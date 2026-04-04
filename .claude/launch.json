@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dev",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": ["-c", "PATH=/usr/local/bin:$PATH npm run dev -- --port 5176"],
+      "port": 5176
+    }
+  ]
+}

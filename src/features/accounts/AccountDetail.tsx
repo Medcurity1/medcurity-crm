@@ -1,0 +1,493 @@
+import { useParams, useNavigate, Link } from "react-router-dom";
+import { useState } from "react";
+import { Pencil, Archive, ExternalLink, ChevronDown, Phone, UserRoundCog, Plus } from "lucide-react";
+import { useAccount, useUpdateAccount, useArchiveAccount, useAccountContracts } from "./api";
+import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
+import { PageHeader } from "@/components/PageHeader";
+import { StatusBadge } from "@/components/StatusBadge";
+import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
+import { RecordId } from "@/components/RecordId";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  lifecycleLabel,
+  statusLabel,
+  renewalTypeLabel,
+  formatDate,
+  formatCurrency,
+} from "@/lib/formatters";
+import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { AccountContacts } from "./AccountContacts";
+import { AccountOpportunities } from "./AccountOpportunities";
+import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
+import { TasksPanel } from "@/features/activities/TasksPanel";
+import type { AccountContract } from "@/types/crm";
+
+/* ---------- Collapsible section ---------- */
+
+function CollapsibleSection({
+  title,
+  defaultOpen = true,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div className="border rounded-lg mb-4">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between px-4 py-3 text-sm font-semibold hover:bg-muted/50 transition-colors"
+      >
+        {title}
+        <ChevronDown
+          className={cn(
+            "h-4 w-4 text-muted-foreground transition-transform",
+            open && "rotate-180"
+          )}
+        />
+      </button>
+      {open && <div className="px-4 pb-4">{children}</div>}
+    </div>
+  );
+}
+
+/* ---------- Detail field ---------- */
+
+function Field({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex flex-col">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-sm font-medium">{value ?? "\u2014"}</span>
+    </div>
+  );
+}
+
+/* ---------- Address helper ---------- */
+
+function AddressBlock({
+  street,
+  city,
+  state,
+  zip,
+  country,
+}: {
+  street: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  country: string | null;
+}) {
+  const parts = [street, [city, state, zip].filter(Boolean).join(", "), country].filter(Boolean);
+  if (!parts.length) return <p className="text-sm text-muted-foreground">No address on file</p>;
+  return (
+    <p className="text-sm font-medium whitespace-pre-line">
+      {parts.join("\n")}
+    </p>
+  );
+}
+
+/* ---------- Main component ---------- */
+
+export function AccountDetail() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { data: account, isLoading } = useAccount(id);
+  const { data: contracts } = useAccountContracts(id);
+  const { data: customFieldDefs } = useCustomFieldDefinitions("accounts");
+  const updateMutation = useUpdateAccount();
+  const archiveMutation = useArchiveAccount();
+  const [showArchive, setShowArchive] = useState(false);
+  const [showChangeOwner, setShowChangeOwner] = useState(false);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-10 w-48" />
+        <Skeleton className="h-48 w-full" />
+      </div>
+    );
+  }
+
+  if (!account) {
+    return <div className="text-muted-foreground">Account not found.</div>;
+  }
+
+  function handleArchive() {
+    if (!id) return;
+    archiveMutation.mutate(
+      { id },
+      {
+        onSuccess: () => {
+          toast.success("Account archived");
+          navigate("/accounts");
+        },
+        onError: (err) => {
+          toast.error("Failed to archive account: " + (err as Error).message);
+        },
+      }
+    );
+  }
+
+  const hasAddress = (prefix: "billing" | "shipping") => {
+    const a = account as unknown as Record<string, unknown>;
+    return [
+      a[`${prefix}_street`],
+      a[`${prefix}_city`],
+      a[`${prefix}_state`],
+      a[`${prefix}_zip`],
+      a[`${prefix}_country`],
+    ].some(Boolean);
+  };
+
+  return (
+    <div>
+      {/* --------- Header --------- */}
+      <PageHeader
+        title={account.name}
+        actions={
+          <div className="flex items-center gap-2">
+            <StatusBadge
+              value={account.status}
+              variant="status"
+              label={statusLabel(account.status)}
+            />
+            <StatusBadge
+              value={account.lifecycle_status}
+              variant="lifecycle"
+              label={lifecycleLabel(account.lifecycle_status)}
+            />
+            <Button variant="outline" size="sm" onClick={() => navigate(`/opportunities/new?account_id=${id}`)}>
+              <Plus className="h-4 w-4 mr-1" />
+              New Opportunity
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => navigate(`/contacts/new?account_id=${id}`)}>
+              <Plus className="h-4 w-4 mr-1" />
+              New Contact
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setShowChangeOwner(true)}>
+              <UserRoundCog className="h-4 w-4 mr-1" />
+              Change Owner
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => navigate(`/accounts/${id}/edit`)}>
+              <Pencil className="h-4 w-4 mr-1" />
+              Edit
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>
+              <Archive className="h-4 w-4 mr-1" />
+              Archive
+            </Button>
+          </div>
+        }
+      />
+
+      <RecordId id={account.id} sfId={account.sf_id} />
+
+      {/* --------- Key Info Bar --------- */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+        <Card>
+          <CardHeader className="pb-1 pt-3 px-4">
+            <CardTitle className="text-xs text-muted-foreground font-medium">Owner</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            <p className="text-sm font-semibold truncate">{account.owner?.full_name ?? "Unassigned"}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-1 pt-3 px-4">
+            <CardTitle className="text-xs text-muted-foreground font-medium">Industry</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            <p className="text-sm font-semibold truncate">{account.industry ?? "\u2014"}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-1 pt-3 px-4">
+            <CardTitle className="text-xs text-muted-foreground font-medium">Website</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            {account.website ? (
+              <a
+                href={account.website}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-primary hover:underline inline-flex items-center gap-1 truncate"
+              >
+                {account.website.replace(/^https?:\/\//, "")}
+                <ExternalLink className="h-3 w-3 shrink-0" />
+              </a>
+            ) : (
+              <p className="text-sm text-muted-foreground">{"\u2014"}</p>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-1 pt-3 px-4">
+            <CardTitle className="text-xs text-muted-foreground font-medium">Phone</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            <p className="text-sm font-semibold inline-flex items-center gap-1">
+              <Phone className="h-3 w-3 text-muted-foreground" />
+              {"\u2014"}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-1 pt-3 px-4">
+            <CardTitle className="text-xs text-muted-foreground font-medium">Status</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            <StatusBadge
+              value={account.status}
+              variant="status"
+              label={statusLabel(account.status)}
+            />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-1 pt-3 px-4">
+            <CardTitle className="text-xs text-muted-foreground font-medium">ACV</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            <p className="text-sm font-semibold">
+              {account.acv != null ? formatCurrency(account.acv) : "\u2014"}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* --------- Details Section --------- */}
+      <CollapsibleSection title="Details">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
+          <Field label="Account Type" value={account.account_type} />
+          <Field label="Active Since" value={formatDate(account.active_since)} />
+          <Field label="Timezone" value={account.timezone} />
+          <Field
+            label="Renewal Type"
+            value={account.renewal_type ? renewalTypeLabel(account.renewal_type) : null}
+          />
+        </div>
+      </CollapsibleSection>
+
+      {/* --------- Company Info Section --------- */}
+      <CollapsibleSection title="Company Info">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
+          <Field
+            label="Employees"
+            value={account.employees != null ? account.employees.toLocaleString() : null}
+          />
+          <Field
+            label="Locations"
+            value={account.locations != null ? account.locations.toLocaleString() : null}
+          />
+          <Field
+            label="FTE Count"
+            value={account.fte_count != null ? account.fte_count.toLocaleString() : null}
+          />
+          <Field label="FTE Range" value={account.fte_range} />
+          <Field
+            label="Annual Revenue"
+            value={account.annual_revenue != null ? formatCurrency(account.annual_revenue) : null}
+          />
+        </div>
+      </CollapsibleSection>
+
+      {/* --------- Billing Address --------- */}
+      <CollapsibleSection title="Billing Address" defaultOpen={hasAddress("billing")}>
+        <AddressBlock
+          street={account.billing_street}
+          city={account.billing_city}
+          state={account.billing_state}
+          zip={account.billing_zip}
+          country={account.billing_country}
+        />
+      </CollapsibleSection>
+
+      {/* --------- Shipping Address --------- */}
+      <CollapsibleSection title="Shipping Address" defaultOpen={hasAddress("shipping")}>
+        <AddressBlock
+          street={account.shipping_street}
+          city={account.shipping_city}
+          state={account.shipping_state}
+          zip={account.shipping_zip}
+          country={account.shipping_country}
+        />
+      </CollapsibleSection>
+
+      {/* --------- Contract Info --------- */}
+      <CollapsibleSection title="Contract Info">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
+          <Field label="Contract Start" value={formatDate(account.current_contract_start_date)} />
+          <Field label="Contract End" value={formatDate(account.current_contract_end_date)} />
+          <Field
+            label="Contract Length"
+            value={
+              account.current_contract_length_months != null
+                ? `${account.current_contract_length_months} months`
+                : null
+            }
+          />
+          <Field
+            label="ACV"
+            value={account.acv != null ? formatCurrency(account.acv) : null}
+          />
+          <Field
+            label="Lifetime Value"
+            value={account.lifetime_value != null ? formatCurrency(account.lifetime_value) : null}
+          />
+        </div>
+      </CollapsibleSection>
+
+      {/* --------- Notes --------- */}
+      {account.notes && (
+        <CollapsibleSection title="Notes">
+          <p className="text-sm whitespace-pre-wrap">{account.notes}</p>
+        </CollapsibleSection>
+      )}
+
+      {/* --------- Custom Fields --------- */}
+      {customFieldDefs && customFieldDefs.length > 0 && account.custom_fields && (
+        <CollapsibleSection title="Custom Fields">
+          <CustomFieldsDisplay
+            customFields={account.custom_fields}
+            definitions={customFieldDefs}
+          />
+        </CollapsibleSection>
+      )}
+
+      {/* --------- Tabs --------- */}
+      <Tabs defaultValue="contacts" className="mt-2">
+        <TabsList>
+          <TabsTrigger value="contacts">Contacts</TabsTrigger>
+          <TabsTrigger value="opportunities">Opportunities</TabsTrigger>
+          <TabsTrigger value="activities">Activities</TabsTrigger>
+          <TabsTrigger value="tasks">Tasks</TabsTrigger>
+          <TabsTrigger value="contract_history">Contract History</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="contacts" className="mt-4">
+          <AccountContacts accountId={account.id} />
+        </TabsContent>
+
+        <TabsContent value="opportunities" className="mt-4">
+          <AccountOpportunities accountId={account.id} />
+        </TabsContent>
+
+        <TabsContent value="activities" className="mt-4">
+          <ActivityTimeline accountId={account.id} />
+        </TabsContent>
+
+        <TabsContent value="tasks" className="mt-4">
+          <TasksPanel accountId={account.id} />
+        </TabsContent>
+
+        <TabsContent value="contract_history" className="mt-4">
+          <ContractHistoryTable contracts={contracts ?? []} />
+        </TabsContent>
+      </Tabs>
+
+      <ConfirmDialog
+        open={showArchive}
+        onOpenChange={setShowArchive}
+        title="Archive Account"
+        description="This will hide the account from active views. An admin can restore it later."
+        confirmLabel="Archive"
+        destructive
+        onConfirm={handleArchive}
+      />
+
+      <ChangeOwnerDialog
+        open={showChangeOwner}
+        onOpenChange={setShowChangeOwner}
+        currentOwnerId={account.owner_user_id}
+        onConfirm={(newOwnerId) => {
+          if (!id) return;
+          updateMutation.mutate(
+            { id, owner_user_id: newOwnerId },
+            {
+              onSuccess: () => toast.success("Owner updated"),
+              onError: (err) => toast.error("Failed to update owner: " + (err as Error).message),
+            }
+          );
+        }}
+        title="Change Account Owner"
+      />
+    </div>
+  );
+}
+
+/* ---------- Contract History Table ---------- */
+
+function ContractHistoryTable({ contracts }: { contracts: AccountContract[] }) {
+  if (!contracts.length) {
+    return (
+      <p className="text-sm text-muted-foreground py-4">
+        No contract history available.
+      </p>
+    );
+  }
+
+  return (
+    <div className="rounded-md border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Year</TableHead>
+            <TableHead>Opportunity</TableHead>
+            <TableHead>Start Date</TableHead>
+            <TableHead>End Date</TableHead>
+            <TableHead className="text-right">Total Amount</TableHead>
+            <TableHead className="text-right">Services</TableHead>
+            <TableHead className="text-right">Products</TableHead>
+            <TableHead className="text-center">Services Incl.</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {contracts.map((c) => (
+            <TableRow key={c.opportunity_id}>
+              <TableCell>{c.contract_year ?? "\u2014"}</TableCell>
+              <TableCell>
+                <Link
+                  to={`/opportunities/${c.opportunity_id}`}
+                  className="text-primary hover:underline"
+                >
+                  {c.opportunity_name}
+                </Link>
+              </TableCell>
+              <TableCell>{formatDate(c.contract_start_date)}</TableCell>
+              <TableCell>{formatDate(c.contract_end_date)}</TableCell>
+              <TableCell className="text-right">{formatCurrency(c.total_amount)}</TableCell>
+              <TableCell className="text-right">
+                {c.service_amount != null ? formatCurrency(c.service_amount) : "\u2014"}
+              </TableCell>
+              <TableCell className="text-right">
+                {c.product_amount != null ? formatCurrency(c.product_amount) : "\u2014"}
+              </TableCell>
+              <TableCell className="text-center">
+                {c.services_included ? "\u2713" : "\u2717"}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+

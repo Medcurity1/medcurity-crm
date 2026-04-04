@@ -1,0 +1,732 @@
+import { useEffect } from "react";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+import { useOpportunity, useCreateOpportunity, useUpdateOpportunity } from "./api";
+import { useAccounts, useUsers } from "@/features/accounts/api";
+import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
+import { useRequiredFields } from "@/hooks/useRequiredFields";
+import { RequiredIndicator } from "@/components/RequiredIndicator";
+import { opportunitySchema, type OpportunityFormValues } from "./schema";
+import { PageHeader } from "@/components/PageHeader";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "sonner";
+import type { Contact, CustomFieldDefinition } from "@/types/crm";
+
+/* ---------- Section wrapper ---------- */
+
+function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-4">
+      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider border-b pb-2">
+        {title}
+      </h3>
+      {children}
+    </div>
+  );
+}
+
+/* ---------- Main component ---------- */
+
+export function OpportunityForm() {
+  const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const isEditing = !!id;
+  const { data: opp, isLoading: loadingOpp } = useOpportunity(id);
+  const { data: accountsResult } = useAccounts();
+  const accounts = accountsResult?.data;
+  const { data: users } = useUsers();
+  const { data: customFieldDefs } = useCustomFieldDefinitions("opportunities");
+  const { data: requiredFieldsData } = useRequiredFields("opportunities");
+  const requiredKeys = requiredFieldsData?.map((f) => f.field_key) ?? [];
+  const createMutation = useCreateOpportunity();
+  const updateMutation = useUpdateOpportunity();
+
+  const preselectedAccountId = searchParams.get("account_id");
+
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    watch,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm<OpportunityFormValues>({
+    resolver: zodResolver(opportunitySchema),
+    defaultValues: {
+      account_id: preselectedAccountId ?? "",
+      primary_contact_id: null,
+      owner_user_id: null,
+      team: "sales",
+      kind: "new_business",
+      name: "",
+      stage: "lead",
+      amount: 0,
+      expected_close_date: "",
+      close_date: "",
+      contract_start_date: "",
+      contract_end_date: "",
+      contract_length_months: undefined,
+      contract_year: undefined,
+      loss_reason: "",
+      notes: "",
+      // New fields
+      probability: undefined,
+      next_step: "",
+      lead_source: null,
+      payment_frequency: null,
+      cycle_count: undefined,
+      auto_renewal: false,
+      description: "",
+      promo_code: "",
+      discount: undefined,
+      subtotal: undefined,
+      follow_up: false,
+      service_amount: undefined,
+      product_amount: undefined,
+      services_included: false,
+      custom_fields: {},
+    },
+  });
+
+  const watchedAccountId = watch("account_id");
+  const watchedStage = watch("stage");
+
+  const { data: contacts } = useQuery({
+    queryKey: ["contacts", { account_id: watchedAccountId }],
+    queryFn: async () => {
+      if (!watchedAccountId) return [];
+      const { data, error } = await supabase
+        .from("contacts")
+        .select("*")
+        .eq("account_id", watchedAccountId)
+        .order("last_name");
+      if (error) throw error;
+      return data as Contact[];
+    },
+    enabled: !!watchedAccountId,
+  });
+
+  useEffect(() => {
+    if (opp && isEditing) {
+      reset({
+        account_id: opp.account_id,
+        primary_contact_id: opp.primary_contact_id,
+        owner_user_id: opp.owner_user_id,
+        team: opp.team,
+        kind: opp.kind,
+        name: opp.name,
+        stage: opp.stage,
+        amount: opp.amount,
+        expected_close_date: opp.expected_close_date ?? "",
+        close_date: opp.close_date ?? "",
+        contract_start_date: opp.contract_start_date ?? "",
+        contract_end_date: opp.contract_end_date ?? "",
+        contract_length_months: opp.contract_length_months ?? undefined,
+        contract_year: opp.contract_year ?? undefined,
+        loss_reason: opp.loss_reason ?? "",
+        notes: opp.notes ?? "",
+        // New fields
+        probability: opp.probability ?? undefined,
+        next_step: opp.next_step ?? "",
+        lead_source: opp.lead_source ?? null,
+        payment_frequency: opp.payment_frequency ?? null,
+        cycle_count: opp.cycle_count ?? undefined,
+        auto_renewal: opp.auto_renewal ?? false,
+        description: opp.description ?? "",
+        promo_code: opp.promo_code ?? "",
+        discount: opp.discount ?? undefined,
+        subtotal: opp.subtotal ?? undefined,
+        follow_up: opp.follow_up ?? false,
+        service_amount: opp.service_amount ?? undefined,
+        product_amount: opp.product_amount ?? undefined,
+        services_included: opp.services_included ?? false,
+        custom_fields: opp.custom_fields ?? {},
+      });
+    }
+  }, [opp, isEditing, reset]);
+
+  function emptyToNull(v: unknown): unknown {
+    if (v === "" || v === undefined) return null;
+    return v;
+  }
+
+  async function onSubmit(values: OpportunityFormValues) {
+    // Check dynamic required fields
+    const missingFields = requiredKeys.filter((key) => {
+      const val = values[key as keyof typeof values];
+      return val === null || val === undefined || val === "";
+    });
+    if (missingFields.length > 0) {
+      toast.error(
+        `Required fields missing: ${missingFields.map((k) => k.replace(/_/g, " ")).join(", ")}`
+      );
+      return;
+    }
+
+    const payload: Record<string, unknown> = {
+      account_id: values.account_id,
+      primary_contact_id: values.primary_contact_id || null,
+      owner_user_id: values.owner_user_id ?? null,
+      team: values.team,
+      kind: values.kind,
+      name: values.name,
+      stage: values.stage,
+      amount: Number(values.amount),
+      expected_close_date: emptyToNull(values.expected_close_date),
+      close_date: emptyToNull(values.close_date),
+      contract_start_date: emptyToNull(values.contract_start_date),
+      contract_end_date: emptyToNull(values.contract_end_date),
+      contract_length_months: emptyToNull(values.contract_length_months),
+      contract_year: emptyToNull(values.contract_year),
+      loss_reason: emptyToNull(values.loss_reason),
+      notes: emptyToNull(values.notes),
+      // New fields
+      probability: values.probability ?? null,
+      next_step: emptyToNull(values.next_step),
+      lead_source: values.lead_source ?? null,
+      payment_frequency: values.payment_frequency ?? null,
+      cycle_count: values.cycle_count ?? null,
+      auto_renewal: values.auto_renewal ?? false,
+      description: emptyToNull(values.description),
+      promo_code: emptyToNull(values.promo_code),
+      discount: values.discount ?? null,
+      subtotal: values.subtotal ?? null,
+      follow_up: values.follow_up ?? false,
+      service_amount: values.service_amount ?? null,
+      product_amount: values.product_amount ?? null,
+      services_included: values.services_included ?? false,
+      custom_fields: values.custom_fields ?? {},
+    };
+
+    try {
+      if (isEditing && id) {
+        await updateMutation.mutateAsync({ id, ...payload } as Parameters<typeof updateMutation.mutateAsync>[0]);
+        toast.success("Opportunity updated");
+        navigate(`/opportunities/${id}`);
+      } else {
+        const result = await createMutation.mutateAsync(payload as Parameters<typeof createMutation.mutateAsync>[0]);
+        toast.success("Opportunity created");
+        navigate(`/opportunities/${result.id}`);
+      }
+    } catch (err) {
+      console.error("Failed to save opportunity:", err);
+      toast.error("Failed to save: " + (err as Error).message);
+    }
+  }
+
+  if (isEditing && loadingOpp) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-10 w-48" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <PageHeader title={isEditing ? "Edit Opportunity" : "New Opportunity"} />
+
+      <Card>
+        <CardContent className="pt-6">
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
+            {/* ---- Basic Info ---- */}
+            <FormSection title="Basic Info">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="name">Opportunity Name *<RequiredIndicator fieldKey="name" requiredFields={requiredKeys} /></Label>
+                  <Input id="name" {...register("name")} />
+                  {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Account *<RequiredIndicator fieldKey="account_id" requiredFields={requiredKeys} /></Label>
+                  <Select value={watchedAccountId} onValueChange={(v) => setValue("account_id", v)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select account" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {accounts?.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {errors.account_id && <p className="text-sm text-destructive">{errors.account_id.message}</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Primary Contact<RequiredIndicator fieldKey="primary_contact_id" requiredFields={requiredKeys} /></Label>
+                  <Select
+                    value={watch("primary_contact_id") ?? "none"}
+                    onValueChange={(v) => setValue("primary_contact_id", v === "none" ? null : v)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select contact" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {contacts?.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.first_name} {c.last_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Owner<RequiredIndicator fieldKey="owner_user_id" requiredFields={requiredKeys} /></Label>
+                  <Select
+                    value={watch("owner_user_id") ?? "unassigned"}
+                    onValueChange={(v) => setValue("owner_user_id", v === "unassigned" ? null : v)}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Select owner" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unassigned">Unassigned</SelectItem>
+                      {users?.map((u) => (
+                        <SelectItem key={u.id} value={u.id}>{u.full_name ?? u.id}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Team<RequiredIndicator fieldKey="team" requiredFields={requiredKeys} /></Label>
+                  <Select value={watch("team")} onValueChange={(v) => setValue("team", v as "sales" | "renewals")}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="sales">Sales</SelectItem>
+                      <SelectItem value="renewals">Renewals</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Kind<RequiredIndicator fieldKey="kind" requiredFields={requiredKeys} /></Label>
+                  <Select value={watch("kind")} onValueChange={(v) => setValue("kind", v as "new_business" | "renewal")}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="new_business">New Business</SelectItem>
+                      <SelectItem value="renewal">Renewal</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Stage<RequiredIndicator fieldKey="stage" requiredFields={requiredKeys} /></Label>
+                  <Select value={watchedStage} onValueChange={(v) => setValue("stage", v as OpportunityFormValues["stage"])}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="lead">Lead</SelectItem>
+                      <SelectItem value="qualified">Qualified</SelectItem>
+                      <SelectItem value="proposal">Proposal</SelectItem>
+                      <SelectItem value="verbal_commit">Verbal Commit</SelectItem>
+                      <SelectItem value="closed_won">Closed Won</SelectItem>
+                      <SelectItem value="closed_lost">Closed Lost</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="probability">Probability (%)<RequiredIndicator fieldKey="probability" requiredFields={requiredKeys} /></Label>
+                  <Input id="probability" type="number" min={0} max={100} step={1} {...register("probability")} />
+                  {errors.probability && <p className="text-sm text-destructive">{errors.probability.message}</p>}
+                </div>
+              </div>
+            </FormSection>
+
+            {/* ---- Financial ---- */}
+            <FormSection title="Financial">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="amount">Amount ($) *<RequiredIndicator fieldKey="amount" requiredFields={requiredKeys} /></Label>
+                  <Input id="amount" type="number" step="0.01" {...register("amount")} />
+                  {errors.amount && <p className="text-sm text-destructive">{errors.amount.message}</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="subtotal">Subtotal ($)</Label>
+                  <Input id="subtotal" type="number" step="0.01" {...register("subtotal")} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="discount">Discount ($)</Label>
+                  <Input id="discount" type="number" step="0.01" {...register("discount")} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="promo_code">Promo Code</Label>
+                  <Input id="promo_code" {...register("promo_code")} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="service_amount">Service Amount ($)</Label>
+                  <Input id="service_amount" type="number" step="0.01" {...register("service_amount")} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="product_amount">Product Amount ($)</Label>
+                  <Input id="product_amount" type="number" step="0.01" {...register("product_amount")} />
+                </div>
+
+                <div className="flex items-center gap-2 pt-6">
+                  <Checkbox
+                    id="services_included"
+                    checked={watch("services_included") ?? false}
+                    onCheckedChange={(v) => setValue("services_included", v === true)}
+                  />
+                  <Label htmlFor="services_included" className="text-sm font-normal cursor-pointer">
+                    Services Included
+                  </Label>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Payment Frequency</Label>
+                  <Select
+                    value={watch("payment_frequency") ?? "none"}
+                    onValueChange={(v) => setValue("payment_frequency", v === "none" ? null : v as OpportunityFormValues["payment_frequency"])}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                      <SelectItem value="quarterly">Quarterly</SelectItem>
+                      <SelectItem value="semi_annually">Semi-Annually</SelectItem>
+                      <SelectItem value="annually">Annually</SelectItem>
+                      <SelectItem value="one_time">One-Time</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </FormSection>
+
+            {/* ---- Dates & Contract ---- */}
+            <FormSection title="Dates & Contract">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="expected_close_date">Expected Close Date<RequiredIndicator fieldKey="expected_close_date" requiredFields={requiredKeys} /></Label>
+                  <Input id="expected_close_date" type="date" {...register("expected_close_date")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="close_date">Close Date<RequiredIndicator fieldKey="close_date" requiredFields={requiredKeys} /></Label>
+                  <Input id="close_date" type="date" {...register("close_date")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="contract_start_date">Contract Start<RequiredIndicator fieldKey="contract_start_date" requiredFields={requiredKeys} /></Label>
+                  <Input id="contract_start_date" type="date" {...register("contract_start_date")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="contract_end_date">Maturity Date<RequiredIndicator fieldKey="contract_end_date" requiredFields={requiredKeys} /></Label>
+                  <Input id="contract_end_date" type="date" {...register("contract_end_date")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="contract_length_months">Contract Length (months)</Label>
+                  <Input id="contract_length_months" type="number" {...register("contract_length_months")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="contract_year">Contract Year</Label>
+                  <Input id="contract_year" type="number" {...register("contract_year")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="cycle_count">Cycle Count</Label>
+                  <Input id="cycle_count" type="number" min={0} {...register("cycle_count")} />
+                </div>
+                <div className="flex items-center gap-2 pt-6">
+                  <Checkbox
+                    id="auto_renewal"
+                    checked={watch("auto_renewal") ?? false}
+                    onCheckedChange={(v) => setValue("auto_renewal", v === true)}
+                  />
+                  <Label htmlFor="auto_renewal" className="text-sm font-normal cursor-pointer">
+                    Auto Renewal
+                  </Label>
+                </div>
+              </div>
+            </FormSection>
+
+            {/* ---- Source & Next Steps ---- */}
+            <FormSection title="Source & Next Steps">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Lead Source<RequiredIndicator fieldKey="lead_source" requiredFields={requiredKeys} /></Label>
+                  <Select
+                    value={watch("lead_source") ?? "none"}
+                    onValueChange={(v) => setValue("lead_source", v === "none" ? null : v as OpportunityFormValues["lead_source"])}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="website">Website</SelectItem>
+                      <SelectItem value="referral">Referral</SelectItem>
+                      <SelectItem value="cold_call">Cold Call</SelectItem>
+                      <SelectItem value="trade_show">Trade Show</SelectItem>
+                      <SelectItem value="partner">Partner</SelectItem>
+                      <SelectItem value="social_media">Social Media</SelectItem>
+                      <SelectItem value="email_campaign">Email Campaign</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="next_step">Next Step<RequiredIndicator fieldKey="next_step" requiredFields={requiredKeys} /></Label>
+                  <Input id="next_step" {...register("next_step")} />
+                </div>
+
+                <div className="flex items-center gap-2 pt-2">
+                  <Checkbox
+                    id="follow_up"
+                    checked={watch("follow_up") ?? false}
+                    onCheckedChange={(v) => setValue("follow_up", v === true)}
+                  />
+                  <Label htmlFor="follow_up" className="text-sm font-normal cursor-pointer">
+                    Follow Up
+                  </Label>
+                </div>
+              </div>
+
+              {watchedStage === "closed_lost" && (
+                <div className="space-y-2 mt-4">
+                  <Label htmlFor="loss_reason">Loss Reason</Label>
+                  <Textarea id="loss_reason" rows={3} {...register("loss_reason")} />
+                </div>
+              )}
+            </FormSection>
+
+            {/* ---- Notes & Description ---- */}
+            <FormSection title="Notes & Description">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="description">Description</Label>
+                  <Textarea id="description" rows={4} {...register("description")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="notes">Notes</Label>
+                  <Textarea id="notes" rows={4} {...register("notes")} />
+                </div>
+              </div>
+            </FormSection>
+
+            {/* ---- Custom Fields ---- */}
+            {customFieldDefs && customFieldDefs.length > 0 && (
+              <FormSection title="Custom Fields">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {customFieldDefs.map((def) => (
+                    <CustomFieldInput
+                      key={def.id}
+                      definition={def}
+                      value={watch("custom_fields")?.[def.field_key]}
+                      onChange={(v) => {
+                        const current = watch("custom_fields") ?? {};
+                        setValue("custom_fields", { ...current, [def.field_key]: v });
+                      }}
+                    />
+                  ))}
+                </div>
+              </FormSection>
+            )}
+
+            {/* ---- Actions ---- */}
+            <div className="flex items-center gap-3">
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting ? "Saving..." : isEditing ? "Save Changes" : "Create Opportunity"}
+              </Button>
+              <Button type="button" variant="outline" onClick={() => navigate(-1)}>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/* ---------- Custom Field Input ---------- */
+
+function CustomFieldInput({
+  definition,
+  value,
+  onChange,
+}: {
+  definition: CustomFieldDefinition;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const { field_key, label, field_type, options, is_required } = definition;
+  const inputId = `custom_${field_key}`;
+
+  switch (field_type) {
+    case "text":
+    case "email":
+    case "phone":
+    case "url":
+      return (
+        <div className="space-y-2">
+          <Label htmlFor={inputId}>
+            {label}
+            {is_required && " *"}
+          </Label>
+          <Input
+            id={inputId}
+            type={field_type === "email" ? "email" : field_type === "url" ? "url" : "text"}
+            value={String(value ?? "")}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        </div>
+      );
+
+    case "textarea":
+      return (
+        <div className="space-y-2 md:col-span-2">
+          <Label htmlFor={inputId}>
+            {label}
+            {is_required && " *"}
+          </Label>
+          <Textarea
+            id={inputId}
+            rows={3}
+            value={String(value ?? "")}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        </div>
+      );
+
+    case "number":
+      return (
+        <div className="space-y-2">
+          <Label htmlFor={inputId}>
+            {label}
+            {is_required && " *"}
+          </Label>
+          <Input
+            id={inputId}
+            type="number"
+            value={value != null ? String(value) : ""}
+            onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
+          />
+        </div>
+      );
+
+    case "currency":
+      return (
+        <div className="space-y-2">
+          <Label htmlFor={inputId}>
+            {label}
+            {is_required && " *"}
+          </Label>
+          <Input
+            id={inputId}
+            type="number"
+            step="0.01"
+            value={value != null ? String(value) : ""}
+            onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
+          />
+        </div>
+      );
+
+    case "date":
+      return (
+        <div className="space-y-2">
+          <Label htmlFor={inputId}>
+            {label}
+            {is_required && " *"}
+          </Label>
+          <Input
+            id={inputId}
+            type="date"
+            value={String(value ?? "")}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        </div>
+      );
+
+    case "checkbox":
+      return (
+        <div className="flex items-center gap-2 pt-6">
+          <Checkbox
+            id={inputId}
+            checked={value === true}
+            onCheckedChange={(v) => onChange(v === true)}
+          />
+          <Label htmlFor={inputId} className="text-sm font-normal cursor-pointer">
+            {label}
+            {is_required && " *"}
+          </Label>
+        </div>
+      );
+
+    case "select":
+      return (
+        <div className="space-y-2">
+          <Label>
+            {label}
+            {is_required && " *"}
+          </Label>
+          <Select
+            value={String(value ?? "")}
+            onValueChange={(v) => onChange(v)}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select..." />
+            </SelectTrigger>
+            <SelectContent>
+              {options?.map((opt) => (
+                <SelectItem key={opt} value={opt}>
+                  {opt}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      );
+
+    case "multi_select":
+      return (
+        <div className="space-y-2">
+          <Label htmlFor={inputId}>
+            {label}
+            {is_required && " *"}
+          </Label>
+          <Input
+            id={inputId}
+            placeholder="Comma-separated values"
+            value={Array.isArray(value) ? value.join(", ") : String(value ?? "")}
+            onChange={(e) =>
+              onChange(
+                e.target.value
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+              )
+            }
+          />
+          {options && (
+            <p className="text-xs text-muted-foreground">
+              Options: {options.join(", ")}
+            </p>
+          )}
+        </div>
+      );
+
+    default:
+      return null;
+  }
+}
