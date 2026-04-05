@@ -28,6 +28,8 @@ const PipelineBoard = lazy(() => import("@/features/opportunities/PipelineBoard"
 const ProductsPage = lazy(() => import("@/features/products/ProductsPage").then(m => ({ default: m.ProductsPage })));
 const RenewalsQueue = lazy(() => import("@/features/renewals/RenewalsQueue").then(m => ({ default: m.RenewalsQueue })));
 const ReportBuilder = lazy(() => import("@/features/reports/ReportBuilder").then(m => ({ default: m.ReportBuilder })));
+const ForecastPage = lazy(() => import("@/features/forecasting/ForecastPage").then(m => ({ default: m.ForecastPage })));
+const ActivityCalendar = lazy(() => import("@/features/activities/ActivityCalendar").then(m => ({ default: m.ActivityCalendar })));
 const SequencesPage = lazy(() => import("@/features/sequences/SequencesPage").then(m => ({ default: m.SequencesPage })));
 const EmailTemplatesPage = lazy(() => import("@/features/email-templates/EmailTemplatesPage").then(m => ({ default: m.EmailTemplatesPage })));
 const LeadListsPage = lazy(() => import("@/features/lead-lists/LeadListsPage").then(m => ({ default: m.LeadListsPage })));
@@ -65,9 +67,11 @@ export default function App() {
                   <Route path="opportunities/:id" element={<OpportunityDetail />} />
                   <Route path="opportunities/:id/edit" element={<OpportunityForm />} />
                   <Route path="pipeline" element={<PipelineBoard />} />
+                  <Route path="calendar" element={<ActivityCalendar />} />
                   <Route path="products" element={<ProductsPage />} />
                   <Route path="renewals" element={<RenewalsQueue />} />
                   <Route path="reports" element={<ReportBuilder />} />
+                  <Route path="forecasting" element={<ForecastPage />} />
                   <Route path="archive" element={<ArchiveManager />} />
                   <Route path="admin" element={<AdminSettings />} />
                   <Route path="*" element={<NotFound />} />

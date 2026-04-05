@@ -9,6 +9,7 @@ import {
   Package,
   RefreshCw,
   BarChart3,
+  TrendingUp,
   Archive,
   Settings,
   ChevronLeft,
@@ -50,6 +51,7 @@ const navItems = [
   { to: "/products", icon: Package, label: "Products" },
   { to: "/renewals", icon: RefreshCw, label: "Renewals" },
   { to: "/reports", icon: BarChart3, label: "Reports" },
+  { to: "/forecasting", icon: TrendingUp, label: "Forecasting" },
 ];
 
 const adminItems = [
