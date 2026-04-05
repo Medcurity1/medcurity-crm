@@ -464,6 +464,18 @@ export interface LeadListMember {
   contact?: Contact;
 }
 
+// Notifications
+export interface Notification {
+  id: string;
+  user_id: string;
+  type: "task_due" | "renewal_upcoming" | "deal_stage_change" | "mention" | "engagement" | "system";
+  title: string;
+  message: string | null;
+  link: string | null;
+  is_read: boolean;
+  created_at: string;
+}
+
 // Dashboard widgets
 export interface DashboardWidget {
   id: string;

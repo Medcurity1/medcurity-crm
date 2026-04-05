@@ -4,7 +4,7 @@
 
 Internal CRM replacing Salesforce for Medcurity's sales and renewals workflows. Built as a React SPA backed by Supabase (Postgres + Auth + RLS).
 
-**Status:** MVP feature-complete. Core CRUD, pipeline, renewals, report builder, activity tracking, and global search are functional. Additional features: pagination, bulk actions, CSV export, required field enforcement, code splitting, mobile responsive, enhanced detail pages, keyboard shortcuts, user onboarding wizard, email integration (OAuth UI + Edge Function), report chart visualizations, and polished Salesforce import.
+**Status:** MVP feature-complete. Core CRUD, pipeline, renewals, report builder, activity tracking, and global search are functional. Additional features: pagination, bulk actions, CSV export, required field enforcement, code splitting, mobile responsive, enhanced detail pages, keyboard shortcuts, user onboarding wizard, email integration (OAuth UI + Edge Function), report chart visualizations, polished Salesforce import, products + price books wired to opportunities, PandaDoc integration scaffolding, process automations, sales sequences / cadences, targeted lead lists, MQL/SQL/SAL lead qualification, customizable dashboard widgets, and a notifications center.
 
 **Staging project:** https://supabase.com/dashboard/project/baekcgdyjedgxmejbytc
 
@@ -44,6 +44,7 @@ src/
 │   │   └── Sidebar.tsx              # Collapsible nav with role-aware items + search
 │   ├── ui/                          # shadcn/ui component library (23+ components)
 │   ├── GlobalSearch.tsx             # Cmd+K command palette (accounts/contacts/opps)
+│   ├── NotificationsDropdown.tsx    # Bell icon + unread badge + notifications popover
 │   ├── QuickCreateDialog.tsx        # Cmd+N quick create command palette
 │   ├── KeyboardShortcutsDialog.tsx  # Cmd+/ shortcut reference dialog
 │   ├── PageHeader.tsx               # Consistent page header with actions slot
@@ -128,6 +129,20 @@ src/
 │   │   ├── EmailSyncConfig.tsx      # Email sync preference toggles
 │   │   ├── SystemInfo.tsx           # System info panel (version, DB stats, build info)
 │   │   └── UsersManager.tsx         # User role + active management
+│   ├── sequences/
+│   │   ├── sequences-api.ts         # Sequences + enrollments CRUD hooks
+│   │   ├── SequencesPage.tsx        # List sequences with step chips + call list
+│   │   ├── CreateSequenceDialog.tsx # Sequence builder with step editor
+│   │   ├── EnrollInSequenceDialog.tsx # Enroll leads/contacts in a sequence
+│   │   └── SequencesTab.tsx         # Tab shown on lead/contact detail pages
+│   ├── lead-lists/
+│   │   ├── lead-lists-api.ts        # Lead list + membership CRUD hooks
+│   │   └── LeadListsPage.tsx        # List builder with bulk enroll actions
+│   ├── products/
+│   │   ├── api.ts                   # Products + price books + price_book_entries hooks
+│   │   └── ProductsPage.tsx         # Products catalog + price book manager
+│   ├── notifications/
+│   │   └── notifications-api.ts     # Notifications CRUD + unread count hooks
 │   └── NotFound.tsx                 # 404 page
 ├── hooks/
 │   ├── useCustomFields.ts           # Custom field definitions hook
@@ -138,7 +153,11 @@ supabase/
 ├── migrations/
 │   ├── 20260331_initial_schema.sql                     # Core schema (633 lines)
 │   ├── 20260403_pipeline_views_and_saved_reports.sql   # Custom pipelines + saved reports
-│   └── 20260404_email_sync.sql                         # email_sync_connections table
+│   ├── 20260404_email_sync.sql                         # email_sync_connections table
+│   ├── 20260404_price_books.sql                        # Products, price books + entries
+│   ├── 20260404_pandadoc.sql                           # PandaDoc integration tables
+│   ├── 20260404_automations.sql                        # Process automation tables
+│   └── 20260404_mql_sql_and_sequences.sql              # MQL/SQL, sequences, lead lists, widgets, notifications
 ├── functions/
 │   └── sync-emails/
 │       └── index.ts                                    # Edge Function for email sync
@@ -163,6 +182,8 @@ supabase/
 | `/leads/new` | LeadForm | Yes | Create lead |
 | `/leads/:id` | LeadDetail | Yes | Lead info + convert to account/contact/opp |
 | `/leads/:id/edit` | LeadForm | Yes | Edit lead |
+| `/sequences` | SequencesPage | Yes | Sales sequences / cadences |
+| `/lead-lists` | LeadListsPage | Yes | Targeted lead lists |
 | `/opportunities` | OpportunitiesList | Yes | Filterable opportunities table |
 | `/opportunities/new` | OpportunityForm | Yes | Create opportunity |
 | `/opportunities/:id` | OpportunityDetail | Yes | Full opp detail + products/history |
@@ -194,6 +215,15 @@ supabase/
 | `custom_field_definitions` | Admin-defined custom fields per entity | No |
 | `required_field_config` | Required field settings per entity | No |
 | `email_sync_connections` | OAuth tokens + sync config for Gmail/Outlook | No |
+| `products` | Product catalog with pricing model + default ARR | No |
+| `price_books` | Price book definitions (default + custom) | No |
+| `price_book_entries` | Per-product pricing rows (by FTE range) within a price book | No |
+| `sequences` | Sales sequence definitions with `steps` jsonb | No |
+| `sequence_enrollments` | Lead/contact enrollments in sequences with status + next_touch_at | No |
+| `lead_lists` | Targeted lead list metadata | No |
+| `lead_list_members` | Lead/contact members of lead lists | No |
+| `dashboard_widgets` | User dashboard widget visibility + config | No |
+| `notifications` | Per-user notifications (task due, renewals, deal stage, mention, engagement, system) | No |
 
 ### Custom Enums
 
@@ -209,6 +239,7 @@ supabase/
 - `lead_status`: new, contacted, qualified, unqualified, converted
 - `lead_source`: website, referral, cold_call, trade_show, partner, social_media, email_campaign, other
 - `payment_frequency`: monthly, quarterly, semi_annually, annually, one_time
+- `lead_qualification`: unqualified, mql, sql, sal
 
 ### SQL Views
 
@@ -251,6 +282,8 @@ supabase/
 - No camelCase mapping layer — Supabase returns data as-is
 - Joined fields are optional properties on base types (e.g., `owner?: UserProfile`)
 
+**Key types in `src/types/crm.ts`**: `UserProfile`, `Account`, `Contact`, `Product`, `Opportunity`, `OpportunityProduct`, `Lead`, `LeadQualification`, `CustomFieldDefinition`, `AccountContract`, `Activity`, `OpportunityStageHistory`, `AuditLog`, `PriceBook`, `PriceBookEntry`, `PipelineView`, `PipelineViewConfig`, `SavedReport`, `ReportConfig`, `ReportFilter`, `ReportSort`, `Sequence`, `SequenceStep`, `SequenceEnrollment`, `LeadList`, `LeadListMember`, `DashboardWidget`, `Notification`.
+
 ### Form Pattern
 - React Hook Form + `zodResolver` for all forms
 - Zod schemas defined per feature in `schema.ts`
@@ -279,12 +312,15 @@ supabase/
 
 ## Features Implemented
 
-### Home Dashboard
+### Home Dashboard (Customizable)
 - Time-of-day greeting with user name and role
 - Role-dependent KPI cards (4 for sales, 4 for renewals, all 12 for admin)
 - Quick action buttons (New Account, New Opportunity, View Pipeline)
 - Recent activities timeline (feed of latest activities)
 - My Open Opportunities mini-table with "View All" link
+- **8 toggleable widgets**: KPIs, Tasks, Open Opportunities, Recent Activities, Pipeline Summary, Upcoming Renewals, Call List, Saved Report
+- **Customize button** (Settings icon) opens a Sheet with per-widget visibility toggles
+- Widget visibility saved to localStorage per user
 
 ### Pipeline Board
 - **Default pipelines**: Sales Pipeline + Renewals Pipeline tabs (permanent, not deletable)
@@ -355,6 +391,40 @@ supabase/
 - Fields: name, email, phone, company, title, industry, website, employees, annual revenue, address, description
 - Custom fields support via JSONB
 - Activity timeline integration
+
+### Lead Qualification (MQL/SQL/SAL)
+- New `qualification` field on leads: `unqualified` / `mql` / `sql` / `sal`
+- **Quick stats cards** on LeadsList: Total / MQL / SQL / Converted
+- **Qualify dropdown** on LeadDetail with Mark as MQL / SQL / SAL actions
+- Qualification date + lead score tracked on the record (`qualification_date`, `score`, `score_factors`)
+- **Quality filter** in list view for filtering by qualification tier
+
+### Lead Source on Contacts
+- `lead_source` + `original_lead_id` fields on contacts
+- Source carries over automatically when converting a lead to a contact
+- Visible in ContactDetail and editable in ContactForm
+
+### Sales Sequences (Cadences)
+- New `/sequences` route and sidebar entry
+- Step-based outreach: email / call / task steps with per-step `delay_days`
+- **SequencesPage**: lists sequences with step chips, active toggle, call list per sequence
+- **CreateSequenceDialog** with step builder UI
+- Enroll leads/contacts via **EnrollInSequenceDialog**
+- **Engagement detection**: automatically pauses a sequence enrollment when an email activity is logged to the contact/lead
+- **Sequences tab** on Lead and Contact detail pages showing current enrollments
+- Per-enrollment actions: Mark Complete / Pause / Resume
+
+### Targeted Lead Lists
+- New `/lead-lists` route and sidebar entry
+- Create named lists with description
+- Add leads/contacts to a list via search dialog
+- Remove members individually
+- **Bulk enroll list members** in a sequence
+
+### Price Books Wired to Opportunities
+- **AddProductDialog** on Opportunity Products tab now includes a Price Book selector
+- Auto-lookup of unit price from `price_book_entries` matching product + account FTE range
+- Falls back to product `default_arr` when no matching price book entry is found
 
 ### Pagination
 - All list views (Accounts, Contacts, Opportunities, Leads) now have server-side pagination
@@ -567,6 +637,25 @@ Creates `pipeline_views` and `saved_reports` tables with full RLS policies.
 - `email_sync_connections` table: stores OAuth provider, tokens, sync preferences, and last sync timestamp per user
 - RLS policies for user-level access to own connections
 
+### `20260404_price_books.sql` (needs to be applied)
+- `products`, `price_books`, `price_book_entries` tables with RLS
+- Entries keyed by product + FTE range for opportunity unit-price lookup
+
+### `20260404_pandadoc.sql` (needs to be applied)
+- PandaDoc integration tables for document sync scaffolding
+
+### `20260404_automations.sql` (needs to be applied)
+- Process automation tables for workflow definitions and runs
+
+### `20260404_mql_sql_and_sequences.sql` (needs to be applied)
+- Adds `qualification`, `qualification_date`, `score`, `score_factors` to `leads`
+- Adds `lead_source`, `original_lead_id` to `contacts`
+- New tables: `sequences`, `sequence_enrollments`, `lead_lists`, `lead_list_members`, `dashboard_widgets`, `notifications`
+- Full RLS + triggers for each table
+
+### `supabase/run_weekend_migrations.sql`
+- Combined migration file that bundles the recent weekend migrations for easy Supabase execution
+
 **All migrations have been applied** via the combined `run_all_migrations_and_seed.sql` file. Test data has been seeded (5 accounts, 7 contacts, 9 opportunities, 5 leads, 8 activities with product linkage).
 
 ## Environment Variables
@@ -598,11 +687,11 @@ The system supports both manual email logging (Log Email dialog) and automated O
 
 ## What's Next
 
-- [ ] Deploy email sync Edge Function (needs Google Cloud + Azure AD OAuth app registration)
-- [ ] PandaDoc contract sync (auto-populate contract dates and products)
-- [ ] Inline field editing on detail pages (click to edit in place)
-- [ ] Dashboard widget customization (drag/drop layout)
+- [ ] OAuth Gmail/Outlook email sync deployment
+- [ ] PandaDoc integration deployment
+- [ ] Email campaign tracking + open/click analytics
+- [ ] AI-powered lead scoring
+- [ ] Email template library
+- [ ] Workflow designer visual editor
 - [ ] Forecasting views
-- [ ] Notification system for renewals/tasks (due date reminders)
-- [ ] Activity calendar view
-- [ ] Print/PDF export for account summaries
+- [ ] Custom dashboard widget creation

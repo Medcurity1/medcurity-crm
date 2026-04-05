@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, Suspense } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { GlobalSearch } from "@/components/GlobalSearch";
+import { NotificationsDropdown } from "@/components/NotificationsDropdown";
 import { WelcomeWizard } from "@/features/auth/WelcomeWizard";
 import { QuickCreateDialog } from "@/components/QuickCreateDialog";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
@@ -92,7 +93,10 @@ export function AppLayout() {
         {/* Top bar */}
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-background/95 px-6 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <span className="text-sm font-medium text-muted-foreground">{sectionName}</span>
-          <GlobalSearch />
+          <div className="flex items-center gap-1">
+            <GlobalSearch />
+            <NotificationsDropdown />
+          </div>
         </div>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
           <Suspense
