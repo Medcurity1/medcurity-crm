@@ -10,6 +10,7 @@ import {
   RefreshCw,
   BarChart3,
   TrendingUp,
+  LineChart,
   Archive,
   Settings,
   ChevronLeft,
@@ -19,6 +20,8 @@ import {
   PlayCircle,
   ListChecks,
   Mail,
+  Calendar as CalendarIcon,
+  Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { branding } from "@/lib/branding";
@@ -48,10 +51,13 @@ const navItems = [
   { to: "/email-templates", icon: Mail, label: "Email Templates" },
   { to: "/opportunities", icon: Target, label: "Opportunities" },
   { to: "/pipeline", icon: Kanban, label: "Pipeline" },
+  { to: "/calendar", icon: CalendarIcon, label: "Calendar" },
+  { to: "/activities", icon: Clock, label: "Activities" },
   { to: "/products", icon: Package, label: "Products" },
   { to: "/renewals", icon: RefreshCw, label: "Renewals" },
   { to: "/reports", icon: BarChart3, label: "Reports" },
   { to: "/forecasting", icon: TrendingUp, label: "Forecasting" },
+  { to: "/analytics", icon: LineChart, label: "Analytics" },
 ];
 
 const adminItems = [

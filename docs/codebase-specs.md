@@ -312,6 +312,41 @@ supabase/
 
 ## Features Implemented
 
+### Forecasting
+- Quarter-based revenue forecasting at `/forecasting`
+- Quarter/year selectors (Q1-Q4 + prev/current/next year)
+- 4 summary cards: Committed (closed_won + verbal_commit), Best Case (committed + proposal * 0.6), Pipeline (all open stages), Quota (placeholder)
+- Per-owner forecast table: Committed, Best Case, Pipeline, Deal count per rep, with totals row
+- Weighted pipeline bar chart: stage probability weights (lead 0.1, qualified 0.3, proposal 0.6, verbal 0.9) applied to per-stage amounts
+- Color-coded bars per stage
+
+### Activity Calendar
+- Monthly calendar grid at `/calendar`
+- Click dates to see activities for that day in a side panel
+- Heat-map coloring: cells shade darker based on activity volume
+- Month navigation (prev/next/Today) and current-month highlighting
+- Activity items linked back to their related Account, Contact, or Opportunity
+
+### Activities List
+- Dedicated listing page at `/activities` showing all activities across all records
+- Search by subject (ilike) and filters: type, owner, start date, end date
+- Table columns: type icon, subject, owner, related record (clickable link), date, completed indicator
+- Server-side pagination (25/page)
+
+### Win/Loss Analysis
+- Analytics page at `/analytics` with date-range selector (30/90/365 days)
+- 4 summary cards: Win Rate %, Total Closed Won $, Total Closed Lost $, Average Deal Size $
+- Top 5 loss reasons horizontal bar chart (grouped from `loss_reason` on closed-lost opps)
+- Sales velocity table: avg days Lead->Qualified, Qualified->Proposal, Proposal->Verbal Commit, Verbal Commit->Closed Won, plus total sales cycle (created_at -> close)
+- Uses `opportunity_stage_history` table; averages computed client-side
+- Win rate by owner table: won/lost counts, win rate %, total won $ per rep, sorted by win rate desc
+
+### Automation Execution
+- DB trigger `execute_opportunity_automations` runs on opportunity stage changes
+- Evaluates per-automation conditions (field eq/neq comparisons) before firing
+- Supports action types: `update_account_status`, `create_task`, `send_notification`
+- All invocations logged to `automation_log` table with success/failure status
+
 ### Home Dashboard (Customizable)
 - Time-of-day greeting with user name and role
 - Role-dependent KPI cards (4 for sales, 4 for renewals, all 12 for admin)
