@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
-import { useProducts, useAddOpportunityProduct } from "./api";
+import { useProducts, useAddOpportunityProduct, useOpportunity } from "./api";
+import { usePriceBooks, usePriceBookEntries } from "@/features/products/api";
+import { useAccount } from "@/features/accounts/api";
 import {
   Dialog,
   DialogContent,
@@ -18,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { formatCurrencyDetailed } from "@/lib/formatters";
 
 interface AddProductDialogProps {
   open: boolean;
@@ -27,31 +30,73 @@ interface AddProductDialogProps {
 
 export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProductDialogProps) {
   const { data: products } = useProducts();
+  const { data: priceBooks } = usePriceBooks();
+  const { data: opp } = useOpportunity(opportunityId);
+  const { data: account } = useAccount(opp?.account_id);
   const addMutation = useAddOpportunityProduct();
 
+  const [priceBookId, setPriceBookId] = useState("");
   const [productId, setProductId] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [unitPrice, setUnitPrice] = useState(0);
   const [arrAmount, setArrAmount] = useState(0);
   const [arrManuallyEdited, setArrManuallyEdited] = useState(false);
+  const [priceBookPriceFilled, setPriceBookPriceFilled] = useState(false);
+
+  const { data: priceBookEntries } = usePriceBookEntries(priceBookId || undefined);
+
+  const accountFteRange = account?.fte_range ?? null;
+  const activePriceBooks = priceBooks?.filter((pb) => pb.is_active) ?? [];
 
   // Reset form when dialog opens
   useEffect(() => {
     if (open) {
+      setPriceBookId("");
       setProductId("");
       setQuantity(1);
       setUnitPrice(0);
       setArrAmount(0);
       setArrManuallyEdited(false);
+      setPriceBookPriceFilled(false);
     }
   }, [open]);
 
-  // Pre-fill unit price from product's default_arr when product is selected
+  // Look up price from price book entries when price book + product + fte range are available
   useEffect(() => {
-    if (!productId || !products) return;
+    if (!priceBookId || !productId || !priceBookEntries) return;
+
+    const matchingEntry = priceBookEntries.find(
+      (e) =>
+        e.product_id === productId &&
+        (accountFteRange ? e.fte_range === accountFteRange : e.fte_range === null)
+    );
+
+    if (matchingEntry) {
+      setUnitPrice(matchingEntry.unit_price);
+      setPriceBookPriceFilled(true);
+      if (!arrManuallyEdited) {
+        setArrAmount(quantity * matchingEntry.unit_price);
+      }
+    } else {
+      setPriceBookPriceFilled(false);
+      // Fall back to product default_arr
+      const selected = products?.find((p) => p.id === productId);
+      if (selected?.default_arr != null) {
+        setUnitPrice(selected.default_arr);
+        if (!arrManuallyEdited) {
+          setArrAmount(quantity * selected.default_arr);
+        }
+      }
+    }
+  }, [priceBookId, productId, priceBookEntries, accountFteRange]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pre-fill unit price from product's default_arr when product is selected (no price book)
+  useEffect(() => {
+    if (!productId || !products || priceBookId) return;
     const selected = products.find((p) => p.id === productId);
     if (selected?.default_arr != null) {
       setUnitPrice(selected.default_arr);
+      setPriceBookPriceFilled(false);
       if (!arrManuallyEdited) {
         setArrAmount(quantity * selected.default_arr);
       }
@@ -92,6 +137,8 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
     );
   }
 
+  const selectedPriceBook = activePriceBooks.find((pb) => pb.id === priceBookId);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -99,6 +146,33 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
           <DialogTitle>Add Product</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="price-book-select">Price Book</Label>
+            <Select value={priceBookId || "none"} onValueChange={(v) => setPriceBookId(v === "none" ? "" : v)}>
+              <SelectTrigger id="price-book-select">
+                <SelectValue placeholder="Select a price book..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No price book</SelectItem>
+                {activePriceBooks.map((pb) => (
+                  <SelectItem key={pb.id} value={pb.id}>
+                    {pb.name}{pb.is_default ? " (Default)" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedPriceBook && accountFteRange && (
+              <p className="text-xs text-muted-foreground">
+                Using "{selectedPriceBook.name}" for FTE range: {accountFteRange}
+              </p>
+            )}
+            {selectedPriceBook && !accountFteRange && (
+              <p className="text-xs text-amber-600">
+                Account has no FTE range set. Prices may not match.
+              </p>
+            )}
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="product-select">Product</Label>
             <Select value={productId} onValueChange={setProductId}>
@@ -113,6 +187,11 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
                 ))}
               </SelectContent>
             </Select>
+            {priceBookPriceFilled && selectedPriceBook && (
+              <p className="text-xs text-emerald-600">
+                Price auto-filled from "{selectedPriceBook.name}" ({accountFteRange ?? "no FTE range"}): {formatCurrencyDetailed(unitPrice)}
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-4">

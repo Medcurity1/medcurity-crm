@@ -9,6 +9,7 @@ export const contactSchema = z.object({
   phone: z.string().optional().or(z.literal("")),
   is_primary: z.boolean(),
   owner_user_id: z.string().uuid().nullable().optional(),
+  lead_source: z.string().nullable().optional(),
 });
 
 export type ContactFormValues = z.input<typeof contactSchema>;

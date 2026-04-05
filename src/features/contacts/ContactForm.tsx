@@ -59,6 +59,7 @@ export function ContactForm() {
       phone: "",
       is_primary: false,
       owner_user_id: null,
+      lead_source: null,
     },
   });
 
@@ -73,6 +74,7 @@ export function ContactForm() {
         phone: contact.phone ?? "",
         is_primary: contact.is_primary,
         owner_user_id: contact.owner_user_id,
+        lead_source: contact.lead_source ?? null,
       });
     }
   }, [contact, isEditing, reset]);
@@ -99,11 +101,11 @@ export function ContactForm() {
 
     try {
       if (isEditing && id) {
-        await updateMutation.mutateAsync({ id, ...payload });
+        await updateMutation.mutateAsync({ id, ...payload } as Parameters<typeof updateMutation.mutateAsync>[0]);
         toast.success("Contact updated");
         navigate(`/contacts/${id}`);
       } else {
-        const result = await createMutation.mutateAsync(payload);
+        const result = await createMutation.mutateAsync(payload as Parameters<typeof createMutation.mutateAsync>[0]);
         toast.success("Contact created");
         navigate(`/contacts/${result.id}`);
       }
@@ -187,6 +189,29 @@ export function ContactForm() {
               <div className="space-y-2">
                 <Label htmlFor="phone">Phone<RequiredIndicator fieldKey="phone" requiredFields={requiredKeys} /></Label>
                 <Input id="phone" {...register("phone")} />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Lead Source</Label>
+                <Select
+                  value={watch("lead_source") ?? "none"}
+                  onValueChange={(v) => setValue("lead_source", v === "none" ? null : v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select source..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    <SelectItem value="website">Website</SelectItem>
+                    <SelectItem value="referral">Referral</SelectItem>
+                    <SelectItem value="cold_call">Cold Call</SelectItem>
+                    <SelectItem value="trade_show">Trade Show</SelectItem>
+                    <SelectItem value="partner">Partner</SelectItem>
+                    <SelectItem value="social_media">Social Media</SelectItem>
+                    <SelectItem value="email_campaign">Email Campaign</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-2">

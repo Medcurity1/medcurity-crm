@@ -16,6 +16,7 @@ export type CustomFieldType = "text" | "textarea" | "number" | "currency" | "dat
 export type LeadStatus = "new" | "contacted" | "qualified" | "unqualified" | "converted";
 export type LeadSource = "website" | "referral" | "cold_call" | "trade_show" | "partner" | "social_media" | "email_campaign" | "other";
 export type PaymentFrequency = "monthly" | "quarterly" | "semi_annually" | "annually" | "one_time";
+export type LeadQualification = "unqualified" | "mql" | "sql" | "sal";
 
 export interface UserProfile {
   id: string;
@@ -95,6 +96,8 @@ export interface Contact {
   mailing_state: string | null;
   mailing_zip: string | null;
   mailing_country: string | null;
+  lead_source: LeadSource | null;
+  original_lead_id: string | null;
   custom_fields: Record<string, unknown>;
   archived_at: string | null;
   archived_by: string | null;
@@ -191,6 +194,10 @@ export interface Lead {
   state: string | null;
   zip: string | null;
   country: string | null;
+  qualification: LeadQualification;
+  qualification_date: string | null;
+  score: number;
+  score_factors: Record<string, unknown>[];
   converted_at: string | null;
   converted_account_id: string | null;
   converted_contact_id: string | null;
@@ -393,4 +400,76 @@ export interface SavedReport {
   config: ReportConfig;
   created_at: string;
   updated_at: string;
+}
+
+// Sales sequences / cadences
+export interface Sequence {
+  id: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  owner_user_id: string | null;
+  steps: SequenceStep[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SequenceStep {
+  step_number: number;
+  type: "email" | "call" | "task";
+  delay_days: number;
+  subject: string;
+  body?: string;
+}
+
+export interface SequenceEnrollment {
+  id: string;
+  sequence_id: string;
+  lead_id: string | null;
+  contact_id: string | null;
+  account_id: string | null;
+  owner_user_id: string | null;
+  current_step: number;
+  status: "active" | "paused" | "completed" | "replied" | "bounced";
+  next_touch_at: string | null;
+  enrolled_at: string;
+  completed_at: string | null;
+  paused_reason: string | null;
+  created_at: string;
+  updated_at: string;
+  sequence?: Sequence;
+  lead?: Lead;
+  contact?: Contact;
+}
+
+// Lead lists
+export interface LeadList {
+  id: string;
+  name: string;
+  description: string | null;
+  owner_user_id: string;
+  is_dynamic: boolean;
+  filter_config: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LeadListMember {
+  id: string;
+  list_id: string;
+  lead_id: string | null;
+  contact_id: string | null;
+  added_at: string;
+  lead?: Lead;
+  contact?: Contact;
+}
+
+// Dashboard widgets
+export interface DashboardWidget {
+  id: string;
+  user_id: string;
+  widget_type: string;
+  config: Record<string, unknown>;
+  position: number;
+  is_visible: boolean;
 }

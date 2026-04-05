@@ -15,6 +15,8 @@ import {
   ChevronRight,
   LogOut,
   Search,
+  PlayCircle,
+  ListChecks,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { branding } from "@/lib/branding";
@@ -39,6 +41,8 @@ const navItems = [
   { to: "/accounts", icon: Building2, label: "Accounts" },
   { to: "/contacts", icon: Users, label: "Contacts" },
   { to: "/leads", icon: UserPlus, label: "Leads" },
+  { to: "/lead-lists", icon: ListChecks, label: "Lead Lists" },
+  { to: "/sequences", icon: PlayCircle, label: "Sequences" },
   { to: "/opportunities", icon: Target, label: "Opportunities" },
   { to: "/pipeline", icon: Kanban, label: "Pipeline" },
   { to: "/products", icon: Package, label: "Products" },

@@ -27,7 +27,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { leadStatusLabel, leadSourceLabel } from "@/lib/formatters";
+import { leadStatusLabel, leadSourceLabel, qualificationLabel } from "@/lib/formatters";
 import type { LeadSource } from "@/types/crm";
 
 const PAGE_SIZE = 25;
@@ -37,6 +37,7 @@ export function LeadsList() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [qualificationFilter, setQualificationFilter] = useState<string>("all");
   const [page, setPage] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -44,6 +45,7 @@ export function LeadsList() {
     search: search || undefined,
     status: statusFilter !== "all" ? statusFilter : undefined,
     source: sourceFilter !== "all" ? sourceFilter : undefined,
+    qualification: qualificationFilter !== "all" ? qualificationFilter : undefined,
     page,
     pageSize: PAGE_SIZE,
   });
@@ -64,6 +66,10 @@ export function LeadsList() {
   };
   const handleSourceChange = (value: string) => {
     setSourceFilter(value);
+    setPage(0);
+  };
+  const handleQualificationChange = (value: string) => {
+    setQualificationFilter(value);
     setPage(0);
   };
 
@@ -161,6 +167,18 @@ export function LeadsList() {
             <SelectItem value="other">Other</SelectItem>
           </SelectContent>
         </Select>
+        <Select value={qualificationFilter} onValueChange={handleQualificationChange}>
+          <SelectTrigger className="w-44">
+            <SelectValue placeholder="All qualifications" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Qualifications</SelectItem>
+            <SelectItem value="unqualified">Unqualified</SelectItem>
+            <SelectItem value="mql">MQL</SelectItem>
+            <SelectItem value="sql">SQL</SelectItem>
+            <SelectItem value="sal">SAL</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {isLoading ? (
@@ -174,12 +192,12 @@ export function LeadsList() {
           icon={UserPlus}
           title="No leads found"
           description={
-            search || statusFilter !== "all" || sourceFilter !== "all"
+            search || statusFilter !== "all" || sourceFilter !== "all" || qualificationFilter !== "all"
               ? "Try adjusting your search or filters"
               : "Create your first lead to get started"
           }
           action={
-            !search && statusFilter === "all" && sourceFilter === "all"
+            !search && statusFilter === "all" && sourceFilter === "all" && qualificationFilter === "all"
               ? {
                   label: "New Lead",
                   onClick: () => navigate("/leads/new"),
@@ -203,6 +221,7 @@ export function LeadsList() {
                   <TableHead>Name</TableHead>
                   <TableHead>Company</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Qualification</TableHead>
                   <TableHead>Source</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Phone</TableHead>
@@ -240,6 +259,13 @@ export function LeadsList() {
                         value={lead.status}
                         variant="leadStatus"
                         label={leadStatusLabel(lead.status)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadge
+                        value={lead.qualification}
+                        variant="qualification"
+                        label={qualificationLabel(lead.qualification)}
                       />
                     </TableCell>
                     <TableCell>

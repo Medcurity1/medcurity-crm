@@ -6,6 +6,7 @@ interface LeadFilters {
   search?: string;
   status?: string;
   source?: string;
+  qualification?: string;
   page?: number;
   pageSize?: number;
 }
@@ -33,6 +34,9 @@ export function useLeads(filters?: LeadFilters) {
       }
       if (filters?.source) {
         query = query.eq("source", filters.source);
+      }
+      if (filters?.qualification) {
+        query = query.eq("qualification", filters.qualification);
       }
 
       const { data, error, count } = await query;
@@ -144,6 +148,7 @@ interface ConvertLeadInput {
   state: string | null;
   zip: string | null;
   country: string | null;
+  leadSource: string | null;
   createOpportunity: boolean;
   opportunityName?: string;
   opportunityAmount?: number;
@@ -182,6 +187,8 @@ export function useConvertLead() {
           phone: input.phone,
           title: input.title,
           is_primary: true,
+          lead_source: input.leadSource ?? null,
+          original_lead_id: input.leadId,
         })
         .select()
         .single();

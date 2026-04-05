@@ -33,6 +33,9 @@ export const leadSchema = z.object({
   state: z.string().optional().or(z.literal("")),
   zip: z.string().optional().or(z.literal("")),
   country: z.string().optional().or(z.literal("")),
+  // Qualification
+  qualification: z.enum(["unqualified", "mql", "sql", "sal"]).optional(),
+  score: z.coerce.number().int().nonnegative().optional().or(z.literal("")),
   // Custom fields
   custom_fields: z.record(z.string(), z.unknown()).optional(),
 });

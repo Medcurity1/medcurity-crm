@@ -17,13 +17,20 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   leadStatusLabel,
   leadSourceLabel,
+  qualificationLabel,
   formatCurrency,
   formatDate,
 } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
-import type { LeadSource } from "@/types/crm";
+import type { LeadSource, LeadQualification } from "@/types/crm";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 /* ---------- Collapsible section ---------- */
 
@@ -127,6 +134,11 @@ export function LeadDetail() {
               variant="leadStatus"
               label={leadStatusLabel(lead.status)}
             />
+            <StatusBadge
+              value={lead.qualification}
+              variant="qualification"
+              label={qualificationLabel(lead.qualification)}
+            />
             {lead.source && (
               <StatusBadge
                 value={lead.source}
@@ -134,6 +146,41 @@ export function LeadDetail() {
                 label={leadSourceLabel(lead.source as LeadSource)}
               />
             )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm">
+                  Qualify
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                {(["mql", "sql", "sal"] as LeadQualification[]).map((q) => (
+                  <DropdownMenuItem
+                    key={q}
+                    onClick={() => {
+                      if (!id) return;
+                      updateMutation.mutate(
+                        {
+                          id,
+                          qualification: q,
+                          qualification_date: new Date().toISOString(),
+                        } as Parameters<typeof updateMutation.mutate>[0],
+                        {
+                          onSuccess: () =>
+                            toast.success(`Marked as ${qualificationLabel(q)}`),
+                          onError: (err) =>
+                            toast.error(
+                              "Failed to update qualification: " +
+                                (err as Error).message
+                            ),
+                        }
+                      );
+                    }}
+                  >
+                    Mark as {qualificationLabel(q)}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button variant="outline" size="sm" onClick={() => setShowChangeOwner(true)}>
               <UserRoundCog className="h-4 w-4 mr-1" />
               Change Owner
@@ -211,6 +258,18 @@ export function LeadDetail() {
         </Card>
         <Card>
           <CardHeader className="pb-1 pt-3 px-4">
+            <CardTitle className="text-xs text-muted-foreground font-medium">Qualification</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            <StatusBadge
+              value={lead.qualification}
+              variant="qualification"
+              label={qualificationLabel(lead.qualification)}
+            />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-1 pt-3 px-4">
             <CardTitle className="text-xs text-muted-foreground font-medium">Source</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
@@ -223,6 +282,14 @@ export function LeadDetail() {
             ) : (
               <p className="text-sm text-muted-foreground">{"\u2014"}</p>
             )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-1 pt-3 px-4">
+            <CardTitle className="text-xs text-muted-foreground font-medium">Score</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            <p className="text-sm font-semibold">{lead.score ?? 0}</p>
           </CardContent>
         </Card>
         <Card>

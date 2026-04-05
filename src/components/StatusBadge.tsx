@@ -7,6 +7,7 @@ import type {
   OpportunityKind,
   LeadStatus,
   LeadSource,
+  LeadQualification,
 } from "@/types/crm";
 
 const stageColors: Record<OpportunityStage, string> = {
@@ -56,7 +57,14 @@ const leadSourceColors: Record<LeadSource, string> = {
   other: "bg-slate-100 text-slate-700",
 };
 
-type BadgeVariant = "stage" | "lifecycle" | "kind" | "status" | "leadStatus" | "leadSource";
+const qualificationColors: Record<LeadQualification, string> = {
+  unqualified: "bg-slate-100 text-slate-700",
+  mql: "bg-blue-100 text-blue-700",
+  sql: "bg-emerald-100 text-emerald-700",
+  sal: "bg-amber-100 text-amber-700",
+};
+
+type BadgeVariant = "stage" | "lifecycle" | "kind" | "status" | "leadStatus" | "leadSource" | "qualification";
 
 interface StatusBadgeProps {
   value: string;
@@ -72,6 +80,7 @@ export function StatusBadge({ value, variant, label }: StatusBadgeProps) {
   if (variant === "kind") colorClass = kindColors[value as OpportunityKind] ?? "";
   if (variant === "leadStatus") colorClass = leadStatusColors[value as LeadStatus] ?? "";
   if (variant === "leadSource") colorClass = leadSourceColors[value as LeadSource] ?? "";
+  if (variant === "qualification") colorClass = qualificationColors[value as LeadQualification] ?? "";
 
   return (
     <Badge variant="secondary" className={cn("font-medium", colorClass)}>

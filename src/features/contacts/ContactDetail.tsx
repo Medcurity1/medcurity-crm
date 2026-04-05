@@ -13,7 +13,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatName } from "@/lib/formatters";
+import { formatName, leadSourceLabel } from "@/lib/formatters";
+import { StatusBadge } from "@/components/StatusBadge";
+import type { LeadSource } from "@/types/crm";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { AccountOpportunities } from "@/features/accounts/AccountOpportunities";
@@ -259,6 +261,18 @@ export function ContactDetail() {
             label="Do Not Contact"
             value={contact.do_not_contact ? "\u2713" : "\u2717"}
           />
+          {contact.lead_source && (
+            <Field
+              label="Lead Source"
+              value={
+                <StatusBadge
+                  value={contact.lead_source}
+                  variant="leadSource"
+                  label={leadSourceLabel(contact.lead_source as LeadSource)}
+                />
+              }
+            />
+          )}
         </div>
       </CollapsibleSection>
 

@@ -1,5 +1,5 @@
 import { format, formatDistanceToNow, parseISO, differenceInDays } from "date-fns";
-import type { OpportunityStage, AccountLifecycle, AccountStatus, RenewalType, ActivityType, OpportunityKind, OpportunityTeam, LeadStatus, LeadSource, PaymentFrequency } from "@/types/crm";
+import type { OpportunityStage, AccountLifecycle, AccountStatus, RenewalType, ActivityType, OpportunityKind, OpportunityTeam, LeadStatus, LeadSource, PaymentFrequency, LeadQualification } from "@/types/crm";
 
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -150,6 +150,17 @@ const paymentFrequencyLabels: Record<PaymentFrequency, string> = {
 
 export function paymentFrequencyLabel(freq: PaymentFrequency): string {
   return paymentFrequencyLabels[freq];
+}
+
+const qualificationLabels: Record<LeadQualification, string> = {
+  unqualified: "Unqualified",
+  mql: "MQL",
+  sql: "SQL",
+  sal: "SAL",
+};
+
+export function qualificationLabel(q: LeadQualification): string {
+  return qualificationLabels[q];
 }
 
 export const OPEN_STAGES: OpportunityStage[] = [

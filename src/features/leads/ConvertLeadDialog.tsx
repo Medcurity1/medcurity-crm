@@ -60,6 +60,7 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
         state: lead.state,
         zip: lead.zip,
         country: lead.country,
+        leadSource: lead.source,
         createOpportunity,
         opportunityName: createOpportunity ? opportunityName : undefined,
         opportunityAmount: createOpportunity && opportunityAmount

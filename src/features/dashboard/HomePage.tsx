@@ -1,3 +1,4 @@
+import { useState, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -20,14 +21,26 @@ import {
   LogIn,
   UserPlus,
   Sparkles,
+  Settings,
+  GripVertical,
+  Phone,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
 import {
   Table,
   TableBody,
@@ -771,6 +784,284 @@ function GettingStartedCard() {
 }
 
 // ---------------------------------------------------------------------------
+// Dashboard customization
+// ---------------------------------------------------------------------------
+
+interface WidgetDef {
+  key: string;
+  label: string;
+  defaultVisible: boolean;
+}
+
+const WIDGET_DEFS: WidgetDef[] = [
+  { key: "kpis", label: "My KPIs", defaultVisible: true },
+  { key: "tasks", label: "My Tasks", defaultVisible: true },
+  { key: "open_opps", label: "My Open Opportunities", defaultVisible: true },
+  { key: "recent_activity", label: "Recent Activities", defaultVisible: true },
+  { key: "pipeline_summary", label: "Pipeline Summary", defaultVisible: false },
+  { key: "upcoming_renewals", label: "Upcoming Renewals", defaultVisible: false },
+  { key: "call_list", label: "Call List (from Sequences)", defaultVisible: false },
+  { key: "saved_report", label: "Saved Report", defaultVisible: false },
+];
+
+function getDefaultConfig(): Record<string, boolean> {
+  const config: Record<string, boolean> = {};
+  for (const w of WIDGET_DEFS) {
+    config[w.key] = w.defaultVisible;
+  }
+  return config;
+}
+
+function loadDashboardConfig(): Record<string, boolean> {
+  try {
+    const stored = localStorage.getItem("dashboard_config");
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      // Merge with defaults to pick up new widgets
+      const defaults = getDefaultConfig();
+      return { ...defaults, ...parsed };
+    }
+  } catch {
+    // ignore
+  }
+  return getDefaultConfig();
+}
+
+function saveDashboardConfig(config: Record<string, boolean>) {
+  localStorage.setItem("dashboard_config", JSON.stringify(config));
+}
+
+function DashboardCustomizeSheet({
+  open,
+  onOpenChange,
+  config,
+  onConfigChange,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  config: Record<string, boolean>;
+  onConfigChange: (config: Record<string, boolean>) => void;
+}) {
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent>
+        <SheetHeader>
+          <SheetTitle>Customize Dashboard</SheetTitle>
+          <SheetDescription>
+            Toggle widgets on or off to personalize your dashboard.
+          </SheetDescription>
+        </SheetHeader>
+        <div className="space-y-4 py-4">
+          {WIDGET_DEFS.map((w) => (
+            <div key={w.key} className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <GripVertical className="h-4 w-4 text-muted-foreground" />
+                <Label htmlFor={`widget-${w.key}`} className="cursor-pointer">
+                  {w.label}
+                </Label>
+              </div>
+              <Switch
+                id={`widget-${w.key}`}
+                checked={config[w.key] ?? false}
+                onCheckedChange={(checked) => {
+                  const updated = { ...config, [w.key]: checked };
+                  onConfigChange(updated);
+                  saveDashboardConfig(updated);
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline Summary widget
+// ---------------------------------------------------------------------------
+
+function PipelineSummaryWidget() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["dashboard", "pipeline-summary"],
+    queryFn: async () => {
+      const { data: opps, error } = await supabase
+        .from("opportunities")
+        .select("stage, amount")
+        .is("archived_at", null)
+        .not("stage", "in", '("closed_won","closed_lost")');
+      if (error) throw error;
+
+      const stages: Record<string, { count: number; total: number }> = {};
+      for (const opp of opps ?? []) {
+        if (!stages[opp.stage]) stages[opp.stage] = { count: 0, total: 0 };
+        stages[opp.stage].count++;
+        stages[opp.stage].total += Number(opp.amount);
+      }
+      return stages;
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center gap-2">
+        <GripVertical className="h-4 w-4 text-muted-foreground" />
+        <CardTitle className="text-base">Pipeline Summary</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <Skeleton className="h-24 w-full" />
+        ) : !data || Object.keys(data).length === 0 ? (
+          <p className="text-sm text-muted-foreground">No open pipeline.</p>
+        ) : (
+          <div className="space-y-2">
+            {Object.entries(data).map(([stage, info]) => (
+              <div key={stage} className="flex items-center justify-between text-sm">
+                <span className="capitalize">{stageLabel(stage as OpportunityStage)}</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-muted-foreground">{info.count} deals</span>
+                  <span className="font-medium">{formatCurrency(info.total)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Upcoming Renewals widget
+// ---------------------------------------------------------------------------
+
+function UpcomingRenewalsWidget() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["dashboard", "upcoming-renewals-widget"],
+    queryFn: async () => {
+      const { data: rows, error } = await supabase
+        .from("renewal_queue")
+        .select("account_name, days_until_renewal, current_arr")
+        .order("days_until_renewal", { ascending: true })
+        .limit(5);
+      if (error) throw error;
+      return rows ?? [];
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center gap-2">
+        <GripVertical className="h-4 w-4 text-muted-foreground" />
+        <CardTitle className="text-base">Upcoming Renewals</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <Skeleton className="h-24 w-full" />
+        ) : !data?.length ? (
+          <p className="text-sm text-muted-foreground">No upcoming renewals.</p>
+        ) : (
+          <div className="space-y-2">
+            {data.map((row, i) => (
+              <div key={i} className="flex items-center justify-between text-sm">
+                <span className="font-medium truncate max-w-[200px]">{row.account_name}</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-muted-foreground">
+                    {row.days_until_renewal != null
+                      ? `${row.days_until_renewal}d`
+                      : "---"}
+                  </span>
+                  <span className="font-medium">{formatCurrency(Number(row.current_arr))}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Call List widget (from sequences)
+// ---------------------------------------------------------------------------
+
+function CallListWidget() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["dashboard", "call-list-widget"],
+    queryFn: async () => {
+      const now = new Date();
+      now.setHours(23, 59, 59, 999);
+      const { data: enrollments, error } = await supabase
+        .from("sequence_enrollments")
+        .select(
+          "id, current_step, next_touch_at, sequence:sequences(steps), lead:leads(first_name, last_name, company, phone), contact:contacts(first_name, last_name, phone)"
+        )
+        .eq("status", "active")
+        .lte("next_touch_at", now.toISOString())
+        .limit(10);
+      if (error) throw error;
+
+      // Filter to call steps
+      return (enrollments ?? []).filter((e) => {
+        const seq = e.sequence as unknown as { steps: Array<{ step_number: number; type: string }> } | null;
+        if (!seq?.steps) return false;
+        const step = seq.steps.find(
+          (s: { step_number: number; type: string }) => s.step_number === e.current_step
+        );
+        return step?.type === "call";
+      });
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center gap-2">
+        <GripVertical className="h-4 w-4 text-muted-foreground" />
+        <CardTitle className="text-base flex items-center gap-2">
+          <Phone className="h-4 w-4 text-green-600" />
+          Call List
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <Skeleton className="h-24 w-full" />
+        ) : !data?.length ? (
+          <p className="text-sm text-muted-foreground">No calls due today.</p>
+        ) : (
+          <div className="space-y-2">
+            {data.map((e) => {
+              const lead = (e.lead as unknown) as Record<string, string> | null;
+              const contact = (e.contact as unknown) as Record<string, string> | null;
+              const name = lead
+                ? `${lead.first_name ?? ""} ${lead.last_name ?? ""}`.trim()
+                : contact
+                  ? `${contact.first_name ?? ""} ${contact.last_name ?? ""}`.trim()
+                  : "Unknown";
+              const phone = lead?.phone ?? contact?.phone ?? "";
+              const company = lead?.company ?? "";
+              return (
+                <div key={e.id} className="flex items-center justify-between text-sm">
+                  <div>
+                    <span className="font-medium">{name}</span>
+                    {company && (
+                      <span className="text-muted-foreground ml-2">
+                        {company}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-muted-foreground">{phone || "No phone"}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -778,6 +1069,16 @@ export function HomePage() {
   const { profile } = useAuth();
   const role: AppRole = profile?.role ?? "sales";
   const userId = profile?.id ?? "";
+
+  const [dashboardConfig, setDashboardConfig] = useState<Record<string, boolean>>(
+    loadDashboardConfig
+  );
+  const [showCustomize, setShowCustomize] = useState(false);
+
+  const isWidgetVisible = useCallback(
+    (key: string) => dashboardConfig[key] ?? false,
+    [dashboardConfig]
+  );
 
   const salesQuery = useSalesMetrics(userId);
   const renewalsQuery = useRenewalsMetrics(userId);
@@ -829,22 +1130,32 @@ export function HomePage() {
   return (
     <div className="space-y-6">
       {/* Welcome header */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">
-          {greeting}, {profile?.full_name ?? "there"}
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Here is your dashboard overview.
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">
+            {greeting}, {profile?.full_name ?? "there"}
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            Here is your dashboard overview.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setShowCustomize(true)}
+        >
+          <Settings className="h-4 w-4 mr-2" />
+          Customize
+        </Button>
       </div>
 
       {allMetricsZero ? (
         /* Getting started empty state for new installs */
         <GettingStartedCard />
-      ) : (
+      ) : isWidgetVisible("kpis") ? (
         /* KPI Metric Cards */
         <MetricCardGrid cards={roleCards} loading={isMetricsLoading} />
-      )}
+      ) : null}
 
       {/* Quick Actions */}
       <div>
@@ -855,13 +1166,31 @@ export function HomePage() {
       </div>
 
       {/* My Tasks */}
-      <MyTasksSection userId={userId} />
+      {isWidgetVisible("tasks") && <MyTasksSection userId={userId} />}
 
-      {/* Two-column bottom section */}
+      {/* Two-column grid for default widgets */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <RecentActivitySection />
-        <MyOpenOpportunitiesSection userId={userId} />
+        {isWidgetVisible("recent_activity") && <RecentActivitySection />}
+        {isWidgetVisible("open_opps") && (
+          <MyOpenOpportunitiesSection userId={userId} />
+        )}
       </div>
+
+      {/* Optional widgets */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {isWidgetVisible("pipeline_summary") && <PipelineSummaryWidget />}
+        {isWidgetVisible("upcoming_renewals") && <UpcomingRenewalsWidget />}
+      </div>
+
+      {isWidgetVisible("call_list") && <CallListWidget />}
+
+      {/* Customize sheet */}
+      <DashboardCustomizeSheet
+        open={showCustomize}
+        onOpenChange={setShowCustomize}
+        config={dashboardConfig}
+        onConfigChange={setDashboardConfig}
+      />
     </div>
   );
 }

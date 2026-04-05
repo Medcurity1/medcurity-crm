@@ -72,6 +72,8 @@ export function LeadForm() {
       website: "",
       status: "new",
       source: "",
+      qualification: "unqualified",
+      score: "",
       description: "",
       employees: "",
       annual_revenue: "",
@@ -98,6 +100,8 @@ export function LeadForm() {
         website: lead.website ?? "",
         status: lead.status,
         source: lead.source ?? "",
+        qualification: lead.qualification ?? "unqualified",
+        score: lead.score ?? "",
         description: lead.description ?? "",
         employees: lead.employees ?? "",
         annual_revenue: lead.annual_revenue ?? "",
@@ -141,6 +145,8 @@ export function LeadForm() {
       website: emptyToNull(values.website),
       status: values.status,
       source: emptyToNull(values.source),
+      qualification: values.qualification ?? "unqualified",
+      score: emptyToNull(values.score),
       description: emptyToNull(values.description),
       employees: emptyToNull(values.employees),
       annual_revenue: emptyToNull(values.annual_revenue),
@@ -280,6 +286,31 @@ export function LeadForm() {
                       <SelectItem value="other">Other</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Qualification<RequiredIndicator fieldKey="qualification" requiredFields={requiredKeys} /></Label>
+                  <Select
+                    value={watch("qualification") ?? "unqualified"}
+                    onValueChange={(v) =>
+                      setValue("qualification", v as LeadFormValues["qualification"])
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unqualified">Unqualified</SelectItem>
+                      <SelectItem value="mql">MQL</SelectItem>
+                      <SelectItem value="sql">SQL</SelectItem>
+                      <SelectItem value="sal">SAL</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="score">Score<RequiredIndicator fieldKey="score" requiredFields={requiredKeys} /></Label>
+                  <Input id="score" type="number" min={0} {...register("score")} />
                 </div>
 
                 <div className="space-y-2">
