@@ -27,7 +27,7 @@ export function BulkActionBar({
   return (
     <div
       className={cn(
-        "fixed bottom-0 left-0 right-0 z-50 flex items-center gap-3 border-t bg-background px-6 py-3 shadow-lg transition-transform duration-200",
+        "fixed bottom-0 left-0 right-0 z-50 flex flex-wrap items-center gap-2 border-t bg-background px-4 py-3 shadow-lg transition-transform duration-200 sm:gap-3 sm:px-6",
         selectedCount > 0 ? "translate-y-0" : "translate-y-full"
       )}
     >
@@ -37,7 +37,7 @@ export function BulkActionBar({
 
       {onAssignOwner && users && users.length > 0 && (
         <Select onValueChange={(val) => onAssignOwner(val)}>
-          <SelectTrigger className="w-48">
+          <SelectTrigger className="w-40 sm:w-48">
             <SelectValue placeholder="Assign Owner" />
           </SelectTrigger>
           <SelectContent>

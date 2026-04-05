@@ -21,6 +21,7 @@ import { toast } from "sonner";
 import { AccountOpportunities } from "@/features/accounts/AccountOpportunities";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
 import { TasksPanel } from "@/features/activities/TasksPanel";
+import { SequencesTab } from "@/features/sequences/SequencesTab";
 
 /* ---------- Collapsible section ---------- */
 
@@ -305,6 +306,7 @@ export function ContactDetail() {
           <TabsTrigger value="opportunities">Opportunities</TabsTrigger>
           <TabsTrigger value="activities">Activities</TabsTrigger>
           <TabsTrigger value="tasks">Tasks</TabsTrigger>
+          <TabsTrigger value="sequences">Sequences</TabsTrigger>
         </TabsList>
 
         <TabsContent value="opportunities" className="mt-4">
@@ -322,6 +324,10 @@ export function ContactDetail() {
 
         <TabsContent value="tasks" className="mt-4">
           <TasksPanel contactId={contact.id} />
+        </TabsContent>
+
+        <TabsContent value="sequences" className="mt-4">
+          <SequencesTab contactId={contact.id} accountId={contact.account_id} />
         </TabsContent>
       </Tabs>
 

@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { UserPlus, Plus, Search } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useLeads, useArchiveLead, useBulkUpdateOwner } from "./api";
 import { useUsers } from "@/features/accounts/api";
+import { supabase } from "@/lib/supabase";
+import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -32,6 +35,40 @@ import type { LeadSource } from "@/types/crm";
 
 const PAGE_SIZE = 25;
 
+function useLeadQuickStats() {
+  return useQuery({
+    queryKey: ["leads", "quick-stats"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("leads")
+        .select("qualification, status")
+        .is("archived_at", null);
+      if (error) throw error;
+      const rows = (data ?? []) as { qualification: string | null; status: string | null }[];
+      let mql = 0;
+      let sql = 0;
+      let converted = 0;
+      for (const r of rows) {
+        if (r.qualification === "mql") mql++;
+        else if (r.qualification === "sql") sql++;
+        if (r.status === "converted") converted++;
+      }
+      return { total: rows.length, mql, sql, converted };
+    },
+  });
+}
+
+function StatCard({ label, value }: { label: string; value: number | string }) {
+  return (
+    <Card>
+      <CardContent className="px-4 py-3">
+        <p className="text-xs text-muted-foreground font-medium">{label}</p>
+        <p className="text-2xl font-semibold mt-1">{value}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function LeadsList() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
@@ -50,6 +87,7 @@ export function LeadsList() {
     pageSize: PAGE_SIZE,
   });
   const { data: users } = useUsers();
+  const { data: quickStats } = useLeadQuickStats();
   const archiveMutation = useArchiveLead();
   const bulkOwnerMutation = useBulkUpdateOwner();
 
@@ -128,8 +166,15 @@ export function LeadsList() {
         }
       />
 
-      <div className="flex items-center gap-3 mb-4">
-        <div className="relative flex-1 max-w-sm">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <StatCard label="Total Leads" value={quickStats?.total ?? 0} />
+        <StatCard label="MQL" value={quickStats?.mql ?? 0} />
+        <StatCard label="SQL" value={quickStats?.sql ?? 0} />
+        <StatCard label="Converted" value={quickStats?.converted ?? 0} />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search leads..."

@@ -24,6 +24,7 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
+import { SequencesTab } from "@/features/sequences/SequencesTab";
 import type { LeadSource, LeadQualification } from "@/types/crm";
 import {
   DropdownMenu,
@@ -434,10 +435,15 @@ export function LeadDetail() {
       <Tabs defaultValue="activities" className="mt-2">
         <TabsList>
           <TabsTrigger value="activities">Activities</TabsTrigger>
+          <TabsTrigger value="sequences">Sequences</TabsTrigger>
         </TabsList>
 
         <TabsContent value="activities" className="mt-4">
           <ActivityTimeline />
+        </TabsContent>
+
+        <TabsContent value="sequences" className="mt-4">
+          <SequencesTab leadId={lead.id} />
         </TabsContent>
       </Tabs>
 

@@ -2,11 +2,12 @@ import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Mail } from "lucide-react";
 import { useCreateActivity } from "./api";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { supabase } from "@/lib/supabase";
+import { pauseEnrollmentsOnEngagement } from "@/features/sequences/sequences-api";
 import {
   Dialog,
   DialogContent,
@@ -57,6 +58,7 @@ export function LogEmailDialog({
 }: LogEmailDialogProps) {
   const { user } = useAuth();
   const createMutation = useCreateActivity();
+  const queryClient = useQueryClient();
 
   const form = useForm<EmailFormValues>({
     resolver: zodResolver(emailFormSchema),
@@ -126,8 +128,30 @@ export function LogEmailDialog({
         owner_user_id: user?.id,
       },
       {
-        onSuccess: () => {
+        onSuccess: async () => {
           toast.success("Email logged");
+          // Auto-pause any active sequences for this contact (engagement detected)
+          if (contactId) {
+            try {
+              const pausedCount = await pauseEnrollmentsOnEngagement({
+                contactId,
+                reason: "engagement",
+              });
+              if (pausedCount > 0) {
+                toast.info(
+                  `Paused ${pausedCount} active sequence${pausedCount === 1 ? "" : "s"} for this contact`
+                );
+                queryClient.invalidateQueries({
+                  queryKey: ["sequence-enrollments", "by-contact", contactId],
+                });
+                queryClient.invalidateQueries({
+                  queryKey: ["sequence-enrollment-counts"],
+                });
+              }
+            } catch {
+              // Non-fatal
+            }
+          }
           form.reset();
           onOpenChange(false);
         },
@@ -233,6 +257,12 @@ export function LogEmailDialog({
                 </SelectContent>
               </Select>
             </div>
+          )}
+
+          {contactId && (
+            <p className="text-xs text-muted-foreground">
+              Note: This will pause any active sequences for this contact.
+            </p>
           )}
 
           <div className="flex justify-end gap-2 pt-2">

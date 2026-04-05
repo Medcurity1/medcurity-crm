@@ -175,6 +175,17 @@ export function useEnrollInSequence() {
       qc.invalidateQueries({
         queryKey: ["sequence-enrollments", vars.sequence_id],
       });
+      if (vars.lead_id) {
+        qc.invalidateQueries({
+          queryKey: ["sequence-enrollments", "by-lead", vars.lead_id],
+        });
+      }
+      if (vars.contact_id) {
+        qc.invalidateQueries({
+          queryKey: ["sequence-enrollments", "by-contact", vars.contact_id],
+        });
+      }
+      qc.invalidateQueries({ queryKey: ["sequence-enrollment-counts"] });
       qc.invalidateQueries({ queryKey: ["sequences"] });
     },
   });
@@ -250,7 +261,9 @@ export function usePauseEnrollment() {
       reason,
     }: {
       enrollmentId: string;
-      sequenceId: string;
+      sequenceId?: string;
+      leadId?: string;
+      contactId?: string;
       reason?: string;
     }) => {
       const { error } = await supabase
@@ -263,11 +276,139 @@ export function usePauseEnrollment() {
       if (error) throw error;
     },
     onSuccess: (_data, vars) => {
-      qc.invalidateQueries({
-        queryKey: ["sequence-enrollments", vars.sequenceId],
-      });
+      if (vars.sequenceId) {
+        qc.invalidateQueries({
+          queryKey: ["sequence-enrollments", vars.sequenceId],
+        });
+      }
+      if (vars.leadId) {
+        qc.invalidateQueries({
+          queryKey: ["sequence-enrollments", "by-lead", vars.leadId],
+        });
+      }
+      if (vars.contactId) {
+        qc.invalidateQueries({
+          queryKey: ["sequence-enrollments", "by-contact", vars.contactId],
+        });
+      }
+      qc.invalidateQueries({ queryKey: ["sequence-enrollment-counts"] });
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Resume a paused enrollment
+// ---------------------------------------------------------------------------
+
+export function useResumeEnrollment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      enrollmentId,
+    }: {
+      enrollmentId: string;
+      sequenceId?: string;
+      leadId?: string;
+      contactId?: string;
+    }) => {
+      const { error } = await supabase
+        .from("sequence_enrollments")
+        .update({
+          status: "active",
+          paused_reason: null,
+        })
+        .eq("id", enrollmentId);
+      if (error) throw error;
+    },
+    onSuccess: (_data, vars) => {
+      if (vars.sequenceId) {
+        qc.invalidateQueries({
+          queryKey: ["sequence-enrollments", vars.sequenceId],
+        });
+      }
+      if (vars.leadId) {
+        qc.invalidateQueries({
+          queryKey: ["sequence-enrollments", "by-lead", vars.leadId],
+        });
+      }
+      if (vars.contactId) {
+        qc.invalidateQueries({
+          queryKey: ["sequence-enrollments", "by-contact", vars.contactId],
+        });
+      }
+      qc.invalidateQueries({ queryKey: ["sequence-enrollment-counts"] });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Active enrollments per lead / contact
+// ---------------------------------------------------------------------------
+
+export function useActiveEnrollmentsForLead(leadId: string | undefined) {
+  return useQuery({
+    queryKey: ["sequence-enrollments", "by-lead", leadId],
+    queryFn: async () => {
+      if (!leadId) return [];
+      const { data, error } = await supabase
+        .from("sequence_enrollments")
+        .select("*, sequence:sequences(id, name, description, steps, is_active)")
+        .eq("lead_id", leadId)
+        .in("status", ["active", "paused"])
+        .order("enrolled_at", { ascending: false });
+      if (error) throw error;
+      return data as unknown as SequenceEnrollment[];
+    },
+    enabled: !!leadId,
+  });
+}
+
+export function useActiveEnrollmentsForContact(contactId: string | undefined) {
+  return useQuery({
+    queryKey: ["sequence-enrollments", "by-contact", contactId],
+    queryFn: async () => {
+      if (!contactId) return [];
+      const { data, error } = await supabase
+        .from("sequence_enrollments")
+        .select("*, sequence:sequences(id, name, description, steps, is_active)")
+        .eq("contact_id", contactId)
+        .in("status", ["active", "paused"])
+        .order("enrolled_at", { ascending: false });
+      if (error) throw error;
+      return data as unknown as SequenceEnrollment[];
+    },
+    enabled: !!contactId,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Pause enrollments when engagement detected (e.g. email logged / reply)
+// ---------------------------------------------------------------------------
+
+export async function pauseEnrollmentsOnEngagement(params: {
+  leadId?: string | null;
+  contactId?: string | null;
+  reason?: string;
+}): Promise<number> {
+  const { leadId, contactId, reason } = params;
+  if (!leadId && !contactId) return 0;
+
+  const filters: string[] = [];
+  if (leadId) filters.push(`lead_id.eq.${leadId}`);
+  if (contactId) filters.push(`contact_id.eq.${contactId}`);
+
+  const { data, error } = await supabase
+    .from("sequence_enrollments")
+    .update({
+      status: "paused",
+      paused_reason: reason ?? "engagement",
+    })
+    .eq("status", "active")
+    .or(filters.join(","))
+    .select("id");
+
+  if (error) throw error;
+  return data?.length ?? 0;
 }
 
 // ---------------------------------------------------------------------------
