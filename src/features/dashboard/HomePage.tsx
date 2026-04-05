@@ -24,7 +24,9 @@ import {
   Settings,
   GripVertical,
   Phone,
+  History,
 } from "lucide-react";
+import { useRecentRecords, type RecentRecord } from "@/hooks/useRecentRecords";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -798,6 +800,7 @@ const WIDGET_DEFS: WidgetDef[] = [
   { key: "tasks", label: "My Tasks", defaultVisible: true },
   { key: "open_opps", label: "My Open Opportunities", defaultVisible: true },
   { key: "recent_activity", label: "Recent Activities", defaultVisible: true },
+  { key: "recent_records", label: "Recent Records", defaultVisible: true },
   { key: "pipeline_summary", label: "Pipeline Summary", defaultVisible: false },
   { key: "upcoming_renewals", label: "Upcoming Renewals", defaultVisible: false },
   { key: "call_list", label: "Call List (from Sequences)", defaultVisible: false },
@@ -1062,6 +1065,93 @@ function CallListWidget() {
 }
 
 // ---------------------------------------------------------------------------
+// Recent Records widget
+// ---------------------------------------------------------------------------
+
+function recentRecordPath(r: RecentRecord): string {
+  switch (r.entity) {
+    case "account":
+      return `/accounts/${r.id}`;
+    case "contact":
+      return `/contacts/${r.id}`;
+    case "opportunity":
+      return `/opportunities/${r.id}`;
+    case "lead":
+      return `/leads/${r.id}`;
+  }
+}
+
+function recentRecordIcon(entity: RecentRecord["entity"]): React.ElementType {
+  switch (entity) {
+    case "account":
+      return Building2;
+    case "contact":
+      return Users;
+    case "opportunity":
+      return Target;
+    case "lead":
+      return UserPlus;
+  }
+}
+
+function entityLabel(entity: RecentRecord["entity"]): string {
+  switch (entity) {
+    case "account":
+      return "Account";
+    case "contact":
+      return "Contact";
+    case "opportunity":
+      return "Opportunity";
+    case "lead":
+      return "Lead";
+  }
+}
+
+function RecentRecordsWidget() {
+  const { records } = useRecentRecords();
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center gap-2">
+        <History className="h-4 w-4 text-muted-foreground" />
+        <CardTitle className="text-base">Recently Viewed</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {!records.length ? (
+          <p className="text-sm text-muted-foreground">
+            Records you view will appear here.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {records.map((r) => {
+              const Icon = recentRecordIcon(r.entity);
+              return (
+                <Link
+                  key={`${r.entity}-${r.id}`}
+                  to={recentRecordPath(r)}
+                  className="flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-muted transition-colors"
+                >
+                  <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate">{r.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {entityLabel(r.entity)}
+                    </p>
+                  </div>
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">
+                    {formatRelativeDate(r.viewedAt)}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -1174,6 +1264,7 @@ export function HomePage() {
         {isWidgetVisible("open_opps") && (
           <MyOpenOpportunitiesSection userId={userId} />
         )}
+        {isWidgetVisible("recent_records") && <RecentRecordsWidget />}
       </div>
 
       {/* Optional widgets */}

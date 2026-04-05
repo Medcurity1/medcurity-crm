@@ -1,13 +1,17 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Mail } from "lucide-react";
+import { Mail, FileText } from "lucide-react";
 import { useCreateActivity } from "./api";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { supabase } from "@/lib/supabase";
 import { pauseEnrollmentsOnEngagement } from "@/features/sequences/sequences-api";
+import {
+  useEmailTemplates,
+  useIncrementUsage,
+} from "@/features/email-templates/templates-api";
 import {
   Dialog,
   DialogContent,
@@ -26,7 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import type { Opportunity } from "@/types/crm";
+import type { Opportunity, EmailTemplate } from "@/types/crm";
 
 const emailFormSchema = z.object({
   subject: z.string().min(1, "Subject is required"),
@@ -47,6 +51,17 @@ interface LogEmailDialogProps {
   contactName?: string;
 }
 
+function applyTemplateVariables(
+  text: string,
+  vars: { first_name: string; last_name: string; company: string; account_name: string }
+): string {
+  return text
+    .replaceAll("{{first_name}}", vars.first_name)
+    .replaceAll("{{last_name}}", vars.last_name)
+    .replaceAll("{{company}}", vars.company)
+    .replaceAll("{{account_name}}", vars.account_name);
+}
+
 export function LogEmailDialog({
   open,
   onOpenChange,
@@ -58,7 +73,11 @@ export function LogEmailDialog({
 }: LogEmailDialogProps) {
   const { user } = useAuth();
   const createMutation = useCreateActivity();
+  const incrementUsage = useIncrementUsage();
   const queryClient = useQueryClient();
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+
+  const { data: templates } = useEmailTemplates();
 
   const form = useForm<EmailFormValues>({
     resolver: zodResolver(emailFormSchema),
@@ -79,6 +98,7 @@ export function LogEmailDialog({
         date: new Date().toISOString().slice(0, 16),
         opportunity_id: opportunityId ?? "",
       });
+      setSelectedTemplateId("");
     }
   }, [open, opportunityId, form]);
 
@@ -114,6 +134,50 @@ export function LogEmailDialog({
     },
     enabled: !!accountId && open,
   });
+
+  // Fetch contact for template variable replacement
+  const { data: contact } = useQuery({
+    queryKey: ["contact-for-template", contactId],
+    queryFn: async () => {
+      if (!contactId) return null;
+      const { data, error } = await supabase
+        .from("contacts")
+        .select("first_name, last_name, account:accounts(name)")
+        .eq("id", contactId)
+        .single();
+      if (error) throw error;
+      return data as unknown as {
+        first_name: string;
+        last_name: string;
+        account: { name: string } | null;
+      };
+    },
+    enabled: !!contactId && open,
+  });
+
+  function handleApplyTemplate(templateId: string) {
+    setSelectedTemplateId(templateId);
+    if (templateId === "__none__") {
+      return;
+    }
+    const template = (templates ?? []).find(
+      (t: EmailTemplate) => t.id === templateId
+    );
+    if (!template) return;
+
+    const vars = {
+      first_name: contact?.first_name ?? "",
+      last_name: contact?.last_name ?? "",
+      company: account?.name ?? contact?.account?.name ?? "",
+      account_name: account?.name ?? contact?.account?.name ?? "",
+    };
+
+    form.setValue("subject", applyTemplateVariables(template.subject, vars));
+    form.setValue("body", applyTemplateVariables(template.body, vars));
+
+    // Track usage (fire-and-forget)
+    incrementUsage.mutate(template.id);
+  }
 
   function onSubmit(values: EmailFormValues) {
     createMutation.mutate(
@@ -173,6 +237,33 @@ export function LogEmailDialog({
         </DialogHeader>
 
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          {/* Template selector */}
+          {templates && templates.length > 0 && (
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1 text-muted-foreground">
+                <FileText className="h-3.5 w-3.5" />
+                Use Template
+              </Label>
+              <Select
+                value={selectedTemplateId}
+                onValueChange={handleApplyTemplate}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a template (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None</SelectItem>
+                  {templates.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                      {t.category ? ` · ${t.category}` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           {/* To field */}
           {contactEmail && (
             <div className="space-y-2">

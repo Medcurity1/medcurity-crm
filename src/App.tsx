@@ -29,6 +29,7 @@ const ProductsPage = lazy(() => import("@/features/products/ProductsPage").then(
 const RenewalsQueue = lazy(() => import("@/features/renewals/RenewalsQueue").then(m => ({ default: m.RenewalsQueue })));
 const ReportBuilder = lazy(() => import("@/features/reports/ReportBuilder").then(m => ({ default: m.ReportBuilder })));
 const SequencesPage = lazy(() => import("@/features/sequences/SequencesPage").then(m => ({ default: m.SequencesPage })));
+const EmailTemplatesPage = lazy(() => import("@/features/email-templates/EmailTemplatesPage").then(m => ({ default: m.EmailTemplatesPage })));
 const LeadListsPage = lazy(() => import("@/features/lead-lists/LeadListsPage").then(m => ({ default: m.LeadListsPage })));
 const ArchiveManager = lazy(() => import("@/features/archive/ArchiveManager").then(m => ({ default: m.ArchiveManager })));
 const AdminSettings = lazy(() => import("@/features/admin/AdminSettings").then(m => ({ default: m.AdminSettings })));
@@ -54,6 +55,7 @@ export default function App() {
                   <Route path="leads/:id/edit" element={<LeadForm />} />
                   <Route path="lead-lists" element={<LeadListsPage />} />
                   <Route path="sequences" element={<SequencesPage />} />
+                  <Route path="email-templates" element={<EmailTemplatesPage />} />
                   <Route path="contacts" element={<ContactsList />} />
                   <Route path="contacts/new" element={<ContactForm />} />
                   <Route path="contacts/:id" element={<ContactDetail />} />

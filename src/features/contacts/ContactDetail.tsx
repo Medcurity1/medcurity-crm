@@ -1,5 +1,6 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { Pencil, Archive, ExternalLink, ChevronDown, Phone, Mail, UserRoundCog } from "lucide-react";
 import { useContact, useUpdateContact, useArchiveContact } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
@@ -78,6 +79,15 @@ export function ContactDetail() {
   const archiveMutation = useArchiveContact();
   const [showArchive, setShowArchive] = useState(false);
   const [showChangeOwner, setShowChangeOwner] = useState(false);
+  const { addRecent } = useRecentRecords();
+
+  useEffect(() => {
+    if (contact) {
+      const name = `${contact.first_name ?? ""} ${contact.last_name ?? ""}`.trim() || "Unknown";
+      addRecent({ id: contact.id, entity: "contact", name });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contact?.id]);
 
   if (isLoading) {
     return (

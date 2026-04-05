@@ -1,5 +1,6 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { Pencil, Archive, ChevronDown, UserRoundCog, Plus, Trash2 } from "lucide-react";
 import { useOpportunity, useUpdateOpportunity, useArchiveOpportunity, useStageHistory, useOpportunityProducts, useRemoveOpportunityProduct } from "./api";
 import { AddProductDialog } from "./AddProductDialog";
@@ -102,6 +103,14 @@ export function OpportunityDetail() {
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [pendingRemoveProduct, setPendingRemoveProduct] = useState<{ id: string; name: string } | null>(null);
   const [pendingStage, setPendingStage] = useState<OpportunityStage | null>(null);
+  const { addRecent } = useRecentRecords();
+
+  useEffect(() => {
+    if (opp) {
+      addRecent({ id: opp.id, entity: "opportunity", name: opp.name });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opp?.id]);
 
   if (isLoading) {
     return (

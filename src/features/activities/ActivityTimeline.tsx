@@ -13,6 +13,7 @@ import {
 import { useActivities } from "./api";
 import { ActivityForm } from "./ActivityForm";
 import { LogEmailDialog } from "./LogEmailDialog";
+import { QuickNoteInput } from "./QuickNoteInput";
 import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
 import { formatRelativeDate, formatDate, activityLabel } from "@/lib/formatters";
@@ -75,6 +76,11 @@ export function ActivityTimeline({
 
   return (
     <div>
+      <QuickNoteInput
+        accountId={accountId}
+        contactId={contactId}
+        opportunityId={opportunityId}
+      />
       <div className="mb-4 flex gap-2">
         <Button size="sm" onClick={() => setShowForm(true)}>
           <Plus className="h-4 w-4 mr-1" />

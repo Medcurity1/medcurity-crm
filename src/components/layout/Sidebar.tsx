@@ -17,6 +17,7 @@ import {
   Search,
   PlayCircle,
   ListChecks,
+  Mail,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { branding } from "@/lib/branding";
@@ -43,6 +44,7 @@ const navItems = [
   { to: "/leads", icon: UserPlus, label: "Leads" },
   { to: "/lead-lists", icon: ListChecks, label: "Lead Lists" },
   { to: "/sequences", icon: PlayCircle, label: "Sequences" },
+  { to: "/email-templates", icon: Mail, label: "Email Templates" },
   { to: "/opportunities", icon: Target, label: "Opportunities" },
   { to: "/pipeline", icon: Kanban, label: "Pipeline" },
   { to: "/products", icon: Package, label: "Products" },

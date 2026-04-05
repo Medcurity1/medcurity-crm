@@ -1,5 +1,6 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { Pencil, Archive, ExternalLink, ChevronDown, Phone, UserRoundCog, Plus } from "lucide-react";
 import { useAccount, useUpdateAccount, useArchiveAccount, useAccountContracts } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
@@ -117,6 +118,14 @@ export function AccountDetail() {
   const archiveMutation = useArchiveAccount();
   const [showArchive, setShowArchive] = useState(false);
   const [showChangeOwner, setShowChangeOwner] = useState(false);
+  const { addRecent } = useRecentRecords();
+
+  useEffect(() => {
+    if (account) {
+      addRecent({ id: account.id, entity: "account", name: account.name });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account?.id]);
 
   if (isLoading) {
     return (

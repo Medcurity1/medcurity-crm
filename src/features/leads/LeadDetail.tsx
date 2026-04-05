@@ -1,5 +1,6 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { Pencil, Archive, ExternalLink, ChevronDown, Phone, Mail, ArrowRightLeft, UserRoundCog } from "lucide-react";
 import { useLead, useUpdateLead, useArchiveLead } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
@@ -89,6 +90,15 @@ export function LeadDetail() {
   const [showArchive, setShowArchive] = useState(false);
   const [showConvert, setShowConvert] = useState(false);
   const [showChangeOwner, setShowChangeOwner] = useState(false);
+  const { addRecent } = useRecentRecords();
+
+  useEffect(() => {
+    if (lead) {
+      const name = `${lead.first_name ?? ""} ${lead.last_name ?? ""}`.trim() || "Unknown";
+      addRecent({ id: lead.id, entity: "lead", name });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead?.id]);
 
   if (isLoading) {
     return (
