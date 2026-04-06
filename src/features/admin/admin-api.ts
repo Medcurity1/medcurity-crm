@@ -94,6 +94,29 @@ export function useAllUsers() {
   });
 }
 
+export function useInviteUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: {
+      email: string;
+      password: string;
+      full_name: string;
+      role: string;
+    }) => {
+      const { data, error } = await supabase.functions.invoke("invite-user", {
+        body: payload,
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as { success: boolean; user: { id: string; email: string; full_name: string; role: string } };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin_users"] });
+      qc.invalidateQueries({ queryKey: ["users"] });
+    },
+  });
+}
+
 export function useUpdateUserProfile() {
   const qc = useQueryClient();
   return useMutation({
