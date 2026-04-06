@@ -14,11 +14,11 @@
     },
     {
       "route": "/",
-      "allowedRoles": ["crm-users"]
+      "allowedRoles": ["authenticated"]
     },
     {
       "route": "/(.*)",
-      "allowedRoles": ["crm-users"]
+      "allowedRoles": ["authenticated"]
     }
   ],
   "responseOverrides": {
