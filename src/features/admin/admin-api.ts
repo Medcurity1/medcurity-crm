@@ -103,12 +103,17 @@ export function useInviteUser() {
       full_name: string;
       role: string;
     }) => {
-      const { data, error } = await supabase.functions.invoke("invite-user", {
-        body: payload,
+      const { data, error } = await supabase.rpc("create_crm_user", {
+        p_email: payload.email,
+        p_password: payload.password,
+        p_full_name: payload.full_name,
+        p_role: payload.role,
       });
       if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      return data as { success: boolean; user: { id: string; email: string; full_name: string; role: string } };
+      // The function returns JSON — check for application-level errors
+      const result = typeof data === "string" ? JSON.parse(data) : data;
+      if (result?.error) throw new Error(result.error);
+      return result as { success: boolean; user: { id: string; email: string; full_name: string; role: string } };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin_users"] });

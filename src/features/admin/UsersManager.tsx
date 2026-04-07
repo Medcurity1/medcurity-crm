@@ -125,19 +125,7 @@ function InviteUserDialog({
           setCreatedPassword(password);
         },
         onError: (err) => {
-          // If the Edge Function isn't deployed yet (404 or relay error)
-          if (
-            err.message?.includes("404") ||
-            err.message?.includes("FunctionNotFound") ||
-            err.message?.includes("Relay")
-          ) {
-            toast.error(
-              "Edge Function not deployed yet. Create users in the Supabase dashboard, then set their role here.",
-              { duration: 8000 },
-            );
-          } else {
-            toast.error(`Failed to create user: ${err.message}`);
-          }
+          toast.error(`Failed to create user: ${err.message}`);
         },
       },
     );
