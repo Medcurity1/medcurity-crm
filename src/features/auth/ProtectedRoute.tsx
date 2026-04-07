@@ -1,8 +1,9 @@
 import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "./AuthProvider";
+import { Button } from "@/components/ui/button";
 
 export function ProtectedRoute() {
-  const { session, loading, profile } = useAuth();
+  const { session, loading, profile, signOut } = useAuth();
 
   if (loading) {
     return (
@@ -25,6 +26,12 @@ export function ProtectedRoute() {
             Your login works, but you don't have a CRM profile yet. Ask an admin
             to create your user profile.
           </p>
+          <p className="text-xs text-muted-foreground font-mono">
+            User ID: {session.user.id}
+          </p>
+          <Button variant="outline" onClick={() => signOut()}>
+            Sign Out
+          </Button>
         </div>
       </div>
     );

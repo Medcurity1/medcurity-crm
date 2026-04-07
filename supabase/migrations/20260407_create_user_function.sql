@@ -99,7 +99,7 @@ begin
 
   -- Create the user profile
   insert into public.user_profiles (id, full_name, role, is_active)
-  values (new_user_id, p_full_name, p_role, true);
+  values (new_user_id, p_full_name, p_role::public.app_role, true);
 
   return json_build_object(
     'success', true,
