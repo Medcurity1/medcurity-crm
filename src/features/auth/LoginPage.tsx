@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -73,6 +73,14 @@ export function LoginPage() {
             <Button type="submit" className="w-full" disabled={submitting}>
               {submitting ? "Signing in..." : "Sign In"}
             </Button>
+            <div className="text-center">
+              <Link
+                to="/forgot-password"
+                className="text-sm text-muted-foreground hover:underline"
+              >
+                Forgot password?
+              </Link>
+            </div>
           </form>
         </CardContent>
       </Card>

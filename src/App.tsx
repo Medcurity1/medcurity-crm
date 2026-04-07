@@ -7,6 +7,8 @@ import { queryClient } from "@/lib/queryClient";
 import { AuthProvider } from "@/features/auth/AuthProvider";
 import { ProtectedRoute } from "@/features/auth/ProtectedRoute";
 import { LoginPage } from "@/features/auth/LoginPage";
+import { ForgotPasswordPage } from "@/features/auth/ForgotPasswordPage";
+import { ResetPasswordPage } from "@/features/auth/ResetPasswordPage";
 import { AppLayout } from "@/components/layout/AppLayout";
 
 // Lazy-loaded route components for code splitting
@@ -46,6 +48,8 @@ export default function App() {
           <TooltipProvider>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route element={<ProtectedRoute />}>
                 <Route element={<AppLayout />}>
                   <Route index element={<HomePage />} />
