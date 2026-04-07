@@ -35,6 +35,11 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.STAGING_VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.STAGING_VITE_SUPABASE_ANON_KEY }}
 
+      - name: Run Supabase Migrations (Staging)
+        run: npx supabase migration up --db-url "$STAGING_SUPABASE_DB_URL"
+        env:
+          STAGING_SUPABASE_DB_URL: ${{ secrets.STAGING_SUPABASE_DB_URL }}
+
       - name: Deploy
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
