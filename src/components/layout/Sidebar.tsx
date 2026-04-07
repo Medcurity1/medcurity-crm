@@ -1,4 +1,4 @@
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Home,
   Building2,
@@ -16,6 +16,7 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
+  KeyRound,
   Search,
   PlayCircle,
   ListChecks,
@@ -68,6 +69,7 @@ const adminItems = [
 export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps) {
   const { profile, signOut } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
 
   const allItems = profile?.role === "admin"
     ? [...navItems, ...adminItems]
@@ -199,6 +201,15 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
             variant="ghost"
             size="sm"
             className="w-full justify-start gap-2 text-muted-foreground"
+            onClick={() => navigate("/change-password")}
+          >
+            <KeyRound className="h-4 w-4" />
+            Change Password
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start gap-2 text-muted-foreground"
             onClick={signOut}
           >
             <LogOut className="h-4 w-4" />
@@ -208,7 +219,20 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
       )}
 
       {collapsed && (
-        <div className="p-2">
+        <div className="p-2 space-y-1">
+          <Tooltip delayDuration={0}>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="w-full"
+                onClick={() => navigate("/change-password")}
+              >
+                <KeyRound className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Change Password</TooltipContent>
+          </Tooltip>
           <Tooltip delayDuration={0}>
             <TooltipTrigger asChild>
               <Button

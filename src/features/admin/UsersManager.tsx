@@ -119,9 +119,7 @@ function InviteUserDialog({
       { email, password, full_name: fullName, role },
       {
         onSuccess: () => {
-          toast.success(
-            "User created! They can log in with the provided credentials.",
-          );
+          toast.success("User created! Share the credentials below.");
           setCreatedPassword(password);
         },
         onError: (err) => {
@@ -141,8 +139,8 @@ function InviteUserDialog({
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Share these credentials with the new user. The password will not be
-              shown again.
+              Share these credentials with the new user. They will not be shown
+              again.
             </p>
             <div className="rounded-lg border bg-muted/50 p-4 space-y-2">
               <div className="flex items-center justify-between">

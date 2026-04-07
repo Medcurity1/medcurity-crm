@@ -39,6 +39,7 @@ const EmailTemplatesPage = lazy(() => import("@/features/email-templates/EmailTe
 const LeadListsPage = lazy(() => import("@/features/lead-lists/LeadListsPage").then(m => ({ default: m.LeadListsPage })));
 const ArchiveManager = lazy(() => import("@/features/archive/ArchiveManager").then(m => ({ default: m.ArchiveManager })));
 const AdminSettings = lazy(() => import("@/features/admin/AdminSettings").then(m => ({ default: m.AdminSettings })));
+const ChangePasswordPage = lazy(() => import("@/features/auth/ChangePasswordPage").then(m => ({ default: m.ChangePasswordPage })));
 
 export default function App() {
   return (
@@ -82,6 +83,7 @@ export default function App() {
                   <Route path="forecasting" element={<ForecastPage />} />
                   <Route path="archive" element={<ArchiveManager />} />
                   <Route path="admin" element={<AdminSettings />} />
+                  <Route path="change-password" element={<ChangePasswordPage />} />
                   <Route path="*" element={<NotFound />} />
                 </Route>
               </Route>
