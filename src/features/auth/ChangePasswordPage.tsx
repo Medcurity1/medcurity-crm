@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/card";
 
 export function ChangePasswordPage() {
-  const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +42,6 @@ export function ChangePasswordPage() {
     } else {
       setSuccess(true);
       setSubmitting(false);
-      setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
       setTimeout(() => setSuccess(false), 3000);
