@@ -106,6 +106,7 @@ end;
 $$;
 
 drop trigger if exists trg_opportunity_automations on public.opportunities;
+drop trigger if exists trg_opportunity_automations on public.opportunities;
 create trigger trg_opportunity_automations
 after update on public.opportunities
 for each row execute function public.execute_opportunity_automations();

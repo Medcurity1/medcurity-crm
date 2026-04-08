@@ -22,6 +22,7 @@ create table if not exists public.automation_rules (
   updated_at timestamptz not null default timezone('utc', now())
 );
 
+drop trigger if exists automation_rules_updated_at on public.automation_rules;
 create trigger automation_rules_updated_at
   before update on public.automation_rules
   for each row execute function public.set_updated_at();
@@ -29,12 +30,14 @@ create trigger automation_rules_updated_at
 alter table public.automation_rules enable row level security;
 
 -- All authenticated users can read automation rules
+drop policy if exists "automations_read" on public.automation_rules;
 create policy "automations_read"
   on public.automation_rules
   for select to authenticated
   using (true);
 
 -- Only admins can create/update/delete rules
+drop policy if exists "automations_admin_write" on public.automation_rules;
 create policy "automations_admin_write"
   on public.automation_rules
   for all to authenticated
@@ -57,6 +60,7 @@ create table if not exists public.automation_log (
 alter table public.automation_log enable row level security;
 
 -- Only admins can view the execution log
+drop policy if exists "automation_log_read" on public.automation_log;
 create policy "automation_log_read"
   on public.automation_log
   for select to authenticated

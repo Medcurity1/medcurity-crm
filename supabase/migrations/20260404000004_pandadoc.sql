@@ -19,6 +19,7 @@ create table if not exists public.pandadoc_documents (
 );
 
 -- Auto-update the updated_at timestamp
+drop trigger if exists pandadoc_documents_updated_at on public.pandadoc_documents;
 create trigger pandadoc_documents_updated_at
   before update on public.pandadoc_documents
   for each row execute function public.set_updated_at();
@@ -26,6 +27,7 @@ create trigger pandadoc_documents_updated_at
 -- Row-level security: all authenticated users can read
 alter table public.pandadoc_documents enable row level security;
 
+drop policy if exists "pandadoc_read" on public.pandadoc_documents;
 create policy "pandadoc_read"
   on public.pandadoc_documents
   for select to authenticated
@@ -33,6 +35,7 @@ create policy "pandadoc_read"
 
 -- Only admins can insert/update (via Edge Function service role bypasses RLS,
 -- but this protects against direct client writes)
+drop policy if exists "pandadoc_admin_write" on public.pandadoc_documents;
 create policy "pandadoc_admin_write"
   on public.pandadoc_documents
   for all to authenticated

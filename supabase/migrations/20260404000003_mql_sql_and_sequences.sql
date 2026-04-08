@@ -77,18 +77,29 @@ alter table public.sequence_enrollments enable row level security;
 alter table public.lead_lists enable row level security;
 alter table public.lead_list_members enable row level security;
 
+drop policy if exists "sequences_read" on public.sequences;
 create policy "sequences_read" on public.sequences for select to authenticated using (true);
+drop policy if exists "sequences_write" on public.sequences;
 create policy "sequences_write" on public.sequences for all to authenticated using (public.current_app_role() in ('sales','admin')) with check (public.current_app_role() in ('sales','admin'));
+drop policy if exists "enrollments_read" on public.sequence_enrollments;
 create policy "enrollments_read" on public.sequence_enrollments for select to authenticated using (true);
+drop policy if exists "enrollments_write" on public.sequence_enrollments;
 create policy "enrollments_write" on public.sequence_enrollments for all to authenticated using (public.current_app_role() in ('sales','admin')) with check (public.current_app_role() in ('sales','admin'));
+drop policy if exists "lead_lists_read" on public.lead_lists;
 create policy "lead_lists_read" on public.lead_lists for select to authenticated using (owner_user_id = auth.uid() or public.is_admin());
+drop policy if exists "lead_lists_write" on public.lead_lists;
 create policy "lead_lists_write" on public.lead_lists for all to authenticated using (owner_user_id = auth.uid() or public.is_admin()) with check (owner_user_id = auth.uid() or public.is_admin());
+drop policy if exists "lead_list_members_read" on public.lead_list_members;
 create policy "lead_list_members_read" on public.lead_list_members for select to authenticated using (true);
+drop policy if exists "lead_list_members_write" on public.lead_list_members;
 create policy "lead_list_members_write" on public.lead_list_members for all to authenticated using (public.current_app_role() in ('sales','admin')) with check (public.current_app_role() in ('sales','admin'));
 
 -- Triggers
+drop trigger if exists trg_sequences_updated_at on public.sequences;
 create trigger trg_sequences_updated_at before update on public.sequences for each row execute function public.set_updated_at();
+drop trigger if exists trg_sequence_enrollments_updated_at on public.sequence_enrollments;
 create trigger trg_sequence_enrollments_updated_at before update on public.sequence_enrollments for each row execute function public.set_updated_at();
+drop trigger if exists trg_lead_lists_updated_at on public.lead_lists;
 create trigger trg_lead_lists_updated_at before update on public.lead_lists for each row execute function public.set_updated_at();
 
 -- Dashboard widget configs
@@ -104,7 +115,9 @@ create table if not exists public.dashboard_widgets (
 );
 
 alter table public.dashboard_widgets enable row level security;
+drop policy if exists "dashboard_widgets_own" on public.dashboard_widgets;
 create policy "dashboard_widgets_own" on public.dashboard_widgets for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+drop trigger if exists trg_dashboard_widgets_updated_at on public.dashboard_widgets;
 create trigger trg_dashboard_widgets_updated_at before update on public.dashboard_widgets for each row execute function public.set_updated_at();
 
 -- Notifications
@@ -123,5 +136,6 @@ create index if not exists idx_notifications_user_unread on public.notifications
 create index if not exists idx_notifications_created_at on public.notifications(created_at desc);
 
 alter table public.notifications enable row level security;
+drop policy if exists "notifications_own" on public.notifications;
 create policy "notifications_own" on public.notifications for all to authenticated
 using (user_id = auth.uid()) with check (user_id = auth.uid());

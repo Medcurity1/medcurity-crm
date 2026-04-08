@@ -13,12 +13,14 @@ create table if not exists public.pipeline_views (
 create index if not exists idx_pipeline_views_owner on public.pipeline_views (owner_user_id);
 
 drop trigger if exists trg_pipeline_views_updated_at on public.pipeline_views;
+drop trigger if exists trg_pipeline_views_updated_at on public.pipeline_views;
 create trigger trg_pipeline_views_updated_at
 before update on public.pipeline_views
 for each row execute function public.set_updated_at();
 
 alter table public.pipeline_views enable row level security;
 
+drop policy if exists "pipeline_views_read" on public.pipeline_views;
 drop policy if exists "pipeline_views_read" on public.pipeline_views;
 create policy "pipeline_views_read"
 on public.pipeline_views
@@ -27,6 +29,7 @@ to authenticated
 using (owner_user_id = auth.uid() or is_shared = true);
 
 drop policy if exists "pipeline_views_insert" on public.pipeline_views;
+drop policy if exists "pipeline_views_insert" on public.pipeline_views;
 create policy "pipeline_views_insert"
 on public.pipeline_views
 for insert
@@ -34,12 +37,14 @@ to authenticated
 with check (owner_user_id = auth.uid());
 
 drop policy if exists "pipeline_views_update" on public.pipeline_views;
+drop policy if exists "pipeline_views_update" on public.pipeline_views;
 create policy "pipeline_views_update"
 on public.pipeline_views
 for update
 to authenticated
 using (owner_user_id = auth.uid());
 
+drop policy if exists "pipeline_views_delete" on public.pipeline_views;
 drop policy if exists "pipeline_views_delete" on public.pipeline_views;
 create policy "pipeline_views_delete"
 on public.pipeline_views
@@ -62,12 +67,14 @@ create table if not exists public.saved_reports (
 create index if not exists idx_saved_reports_owner on public.saved_reports (owner_user_id);
 
 drop trigger if exists trg_saved_reports_updated_at on public.saved_reports;
+drop trigger if exists trg_saved_reports_updated_at on public.saved_reports;
 create trigger trg_saved_reports_updated_at
 before update on public.saved_reports
 for each row execute function public.set_updated_at();
 
 alter table public.saved_reports enable row level security;
 
+drop policy if exists "saved_reports_read" on public.saved_reports;
 drop policy if exists "saved_reports_read" on public.saved_reports;
 create policy "saved_reports_read"
 on public.saved_reports
@@ -76,6 +83,7 @@ to authenticated
 using (owner_user_id = auth.uid() or is_shared = true);
 
 drop policy if exists "saved_reports_insert" on public.saved_reports;
+drop policy if exists "saved_reports_insert" on public.saved_reports;
 create policy "saved_reports_insert"
 on public.saved_reports
 for insert
@@ -83,12 +91,14 @@ to authenticated
 with check (owner_user_id = auth.uid());
 
 drop policy if exists "saved_reports_update" on public.saved_reports;
+drop policy if exists "saved_reports_update" on public.saved_reports;
 create policy "saved_reports_update"
 on public.saved_reports
 for update
 to authenticated
 using (owner_user_id = auth.uid());
 
+drop policy if exists "saved_reports_delete" on public.saved_reports;
 drop policy if exists "saved_reports_delete" on public.saved_reports;
 create policy "saved_reports_delete"
 on public.saved_reports

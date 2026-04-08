@@ -25,12 +25,14 @@ create table if not exists public.email_sync_connections (
 -- RLS: users can only see and manage their own connections
 alter table public.email_sync_connections enable row level security;
 
+drop policy if exists "email_sync_own" on public.email_sync_connections;
 create policy "email_sync_own" on public.email_sync_connections
   for all to authenticated
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
 -- Auto-update the updated_at timestamp
+drop trigger if exists email_sync_connections_updated_at on public.email_sync_connections;
 create trigger email_sync_connections_updated_at
   before update on public.email_sync_connections
   for each row execute function public.set_updated_at();

@@ -15,10 +15,13 @@ create index if not exists idx_email_templates_owner on public.email_templates(o
 create index if not exists idx_email_templates_category on public.email_templates(category);
 
 alter table public.email_templates enable row level security;
+drop policy if exists "email_templates_read" on public.email_templates;
 create policy "email_templates_read" on public.email_templates for select to authenticated
 using (owner_user_id = auth.uid() or is_shared = true);
+drop policy if exists "email_templates_write" on public.email_templates;
 create policy "email_templates_write" on public.email_templates for all to authenticated
 using (owner_user_id = auth.uid()) with check (owner_user_id = auth.uid());
 
+drop trigger if exists trg_email_templates_updated_at on public.email_templates;
 create trigger trg_email_templates_updated_at before update on public.email_templates
 for each row execute function public.set_updated_at();

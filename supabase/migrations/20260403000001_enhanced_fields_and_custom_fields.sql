@@ -99,6 +99,7 @@ create table if not exists public.custom_field_definitions (
 create index if not exists idx_custom_field_defs_entity on public.custom_field_definitions (entity, sort_order);
 
 drop trigger if exists trg_custom_field_definitions_updated_at on public.custom_field_definitions;
+drop trigger if exists trg_custom_field_definitions_updated_at on public.custom_field_definitions;
 create trigger trg_custom_field_definitions_updated_at
 before update on public.custom_field_definitions
 for each row execute function public.set_updated_at();
@@ -106,6 +107,7 @@ for each row execute function public.set_updated_at();
 alter table public.custom_field_definitions enable row level security;
 
 -- All authenticated users can read field definitions
+drop policy if exists "custom_field_defs_read" on public.custom_field_definitions;
 drop policy if exists "custom_field_defs_read" on public.custom_field_definitions;
 create policy "custom_field_defs_read"
 on public.custom_field_definitions
@@ -115,6 +117,7 @@ using (true);
 
 -- Only admins can manage field definitions
 drop policy if exists "custom_field_defs_admin_insert" on public.custom_field_definitions;
+drop policy if exists "custom_field_defs_admin_insert" on public.custom_field_definitions;
 create policy "custom_field_defs_admin_insert"
 on public.custom_field_definitions
 for insert
@@ -122,12 +125,14 @@ to authenticated
 with check (public.is_admin());
 
 drop policy if exists "custom_field_defs_admin_update" on public.custom_field_definitions;
+drop policy if exists "custom_field_defs_admin_update" on public.custom_field_definitions;
 create policy "custom_field_defs_admin_update"
 on public.custom_field_definitions
 for update
 to authenticated
 using (public.is_admin());
 
+drop policy if exists "custom_field_defs_admin_delete" on public.custom_field_definitions;
 drop policy if exists "custom_field_defs_admin_delete" on public.custom_field_definitions;
 create policy "custom_field_defs_admin_delete"
 on public.custom_field_definitions
@@ -150,12 +155,14 @@ create table if not exists public.required_field_config (
 alter table public.required_field_config enable row level security;
 
 drop policy if exists "required_fields_read" on public.required_field_config;
+drop policy if exists "required_fields_read" on public.required_field_config;
 create policy "required_fields_read"
 on public.required_field_config
 for select
 to authenticated
 using (true);
 
+drop policy if exists "required_fields_admin_write" on public.required_field_config;
 drop policy if exists "required_fields_admin_write" on public.required_field_config;
 create policy "required_fields_admin_write"
 on public.required_field_config

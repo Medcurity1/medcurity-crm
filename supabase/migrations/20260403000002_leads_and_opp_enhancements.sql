@@ -70,6 +70,7 @@ create index if not exists idx_leads_status on public.leads (status);
 create index if not exists idx_leads_archived_at on public.leads (archived_at);
 
 drop trigger if exists trg_leads_updated_at on public.leads;
+drop trigger if exists trg_leads_updated_at on public.leads;
 create trigger trg_leads_updated_at
 before update on public.leads
 for each row execute function public.set_updated_at();
@@ -82,6 +83,7 @@ for each row execute function public.log_row_change();
 alter table public.leads enable row level security;
 
 drop policy if exists "leads_read_active" on public.leads;
+drop policy if exists "leads_read_active" on public.leads;
 create policy "leads_read_active"
 on public.leads
 for select
@@ -89,12 +91,14 @@ to authenticated
 using (archived_at is null or public.is_admin());
 
 drop policy if exists "leads_insert_crm_roles" on public.leads;
+drop policy if exists "leads_insert_crm_roles" on public.leads;
 create policy "leads_insert_crm_roles"
 on public.leads
 for insert
 to authenticated
 with check (public.current_app_role() in ('sales', 'renewals', 'admin'));
 
+drop policy if exists "leads_update_crm_roles" on public.leads;
 drop policy if exists "leads_update_crm_roles" on public.leads;
 create policy "leads_update_crm_roles"
 on public.leads
