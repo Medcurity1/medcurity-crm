@@ -46,7 +46,7 @@ export function useOpportunity(id: string | undefined) {
       if (!id) throw new Error("Missing opportunity ID");
       const { data, error } = await supabase
         .from("opportunities")
-        .select("*, account:accounts!account_id(id, name, fte_range, fte_count), owner:user_profiles!owner_user_id(id, full_name), primary_contact:contacts!primary_contact_id(id, first_name, last_name), creator:user_profiles!created_by(id, full_name), updater:user_profiles!updated_by(id, full_name)")
+        .select("*, account:accounts!account_id(id, name, fte_range, fte_count, lead_source, partner_account), owner:user_profiles!owner_user_id(id, full_name), primary_contact:contacts!primary_contact_id(id, first_name, last_name), creator:user_profiles!created_by(id, full_name), updater:user_profiles!updated_by(id, full_name)")
         .eq("id", id)
         .single();
       if (error) throw error;

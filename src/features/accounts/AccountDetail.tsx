@@ -27,18 +27,18 @@ import {
   lifecycleLabel,
   statusLabel,
   renewalTypeLabel,
+  leadSourceLabel,
   formatDate,
   formatDateTime,
   formatCurrency,
 } from "@/lib/formatters";
-// lifecycleLabel kept for collapsible Details section
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { AccountContacts } from "./AccountContacts";
 import { AccountOpportunities } from "./AccountOpportunities";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
 import { TasksPanel } from "@/features/activities/TasksPanel";
-import type { AccountContract } from "@/types/crm";
+import type { AccountContract, LeadSource } from "@/types/crm";
 
 /* ---------- Collapsible section ---------- */
 
@@ -195,6 +195,9 @@ export function AccountDetail() {
     ].some(Boolean);
   };
 
+  const hasSfHistory =
+    account.sf_created_by || account.sf_created_date || account.sf_last_modified_by || account.sf_last_modified_date;
+
   return (
     <div>
       {/* --------- Header --------- */}
@@ -278,7 +281,9 @@ export function AccountDetail() {
           <CardContent className="px-4 pb-3">
             <p className="text-sm font-semibold inline-flex items-center gap-1">
               <Phone className="h-3 w-3 text-muted-foreground" />
-              {"\u2014"}
+              {account.phone
+                ? `${account.phone}${account.phone_extension ? ` x${account.phone_extension}` : ""}`
+                : "\u2014"}
             </p>
           </CardContent>
         </Card>
@@ -306,37 +311,64 @@ export function AccountDetail() {
         </Card>
       </div>
 
-      {/* --------- Details Section --------- */}
-      <CollapsibleSection title="Details">
+      {/* --------- 1. Basic Information --------- */}
+      <CollapsibleSection title="Basic Information">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
           <EditableField label="Account Type" value={account.account_type} onSave={saveField("account_type")} />
+          <Field label="Account Number" value={account.account_number} />
           <Field label="Customer Type" value={lifecycleLabel(account.lifecycle_status)} />
-          <Field label="Active Since" value={formatDate(account.active_since)} />
-          <EditableField label="Timezone" value={account.timezone} onSave={saveField("timezone")} />
           <EditableField label="Industry" value={account.industry} onSave={saveField("industry")} />
           <EditableField label="Website" value={account.website} onSave={saveField("website")} />
           <Field
-            label="Renewal Type"
-            value={account.renewal_type ? renewalTypeLabel(account.renewal_type) : null}
+            label="Parent Account"
+            value={
+              account.parent_account ? (
+                <Link to={`/accounts/${account.parent_account.id}`} className="text-primary hover:underline">
+                  {account.parent_account.name}
+                </Link>
+              ) : null
+            }
           />
         </div>
       </CollapsibleSection>
 
-      {/* --------- Company Info Section --------- */}
-      <CollapsibleSection title="Company Info">
+      {/* --------- 2. Contact Information --------- */}
+      <CollapsibleSection title="Contact Information">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-          <EditableField
-            label="Employees"
-            value={account.employees}
-            onSave={saveField("employees", parseNumber)}
-            type="number"
-          />
-          <EditableField
-            label="Locations"
-            value={account.locations}
-            onSave={saveField("locations", parseNumber)}
-            type="number"
-          />
+          <EditableField label="Phone" value={account.phone} onSave={saveField("phone")} />
+          <EditableField label="Phone Extension" value={account.phone_extension} onSave={saveField("phone_extension")} />
+        </div>
+      </CollapsibleSection>
+
+      {/* --------- 3. Address Information --------- */}
+      <CollapsibleSection title="Address Information" defaultOpen={hasAddress("billing") || hasAddress("shipping")}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
+          <div>
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Billing Address</h4>
+            <div className="space-y-3">
+              <EditableField label="Street" value={account.billing_street} onSave={saveField("billing_street")} />
+              <EditableField label="City" value={account.billing_city} onSave={saveField("billing_city")} />
+              <EditableField label="State" value={account.billing_state} onSave={saveField("billing_state")} />
+              <EditableField label="Zip" value={account.billing_zip} onSave={saveField("billing_zip")} />
+              <EditableField label="Country" value={account.billing_country} onSave={saveField("billing_country")} />
+            </div>
+          </div>
+          <div>
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Shipping Address</h4>
+            <AddressBlock
+              street={account.shipping_street}
+              city={account.shipping_city}
+              state={account.shipping_state}
+              zip={account.shipping_zip}
+              country={account.shipping_country}
+            />
+          </div>
+        </div>
+      </CollapsibleSection>
+
+      {/* --------- 4. Company Details --------- */}
+      <CollapsibleSection title="Company Details">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
           <EditableField
             label="FTE Count"
             value={account.fte_count}
@@ -345,45 +377,43 @@ export function AccountDetail() {
           />
           <EditableField label="FTE Range" value={account.fte_range} onSave={saveField("fte_range")} />
           <EditableField
+            label="Number of Employees"
+            value={account.employees}
+            onSave={saveField("employees", parseNumber)}
+            type="number"
+          />
+          <EditableField
+            label="Number of Providers"
+            value={account.number_of_providers}
+            onSave={saveField("number_of_providers", parseNumber)}
+            type="number"
+          />
+          <EditableField
+            label="Number of Locations"
+            value={account.locations}
+            onSave={saveField("locations", parseNumber)}
+            type="number"
+          />
+          <EditableField
             label="Annual Revenue"
             value={account.annual_revenue}
             onSave={saveField("annual_revenue", parseNumber)}
             type="currency"
           />
-          <EditableField
-            label="ACV"
-            value={account.acv}
-            onSave={saveField("acv", parseNumber)}
-            type="currency"
+          <EditableField label="Timezone" value={account.timezone} onSave={saveField("timezone")} />
+        </div>
+      </CollapsibleSection>
+
+      {/* --------- 5. Contract & Renewal --------- */}
+      <CollapsibleSection title="Contract & Renewal">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
+          <Field label="Active Since" value={formatDate(account.active_since)} />
+          <Field
+            label="Renewal Type"
+            value={account.renewal_type ? renewalTypeLabel(account.renewal_type) : null}
           />
-        </div>
-      </CollapsibleSection>
-
-      {/* --------- Billing Address --------- */}
-      <CollapsibleSection title="Billing Address" defaultOpen={hasAddress("billing")}>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-          <EditableField label="Street" value={account.billing_street} onSave={saveField("billing_street")} />
-          <EditableField label="City" value={account.billing_city} onSave={saveField("billing_city")} />
-          <EditableField label="State" value={account.billing_state} onSave={saveField("billing_state")} />
-          <EditableField label="Zip" value={account.billing_zip} onSave={saveField("billing_zip")} />
-          <EditableField label="Country" value={account.billing_country} onSave={saveField("billing_country")} />
-        </div>
-      </CollapsibleSection>
-
-      {/* --------- Shipping Address --------- */}
-      <CollapsibleSection title="Shipping Address" defaultOpen={hasAddress("shipping")}>
-        <AddressBlock
-          street={account.shipping_street}
-          city={account.shipping_city}
-          state={account.shipping_state}
-          zip={account.shipping_zip}
-          country={account.shipping_country}
-        />
-      </CollapsibleSection>
-
-      {/* --------- Contract Info --------- */}
-      <CollapsibleSection title="Contract Info">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
+          <Field label="Every Other Year" value={account.every_other_year ? "Yes" : "No"} />
+          <EditableField label="Contracts" value={account.contracts} onSave={saveField("contracts")} />
           <Field label="Contract Start" value={formatDate(account.current_contract_start_date)} />
           <Field label="Contract End" value={formatDate(account.current_contract_end_date)} />
           <Field
@@ -394,26 +424,89 @@ export function AccountDetail() {
                 : null
             }
           />
-          <Field
+          <EditableField
             label="ACV"
-            value={account.acv != null ? formatCurrency(account.acv) : null}
+            value={account.acv}
+            onSave={saveField("acv", parseNumber)}
+            type="currency"
           />
           <Field
             label="Lifetime Value"
             value={account.lifetime_value != null ? formatCurrency(account.lifetime_value) : null}
           />
+          <Field
+            label="Churn Amount"
+            value={account.churn_amount != null ? formatCurrency(account.churn_amount) : null}
+          />
+          <Field label="Churn Date" value={formatDate(account.churn_date)} />
         </div>
       </CollapsibleSection>
 
-      {/* --------- Notes --------- */}
-      <CollapsibleSection title="Notes" defaultOpen={!!account.notes}>
-        <InlineEdit
-          value={account.notes}
-          onSave={saveField("notes")}
-          type="textarea"
-          placeholder="Add notes..."
-        />
+      {/* --------- 6. Partner Information --------- */}
+      <CollapsibleSection title="Partner Information">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
+          <EditableField label="Partner Account" value={account.partner_account} onSave={saveField("partner_account")} />
+          <Field label="Partner Prospect" value={account.partner_prospect ? "Yes" : "No"} />
+          <Field
+            label="Lead Source"
+            value={account.lead_source ? leadSourceLabel(account.lead_source as LeadSource) : null}
+          />
+          <EditableField label="Lead Source Detail" value={account.lead_source_detail} onSave={saveField("lead_source_detail")} />
+        </div>
       </CollapsibleSection>
+
+      {/* --------- 7. Additional Information --------- */}
+      <CollapsibleSection
+        title="Additional Information"
+        defaultOpen={!!(account.priority_account || account.project || account.description || account.notes || account.next_steps)}
+      >
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
+          <Field label="Priority Account" value={account.priority_account ? "Yes" : "No"} />
+          <EditableField label="Project" value={account.project} onSave={saveField("project")} />
+        </div>
+        <div className="mt-3 space-y-3">
+          <div>
+            <span className="text-xs text-muted-foreground">Description</span>
+            <InlineEdit
+              value={account.description}
+              onSave={saveField("description")}
+              type="textarea"
+              placeholder="Add description..."
+            />
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Notes</span>
+            <InlineEdit
+              value={account.notes}
+              onSave={saveField("notes")}
+              type="textarea"
+              placeholder="Add notes..."
+            />
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Next Steps</span>
+            <InlineEdit
+              value={account.next_steps}
+              onSave={saveField("next_steps")}
+              type="textarea"
+              placeholder="Add next steps..."
+            />
+          </div>
+        </div>
+      </CollapsibleSection>
+
+      {/* --------- 8. Salesforce History (only if data exists) --------- */}
+      {hasSfHistory && (
+        <CollapsibleSection title="Salesforce History" defaultOpen={false}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
+            <Field label="SF Created By" value={account.sf_created_by} />
+            <Field label="SF Created Date" value={formatDateTime(account.sf_created_date)} />
+            <Field label="SF Last Modified By" value={account.sf_last_modified_by} />
+            <Field label="SF Last Modified Date" value={formatDateTime(account.sf_last_modified_date)} />
+            <Field label="SF ID" value={account.sf_id} />
+          </div>
+        </CollapsibleSection>
+      )}
 
       {/* --------- Custom Fields --------- */}
       {customFieldDefs && customFieldDefs.length > 0 && account.custom_fields && (
@@ -559,4 +652,3 @@ function ContractHistoryTable({ contracts }: { contracts: AccountContract[] }) {
     </div>
   );
 }
-

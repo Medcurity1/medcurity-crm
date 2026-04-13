@@ -1,9 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { useOpportunity, useCreateOpportunity, useUpdateOpportunity } from "./api";
 import { useAccounts, useUsers } from "@/features/accounts/api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
@@ -26,7 +27,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import type { Contact, CustomFieldDefinition } from "@/types/crm";
+import type { Contact, CustomFieldDefinition, Account } from "@/types/crm";
 
 /* ---------- Section wrapper ---------- */
 
@@ -57,6 +58,8 @@ export function OpportunityForm() {
   const requiredKeys = requiredFieldsData?.map((f) => f.field_key) ?? [];
   const createMutation = useCreateOpportunity();
   const updateMutation = useUpdateOpportunity();
+  const { profile } = useAuth();
+  const [newNote, setNewNote] = useState("");
 
   const preselectedAccountId = searchParams.get("account_id");
 
@@ -90,6 +93,7 @@ export function OpportunityForm() {
       probability: undefined,
       next_step: "",
       lead_source: null,
+      lead_source_detail: "",
       payment_frequency: null,
       cycle_count: undefined,
       auto_renewal: false,
@@ -101,6 +105,7 @@ export function OpportunityForm() {
       service_amount: undefined,
       product_amount: undefined,
       services_included: false,
+      one_time_project: false,
       custom_fields: {},
     },
   });
@@ -146,6 +151,7 @@ export function OpportunityForm() {
         probability: opp.probability ?? undefined,
         next_step: opp.next_step ?? "",
         lead_source: opp.lead_source ?? null,
+        lead_source_detail: opp.lead_source_detail ?? "",
         payment_frequency: opp.payment_frequency ?? null,
         cycle_count: opp.cycle_count ?? undefined,
         auto_renewal: opp.auto_renewal ?? false,
@@ -157,10 +163,22 @@ export function OpportunityForm() {
         service_amount: opp.service_amount ?? undefined,
         product_amount: opp.product_amount ?? undefined,
         services_included: opp.services_included ?? false,
+        one_time_project: opp.one_time_project ?? false,
         custom_fields: opp.custom_fields ?? {},
       });
     }
   }, [opp, isEditing, reset]);
+
+  // Auto-populate fields from account when account changes (new opps only)
+  const selectedAccount: Account | undefined = accounts?.find((a) => a.id === watchedAccountId);
+  useEffect(() => {
+    if (!watchedAccountId || isEditing) return;
+    const acct = accounts?.find((a) => a.id === watchedAccountId);
+    if (!acct) return;
+    if (acct.lead_source) {
+      setValue("lead_source", acct.lead_source as OpportunityFormValues["lead_source"]);
+    }
+  }, [watchedAccountId, accounts, isEditing, setValue]);
 
   function emptyToNull(v: unknown): unknown {
     if (v === "" || v === undefined) return null;
@@ -201,6 +219,7 @@ export function OpportunityForm() {
       probability: values.probability ?? null,
       next_step: emptyToNull(values.next_step),
       lead_source: values.lead_source ?? null,
+      lead_source_detail: emptyToNull(values.lead_source_detail),
       payment_frequency: values.payment_frequency ?? null,
       cycle_count: values.cycle_count ?? null,
       auto_renewal: values.auto_renewal ?? false,
@@ -212,6 +231,7 @@ export function OpportunityForm() {
       service_amount: values.service_amount ?? null,
       product_amount: values.product_amount ?? null,
       services_included: values.services_included ?? false,
+      one_time_project: values.one_time_project ?? false,
       custom_fields: values.custom_fields ?? {},
     };
 
@@ -357,18 +377,18 @@ export function OpportunityForm() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="amount">Amount ($) *<RequiredIndicator fieldKey="amount" requiredFields={requiredKeys} /></Label>
-                  <Input id="amount" type="number" step="0.01" {...register("amount")} />
+                  <Input id="amount" type="number" step="0.01" disabled className="bg-muted" {...register("amount")} />
                   {errors.amount && <p className="text-sm text-destructive">{errors.amount.message}</p>}
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="subtotal">Subtotal ($)</Label>
-                  <Input id="subtotal" type="number" step="0.01" {...register("subtotal")} />
+                  <Input id="subtotal" type="number" step="0.01" disabled className="bg-muted" {...register("subtotal")} />
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="discount">Discount ($)</Label>
-                  <Input id="discount" type="number" step="0.01" {...register("discount")} />
+                  <Input id="discount" type="number" step="0.01" disabled className="bg-muted" {...register("discount")} />
                 </div>
 
                 <div className="space-y-2">
@@ -394,6 +414,17 @@ export function OpportunityForm() {
                   />
                   <Label htmlFor="services_included" className="text-sm font-normal cursor-pointer">
                     Services Included
+                  </Label>
+                </div>
+
+                <div className="flex items-center gap-2 pt-6">
+                  <Checkbox
+                    id="one_time_project"
+                    checked={watch("one_time_project") ?? false}
+                    onCheckedChange={(v) => setValue("one_time_project", v === true)}
+                  />
+                  <Label htmlFor="one_time_project" className="text-sm font-normal cursor-pointer">
+                    One Time Project
                   </Label>
                 </div>
 
@@ -473,16 +504,26 @@ export function OpportunityForm() {
                     <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="website">Website</SelectItem>
+                      <SelectItem value="partner">Partner</SelectItem>
+                      <SelectItem value="webinar">Webinar</SelectItem>
+                      <SelectItem value="podcast">Podcast</SelectItem>
+                      <SelectItem value="conference">Conference</SelectItem>
+                      <SelectItem value="email_campaign">Email Campaign</SelectItem>
+                      <SelectItem value="sql">SQL</SelectItem>
+                      <SelectItem value="mql">MQL</SelectItem>
                       <SelectItem value="referral">Referral</SelectItem>
+                      <SelectItem value="website">Website</SelectItem>
                       <SelectItem value="cold_call">Cold Call</SelectItem>
                       <SelectItem value="trade_show">Trade Show</SelectItem>
-                      <SelectItem value="partner">Partner</SelectItem>
                       <SelectItem value="social_media">Social Media</SelectItem>
-                      <SelectItem value="email_campaign">Email Campaign</SelectItem>
                       <SelectItem value="other">Other</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="lead_source_detail">Lead Source Detail</Label>
+                  <Input id="lead_source_detail" placeholder="Additional info (discount type, event name, etc.)" {...register("lead_source_detail")} />
                 </div>
 
                 <div className="space-y-2">
@@ -510,6 +551,30 @@ export function OpportunityForm() {
               )}
             </FormSection>
 
+            {/* ---- Account Reference (read-only) ---- */}
+            {selectedAccount && (
+              <FormSection title="Account Reference">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="space-y-2">
+                    <Label>FTE Count (from Account)</Label>
+                    <Input value={selectedAccount.fte_count != null ? String(selectedAccount.fte_count) : ""} disabled className="bg-muted" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>FTE Range (from Account)</Label>
+                    <Input value={selectedAccount.fte_range ?? ""} disabled className="bg-muted" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Lead Source (from Account)</Label>
+                    <Input value={selectedAccount.lead_source ?? ""} disabled className="bg-muted" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Partner (from Account)</Label>
+                    <Input value={selectedAccount.partner_account ?? ""} disabled className="bg-muted" />
+                  </div>
+                </div>
+              </FormSection>
+            )}
+
             {/* ---- Notes & Description ---- */}
             <FormSection title="Notes & Description">
               <div className="space-y-4">
@@ -518,8 +583,61 @@ export function OpportunityForm() {
                   <Textarea id="description" rows={4} {...register("description")} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="notes">Notes</Label>
-                  <Textarea id="notes" rows={4} {...register("notes")} />
+                  <Label>Notes</Label>
+                  {/* Scrollable log of existing notes */}
+                  {watch("notes") && (
+                    <div className="border rounded-md p-3 max-h-48 overflow-y-auto bg-muted/30 space-y-1 text-sm">
+                      {watch("notes")!.split("\n").filter(Boolean).map((line, i) => {
+                        const parts = line.split(" | ");
+                        if (parts.length >= 3) {
+                          const [name, date, ...rest] = parts;
+                          return (
+                            <div key={i} className="py-1 border-b last:border-b-0 border-muted">
+                              <span className="font-medium">{name}</span>
+                              <span className="text-muted-foreground"> - {date}: </span>
+                              <span>{rest.join(" | ")}</span>
+                            </div>
+                          );
+                        }
+                        return <div key={i} className="py-1 border-b last:border-b-0 border-muted">{line}</div>;
+                      })}
+                    </div>
+                  )}
+                  {/* Add new note input */}
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Add a note..."
+                      value={newNote}
+                      onChange={(e) => setNewNote(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          if (!newNote.trim()) return;
+                          const userName = profile?.full_name ?? "Unknown";
+                          const now = new Date().toLocaleString();
+                          const entry = `${userName} | ${now} | ${newNote.trim()}`;
+                          const current = watch("notes") ?? "";
+                          setValue("notes", current ? `${entry}\n${current}` : entry);
+                          setNewNote("");
+                        }
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        if (!newNote.trim()) return;
+                        const userName = profile?.full_name ?? "Unknown";
+                        const now = new Date().toLocaleString();
+                        const entry = `${userName} | ${now} | ${newNote.trim()}`;
+                        const current = watch("notes") ?? "";
+                        setValue("notes", current ? `${entry}\n${current}` : entry);
+                        setNewNote("");
+                      }}
+                    >
+                      Add Note
+                    </Button>
+                  </div>
                 </div>
               </div>
             </FormSection>

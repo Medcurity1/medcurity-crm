@@ -14,7 +14,7 @@ export type OpportunityStage =
 export type ActivityType = "call" | "email" | "meeting" | "note" | "task";
 export type CustomFieldType = "text" | "textarea" | "number" | "currency" | "date" | "checkbox" | "select" | "multi_select" | "url" | "email" | "phone";
 export type LeadStatus = "new" | "contacted" | "qualified" | "unqualified" | "converted";
-export type LeadSource = "website" | "referral" | "cold_call" | "trade_show" | "partner" | "social_media" | "email_campaign" | "other";
+export type LeadSource = "website" | "referral" | "cold_call" | "trade_show" | "partner" | "social_media" | "email_campaign" | "webinar" | "podcast" | "conference" | "sql" | "mql" | "other";
 export type PaymentFrequency = "monthly" | "quarterly" | "semi_annually" | "annually" | "one_time";
 export type LeadQualification = "unqualified" | "mql" | "sql" | "sal";
 
@@ -65,6 +65,37 @@ export interface Account {
   shipping_state: string | null;
   shipping_zip: string | null;
   shipping_country: string | null;
+  // Contact info
+  phone: string | null;
+  phone_extension: string | null;
+  // Parent account
+  parent_account_id: string | null;
+  account_number: string | null;
+  // Scheduling
+  every_other_year: boolean;
+  // Description & next steps
+  description: string | null;
+  next_steps: string | null;
+  // Provider info
+  number_of_providers: number | null;
+  // Priority
+  priority_account: boolean;
+  // Contracts & churn
+  contracts: string | null;
+  churn_amount: number | null;
+  churn_date: string | null;
+  // Project
+  project: string | null;
+  // Salesforce audit fields
+  sf_created_by: string | null;
+  sf_created_date: string | null;
+  sf_last_modified_by: string | null;
+  sf_last_modified_date: string | null;
+  // Lead / Partner
+  lead_source: string | null;
+  lead_source_detail: string | null;
+  partner_account: string | null;
+  partner_prospect: boolean;
   // Custom
   custom_fields: Record<string, unknown>;
   // System
@@ -79,6 +110,7 @@ export interface Account {
   owner?: UserProfile;
   creator?: UserProfile;
   updater?: UserProfile;
+  parent_account?: { id: string; name: string } | null;
 }
 
 export interface Contact {
@@ -101,6 +133,7 @@ export interface Contact {
   mailing_zip: string | null;
   mailing_country: string | null;
   lead_source: LeadSource | null;
+  lead_source_detail?: string | null;
   original_lead_id: string | null;
   custom_fields: Record<string, unknown>;
   archived_at: string | null;
@@ -168,6 +201,8 @@ export interface Opportunity {
   discount: number | null;
   subtotal: number | null;
   follow_up: boolean;
+  one_time_project?: boolean;
+  lead_source_detail?: string | null;
   custom_fields: Record<string, unknown>;
   archived_at: string | null;
   archived_by: string | null;
@@ -198,6 +233,7 @@ export interface Lead {
   website: string | null;
   status: LeadStatus;
   source: LeadSource | null;
+  lead_source_detail?: string | null;
   description: string | null;
   employees: number | null;
   annual_revenue: number | null;
@@ -226,6 +262,7 @@ export interface Lead {
   owner?: UserProfile;
   creator?: UserProfile;
   updater?: UserProfile;
+  parent_account?: { id: string; name: string };
 }
 
 export interface CustomFieldDefinition {

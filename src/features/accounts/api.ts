@@ -46,7 +46,7 @@ export function useAccount(id: string | undefined) {
       if (!id) throw new Error("Missing account ID");
       const { data, error } = await supabase
         .from("accounts")
-        .select("*, owner:user_profiles!owner_user_id(id, full_name), creator:user_profiles!created_by(id, full_name), updater:user_profiles!updated_by(id, full_name)")
+        .select("*, owner:user_profiles!owner_user_id(id, full_name), creator:user_profiles!created_by(id, full_name), updater:user_profiles!updated_by(id, full_name), parent_account:accounts!parent_account_id(id, name)")
         .eq("id", id)
         .single();
       if (error) throw error;
@@ -139,6 +139,21 @@ export function useBulkUpdateOwner() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["accounts"] });
+    },
+  });
+}
+
+export function useAccountsList() {
+  return useQuery({
+    queryKey: ["accounts_list"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("accounts")
+        .select("id, name")
+        .is("archived_at", null)
+        .order("name");
+      if (error) throw error;
+      return data as { id: string; name: string }[];
     },
   });
 }

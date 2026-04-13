@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useAccount, useCreateAccount, useUpdateAccount, useUsers } from "./api";
+import { useAccount, useCreateAccount, useUpdateAccount, useUsers, useAccountsList } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
@@ -24,9 +24,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { DuplicateWarning } from "@/components/DuplicateWarning";
+import { ChevronDown } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type { CustomFieldDefinition } from "@/types/crm";
 
-/* ---------- Section wrapper ---------- */
+/* ---------- Section wrapper (always open) ---------- */
 
 function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -39,6 +41,39 @@ function FormSection({ title, children }: { title: string; children: React.React
   );
 }
 
+/* ---------- Collapsible section wrapper ---------- */
+
+function CollapsibleFormSection({
+  title,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div className="border rounded-lg">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between px-4 py-3 text-sm font-semibold text-muted-foreground uppercase tracking-wider hover:bg-muted/50 transition-colors"
+      >
+        {title}
+        <ChevronDown
+          className={cn(
+            "h-4 w-4 text-muted-foreground transition-transform",
+            open && "rotate-180"
+          )}
+        />
+      </button>
+      {open && <div className="px-4 pb-4 space-y-4">{children}</div>}
+    </div>
+  );
+}
+
 /* ---------- Main component ---------- */
 
 export function AccountForm() {
@@ -47,6 +82,7 @@ export function AccountForm() {
   const isEditing = !!id;
   const { data: account, isLoading: loadingAccount } = useAccount(id);
   const { data: users } = useUsers();
+  const { data: allAccounts } = useAccountsList();
   const { data: customFieldDefs } = useCustomFieldDefinitions("accounts");
   const { data: requiredFieldsData } = useRequiredFields("accounts");
   const requiredKeys = requiredFieldsData?.map((f) => f.field_key) ?? [];
@@ -72,18 +108,28 @@ export function AccountForm() {
       website: "",
       industry: "",
       account_type: "",
+      account_number: "",
+      parent_account_id: null,
+      phone: "",
+      phone_extension: "",
       timezone: "",
       employees: "",
       locations: "",
       fte_count: "",
       fte_range: "",
+      number_of_providers: "",
       annual_revenue: "",
       active_since: "",
       renewal_type: "",
+      every_other_year: false,
+      contracts: "",
       current_contract_start_date: "",
       current_contract_end_date: "",
       current_contract_length_months: "",
       acv: "",
+      lifetime_value: "",
+      churn_amount: "",
+      churn_date: "",
       billing_street: "",
       billing_city: "",
       billing_state: "",
@@ -94,7 +140,15 @@ export function AccountForm() {
       shipping_state: "",
       shipping_zip: "",
       shipping_country: "",
+      partner_account: "",
+      partner_prospect: false,
+      lead_source: "",
+      lead_source_detail: "",
+      priority_account: false,
+      project: "",
+      description: "",
       notes: "",
+      next_steps: "",
       custom_fields: {},
     },
   });
@@ -109,18 +163,28 @@ export function AccountForm() {
         website: account.website ?? "",
         industry: account.industry ?? "",
         account_type: account.account_type ?? "",
+        account_number: account.account_number ?? "",
+        parent_account_id: account.parent_account_id ?? null,
+        phone: account.phone ?? "",
+        phone_extension: account.phone_extension ?? "",
         timezone: account.timezone ?? "",
         employees: account.employees ?? "",
         locations: account.locations ?? "",
         fte_count: account.fte_count ?? "",
         fte_range: account.fte_range ?? "",
+        number_of_providers: account.number_of_providers ?? "",
         annual_revenue: account.annual_revenue ?? "",
         active_since: account.active_since ?? "",
         renewal_type: account.renewal_type ?? "",
+        every_other_year: account.every_other_year ?? false,
+        contracts: account.contracts ?? "",
         current_contract_start_date: account.current_contract_start_date ?? "",
         current_contract_end_date: account.current_contract_end_date ?? "",
         current_contract_length_months: account.current_contract_length_months ?? "",
         acv: account.acv ?? "",
+        lifetime_value: account.lifetime_value ?? "",
+        churn_amount: account.churn_amount ?? "",
+        churn_date: account.churn_date ?? "",
         billing_street: account.billing_street ?? "",
         billing_city: account.billing_city ?? "",
         billing_state: account.billing_state ?? "",
@@ -131,7 +195,15 @@ export function AccountForm() {
         shipping_state: account.shipping_state ?? "",
         shipping_zip: account.shipping_zip ?? "",
         shipping_country: account.shipping_country ?? "",
+        partner_account: account.partner_account ?? "",
+        partner_prospect: account.partner_prospect ?? false,
+        lead_source: account.lead_source ?? "",
+        lead_source_detail: account.lead_source_detail ?? "",
+        priority_account: account.priority_account ?? false,
+        project: account.project ?? "",
+        description: account.description ?? "",
         notes: account.notes ?? "",
+        next_steps: account.next_steps ?? "",
         custom_fields: account.custom_fields ?? {},
       });
     }
@@ -175,18 +247,28 @@ export function AccountForm() {
       website: emptyToNull(values.website),
       industry: emptyToNull(values.industry),
       account_type: emptyToNull(values.account_type),
+      account_number: emptyToNull(values.account_number),
+      parent_account_id: values.parent_account_id ?? null,
+      phone: emptyToNull(values.phone),
+      phone_extension: emptyToNull(values.phone_extension),
       timezone: emptyToNull(values.timezone),
       employees: emptyToNull(values.employees),
       locations: emptyToNull(values.locations),
       fte_count: emptyToNull(values.fte_count),
       fte_range: emptyToNull(values.fte_range),
+      number_of_providers: emptyToNull(values.number_of_providers),
       annual_revenue: emptyToNull(values.annual_revenue),
       active_since: emptyToNull(values.active_since),
       renewal_type: emptyToNull(values.renewal_type),
+      every_other_year: values.every_other_year ?? false,
+      contracts: emptyToNull(values.contracts),
       current_contract_start_date: emptyToNull(values.current_contract_start_date),
       current_contract_end_date: emptyToNull(values.current_contract_end_date),
       current_contract_length_months: emptyToNull(values.current_contract_length_months),
       acv: emptyToNull(values.acv),
+      lifetime_value: emptyToNull(values.lifetime_value),
+      churn_amount: emptyToNull(values.churn_amount),
+      churn_date: emptyToNull(values.churn_date),
       billing_street: emptyToNull(values.billing_street),
       billing_city: emptyToNull(values.billing_city),
       billing_state: emptyToNull(values.billing_state),
@@ -197,7 +279,15 @@ export function AccountForm() {
       shipping_state: emptyToNull(values.shipping_state),
       shipping_zip: emptyToNull(values.shipping_zip),
       shipping_country: emptyToNull(values.shipping_country),
+      partner_account: emptyToNull(values.partner_account),
+      partner_prospect: values.partner_prospect ?? false,
+      lead_source: emptyToNull(values.lead_source),
+      lead_source_detail: emptyToNull(values.lead_source_detail),
+      priority_account: values.priority_account ?? false,
+      project: emptyToNull(values.project),
+      description: emptyToNull(values.description),
       notes: emptyToNull(values.notes),
+      next_steps: emptyToNull(values.next_steps),
       custom_fields: Object.keys(values.custom_fields ?? {}).length > 0 ? values.custom_fields : {},
     };
 
@@ -228,15 +318,18 @@ export function AccountForm() {
     );
   }
 
+  // Filter out current account from parent account list
+  const parentAccountOptions = allAccounts?.filter((a) => a.id !== id) ?? [];
+
   return (
     <div>
       <PageHeader title={isEditing ? "Edit Account" : "New Account"} />
 
       <Card>
         <CardContent className="pt-6">
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
-            {/* ---- Basic Info ---- */}
-            <FormSection title="Basic Info">
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+            {/* ---- 1. Basic Information (always open) ---- */}
+            <FormSection title="Basic Information">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="name">Account Name *<RequiredIndicator fieldKey="name" requiredFields={requiredKeys} /></Label>
@@ -248,27 +341,6 @@ export function AccountForm() {
                   {!isEditing && (
                     <DuplicateWarning entity="accounts" name={watch("name")} />
                   )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Status<RequiredIndicator fieldKey="status" requiredFields={requiredKeys} /></Label>
-                  <Select
-                    value={watch("status") ?? "discovery"}
-                    onValueChange={(v) =>
-                      setValue("status", v as NonNullable<AccountFormValues["status"]>)
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="discovery">Discovery</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="active">Active</SelectItem>
-                      <SelectItem value="inactive">Inactive</SelectItem>
-                      <SelectItem value="churned">Churned</SelectItem>
-                    </SelectContent>
-                  </Select>
                 </div>
 
                 <div className="space-y-2">
@@ -297,35 +369,146 @@ export function AccountForm() {
                 </div>
 
                 <div className="space-y-2">
+                  <Label htmlFor="account_number">Account Number<RequiredIndicator fieldKey="account_number" requiredFields={requiredKeys} /></Label>
+                  <Input id="account_number" {...register("account_number")} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Status<RequiredIndicator fieldKey="status" requiredFields={requiredKeys} /></Label>
+                  <Select
+                    value={watch("status") ?? "discovery"}
+                    onValueChange={(v) =>
+                      setValue("status", v as NonNullable<AccountFormValues["status"]>)
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="discovery">Discovery</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                      <SelectItem value="churned">Churned</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
                   <Label htmlFor="industry">Industry<RequiredIndicator fieldKey="industry" requiredFields={requiredKeys} /></Label>
                   <Input id="industry" {...register("industry")} />
                 </div>
 
-                <div className="space-y-2 md:col-span-2">
+                <div className="space-y-2">
                   <Label htmlFor="website">Website<RequiredIndicator fieldKey="website" requiredFields={requiredKeys} /></Label>
                   <Input id="website" placeholder="https://..." {...register("website")} />
                   {errors.website && (
                     <p className="text-sm text-destructive">{errors.website.message}</p>
                   )}
                 </div>
+
+                <div className="space-y-2">
+                  <Label>Parent Account<RequiredIndicator fieldKey="parent_account_id" requiredFields={requiredKeys} /></Label>
+                  <Select
+                    value={watch("parent_account_id") ?? "none"}
+                    onValueChange={(v) => setValue("parent_account_id", v === "none" ? null : v)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select parent account" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {parentAccountOptions.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </FormSection>
 
-            {/* ---- Company Details ---- */}
-            <FormSection title="Company Details">
+            {/* ---- 2. Contact Information (always open) ---- */}
+            <FormSection title="Contact Information">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="phone">Phone<RequiredIndicator fieldKey="phone" requiredFields={requiredKeys} /></Label>
+                  <Input id="phone" type="tel" {...register("phone")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="phone_extension">Phone Extension<RequiredIndicator fieldKey="phone_extension" requiredFields={requiredKeys} /></Label>
+                  <Input id="phone_extension" {...register("phone_extension")} />
+                </div>
+              </div>
+            </FormSection>
+
+            {/* ---- 3. Address Information (collapsible, open by default) ---- */}
+            <CollapsibleFormSection title="Address Information" defaultOpen={true}>
+              {/* Billing */}
+              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Billing Address</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="billing_street">Street</Label>
+                  <Input id="billing_street" {...register("billing_street")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="billing_city">City</Label>
+                  <Input id="billing_city" {...register("billing_city")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="billing_state">State</Label>
+                  <Input id="billing_state" {...register("billing_state")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="billing_zip">Zip</Label>
+                  <Input id="billing_zip" {...register("billing_zip")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="billing_country">Country</Label>
+                  <Input id="billing_country" {...register("billing_country")} />
+                </div>
+              </div>
+
+              {/* Shipping */}
+              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mt-4">Shipping Address</h4>
+              <div className="flex items-center gap-2 mb-1">
+                <Checkbox
+                  id="same_as_billing"
+                  checked={sameAsBilling}
+                  onCheckedChange={(v) => setSameAsBilling(v === true)}
+                />
+                <Label htmlFor="same_as_billing" className="text-sm font-normal cursor-pointer">
+                  Same as billing
+                </Label>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="shipping_street">Street</Label>
+                  <Input id="shipping_street" disabled={sameAsBilling} {...register("shipping_street")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="shipping_city">City</Label>
+                  <Input id="shipping_city" disabled={sameAsBilling} {...register("shipping_city")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="shipping_state">State</Label>
+                  <Input id="shipping_state" disabled={sameAsBilling} {...register("shipping_state")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="shipping_zip">Zip</Label>
+                  <Input id="shipping_zip" disabled={sameAsBilling} {...register("shipping_zip")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="shipping_country">Country</Label>
+                  <Input id="shipping_country" disabled={sameAsBilling} {...register("shipping_country")} />
+                </div>
+              </div>
+            </CollapsibleFormSection>
+
+            {/* ---- 4. Company Details (collapsible) ---- */}
+            <CollapsibleFormSection title="Company Details">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="timezone">Timezone<RequiredIndicator fieldKey="timezone" requiredFields={requiredKeys} /></Label>
-                  <Input id="timezone" placeholder="US/Eastern" {...register("timezone")} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="employees">Employees<RequiredIndicator fieldKey="employees" requiredFields={requiredKeys} /></Label>
-                  <Input id="employees" type="number" {...register("employees")} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="locations">Locations<RequiredIndicator fieldKey="locations" requiredFields={requiredKeys} /></Label>
-                  <Input id="locations" type="number" {...register("locations")} />
-                </div>
                 <div className="space-y-2">
                   <Label htmlFor="fte_count">FTE Count<RequiredIndicator fieldKey="fte_count" requiredFields={requiredKeys} /></Label>
                   <Input id="fte_count" type="number" {...register("fte_count")} />
@@ -335,8 +518,24 @@ export function AccountForm() {
                   <Input id="fte_range" placeholder="e.g. 100-500" {...register("fte_range")} />
                 </div>
                 <div className="space-y-2">
+                  <Label htmlFor="employees">Number of Employees<RequiredIndicator fieldKey="employees" requiredFields={requiredKeys} /></Label>
+                  <Input id="employees" type="number" {...register("employees")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="number_of_providers">Number of Providers<RequiredIndicator fieldKey="number_of_providers" requiredFields={requiredKeys} /></Label>
+                  <Input id="number_of_providers" type="number" {...register("number_of_providers")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="locations">Number of Locations<RequiredIndicator fieldKey="locations" requiredFields={requiredKeys} /></Label>
+                  <Input id="locations" type="number" {...register("locations")} />
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="annual_revenue">Annual Revenue<RequiredIndicator fieldKey="annual_revenue" requiredFields={requiredKeys} /></Label>
                   <Input id="annual_revenue" type="number" step="0.01" {...register("annual_revenue")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="timezone">Timezone<RequiredIndicator fieldKey="timezone" requiredFields={requiredKeys} /></Label>
+                  <Input id="timezone" placeholder="US/Eastern" {...register("timezone")} />
                 </div>
                 <div className="space-y-2">
                   <Label>Customer Type<RequiredIndicator fieldKey="lifecycle_status" requiredFields={requiredKeys} /></Label>
@@ -357,10 +556,10 @@ export function AccountForm() {
                   </Select>
                 </div>
               </div>
-            </FormSection>
+            </CollapsibleFormSection>
 
-            {/* ---- Contract ---- */}
-            <FormSection title="Contract">
+            {/* ---- 5. Contract & Renewal (collapsible) ---- */}
+            <CollapsibleFormSection title="Contract & Renewal">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="active_since">Active Since<RequiredIndicator fieldKey="active_since" requiredFields={requiredKeys} /></Label>
@@ -384,129 +583,136 @@ export function AccountForm() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="flex items-center gap-2 pt-6">
+                  <Checkbox
+                    id="every_other_year"
+                    checked={watch("every_other_year") ?? false}
+                    onCheckedChange={(v) => setValue("every_other_year", v === true)}
+                  />
+                  <Label htmlFor="every_other_year" className="text-sm font-normal cursor-pointer">
+                    Every Other Year
+                  </Label>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="contracts">Contracts<RequiredIndicator fieldKey="contracts" requiredFields={requiredKeys} /></Label>
+                  <Input id="contracts" {...register("contracts")} />
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="current_contract_start_date">Contract Start<RequiredIndicator fieldKey="current_contract_start_date" requiredFields={requiredKeys} /></Label>
-                  <Input
-                    id="current_contract_start_date"
-                    type="date"
-                    {...register("current_contract_start_date")}
-                  />
+                  <Input id="current_contract_start_date" type="date" {...register("current_contract_start_date")} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="current_contract_end_date">Contract End<RequiredIndicator fieldKey="current_contract_end_date" requiredFields={requiredKeys} /></Label>
-                  <Input
-                    id="current_contract_end_date"
-                    type="date"
-                    {...register("current_contract_end_date")}
-                  />
+                  <Input id="current_contract_end_date" type="date" {...register("current_contract_end_date")} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="current_contract_length_months">Contract Length (months)<RequiredIndicator fieldKey="current_contract_length_months" requiredFields={requiredKeys} /></Label>
-                  <Input
-                    id="current_contract_length_months"
-                    type="number"
-                    {...register("current_contract_length_months")}
-                  />
+                  <Input id="current_contract_length_months" type="number" {...register("current_contract_length_months")} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="acv">ACV<RequiredIndicator fieldKey="acv" requiredFields={requiredKeys} /></Label>
                   <Input id="acv" type="number" step="0.01" {...register("acv")} />
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="lifetime_value">Lifetime Value<RequiredIndicator fieldKey="lifetime_value" requiredFields={requiredKeys} /></Label>
+                  <Input id="lifetime_value" type="number" step="0.01" {...register("lifetime_value")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="churn_amount">Churn Amount<RequiredIndicator fieldKey="churn_amount" requiredFields={requiredKeys} /></Label>
+                  <Input id="churn_amount" type="number" step="0.01" {...register("churn_amount")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="churn_date">Churn Date<RequiredIndicator fieldKey="churn_date" requiredFields={requiredKeys} /></Label>
+                  <Input id="churn_date" type="date" {...register("churn_date")} />
+                </div>
               </div>
-            </FormSection>
+            </CollapsibleFormSection>
 
-            {/* ---- Billing Address ---- */}
-            <FormSection title="Billing Address">
+            {/* ---- 6. Partner Information (collapsible) ---- */}
+            <CollapsibleFormSection title="Partner Information">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="billing_street">Street</Label>
-                  <Input id="billing_street" {...register("billing_street")} />
+                <div className="space-y-2">
+                  <Label htmlFor="partner_account">Partner Account<RequiredIndicator fieldKey="partner_account" requiredFields={requiredKeys} /></Label>
+                  <Input id="partner_account" {...register("partner_account")} />
+                </div>
+                <div className="flex items-center gap-2 pt-6">
+                  <Checkbox
+                    id="partner_prospect"
+                    checked={watch("partner_prospect") ?? false}
+                    onCheckedChange={(v) => setValue("partner_prospect", v === true)}
+                  />
+                  <Label htmlFor="partner_prospect" className="text-sm font-normal cursor-pointer">
+                    Partner Prospect
+                  </Label>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="billing_city">City</Label>
-                  <Input id="billing_city" {...register("billing_city")} />
+                  <Label>Lead Source<RequiredIndicator fieldKey="lead_source" requiredFields={requiredKeys} /></Label>
+                  <Select
+                    value={watch("lead_source") ?? ""}
+                    onValueChange={(v) => setValue("lead_source", v)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="website">Website</SelectItem>
+                      <SelectItem value="referral">Referral</SelectItem>
+                      <SelectItem value="cold_call">Cold Call</SelectItem>
+                      <SelectItem value="trade_show">Trade Show</SelectItem>
+                      <SelectItem value="partner">Partner</SelectItem>
+                      <SelectItem value="social_media">Social Media</SelectItem>
+                      <SelectItem value="email_campaign">Email Campaign</SelectItem>
+                      <SelectItem value="webinar">Webinar</SelectItem>
+                      <SelectItem value="podcast">Podcast</SelectItem>
+                      <SelectItem value="conference">Conference</SelectItem>
+                      <SelectItem value="sql">SQL</SelectItem>
+                      <SelectItem value="mql">MQL</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="billing_state">State</Label>
-                  <Input id="billing_state" {...register("billing_state")} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="billing_zip">Zip</Label>
-                  <Input id="billing_zip" {...register("billing_zip")} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="billing_country">Country</Label>
-                  <Input id="billing_country" {...register("billing_country")} />
+                  <Label htmlFor="lead_source_detail">Lead Source Detail<RequiredIndicator fieldKey="lead_source_detail" requiredFields={requiredKeys} /></Label>
+                  <Input id="lead_source_detail" {...register("lead_source_detail")} />
                 </div>
               </div>
-            </FormSection>
+            </CollapsibleFormSection>
 
-            {/* ---- Shipping Address ---- */}
-            <FormSection title="Shipping Address">
-              <div className="flex items-center gap-2 mb-3">
-                <Checkbox
-                  id="same_as_billing"
-                  checked={sameAsBilling}
-                  onCheckedChange={(v) => setSameAsBilling(v === true)}
-                />
-                <Label htmlFor="same_as_billing" className="text-sm font-normal cursor-pointer">
-                  Same as billing
-                </Label>
-              </div>
+            {/* ---- 7. Additional Information (collapsible, collapsed by default) ---- */}
+            <CollapsibleFormSection title="Additional Information" defaultOpen={false}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex items-center gap-2 pt-2">
+                  <Checkbox
+                    id="priority_account"
+                    checked={watch("priority_account") ?? false}
+                    onCheckedChange={(v) => setValue("priority_account", v === true)}
+                  />
+                  <Label htmlFor="priority_account" className="text-sm font-normal cursor-pointer">
+                    Priority Account
+                  </Label>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="project">Project<RequiredIndicator fieldKey="project" requiredFields={requiredKeys} /></Label>
+                  <Input id="project" {...register("project")} />
+                </div>
                 <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="shipping_street">Street</Label>
-                  <Input
-                    id="shipping_street"
-                    disabled={sameAsBilling}
-                    {...register("shipping_street")}
-                  />
+                  <Label htmlFor="description">Description<RequiredIndicator fieldKey="description" requiredFields={requiredKeys} /></Label>
+                  <Textarea id="description" rows={3} {...register("description")} />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="shipping_city">City</Label>
-                  <Input
-                    id="shipping_city"
-                    disabled={sameAsBilling}
-                    {...register("shipping_city")}
-                  />
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="notes">Notes<RequiredIndicator fieldKey="notes" requiredFields={requiredKeys} /></Label>
+                  <Textarea id="notes" rows={3} {...register("notes")} />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="shipping_state">State</Label>
-                  <Input
-                    id="shipping_state"
-                    disabled={sameAsBilling}
-                    {...register("shipping_state")}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="shipping_zip">Zip</Label>
-                  <Input
-                    id="shipping_zip"
-                    disabled={sameAsBilling}
-                    {...register("shipping_zip")}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="shipping_country">Country</Label>
-                  <Input
-                    id="shipping_country"
-                    disabled={sameAsBilling}
-                    {...register("shipping_country")}
-                  />
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="next_steps">Next Steps<RequiredIndicator fieldKey="next_steps" requiredFields={requiredKeys} /></Label>
+                  <Textarea id="next_steps" rows={3} {...register("next_steps")} />
                 </div>
               </div>
-            </FormSection>
-
-            {/* ---- Notes ---- */}
-            <FormSection title="Notes">
-              <div className="space-y-2">
-                <Textarea id="notes" rows={4} {...register("notes")} />
-              </div>
-            </FormSection>
+            </CollapsibleFormSection>
 
             {/* ---- Custom Fields ---- */}
             {customFieldDefs && customFieldDefs.length > 0 && (
-              <FormSection title="Custom Fields">
+              <CollapsibleFormSection title="Custom Fields" defaultOpen={true}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {customFieldDefs.map((def) => (
                     <CustomFieldInput
@@ -520,7 +726,7 @@ export function AccountForm() {
                     />
                   ))}
                 </div>
-              </FormSection>
+              </CollapsibleFormSection>
             )}
 
             {/* ---- Actions ---- */}
@@ -679,7 +885,6 @@ function CustomFieldInput({
       );
 
     case "multi_select":
-      // For multi_select, fall back to text input with comma-separated values
       return (
         <div className="space-y-2">
           <Label htmlFor={id}>

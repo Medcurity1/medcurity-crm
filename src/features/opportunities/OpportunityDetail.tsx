@@ -1,5 +1,6 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { Pencil, Archive, ChevronDown, UserRoundCog, Plus, Trash2 } from "lucide-react";
 import { useOpportunity, useUpdateOpportunity, useArchiveOpportunity, useStageHistory, useOpportunityProducts, useRemoveOpportunityProduct } from "./api";
@@ -15,6 +16,7 @@ import { RecordId } from "@/components/RecordId";
 import { InlineEdit, type InlineEditProps } from "@/components/InlineEdit";
 import { AccountContacts } from "@/features/accounts/AccountContacts";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -124,6 +126,8 @@ export function OpportunityDetail() {
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [pendingRemoveProduct, setPendingRemoveProduct] = useState<{ id: string; name: string } | null>(null);
   const [pendingStage, setPendingStage] = useState<OpportunityStage | null>(null);
+  const [newNote, setNewNote] = useState("");
+  const { profile } = useAuth();
   const { addRecent } = useRecentRecords();
 
   useEffect(() => {
@@ -341,7 +345,12 @@ export function OpportunityDetail() {
             label="FTEs"
             value={opp.account?.fte_count != null ? opp.account.fte_count.toLocaleString() : null}
           />
+          <Field label="Partner" value={(opp.account as Record<string, unknown>)?.partner_account as string ?? null} />
           <Field label="Team" value={teamLabel(opp.team)} />
+          <Field
+            label="One Time Project"
+            value={opp.one_time_project ? "\u2713 Yes" : "\u2717 No"}
+          />
         </div>
       </CollapsibleSection>
 
@@ -351,6 +360,10 @@ export function OpportunityDetail() {
           <Field
             label="Lead Source"
             value={opp.lead_source ? leadSourceLabel(opp.lead_source) : null}
+          />
+          <Field
+            label="Lead Source Detail"
+            value={opp.lead_source_detail}
           />
           <Field
             label="Payment Frequency"
@@ -390,12 +403,72 @@ export function OpportunityDetail() {
 
       {/* --------- Notes --------- */}
       <CollapsibleSection title="Notes" defaultOpen={!!opp.notes}>
-        <InlineEdit
-          value={opp.notes}
-          onSave={saveField("notes")}
-          type="textarea"
-          placeholder="Add notes..."
-        />
+        {/* Scrollable log of existing notes */}
+        {opp.notes && (
+          <div className="border rounded-md p-3 max-h-64 overflow-y-auto bg-muted/30 space-y-1 text-sm mb-3">
+            {opp.notes.split("\n").filter(Boolean).map((line, i) => {
+              const parts = line.split(" | ");
+              if (parts.length >= 3) {
+                const [name, date, ...rest] = parts;
+                return (
+                  <div key={i} className="py-1 border-b last:border-b-0 border-muted">
+                    <span className="font-medium">{name}</span>
+                    <span className="text-muted-foreground"> - {date}: </span>
+                    <span>{rest.join(" | ")}</span>
+                  </div>
+                );
+              }
+              return <div key={i} className="py-1 border-b last:border-b-0 border-muted">{line}</div>;
+            })}
+          </div>
+        )}
+        {/* Add new note */}
+        <div className="flex gap-2">
+          <Input
+            placeholder="Add a note..."
+            value={newNote}
+            onChange={(e) => setNewNote(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (!newNote.trim() || !id) return;
+                const userName = profile?.full_name ?? "Unknown";
+                const now = new Date().toLocaleString();
+                const entry = `${userName} | ${now} | ${newNote.trim()}`;
+                const current = opp.notes ?? "";
+                const updated = current ? `${entry}\n${current}` : entry;
+                updateMutation.mutate(
+                  { id, notes: updated },
+                  {
+                    onSuccess: () => { setNewNote(""); toast.success("Note added"); },
+                    onError: (err) => toast.error("Failed to add note: " + (err as Error).message),
+                  }
+                );
+              }
+            }}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (!newNote.trim() || !id) return;
+              const userName = profile?.full_name ?? "Unknown";
+              const now = new Date().toLocaleString();
+              const entry = `${userName} | ${now} | ${newNote.trim()}`;
+              const current = opp.notes ?? "";
+              const updated = current ? `${entry}\n${current}` : entry;
+              updateMutation.mutate(
+                { id, notes: updated },
+                {
+                  onSuccess: () => { setNewNote(""); toast.success("Note added"); },
+                  onError: (err) => toast.error("Failed to add note: " + (err as Error).message),
+                }
+              );
+            }}
+          >
+            Add Note
+          </Button>
+        </div>
       </CollapsibleSection>
 
       {/* --------- Custom Fields --------- */}

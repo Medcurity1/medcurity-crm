@@ -138,6 +138,11 @@ const leadSourceLabels: Record<LeadSource, string> = {
   partner: "Partner",
   social_media: "Social Media",
   email_campaign: "Email Campaign",
+  webinar: "Webinar",
+  podcast: "Podcast",
+  conference: "Conference",
+  sql: "SQL",
+  mql: "MQL",
   other: "Other",
 };
 

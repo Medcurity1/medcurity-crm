@@ -37,6 +37,7 @@ const WinLossAnalysis = lazy(() => import("@/features/analytics/WinLossAnalysis"
 const SequencesPage = lazy(() => import("@/features/sequences/SequencesPage").then(m => ({ default: m.SequencesPage })));
 const EmailTemplatesPage = lazy(() => import("@/features/email-templates/EmailTemplatesPage").then(m => ({ default: m.EmailTemplatesPage })));
 const LeadListsPage = lazy(() => import("@/features/lead-lists/LeadListsPage").then(m => ({ default: m.LeadListsPage })));
+const PartnersPage = lazy(() => import("@/features/partners/PartnersPage").then(m => ({ default: m.PartnersPage })));
 const ArchiveManager = lazy(() => import("@/features/archive/ArchiveManager").then(m => ({ default: m.ArchiveManager })));
 const AdminSettings = lazy(() => import("@/features/admin/AdminSettings").then(m => ({ default: m.AdminSettings })));
 const ChangePasswordPage = lazy(() => import("@/features/auth/ChangePasswordPage").then(m => ({ default: m.ChangePasswordPage })));
@@ -65,6 +66,7 @@ export default function App() {
                   <Route path="lead-lists" element={<LeadListsPage />} />
                   <Route path="sequences" element={<SequencesPage />} />
                   <Route path="email-templates" element={<EmailTemplatesPage />} />
+                  <Route path="partners" element={<PartnersPage />} />
                   <Route path="contacts" element={<ContactsList />} />
                   <Route path="contacts/new" element={<ContactForm />} />
                   <Route path="contacts/:id" element={<ContactDetail />} />

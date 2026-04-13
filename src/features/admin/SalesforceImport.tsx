@@ -133,7 +133,8 @@ const ACCOUNT_FIELDS: Record<string, string> = {
   "account id": "sf_id",
   industry: "industry",
   website: "website",
-  phone: "notes",
+  phone: "phone",
+  description: "description",
   "billing street": "billing_street",
   "billing city": "billing_city",
   "billing state/province": "billing_state",
@@ -145,6 +146,35 @@ const ACCOUNT_FIELDS: Record<string, string> = {
   type: "account_type",
   "annual revenue": "annual_revenue",
   employees: "employees",
+  "lead source": "lead_source",
+  "lead source detail": "lead_source_detail",
+  "partner account": "partner_account",
+  "referring partner": "partner_account",
+  "partner prospect": "partner_prospect",
+  "partner source": "lead_source_detail",
+  "account source": "lead_source",
+  locations: "locations",
+  status: "status",
+  "active since": "active_since",
+  ftes: "fte_count",
+  "fte range": "fte_range",
+  "lifetime value": "lifetime_value",
+  "time zone": "timezone",
+  "renewal type": "renewal_type",
+  "account number": "account_number",
+  "created date": "sf_created_date",
+  "created by id": "sf_created_by",
+  "last modified date": "sf_last_modified_date",
+  "last modified by id": "sf_last_modified_by",
+  "parent id": "parent_account_id",
+  "number of providers": "number_of_providers",
+  project: "project",
+  "churn amount": "churn_amount",
+  "churn date": "churn_date",
+  contracts: "contracts",
+  "next steps": "next_steps",
+  "priority account": "priority_account",
+  "every other year": "every_other_year",
 };
 
 const CONTACT_FIELDS: Record<string, string> = {
@@ -165,6 +195,22 @@ const OPPORTUNITY_FIELDS: Record<string, string> = {
   "close date": "close_date",
   "opportunity id": "sf_id",
   type: "kind",
+  "one time project": "one_time_project",
+  "lead source": "lead_source",
+  "lead source detail": "lead_source_detail",
+  "payment frequency": "payment_frequency",
+  "contract length": "contract_length_months",
+  "contract year": "contract_year",
+  discount: "discount",
+  subtotal: "subtotal",
+  "promo code": "promo_code",
+  "follow up": "follow_up",
+  "auto renewal": "auto_renewal",
+  "cycle count": "cycle_count",
+  description: "description",
+  "next step": "next_step",
+  probability: "probability",
+  "created date": "created_at",
 };
 
 const LEAD_FIELDS: Record<string, string> = {
@@ -227,6 +273,30 @@ function getCRMFields(entity: EntityType): string[] {
         "fte_count",
         "fte_range",
         "locations",
+        "lead_source",
+        "lead_source_detail",
+        "partner_account",
+        "partner_prospect",
+        "active_since",
+        "lifetime_value",
+        "renewal_type",
+        "phone",
+        "phone_extension",
+        "parent_account_id",
+        "account_number",
+        "every_other_year",
+        "description",
+        "next_steps",
+        "number_of_providers",
+        "priority_account",
+        "contracts",
+        "churn_amount",
+        "churn_date",
+        "project",
+        "sf_created_by",
+        "sf_created_date",
+        "sf_last_modified_by",
+        "sf_last_modified_date",
       ];
     case "contacts":
       return [
@@ -254,6 +324,20 @@ function getCRMFields(entity: EntityType): string[] {
         "notes",
         "probability",
         "description",
+        "one_time_project",
+        "lead_source",
+        "lead_source_detail",
+        "payment_frequency",
+        "contract_length_months",
+        "contract_year",
+        "discount",
+        "subtotal",
+        "promo_code",
+        "follow_up",
+        "auto_renewal",
+        "cycle_count",
+        "next_step",
+        "created_at",
       ];
     case "leads":
       return [
@@ -280,8 +364,14 @@ function getCRMFields(entity: EntityType): string[] {
   }
 }
 
+/** Human-readable label overrides for specific CRM field keys. */
+const FIELD_LABEL_OVERRIDES: Record<string, string> = {
+  owner_user_id: "Account Owner",
+};
+
 /** Human-readable label for a CRM field key. */
 function fieldLabel(key: string): string {
+  if (FIELD_LABEL_OVERRIDES[key]) return FIELD_LABEL_OVERRIDES[key];
   return key
     .replace(/_sf_lookup$/, " (SF Lookup)")
     .replace(/_/g, " ")
@@ -430,7 +520,108 @@ export function SalesforceImport() {
     "skip"
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const userFileInputRef = useRef<HTMLInputElement>(null);
   const importStartTimeRef = useRef<number>(0);
+
+  // Salesforce User ID → { name, email } mapping
+  // Pre-loaded from Salesforce User export. Can be overridden by uploading a new User CSV.
+  const [sfUserMap, setSfUserMap] = useState<Map<string, { name: string; email: string }>>(new Map([
+    ["0055w00000A9RjVAAV", { name: "Joe Gellatly", email: "joeg@medcurity.com" }],
+    ["0055w00000A9RnmAAF", { name: "Chatter Expert", email: "noreply@chatter.salesforce.com" }],
+    ["0055w00000A9RnnAAF", { name: "System", email: "rachelk@medcurity.com" }],
+    ["0055w00000A9Rs9AAF", { name: "April Needham", email: "apriln@medcurity.com" }],
+    ["0055w00000A9RsJAAV", { name: "Amanda Hepper", email: "amanda@medcurity.com" }],
+    ["0055w00000A9RsOAAV", { name: "Lorraine Gary", email: "lorraineg@medcurity.com" }],
+    ["0055w00000BmnpFAAR", { name: "Christian Williams", email: "christianw@medcurity.com" }],
+    ["0055w00000BmnpKAAR", { name: "James Parrish", email: "jamesp@medcurity.com" }],
+    ["0055w00000ByXXDAA3", { name: "Integration User", email: "marketing@medcurity.com" }],
+    ["0055w00000ByXXEAA3", { name: "Automated Process", email: "wharley@00d5w000002rxcxeay" }],
+    ["0055w00000ByXXFAA3", { name: "Salesforce Administrator", email: "wharley@00d5w000002rxcxeay" }],
+    ["0055w00000ByXXIAA3", { name: "Security User", email: "insightssecurity@example.com" }],
+    ["0055w00000ByXXJAA3", { name: "Platform Integration User", email: "noreply@00d5w000002rxcxeay" }],
+    ["0055w00000CT0VRAA1", { name: "Rachel Kunkel", email: "rachelk@medcurity.com" }],
+    ["0055w00000CwK1jAAF", { name: "Gabe Ellzey", email: "gabe.ellzey@ziplineinteractive.com" }],
+    ["0055w00000CwNfdAAF", { name: "Salesforce Mobile Apps", email: "noreply@salesforce.com" }],
+    ["0055w00000CwNq2AAF", { name: "Website API", email: "brandon.perdue@ziplineinteractive.com" }],
+    ["0055w00000CwNsmAAF", { name: "Matt Bayley", email: "mattb@medcurity.com" }],
+    ["0055w00000CwOJYAA3", { name: "Public User", email: "externalWho@00d5w000002rxcxeay.ext" }],
+    ["0055w00000CwT2zAAF", { name: "Ari Van Peursem", email: "arivp@medcurity.com" }],
+    ["0055w00000Cx2CmAAJ", { name: "Alexa Fouch", email: "alexaf@medcurity.com" }],
+    ["0055w00000Cx9ziAAB", { name: "Grant Miller", email: "grantm@medcurity.com" }],
+    ["0055w00000CyBoMAAV", { name: "Walt Maxwell", email: "walterm@medcurity.com" }],
+    ["0055w00000CyFm2AAF", { name: "Meghan Andrews", email: "meghana@medcurity.com" }],
+    ["0055w00000CycSrAAJ", { name: "Aaric Gomez", email: "aaricg@medcurity.com" }],
+    ["0055w00000Cz7s1AAB", { name: "Wyatt Watkins", email: "wyattw@medcurity.com" }],
+    ["0055w00000Cz7sGAAR", { name: "Rachel Moe", email: "rachelm@medcurity.com" }],
+    ["0055w00000D0QMMAA3", { name: "Gavin Weiler", email: "gavinw@medcurity.com" }],
+    ["0055w00000FNiqqAAD", { name: "Dave Westenskow", email: "davew@medcurity.com" }],
+    ["0055w00000FPhNGAA1", { name: "Dennis Hake", email: "dennis.hake@outlook.com" }],
+    ["0055w00000FPhNLAA1", { name: "Mel (Old) Nevala (Old)", email: "meln@medcurity.com" }],
+    ["0055w00000FPjGCAA1", { name: "Bobby Seegmiller", email: "bobbys@medcurity.com" }],
+    ["0055w00000FPjvUAAT", { name: "Client Admin", email: "client.admin@minlopro.com" }],
+    ["0055w00000FPlKxAAL", { name: "Integrated User", email: "marketing@medcurity.com" }],
+    ["0055w00000FPlYJAA1", { name: "Salesforce Connected Apps", email: "noreply@salesforce.com" }],
+    ["0055w00000FPlfhAAD", { name: "HubSpot Integration", email: "noreply@salesforce.com" }],
+    ["0055w00000FPnYXAA1", { name: "Abby Jones", email: "abbyj@medcurity.com" }],
+    ["005RO000002CtcHYAS", { name: "Margaret Karatzas", email: "margaretl@medcurity.com" }],
+    ["005RO000002DRpFYAW", { name: "Jordan Scherich", email: "jordans@medcurity.com" }],
+    ["005RO000002cb8fYAA", { name: "SalesforceIQ Integration", email: "salesforceiqintegration@00d5w000002rxcxeay.ext" }],
+    ["005RO000002cb8gYAA", { name: "Insights Integration", email: "insightsintegration@00d5w000002rxcxeay.ext" }],
+    ["005RO000002cb8hYAA", { name: "B2BMA Integration", email: "noreply@salesforce.com" }],
+    ["005RO000002cbAHYAY", { name: "b2bmaIntegration", email: "noreply@salesforce.com" }],
+    ["005RO000002ccG1YAI", { name: "Sales Insights", email: "noreply@salesforce.com" }],
+    ["005RO000002gHUjYAM", { name: "Pardot", email: "noreply@salesforce.com" }],
+    ["005RO000002w6DZYAY", { name: "Sai Gudivada", email: "sai.gudivada@olooptech.com" }],
+    ["005RO0000030yorYAA", { name: "Niharika Medavaram", email: "niharika.medavaram@olooptech.com" }],
+    ["005RO000003nrpRYAQ", { name: "Summer Hume", email: "summerh@medcurity.com" }],
+    ["005RO000005BrJ4YAK", { name: "Molly Miller", email: "mollym@medcurity.com" }],
+    ["005RO000005BtHeYAK", { name: "Vaughn Handel", email: "vaughnh@medcurity.com" }],
+    ["005RO000005C4kvYAC", { name: "Mel Nevala", email: "meln@medcurity.com" }],
+  ]));
+  const [userCsvLoaded, setUserCsvLoaded] = useState(true);
+
+  /* ---------- SF User CSV handling ---------- */
+
+  const handleUserFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const text = evt.target?.result as string;
+        if (!text) return;
+
+        const { headers, rows } = parseCSV(text);
+        const idIdx = headers.findIndex((h) => h.toLowerCase() === "id");
+        const firstIdx = headers.findIndex((h) => h.toLowerCase() === "firstname");
+        const lastIdx = headers.findIndex((h) => h.toLowerCase() === "lastname");
+        const emailIdx = headers.findIndex((h) => h.toLowerCase() === "email");
+
+        if (idIdx === -1) {
+          toast.error("User CSV must have an 'Id' column");
+          return;
+        }
+
+        const map = new Map<string, { name: string; email: string }>();
+        for (const row of rows) {
+          const id = row[idIdx]?.trim();
+          if (!id) continue;
+          const first = firstIdx >= 0 ? row[firstIdx]?.trim() || "" : "";
+          const last = lastIdx >= 0 ? row[lastIdx]?.trim() || "" : "";
+          const email = emailIdx >= 0 ? row[emailIdx]?.trim() || "" : "";
+          const name = `${first} ${last}`.trim();
+          map.set(id, { name, email });
+        }
+
+        setSfUserMap(map);
+        setUserCsvLoaded(true);
+        toast.success(`Loaded ${map.size} Salesforce users for owner matching`);
+      };
+      reader.readAsText(file);
+    },
+    []
+  );
 
   /* ---------- File handling ---------- */
 
@@ -604,11 +795,43 @@ export function SalesforceImport() {
     const errors: string[] = [];
     const failedRows: FailedRow[] = [];
 
+    // Track unmatched SF owner IDs to warn user
+    const unmatchedOwners = new Map<string, string[]>();
+
     try {
       // Pre-fetch lookup data
       const { data: users } = await supabase
         .from("user_profiles")
-        .select("id, full_name");
+        .select("id, full_name, email");
+
+      // Build a map of SF User IDs → CRM user IDs by matching on email
+      // This lets us resolve Salesforce OwnerId values to CRM users
+      const sfUserIdToCrmId = new Map<string, string>();
+      const sfUserIdToName = new Map<string, string>();
+
+      // Parse the User CSV if it was previously imported, or build from known SF users
+      // We match SF users to CRM users by email address
+      if (users) {
+        // Fetch the SF User mapping from the uploaded User.csv data
+        // For now, we build a lookup from the CSV OwnerId values
+        // by matching CRM user emails against SF user emails
+        const crmEmailMap = new Map(
+          users
+            .filter((u) => u.email)
+            .map((u) => [u.email!.toLowerCase(), u.id as string])
+        );
+        const crmNameMap = new Map(
+          users
+            .filter((u) => u.full_name)
+            .map((u) => [u.full_name!.toLowerCase(), u.id as string])
+        );
+
+        // Store these for use in the owner lookup
+        sfUserIdToCrmId.set("__email_map__", ""); // marker
+        // We'll attach the maps to a closure variable
+        var crmEmailLookup = crmEmailMap;
+        var crmNameLookup = crmNameMap;
+      }
 
       let accountSfMap: Map<string, string> | null = null;
       if (
@@ -652,14 +875,77 @@ export function SalesforceImport() {
             if (!value && value !== "0") continue;
 
             if (field === "owner_user_id") {
-              // Lookup user by name
-              const user = users?.find(
-                (u) =>
-                  u.full_name?.toLowerCase() === value.toLowerCase()
+              // Try multiple strategies to resolve the owner:
+              // 1. Direct match by full name
+              // 2. Match by email (if value looks like an email)
+              // 3. Treat as Salesforce User ID — look up SF user name/email
+              //    from the CSV data and match to CRM user by email or name
+              let matched = false;
+              const valueLower = value.toLowerCase().trim();
+
+              // Strategy 1: Match by full name
+              const userByName = users?.find(
+                (u) => u.full_name?.toLowerCase() === valueLower
               );
-              if (user) {
-                record.owner_user_id = user.id;
+              if (userByName) {
+                record.owner_user_id = userByName.id;
+                matched = true;
               }
+
+              // Strategy 2: Match by email
+              if (!matched && value.includes("@")) {
+                const userByEmail = users?.find(
+                  (u) => (u.email as string | undefined)?.toLowerCase() === valueLower
+                );
+                if (userByEmail) {
+                  record.owner_user_id = userByEmail.id;
+                  matched = true;
+                }
+              }
+
+              // Strategy 3: Salesforce User ID (starts with 005)
+              // Use the SF User CSV map to resolve SF ID → email → CRM user
+              if (!matched && value.startsWith("005") && sfUserMap.size > 0) {
+                const sfUser = sfUserMap.get(value);
+                if (sfUser) {
+                  // Try matching by email first (most reliable)
+                  if (sfUser.email && crmEmailLookup) {
+                    const crmId = crmEmailLookup.get(sfUser.email.toLowerCase());
+                    if (crmId) {
+                      record.owner_user_id = crmId;
+                      matched = true;
+                    }
+                  }
+                  // Fall back to name match
+                  if (!matched && sfUser.name && crmNameLookup) {
+                    const crmId = crmNameLookup.get(sfUser.name.toLowerCase());
+                    if (crmId) {
+                      record.owner_user_id = crmId;
+                      matched = true;
+                    }
+                  }
+                  // Still not matched — user exists in SF but not in CRM
+                  if (!matched) {
+                    const label = `${sfUser.name} (${sfUser.email})`;
+                    const existing = unmatchedOwners.get(label) || [];
+                    existing.push(`Row ${rowIndex + 1}`);
+                    unmatchedOwners.set(label, existing);
+                  }
+                } else {
+                  // SF ID not found in User CSV
+                  const existing = unmatchedOwners.get(value) || [];
+                  existing.push(`Row ${rowIndex + 1}`);
+                  unmatchedOwners.set(value, existing);
+                }
+              }
+
+              // If value is not a SF ID and still not matched, track it
+              if (!matched && !value.startsWith("005")) {
+                const existing = unmatchedOwners.get(value) || [];
+                existing.push(`Row ${rowIndex + 1}`);
+                unmatchedOwners.set(value, existing);
+              }
+
               continue;
             }
 
@@ -865,6 +1151,14 @@ export function SalesforceImport() {
       errors.push(`Unexpected error: ${(err as Error).message}`);
     }
 
+    // Warn about unmatched owners
+    if (unmatchedOwners.size > 0) {
+      const ownerWarnings = Array.from(unmatchedOwners.entries()).map(
+        ([owner, rows]) => `Owner "${owner}" not found in CRM (${rows.length} records: ${rows.slice(0, 3).join(", ")}${rows.length > 3 ? "..." : ""})`
+      );
+      errors.push(...ownerWarnings);
+    }
+
     setImporting(false);
     setEstimatedTimeRemaining(null);
     setResult({
@@ -875,7 +1169,11 @@ export function SalesforceImport() {
       failedRows,
     });
 
-    if (errors.length === 0) {
+    if (unmatchedOwners.size > 0) {
+      toast.warning(
+        `⚠️ ${unmatchedOwners.size} Salesforce user(s) not found in CRM — those records imported without an owner. See details below.`
+      );
+    } else if (errors.length === 0) {
       toast.success(
         `Import complete: ${imported[0]} records imported, ${skippedArr[0]} skipped.`
       );
@@ -988,10 +1286,38 @@ export function SalesforceImport() {
         </CardContent>
       </Card>
 
-      {/* Step 2: Upload CSV */}
+      {/* Step 2a: Upload SF User CSV (for owner mapping) */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Step 2: Upload CSV</CardTitle>
+          <CardTitle className="text-base">Step 2: Load Salesforce Users (for Owner Mapping)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground mb-3">
+            Upload your <strong>User.csv</strong> or <strong>User TEST.csv</strong> from the Salesforce export.
+            This maps Salesforce Owner IDs to CRM users by matching email addresses.
+            {!userCsvLoaded && " Without this, owner fields won't be assigned."}
+          </p>
+          <div className="flex items-center gap-4">
+            <Input
+              ref={userFileInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleUserFileChange}
+              className="max-w-sm"
+            />
+            {userCsvLoaded && (
+              <div className="flex items-center gap-2 text-sm text-green-600 font-medium">
+                ✅ {sfUserMap.size} Salesforce users loaded
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Step 2b: Upload Entity CSV */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Step 3: Upload CSV</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex items-center gap-4">
