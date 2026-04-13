@@ -11,6 +11,7 @@ import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { opportunitySchema, type OpportunityFormValues } from "./schema";
+import { FTE_RANGES, employeesToFteRange } from "@/lib/formatters";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -106,6 +107,8 @@ export function OpportunityForm() {
       product_amount: undefined,
       services_included: false,
       one_time_project: false,
+      fte_count: undefined,
+      fte_range: "",
       custom_fields: {},
     },
   });
@@ -164,6 +167,8 @@ export function OpportunityForm() {
         product_amount: opp.product_amount ?? undefined,
         services_included: opp.services_included ?? false,
         one_time_project: opp.one_time_project ?? false,
+        fte_count: opp.fte_count ?? undefined,
+        fte_range: opp.fte_range ?? "",
         custom_fields: opp.custom_fields ?? {},
       });
     }
@@ -177,6 +182,13 @@ export function OpportunityForm() {
     if (!acct) return;
     if (acct.lead_source) {
       setValue("lead_source", acct.lead_source as OpportunityFormValues["lead_source"]);
+    }
+    // Snapshot FTE from account for new opportunities
+    if (acct.fte_count != null) {
+      setValue("fte_count", acct.fte_count);
+    }
+    if (acct.fte_range) {
+      setValue("fte_range", acct.fte_range as OpportunityFormValues["fte_range"]);
     }
   }, [watchedAccountId, accounts, isEditing, setValue]);
 
@@ -232,6 +244,8 @@ export function OpportunityForm() {
       product_amount: values.product_amount ?? null,
       services_included: values.services_included ?? false,
       one_time_project: values.one_time_project ?? false,
+      fte_count: values.fte_count ?? null,
+      fte_range: emptyToNull(values.fte_range),
       custom_fields: values.custom_fields ?? {},
     };
 
@@ -551,18 +565,56 @@ export function OpportunityForm() {
               )}
             </FormSection>
 
+            {/* ---- FTE Snapshot ---- */}
+            <FormSection title="FTE Snapshot">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="space-y-2">
+                  <Label>FTE Count</Label>
+                  <Input
+                    type="number"
+                    {...register("fte_count", {
+                      onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+                        const num = parseInt(e.target.value, 10);
+                        if (!isNaN(num) && num > 0) {
+                          setValue("fte_range", employeesToFteRange(num) as OpportunityFormValues["fte_range"]);
+                        }
+                      },
+                    })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>FTE Range</Label>
+                  <Select
+                    value={watch("fte_range") ?? ""}
+                    onValueChange={(v) => setValue("fte_range", v as OpportunityFormValues["fte_range"])}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select range" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">-- None --</SelectItem>
+                      {FTE_RANGES.map((r) => (
+                        <SelectItem key={r} value={r}>{r}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {selectedAccount && (
+                  <div className="space-y-2 col-span-1 md:col-span-2">
+                    <Label className="text-muted-foreground text-xs">Current Account FTE</Label>
+                    <p className="text-sm text-muted-foreground pt-1">
+                      {selectedAccount.fte_count != null ? `${selectedAccount.fte_count.toLocaleString()} employees` : "Not set"}
+                      {selectedAccount.fte_range ? ` (${selectedAccount.fte_range})` : ""}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </FormSection>
+
             {/* ---- Account Reference (read-only) ---- */}
             {selectedAccount && (
               <FormSection title="Account Reference">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="space-y-2">
-                    <Label>FTE Count (from Account)</Label>
-                    <Input value={selectedAccount.fte_count != null ? String(selectedAccount.fte_count) : ""} disabled className="bg-muted" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>FTE Range (from Account)</Label>
-                    <Input value={selectedAccount.fte_range ?? ""} disabled className="bg-muted" />
-                  </div>
                   <div className="space-y-2">
                     <Label>Lead Source (from Account)</Label>
                     <Input value={selectedAccount.lead_source ?? ""} disabled className="bg-muted" />

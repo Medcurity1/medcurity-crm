@@ -246,7 +246,7 @@ export function OpportunityDetail() {
             <CardTitle className="text-xs text-muted-foreground font-medium">FTE Range</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
-            <p className="text-sm font-semibold">{opp.account?.fte_range ?? "\u2014"}</p>
+            <p className="text-sm font-semibold">{opp.fte_range ?? opp.account?.fte_range ?? "\u2014"}</p>
           </CardContent>
         </Card>
         <Card>
@@ -340,11 +340,14 @@ export function OpportunityDetail() {
             onSave={saveField("amount", (v) => (v === "" ? 0 : Number(v)))}
             type="currency"
           />
-          <Field label="FTE Range" value={opp.account?.fte_range} />
+          <Field label="FTE Range (at time of opp)" value={opp.fte_range ?? opp.account?.fte_range} />
           <Field
-            label="FTEs"
-            value={opp.account?.fte_count != null ? opp.account.fte_count.toLocaleString() : null}
+            label="FTEs (at time of opp)"
+            value={opp.fte_count != null ? opp.fte_count.toLocaleString() : opp.account?.fte_count != null ? opp.account.fte_count.toLocaleString() : null}
           />
+          {opp.account?.fte_range && opp.fte_range && opp.fte_range !== opp.account.fte_range && (
+            <Field label="Current Account FTE Range" value={opp.account.fte_range} />
+          )}
           <Field label="Partner" value={(opp.account as unknown as Record<string, unknown>)?.partner_account as string ?? null} />
           <Field label="Team" value={teamLabel(opp.team)} />
           <Field

@@ -434,6 +434,9 @@ function getCRMFields(entity: EntityType): string[] {
         "cycle_count",
         "auto_renewal",
         "one_time_project",
+        // FTE snapshot
+        "fte_count",
+        "fte_range",
         // Lead / Source
         "lead_source",
         "lead_source_detail",

@@ -34,6 +34,9 @@ export const opportunitySchema = z.object({
   product_amount: z.coerce.number().min(0).optional().nullable(),
   services_included: z.boolean().optional(),
   one_time_project: z.boolean().optional(),
+  // FTE snapshot
+  fte_count: z.coerce.number().int().nonnegative().optional().nullable(),
+  fte_range: z.enum(["1-20", "21-50", "51-100", "101-250", "251-500", "501-750", "751-1000", "1001-1500", "1501-2000", "2001-5000", "5001-10000"]).optional().or(z.literal("")).nullable(),
   custom_fields: z.record(z.string(), z.unknown()).optional(),
 });
 

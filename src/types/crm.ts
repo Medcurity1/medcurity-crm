@@ -218,6 +218,9 @@ export interface Opportunity {
   follow_up: boolean;
   one_time_project?: boolean;
   lead_source_detail?: string | null;
+  // FTE snapshot (captured at opp creation for historical tracking)
+  fte_count: number | null;
+  fte_range: string | null;
   custom_fields: Record<string, unknown>;
   archived_at: string | null;
   archived_by: string | null;
