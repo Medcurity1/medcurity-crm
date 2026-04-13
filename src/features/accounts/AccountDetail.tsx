@@ -1,7 +1,7 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
-import { Pencil, Archive, ExternalLink, ChevronDown, Phone, UserRoundCog, Plus } from "lucide-react";
+import { Pencil, Archive, ExternalLink, ChevronDown, Phone, UserRoundCog, Plus, MapPin } from "lucide-react";
 import { useAccount, useUpdateAccount, useArchiveAccount, useAccountContracts } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
@@ -351,6 +351,20 @@ export function AccountDetail() {
               <EditableField label="State" value={account.billing_state} onSave={saveField("billing_state")} />
               <EditableField label="Zip" value={account.billing_zip} onSave={saveField("billing_zip")} />
               <EditableField label="Country" value={account.billing_country} onSave={saveField("billing_country")} />
+              {(account.billing_street || account.billing_city) && (
+                <a
+                  href={account.billing_latitude && account.billing_longitude
+                    ? `https://www.google.com/maps?q=${account.billing_latitude},${account.billing_longitude}`
+                    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                        [account.billing_street, account.billing_city, account.billing_state, account.billing_zip].filter(Boolean).join(', ')
+                      )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:underline text-sm flex items-center gap-1"
+                >
+                  <MapPin className="h-3 w-3" /> View on Map
+                </a>
+              )}
             </div>
           </div>
           <div>
@@ -362,6 +376,20 @@ export function AccountDetail() {
               zip={account.shipping_zip}
               country={account.shipping_country}
             />
+            {(account.shipping_street || account.shipping_city) && (
+              <a
+                href={account.shipping_latitude && account.shipping_longitude
+                  ? `https://www.google.com/maps?q=${account.shipping_latitude},${account.shipping_longitude}`
+                  : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                      [account.shipping_street, account.shipping_city, account.shipping_state, account.shipping_zip].filter(Boolean).join(', ')
+                    )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 hover:underline text-sm flex items-center gap-1 mt-2"
+              >
+                <MapPin className="h-3 w-3" /> View on Map
+              </a>
+            )}
           </div>
         </div>
       </CollapsibleSection>

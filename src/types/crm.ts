@@ -65,9 +65,15 @@ export interface Account {
   shipping_state: string | null;
   shipping_zip: string | null;
   shipping_country: string | null;
+  // Geo-coordinates
+  billing_latitude?: number | null;
+  billing_longitude?: number | null;
+  shipping_latitude?: number | null;
+  shipping_longitude?: number | null;
   // Contact info
   phone: string | null;
   phone_extension: string | null;
+  fax?: string | null;
   // Parent account
   parent_account_id: string | null;
   account_number: string | null;
@@ -78,6 +84,15 @@ export interface Account {
   next_steps: string | null;
   // Provider info
   number_of_providers: number | null;
+  // Additional Salesforce fields
+  sic?: string | null;
+  sic_description?: string | null;
+  ownership?: string | null;
+  rating?: string | null;
+  site?: string | null;
+  ticker_symbol?: string | null;
+  last_activity_date?: string | null;
+  do_not_contact?: boolean;
   // Priority
   priority_account: boolean;
   // Contracts & churn
