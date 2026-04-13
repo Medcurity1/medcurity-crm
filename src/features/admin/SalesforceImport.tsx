@@ -1144,6 +1144,57 @@ export function SalesforceImport() {
               continue;
             }
 
+            // Normalize enum values: "No Auto Renew" → "no_auto_renew", etc.
+            if (["renewal_type", "status", "lifecycle_status", "stage", "kind",
+                 "team", "lead_source", "payment_frequency", "qualification"].includes(field)) {
+              // Convert human-readable to snake_case enum: lowercase, trim, replace spaces with underscores
+              const normalized = value.toLowerCase().trim().replace(/[\s-]+/g, "_");
+              // Map common Salesforce values to CRM enum values
+              const enumMappings: Record<string, Record<string, string>> = {
+                renewal_type: {
+                  "no_auto_renew": "no_auto_renew",
+                  "auto_renew": "auto_renew",
+                  "manual_renew": "manual_renew",
+                },
+                status: {
+                  "active": "active",
+                  "inactive": "inactive",
+                  "discovery": "discovery",
+                  "pending": "pending",
+                  "churned": "churned",
+                },
+                stage: {
+                  "closed_won": "closed_won",
+                  "closed_lost": "closed_lost",
+                  "closed/won": "closed_won",
+                  "closed/lost": "closed_lost",
+                  "proposal": "proposal",
+                  "qualified": "qualified",
+                  "verbal_commit": "verbal_commit",
+                  "lead": "lead",
+                },
+                kind: {
+                  "new_business": "new_business",
+                  "new business": "new_business",
+                  "renewal": "renewal",
+                },
+                lead_source: {
+                  "cold_call": "cold_call",
+                  "cold call": "cold_call",
+                  "cold_call___smb": "cold_call",
+                  "trade_show": "trade_show",
+                  "trade show": "trade_show",
+                  "social_media": "social_media",
+                  "social media": "social_media",
+                  "email_campaign": "email_campaign",
+                  "email campaign": "email_campaign",
+                },
+              };
+              const mapping = enumMappings[field];
+              record[field] = mapping?.[normalized] ?? normalized;
+              continue;
+            }
+
             record[field] = value;
           }
 
@@ -1269,15 +1320,31 @@ export function SalesforceImport() {
           }
         }
 
-        // Insert new records
+        // Insert new records — try batch first, fall back to individual on failure
         if (toInsert.length > 0) {
           const { error: insertError } = await supabase
             .from(tableName)
             .insert(toInsert);
           if (insertError) {
-            errors.push(
-              `Batch at row ${i + 1}: ${insertError.message}`
-            );
+            // Batch failed — insert one at a time so good records still go through
+            for (let r = 0; r < toInsert.length; r++) {
+              const { error: singleError } = await supabase
+                .from(tableName)
+                .insert(toInsert[r]);
+              if (singleError) {
+                const rowNum = recordRowIndices[r] + 1;
+                const name = (toInsert[r].name as string) || `Row ${rowNum}`;
+                errors.push(`Row ${rowNum} (${name}): ${singleError.message}`);
+                failedRows.push({
+                  rowNumber: rowNum,
+                  csvData: buildCsvDataRow(csvRows[recordRowIndices[r]], csvHeaders),
+                  error: singleError.message,
+                });
+                failedCount[0]++;
+              } else {
+                imported[0]++;
+              }
+            }
           } else {
             imported[0] += toInsert.length;
           }
