@@ -916,10 +916,13 @@ export function SalesforceImport() {
     const unmatchedOwners = new Map<string, string[]>();
 
     try {
-      // Pre-fetch lookup data
+      // Pre-fetch lookup data — user_profiles doesn't have email,
+      // so we fetch from auth.users via the admin RPC or match by name.
+      // We also build a reverse map from the pre-loaded sfUserMap:
+      // SF User email → CRM user full_name → CRM user id
       const { data: users } = await supabase
         .from("user_profiles")
-        .select("id, full_name, email");
+        .select("id, full_name");
 
       // Build lookup maps from CRM users for owner matching
       const crmEmailLookup = new Map<string, string>();
@@ -927,8 +930,18 @@ export function SalesforceImport() {
 
       if (users) {
         for (const u of users) {
-          if (u.email) crmEmailLookup.set((u.email as string).toLowerCase(), u.id as string);
           if (u.full_name) crmNameLookup.set((u.full_name as string).toLowerCase(), u.id as string);
+        }
+        // Build email lookup by matching SF user emails to CRM user names
+        // Since user_profiles has no email, we match SF user name → CRM user name
+        // then register the SF user's email as pointing to that CRM user ID
+        for (const [, sfUser] of sfUserMap) {
+          if (sfUser.email && sfUser.name) {
+            const crmId = crmNameLookup.get(sfUser.name.toLowerCase());
+            if (crmId) {
+              crmEmailLookup.set(sfUser.email.toLowerCase(), crmId);
+            }
+          }
         }
       }
 
@@ -991,13 +1004,11 @@ export function SalesforceImport() {
                 matched = true;
               }
 
-              // Strategy 2: Match by email
+              // Strategy 2: Match by email (via SF user map lookup)
               if (!matched && value.includes("@")) {
-                const userByEmail = users?.find(
-                  (u) => (u.email as string | undefined)?.toLowerCase() === valueLower
-                );
-                if (userByEmail) {
-                  record.owner_user_id = userByEmail.id;
+                const crmId = crmEmailLookup.get(valueLower);
+                if (crmId) {
+                  record.owner_user_id = crmId;
                   matched = true;
                 }
               }
@@ -1074,6 +1085,22 @@ export function SalesforceImport() {
                 "probability",
                 "fte_count",
                 "locations",
+                "number_of_providers",
+                "lifetime_value",
+                "churn_amount",
+                "acv",
+                "discount",
+                "subtotal",
+                "service_amount",
+                "product_amount",
+                "cycle_count",
+                "contract_length_months",
+                "contract_year",
+                "score",
+                "billing_latitude",
+                "billing_longitude",
+                "shipping_latitude",
+                "shipping_longitude",
               ].includes(field)
             ) {
               const num = Number(value.replace(/[,$]/g, ""));
@@ -1084,8 +1111,36 @@ export function SalesforceImport() {
             }
 
             // Boolean fields
-            if (field === "is_primary") {
+            if (
+              ["is_primary", "do_not_contact", "partner_prospect", "priority_account",
+               "every_other_year", "one_time_project", "auto_renewal"].includes(field)
+            ) {
               record[field] = value.toLowerCase() === "true" || value === "1";
+              continue;
+            }
+
+            // UUID reference fields — skip Salesforce null placeholders like "000000000000000AAA"
+            if (
+              ["parent_account_id", "converted_account_id", "converted_contact_id",
+               "converted_opportunity_id"].includes(field)
+            ) {
+              // Valid UUIDs are 36 chars with hyphens; SF IDs are 18-char alphanumeric
+              // Skip null placeholders (all zeros or all same char)
+              if (/^0+[A-Z]*$/.test(value) || value === "000000000000000AAA") {
+                continue; // skip — it's a Salesforce null placeholder
+              }
+              record[field] = value;
+              continue;
+            }
+
+            // SF user ID fields (CreatedById, LastModifiedById) — resolve to names
+            if (["sf_created_by", "sf_last_modified_by"].includes(field)) {
+              if (value.startsWith("005") && sfUserMap.size > 0) {
+                const sfUser = sfUserMap.get(value);
+                record[field] = sfUser ? sfUser.name : value;
+              } else {
+                record[field] = value;
+              }
               continue;
             }
 
