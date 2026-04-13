@@ -441,7 +441,7 @@ export function AccountDetail() {
             value={account.renewal_type ? renewalTypeLabel(account.renewal_type) : null}
           />
           <Field label="Every Other Year" value={account.every_other_year ? "Yes" : "No"} />
-          <EditableField label="Contracts" value={account.contracts} onSave={saveField("contracts")} />
+          <EditableField label="Contracts (from SF)" value={account.contracts} onSave={saveField("contracts")} />
           <Field label="Contract Start" value={formatDate(account.current_contract_start_date)} />
           <Field label="Contract End" value={formatDate(account.current_contract_end_date)} />
           <Field

@@ -667,7 +667,7 @@ export function SalesforceImport() {
     ["0055w00000A9RsJAAV", { name: "Amanda Hepper", email: "amanda@medcurity.com" }],
     ["0055w00000A9RsOAAV", { name: "Lorraine Gary", email: "lorraineg@medcurity.com" }],
     ["0055w00000BmnpFAAR", { name: "Christian Williams", email: "christianw@medcurity.com" }],
-    ["0055w00000BmnpKAAR", { name: "James Parrish", email: "jamesp@medcurity.com" }],
+    ["0055w00000BmnpKAAR", { name: "Brayden Frost", email: "braydenf@medcurity.com" }],
     ["0055w00000ByXXDAA3", { name: "Integration User", email: "marketing@medcurity.com" }],
     ["0055w00000ByXXEAA3", { name: "Automated Process", email: "wharley@00d5w000002rxcxeay" }],
     ["0055w00000ByXXFAA3", { name: "Salesforce Administrator", email: "wharley@00d5w000002rxcxeay" }],
@@ -1177,11 +1177,17 @@ export function SalesforceImport() {
               continue;
             }
 
-            // SF user ID fields (CreatedById, LastModifiedById) — resolve to names
+            // SF user ID fields (CreatedById, LastModifiedById) — resolve to ORIGINAL names for history
             if (["sf_created_by", "sf_last_modified_by"].includes(field)) {
               if (value.startsWith("005") && sfUserMap.size > 0) {
+                // For historical fields, use the original SF name (not the remapped name)
+                // e.g. James Parrish's ID is remapped to Brayden Frost for ownership,
+                // but Created By / Modified By should show the original person
+                const historicalNames: Record<string, string> = {
+                  "0055w00000BmnpKAAR": "James Parrish",
+                };
                 const sfUser = sfUserMap.get(value);
-                record[field] = sfUser ? sfUser.name : value;
+                record[field] = historicalNames[value] ?? (sfUser ? sfUser.name : value);
               } else {
                 record[field] = value;
               }
