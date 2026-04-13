@@ -578,8 +578,10 @@ export function AccountForm() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="auto_renew">Auto Renew</SelectItem>
+                      <SelectItem value="full_auto_renew">Full Auto Renew</SelectItem>
                       <SelectItem value="manual_renew">Manual Renew</SelectItem>
                       <SelectItem value="no_auto_renew">No Auto Renew</SelectItem>
+                      <SelectItem value="platform_only_auto_renew">Platform Only Auto Renew</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

@@ -30,6 +30,9 @@ import {
   XCircle,
   Download,
   Clock,
+  RotateCcw,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 
 /* ================================================================
@@ -49,6 +52,7 @@ interface ColumnMapping {
 interface FailedRow {
   rowNumber: number;
   csvData: Record<string, string>;
+  crmRecord: Record<string, unknown>;
   error: string;
 }
 
@@ -693,6 +697,8 @@ export function SalesforceImport() {
     ["005RO000005C4kvYAC", { name: "Mel Nevala", email: "meln@medcurity.com" }],
   ]));
   const [userCsvLoaded, setUserCsvLoaded] = useState(true);
+  const [retryEdits, setRetryEdits] = useState<Record<number, Record<string, string>>>({});
+  const [retryingRows, setRetryingRows] = useState(false);
 
   /* ---------- SF User CSV handling ---------- */
 
@@ -1068,7 +1074,7 @@ export function SalesforceImport() {
                 } else {
                   const errMsg = `Account SF ID "${value}" not found in CRM`;
                   errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
-                  failedRows.push({ rowNumber: rowIndex + 1, csvData, error: errMsg });
+                  failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
                   failedCount[0]++;
                   skipRow = true;
                 }
@@ -1155,6 +1161,8 @@ export function SalesforceImport() {
                   "no_auto_renew": "no_auto_renew",
                   "auto_renew": "auto_renew",
                   "manual_renew": "manual_renew",
+                  "full_auto_renew": "full_auto_renew",
+                  "platform_only_auto_renew": "platform_only_auto_renew",
                 },
                 status: {
                   "active": "active",
@@ -1206,35 +1214,35 @@ export function SalesforceImport() {
           if (entity === "accounts" && !record.name) {
             const errMsg = "Missing account name";
             errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
-            failedRows.push({ rowNumber: rowIndex + 1, csvData, error: errMsg });
+            failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
             failedCount[0]++;
             continue;
           }
           if (entity === "contacts" && (!record.first_name || !record.last_name)) {
             const errMsg = "Missing first or last name";
             errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
-            failedRows.push({ rowNumber: rowIndex + 1, csvData, error: errMsg });
+            failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
             failedCount[0]++;
             continue;
           }
           if (entity === "contacts" && !record.account_id) {
             const errMsg = "Missing account reference";
             errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
-            failedRows.push({ rowNumber: rowIndex + 1, csvData, error: errMsg });
+            failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
             failedCount[0]++;
             continue;
           }
           if (entity === "opportunities" && (!record.name || !record.account_id)) {
             const errMsg = "Missing name or account reference";
             errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
-            failedRows.push({ rowNumber: rowIndex + 1, csvData, error: errMsg });
+            failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
             failedCount[0]++;
             continue;
           }
           if (entity === "leads" && (!record.first_name || !record.last_name)) {
             const errMsg = "Missing first or last name";
             errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
-            failedRows.push({ rowNumber: rowIndex + 1, csvData, error: errMsg });
+            failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
             failedCount[0]++;
             continue;
           }
@@ -1247,7 +1255,7 @@ export function SalesforceImport() {
           ) {
             const errMsg = `Invalid email format "${record.email}"`;
             errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
-            failedRows.push({ rowNumber: rowIndex + 1, csvData, error: errMsg });
+            failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
             failedCount[0]++;
             continue;
           }
@@ -1338,6 +1346,7 @@ export function SalesforceImport() {
                 failedRows.push({
                   rowNumber: rowNum,
                   csvData: buildCsvDataRow(csvRows[recordRowIndices[r]], csvHeaders),
+                  crmRecord: { ...toInsert[r] },
                   error: singleError.message,
                 });
                 failedCount[0]++;
@@ -1436,9 +1445,146 @@ export function SalesforceImport() {
     setProgress({ current: 0, total: 0 });
     setCurrentBatch({ batch: 0, totalBatches: 0 });
     setEstimatedTimeRemaining(null);
+    setRetryEdits({});
+    setRetryingRows(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+  }
+
+  /* ---------- Retry Failed Rows ---------- */
+
+  function initRetryEdits() {
+    if (!result) return;
+    const edits: Record<number, Record<string, string>> = {};
+    result.failedRows.forEach((fr, idx) => {
+      // Build editable fields from the CRM record
+      const fields: Record<string, string> = {};
+      for (const [key, val] of Object.entries(fr.crmRecord)) {
+        fields[key] = val == null ? "" : String(val);
+      }
+      edits[idx] = fields;
+    });
+    setRetryEdits(edits);
+  }
+
+  function updateRetryField(rowIdx: number, field: string, value: string) {
+    setRetryEdits((prev) => ({
+      ...prev,
+      [rowIdx]: { ...prev[rowIdx], [field]: value },
+    }));
+  }
+
+  function removeRetryRow(rowIdx: number) {
+    if (!result) return;
+    const newFailedRows = result.failedRows.filter((_, i) => i !== rowIdx);
+    setResult({ ...result, failedRows: newFailedRows, failed: newFailedRows.length });
+    setRetryEdits((prev) => {
+      const next: Record<number, Record<string, string>> = {};
+      // Re-index remaining edits
+      let newIdx = 0;
+      for (let i = 0; i < result.failedRows.length; i++) {
+        if (i !== rowIdx) {
+          next[newIdx] = prev[i] ?? {};
+          newIdx++;
+        }
+      }
+      return next;
+    });
+  }
+
+  async function handleRetryFailed() {
+    if (!result || result.failedRows.length === 0) return;
+    setRetryingRows(true);
+
+    const tableName = entity;
+    const stillFailed: FailedRow[] = [];
+    let retrySuccess = 0;
+
+    for (let i = 0; i < result.failedRows.length; i++) {
+      const fr = result.failedRows[i];
+      const edits = retryEdits[i];
+      if (!edits) continue;
+
+      // Build the record from edited fields
+      const record: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(edits)) {
+        if (val === "") continue;
+        // Handle booleans
+        if (["do_not_contact", "partner_prospect", "priority_account",
+             "every_other_year", "one_time_project", "auto_renewal"].includes(key)) {
+          record[key] = val === "true" || val === "1" || val.toLowerCase() === "yes";
+          continue;
+        }
+        // Handle numbers
+        if (["employees", "locations", "fte_count", "annual_revenue", "acv",
+             "lifetime_value", "churn_amount", "number_of_providers", "amount",
+             "subtotal", "discount", "score", "billing_latitude", "billing_longitude",
+             "shipping_latitude", "shipping_longitude"].includes(key)) {
+          const num = Number(val);
+          if (!isNaN(num)) { record[key] = num; continue; }
+        }
+        record[key] = val;
+      }
+
+      const { error } = await supabase.from(tableName).insert(record);
+      if (error) {
+        stillFailed.push({ ...fr, crmRecord: record, error: error.message });
+      } else {
+        retrySuccess++;
+      }
+    }
+
+    setResult({
+      ...result,
+      imported: result.imported + retrySuccess,
+      failed: stillFailed.length,
+      failedRows: stillFailed,
+      errors: stillFailed.map((fr) => `Row ${fr.rowNumber}: ${fr.error}`),
+    });
+    setRetryEdits({});
+    setRetryingRows(false);
+
+    if (stillFailed.length === 0) {
+      toast.success(`All ${retrySuccess} previously failed rows imported successfully!`);
+    } else {
+      toast.warning(`${retrySuccess} rows fixed, ${stillFailed.length} still failing.`);
+      // Re-init edits for still-failed rows
+      const edits: Record<number, Record<string, string>> = {};
+      stillFailed.forEach((fr, idx) => {
+        const fields: Record<string, string> = {};
+        for (const [key, val] of Object.entries(fr.crmRecord)) {
+          fields[key] = val == null ? "" : String(val);
+        }
+        edits[idx] = fields;
+      });
+      setRetryEdits(edits);
+    }
+  }
+
+  /** Return dropdown options for enum fields, or null for free-text fields */
+  function getEnumOptions(field: string): string[] | null {
+    const enums: Record<string, string[]> = {
+      renewal_type: ["auto_renew", "manual_renew", "no_auto_renew", "full_auto_renew", "platform_only_auto_renew"],
+      status: ["discovery", "pending", "active", "inactive", "churned"],
+      lifecycle_status: ["prospect", "customer", "former_customer"],
+      stage: ["lead", "qualified", "proposal", "verbal_commit", "closed_won", "closed_lost"],
+      kind: ["new_business", "renewal"],
+      team: ["sales", "renewals"],
+      lead_source: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"],
+      payment_frequency: ["monthly", "quarterly", "semi_annually", "annually"],
+      qualification: ["unqualified", "mql", "sql", "sal"],
+    };
+    return enums[field] ?? null;
+  }
+
+  /** Get the fields that are most likely problematic based on the error message */
+  function getErrorHighlightField(error: string): string | null {
+    const enumMatch = error.match(/enum (\w+)/);
+    if (enumMatch) return enumMatch[1];
+    const colMatch = error.match(/column "(\w+)"/);
+    if (colMatch) return colMatch[1];
+    return null;
   }
 
   /* ---------- Render ---------- */
@@ -1878,41 +2024,13 @@ export function SalesforceImport() {
               )}
             </div>
 
-            {/* Failed rows details */}
-            {result.failedRows.length > 0 && (
-              <div className="space-y-3">
-                <div className="bg-destructive/5 border border-destructive/20 rounded-md p-3 max-h-48 overflow-y-auto">
-                  <p className="text-sm font-medium text-destructive mb-2">
-                    Failed rows:
-                  </p>
-                  <ul className="text-xs text-destructive space-y-1">
-                    {result.failedRows.map((fr, idx) => (
-                      <li key={idx}>
-                        <span className="font-medium">Row {fr.rowNumber}:</span>{" "}
-                        {fr.error}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => downloadErrorReport(result.failedRows)}
-                >
-                  <Download className="h-4 w-4 mr-1.5" />
-                  Download Error Report
-                </Button>
-              </div>
-            )}
-
-            {/* Non-row-specific errors (batch errors) */}
+            {/* Non-row-specific errors (owner warnings etc.) */}
             {result.errors.length > 0 && result.errors.some((e) => !result.failedRows.some((fr) => e.includes(`Row ${fr.rowNumber}`))) && (
-              <div className="bg-destructive/5 border border-destructive/20 rounded-md p-3 max-h-48 overflow-y-auto">
-                <p className="text-sm font-medium text-destructive mb-1">
-                  Other errors:
+              <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md p-3 max-h-48 overflow-y-auto">
+                <p className="text-sm font-medium text-amber-700 dark:text-amber-400 mb-1">
+                  Warnings:
                 </p>
-                <ul className="text-xs text-destructive space-y-0.5">
+                <ul className="text-xs text-amber-600 dark:text-amber-500 space-y-0.5">
                   {result.errors
                     .filter((e) => !result.failedRows.some((fr) => e.startsWith(`Row ${fr.rowNumber}:`)))
                     .map((err, idx) => (
@@ -1922,12 +2040,197 @@ export function SalesforceImport() {
               </div>
             )}
 
-            <Button
-              variant="outline"
-              onClick={handleReset}
-            >
-              Start New Import
-            </Button>
+            {/* Failed rows — editable retry UI */}
+            {result.failedRows.length > 0 && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-medium text-destructive flex items-center gap-1.5">
+                    <XCircle className="h-4 w-4" />
+                    {result.failedRows.length} Failed Row{result.failedRows.length !== 1 ? "s" : ""}
+                  </h4>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => downloadErrorReport(result.failedRows)}
+                    >
+                      <Download className="h-4 w-4 mr-1.5" />
+                      Download CSV
+                    </Button>
+                    {Object.keys(retryEdits).length === 0 ? (
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={initRetryEdits}
+                      >
+                        <Pencil className="h-4 w-4 mr-1.5" />
+                        Edit & Retry Failed Rows
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={handleRetryFailed}
+                        disabled={retryingRows}
+                      >
+                        <RotateCcw className="h-4 w-4 mr-1.5" />
+                        {retryingRows ? "Retrying..." : `Retry ${result.failedRows.length} Row${result.failedRows.length !== 1 ? "s" : ""}`}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {/* If NOT in edit mode, show error summary */}
+                {Object.keys(retryEdits).length === 0 && (
+                  <div className="bg-destructive/5 border border-destructive/20 rounded-md p-3">
+                    <ul className="text-xs text-destructive space-y-1">
+                      {result.failedRows.map((fr, idx) => {
+                        const recordName = (fr.crmRecord.name as string) || `Row ${fr.rowNumber}`;
+                        return (
+                          <li key={idx}>
+                            <span className="font-medium">{recordName} (Row {fr.rowNumber}):</span>{" "}
+                            {fr.error}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Editable retry cards */}
+                {Object.keys(retryEdits).length > 0 && (
+                  <div className="space-y-3">
+                    {result.failedRows.map((fr, idx) => {
+                      const edits = retryEdits[idx];
+                      if (!edits) return null;
+                      const errorField = getErrorHighlightField(fr.error);
+                      const recordName = (edits.name) || `Row ${fr.rowNumber}`;
+
+                      // Get important fields first, then the rest
+                      const fieldEntries = Object.entries(edits);
+                      const importantFields = errorField
+                        ? fieldEntries.filter(([k]) => k === errorField)
+                        : [];
+                      const otherFields = errorField
+                        ? fieldEntries.filter(([k]) => k !== errorField)
+                        : fieldEntries;
+
+                      return (
+                        <div key={idx} className="border rounded-md overflow-hidden">
+                          {/* Row header */}
+                          <div className="bg-destructive/5 px-4 py-2 flex items-center justify-between border-b">
+                            <div>
+                              <span className="text-sm font-medium">{recordName}</span>
+                              <span className="text-xs text-muted-foreground ml-2">(CSV Row {fr.rowNumber})</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge variant="destructive" className="text-[10px]">
+                                {fr.error}
+                              </Badge>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                                onClick={() => removeRetryRow(idx)}
+                                title="Remove this row (skip it)"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+
+                          {/* Error field highlighted at top */}
+                          {importantFields.length > 0 && (
+                            <div className="px-4 py-3 bg-red-50 dark:bg-red-950/20 border-b border-red-200 dark:border-red-800">
+                              <p className="text-xs font-medium text-red-700 dark:text-red-400 mb-2 flex items-center gap-1">
+                                <AlertTriangle className="h-3 w-3" />
+                                Fix this field:
+                              </p>
+                              {importantFields.map(([field, val]) => (
+                                <div key={field} className="flex items-center gap-2">
+                                  <Label className="text-xs font-medium w-40 text-red-700 dark:text-red-400">{fieldLabel(field)}</Label>
+                                  {getEnumOptions(field) ? (
+                                    <Select
+                                      value={val || "__empty__"}
+                                      onValueChange={(v) => updateRetryField(idx, field, v === "__empty__" ? "" : v)}
+                                    >
+                                      <SelectTrigger className="h-8 text-xs border-red-300 dark:border-red-700 w-[200px]">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="__empty__">-- Clear --</SelectItem>
+                                        {getEnumOptions(field)!.map((opt) => (
+                                          <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  ) : (
+                                    <Input
+                                      value={val}
+                                      onChange={(e) => updateRetryField(idx, field, e.target.value)}
+                                      className="h-8 text-xs border-red-300 dark:border-red-700 max-w-xs"
+                                    />
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Other fields in a compact grid */}
+                          <div className="px-4 py-3">
+                            <details className="group">
+                              <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">
+                                {otherFields.length} other fields (click to expand)
+                              </summary>
+                              <div className="mt-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                {otherFields.map(([field, val]) => (
+                                  <div key={field} className="flex items-center gap-1.5">
+                                    <Label className="text-[11px] font-medium text-muted-foreground w-32 shrink-0 truncate" title={field}>
+                                      {fieldLabel(field)}
+                                    </Label>
+                                    {getEnumOptions(field) ? (
+                                      <Select
+                                        value={val || "__empty__"}
+                                        onValueChange={(v) => updateRetryField(idx, field, v === "__empty__" ? "" : v)}
+                                      >
+                                        <SelectTrigger className="h-7 text-[11px] flex-1">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="__empty__">-- Clear --</SelectItem>
+                                          {getEnumOptions(field)!.map((opt) => (
+                                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    ) : (
+                                      <Input
+                                        value={val}
+                                        onChange={(e) => updateRetryField(idx, field, e.target.value)}
+                                        className="h-7 text-[11px] flex-1"
+                                      />
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </details>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={handleReset}
+              >
+                Start New Import
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}

@@ -112,6 +112,8 @@ const renewalTypeLabels: Record<RenewalType, string> = {
   auto_renew: "Auto Renew",
   manual_renew: "Manual Renew",
   no_auto_renew: "No Auto Renew",
+  full_auto_renew: "Full Auto Renew",
+  platform_only_auto_renew: "Platform Only Auto Renew",
 };
 
 export function renewalTypeLabel(type: RenewalType): string {

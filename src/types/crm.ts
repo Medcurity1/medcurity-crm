@@ -1,7 +1,7 @@
 export type AppRole = "sales" | "renewals" | "admin";
 export type AccountLifecycle = "prospect" | "customer" | "former_customer";
 export type AccountStatus = "discovery" | "pending" | "active" | "inactive" | "churned";
-export type RenewalType = "auto_renew" | "manual_renew" | "no_auto_renew";
+export type RenewalType = "auto_renew" | "manual_renew" | "no_auto_renew" | "full_auto_renew" | "platform_only_auto_renew";
 export type OpportunityTeam = "sales" | "renewals";
 export type OpportunityKind = "new_business" | "renewal";
 export type OpportunityStage =
