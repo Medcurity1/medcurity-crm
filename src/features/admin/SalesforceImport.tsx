@@ -706,11 +706,14 @@ export function SalesforceImport() {
         const text = evt.target?.result as string;
         if (!text) return;
 
-        const { headers, rows } = parseCSV(text);
-        const idIdx = headers.findIndex((h) => h.toLowerCase() === "id");
-        const firstIdx = headers.findIndex((h) => h.toLowerCase() === "firstname");
-        const lastIdx = headers.findIndex((h) => h.toLowerCase() === "lastname");
-        const emailIdx = headers.findIndex((h) => h.toLowerCase() === "email");
+        const parsed = parseCSV(text);
+        if (parsed.length < 2) { toast.error("User CSV is empty"); return; }
+        const headers = parsed[0];
+        const rows = parsed.slice(1);
+        const idIdx = headers.findIndex((h: string) => h.toLowerCase() === "id");
+        const firstIdx = headers.findIndex((h: string) => h.toLowerCase() === "firstname");
+        const lastIdx = headers.findIndex((h: string) => h.toLowerCase() === "lastname");
+        const emailIdx = headers.findIndex((h: string) => h.toLowerCase() === "email");
 
         if (idIdx === -1) {
           toast.error("User CSV must have an 'Id' column");
@@ -918,33 +921,15 @@ export function SalesforceImport() {
         .from("user_profiles")
         .select("id, full_name, email");
 
-      // Build a map of SF User IDs → CRM user IDs by matching on email
-      // This lets us resolve Salesforce OwnerId values to CRM users
-      const sfUserIdToCrmId = new Map<string, string>();
-      const sfUserIdToName = new Map<string, string>();
+      // Build lookup maps from CRM users for owner matching
+      const crmEmailLookup = new Map<string, string>();
+      const crmNameLookup = new Map<string, string>();
 
-      // Parse the User CSV if it was previously imported, or build from known SF users
-      // We match SF users to CRM users by email address
       if (users) {
-        // Fetch the SF User mapping from the uploaded User.csv data
-        // For now, we build a lookup from the CSV OwnerId values
-        // by matching CRM user emails against SF user emails
-        const crmEmailMap = new Map(
-          users
-            .filter((u) => u.email)
-            .map((u) => [u.email!.toLowerCase(), u.id as string])
-        );
-        const crmNameMap = new Map(
-          users
-            .filter((u) => u.full_name)
-            .map((u) => [u.full_name!.toLowerCase(), u.id as string])
-        );
-
-        // Store these for use in the owner lookup
-        sfUserIdToCrmId.set("__email_map__", ""); // marker
-        // We'll attach the maps to a closure variable
-        var crmEmailLookup = crmEmailMap;
-        var crmNameLookup = crmNameMap;
+        for (const u of users) {
+          if (u.email) crmEmailLookup.set((u.email as string).toLowerCase(), u.id as string);
+          if (u.full_name) crmNameLookup.set((u.full_name as string).toLowerCase(), u.id as string);
+        }
       }
 
       let accountSfMap: Map<string, string> | null = null;

@@ -54,6 +54,11 @@ const leadSourceColors: Record<LeadSource, string> = {
   partner: "bg-teal-100 text-teal-700",
   social_media: "bg-pink-100 text-pink-700",
   email_campaign: "bg-indigo-100 text-indigo-700",
+  webinar: "bg-cyan-100 text-cyan-700",
+  podcast: "bg-orange-100 text-orange-700",
+  conference: "bg-violet-100 text-violet-700",
+  sql: "bg-emerald-100 text-emerald-700",
+  mql: "bg-blue-100 text-blue-700",
   other: "bg-slate-100 text-slate-700",
 };
 

@@ -19,6 +19,11 @@ export const leadSchema = z.object({
       "partner",
       "social_media",
       "email_campaign",
+      "webinar",
+      "podcast",
+      "conference",
+      "sql",
+      "mql",
       "other",
     ])
     .optional()

@@ -345,7 +345,7 @@ export function OpportunityDetail() {
             label="FTEs"
             value={opp.account?.fte_count != null ? opp.account.fte_count.toLocaleString() : null}
           />
-          <Field label="Partner" value={(opp.account as Record<string, unknown>)?.partner_account as string ?? null} />
+          <Field label="Partner" value={(opp.account as unknown as Record<string, unknown>)?.partner_account as string ?? null} />
           <Field label="Team" value={teamLabel(opp.team)} />
           <Field
             label="One Time Project"
