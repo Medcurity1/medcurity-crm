@@ -175,6 +175,38 @@ export function qualificationLabel(q: LeadQualification): string {
   return qualificationLabels[q];
 }
 
+/* ---- FTE Range ---- */
+
+export const FTE_RANGES = [
+  "1-20",
+  "21-50",
+  "51-100",
+  "101-250",
+  "251-500",
+  "501-750",
+  "751-1000",
+  "1001-1500",
+  "1501-2000",
+  "2001-5000",
+  "5001-10000",
+] as const;
+
+/** Given a number of employees, return the matching FTE range bucket */
+export function employeesToFteRange(employees: number | null | undefined): string {
+  if (employees == null || employees <= 0) return "";
+  if (employees <= 20) return "1-20";
+  if (employees <= 50) return "21-50";
+  if (employees <= 100) return "51-100";
+  if (employees <= 250) return "101-250";
+  if (employees <= 500) return "251-500";
+  if (employees <= 750) return "501-750";
+  if (employees <= 1000) return "751-1000";
+  if (employees <= 1500) return "1001-1500";
+  if (employees <= 2000) return "1501-2000";
+  if (employees <= 5000) return "2001-5000";
+  return "5001-10000";
+}
+
 export const OPEN_STAGES: OpportunityStage[] = [
   "lead",
   "qualified",

@@ -7,6 +7,7 @@ import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { accountSchema, type AccountFormValues } from "./schema";
+import { FTE_RANGES, employeesToFteRange } from "@/lib/formatters";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -515,11 +516,36 @@ export function AccountForm() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="fte_range">FTE Range<RequiredIndicator fieldKey="fte_range" requiredFields={requiredKeys} /></Label>
-                  <Input id="fte_range" placeholder="e.g. 100-500" {...register("fte_range")} />
+                  <Select
+                    value={watch("fte_range") ?? ""}
+                    onValueChange={(v) => setValue("fte_range", v as AccountFormValues["fte_range"])}
+                  >
+                    <SelectTrigger id="fte_range">
+                      <SelectValue placeholder="Select range" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">-- None --</SelectItem>
+                      {FTE_RANGES.map((r) => (
+                        <SelectItem key={r} value={r}>{r}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="employees">Number of Employees<RequiredIndicator fieldKey="employees" requiredFields={requiredKeys} /></Label>
-                  <Input id="employees" type="number" {...register("employees")} />
+                  <Input
+                    id="employees"
+                    type="number"
+                    {...register("employees", {
+                      onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+                        const num = parseInt(e.target.value, 10);
+                        if (!isNaN(num) && num > 0) {
+                          setValue("fte_range", employeesToFteRange(num));
+                        }
+                      },
+                    })}
+                  />
+                  <p className="text-[11px] text-muted-foreground">Auto-sets FTE Range</p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="number_of_providers">Number of Providers<RequiredIndicator fieldKey="number_of_providers" requiredFields={requiredKeys} /></Label>

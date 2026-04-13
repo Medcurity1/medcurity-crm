@@ -18,7 +18,7 @@ export const accountSchema = z.object({
   employees: z.coerce.number().int().nonnegative().optional().or(z.literal("")),
   locations: z.coerce.number().int().nonnegative().optional().or(z.literal("")),
   fte_count: z.coerce.number().int().nonnegative().optional().or(z.literal("")),
-  fte_range: z.string().optional().or(z.literal("")),
+  fte_range: z.enum(["1-20", "21-50", "51-100", "101-250", "251-500", "501-750", "751-1000", "1001-1500", "1501-2000", "2001-5000", "5001-10000"]).optional().or(z.literal("")),
   number_of_providers: z.coerce.number().int().nonnegative().optional().or(z.literal("")),
   annual_revenue: z.coerce.number().nonnegative().optional().or(z.literal("")),
   // Contract & Renewal

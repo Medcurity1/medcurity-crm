@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
+import { employeesToFteRange } from "@/lib/formatters";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -253,6 +254,16 @@ const OPPORTUNITY_FIELDS: Record<string, string> = {
   "next step": "next_step",
   probability: "probability",
   "created date": "created_at",
+  "owner id": "owner_user_id",
+  ownerid: "owner_user_id",
+  "opportunity owner": "owner_user_id",
+  team: "team",
+  "primary contact id": "primary_contact_id_sf_lookup",
+  "contract start date": "contract_start_date",
+  "contract end date": "contract_end_date",
+  "current contract start date": "contract_start_date",
+  "current contract end date": "contract_end_date",
+  notes: "notes",
 };
 
 const LEAD_FIELDS: Record<string, string> = {
@@ -399,6 +410,7 @@ function getCRMFields(entity: EntityType): string[] {
         "name",
         "sf_id",
         "account_id_sf_lookup",
+        "primary_contact_id_sf_lookup",
         "owner_user_id",
         "stage",
         "amount",
@@ -471,6 +483,7 @@ const FIELD_LABEL_OVERRIDES: Record<string, string> = {
   owner_user_id: "Account Owner",
   sf_id: "Salesforce ID",
   account_id_sf_lookup: "Account (SF ID Lookup)",
+  primary_contact_id_sf_lookup: "Primary Contact (SF ID Lookup)",
   sf_created_by: "SF Created By",
   sf_created_date: "SF Created Date",
   sf_last_modified_by: "SF Last Modified By",
@@ -952,6 +965,7 @@ export function SalesforceImport() {
       }
 
       let accountSfMap: Map<string, string> | null = null;
+      let contactSfMap: Map<string, string> | null = null;
       if (
         entity === "contacts" ||
         entity === "opportunities"
@@ -962,6 +976,15 @@ export function SalesforceImport() {
           .not("sf_id", "is", null);
         accountSfMap = new Map(
           (accounts ?? []).map((a) => [a.sf_id as string, a.id as string])
+        );
+      }
+      if (entity === "opportunities") {
+        const { data: contacts } = await supabase
+          .from("contacts")
+          .select("id, sf_id")
+          .not("sf_id", "is", null);
+        contactSfMap = new Map(
+          (contacts ?? []).map((c) => [c.sf_id as string, c.id as string])
         );
       }
 
@@ -1078,6 +1101,18 @@ export function SalesforceImport() {
                   failedCount[0]++;
                   skipRow = true;
                 }
+              }
+              continue;
+            }
+
+            if (field === "primary_contact_id_sf_lookup") {
+              // Lookup contact by SF ID
+              if (contactSfMap) {
+                const contactId = contactSfMap.get(value);
+                if (contactId) {
+                  record.primary_contact_id = contactId;
+                }
+                // Don't fail — primary contact is optional
               }
               continue;
             }
@@ -1264,6 +1299,10 @@ export function SalesforceImport() {
           if (entity === "accounts") {
             record.lifecycle_status = record.lifecycle_status ?? "prospect";
             record.status = record.status ?? "discovery";
+            // Auto-calculate FTE Range from employees if not already set
+            if (!record.fte_range && typeof record.employees === "number" && record.employees > 0) {
+              record.fte_range = employeesToFteRange(record.employees as number);
+            }
           }
           if (entity === "opportunities") {
             record.stage = record.stage ?? "lead";
