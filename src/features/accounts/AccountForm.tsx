@@ -517,14 +517,14 @@ export function AccountForm() {
                 <div className="space-y-2">
                   <Label htmlFor="fte_range">FTE Range<RequiredIndicator fieldKey="fte_range" requiredFields={requiredKeys} /></Label>
                   <Select
-                    value={watch("fte_range") ?? ""}
-                    onValueChange={(v) => setValue("fte_range", v as AccountFormValues["fte_range"])}
+                    value={watch("fte_range") || "none"}
+                    onValueChange={(v) => setValue("fte_range", v === "none" ? "" as AccountFormValues["fte_range"] : v as AccountFormValues["fte_range"])}
                   >
                     <SelectTrigger id="fte_range">
                       <SelectValue placeholder="Select range" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">-- None --</SelectItem>
+                      <SelectItem value="none">-- None --</SelectItem>
                       {FTE_RANGES.map((r) => (
                         <SelectItem key={r} value={r}>{r}</SelectItem>
                       ))}

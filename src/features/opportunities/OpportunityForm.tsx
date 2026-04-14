@@ -584,14 +584,14 @@ export function OpportunityForm() {
                 <div className="space-y-2">
                   <Label>FTE Range</Label>
                   <Select
-                    value={watch("fte_range") ?? ""}
-                    onValueChange={(v) => setValue("fte_range", v as OpportunityFormValues["fte_range"])}
+                    value={watch("fte_range") || "none"}
+                    onValueChange={(v) => setValue("fte_range", v === "none" ? "" as OpportunityFormValues["fte_range"] : v as OpportunityFormValues["fte_range"])}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select range" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">-- None --</SelectItem>
+                      <SelectItem value="none">-- None --</SelectItem>
                       {FTE_RANGES.map((r) => (
                         <SelectItem key={r} value={r}>{r}</SelectItem>
                       ))}

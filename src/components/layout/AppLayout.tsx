@@ -7,6 +7,7 @@ import { WelcomeWizard } from "@/features/auth/WelcomeWizard";
 import { QuickCreateDialog } from "@/components/QuickCreateDialog";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const pathMap: Record<string, string> = {
   "": "Home",
@@ -108,7 +109,9 @@ export function AppLayout() {
               </div>
             }
           >
-            <Outlet />
+            <ErrorBoundary>
+              <Outlet />
+            </ErrorBoundary>
           </Suspense>
         </div>
       </main>
