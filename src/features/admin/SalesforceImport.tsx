@@ -2007,17 +2007,17 @@ export function SalesforceImport() {
               continue;
             }
 
-            // UUID reference fields — skip Salesforce null placeholders like "000000000000000AAA"
+            // UUID reference fields — only accept valid UUIDs, skip SF IDs and null placeholders
             if (
               ["parent_account_id", "converted_account_id", "converted_contact_id",
                "converted_opportunity_id", "campaign_id"].includes(field)
             ) {
-              // Valid UUIDs are 36 chars with hyphens; SF IDs are 18-char alphanumeric
-              // Skip null placeholders (all zeros or all same char)
-              if (/^0+[A-Z]*$/.test(value) || value === "000000000000000AAA") {
-                continue; // skip — it's a Salesforce null placeholder
+              // Only store valid UUIDs (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+              const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+              if (UUID_REGEX.test(value)) {
+                record[field] = value;
               }
-              record[field] = value;
+              // Skip anything that's not a valid UUID (SF IDs, null placeholders, etc.)
               continue;
             }
 
@@ -2269,6 +2269,21 @@ export function SalesforceImport() {
           }
           if (entity === "price_book_entries") {
             record.unit_price = record.unit_price ?? 0;
+          }
+
+          // Sanitize UUID fields — remove any SF IDs that snuck through
+          // These DB columns are uuid type and will reject non-UUID values
+          const UUID_COLUMNS = new Set([
+            "account_id", "primary_contact_id", "owner_user_id", "parent_account_id",
+            "converted_account_id", "converted_contact_id", "converted_opportunity_id",
+            "source_opportunity_id", "renewal_from_opportunity_id", "campaign_id",
+            "original_lead_id", "price_book_id", "product_id",
+          ]);
+          const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+          for (const key of Object.keys(record)) {
+            if (UUID_COLUMNS.has(key) && typeof record[key] === "string" && !UUID_RE.test(record[key] as string)) {
+              delete record[key]; // Strip non-UUID values (SF IDs, etc.)
+            }
           }
 
           // Move non-DB fields into custom_fields JSONB
