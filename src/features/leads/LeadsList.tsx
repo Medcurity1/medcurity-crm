@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
 import { UserPlus, Plus, Search } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useLeads, useArchiveLead, useBulkUpdateOwner } from "./api";
@@ -71,11 +72,11 @@ function StatCard({ label, value }: { label: string; value: number | string }) {
 
 export function LeadsList() {
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [sourceFilter, setSourceFilter] = useState<string>("all");
-  const [qualificationFilter, setQualificationFilter] = useState<string>("all");
-  const [page, setPage] = useState(0);
+  const [search, setSearch] = useUrlState("q", "");
+  const [statusFilter, setStatusFilter] = useUrlState("status", "all");
+  const [sourceFilter, setSourceFilter] = useUrlState("source", "all");
+  const [qualificationFilter, setQualificationFilter] = useUrlState("qual", "all");
+  const [page, setPage] = useUrlNumberState("page", 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const { data: result, isLoading } = useLeads({

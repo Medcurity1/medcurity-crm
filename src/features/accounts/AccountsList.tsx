@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
 import { Building2, Plus, Search } from "lucide-react";
 import { useAccounts, useArchiveAccount, useBulkUpdateOwner, useUsers } from "./api";
 import { PageHeader } from "@/components/PageHeader";
@@ -32,9 +33,9 @@ const PAGE_SIZE = 25;
 
 export function AccountsList() {
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [page, setPage] = useState(0);
+  const [search, setSearch] = useUrlState("q", "");
+  const [statusFilter, setStatusFilter] = useUrlState("status", "all");
+  const [page, setPage] = useUrlNumberState("page", 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const { data: result, isLoading } = useAccounts({

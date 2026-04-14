@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
 import { Users, Plus, Search } from "lucide-react";
 import { useContacts, useArchiveContact, useBulkUpdateOwner } from "./api";
 import { useUsers } from "@/features/accounts/api";
@@ -26,8 +27,8 @@ const PAGE_SIZE = 25;
 
 export function ContactsList() {
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(0);
+  const [search, setSearch] = useUrlState("q", "");
+  const [page, setPage] = useUrlNumberState("page", 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const { data: result, isLoading } = useContacts({
