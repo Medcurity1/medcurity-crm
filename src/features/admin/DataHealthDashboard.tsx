@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -19,8 +21,12 @@ import {
   Loader2,
   FileBarChart,
   Upload,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
 } from "lucide-react";
 import { formatDate } from "@/lib/formatters";
+import { Link } from "react-router-dom";
 
 /* ---------- Types ---------- */
 
@@ -41,6 +47,12 @@ interface DataHealthRow {
   modified_last_24h: number;
   missing_name: number;
   unassigned_records: number;
+}
+
+interface DrilldownRecord {
+  id: string;
+  name: string;
+  issue: string;
 }
 
 /* ---------- Hooks ---------- */
@@ -69,6 +81,125 @@ function useDataHealthCheck() {
   });
 }
 
+/* ---------- Drilldown fetcher ---------- */
+
+async function fetchDrilldown(
+  entity: string,
+  issue: "unassigned" | "missing_name"
+): Promise<DrilldownRecord[]> {
+  const tableName = entity;
+
+  if (issue === "unassigned") {
+    if (entity === "accounts") {
+      const { data } = await supabase
+        .from(tableName)
+        .select("id, name")
+        .is("owner_user_id", null)
+        .is("archived_at", null)
+        .order("name")
+        .limit(50);
+      return (data ?? []).map((r) => ({ id: r.id, name: r.name || "Unnamed", issue: "No owner assigned" }));
+    }
+    if (entity === "contacts") {
+      const { data } = await supabase
+        .from(tableName)
+        .select("id, first_name, last_name")
+        .is("owner_user_id", null)
+        .is("archived_at", null)
+        .order("last_name")
+        .limit(50);
+      return (data ?? []).map((r) => ({
+        id: r.id,
+        name: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() || "Unnamed",
+        issue: "No owner assigned",
+      }));
+    }
+    if (entity === "opportunities") {
+      const { data } = await supabase
+        .from(tableName)
+        .select("id, name")
+        .is("owner_user_id", null)
+        .is("archived_at", null)
+        .order("name")
+        .limit(50);
+      return (data ?? []).map((r) => ({ id: r.id, name: r.name || "Unnamed", issue: "No owner assigned" }));
+    }
+    if (entity === "leads") {
+      const { data } = await supabase
+        .from(tableName)
+        .select("id, first_name, last_name")
+        .is("owner_user_id", null)
+        .is("archived_at", null)
+        .order("last_name")
+        .limit(50);
+      return (data ?? []).map((r) => ({
+        id: r.id,
+        name: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() || "Unnamed",
+        issue: "No owner assigned",
+      }));
+    }
+  }
+
+  if (issue === "missing_name") {
+    if (entity === "accounts") {
+      const { data } = await supabase
+        .from(tableName)
+        .select("id, name")
+        .or("name.is.null,name.eq.")
+        .is("archived_at", null)
+        .limit(50);
+      return (data ?? []).map((r) => ({ id: r.id, name: r.name || `ID: ${r.id.slice(0, 8)}`, issue: "Missing name" }));
+    }
+    if (entity === "contacts") {
+      const { data } = await supabase
+        .from(tableName)
+        .select("id, first_name, last_name")
+        .or("first_name.is.null,last_name.is.null")
+        .is("archived_at", null)
+        .limit(50);
+      return (data ?? []).map((r) => ({
+        id: r.id,
+        name: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() || `ID: ${r.id.slice(0, 8)}`,
+        issue: "Missing name",
+      }));
+    }
+    if (entity === "opportunities") {
+      const { data } = await supabase
+        .from(tableName)
+        .select("id, name")
+        .or("name.is.null,name.eq.")
+        .is("archived_at", null)
+        .limit(50);
+      return (data ?? []).map((r) => ({ id: r.id, name: r.name || `ID: ${r.id.slice(0, 8)}`, issue: "Missing name" }));
+    }
+    if (entity === "leads") {
+      const { data } = await supabase
+        .from(tableName)
+        .select("id, first_name, last_name")
+        .or("first_name.is.null,last_name.is.null")
+        .is("archived_at", null)
+        .limit(50);
+      return (data ?? []).map((r) => ({
+        id: r.id,
+        name: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() || `ID: ${r.id.slice(0, 8)}`,
+        issue: "Missing name",
+      }));
+    }
+  }
+
+  return [];
+}
+
+function entityPath(entity: string): string {
+  switch (entity) {
+    case "accounts": return "/accounts";
+    case "contacts": return "/contacts";
+    case "opportunities": return "/opportunities";
+    case "leads": return "/leads";
+    default: return "/";
+  }
+}
+
 /* ---------- Constants ---------- */
 
 const SUPABASE_FREE_TIER_BYTES = 500 * 1024 * 1024; // 500 MB
@@ -83,11 +214,79 @@ const PROTECTION_CHECKLIST = [
   { enabled: false, label: "Point-in-time recovery (available on Pro plan)" },
 ];
 
+/* ---------- Drilldown Panel ---------- */
+
+function DrilldownPanel({ entity, issue, onClose }: {
+  entity: string;
+  issue: "unassigned" | "missing_name";
+  onClose: () => void;
+}) {
+  const { data: records, isLoading } = useQuery({
+    queryKey: ["data_health_drilldown", entity, issue],
+    queryFn: () => fetchDrilldown(entity, issue),
+  });
+
+  const issueLabel = issue === "unassigned" ? "Unassigned" : "Missing Data";
+
+  return (
+    <TableRow>
+      <TableCell colSpan={7} className="p-0">
+        <div className="bg-muted/30 border-t px-4 py-3">
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="text-sm font-medium capitalize">
+              {issueLabel} {entity}
+            </h4>
+            <Button variant="ghost" size="sm" onClick={onClose} className="h-6 text-xs">
+              Close
+            </Button>
+          </div>
+          {isLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+              <Loader2 className="h-3 w-3 animate-spin" /> Loading...
+            </div>
+          ) : records && records.length > 0 ? (
+            <div className="rounded-md border bg-background">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Issue</TableHead>
+                    <TableHead className="w-16"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {records.map((r) => (
+                    <TableRow key={r.id}>
+                      <TableCell className="text-sm font-medium">{r.name}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{r.issue}</TableCell>
+                      <TableCell>
+                        <Link
+                          to={`${entityPath(entity)}/${r.id}`}
+                          className="text-blue-600 hover:underline text-xs inline-flex items-center gap-1"
+                        >
+                          View <ExternalLink className="h-3 w-3" />
+                        </Link>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground py-1">No records found.</p>
+          )}
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+}
+
 /* ---------- Component ---------- */
 
 export function DataHealthDashboard() {
   const { data: stats, isLoading: statsLoading } = useDatabaseStats();
   const { data: healthRows, isLoading: healthLoading } = useDataHealthCheck();
+  const [expanded, setExpanded] = useState<{ entity: string; issue: "unassigned" | "missing_name" } | null>(null);
 
   if (statsLoading || healthLoading) {
     return (
@@ -101,6 +300,14 @@ export function DataHealthDashboard() {
     ? Math.round((stats.database_size_bytes / SUPABASE_FREE_TIER_BYTES) * 100)
     : 0;
   const sizeWarning = sizePercent > 80;
+
+  function toggleDrilldown(entity: string, issue: "unassigned" | "missing_name") {
+    if (expanded?.entity === entity && expanded?.issue === issue) {
+      setExpanded(null);
+    } else {
+      setExpanded({ entity, issue });
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -200,39 +407,67 @@ export function DataHealthDashboard() {
                 </TableHeader>
                 <TableBody>
                   {healthRows.map((row) => (
-                    <TableRow key={row.entity}>
-                      <TableCell className="font-medium capitalize">
-                        {row.entity}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {row.total_records}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {row.archived_records}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {row.created_last_24h}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {row.modified_last_24h}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <span className="inline-flex items-center gap-1">
-                          {row.missing_name > 0 && (
-                            <AlertTriangle className="h-3 w-3 text-yellow-500" />
+                    <>
+                      <TableRow key={row.entity}>
+                        <TableCell className="font-medium capitalize">
+                          {row.entity}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {row.total_records}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {row.archived_records}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {row.created_last_24h}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {row.modified_last_24h}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {row.missing_name > 0 ? (
+                            <button
+                              onClick={() => toggleDrilldown(row.entity, "missing_name")}
+                              className="inline-flex items-center gap-1 text-yellow-600 hover:text-yellow-700 hover:underline cursor-pointer font-medium"
+                            >
+                              <AlertTriangle className="h-3 w-3" />
+                              {row.missing_name}
+                              {expanded?.entity === row.entity && expanded?.issue === "missing_name"
+                                ? <ChevronDown className="h-3 w-3" />
+                                : <ChevronRight className="h-3 w-3" />
+                              }
+                            </button>
+                          ) : (
+                            <span>{row.missing_name}</span>
                           )}
-                          {row.missing_name}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <span className="inline-flex items-center gap-1">
-                          {row.unassigned_records > 0 && (
-                            <AlertTriangle className="h-3 w-3 text-red-500" />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {row.unassigned_records > 0 ? (
+                            <button
+                              onClick={() => toggleDrilldown(row.entity, "unassigned")}
+                              className="inline-flex items-center gap-1 text-red-600 hover:text-red-700 hover:underline cursor-pointer font-medium"
+                            >
+                              <AlertTriangle className="h-3 w-3" />
+                              {row.unassigned_records}
+                              {expanded?.entity === row.entity && expanded?.issue === "unassigned"
+                                ? <ChevronDown className="h-3 w-3" />
+                                : <ChevronRight className="h-3 w-3" />
+                              }
+                            </button>
+                          ) : (
+                            <span>{row.unassigned_records}</span>
                           )}
-                          {row.unassigned_records}
-                        </span>
-                      </TableCell>
-                    </TableRow>
+                        </TableCell>
+                      </TableRow>
+                      {expanded?.entity === row.entity && (
+                        <DrilldownPanel
+                          key={`${row.entity}-${expanded.issue}`}
+                          entity={row.entity}
+                          issue={expanded.issue}
+                          onClose={() => setExpanded(null)}
+                        />
+                      )}
+                    </>
                   ))}
                 </TableBody>
               </Table>

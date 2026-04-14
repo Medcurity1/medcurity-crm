@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useOpportunity, useCreateOpportunity, useUpdateOpportunity } from "./api";
-import { useAccounts, useUsers } from "@/features/accounts/api";
+import { useAccountsList, useAccount, useUsers } from "@/features/accounts/api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
@@ -28,7 +28,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import type { Contact, CustomFieldDefinition, Account } from "@/types/crm";
+import type { Contact, CustomFieldDefinition } from "@/types/crm";
 
 /* ---------- Section wrapper ---------- */
 
@@ -51,8 +51,7 @@ export function OpportunityForm() {
   const navigate = useNavigate();
   const isEditing = !!id;
   const { data: opp, isLoading: loadingOpp } = useOpportunity(id);
-  const { data: accountsResult } = useAccounts();
-  const accounts = accountsResult?.data;
+  const { data: accountsList } = useAccountsList();
   const { data: users } = useUsers(true);
   const { data: customFieldDefs } = useCustomFieldDefinitions("opportunities");
   const { data: requiredFieldsData } = useRequiredFields("opportunities");
@@ -174,11 +173,11 @@ export function OpportunityForm() {
     }
   }, [opp, isEditing, reset]);
 
-  // Auto-populate fields from account when account changes (new opps only)
-  const selectedAccount: Account | undefined = accounts?.find((a) => a.id === watchedAccountId);
+  // Fetch full account data for the selected account (FTE, lead source, partner, etc.)
+  const { data: selectedAccount } = useAccount(watchedAccountId || undefined);
   useEffect(() => {
     if (!watchedAccountId || isEditing) return;
-    const acct = accounts?.find((a) => a.id === watchedAccountId);
+    const acct = selectedAccount;
     if (!acct) return;
     if (acct.lead_source) {
       setValue("lead_source", acct.lead_source as OpportunityFormValues["lead_source"]);
@@ -190,7 +189,7 @@ export function OpportunityForm() {
     if (acct.fte_range) {
       setValue("fte_range", acct.fte_range as OpportunityFormValues["fte_range"]);
     }
-  }, [watchedAccountId, accounts, isEditing, setValue]);
+  }, [watchedAccountId, selectedAccount, isEditing, setValue]);
 
   function emptyToNull(v: unknown): unknown {
     if (v === "" || v === undefined) return null;
@@ -297,7 +296,7 @@ export function OpportunityForm() {
                       <SelectValue placeholder="Select account" />
                     </SelectTrigger>
                     <SelectContent>
-                      {accounts?.map((a) => (
+                      {accountsList?.map((a) => (
                         <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
                       ))}
                     </SelectContent>
