@@ -168,7 +168,7 @@ export function OpportunityForm() {
         services_included: opp.services_included ?? false,
         one_time_project: opp.one_time_project ?? false,
         fte_count: opp.fte_count ?? undefined,
-        fte_range: opp.fte_range ?? "",
+        fte_range: (opp.fte_range ?? "") as OpportunityFormValues["fte_range"],
         custom_fields: opp.custom_fields ?? {},
       });
     }

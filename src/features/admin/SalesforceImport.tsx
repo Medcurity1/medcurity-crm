@@ -920,6 +920,18 @@ export function SalesforceImport() {
           if (exactMatch) {
             return { csvColumn: h, crmField: exactMatch, confidence: "exact" as MappingConfidence };
           }
+          // Try without spaces/underscores/slashes (catches "Billing Zip/Postal Code" etc.)
+          const stripped = normalized.replace(/[\s_/]+/g, "");
+          const strippedMatch = fieldMap[stripped];
+          if (strippedMatch) {
+            return { csvColumn: h, crmField: strippedMatch, confidence: "exact" as MappingConfidence };
+          }
+          // Try with spaces instead of camelCase: "BillingPostalCode" → "billing postal code"
+          const spaced = normalized.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+          const spacedMatch = fieldMap[spaced];
+          if (spacedMatch) {
+            return { csvColumn: h, crmField: spacedMatch, confidence: "exact" as MappingConfidence };
+          }
           // Try fuzzy match
           const fuzzy = fuzzyMatchField(h, crmFields);
           if (fuzzy) {
@@ -1195,12 +1207,7 @@ export function SalesforceImport() {
               if (!matched && !value.startsWith("005")) {
                 // Check if there's ALSO a 005 Owner Id column mapped — if so,
                 // skip the text name; the 005 column will handle it more reliably
-                const hasOwnerIdColumn = mappings.some(
-                  (m) => m.crmField === "owner_user_id" && m.csvColumn !== csvHeaders[csvHeaders.indexOf(
-                    mappings.find((mm) => mm.crmField === "owner_user_id" && csvRows[0]?.[csvHeaders.indexOf(mm.csvColumn)]?.startsWith?.("005") === false)?.csvColumn ?? ""
-                  )]
-                );
-                // Simpler: just check if ANY mapped owner column has a 005 value in this row
+                // Check if ANY mapped owner column has a 005 value in this row
                 const ownerMappings = mappings.filter((m) => m.crmField === "owner_user_id");
                 const has005Column = ownerMappings.some((m) => {
                   const colIdx = csvHeaders.indexOf(m.csvColumn);

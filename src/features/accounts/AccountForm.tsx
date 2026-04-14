@@ -172,7 +172,7 @@ export function AccountForm() {
         employees: account.employees ?? "",
         locations: account.locations ?? "",
         fte_count: account.fte_count ?? "",
-        fte_range: account.fte_range ?? "",
+        fte_range: (account.fte_range ?? "") as AccountFormValues["fte_range"],
         number_of_providers: account.number_of_providers ?? "",
         annual_revenue: account.annual_revenue ?? "",
         active_since: account.active_since ?? "",
@@ -540,7 +540,7 @@ export function AccountForm() {
                       onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
                         const num = parseInt(e.target.value, 10);
                         if (!isNaN(num) && num > 0) {
-                          setValue("fte_range", employeesToFteRange(num));
+                          setValue("fte_range", employeesToFteRange(num) as AccountFormValues["fte_range"]);
                         }
                       },
                     })}
