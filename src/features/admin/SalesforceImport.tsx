@@ -360,8 +360,21 @@ const CONTACT_FIELDS: Record<string, string> = {
   // MQL/SQL
   "mql date": "mql_date",
   mql_date__c: "mql_date",
+  mql__c: "mql_date",
+  "mql": "mql_date",
   "sql date": "sql_date",
   sql_date__c: "sql_date",
+  sql__c: "sql_date",
+  "sql": "sql_date",
+  // Partner & next steps
+  "partner source": "partner_source",
+  partner_source__c: "partner_source",
+  partner__c: "partner_source",
+  "partner": "partner_source",
+  "next steps": "next_steps",
+  next_steps__c: "next_steps",
+  "next step": "next_steps",
+  next_step__c: "next_steps",
   // SF metadata
   createddate: "sf_created_date",
   "created date": "sf_created_date",
@@ -583,6 +596,14 @@ const LEAD_FIELDS: Record<string, string> = {
   // MQL
   "mql date": "mql_date",
   mql_date__c: "mql_date",
+  mql__c: "mql_date",
+  "mql": "mql_date",
+  // Partner & next steps
+  "partner source": "partner_source",
+  partner_source__c: "partner_source",
+  "next steps": "next_steps",
+  next_steps__c: "next_steps",
+  "next step": "next_steps",
   // Email bounce
   emailbouncedreason: "email_bounced_reason",
   "email bounced reason": "email_bounced_reason",
@@ -740,6 +761,9 @@ function getCRMFields(entity: EntityType): string[] {
         // MQL/SQL
         "mql_date",
         "sql_date",
+        // Partner & next steps
+        "partner_source",
+        "next_steps",
         // Email bounce
         "email_bounced_reason",
         "email_bounced_date",
@@ -849,6 +873,9 @@ function getCRMFields(entity: EntityType): string[] {
         "score",
         // MQL
         "mql_date",
+        // Partner & next steps
+        "partner_source",
+        "next_steps",
         // Conversion
         "is_converted",
         "converted_at",
@@ -932,6 +959,8 @@ const FIELD_LABEL_OVERRIDES: Record<string, string> = {
   lead_source_detail: "Lead Source Detail",
   mql_date: "MQL Date",
   sql_date: "SQL Date",
+  partner_source: "Partner Source",
+  next_steps: "Next Steps",
 };
 
 /** Human-readable label for a CRM field key. */
