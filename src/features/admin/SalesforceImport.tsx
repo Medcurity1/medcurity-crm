@@ -40,7 +40,7 @@ import {
    Types
    ================================================================ */
 
-type EntityType = "accounts" | "contacts" | "opportunities" | "leads";
+type EntityType = "accounts" | "contacts" | "opportunities" | "leads" | "products" | "price_books" | "price_book_entries";
 
 type MappingConfidence = "exact" | "fuzzy" | "unmapped";
 
@@ -675,6 +675,109 @@ const LEAD_FIELDS: Record<string, string> = {
   "last modified by": "sf_last_modified_by",
 };
 
+/* ---- Products ---- */
+const PRODUCT_FIELDS: Record<string, string> = {
+  // Identity
+  id: "sf_id",
+  product2id: "sf_id",
+  "product id": "sf_id",
+  productcode: "code",
+  "product code": "code",
+  code: "code",
+  name: "name",
+  "product name": "name",
+  // Details
+  family: "product_family",
+  "product family": "product_family",
+  productfamily: "product_family",
+  description: "description",
+  "product description": "description",
+  isactive: "is_active",
+  "is active": "is_active",
+  active: "is_active",
+  // Pricing
+  "default arr": "default_arr",
+  default_arr__c: "default_arr",
+  defaultarr: "default_arr",
+  category: "category",
+  "product category": "category",
+  "pricing model": "pricing_model",
+  pricing_model__c: "pricing_model",
+  pricingmodel: "pricing_model",
+  // SF metadata
+  createddate: "sf_created_date",
+  "created date": "sf_created_date",
+  lastmodifieddate: "sf_last_modified_date",
+  "last modified date": "sf_last_modified_date",
+};
+
+/* ---- Price Books ---- */
+const PRICE_BOOK_FIELDS: Record<string, string> = {
+  id: "sf_id",
+  pricebook2id: "sf_id",
+  "price book id": "sf_id",
+  "pricebook id": "sf_id",
+  name: "name",
+  "price book name": "name",
+  pricebookname: "name",
+  description: "description",
+  isactive: "is_active",
+  "is active": "is_active",
+  active: "is_active",
+  isstandard: "is_default",
+  "is standard": "is_default",
+  "is default": "is_default",
+  effectivedate: "effective_date",
+  "effective date": "effective_date",
+  createddate: "sf_created_date",
+  "created date": "sf_created_date",
+  lastmodifieddate: "sf_last_modified_date",
+  "last modified date": "sf_last_modified_date",
+};
+
+/* ---- Price Book Entries ---- */
+const PRICE_BOOK_ENTRY_FIELDS: Record<string, string> = {
+  // Identity
+  id: "sf_id",
+  pricebookentryid: "sf_id",
+  "pricebook entry id": "sf_id",
+  // References
+  pricebook2id: "price_book_sf_id",
+  "price book id": "price_book_sf_id",
+  "pricebook id": "price_book_sf_id",
+  product2id: "product_sf_id",
+  "product id": "product_sf_id",
+  "product 2 id": "product_sf_id",
+  productcode: "product_code_lookup",
+  "product code": "product_code_lookup",
+  // Pricing
+  unitprice: "unit_price",
+  "unit price": "unit_price",
+  "list price": "unit_price",
+  listprice: "unit_price",
+  price: "unit_price",
+  // FTE range
+  "fte range": "fte_range",
+  fte_range__c: "fte_range",
+  fterange: "fte_range",
+  // Status
+  isactive: "is_active",
+  "is active": "is_active",
+  active: "is_active",
+  // Product name (informational, for display)
+  name: "product_name",
+  "product name": "product_name",
+  // Price book name (informational)
+  "pricebook name": "price_book_name",
+  "price book name": "price_book_name",
+  pricebook2name: "price_book_name",
+  // SF metadata
+  createddate: "sf_created_date",
+  "created date": "sf_created_date",
+  lastmodifieddate: "sf_last_modified_date",
+  "last modified date": "sf_last_modified_date",
+};
+
 function getFieldMap(entity: EntityType): Record<string, string> {
   switch (entity) {
     case "accounts":
@@ -685,6 +788,12 @@ function getFieldMap(entity: EntityType): Record<string, string> {
       return OPPORTUNITY_FIELDS;
     case "leads":
       return LEAD_FIELDS;
+    case "products":
+      return PRODUCT_FIELDS;
+    case "price_books":
+      return PRICE_BOOK_FIELDS;
+    case "price_book_entries":
+      return PRICE_BOOK_ENTRY_FIELDS;
   }
 }
 
@@ -966,6 +1075,45 @@ function getCRMFields(entity: EntityType): string[] {
         "sf_last_modified_by",
         "sf_last_modified_date",
       ];
+    case "products":
+      return [
+        "sf_id",
+        "code",
+        "name",
+        "product_family",
+        "description",
+        "is_active",
+        "default_arr",
+        "category",
+        "pricing_model",
+        "sf_created_date",
+        "sf_last_modified_date",
+      ];
+    case "price_books":
+      return [
+        "sf_id",
+        "name",
+        "description",
+        "is_active",
+        "is_default",
+        "effective_date",
+        "sf_created_date",
+        "sf_last_modified_date",
+      ];
+    case "price_book_entries":
+      return [
+        "sf_id",
+        "price_book_sf_id",
+        "product_sf_id",
+        "product_code_lookup",
+        "unit_price",
+        "fte_range",
+        "is_active",
+        "product_name",
+        "price_book_name",
+        "sf_created_date",
+        "sf_last_modified_date",
+      ];
   }
 }
 
@@ -1049,6 +1197,20 @@ const FIELD_LABEL_OVERRIDES: Record<string, string> = {
   comments: "Comments",
   linkedin_url: "LinkedIn Profile",
   priority_lead: "Priority Lead",
+  // Product fields
+  code: "Product Code",
+  product_family: "Product Family",
+  default_arr: "Default ARR",
+  pricing_model: "Pricing Model",
+  // Price book entry fields
+  price_book_sf_id: "Price Book (SF ID)",
+  product_sf_id: "Product (SF ID)",
+  product_code_lookup: "Product (Code Lookup)",
+  unit_price: "Unit Price",
+  product_name: "Product Name",
+  price_book_name: "Price Book Name",
+  is_default: "Is Default/Standard",
+  effective_date: "Effective Date",
 };
 
 /** Human-readable label for a CRM field key. */
@@ -1145,6 +1307,15 @@ function validateRow(
   }
   if (entity === "opportunities" && !mapped.name) {
     return { type: "skip", message: "Missing required field \"name\"" };
+  }
+  if (entity === "products" && (!mapped.name || !mapped.code)) {
+    return { type: "skip", message: "Missing required field \"name\" or \"code\"" };
+  }
+  if (entity === "price_books" && !mapped.name) {
+    return { type: "skip", message: "Missing required field \"name\"" };
+  }
+  if (entity === "price_book_entries" && !mapped.unit_price) {
+    return { type: "skip", message: "Missing required field \"unit_price\"" };
   }
 
   return null;
@@ -1539,6 +1710,10 @@ export function SalesforceImport() {
 
       let accountSfMap: Map<string, string> | null = null;
       let contactSfMap: Map<string, string> | null = null;
+      let productSfMap: Map<string, string> | null = null;
+      let productCodeMap: Map<string, string> | null = null;
+      let priceBookSfMap: Map<string, string> | null = null;
+      let priceBookNameMap: Map<string, string> | null = null;
       if (
         entity === "contacts" ||
         entity === "opportunities"
@@ -1558,6 +1733,28 @@ export function SalesforceImport() {
           .not("sf_id", "is", null);
         contactSfMap = new Map(
           (contacts ?? []).map((c) => [c.sf_id as string, c.id as string])
+        );
+      }
+      if (entity === "price_book_entries") {
+        // Build product lookups (by sf_id and by code)
+        const { data: products } = await supabase
+          .from("products")
+          .select("id, sf_id, code");
+        productSfMap = new Map(
+          (products ?? []).filter((p) => p.sf_id).map((p) => [p.sf_id as string, p.id as string])
+        );
+        productCodeMap = new Map(
+          (products ?? []).filter((p) => p.code).map((p) => [p.code as string, p.id as string])
+        );
+        // Build price book lookups
+        const { data: priceBooks } = await supabase
+          .from("price_books")
+          .select("id, sf_id, name");
+        priceBookSfMap = new Map(
+          (priceBooks ?? []).filter((pb) => pb.sf_id).map((pb) => [pb.sf_id as string, pb.id as string])
+        );
+        priceBookNameMap = new Map(
+          (priceBooks ?? []).map((pb) => [(pb.name as string).toLowerCase(), pb.id as string])
         );
       }
 
@@ -1696,6 +1893,68 @@ export function SalesforceImport() {
               continue;
             }
 
+            // Product SF ID lookup (for price book entries)
+            if (field === "product_sf_id") {
+              if (productSfMap) {
+                const productId = productSfMap.get(value);
+                if (productId) {
+                  record.product_id = productId;
+                } else {
+                  const errMsg = `Product SF ID "${value}" not found in CRM`;
+                  errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
+                  failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
+                  failedCount[0]++;
+                  skipRow = true;
+                }
+              }
+              continue;
+            }
+
+            // Product code lookup (for price book entries)
+            if (field === "product_code_lookup") {
+              if (!record.product_id && productCodeMap) {
+                const productId = productCodeMap.get(value);
+                if (productId) {
+                  record.product_id = productId;
+                }
+                // Don't fail — product_sf_id is the primary lookup
+              }
+              continue;
+            }
+
+            // Price book SF ID lookup
+            if (field === "price_book_sf_id") {
+              if (priceBookSfMap) {
+                const pbId = priceBookSfMap.get(value);
+                if (pbId) {
+                  record.price_book_id = pbId;
+                } else {
+                  const errMsg = `Price Book SF ID "${value}" not found in CRM — import price books first`;
+                  errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
+                  failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
+                  failedCount[0]++;
+                  skipRow = true;
+                }
+              }
+              continue;
+            }
+
+            // Price book name lookup (fallback)
+            if (field === "price_book_name") {
+              if (!record.price_book_id && priceBookNameMap) {
+                const pbId = priceBookNameMap.get(value.toLowerCase());
+                if (pbId) {
+                  record.price_book_id = pbId;
+                }
+              }
+              continue;
+            }
+
+            // Product name (informational only for price book entries)
+            if (field === "product_name") {
+              continue;
+            }
+
             // Numeric fields
             if (
               [
@@ -1725,6 +1984,8 @@ export function SalesforceImport() {
                 "fiscal_year",
                 "fiscal_quarter",
                 "total_opportunity_quantity",
+                "unit_price",
+                "default_arr",
               ].includes(field)
             ) {
               const num = Number(value.replace(/[,$]/g, ""));
@@ -1740,7 +2001,8 @@ export function SalesforceImport() {
                "every_other_year", "one_time_project", "auto_renewal", "services_included",
                "follow_up", "is_converted", "is_closed", "is_won",
                "created_by_automation", "has_opportunity_line_items",
-               "has_opted_out_of_email", "do_not_call", "do_not_market_to", "priority_lead"].includes(field)
+               "has_opted_out_of_email", "do_not_call", "do_not_market_to", "priority_lead",
+               "is_active", "is_default"].includes(field)
             ) {
               record[field] = value.toLowerCase() === "true" || value === "1";
               continue;
@@ -1946,6 +2208,27 @@ export function SalesforceImport() {
             failedCount[0]++;
             continue;
           }
+          if (entity === "products" && (!record.name || !record.code)) {
+            const errMsg = "Missing product name or code";
+            errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
+            failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
+            failedCount[0]++;
+            continue;
+          }
+          if (entity === "price_books" && !record.name) {
+            const errMsg = "Missing price book name";
+            errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
+            failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
+            failedCount[0]++;
+            continue;
+          }
+          if (entity === "price_book_entries" && (!record.product_id || !record.price_book_id)) {
+            const errMsg = "Missing product or price book reference";
+            errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
+            failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
+            failedCount[0]++;
+            continue;
+          }
 
           // Email validation
           if (
@@ -1978,6 +2261,16 @@ export function SalesforceImport() {
           if (entity === "leads") {
             record.status = record.status ?? "new";
           }
+          if (entity === "products") {
+            record.is_active = record.is_active ?? true;
+          }
+          if (entity === "price_books") {
+            record.is_active = record.is_active ?? true;
+            record.is_default = record.is_default ?? false;
+          }
+          if (entity === "price_book_entries") {
+            record.unit_price = record.unit_price ?? 0;
+          }
 
           // Move non-DB fields into custom_fields JSONB
           const CONTACT_DB_COLS = new Set([
@@ -2008,28 +2301,51 @@ export function SalesforceImport() {
             "created_by", "updated_by", "created_at", "updated_at", "archived_at",
           ]);
 
+          // Products & price book entries — strip unknown fields (no custom_fields JSONB)
+          const PRODUCT_DB_COLS = new Set([
+            "id", "sf_id", "code", "name", "product_family", "description",
+            "is_active", "default_arr", "category", "pricing_model",
+            "created_at", "updated_at",
+          ]);
+          const PB_DB_COLS = new Set([
+            "id", "sf_id", "name", "is_default", "is_active", "description",
+            "effective_date", "created_at", "updated_at",
+          ]);
+          const PBE_DB_COLS = new Set([
+            "id", "sf_id", "price_book_id", "product_id", "fte_range",
+            "unit_price", "created_at", "updated_at",
+          ]);
+
           const dbCols = entity === "contacts" ? CONTACT_DB_COLS
             : entity === "opportunities" ? OPP_DB_COLS
             : entity === "leads" ? LEAD_DB_COLS
+            : entity === "products" ? PRODUCT_DB_COLS
+            : entity === "price_books" ? PB_DB_COLS
+            : entity === "price_book_entries" ? PBE_DB_COLS
             : null; // accounts handled separately
 
           if (dbCols) {
+            const hasCustomFields = entity !== "products" && entity !== "price_books" && entity !== "price_book_entries";
             const customFields: Record<string, unknown> = {};
             const sfHistoryFields = ["sf_created_by", "sf_created_date", "sf_last_modified_by", "sf_last_modified_date"];
             for (const key of Object.keys(record)) {
               if (!dbCols.has(key) && !sfHistoryFields.includes(key)) {
-                customFields[key] = record[key];
+                if (hasCustomFields) {
+                  customFields[key] = record[key];
+                }
                 delete record[key];
               }
             }
-            // SF history fields → store in custom_fields as well
+            // SF history fields → store in custom_fields as well (only for entities that have it)
             for (const sfKey of sfHistoryFields) {
               if (record[sfKey]) {
-                customFields[sfKey] = record[sfKey];
+                if (hasCustomFields) {
+                  customFields[sfKey] = record[sfKey];
+                }
                 delete record[sfKey];
               }
             }
-            if (Object.keys(customFields).length > 0) {
+            if (hasCustomFields && Object.keys(customFields).length > 0) {
               record.custom_fields = customFields;
             }
           }
@@ -2406,6 +2722,9 @@ export function SalesforceImport() {
                 <SelectItem value="contacts">Contacts</SelectItem>
                 <SelectItem value="opportunities">Opportunities</SelectItem>
                 <SelectItem value="leads">Leads</SelectItem>
+                <SelectItem value="products">Products</SelectItem>
+                <SelectItem value="price_books">Price Books</SelectItem>
+                <SelectItem value="price_book_entries">Price Book Entries</SelectItem>
               </SelectContent>
             </Select>
           </div>

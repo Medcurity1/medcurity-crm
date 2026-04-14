@@ -169,6 +169,7 @@ export interface Contact {
 
 export interface Product {
   id: string;
+  sf_id: string | null;
   code: string;
   name: string;
   product_family: string | null;
@@ -377,6 +378,7 @@ export interface AuditLog {
 
 export interface PriceBook {
   id: string;
+  sf_id: string | null;
   name: string;
   is_default: boolean;
   is_active: boolean;
@@ -388,6 +390,7 @@ export interface PriceBook {
 
 export interface PriceBookEntry {
   id: string;
+  sf_id: string | null;
   price_book_id: string;
   product_id: string;
   fte_range: string | null;
