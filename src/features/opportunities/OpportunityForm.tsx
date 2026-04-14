@@ -264,7 +264,7 @@ export function OpportunityForm() {
     }
   }
 
-  if (isEditing && loadingOpp) {
+  if (isEditing && (loadingOpp || !opp)) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-10 w-48" />
@@ -272,6 +272,9 @@ export function OpportunityForm() {
       </div>
     );
   }
+
+  // When creating from an account page, lock the account selection
+  const accountLocked = isEditing || !!preselectedAccountId;
 
   return (
     <div>
@@ -291,16 +294,24 @@ export function OpportunityForm() {
 
                 <div className="space-y-2">
                   <Label>Account *<RequiredIndicator fieldKey="account_id" requiredFields={requiredKeys} /></Label>
-                  <Select value={watchedAccountId} onValueChange={(v) => setValue("account_id", v)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select account" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {accountsList?.map((a) => (
-                        <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {accountLocked ? (
+                    <Input
+                      value={selectedAccount?.name ?? opp?.account?.name ?? "Loading..."}
+                      disabled
+                      className="bg-muted"
+                    />
+                  ) : (
+                    <Select value={watchedAccountId} onValueChange={(v) => setValue("account_id", v)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select account" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {accountsList?.map((a) => (
+                          <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                   {errors.account_id && <p className="text-sm text-destructive">{errors.account_id.message}</p>}
                 </div>
 
