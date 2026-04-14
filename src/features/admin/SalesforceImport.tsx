@@ -1737,7 +1737,34 @@ export function SalesforceImport() {
                 },
               };
               const mapping = enumMappings[field];
-              record[field] = mapping?.[normalized] ?? normalized;
+              const mappedValue = mapping?.[normalized] ?? normalized;
+
+              // Validate against known enum values — unknown values get stored as detail
+              const VALID_ENUMS: Record<string, Set<string>> = {
+                lead_source: new Set(["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"]),
+                source: new Set(["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"]),
+                stage: new Set(["lead", "qualified", "proposal", "verbal_commit", "closed_won", "closed_lost"]),
+                status: new Set(["active", "inactive", "discovery", "pending", "churned", "new", "contacted", "qualified", "unqualified", "converted", "dead"]),
+                lifecycle_status: new Set(["prospect", "active_client", "former_client", "partner"]),
+                kind: new Set(["new_business", "renewal"]),
+                team: new Set(["sales", "renewals"]),
+                payment_frequency: new Set(["monthly", "quarterly", "semi_annually", "annually", "one_time"]),
+                qualification: new Set(["unqualified", "mql", "sql", "opportunity"]),
+                renewal_type: new Set(["auto_renew", "manual_renew", "no_auto_renew", "full_auto_renew", "platform_only_auto_renew"]),
+              };
+              const validSet = VALID_ENUMS[field];
+              if (validSet && !validSet.has(mappedValue)) {
+                // Unknown enum value — store original in lead_source_detail and set to "other"
+                if (field === "lead_source" || field === "source") {
+                  record[field] = "other";
+                  if (!record.lead_source_detail) {
+                    record.lead_source_detail = value; // preserve original SF value
+                  }
+                }
+                // For other enum fields, just skip the unknown value (use defaults)
+              } else {
+                record[field] = mappedValue;
+              }
               continue;
             }
 
@@ -1824,7 +1851,6 @@ export function SalesforceImport() {
             "mailing_street", "mailing_city", "mailing_state", "mailing_zip", "mailing_country",
             "do_not_contact", "lead_source", "original_lead_id", "custom_fields",
             "created_by", "updated_by", "created_at", "updated_at", "archived_at",
-            "description",
           ]);
           const OPP_DB_COLS = new Set([
             "id", "sf_id", "account_id", "primary_contact_id", "owner_user_id",
