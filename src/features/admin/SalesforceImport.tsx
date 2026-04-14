@@ -1429,10 +1429,10 @@ export function SalesforceImport() {
       errors.push(`Unexpected error: ${(err as Error).message}`);
     }
 
-    // Warn about unmatched owners
-    if (unmatchedOwners.size > 0) {
+    // Warn about unmatched owners (only if records were actually imported/updated, not just skipped)
+    if (unmatchedOwners.size > 0 && (imported[0] > 0 || failedCount[0] > 0)) {
       const ownerWarnings = Array.from(unmatchedOwners.entries()).map(
-        ([owner, rows]) => `Owner "${owner}" not found in CRM (${rows.length} records: ${rows.slice(0, 3).join(", ")}${rows.length > 3 ? "..." : ""})`
+        ([owner, rows]) => `Owner "${owner}" not found in CRM — records imported without owner (${rows.length} rows: ${rows.slice(0, 3).join(", ")}${rows.length > 3 ? "..." : ""})`
       );
       errors.push(...ownerWarnings);
     }

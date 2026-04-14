@@ -53,7 +53,7 @@ export function OpportunityForm() {
   const { data: opp, isLoading: loadingOpp } = useOpportunity(id);
   const { data: accountsResult } = useAccounts();
   const accounts = accountsResult?.data;
-  const { data: users } = useUsers();
+  const { data: users } = useUsers(true);
   const { data: customFieldDefs } = useCustomFieldDefinitions("opportunities");
   const { data: requiredFieldsData } = useRequiredFields("opportunities");
   const requiredKeys = requiredFieldsData?.map((f) => f.field_key) ?? [];
@@ -326,7 +326,7 @@ export function OpportunityForm() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Owner<RequiredIndicator fieldKey="owner_user_id" requiredFields={requiredKeys} /></Label>
+                  <Label>Opportunity Owner<RequiredIndicator fieldKey="owner_user_id" requiredFields={requiredKeys} /></Label>
                   <Select
                     value={watch("owner_user_id") ?? "unassigned"}
                     onValueChange={(v) => setValue("owner_user_id", v === "unassigned" ? null : v)}
@@ -335,7 +335,7 @@ export function OpportunityForm() {
                     <SelectContent>
                       <SelectItem value="unassigned">Unassigned</SelectItem>
                       {users?.map((u) => (
-                        <SelectItem key={u.id} value={u.id}>{u.full_name ?? u.id}</SelectItem>
+                        <SelectItem key={u.id} value={u.id}>{u.full_name ?? u.id}{!u.is_active ? " (inactive)" : ""}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>

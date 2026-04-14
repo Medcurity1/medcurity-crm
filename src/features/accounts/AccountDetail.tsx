@@ -240,7 +240,7 @@ export function AccountDetail() {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
         <Card>
           <CardHeader className="pb-1 pt-3 px-4">
-            <CardTitle className="text-xs text-muted-foreground font-medium">Owner</CardTitle>
+            <CardTitle className="text-xs text-muted-foreground font-medium">Account Owner</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
             <p className="text-sm font-semibold truncate">{account.owner?.full_name ?? "Unassigned"}</p>

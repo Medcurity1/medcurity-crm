@@ -82,7 +82,7 @@ export function AccountForm() {
   const navigate = useNavigate();
   const isEditing = !!id;
   const { data: account, isLoading: loadingAccount } = useAccount(id);
-  const { data: users } = useUsers();
+  const { data: users } = useUsers(true);
   const { data: allAccounts } = useAccountsList();
   const { data: customFieldDefs } = useCustomFieldDefinitions("accounts");
   const { data: requiredFieldsData } = useRequiredFields("accounts");
@@ -345,7 +345,7 @@ export function AccountForm() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Owner<RequiredIndicator fieldKey="owner_user_id" requiredFields={requiredKeys} /></Label>
+                  <Label>Account Owner<RequiredIndicator fieldKey="owner_user_id" requiredFields={requiredKeys} /></Label>
                   <Select
                     value={watch("owner_user_id") ?? "unassigned"}
                     onValueChange={(v) => setValue("owner_user_id", v === "unassigned" ? null : v)}
@@ -357,7 +357,7 @@ export function AccountForm() {
                       <SelectItem value="unassigned">Unassigned</SelectItem>
                       {users?.map((u) => (
                         <SelectItem key={u.id} value={u.id}>
-                          {u.full_name ?? u.id}
+                          {u.full_name ?? u.id}{!u.is_active ? " (inactive)" : ""}
                         </SelectItem>
                       ))}
                     </SelectContent>

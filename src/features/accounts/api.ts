@@ -158,15 +158,18 @@ export function useAccountsList() {
   });
 }
 
-export function useUsers() {
+export function useUsers(includeInactive = false) {
   return useQuery({
-    queryKey: ["users"],
+    queryKey: ["users", { includeInactive }],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from("user_profiles")
         .select("*")
-        .eq("is_active", true)
         .order("full_name");
+      if (!includeInactive) {
+        query = query.eq("is_active", true);
+      }
+      const { data, error } = await query;
       if (error) throw error;
       return data;
     },
