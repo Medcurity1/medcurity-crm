@@ -433,6 +433,10 @@ const OPPORTUNITY_FIELDS: Record<string, string> = {
   pricebook2id: "sf_pricebook_id",
   "price book id": "sf_pricebook_id",
   "pricebook id": "sf_pricebook_id",
+  // Quantity
+  totalopportunityquantity: "total_opportunity_quantity",
+  "total opportunity quantity": "total_opportunity_quantity",
+  total_opportunity_quantity__c: "total_opportunity_quantity",
   // Automation
   created_by_automation__c: "created_by_automation",
   "created by automation": "created_by_automation",
@@ -814,6 +818,7 @@ function getCRMFields(entity: EntityType): string[] {
         "sf_contract_id",
         "has_opportunity_line_items",
         "sf_pricebook_id",
+        "total_opportunity_quantity",
         // Contract
         "contract_start_date",
         "contract_end_date",
@@ -987,6 +992,7 @@ const FIELD_LABEL_OVERRIDES: Record<string, string> = {
   has_opportunity_line_items: "Has Line Items",
   sf_pricebook_id: "SF Price Book ID",
   stage_sort_order: "Stage Sort Order",
+  total_opportunity_quantity: "Total Opportunity Quantity",
 };
 
 /** Human-readable label for a CRM field key. */
@@ -1662,6 +1668,7 @@ export function SalesforceImport() {
                 "expected_revenue",
                 "fiscal_year",
                 "fiscal_quarter",
+                "total_opportunity_quantity",
               ].includes(field)
             ) {
               const num = Number(value.replace(/[,$]/g, ""));
