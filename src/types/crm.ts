@@ -150,6 +150,8 @@ export interface Contact {
   lead_source: LeadSource | null;
   lead_source_detail?: string | null;
   original_lead_id: string | null;
+  mql_date: string | null;
+  sql_date: string | null;
   custom_fields: Record<string, unknown>;
   archived_at: string | null;
   archived_by: string | null;
@@ -262,6 +264,7 @@ export interface Lead {
   country: string | null;
   qualification: LeadQualification;
   qualification_date: string | null;
+  mql_date: string | null;
   score: number;
   score_factors: Record<string, unknown>[];
   converted_at: string | null;

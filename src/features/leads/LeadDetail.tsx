@@ -349,6 +349,7 @@ export function LeadDetail() {
           <EditableField label="Title" value={lead.title} onSave={saveField("title")} />
           <EditableField label="Industry" value={lead.industry} onSave={saveField("industry")} />
           <EditableField label="Website" value={lead.website} onSave={saveField("website")} />
+          <Field label="MQL Date" value={lead.mql_date ? formatDate(lead.mql_date) : null} />
           {lead.description && (
             <div className="md:col-span-2">
               <Field label="Description" value={lead.description} />

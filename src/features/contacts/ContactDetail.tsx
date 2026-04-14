@@ -285,6 +285,8 @@ export function ContactDetail() {
               }
             />
           )}
+          <Field label="MQL Date" value={contact.mql_date} />
+          <Field label="SQL Date" value={contact.sql_date} />
         </div>
       </CollapsibleSection>
 

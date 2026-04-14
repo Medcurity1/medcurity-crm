@@ -357,6 +357,11 @@ const CONTACT_FIELDS: Record<string, string> = {
   lastactivitydate: "last_activity_date",
   "last activity date": "last_activity_date",
   "last activity": "last_activity_date",
+  // MQL/SQL
+  "mql date": "mql_date",
+  mql_date__c: "mql_date",
+  "sql date": "sql_date",
+  sql_date__c: "sql_date",
   // SF metadata
   createddate: "sf_created_date",
   "created date": "sf_created_date",
@@ -575,6 +580,9 @@ const LEAD_FIELDS: Record<string, string> = {
   lastactivitydate: "last_activity_date",
   "last activity date": "last_activity_date",
   "last activity": "last_activity_date",
+  // MQL
+  "mql date": "mql_date",
+  mql_date__c: "mql_date",
   // Email bounce
   emailbouncedreason: "email_bounced_reason",
   "email bounced reason": "email_bounced_reason",
@@ -729,6 +737,9 @@ function getCRMFields(entity: EntityType): string[] {
         "other_state",
         "other_zip",
         "other_country",
+        // MQL/SQL
+        "mql_date",
+        "sql_date",
         // Email bounce
         "email_bounced_reason",
         "email_bounced_date",
@@ -836,6 +847,8 @@ function getCRMFields(entity: EntityType): string[] {
         "lead_source_detail",
         "qualification",
         "score",
+        // MQL
+        "mql_date",
         // Conversion
         "is_converted",
         "converted_at",
@@ -917,6 +930,8 @@ const FIELD_LABEL_OVERRIDES: Record<string, string> = {
   converted_contact_id: "Converted Contact ID",
   converted_opportunity_id: "Converted Opportunity ID",
   lead_source_detail: "Lead Source Detail",
+  mql_date: "MQL Date",
+  sql_date: "SQL Date",
 };
 
 /** Human-readable label for a CRM field key. */
@@ -1849,8 +1864,8 @@ export function SalesforceImport() {
             "id", "sf_id", "account_id", "owner_user_id", "first_name", "last_name",
             "email", "title", "phone", "is_primary", "department", "linkedin_url",
             "mailing_street", "mailing_city", "mailing_state", "mailing_zip", "mailing_country",
-            "do_not_contact", "lead_source", "original_lead_id", "custom_fields",
-            "created_by", "updated_by", "created_at", "updated_at", "archived_at",
+            "do_not_contact", "lead_source", "original_lead_id", "mql_date", "sql_date",
+            "custom_fields", "created_by", "updated_by", "created_at", "updated_at", "archived_at",
           ]);
           const OPP_DB_COLS = new Set([
             "id", "sf_id", "account_id", "primary_contact_id", "owner_user_id",
@@ -1868,7 +1883,7 @@ export function SalesforceImport() {
             "company", "title", "industry", "website", "status", "source", "description",
             "employees", "annual_revenue", "street", "city", "state", "zip", "country",
             "converted_at", "converted_account_id", "converted_contact_id", "converted_opportunity_id",
-            "custom_fields", "qualification", "qualification_date", "score", "score_factors",
+            "custom_fields", "qualification", "qualification_date", "mql_date", "score", "score_factors",
             "created_by", "updated_by", "created_at", "updated_at", "archived_at",
           ]);
 

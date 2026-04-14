@@ -60,6 +60,8 @@ export function ContactForm() {
       is_primary: false,
       owner_user_id: null,
       lead_source: null,
+      mql_date: "",
+      sql_date: "",
     },
   });
 
@@ -75,6 +77,8 @@ export function ContactForm() {
         is_primary: contact.is_primary,
         owner_user_id: contact.owner_user_id,
         lead_source: contact.lead_source ?? null,
+        mql_date: contact.mql_date ?? "",
+        sql_date: contact.sql_date ?? "",
       });
     }
   }, [contact, isEditing, reset]);
@@ -97,6 +101,8 @@ export function ContactForm() {
       email: values.email || null,
       title: values.title || null,
       phone: values.phone || null,
+      mql_date: values.mql_date || null,
+      sql_date: values.sql_date || null,
     };
 
     try {
@@ -232,6 +238,16 @@ export function ContactForm() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="mql_date">MQL Date<RequiredIndicator fieldKey="mql_date" requiredFields={requiredKeys} /></Label>
+                <Input id="mql_date" type="date" {...register("mql_date")} />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="sql_date">SQL Date<RequiredIndicator fieldKey="sql_date" requiredFields={requiredKeys} /></Label>
+                <Input id="sql_date" type="date" {...register("sql_date")} />
               </div>
             </div>
 

@@ -74,6 +74,7 @@ export function LeadForm() {
       source: "",
       qualification: "unqualified",
       score: "",
+      mql_date: "",
       description: "",
       employees: "",
       annual_revenue: "",
@@ -102,6 +103,7 @@ export function LeadForm() {
         source: lead.source ?? "",
         qualification: lead.qualification ?? "unqualified",
         score: lead.score ?? "",
+        mql_date: lead.mql_date ?? "",
         description: lead.description ?? "",
         employees: lead.employees ?? "",
         annual_revenue: lead.annual_revenue ?? "",
@@ -147,6 +149,7 @@ export function LeadForm() {
       source: emptyToNull(values.source),
       qualification: values.qualification ?? "unqualified",
       score: emptyToNull(values.score),
+      mql_date: emptyToNull(values.mql_date),
       description: emptyToNull(values.description),
       employees: emptyToNull(values.employees),
       annual_revenue: emptyToNull(values.annual_revenue),
@@ -311,6 +314,11 @@ export function LeadForm() {
                 <div className="space-y-2">
                   <Label htmlFor="score">Score<RequiredIndicator fieldKey="score" requiredFields={requiredKeys} /></Label>
                   <Input id="score" type="number" min={0} {...register("score")} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="mql_date">MQL Date<RequiredIndicator fieldKey="mql_date" requiredFields={requiredKeys} /></Label>
+                  <Input id="mql_date" type="date" {...register("mql_date")} />
                 </div>
 
                 <div className="space-y-2">

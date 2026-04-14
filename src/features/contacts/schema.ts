@@ -10,6 +10,8 @@ export const contactSchema = z.object({
   is_primary: z.boolean(),
   owner_user_id: z.string().uuid().nullable().optional(),
   lead_source: z.string().nullable().optional(),
+  mql_date: z.string().optional().or(z.literal("")),
+  sql_date: z.string().optional().or(z.literal("")),
 });
 
 export type ContactFormValues = z.input<typeof contactSchema>;
