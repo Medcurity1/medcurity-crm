@@ -1019,38 +1019,20 @@ export function SalesforceImport() {
             if (!value && value !== "0") continue;
 
             if (field === "owner_user_id") {
-              // Try multiple strategies to resolve the owner:
-              // 1. Direct match by full name
-              // 2. Match by email (if value looks like an email)
-              // 3. Treat as Salesforce User ID — look up SF user name/email
-              //    from the CSV data and match to CRM user by email or name
+              // SF CSVs often have BOTH "Account Owner" (text name) and "Owner Id" (005 ID).
+              // The 005 ID is more reliable. If we already resolved from a 005 ID, skip.
+              // If this is a text name and owner was already set, skip.
+              if (record.owner_user_id) {
+                continue;
+              }
+
               let matched = false;
               const valueLower = value.toLowerCase().trim();
 
-              // Strategy 1: Match by full name
-              const userByName = users?.find(
-                (u) => u.full_name?.toLowerCase() === valueLower
-              );
-              if (userByName) {
-                record.owner_user_id = userByName.id;
-                matched = true;
-              }
-
-              // Strategy 2: Match by email (via SF user map lookup)
-              if (!matched && value.includes("@")) {
-                const crmId = crmEmailLookup.get(valueLower);
-                if (crmId) {
-                  record.owner_user_id = crmId;
-                  matched = true;
-                }
-              }
-
-              // Strategy 3: Salesforce User ID (starts with 005)
-              // Use the SF User CSV map to resolve SF ID → email → CRM user
-              if (!matched && value.startsWith("005") && sfUserMap.size > 0) {
+              // Salesforce User ID (starts with 005) — most reliable
+              if (value.startsWith("005") && sfUserMap.size > 0) {
                 const sfUser = sfUserMap.get(value);
                 if (sfUser) {
-                  // Try matching by email first (most reliable)
                   if (sfUser.email && crmEmailLookup) {
                     const crmId = crmEmailLookup.get(sfUser.email.toLowerCase());
                     if (crmId) {
@@ -1058,7 +1040,6 @@ export function SalesforceImport() {
                       matched = true;
                     }
                   }
-                  // Fall back to name match
                   if (!matched && sfUser.name && crmNameLookup) {
                     const crmId = crmNameLookup.get(sfUser.name.toLowerCase());
                     if (crmId) {
@@ -1066,26 +1047,56 @@ export function SalesforceImport() {
                       matched = true;
                     }
                   }
-                  // Still not matched — user exists in SF but not in CRM
                   if (!matched) {
                     const label = `${sfUser.name} (${sfUser.email})`;
                     const existing = unmatchedOwners.get(label) || [];
                     existing.push(`Row ${rowIndex + 1}`);
                     unmatchedOwners.set(label, existing);
                   }
-                } else {
-                  // SF ID not found in User CSV
+                }
+              }
+
+              // Text name match — only if no 005 ID was available
+              if (!matched && !value.startsWith("005")) {
+                // Check if there's ALSO a 005 Owner Id column mapped — if so,
+                // skip the text name; the 005 column will handle it more reliably
+                const hasOwnerIdColumn = mappings.some(
+                  (m) => m.crmField === "owner_user_id" && m.csvColumn !== csvHeaders[csvHeaders.indexOf(
+                    mappings.find((mm) => mm.crmField === "owner_user_id" && csvRows[0]?.[csvHeaders.indexOf(mm.csvColumn)]?.startsWith?.("005") === false)?.csvColumn ?? ""
+                  )]
+                );
+                // Simpler: just check if ANY mapped owner column has a 005 value in this row
+                const ownerMappings = mappings.filter((m) => m.crmField === "owner_user_id");
+                const has005Column = ownerMappings.some((m) => {
+                  const colIdx = csvHeaders.indexOf(m.csvColumn);
+                  return colIdx >= 0 && row[colIdx]?.startsWith("005");
+                });
+
+                if (has005Column) {
+                  // Skip text name — the 005 column will resolve this row
+                  continue;
+                }
+
+                // No 005 column — try matching the text name directly
+                const userByName = users?.find(
+                  (u) => u.full_name?.toLowerCase() === valueLower
+                );
+                if (userByName) {
+                  record.owner_user_id = userByName.id;
+                  matched = true;
+                }
+                if (!matched && value.includes("@")) {
+                  const crmId = crmEmailLookup.get(valueLower);
+                  if (crmId) {
+                    record.owner_user_id = crmId;
+                    matched = true;
+                  }
+                }
+                if (!matched) {
                   const existing = unmatchedOwners.get(value) || [];
                   existing.push(`Row ${rowIndex + 1}`);
                   unmatchedOwners.set(value, existing);
                 }
-              }
-
-              // If value is not a SF ID and still not matched, track it
-              if (!matched && !value.startsWith("005")) {
-                const existing = unmatchedOwners.get(value) || [];
-                existing.push(`Row ${rowIndex + 1}`);
-                unmatchedOwners.set(value, existing);
               }
 
               continue;
