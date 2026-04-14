@@ -28,7 +28,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import type { Contact, CustomFieldDefinition } from "@/types/crm";
+import type { Contact, CustomFieldDefinition, Opportunity } from "@/types/crm";
 
 /* ---------- Section wrapper ---------- */
 
@@ -43,16 +43,38 @@ function FormSection({ title, children }: { title: string; children: React.React
   );
 }
 
-/* ---------- Main component ---------- */
+/* ---------- Wrapper: handles loading, then mounts inner form ---------- */
 
 export function OpportunityForm() {
+  const { id } = useParams<{ id: string }>();
+  const isEditing = !!id;
+  const { data: opp, isLoading: loadingOpp } = useOpportunity(id);
+  const { data: users } = useUsers(true);
+
+  // Wait for data before mounting the form so defaultValues are correct
+  if (isEditing && (loadingOpp || !opp || !users)) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-10 w-48" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+
+  // key={id} forces React to remount a fresh form instance per opportunity
+  return <OpportunityFormInner key={id ?? "new"} opp={opp} users={users ?? []} />;
+}
+
+/* ---------- Inner form (mounted fresh with correct defaults) ---------- */
+
+interface UserProfile { id: string; full_name: string | null; is_active: boolean }
+
+function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; users: UserProfile[] }) {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const isEditing = !!id;
-  const { data: opp, isLoading: loadingOpp } = useOpportunity(id);
   const { data: accountsList } = useAccountsList();
-  const { data: users } = useUsers(true);
   const { data: customFieldDefs } = useCustomFieldDefinitions("opportunities");
   const { data: requiredFieldsData } = useRequiredFields("opportunities");
   const requiredKeys = requiredFieldsData?.map((f) => f.field_key) ?? [];
@@ -68,48 +90,84 @@ export function OpportunityForm() {
     handleSubmit,
     setValue,
     watch,
-    reset,
     formState: { errors, isSubmitting },
   } = useForm<OpportunityFormValues>({
     resolver: zodResolver(opportunitySchema),
-    defaultValues: {
-      account_id: preselectedAccountId ?? "",
-      primary_contact_id: null,
-      owner_user_id: null,
-      team: "sales",
-      kind: "new_business",
-      name: "",
-      stage: "lead",
-      amount: 0,
-      expected_close_date: "",
-      close_date: "",
-      contract_start_date: "",
-      contract_end_date: "",
-      contract_length_months: undefined,
-      contract_year: undefined,
-      loss_reason: "",
-      notes: "",
-      // New fields
-      probability: undefined,
-      next_step: "",
-      lead_source: null,
-      lead_source_detail: "",
-      payment_frequency: null,
-      cycle_count: undefined,
-      auto_renewal: false,
-      description: "",
-      promo_code: "",
-      discount: undefined,
-      subtotal: undefined,
-      follow_up: false,
-      service_amount: undefined,
-      product_amount: undefined,
-      services_included: false,
-      one_time_project: false,
-      fte_count: undefined,
-      fte_range: "",
-      custom_fields: {},
-    },
+    defaultValues: isEditing && opp
+      ? {
+          account_id: opp.account_id,
+          primary_contact_id: opp.primary_contact_id,
+          owner_user_id: opp.owner_user_id,
+          team: opp.team,
+          kind: opp.kind,
+          name: opp.name,
+          stage: opp.stage,
+          amount: opp.amount,
+          expected_close_date: opp.expected_close_date ?? "",
+          close_date: opp.close_date ?? "",
+          contract_start_date: opp.contract_start_date ?? "",
+          contract_end_date: opp.contract_end_date ?? "",
+          contract_length_months: opp.contract_length_months ?? undefined,
+          contract_year: opp.contract_year ?? undefined,
+          loss_reason: opp.loss_reason ?? "",
+          notes: opp.notes ?? "",
+          probability: opp.probability ?? undefined,
+          next_step: opp.next_step ?? "",
+          lead_source: opp.lead_source ?? null,
+          lead_source_detail: opp.lead_source_detail ?? "",
+          payment_frequency: opp.payment_frequency ?? null,
+          cycle_count: opp.cycle_count ?? undefined,
+          auto_renewal: opp.auto_renewal ?? false,
+          description: opp.description ?? "",
+          promo_code: opp.promo_code ?? "",
+          discount: opp.discount ?? undefined,
+          subtotal: opp.subtotal ?? undefined,
+          follow_up: opp.follow_up ?? false,
+          service_amount: opp.service_amount ?? undefined,
+          product_amount: opp.product_amount ?? undefined,
+          services_included: opp.services_included ?? false,
+          one_time_project: opp.one_time_project ?? false,
+          fte_count: opp.fte_count ?? undefined,
+          fte_range: (opp.fte_range ?? "") as OpportunityFormValues["fte_range"],
+          custom_fields: opp.custom_fields ?? {},
+        }
+      : {
+          account_id: preselectedAccountId ?? "",
+          primary_contact_id: null,
+          owner_user_id: null,
+          team: "sales",
+          kind: "new_business",
+          name: "",
+          stage: "lead",
+          amount: 0,
+          expected_close_date: "",
+          close_date: "",
+          contract_start_date: "",
+          contract_end_date: "",
+          contract_length_months: undefined,
+          contract_year: undefined,
+          loss_reason: "",
+          notes: "",
+          probability: undefined,
+          next_step: "",
+          lead_source: null,
+          lead_source_detail: "",
+          payment_frequency: null,
+          cycle_count: undefined,
+          auto_renewal: false,
+          description: "",
+          promo_code: "",
+          discount: undefined,
+          subtotal: undefined,
+          follow_up: false,
+          service_amount: undefined,
+          product_amount: undefined,
+          services_included: false,
+          one_time_project: false,
+          fte_count: undefined,
+          fte_range: "",
+          custom_fields: {},
+        },
   });
 
   const watchedAccountId = watch("account_id");
@@ -129,49 +187,6 @@ export function OpportunityForm() {
     },
     enabled: !!watchedAccountId,
   });
-
-  useEffect(() => {
-    if (opp && isEditing) {
-      reset({
-        account_id: opp.account_id,
-        primary_contact_id: opp.primary_contact_id,
-        owner_user_id: opp.owner_user_id,
-        team: opp.team,
-        kind: opp.kind,
-        name: opp.name,
-        stage: opp.stage,
-        amount: opp.amount,
-        expected_close_date: opp.expected_close_date ?? "",
-        close_date: opp.close_date ?? "",
-        contract_start_date: opp.contract_start_date ?? "",
-        contract_end_date: opp.contract_end_date ?? "",
-        contract_length_months: opp.contract_length_months ?? undefined,
-        contract_year: opp.contract_year ?? undefined,
-        loss_reason: opp.loss_reason ?? "",
-        notes: opp.notes ?? "",
-        // New fields
-        probability: opp.probability ?? undefined,
-        next_step: opp.next_step ?? "",
-        lead_source: opp.lead_source ?? null,
-        lead_source_detail: opp.lead_source_detail ?? "",
-        payment_frequency: opp.payment_frequency ?? null,
-        cycle_count: opp.cycle_count ?? undefined,
-        auto_renewal: opp.auto_renewal ?? false,
-        description: opp.description ?? "",
-        promo_code: opp.promo_code ?? "",
-        discount: opp.discount ?? undefined,
-        subtotal: opp.subtotal ?? undefined,
-        follow_up: opp.follow_up ?? false,
-        service_amount: opp.service_amount ?? undefined,
-        product_amount: opp.product_amount ?? undefined,
-        services_included: opp.services_included ?? false,
-        one_time_project: opp.one_time_project ?? false,
-        fte_count: opp.fte_count ?? undefined,
-        fte_range: (opp.fte_range ?? "") as OpportunityFormValues["fte_range"],
-        custom_fields: opp.custom_fields ?? {},
-      });
-    }
-  }, [opp, isEditing, reset]);
 
   // Fetch full account data for the selected account (FTE, lead source, partner, etc.)
   const { data: selectedAccount } = useAccount(watchedAccountId || undefined);
@@ -226,7 +241,6 @@ export function OpportunityForm() {
       contract_year: emptyToNull(values.contract_year),
       loss_reason: emptyToNull(values.loss_reason),
       notes: emptyToNull(values.notes),
-      // New fields
       probability: values.probability ?? null,
       next_step: emptyToNull(values.next_step),
       lead_source: values.lead_source ?? null,
@@ -262,15 +276,6 @@ export function OpportunityForm() {
       console.error("Failed to save opportunity:", err);
       toast.error("Failed to save: " + (err as Error).message);
     }
-  }
-
-  if (isEditing && (loadingOpp || !opp)) {
-    return (
-      <div className="space-y-4">
-        <Skeleton className="h-10 w-48" />
-        <Skeleton className="h-64 w-full" />
-      </div>
-    );
   }
 
   // When creating from an account page, lock the account selection

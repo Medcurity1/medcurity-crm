@@ -27,7 +27,7 @@ import { toast } from "sonner";
 import { DuplicateWarning } from "@/components/DuplicateWarning";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { CustomFieldDefinition } from "@/types/crm";
+import type { Account, CustomFieldDefinition } from "@/types/crm";
 
 /* ---------- Section wrapper (always open) ---------- */
 
@@ -75,14 +75,34 @@ function CollapsibleFormSection({
   );
 }
 
-/* ---------- Main component ---------- */
+/* ---------- Wrapper: handles loading ---------- */
+
+interface UserProfile { id: string; full_name: string | null; is_active: boolean }
 
 export function AccountForm() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const isEditing = !!id;
   const { data: account, isLoading: loadingAccount } = useAccount(id);
   const { data: users } = useUsers(true);
+
+  if (isEditing && (loadingAccount || !account || !users)) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-10 w-48" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+
+  return <AccountFormInner key={id ?? "new"} account={account} users={users ?? []} />;
+}
+
+/* ---------- Inner form ---------- */
+
+function AccountFormInner({ account, users }: { account: Account | undefined; users: UserProfile[] }) {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const isEditing = !!id;
   const { data: allAccounts } = useAccountsList();
   const { data: customFieldDefs } = useCustomFieldDefinitions("accounts");
   const { data: requiredFieldsData } = useRequiredFields("accounts");
@@ -97,118 +117,113 @@ export function AccountForm() {
     handleSubmit,
     setValue,
     watch,
-    reset,
     formState: { errors, isSubmitting },
   } = useForm<AccountFormValues>({
     resolver: zodResolver(accountSchema),
-    defaultValues: {
-      name: "",
-      lifecycle_status: "prospect",
-      status: "discovery",
-      owner_user_id: null,
-      website: "",
-      industry: "",
-      account_type: "",
-      account_number: "",
-      parent_account_id: null,
-      phone: "",
-      phone_extension: "",
-      timezone: "",
-      employees: "",
-      locations: "",
-      fte_count: "",
-      fte_range: "",
-      number_of_providers: "",
-      annual_revenue: "",
-      active_since: "",
-      renewal_type: "",
-      every_other_year: false,
-      contracts: "",
-      current_contract_start_date: "",
-      current_contract_end_date: "",
-      current_contract_length_months: "",
-      acv: "",
-      lifetime_value: "",
-      churn_amount: "",
-      churn_date: "",
-      billing_street: "",
-      billing_city: "",
-      billing_state: "",
-      billing_zip: "",
-      billing_country: "",
-      shipping_street: "",
-      shipping_city: "",
-      shipping_state: "",
-      shipping_zip: "",
-      shipping_country: "",
-      partner_account: "",
-      partner_prospect: false,
-      lead_source: "",
-      lead_source_detail: "",
-      priority_account: false,
-      project: "",
-      description: "",
-      notes: "",
-      next_steps: "",
-      custom_fields: {},
-    },
+    defaultValues: isEditing && account
+      ? {
+          name: account.name,
+          lifecycle_status: account.lifecycle_status,
+          status: account.status ?? "discovery",
+          owner_user_id: account.owner_user_id,
+          website: account.website ?? "",
+          industry: account.industry ?? "",
+          account_type: account.account_type ?? "",
+          account_number: account.account_number ?? "",
+          parent_account_id: account.parent_account_id ?? null,
+          phone: account.phone ?? "",
+          phone_extension: account.phone_extension ?? "",
+          timezone: account.timezone ?? "",
+          employees: account.employees ?? "",
+          locations: account.locations ?? "",
+          fte_count: account.fte_count ?? "",
+          fte_range: (account.fte_range ?? "") as AccountFormValues["fte_range"],
+          number_of_providers: account.number_of_providers ?? "",
+          annual_revenue: account.annual_revenue ?? "",
+          active_since: account.active_since ?? "",
+          renewal_type: account.renewal_type ?? "",
+          every_other_year: account.every_other_year ?? false,
+          contracts: account.contracts ?? "",
+          current_contract_start_date: account.current_contract_start_date ?? "",
+          current_contract_end_date: account.current_contract_end_date ?? "",
+          current_contract_length_months: account.current_contract_length_months ?? "",
+          acv: account.acv ?? "",
+          lifetime_value: account.lifetime_value ?? "",
+          churn_amount: account.churn_amount ?? "",
+          churn_date: account.churn_date ?? "",
+          billing_street: account.billing_street ?? "",
+          billing_city: account.billing_city ?? "",
+          billing_state: account.billing_state ?? "",
+          billing_zip: account.billing_zip ?? "",
+          billing_country: account.billing_country ?? "",
+          shipping_street: account.shipping_street ?? "",
+          shipping_city: account.shipping_city ?? "",
+          shipping_state: account.shipping_state ?? "",
+          shipping_zip: account.shipping_zip ?? "",
+          shipping_country: account.shipping_country ?? "",
+          partner_account: account.partner_account ?? "",
+          partner_prospect: account.partner_prospect ?? false,
+          lead_source: account.lead_source ?? "",
+          lead_source_detail: account.lead_source_detail ?? "",
+          priority_account: account.priority_account ?? false,
+          project: account.project ?? "",
+          description: account.description ?? "",
+          notes: account.notes ?? "",
+          next_steps: account.next_steps ?? "",
+          custom_fields: account.custom_fields ?? {},
+        }
+      : {
+          name: "",
+          lifecycle_status: "prospect",
+          status: "discovery",
+          owner_user_id: null,
+          website: "",
+          industry: "",
+          account_type: "",
+          account_number: "",
+          parent_account_id: null,
+          phone: "",
+          phone_extension: "",
+          timezone: "",
+          employees: "",
+          locations: "",
+          fte_count: "",
+          fte_range: "",
+          number_of_providers: "",
+          annual_revenue: "",
+          active_since: "",
+          renewal_type: "",
+          every_other_year: false,
+          contracts: "",
+          current_contract_start_date: "",
+          current_contract_end_date: "",
+          current_contract_length_months: "",
+          acv: "",
+          lifetime_value: "",
+          churn_amount: "",
+          churn_date: "",
+          billing_street: "",
+          billing_city: "",
+          billing_state: "",
+          billing_zip: "",
+          billing_country: "",
+          shipping_street: "",
+          shipping_city: "",
+          shipping_state: "",
+          shipping_zip: "",
+          shipping_country: "",
+          partner_account: "",
+          partner_prospect: false,
+          lead_source: "",
+          lead_source_detail: "",
+          priority_account: false,
+          project: "",
+          description: "",
+          notes: "",
+          next_steps: "",
+          custom_fields: {},
+        },
   });
-
-  useEffect(() => {
-    if (account && isEditing) {
-      reset({
-        name: account.name,
-        lifecycle_status: account.lifecycle_status,
-        status: account.status ?? "discovery",
-        owner_user_id: account.owner_user_id,
-        website: account.website ?? "",
-        industry: account.industry ?? "",
-        account_type: account.account_type ?? "",
-        account_number: account.account_number ?? "",
-        parent_account_id: account.parent_account_id ?? null,
-        phone: account.phone ?? "",
-        phone_extension: account.phone_extension ?? "",
-        timezone: account.timezone ?? "",
-        employees: account.employees ?? "",
-        locations: account.locations ?? "",
-        fte_count: account.fte_count ?? "",
-        fte_range: (account.fte_range ?? "") as AccountFormValues["fte_range"],
-        number_of_providers: account.number_of_providers ?? "",
-        annual_revenue: account.annual_revenue ?? "",
-        active_since: account.active_since ?? "",
-        renewal_type: account.renewal_type ?? "",
-        every_other_year: account.every_other_year ?? false,
-        contracts: account.contracts ?? "",
-        current_contract_start_date: account.current_contract_start_date ?? "",
-        current_contract_end_date: account.current_contract_end_date ?? "",
-        current_contract_length_months: account.current_contract_length_months ?? "",
-        acv: account.acv ?? "",
-        lifetime_value: account.lifetime_value ?? "",
-        churn_amount: account.churn_amount ?? "",
-        churn_date: account.churn_date ?? "",
-        billing_street: account.billing_street ?? "",
-        billing_city: account.billing_city ?? "",
-        billing_state: account.billing_state ?? "",
-        billing_zip: account.billing_zip ?? "",
-        billing_country: account.billing_country ?? "",
-        shipping_street: account.shipping_street ?? "",
-        shipping_city: account.shipping_city ?? "",
-        shipping_state: account.shipping_state ?? "",
-        shipping_zip: account.shipping_zip ?? "",
-        shipping_country: account.shipping_country ?? "",
-        partner_account: account.partner_account ?? "",
-        partner_prospect: account.partner_prospect ?? false,
-        lead_source: account.lead_source ?? "",
-        lead_source_detail: account.lead_source_detail ?? "",
-        priority_account: account.priority_account ?? false,
-        project: account.project ?? "",
-        description: account.description ?? "",
-        notes: account.notes ?? "",
-        next_steps: account.next_steps ?? "",
-        custom_fields: account.custom_fields ?? {},
-      });
-    }
-  }, [account, isEditing, reset]);
 
   // Copy billing -> shipping when checkbox toggled
   useEffect(() => {
@@ -308,15 +323,6 @@ export function AccountForm() {
       const message = err instanceof Error ? err.message : String(err);
       toast.error("Failed to save account: " + message);
     }
-  }
-
-  if (isEditing && loadingAccount) {
-    return (
-      <div className="space-y-4">
-        <Skeleton className="h-10 w-48" />
-        <Skeleton className="h-64 w-full" />
-      </div>
-    );
   }
 
   // Filter out current account from parent account list
