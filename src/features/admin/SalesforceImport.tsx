@@ -622,6 +622,41 @@ const LEAD_FIELDS: Record<string, string> = {
   "next steps": "next_steps",
   next_steps__c: "next_steps",
   "next step": "next_steps",
+  // Opt-out & do-not flags
+  hasoptedoutofemail: "has_opted_out_of_email",
+  "has opted out of email": "has_opted_out_of_email",
+  emailoptout: "has_opted_out_of_email",
+  "email opt out": "has_opted_out_of_email",
+  has_opted_out_of_email__c: "has_opted_out_of_email",
+  donotcall: "do_not_call",
+  "do not call": "do_not_call",
+  do_not_call__c: "do_not_call",
+  donotmarketto: "do_not_market_to",
+  "do not market to": "do_not_market_to",
+  do_not_market_to__c: "do_not_market_to",
+  // Type
+  type: "lead_type",
+  "lead type": "lead_type",
+  type__c: "lead_type",
+  // Notes / comments
+  notes: "notes",
+  "lead notes": "notes",
+  notes__c: "notes",
+  comments: "comments",
+  "lead comments": "comments",
+  comments__c: "comments",
+  // LinkedIn
+  linkedin: "linkedin_url",
+  "linkedin profile": "linkedin_url",
+  "linkedin url": "linkedin_url",
+  linkedin_profile__c: "linkedin_url",
+  linkedin_url__c: "linkedin_url",
+  linkedinprofile: "linkedin_url",
+  linkedinurl: "linkedin_url",
+  // Priority
+  "priority lead": "priority_lead",
+  priority_lead__c: "priority_lead",
+  prioritylead: "priority_lead",
   // Email bounce
   emailbouncedreason: "email_bounced_reason",
   "email bounced reason": "email_bounced_reason",
@@ -902,6 +937,18 @@ function getCRMFields(entity: EntityType): string[] {
         // Partner & next steps
         "partner_source",
         "next_steps",
+        // Opt-out & flags
+        "has_opted_out_of_email",
+        "do_not_call",
+        "do_not_market_to",
+        // Type / notes
+        "lead_type",
+        "notes",
+        "comments",
+        // LinkedIn
+        "linkedin_url",
+        // Priority
+        "priority_lead",
         // Conversion
         "is_converted",
         "converted_at",
@@ -993,6 +1040,15 @@ const FIELD_LABEL_OVERRIDES: Record<string, string> = {
   sf_pricebook_id: "SF Price Book ID",
   stage_sort_order: "Stage Sort Order",
   total_opportunity_quantity: "Total Opportunity Quantity",
+  // Lead opt-out & flags
+  has_opted_out_of_email: "Has Opted Out of Email",
+  do_not_call: "Do Not Call",
+  do_not_market_to: "Do Not Market To",
+  lead_type: "Lead Type",
+  notes: "Notes",
+  comments: "Comments",
+  linkedin_url: "LinkedIn Profile",
+  priority_lead: "Priority Lead",
 };
 
 /** Human-readable label for a CRM field key. */
@@ -1683,7 +1739,8 @@ export function SalesforceImport() {
               ["is_primary", "do_not_contact", "partner_prospect", "priority_account",
                "every_other_year", "one_time_project", "auto_renewal", "services_included",
                "follow_up", "is_converted", "is_closed", "is_won",
-               "created_by_automation", "has_opportunity_line_items"].includes(field)
+               "created_by_automation", "has_opportunity_line_items",
+               "has_opted_out_of_email", "do_not_call", "do_not_market_to", "priority_lead"].includes(field)
             ) {
               record[field] = value.toLowerCase() === "true" || value === "1";
               continue;
