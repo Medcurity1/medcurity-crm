@@ -266,6 +266,7 @@ const ACCOUNT_FIELDS: Record<string, string> = {
 const CONTACT_FIELDS: Record<string, string> = {
   // Identity
   id: "sf_id",
+  contactid: "sf_id",
   "contact id": "sf_id",
   "first name": "first_name",
   firstname: "first_name",
@@ -273,21 +274,54 @@ const CONTACT_FIELDS: Record<string, string> = {
   lastname: "last_name",
   name: "first_name", // Will need manual adjustment if full name
   email: "email",
+  "email address": "email",
   title: "title",
   phone: "phone",
+  "phone number": "phone",
+  "business phone": "phone",
+  mobilephone: "mobile_phone",
+  "mobile phone": "mobile_phone",
+  "mobile number": "mobile_phone",
+  homephone: "home_phone",
+  "home phone": "home_phone",
+  otherphone: "other_phone",
+  "other phone": "other_phone",
+  fax: "fax",
+  salutation: "salutation",
   // References
   accountid: "account_id_sf_lookup",
   "account id": "account_id_sf_lookup",
+  "account name": "account_id_sf_lookup",
   ownerid: "owner_user_id",
   "owner id": "owner_user_id",
+  "contact owner": "owner_user_id",
+  reportstoid: "reports_to",
+  "reports to id": "reports_to",
+  "reports to": "reports_to",
   // Details
   department: "department",
+  description: "description",
+  "contact description": "description",
   "do not call": "do_not_contact",
   donotcall: "do_not_contact",
   "has opted out of email": "do_not_contact",
   hasoptedoutofemail: "do_not_contact",
+  "email opt out": "do_not_contact",
+  hasoptedoutoffax: "do_not_contact",
   "lead source": "lead_source",
   leadsource: "lead_source",
+  "is primary": "is_primary",
+  birthdate: "birthdate",
+  "date of birth": "birthdate",
+  assistantname: "assistant_name",
+  "assistant name": "assistant_name",
+  "assistant's name": "assistant_name",
+  assistantphone: "assistant_phone",
+  "assistant phone": "assistant_phone",
+  linkedin: "linkedin_url",
+  "linkedin url": "linkedin_url",
+  "linkedin profile": "linkedin_url",
+  linkedin__c: "linkedin_url",
   // Mailing address
   "mailing street": "mailing_street",
   mailingstreet: "mailing_street",
@@ -301,30 +335,75 @@ const CONTACT_FIELDS: Record<string, string> = {
   mailingpostalcode: "mailing_zip",
   "mailing country": "mailing_country",
   mailingcountry: "mailing_country",
+  // Other address
+  "other street": "other_street",
+  otherstreet: "other_street",
+  "other city": "other_city",
+  othercity: "other_city",
+  "other state/province": "other_state",
+  "other state": "other_state",
+  otherstate: "other_state",
+  "other zip/postal code": "other_zip",
+  "other zip": "other_zip",
+  otherpostalcode: "other_zip",
+  "other country": "other_country",
+  othercountry: "other_country",
+  // Email bounce
+  emailbouncedreason: "email_bounced_reason",
+  "email bounced reason": "email_bounced_reason",
+  emailbounceddate: "email_bounced_date",
+  "email bounced date": "email_bounced_date",
+  // Activity
+  lastactivitydate: "last_activity_date",
+  "last activity date": "last_activity_date",
+  "last activity": "last_activity_date",
   // SF metadata
-  createddate: "created_at",
-  "created date": "created_at",
+  createddate: "sf_created_date",
+  "created date": "sf_created_date",
+  createdbyid: "sf_created_by",
+  "created by id": "sf_created_by",
+  "created by": "sf_created_by",
+  lastmodifieddate: "sf_last_modified_date",
+  "last modified date": "sf_last_modified_date",
+  lastmodifiedbyid: "sf_last_modified_by",
+  "last modified by id": "sf_last_modified_by",
+  "last modified by": "sf_last_modified_by",
 };
 
 const OPPORTUNITY_FIELDS: Record<string, string> = {
   // Identity
   id: "sf_id",
+  opportunityid: "sf_id",
   "opportunity id": "sf_id",
   name: "name",
   "opportunity name": "name",
   // References
   accountid: "account_id_sf_lookup",
   "account id": "account_id_sf_lookup",
+  "account name": "account_id_sf_lookup",
   ownerid: "owner_user_id",
   "owner id": "owner_user_id",
+  "opportunity owner": "owner_user_id",
   contactid: "primary_contact_id_sf_lookup",
+  "contact id": "primary_contact_id_sf_lookup",
   "primary contact id": "primary_contact_id_sf_lookup",
+  "primary contact": "primary_contact_id_sf_lookup",
   // Stage & type
   stagename: "stage",
   stage: "stage",
+  "stage name": "stage",
   type: "kind",
+  "opportunity type": "kind",
   team: "team",
   team__c: "team",
+  isclosed: "is_closed",
+  "is closed": "is_closed",
+  iswon: "is_won",
+  "is won": "is_won",
+  forecastcategory: "forecast_category",
+  "forecast category": "forecast_category",
+  forecastcategoryname: "forecast_category",
+  "forecast category name": "forecast_category",
   // Financial
   amount: "amount",
   discount: "discount",
@@ -332,18 +411,37 @@ const OPPORTUNITY_FIELDS: Record<string, string> = {
   subtotal: "subtotal",
   subtotal__c: "subtotal",
   probability: "probability",
+  "probability (%)": "probability",
+  expectedrevenue: "expected_revenue",
+  "expected revenue": "expected_revenue",
+  service_amount__c: "service_amount",
+  "service amount": "service_amount",
+  product_amount__c: "product_amount",
+  "product amount": "product_amount",
+  services_included__c: "services_included",
+  "services included": "services_included",
+  service_description__c: "service_description",
+  "service description": "service_description",
   // Dates
   closedate: "close_date",
   "close date": "close_date",
+  "expected close date": "expected_close_date",
+  expected_close_date__c: "expected_close_date",
   "contract start date": "contract_start_date",
   contract_start_date__c: "contract_start_date",
   "contract end date": "contract_end_date",
   contract_end_date__c: "contract_end_date",
+  "maturity date": "contract_end_date",
+  maturity_date__c: "contract_end_date",
   "current contract start date": "contract_start_date",
   "current contract end date": "contract_end_date",
+  current_contract_start_date__c: "contract_start_date",
+  current_contract_end_date__c: "contract_end_date",
   // Contract details
   "contract length": "contract_length_months",
+  "contract length (months)": "contract_length_months",
   contract_length__c: "contract_length_months",
+  contract_length_months__c: "contract_length_months",
   "contract year": "contract_year",
   contract_year__c: "contract_year",
   "payment frequency": "payment_frequency",
@@ -363,54 +461,136 @@ const OPPORTUNITY_FIELDS: Record<string, string> = {
   leadsource: "lead_source",
   "lead source detail": "lead_source_detail",
   lead_source_detail__c: "lead_source_detail",
+  campaignid: "campaign_id",
+  "campaign id": "campaign_id",
+  "campaign": "campaign_id",
   // Details
   description: "description",
   "next step": "next_step",
   nextstep: "next_step",
+  next_step__c: "next_step",
   notes: "notes",
   notes__c: "notes",
+  "loss reason": "loss_reason",
+  loss_reason__c: "loss_reason",
   // FTE snapshot
   ftes__c: "fte_count",
   "fte count": "fte_count",
+  fte_count__c: "fte_count",
+  "number of ftes": "fte_count",
   fte_range__c: "fte_range",
   "fte range": "fte_range",
+  // Activity
+  lastactivitydate: "last_activity_date",
+  "last activity date": "last_activity_date",
+  "last activity": "last_activity_date",
+  laststagechangedate: "last_stage_change_date",
+  "last stage change date": "last_stage_change_date",
   // SF metadata
-  createddate: "created_at",
-  "created date": "created_at",
+  createddate: "sf_created_date",
+  "created date": "sf_created_date",
+  createdbyid: "sf_created_by",
+  "created by id": "sf_created_by",
+  "created by": "sf_created_by",
+  lastmodifieddate: "sf_last_modified_date",
+  "last modified date": "sf_last_modified_date",
+  lastmodifiedbyid: "sf_last_modified_by",
+  "last modified by id": "sf_last_modified_by",
+  "last modified by": "sf_last_modified_by",
+  fiscalyear: "fiscal_year",
+  "fiscal year": "fiscal_year",
+  fiscalquarter: "fiscal_quarter",
+  "fiscal quarter": "fiscal_quarter",
 };
 
 const LEAD_FIELDS: Record<string, string> = {
+  // Identity
   id: "sf_id",
+  leadid: "sf_id",
   "lead id": "sf_id",
   "first name": "first_name",
   firstname: "first_name",
   "last name": "last_name",
   lastname: "last_name",
+  name: "first_name",
+  salutation: "salutation",
   email: "email",
+  "email address": "email",
   company: "company",
+  "company name": "company",
+  // Status & source
   status: "status",
+  "lead status": "status",
   "lead source": "source",
   leadsource: "source",
+  rating: "rating",
+  "lead rating": "rating",
+  // Owner
   ownerid: "owner_user_id",
   "owner id": "owner_user_id",
+  "lead owner": "owner_user_id",
+  // Contact info
   phone: "phone",
+  "phone number": "phone",
+  mobilephone: "mobile_phone",
+  "mobile phone": "mobile_phone",
+  "mobile number": "mobile_phone",
+  fax: "fax",
   title: "title",
+  "job title": "title",
+  // Company details
   industry: "industry",
   website: "website",
   employees: "employees",
   numberofemployees: "employees",
+  "number of employees": "employees",
   "annual revenue": "annual_revenue",
   annualrevenue: "annual_revenue",
+  // Address
   street: "street",
+  address: "street",
   city: "city",
   state: "state",
+  "state/province": "state",
   "zip/postal code": "zip",
   postalcode: "zip",
   zip: "zip",
+  "postal code": "zip",
   country: "country",
+  // Details
   description: "description",
-  createddate: "created_at",
-  "created date": "created_at",
+  "lead description": "description",
+  // Conversion
+  isconverted: "is_converted",
+  "is converted": "is_converted",
+  converteddate: "converted_at",
+  "converted date": "converted_at",
+  convertedaccountid: "converted_account_id",
+  "converted account id": "converted_account_id",
+  convertedcontactid: "converted_contact_id",
+  "converted contact id": "converted_contact_id",
+  convertedopportunityid: "converted_opportunity_id",
+  "converted opportunity id": "converted_opportunity_id",
+  // Activity
+  lastactivitydate: "last_activity_date",
+  "last activity date": "last_activity_date",
+  "last activity": "last_activity_date",
+  // Email bounce
+  emailbouncedreason: "email_bounced_reason",
+  "email bounced reason": "email_bounced_reason",
+  emailbounceddate: "email_bounced_date",
+  "email bounced date": "email_bounced_date",
+  // SF metadata
+  createddate: "sf_created_date",
+  "created date": "sf_created_date",
+  createdbyid: "sf_created_by",
+  "created by id": "sf_created_by",
+  "created by": "sf_created_by",
+  lastmodifieddate: "sf_last_modified_date",
+  "last modified date": "sf_last_modified_date",
+  lastmodifiedbyid: "sf_last_modified_by",
+  "last modified by id": "sf_last_modified_by",
+  "last modified by": "sf_last_modified_by",
 };
 
 function getFieldMap(entity: EntityType): Record<string, string> {
@@ -510,25 +690,55 @@ function getCRMFields(entity: EntityType): string[] {
       ];
     case "contacts":
       return [
+        // Identity
         "first_name",
         "last_name",
         "email",
         "title",
         "phone",
+        "mobile_phone",
+        "home_phone",
+        "other_phone",
+        "fax",
+        "salutation",
         "sf_id",
+        // References
         "account_id_sf_lookup",
         "owner_user_id",
+        "reports_to",
+        // Details
         "is_primary",
         "department",
+        "description",
         "linkedin_url",
         "do_not_contact",
         "lead_source",
         "lead_source_detail",
+        "birthdate",
+        "assistant_name",
+        "assistant_phone",
+        // Mailing address
         "mailing_street",
         "mailing_city",
         "mailing_state",
         "mailing_zip",
         "mailing_country",
+        // Other address
+        "other_street",
+        "other_city",
+        "other_state",
+        "other_zip",
+        "other_country",
+        // Email bounce
+        "email_bounced_reason",
+        "email_bounced_date",
+        // Activity
+        "last_activity_date",
+        // SF History
+        "sf_created_by",
+        "sf_created_date",
+        "sf_last_modified_by",
+        "sf_last_modified_date",
       ];
     case "opportunities":
       return [
@@ -544,6 +754,10 @@ function getCRMFields(entity: EntityType): string[] {
         "kind",
         "team",
         "probability",
+        // Status flags
+        "is_closed",
+        "is_won",
+        "forecast_category",
         // Contract
         "contract_start_date",
         "contract_end_date",
@@ -552,8 +766,11 @@ function getCRMFields(entity: EntityType): string[] {
         // Financial
         "discount",
         "subtotal",
+        "expected_revenue",
         "service_amount",
         "product_amount",
+        "services_included",
+        "service_description",
         "promo_code",
         "payment_frequency",
         "cycle_count",
@@ -565,50 +782,83 @@ function getCRMFields(entity: EntityType): string[] {
         // Lead / Source
         "lead_source",
         "lead_source_detail",
+        "campaign_id",
         // Details
         "description",
         "notes",
         "next_step",
         "follow_up",
         "loss_reason",
-        "created_at",
+        // Activity
+        "last_activity_date",
+        "last_stage_change_date",
+        // SF History
+        "sf_created_by",
+        "sf_created_date",
+        "sf_last_modified_by",
+        "sf_last_modified_date",
+        "fiscal_year",
+        "fiscal_quarter",
       ];
     case "leads":
       return [
+        // Identity
         "first_name",
         "last_name",
         "email",
+        "salutation",
         "company",
+        "sf_id",
+        // Status & source
         "status",
         "source",
-        "sf_id",
+        "rating",
+        // Owner
         "owner_user_id",
+        // Contact info
         "phone",
+        "mobile_phone",
+        "fax",
         "title",
+        // Company details
         "industry",
         "website",
         "employees",
         "annual_revenue",
+        // Address
         "street",
         "city",
         "state",
         "zip",
         "country",
+        // Details
         "description",
         "lead_source_detail",
         "qualification",
         "score",
+        // Conversion
+        "is_converted",
+        "converted_at",
         "converted_account_id",
         "converted_contact_id",
         "converted_opportunity_id",
-        "converted_at",
+        // Email bounce
+        "email_bounced_reason",
+        "email_bounced_date",
+        // Activity
+        "last_activity_date",
+        // SF History
+        "sf_created_by",
+        "sf_created_date",
+        "sf_last_modified_by",
+        "sf_last_modified_date",
       ];
   }
 }
 
 /** Human-readable label overrides for specific CRM field keys. */
 const FIELD_LABEL_OVERRIDES: Record<string, string> = {
-  owner_user_id: "Account Owner",
+  owner_user_id: "Owner",
   sf_id: "Salesforce ID",
   account_id_sf_lookup: "Account (SF ID Lookup)",
   primary_contact_id_sf_lookup: "Primary Contact (SF ID Lookup)",
@@ -626,6 +876,47 @@ const FIELD_LABEL_OVERRIDES: Record<string, string> = {
   sic_description: "SIC Description",
   do_not_contact: "Do Not Contact",
   last_activity_date: "Last Activity Date",
+  // Contact fields
+  mobile_phone: "Mobile Phone",
+  home_phone: "Home Phone",
+  other_phone: "Other Phone",
+  linkedin_url: "LinkedIn URL",
+  is_primary: "Is Primary Contact",
+  reports_to: "Reports To",
+  assistant_name: "Assistant Name",
+  assistant_phone: "Assistant Phone",
+  email_bounced_reason: "Email Bounced Reason",
+  email_bounced_date: "Email Bounced Date",
+  other_street: "Other Street",
+  other_city: "Other City",
+  other_state: "Other State",
+  other_zip: "Other Zip",
+  other_country: "Other Country",
+  // Opportunity fields
+  is_closed: "Is Closed",
+  is_won: "Is Won",
+  forecast_category: "Forecast Category",
+  expected_revenue: "Expected Revenue",
+  services_included: "Services Included",
+  service_description: "Service Description",
+  service_amount: "Service Amount",
+  product_amount: "Product Amount",
+  contract_length_months: "Contract Length (Months)",
+  payment_frequency: "Payment Frequency",
+  auto_renewal: "Auto Renewal",
+  one_time_project: "One-Time Project",
+  campaign_id: "Campaign",
+  last_stage_change_date: "Last Stage Change Date",
+  fiscal_year: "Fiscal Year",
+  fiscal_quarter: "Fiscal Quarter",
+  loss_reason: "Loss Reason",
+  // Lead fields
+  is_converted: "Is Converted",
+  converted_at: "Converted Date",
+  converted_account_id: "Converted Account ID",
+  converted_contact_id: "Converted Contact ID",
+  converted_opportunity_id: "Converted Opportunity ID",
+  lead_source_detail: "Lead Source Detail",
 };
 
 /** Human-readable label for a CRM field key. */
@@ -1298,6 +1589,9 @@ export function SalesforceImport() {
                 "billing_longitude",
                 "shipping_latitude",
                 "shipping_longitude",
+                "expected_revenue",
+                "fiscal_year",
+                "fiscal_quarter",
               ].includes(field)
             ) {
               const num = Number(value.replace(/[,$]/g, ""));
@@ -1310,7 +1604,8 @@ export function SalesforceImport() {
             // Boolean fields
             if (
               ["is_primary", "do_not_contact", "partner_prospect", "priority_account",
-               "every_other_year", "one_time_project", "auto_renewal"].includes(field)
+               "every_other_year", "one_time_project", "auto_renewal", "services_included",
+               "follow_up", "is_converted", "is_closed", "is_won"].includes(field)
             ) {
               record[field] = value.toLowerCase() === "true" || value === "1";
               continue;
@@ -1319,7 +1614,7 @@ export function SalesforceImport() {
             // UUID reference fields — skip Salesforce null placeholders like "000000000000000AAA"
             if (
               ["parent_account_id", "converted_account_id", "converted_contact_id",
-               "converted_opportunity_id"].includes(field)
+               "converted_opportunity_id", "campaign_id"].includes(field)
             ) {
               // Valid UUIDs are 36 chars with hyphens; SF IDs are 18-char alphanumeric
               // Skip null placeholders (all zeros or all same char)
@@ -1349,7 +1644,7 @@ export function SalesforceImport() {
 
             // Normalize enum values: "No Auto Renew" → "no_auto_renew", etc.
             if (["renewal_type", "status", "lifecycle_status", "stage", "kind",
-                 "team", "lead_source", "payment_frequency", "qualification"].includes(field)) {
+                 "team", "lead_source", "source", "payment_frequency", "qualification"].includes(field)) {
               // Convert human-readable to snake_case enum: lowercase, trim, replace spaces with underscores
               const normalized = value.toLowerCase().trim().replace(/[\s-]+/g, "_");
               // Map common Salesforce values to CRM enum values
@@ -1373,15 +1668,33 @@ export function SalesforceImport() {
                   "closed_lost": "closed_lost",
                   "closed/won": "closed_won",
                   "closed/lost": "closed_lost",
+                  "closed won": "closed_won",
+                  "closed lost": "closed_lost",
+                  "won": "closed_won",
+                  "lost": "closed_lost",
                   "proposal": "proposal",
+                  "proposal/price_quote": "proposal",
                   "qualified": "qualified",
+                  "qualification": "qualified",
+                  "needs_analysis": "qualified",
+                  "value_proposition": "proposal",
+                  "id._decision_makers": "qualified",
+                  "perception_analysis": "qualified",
+                  "negotiation/review": "verbal_commit",
+                  "negotiation": "verbal_commit",
                   "verbal_commit": "verbal_commit",
+                  "verbal commit": "verbal_commit",
+                  "prospecting": "lead",
                   "lead": "lead",
                 },
                 kind: {
                   "new_business": "new_business",
                   "new business": "new_business",
+                  "new": "new_business",
                   "renewal": "renewal",
+                  "existing_business": "renewal",
+                  "existing business": "renewal",
+                  "existing_business___renewal": "renewal",
                 },
                 lead_source: {
                   "cold_call": "cold_call",
@@ -1393,6 +1706,34 @@ export function SalesforceImport() {
                   "social media": "social_media",
                   "email_campaign": "email_campaign",
                   "email campaign": "email_campaign",
+                  "web": "website",
+                  "inbound": "website",
+                  "advertisement": "other",
+                  "employee_referral": "referral",
+                  "employee referral": "referral",
+                  "external_referral": "referral",
+                  "external referral": "referral",
+                  "purchased_list": "other",
+                  "purchased list": "other",
+                  "public_relations": "other",
+                  "public relations": "other",
+                  "seminar___internal": "webinar",
+                  "seminar___partner": "partner",
+                },
+                source: {
+                  "cold_call": "cold_call",
+                  "cold call": "cold_call",
+                  "trade_show": "trade_show",
+                  "trade show": "trade_show",
+                  "social_media": "social_media",
+                  "social media": "social_media",
+                  "email_campaign": "email_campaign",
+                  "email campaign": "email_campaign",
+                  "web": "website",
+                  "inbound": "website",
+                  "employee_referral": "referral",
+                  "external_referral": "referral",
+                  "seminar___internal": "webinar",
                 },
               };
               const mapping = enumMappings[field];
@@ -1474,6 +1815,61 @@ export function SalesforceImport() {
           }
           if (entity === "leads") {
             record.status = record.status ?? "new";
+          }
+
+          // Move non-DB fields into custom_fields JSONB
+          const CONTACT_DB_COLS = new Set([
+            "id", "sf_id", "account_id", "owner_user_id", "first_name", "last_name",
+            "email", "title", "phone", "is_primary", "department", "linkedin_url",
+            "mailing_street", "mailing_city", "mailing_state", "mailing_zip", "mailing_country",
+            "do_not_contact", "lead_source", "original_lead_id", "custom_fields",
+            "created_by", "updated_by", "created_at", "updated_at", "archived_at",
+            "description",
+          ]);
+          const OPP_DB_COLS = new Set([
+            "id", "sf_id", "account_id", "primary_contact_id", "owner_user_id",
+            "team", "kind", "name", "stage", "amount", "service_amount", "product_amount",
+            "services_included", "service_description", "expected_close_date", "close_date",
+            "contract_start_date", "contract_end_date", "contract_length_months", "contract_year",
+            "source_opportunity_id", "renewal_from_opportunity_id", "loss_reason", "notes",
+            "probability", "next_step", "lead_source", "payment_frequency", "cycle_count",
+            "auto_renewal", "description", "promo_code", "discount", "subtotal", "follow_up",
+            "one_time_project", "lead_source_detail", "fte_count", "fte_range",
+            "custom_fields", "created_by", "updated_by", "created_at", "updated_at", "archived_at",
+          ]);
+          const LEAD_DB_COLS = new Set([
+            "id", "sf_id", "owner_user_id", "first_name", "last_name", "email", "phone",
+            "company", "title", "industry", "website", "status", "source", "description",
+            "employees", "annual_revenue", "street", "city", "state", "zip", "country",
+            "converted_at", "converted_account_id", "converted_contact_id", "converted_opportunity_id",
+            "custom_fields", "qualification", "qualification_date", "score", "score_factors",
+            "created_by", "updated_by", "created_at", "updated_at", "archived_at",
+          ]);
+
+          const dbCols = entity === "contacts" ? CONTACT_DB_COLS
+            : entity === "opportunities" ? OPP_DB_COLS
+            : entity === "leads" ? LEAD_DB_COLS
+            : null; // accounts handled separately
+
+          if (dbCols) {
+            const customFields: Record<string, unknown> = {};
+            const sfHistoryFields = ["sf_created_by", "sf_created_date", "sf_last_modified_by", "sf_last_modified_date"];
+            for (const key of Object.keys(record)) {
+              if (!dbCols.has(key) && !sfHistoryFields.includes(key)) {
+                customFields[key] = record[key];
+                delete record[key];
+              }
+            }
+            // SF history fields → store in custom_fields as well
+            for (const sfKey of sfHistoryFields) {
+              if (record[sfKey]) {
+                customFields[sfKey] = record[sfKey];
+                delete record[sfKey];
+              }
+            }
+            if (Object.keys(customFields).length > 0) {
+              record.custom_fields = customFields;
+            }
           }
 
           records.push(record);
