@@ -1195,7 +1195,6 @@ const FIELD_LABEL_OVERRIDES: Record<string, string> = {
   lead_type: "Lead Type",
   notes: "Notes",
   comments: "Comments",
-  linkedin_url: "LinkedIn Profile",
   priority_lead: "Priority Lead",
   // Product fields
   code: "Product Code",
