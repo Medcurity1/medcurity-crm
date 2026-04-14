@@ -354,6 +354,10 @@ export function OpportunityDetail() {
             label="One Time Project"
             value={opp.one_time_project ? "\u2713 Yes" : "\u2717 No"}
           />
+          <Field
+            label="Created by Automation"
+            value={opp.created_by_automation ? "\u2713 Yes" : "\u2717 No"}
+          />
         </div>
       </CollapsibleSection>
 

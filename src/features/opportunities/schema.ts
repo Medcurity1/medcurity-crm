@@ -37,6 +37,7 @@ export const opportunitySchema = z.object({
   // FTE snapshot
   fte_count: z.coerce.number().int().nonnegative().optional().nullable(),
   fte_range: z.enum(["1-20", "21-50", "51-100", "101-250", "251-500", "501-750", "751-1000", "1001-1500", "1501-2000", "2001-5000", "5001-10000"]).optional().or(z.literal("")).nullable(),
+  created_by_automation: z.boolean().optional(),
   custom_fields: z.record(z.string(), z.unknown()).optional(),
 });
 

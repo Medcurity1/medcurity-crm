@@ -223,6 +223,7 @@ export interface Opportunity {
   // FTE snapshot (captured at opp creation for historical tracking)
   fte_count: number | null;
   fte_range: string | null;
+  created_by_automation: boolean;
   custom_fields: Record<string, unknown>;
   archived_at: string | null;
   archived_by: string | null;

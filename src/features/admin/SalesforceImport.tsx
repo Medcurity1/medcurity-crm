@@ -422,6 +422,20 @@ const OPPORTUNITY_FIELDS: Record<string, string> = {
   "forecast category": "forecast_category",
   forecastcategoryname: "forecast_category",
   "forecast category name": "forecast_category",
+  stagesortorder: "stage_sort_order",
+  "stage sort order": "stage_sort_order",
+  // Contract reference (SF Contract object, NOT contract_year)
+  contractid: "sf_contract_id",
+  "contract id": "sf_contract_id",
+  // Product / pricebook
+  hasopportunitylineitem: "has_opportunity_line_items",
+  "has opportunity line item": "has_opportunity_line_items",
+  pricebook2id: "sf_pricebook_id",
+  "price book id": "sf_pricebook_id",
+  "pricebook id": "sf_pricebook_id",
+  // Automation
+  created_by_automation__c: "created_by_automation",
+  "created by automation": "created_by_automation",
   // Financial
   amount: "amount",
   discount: "discount",
@@ -793,6 +807,13 @@ function getCRMFields(entity: EntityType): string[] {
         "is_closed",
         "is_won",
         "forecast_category",
+        "stage_sort_order",
+        // Automation
+        "created_by_automation",
+        // SF references
+        "sf_contract_id",
+        "has_opportunity_line_items",
+        "sf_pricebook_id",
         // Contract
         "contract_start_date",
         "contract_end_date",
@@ -961,6 +982,11 @@ const FIELD_LABEL_OVERRIDES: Record<string, string> = {
   sql_date: "SQL Date",
   partner_source: "Partner Source",
   next_steps: "Next Steps",
+  created_by_automation: "Created by Automation",
+  sf_contract_id: "SF Contract ID",
+  has_opportunity_line_items: "Has Line Items",
+  sf_pricebook_id: "SF Price Book ID",
+  stage_sort_order: "Stage Sort Order",
 };
 
 /** Human-readable label for a CRM field key. */
@@ -1649,7 +1675,8 @@ export function SalesforceImport() {
             if (
               ["is_primary", "do_not_contact", "partner_prospect", "priority_account",
                "every_other_year", "one_time_project", "auto_renewal", "services_included",
-               "follow_up", "is_converted", "is_closed", "is_won"].includes(field)
+               "follow_up", "is_converted", "is_closed", "is_won",
+               "created_by_automation", "has_opportunity_line_items"].includes(field)
             ) {
               record[field] = value.toLowerCase() === "true" || value === "1";
               continue;
@@ -1905,6 +1932,7 @@ export function SalesforceImport() {
             "probability", "next_step", "lead_source", "payment_frequency", "cycle_count",
             "auto_renewal", "description", "promo_code", "discount", "subtotal", "follow_up",
             "one_time_project", "lead_source_detail", "fte_count", "fte_range",
+            "created_by_automation",
             "custom_fields", "created_by", "updated_by", "created_at", "updated_at", "archived_at",
           ]);
           const LEAD_DB_COLS = new Set([

@@ -129,6 +129,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           one_time_project: opp.one_time_project ?? false,
           fte_count: opp.fte_count ?? undefined,
           fte_range: (opp.fte_range ?? "") as OpportunityFormValues["fte_range"],
+          created_by_automation: opp.created_by_automation ?? false,
           custom_fields: opp.custom_fields ?? {},
         }
       : {
@@ -166,6 +167,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           one_time_project: false,
           fte_count: undefined,
           fte_range: "",
+          created_by_automation: false,
           custom_fields: {},
         },
   });
@@ -259,6 +261,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       one_time_project: values.one_time_project ?? false,
       fte_count: values.fte_count ?? null,
       fte_range: emptyToNull(values.fte_range),
+      created_by_automation: values.created_by_automation ?? false,
       custom_fields: values.custom_fields ?? {},
     };
 
@@ -454,6 +457,17 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                   />
                   <Label htmlFor="one_time_project" className="text-sm font-normal cursor-pointer">
                     One Time Project
+                  </Label>
+                </div>
+
+                <div className="flex items-center gap-2 pt-6">
+                  <Checkbox
+                    id="created_by_automation"
+                    checked={watch("created_by_automation") ?? false}
+                    onCheckedChange={(v) => setValue("created_by_automation", v === true)}
+                  />
+                  <Label htmlFor="created_by_automation" className="text-sm font-normal cursor-pointer">
+                    Created by Automation
                   </Label>
                 </div>
 
