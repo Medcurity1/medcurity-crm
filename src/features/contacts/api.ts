@@ -105,6 +105,22 @@ export function useBulkUpdateOwner() {
   });
 }
 
+export function useBulkDeleteContacts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ids }: { ids: string[] }) => {
+      for (let i = 0; i < ids.length; i += 50) {
+        const batch = ids.slice(i, i + 50);
+        const { error } = await supabase.from("contacts").delete().in("id", batch);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+    },
+  });
+}
+
 export function useArchiveContact() {
   const qc = useQueryClient();
   return useMutation({

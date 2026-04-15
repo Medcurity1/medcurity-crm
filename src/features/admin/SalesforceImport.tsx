@@ -63,6 +63,9 @@ interface ImportResult {
   failed: number;
   errors: string[];
   failedRows: FailedRow[];
+  importedIds: string[];
+  entity: EntityType;
+  timestamp: string;
 }
 
 interface ValidationIssue {
@@ -1370,6 +1373,7 @@ export function SalesforceImport() {
   const [currentBatch, setCurrentBatch] = useState({ batch: 0, totalBatches: 0 });
   const [estimatedTimeRemaining, setEstimatedTimeRemaining] = useState<string | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
+  const [undoing, setUndoing] = useState(false);
   const [validation, setValidation] = useState<ValidationSummary | null>(null);
   const [duplicateAction, setDuplicateAction] = useState<"skip" | "update">(
     "skip"
@@ -1676,6 +1680,7 @@ export function SalesforceImport() {
     const failedCount: number[] = [0];
     const errors: string[] = [];
     const failedRows: FailedRow[] = [];
+    const importedIds: string[] = [];
 
     // Track unmatched SF owner IDs to warn user
     const unmatchedOwners = new Map<string, string[]>();
@@ -2428,15 +2433,17 @@ export function SalesforceImport() {
 
         // Insert new records — try batch first, fall back to individual on failure
         if (toInsert.length > 0) {
-          const { error: insertError } = await supabase
+          const { data: insertedData, error: insertError } = await supabase
             .from(tableName)
-            .insert(toInsert);
+            .insert(toInsert)
+            .select("id");
           if (insertError) {
             // Batch failed — insert one at a time so good records still go through
             for (let r = 0; r < toInsert.length; r++) {
-              const { error: singleError } = await supabase
+              const { data: singleData, error: singleError } = await supabase
                 .from(tableName)
-                .insert(toInsert[r]);
+                .insert(toInsert[r])
+                .select("id");
               if (singleError) {
                 const rowNum = recordRowIndices[r] + 1;
                 const name = (toInsert[r].name as string) || `Row ${rowNum}`;
@@ -2450,10 +2457,16 @@ export function SalesforceImport() {
                 failedCount[0]++;
               } else {
                 imported[0]++;
+                if (singleData?.[0]?.id) importedIds.push(singleData[0].id as string);
               }
             }
           } else {
             imported[0] += toInsert.length;
+            if (insertedData) {
+              for (const row of insertedData) {
+                if (row.id) importedIds.push(row.id as string);
+              }
+            }
           }
         }
 
@@ -2495,6 +2508,9 @@ export function SalesforceImport() {
       failed: failedCount[0],
       errors,
       failedRows,
+      importedIds,
+      entity,
+      timestamp: new Date().toISOString(),
     });
 
     if (unmatchedOwners.size > 0) {
@@ -2692,6 +2708,28 @@ export function SalesforceImport() {
     progress.total > 0
       ? Math.round((progress.current / progress.total) * 100)
       : 0;
+
+  async function handleUndoImport() {
+    if (!result || result.importedIds.length === 0) return;
+    if (!confirm(`Delete ${result.importedIds.length} records from this import? This cannot be undone.`)) return;
+
+    setUndoing(true);
+    try {
+      const ids = result.importedIds;
+      const table = result.entity;
+      for (let i = 0; i < ids.length; i += 50) {
+        const batch = ids.slice(i, i + 50);
+        const { error } = await supabase.from(table).delete().in("id", batch);
+        if (error) throw error;
+      }
+      toast.success(`Undo complete — ${ids.length} records deleted from ${table}.`);
+      setResult(null);
+    } catch (err) {
+      toast.error(`Undo failed: ${(err as Error).message}`);
+    } finally {
+      setUndoing(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -3111,6 +3149,18 @@ export function SalesforceImport() {
                 <CheckCircle2 className="h-4 w-4" />
                 {result.imported} records imported successfully
               </div>
+              {result.importedIds.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto text-destructive border-destructive/30 hover:bg-destructive/10"
+                  onClick={handleUndoImport}
+                  disabled={undoing}
+                >
+                  <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                  {undoing ? "Undoing..." : `Undo Import (${result.importedIds.length} records)`}
+                </Button>
+              )}
               {result.skipped > 0 && (
                 <div className="flex items-center gap-2 text-sm text-yellow-600">
                   <AlertTriangle className="h-4 w-4" />

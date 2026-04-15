@@ -112,6 +112,22 @@ export function useBulkUpdateOwner() {
   });
 }
 
+export function useBulkDeleteOpportunities() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ids }: { ids: string[] }) => {
+      for (let i = 0; i < ids.length; i += 50) {
+        const batch = ids.slice(i, i + 50);
+        const { error } = await supabase.from("opportunities").delete().in("id", batch);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+    },
+  });
+}
+
 export function useArchiveOpportunity() {
   const qc = useQueryClient();
   return useMutation({

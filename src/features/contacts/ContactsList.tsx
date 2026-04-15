@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
 import { Users, Plus, Search } from "lucide-react";
-import { useContacts, useArchiveContact, useBulkUpdateOwner } from "./api";
+import { useContacts, useArchiveContact, useBulkUpdateOwner, useBulkDeleteContacts } from "./api";
+import { toast } from "sonner";
 import { useUsers } from "@/features/accounts/api";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
@@ -39,6 +40,7 @@ export function ContactsList() {
   const { data: users } = useUsers();
   const archiveMutation = useArchiveContact();
   const bulkOwnerMutation = useBulkUpdateOwner();
+  const bulkDeleteMutation = useBulkDeleteContacts();
 
   const contacts = result?.data;
   const totalCount = result?.count ?? 0;
@@ -80,6 +82,13 @@ export function ContactsList() {
     const ids = Array.from(selectedIds);
     await Promise.all(ids.map((id) => archiveMutation.mutateAsync({ id })));
     setSelectedIds(new Set());
+  };
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`Permanently delete ${selectedIds.size} contact(s)? This cannot be undone.`)) return;
+    await bulkDeleteMutation.mutateAsync({ ids: Array.from(selectedIds) });
+    setSelectedIds(new Set());
+    toast.success(`${selectedIds.size} contact(s) deleted.`);
   };
 
   const handleBulkAssignOwner = async (userId: string) => {
@@ -210,6 +219,7 @@ export function ContactsList() {
         selectedCount={selectedIds.size}
         onClear={() => setSelectedIds(new Set())}
         onArchive={handleBulkArchive}
+        onDelete={handleBulkDelete}
         onAssignOwner={handleBulkAssignOwner}
         users={users}
       />
