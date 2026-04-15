@@ -1304,6 +1304,9 @@ function validateRow(
   if (entity === "leads" && (!mapped.first_name || !mapped.last_name)) {
     return { type: "skip", message: "Missing required field \"first_name\" or \"last_name\"" };
   }
+  if (entity === "leads" && mapped.is_converted && (mapped.is_converted === "true" || mapped.is_converted === "1")) {
+    return { type: "skip", message: "Converted lead — already a contact in Salesforce" };
+  }
   if (entity === "opportunities" && !mapped.name) {
     return { type: "skip", message: "Missing required field \"name\"" };
   }
@@ -2226,6 +2229,12 @@ export function SalesforceImport() {
             errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
             failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
             failedCount[0]++;
+            continue;
+          }
+
+          // Skip converted leads — they're already contacts in Salesforce
+          if (entity === "leads" && record.is_converted === true) {
+            skippedArr[0]++;
             continue;
           }
 
