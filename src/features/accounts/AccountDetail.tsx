@@ -1,7 +1,8 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
-import { Pencil, Archive, ExternalLink, ChevronDown, Phone, UserRoundCog, Plus, MapPin } from "lucide-react";
+import { useAuth } from "@/features/auth/AuthProvider";
+import { Pencil, Archive, ExternalLink, ChevronDown, Phone, UserRoundCog, Plus, MapPin, History } from "lucide-react";
 import { useAccount, useUpdateAccount, useArchiveAccount, useAccountContracts } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
@@ -132,6 +133,8 @@ function AddressBlock({
 export function AccountDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin";
   const { data: account, isLoading } = useAccount(id);
   const { data: contracts } = useAccountContracts(id);
   const { data: customFieldDefs } = useCustomFieldDefinitions("accounts");
@@ -226,10 +229,12 @@ export function AccountDetail() {
               <Pencil className="h-4 w-4 mr-1" />
               Edit
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>
-              <Archive className="h-4 w-4 mr-1" />
-              Archive
-            </Button>
+            {isAdmin && (
+              <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>
+                <Archive className="h-4 w-4 mr-1" />
+                Archive
+              </Button>
+            )}
           </div>
         }
       />
@@ -555,10 +560,30 @@ export function AccountDetail() {
           />
           <Field
             label="Last Modified By"
-            value={account.updater?.full_name ?? "\u2014"}
+            value={
+              <Link
+                to={`/admin?tab=audit-log&record_id=${account.id}`}
+                className="text-primary hover:underline inline-flex items-center gap-1"
+                title="View audit history for this record"
+              >
+                {account.updater?.full_name ?? "\u2014"}
+                <History className="h-3 w-3" />
+              </Link>
+            }
           />
           <Field label="Created" value={formatDateTime(account.created_at)} />
-          <Field label="Last Modified" value={formatDateTime(account.updated_at)} />
+          <Field
+            label="Last Modified"
+            value={
+              <Link
+                to={`/admin?tab=audit-log&record_id=${account.id}`}
+                className="text-primary hover:underline"
+                title="View audit history for this record"
+              >
+                {formatDateTime(account.updated_at)}
+              </Link>
+            }
+          />
         </div>
       </CollapsibleSection>
 

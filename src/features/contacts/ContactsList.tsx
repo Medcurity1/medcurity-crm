@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { Users, Plus, Search } from "lucide-react";
 import { useContacts, useArchiveContact, useBulkUpdateOwner, useBulkDeleteContacts } from "./api";
 import { toast } from "sonner";
@@ -28,6 +29,8 @@ const PAGE_SIZE = 25;
 
 export function ContactsList() {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin";
   const [search, setSearch] = useUrlState("q", "");
   const [page, setPage] = useUrlNumberState("page", 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -218,8 +221,8 @@ export function ContactsList() {
       <BulkActionBar
         selectedCount={selectedIds.size}
         onClear={() => setSelectedIds(new Set())}
-        onArchive={handleBulkArchive}
-        onDelete={handleBulkDelete}
+        onArchive={isAdmin ? handleBulkArchive : undefined}
+        onDelete={isAdmin ? handleBulkDelete : undefined}
         onAssignOwner={handleBulkAssignOwner}
         users={users}
       />

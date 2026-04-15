@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { Target, Plus, Search } from "lucide-react";
 import { useOpportunities, useArchiveOpportunity, useBulkUpdateOwner, useBulkDeleteOpportunities } from "./api";
 import { toast } from "sonner";
@@ -35,6 +36,8 @@ const PAGE_SIZE = 25;
 
 export function OpportunitiesList() {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin";
   const [search, setSearch] = useUrlState("q", "");
   const [stageFilter, setStageFilter] = useUrlState("stage", "all");
   const [teamFilter, setTeamFilter] = useUrlState("team", "all");
@@ -269,8 +272,8 @@ export function OpportunitiesList() {
       <BulkActionBar
         selectedCount={selectedIds.size}
         onClear={() => setSelectedIds(new Set())}
-        onArchive={handleBulkArchive}
-        onDelete={handleBulkDelete}
+        onArchive={isAdmin ? handleBulkArchive : undefined}
+        onDelete={isAdmin ? handleBulkDelete : undefined}
         onAssignOwner={handleBulkAssignOwner}
         users={users}
       />

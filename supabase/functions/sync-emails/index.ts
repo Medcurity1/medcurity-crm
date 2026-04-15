@@ -369,6 +369,13 @@ async function findOpenOpportunity(
 
 /**
  * Create an activity record for a matched email.
+ *
+ * Deduplicates via (owner_user_id, external_message_id) — the migration
+ * adds a partial unique index, so a concurrent or replayed sync won't
+ * produce duplicate rows.
+ *
+ * Returns true if a new row was created, false if the email was already
+ * recorded or the insert failed.
  */
 async function createEmailActivity(
   supabase: SupabaseClient,
@@ -376,8 +383,19 @@ async function createEmailActivity(
   email: ParsedEmail,
   match: ContactMatch,
   opportunityId: string | null
-) {
+): Promise<boolean> {
   const dirLabel = email.direction === "sent" ? "Sent" : "Received";
+  const externalId = `${conn.provider}:${email.messageId}`;
+
+  // Check first — cheaper and avoids noisy unique-violation errors in logs.
+  const { data: existing } = await supabase
+    .from("activities")
+    .select("id")
+    .eq("owner_user_id", conn.user_id)
+    .eq("external_message_id", externalId)
+    .maybeSingle();
+
+  if (existing) return false;
 
   const { error } = await supabase.from("activities").insert({
     account_id: match.account_id,
@@ -388,11 +406,19 @@ async function createEmailActivity(
     subject: `${dirLabel}: ${email.subject}`,
     body: email.body,
     completed_at: new Date(email.date).toISOString(),
+    external_message_id: externalId,
   });
 
   if (error) {
-    console.error(`Failed to create activity for message ${email.messageId}:`, error.message);
+    // If it's the unique-violation race, treat as a non-error dupe.
+    if (error.code === "23505") return false;
+    console.error(
+      `Failed to create activity for message ${email.messageId}:`,
+      error.message
+    );
+    return false;
   }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -405,15 +431,29 @@ async function syncConnection(
 ): Promise<{ created: number; errors: number }> {
   let created = 0;
   let errors = 0;
+  let fetched = 0;
+
+  // Open a run-log row so we get observability even if we throw.
+  const { data: runRow } = await supabase
+    .from("email_sync_runs")
+    .insert({ connection_id: conn.id })
+    .select("id")
+    .single();
+  const runId: number | null = runRow?.id ?? null;
 
   try {
     // 1. Ensure we have a valid access token
     const accessToken = await ensureValidToken(supabase, conn);
     const userEmail = conn.email_address ?? "";
 
-    // 2. Determine the starting point for this sync
-    const sinceDate =
+    // 2. Determine the starting point for this sync.
+    //    We subtract a 2-minute overlap to ride over clock drift, and rely
+    //    on the activities.external_message_id dedup to prevent duplicates.
+    const baseSince =
       conn.last_sync_at ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const sinceDate = new Date(
+      new Date(baseSince).getTime() - 2 * 60 * 1000
+    ).toISOString();
 
     // 3. Fetch emails from the appropriate provider
     const emails =
@@ -421,6 +461,7 @@ async function syncConnection(
         ? await fetchGmailEmails(accessToken, userEmail, sinceDate)
         : await fetchOutlookEmails(accessToken, userEmail, sinceDate);
 
+    fetched = emails.length;
     console.log(
       `Fetched ${emails.length} emails for ${conn.provider} connection ${conn.id}`
     );
@@ -449,7 +490,7 @@ async function syncConnection(
       Array.from(externalAddresses)
     );
 
-    // 7. Create activities for matched emails
+    // 7. Create activities for matched emails (dedup aware)
     for (const email of filteredEmails) {
       // Determine which email address(es) to check for a contact match
       const addressesToCheck: string[] =
@@ -470,8 +511,14 @@ async function syncConnection(
           opportunityId = await findOpenOpportunity(supabase, match.account_id);
         }
 
-        await createEmailActivity(supabase, conn, email, match, opportunityId);
-        created++;
+        const inserted = await createEmailActivity(
+          supabase,
+          conn,
+          email,
+          match,
+          opportunityId
+        );
+        if (inserted) created++;
         break; // one activity per email, matched to the first contact found
       }
     }
@@ -481,12 +528,35 @@ async function syncConnection(
       .from("email_sync_connections")
       .update({ last_sync_at: new Date().toISOString() })
       .eq("id", conn.id);
+
+    if (runId) {
+      await supabase
+        .from("email_sync_runs")
+        .update({
+          finished_at: new Date().toISOString(),
+          activities_created: created,
+          emails_fetched: fetched,
+        })
+        .eq("id", runId);
+    }
   } catch (err) {
     errors++;
+    const message = (err as Error).message;
     console.error(
       `Error syncing connection ${conn.id} (${conn.provider}):`,
-      (err as Error).message
+      message
     );
+    if (runId) {
+      await supabase
+        .from("email_sync_runs")
+        .update({
+          finished_at: new Date().toISOString(),
+          activities_created: created,
+          emails_fetched: fetched,
+          error_message: message,
+        })
+        .eq("id", runId);
+    }
   }
 
   return { created, errors };

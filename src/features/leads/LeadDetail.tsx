@@ -1,7 +1,8 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
-import { Pencil, Archive, ChevronDown, Phone, Mail, ArrowRightLeft, UserRoundCog } from "lucide-react";
+import { useAuth } from "@/features/auth/AuthProvider";
+import { Pencil, Archive, ChevronDown, Phone, Mail, ArrowRightLeft, UserRoundCog, History } from "lucide-react";
 import { useLead, useUpdateLead, useArchiveLead } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
@@ -104,6 +105,8 @@ function EditableField({
 export function LeadDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin";
   const { data: lead, isLoading } = useLead(id);
   const { data: customFieldDefs } = useCustomFieldDefinitions("leads");
   const updateMutation = useUpdateLead();
@@ -232,10 +235,12 @@ export function LeadDetail() {
                 Convert
               </Button>
             )}
-            <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>
-              <Archive className="h-4 w-4 mr-1" />
-              Archive
-            </Button>
+            {isAdmin && (
+              <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>
+                <Archive className="h-4 w-4 mr-1" />
+                Archive
+              </Button>
+            )}
           </div>
         }
       />
@@ -453,10 +458,30 @@ export function LeadDetail() {
           />
           <Field
             label="Last Modified By"
-            value={lead.updater?.full_name ?? "\u2014"}
+            value={
+              <Link
+                to={`/admin?tab=audit-log&record_id=${lead.id}`}
+                className="text-primary hover:underline inline-flex items-center gap-1"
+                title="View audit history for this record"
+              >
+                {lead.updater?.full_name ?? "\u2014"}
+                <History className="h-3 w-3" />
+              </Link>
+            }
           />
           <Field label="Created" value={formatDateTime(lead.created_at)} />
-          <Field label="Last Modified" value={formatDateTime(lead.updated_at)} />
+          <Field
+            label="Last Modified"
+            value={
+              <Link
+                to={`/admin?tab=audit-log&record_id=${lead.id}`}
+                className="text-primary hover:underline"
+                title="View audit history for this record"
+              >
+                {formatDateTime(lead.updated_at)}
+              </Link>
+            }
+          />
         </div>
       </CollapsibleSection>
 

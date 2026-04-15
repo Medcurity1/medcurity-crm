@@ -2,7 +2,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
-import { Pencil, Archive, ChevronDown, UserRoundCog, Plus, Trash2 } from "lucide-react";
+import { Pencil, Archive, ChevronDown, UserRoundCog, Plus, Trash2, History } from "lucide-react";
 import { useOpportunity, useUpdateOpportunity, useArchiveOpportunity, useStageHistory, useOpportunityProducts, useRemoveOpportunityProduct } from "./api";
 import { AddProductDialog } from "./AddProductDialog";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
@@ -128,6 +128,7 @@ export function OpportunityDetail() {
   const [pendingStage, setPendingStage] = useState<OpportunityStage | null>(null);
   const [newNote, setNewNote] = useState("");
   const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin";
   const { addRecent } = useRecentRecords();
 
   useEffect(() => {
@@ -193,10 +194,12 @@ export function OpportunityDetail() {
               <Pencil className="h-4 w-4 mr-1" />
               Edit
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>
-              <Archive className="h-4 w-4 mr-1" />
-              Archive
-            </Button>
+            {isAdmin && (
+              <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>
+                <Archive className="h-4 w-4 mr-1" />
+                Archive
+              </Button>
+            )}
           </div>
         }
       />
@@ -497,10 +500,30 @@ export function OpportunityDetail() {
           />
           <Field
             label="Last Modified By"
-            value={opp.updater?.full_name ?? "\u2014"}
+            value={
+              <Link
+                to={`/admin?tab=audit-log&record_id=${opp.id}`}
+                className="text-primary hover:underline inline-flex items-center gap-1"
+                title="View audit history for this record"
+              >
+                {opp.updater?.full_name ?? "\u2014"}
+                <History className="h-3 w-3" />
+              </Link>
+            }
           />
           <Field label="Created" value={formatDateTime(opp.created_at)} />
-          <Field label="Last Modified" value={formatDateTime(opp.updated_at)} />
+          <Field
+            label="Last Modified"
+            value={
+              <Link
+                to={`/admin?tab=audit-log&record_id=${opp.id}`}
+                className="text-primary hover:underline"
+                title="View audit history for this record"
+              >
+                {formatDateTime(opp.updated_at)}
+              </Link>
+            }
+          />
         </div>
       </CollapsibleSection>
 

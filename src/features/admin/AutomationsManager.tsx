@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { CreateAutomationDialog } from "./CreateAutomationDialog";
+import { RenewalAutomationCard } from "./RenewalAutomationCard";
 import {
   useAutomationRules,
   useCreateAutomationRule,
@@ -379,6 +380,8 @@ export function AutomationsManager() {
 
   return (
     <div className="space-y-6">
+      <RenewalAutomationCard />
+
       <Card className="p-6">
         <div className="flex items-center justify-between mb-6">
           <div className="space-y-1">

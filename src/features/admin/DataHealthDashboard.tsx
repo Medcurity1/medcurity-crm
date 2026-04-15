@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -24,9 +25,18 @@ import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
+  UserPlus,
+  ChevronLeft,
+  ChevronsRight,
 } from "lucide-react";
 import { formatDate } from "@/lib/formatters";
 import { Link } from "react-router-dom";
+import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
+import { toast } from "sonner";
+import { useBulkUpdateOwner as useBulkUpdateAccountOwner } from "@/features/accounts/api";
+import { useBulkUpdateOwner as useBulkUpdateContactOwner } from "@/features/contacts/api";
+import { useBulkUpdateOwner as useBulkUpdateOpportunityOwner } from "@/features/opportunities/api";
+import { useBulkUpdateOwner as useBulkUpdateLeadOwner } from "@/features/leads/api";
 
 /* ---------- Types ---------- */
 
@@ -81,113 +91,75 @@ function useDataHealthCheck() {
   });
 }
 
-/* ---------- Drilldown fetcher ---------- */
+/* ---------- Drilldown fetcher (paginated) ---------- */
+
+const PAGE_SIZE = 25;
+
+interface DrilldownResult {
+  records: DrilldownRecord[];
+  totalCount: number;
+}
 
 async function fetchDrilldown(
   entity: string,
-  issue: "unassigned" | "missing_name"
-): Promise<DrilldownRecord[]> {
+  issue: "unassigned" | "missing_name",
+  page: number
+): Promise<DrilldownResult> {
+  const from = page * PAGE_SIZE;
+  const to = from + PAGE_SIZE - 1;
   const tableName = entity;
 
+  const isNameEntity = entity === "contacts" || entity === "leads";
+  const selectCols = isNameEntity ? "id, first_name, last_name" : "id, name";
+
+  let query = supabase
+    .from(tableName)
+    .select(selectCols, { count: "exact" })
+    .is("archived_at", null);
+
   if (issue === "unassigned") {
-    if (entity === "accounts") {
-      const { data } = await supabase
-        .from(tableName)
-        .select("id, name")
-        .is("owner_user_id", null)
-        .is("archived_at", null)
-        .order("name")
-        .limit(50);
-      return (data ?? []).map((r) => ({ id: r.id, name: r.name || "Unnamed", issue: "No owner assigned" }));
-    }
-    if (entity === "contacts") {
-      const { data } = await supabase
-        .from(tableName)
-        .select("id, first_name, last_name")
-        .is("owner_user_id", null)
-        .is("archived_at", null)
-        .order("last_name")
-        .limit(50);
-      return (data ?? []).map((r) => ({
-        id: r.id,
-        name: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() || "Unnamed",
-        issue: "No owner assigned",
-      }));
-    }
-    if (entity === "opportunities") {
-      const { data } = await supabase
-        .from(tableName)
-        .select("id, name")
-        .is("owner_user_id", null)
-        .is("archived_at", null)
-        .order("name")
-        .limit(50);
-      return (data ?? []).map((r) => ({ id: r.id, name: r.name || "Unnamed", issue: "No owner assigned" }));
-    }
-    if (entity === "leads") {
-      const { data } = await supabase
-        .from(tableName)
-        .select("id, first_name, last_name")
-        .is("owner_user_id", null)
-        .is("archived_at", null)
-        .order("last_name")
-        .limit(50);
-      return (data ?? []).map((r) => ({
-        id: r.id,
-        name: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() || "Unnamed",
-        issue: "No owner assigned",
-      }));
+    query = query.is("owner_user_id", null);
+  } else {
+    // missing_name
+    if (isNameEntity) {
+      query = query.or("first_name.is.null,last_name.is.null");
+    } else {
+      query = query.or("name.is.null,name.eq.");
     }
   }
 
-  if (issue === "missing_name") {
-    if (entity === "accounts") {
-      const { data } = await supabase
-        .from(tableName)
-        .select("id, name")
-        .or("name.is.null,name.eq.")
-        .is("archived_at", null)
-        .limit(50);
-      return (data ?? []).map((r) => ({ id: r.id, name: r.name || `ID: ${r.id.slice(0, 8)}`, issue: "Missing name" }));
-    }
-    if (entity === "contacts") {
-      const { data } = await supabase
-        .from(tableName)
-        .select("id, first_name, last_name")
-        .or("first_name.is.null,last_name.is.null")
-        .is("archived_at", null)
-        .limit(50);
-      return (data ?? []).map((r) => ({
-        id: r.id,
-        name: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() || `ID: ${r.id.slice(0, 8)}`,
-        issue: "Missing name",
-      }));
-    }
-    if (entity === "opportunities") {
-      const { data } = await supabase
-        .from(tableName)
-        .select("id, name")
-        .or("name.is.null,name.eq.")
-        .is("archived_at", null)
-        .limit(50);
-      return (data ?? []).map((r) => ({ id: r.id, name: r.name || `ID: ${r.id.slice(0, 8)}`, issue: "Missing name" }));
-    }
-    if (entity === "leads") {
-      const { data } = await supabase
-        .from(tableName)
-        .select("id, first_name, last_name")
-        .or("first_name.is.null,last_name.is.null")
-        .is("archived_at", null)
-        .limit(50);
-      return (data ?? []).map((r) => ({
-        id: r.id,
-        name: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() || `ID: ${r.id.slice(0, 8)}`,
-        issue: "Missing name",
-      }));
-    }
-  }
+  query = isNameEntity
+    ? query.order("last_name", { nullsFirst: false })
+    : query.order("name", { nullsFirst: false });
 
-  return [];
+  const { data, count, error } = await query.range(from, to);
+  if (error) throw error;
+
+  const issueLabel = issue === "unassigned" ? "No owner assigned" : "Missing name";
+
+  // The dynamic select string defeats Supabase's type inference, so we cast
+  // the rows to a plain record shape for the mapping below.
+  const rows = (data ?? []) as unknown as Record<string, unknown>[];
+  const records: DrilldownRecord[] = rows.map((r) => {
+    if (isNameEntity) {
+      const first = (r.first_name as string | null) ?? "";
+      const last = (r.last_name as string | null) ?? "";
+      const full = `${first} ${last}`.trim();
+      return {
+        id: r.id as string,
+        name: full || `ID: ${(r.id as string).slice(0, 8)}`,
+        issue: issueLabel,
+      };
+    }
+    const name = (r.name as string | null) ?? "";
+    return {
+      id: r.id as string,
+      name: name || `ID: ${(r.id as string).slice(0, 8)}`,
+      issue: issueLabel,
+    };
+  });
+
+  return { records, totalCount: count ?? 0 };
 }
 
 function entityPath(entity: string): string {
@@ -216,66 +188,229 @@ const PROTECTION_CHECKLIST = [
 
 /* ---------- Drilldown Panel ---------- */
 
+function useEntityBulkOwnerMutation(entity: string) {
+  const accountsMut = useBulkUpdateAccountOwner();
+  const contactsMut = useBulkUpdateContactOwner();
+  const opportunitiesMut = useBulkUpdateOpportunityOwner();
+  const leadsMut = useBulkUpdateLeadOwner();
+
+  switch (entity) {
+    case "accounts":
+      return accountsMut;
+    case "contacts":
+      return contactsMut;
+    case "opportunities":
+      return opportunitiesMut;
+    case "leads":
+      return leadsMut;
+    default:
+      return null;
+  }
+}
+
 function DrilldownPanel({ entity, issue, onClose }: {
   entity: string;
   issue: "unassigned" | "missing_name";
   onClose: () => void;
 }) {
-  const { data: records, isLoading } = useQuery({
-    queryKey: ["data_health_drilldown", entity, issue],
-    queryFn: () => fetchDrilldown(entity, issue),
+  const [page, setPage] = useState(0);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [ownerDialogOpen, setOwnerDialogOpen] = useState(false);
+
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: ["data_health_drilldown", entity, issue, page],
+    queryFn: () => fetchDrilldown(entity, issue, page),
   });
 
+  const records = data?.records ?? [];
+  const totalCount = data?.totalCount ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+
+  const bulkOwnerMutation = useEntityBulkOwnerMutation(entity);
+
   const issueLabel = issue === "unassigned" ? "Unassigned" : "Missing Data";
+
+  const allOnPageSelected =
+    records.length > 0 && records.every((r) => selectedIds.has(r.id));
+
+  function toggleOne(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function togglePage() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allOnPageSelected) {
+        records.forEach((r) => next.delete(r.id));
+      } else {
+        records.forEach((r) => next.add(r.id));
+      }
+      return next;
+    });
+  }
+
+  async function handleBulkAssign(newOwnerId: string) {
+    if (!bulkOwnerMutation) {
+      toast.error("Bulk assign is not supported for this entity.");
+      return;
+    }
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    try {
+      await bulkOwnerMutation.mutateAsync({ ids, owner_user_id: newOwnerId });
+      toast.success(`Assigned owner to ${ids.length} ${entity}.`);
+      setSelectedIds(new Set());
+      // Invalidate handled by the mutation onSuccess; refetching this drilldown
+      // will happen via queryKey change on page flip or manual re-open.
+    } catch (err) {
+      console.error("Bulk assign failed:", err);
+      toast.error("Bulk assign failed: " + (err as Error).message);
+    }
+  }
+
+  const supportsBulkAssign =
+    issue === "unassigned" && bulkOwnerMutation !== null;
+
+  const firstIdx = totalCount === 0 ? 0 : page * PAGE_SIZE + 1;
+  const lastIdx = Math.min(totalCount, (page + 1) * PAGE_SIZE);
 
   return (
     <TableRow>
       <TableCell colSpan={7} className="p-0">
         <div className="bg-muted/30 border-t px-4 py-3">
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
             <h4 className="text-sm font-medium capitalize">
               {issueLabel} {entity}
+              {totalCount > 0 && (
+                <span className="ml-2 text-muted-foreground font-normal">
+                  ({totalCount} total)
+                </span>
+              )}
             </h4>
-            <Button variant="ghost" size="sm" onClick={onClose} className="h-6 text-xs">
-              Close
-            </Button>
+            <div className="flex items-center gap-2">
+              {supportsBulkAssign && selectedIds.size > 0 && (
+                <Button
+                  size="sm"
+                  onClick={() => setOwnerDialogOpen(true)}
+                  className="h-7 text-xs"
+                >
+                  <UserPlus className="h-3 w-3 mr-1" />
+                  Assign owner to {selectedIds.size}
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" onClick={onClose} className="h-6 text-xs">
+                Close
+              </Button>
+            </div>
           </div>
+
           {isLoading ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
               <Loader2 className="h-3 w-3 animate-spin" /> Loading...
             </div>
-          ) : records && records.length > 0 ? (
-            <div className="rounded-md border bg-background">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Issue</TableHead>
-                    <TableHead className="w-16"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {records.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell className="text-sm font-medium">{r.name}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{r.issue}</TableCell>
-                      <TableCell>
-                        <Link
-                          to={`${entityPath(entity)}/${r.id}`}
-                          className="text-blue-600 hover:underline text-xs inline-flex items-center gap-1"
-                        >
-                          View <ExternalLink className="h-3 w-3" />
-                        </Link>
-                      </TableCell>
+          ) : records.length > 0 ? (
+            <>
+              <div className="rounded-md border bg-background">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      {supportsBulkAssign && (
+                        <TableHead className="w-10">
+                          <Checkbox
+                            checked={allOnPageSelected}
+                            onCheckedChange={togglePage}
+                            aria-label="Select page"
+                          />
+                        </TableHead>
+                      )}
+                      <TableHead>Name</TableHead>
+                      <TableHead>Issue</TableHead>
+                      <TableHead className="w-16"></TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                  </TableHeader>
+                  <TableBody>
+                    {records.map((r) => (
+                      <TableRow key={r.id}>
+                        {supportsBulkAssign && (
+                          <TableCell>
+                            <Checkbox
+                              checked={selectedIds.has(r.id)}
+                              onCheckedChange={() => toggleOne(r.id)}
+                              aria-label={`Select ${r.name}`}
+                            />
+                          </TableCell>
+                        )}
+                        <TableCell className="text-sm font-medium">{r.name}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{r.issue}</TableCell>
+                        <TableCell>
+                          <Link
+                            to={`${entityPath(entity)}/${r.id}`}
+                            className="text-blue-600 hover:underline text-xs inline-flex items-center gap-1"
+                          >
+                            View <ExternalLink className="h-3 w-3" />
+                          </Link>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Pagination footer */}
+              <div className="flex items-center justify-between pt-2 text-xs text-muted-foreground">
+                <span>
+                  Showing {firstIdx}–{lastIdx} of {totalCount}
+                  {selectedIds.size > 0 && (
+                    <span className="ml-2">
+                      • {selectedIds.size} selected
+                    </span>
+                  )}
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7"
+                    disabled={page === 0 || isFetching}
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  >
+                    <ChevronLeft className="h-3 w-3" />
+                  </Button>
+                  <span className="px-2">
+                    Page {page + 1} / {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7"
+                    disabled={page + 1 >= totalPages || isFetching}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    <ChevronsRight className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            </>
           ) : (
             <p className="text-sm text-muted-foreground py-1">No records found.</p>
           )}
         </div>
+
+        <ChangeOwnerDialog
+          open={ownerDialogOpen}
+          onOpenChange={setOwnerDialogOpen}
+          currentOwnerId={null}
+          onConfirm={handleBulkAssign}
+          title={`Assign owner to ${selectedIds.size} ${entity}`}
+        />
       </TableCell>
     </TableRow>
   );
@@ -407,8 +542,8 @@ export function DataHealthDashboard() {
                 </TableHeader>
                 <TableBody>
                   {healthRows.map((row) => (
-                    <>
-                      <TableRow key={row.entity}>
+                    <Fragment key={row.entity}>
+                      <TableRow>
                         <TableCell className="font-medium capitalize">
                           {row.entity}
                         </TableCell>
@@ -467,7 +602,7 @@ export function DataHealthDashboard() {
                           onClose={() => setExpanded(null)}
                         />
                       )}
-                    </>
+                    </Fragment>
                   ))}
                 </TableBody>
               </Table>

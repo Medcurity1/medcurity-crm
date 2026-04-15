@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { UserPlus, Plus, Search } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useLeads, useArchiveLead, useBulkUpdateOwner, useBulkDeleteLeads } from "./api";
@@ -73,6 +74,8 @@ function StatCard({ label, value }: { label: string; value: number | string }) {
 
 export function LeadsList() {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin";
   const [search, setSearch] = useUrlState("q", "");
   const [statusFilter, setStatusFilter] = useUrlState("status", "all");
   const [sourceFilter, setSourceFilter] = useUrlState("source", "all");
@@ -360,8 +363,8 @@ export function LeadsList() {
       <BulkActionBar
         selectedCount={selectedIds.size}
         onClear={() => setSelectedIds(new Set())}
-        onArchive={handleBulkArchive}
-        onDelete={handleBulkDelete}
+        onArchive={isAdmin ? handleBulkArchive : undefined}
+        onDelete={isAdmin ? handleBulkDelete : undefined}
         onAssignOwner={handleBulkAssignOwner}
         users={users}
       />

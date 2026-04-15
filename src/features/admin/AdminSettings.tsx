@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { useAuth } from "@/features/auth/AuthProvider";
@@ -15,10 +15,48 @@ import { SystemInfo } from "./SystemInfo";
 import { DataHealthDashboard } from "./DataHealthDashboard";
 import { Loader2 } from "lucide-react";
 
+const VALID_TABS = [
+  "custom-fields",
+  "users",
+  "permissions",
+  "required-fields",
+  "integrations",
+  "automations",
+  "data-import",
+  "audit-log",
+  "data-health",
+  "system",
+];
+
 export function AdminSettings() {
   const { profile, loading } = useAuth();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState("custom-fields");
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const activeTab = (() => {
+    const t = searchParams.get("tab");
+    return t && VALID_TABS.includes(t) ? t : "custom-fields";
+  })();
+
+  const setActiveTab = (tab: string) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("tab", tab);
+        // Drop audit-log-specific filters when navigating away
+        if (tab !== "audit-log") {
+          next.delete("record_id");
+          next.delete("q");
+          next.delete("entity");
+          next.delete("action");
+          next.delete("range");
+          next.delete("page");
+        }
+        return next;
+      },
+      { replace: true }
+    );
+  };
 
   useEffect(() => {
     if (!loading && profile?.role !== "admin") {

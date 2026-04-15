@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { Building2, Plus, Search } from "lucide-react";
 import { useAccounts, useArchiveAccount, useBulkUpdateOwner, useBulkDeleteAccounts, useUsers } from "./api";
 import { toast } from "sonner";
@@ -34,6 +35,8 @@ const PAGE_SIZE = 25;
 
 export function AccountsList() {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin";
   const [search, setSearch] = useUrlState("q", "");
   const [statusFilter, setStatusFilter] = useUrlState("status", "all");
   const [page, setPage] = useUrlNumberState("page", 0);
@@ -239,8 +242,8 @@ export function AccountsList() {
       <BulkActionBar
         selectedCount={selectedIds.size}
         onClear={() => setSelectedIds(new Set())}
-        onArchive={handleBulkArchive}
-        onDelete={handleBulkDelete}
+        onArchive={isAdmin ? handleBulkArchive : undefined}
+        onDelete={isAdmin ? handleBulkDelete : undefined}
         onAssignOwner={handleBulkAssignOwner}
         users={users}
       />
