@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
 import { UserPlus, Plus, Search } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { useLeads, useArchiveLead, useBulkUpdateOwner } from "./api";
+import { useLeads, useArchiveLead, useBulkUpdateOwner, useBulkDeleteLeads } from "./api";
 import { useUsers } from "@/features/accounts/api";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent } from "@/components/ui/card";
@@ -31,6 +31,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "sonner";
 import { leadStatusLabel, leadSourceLabel, qualificationLabel } from "@/lib/formatters";
 import type { LeadSource } from "@/types/crm";
 
@@ -91,6 +92,7 @@ export function LeadsList() {
   const { data: quickStats } = useLeadQuickStats();
   const archiveMutation = useArchiveLead();
   const bulkOwnerMutation = useBulkUpdateOwner();
+  const bulkDeleteMutation = useBulkDeleteLeads();
 
   const leads = result?.data;
   const totalCount = result?.count ?? 0;
@@ -144,6 +146,13 @@ export function LeadsList() {
     const ids = Array.from(selectedIds);
     await Promise.all(ids.map((id) => archiveMutation.mutateAsync({ id })));
     setSelectedIds(new Set());
+  };
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`Permanently delete ${selectedIds.size} lead(s)? This cannot be undone.`)) return;
+    await bulkDeleteMutation.mutateAsync({ ids: Array.from(selectedIds) });
+    setSelectedIds(new Set());
+    toast.success(`${selectedIds.size} lead(s) deleted.`);
   };
 
   const handleBulkAssignOwner = async (userId: string) => {
@@ -352,6 +361,7 @@ export function LeadsList() {
         selectedCount={selectedIds.size}
         onClear={() => setSelectedIds(new Set())}
         onArchive={handleBulkArchive}
+        onDelete={handleBulkDelete}
         onAssignOwner={handleBulkAssignOwner}
         users={users}
       />
