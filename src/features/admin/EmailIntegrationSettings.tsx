@@ -18,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Mail, Loader2, Unlink } from "lucide-react";
+import { Mail, Loader2, Unlink, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import {
   EmailSyncConfig,
@@ -29,6 +29,7 @@ import {
   useUpdateEmailConnection,
   useDisconnectEmailConnection,
   useMyEmailSyncRuns,
+  useSyncEmailsNow,
   startOutlookConnect,
   type EmailSyncConnection,
   type EmailSyncConfigJson,
@@ -79,6 +80,7 @@ function ConnectedProviderCard({
 }) {
   const updateConn = useUpdateEmailConnection();
   const disconnectConn = useDisconnectEmailConnection();
+  const syncNow = useSyncEmailsNow();
   const label = providerLabels[connection.provider];
 
   function handleConfigChange(next: EmailSyncConfigState) {
@@ -104,6 +106,26 @@ function ConnectedProviderCard({
       onSuccess: () => toast.success(`${label} disconnected`),
       onError: (err: Error) =>
         toast.error("Failed to disconnect", { description: err.message }),
+    });
+  }
+
+  function handleSyncNow() {
+    syncNow.mutate(undefined, {
+      onSuccess: (result) => {
+        if (result.connections_processed === 0) {
+          toast.info("No active connections to sync");
+        } else if (result.activities_created > 0) {
+          toast.success(
+            `Sync complete — ${result.activities_created} new email${
+              result.activities_created === 1 ? "" : "s"
+            } logged`
+          );
+        } else {
+          toast.success("Sync complete — no new emails matched a contact");
+        }
+      },
+      onError: (err: Error) =>
+        toast.error("Sync failed", { description: err.message }),
     });
   }
 
@@ -138,19 +160,33 @@ function ConnectedProviderCard({
           onChange={handleConfigChange}
           disabled={updateConn.isPending}
         />
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleDisconnect}
-          disabled={disconnectConn.isPending}
-        >
-          {disconnectConn.isPending ? (
-            <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-          ) : (
-            <Unlink className="mr-2 h-3 w-3" />
-          )}
-          Disconnect {label}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            onClick={handleSyncNow}
+            disabled={syncNow.isPending}
+          >
+            {syncNow.isPending ? (
+              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 h-3 w-3" />
+            )}
+            Sync Now
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDisconnect}
+            disabled={disconnectConn.isPending}
+          >
+            {disconnectConn.isPending ? (
+              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+            ) : (
+              <Unlink className="mr-2 h-3 w-3" />
+            )}
+            Disconnect {label}
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );

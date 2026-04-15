@@ -577,7 +577,19 @@ function extractEmail(header: string): string {
 // Main handler
 // ---------------------------------------------------------------------------
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
 serve(async (req) => {
+  // Handle CORS preflight so the browser can invoke this function from the app
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -586,21 +598,44 @@ serve(async (req) => {
       auth: { persistSession: false },
     });
 
+    // Optional scoping: if the caller passes { user_id } in the body, only
+    // sync that user's connections. Otherwise sync everyone (the cron path).
+    let scopedUserId: string | null = null;
+    try {
+      const body = await req.json();
+      if (body && typeof body.user_id === "string") {
+        scopedUserId = body.user_id;
+      }
+    } catch {
+      // No body (cron path) — sync all connections.
+    }
+
     // Fetch all active email sync connections
-    const { data: connections, error: connError } = await supabase
+    let q = supabase
       .from("email_sync_connections")
       .select("*")
       .eq("is_active", true);
+    if (scopedUserId) q = q.eq("user_id", scopedUserId);
+
+    const { data: connections, error: connError } = await q;
 
     if (connError) {
       throw new Error(`Failed to load connections: ${connError.message}`);
     }
 
     if (!connections || connections.length === 0) {
-      return new Response(JSON.stringify({ message: "No active connections" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({
+          message: "No active connections",
+          connections_processed: 0,
+          activities_created: 0,
+          errors: 0,
+        }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
     console.log(`Processing ${connections.length} active connection(s)`);
@@ -624,7 +659,7 @@ serve(async (req) => {
       }),
       {
         status: 200,
-        headers: { "Content-Type": "application/json" },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
   } catch (err) {
@@ -633,7 +668,7 @@ serve(async (req) => {
       JSON.stringify({ error: (err as Error).message }),
       {
         status: 500,
-        headers: { "Content-Type": "application/json" },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
   }

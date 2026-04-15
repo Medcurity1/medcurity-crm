@@ -125,6 +125,50 @@ export function useMyEmailSyncRuns(limit = 10) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Manual sync trigger
+// ---------------------------------------------------------------------------
+
+export interface SyncEmailsResult {
+  message: string;
+  connections_processed: number;
+  activities_created: number;
+  errors: number;
+}
+
+/**
+ * Manually trigger the sync-emails edge function for the current user only.
+ *
+ * Useful for testing — instead of waiting for the cron tick, the user can
+ * click "Sync Now" on the integrations page and immediately fetch new mail
+ * for any connections they own. Invalidates the runs query so the recent
+ * runs table refreshes.
+ */
+export function useSyncEmailsNow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<SyncEmailsResult> => {
+      const { data: session } = await supabase.auth.getSession();
+      const userId = session?.session?.user?.id;
+      if (!userId) throw new Error("Not signed in");
+
+      const { data, error } = await supabase.functions.invoke("sync-emails", {
+        body: { user_id: userId },
+      });
+      if (error) throw error;
+      return data as SyncEmailsResult;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["email_sync_runs", "me"] });
+      qc.invalidateQueries({ queryKey: ["email_sync_connections", "me"] });
+      // Activities likely changed — refresh anything that lists them.
+      qc.invalidateQueries({ queryKey: ["activities"] });
+      qc.invalidateQueries({ queryKey: ["contact"] });
+      qc.invalidateQueries({ queryKey: ["account"] });
+    },
+  });
+}
+
 /**
  * Kick off the Outlook OAuth flow.
  *
