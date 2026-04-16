@@ -127,7 +127,9 @@ async function handleCallback(req: Request): Promise<Response> {
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   const error = url.searchParams.get("error");
-  const appBase = Deno.env.get("APP_BASE_URL") ?? "/";
+  // Strip any trailing slash so we don't produce //admin?... redirects
+  // if APP_BASE_URL was set with a trailing slash.
+  const appBase = (Deno.env.get("APP_BASE_URL") ?? "").replace(/\/+$/, "") || "";
 
   if (error) {
     return htmlRedirect(

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Card,
   CardContent,
@@ -240,16 +241,20 @@ function DisconnectedProviderCard({
 
 export function EmailIntegrationSettings() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const qc = useQueryClient();
   const { data: connections, isLoading } = useMyEmailConnections();
   const { data: runs } = useMyEmailSyncRuns(10);
 
   // Surface the OAuth callback result (success / error query-string) as a
   // toast, then strip it from the URL so reloads don't re-fire it.
+  // Also refetch connections on success so the button flips to "Connected"
+  // without a manual reload.
   useEffect(() => {
     const outlook = searchParams.get("outlook");
     if (!outlook) return;
     if (outlook === "connected") {
       toast.success("Outlook connected successfully");
+      qc.invalidateQueries({ queryKey: ["email_sync_connections", "me"] });
     } else if (outlook === "error") {
       const reason = searchParams.get("reason") ?? "unknown";
       toast.error("Outlook connection failed", {
@@ -260,7 +265,7 @@ export function EmailIntegrationSettings() {
     next.delete("outlook");
     next.delete("reason");
     setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, qc]);
 
   const outlookConn = connections?.find((c) => c.provider === "outlook");
   const gmailConn = connections?.find((c) => c.provider === "gmail");
