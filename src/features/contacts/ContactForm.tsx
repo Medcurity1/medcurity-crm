@@ -8,6 +8,7 @@ import { useUsers } from "@/features/accounts/api";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { contactSchema, type ContactFormValues } from "./schema";
+import { errorMessage } from "@/lib/errors";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -140,7 +141,7 @@ export function ContactForm() {
       }
     } catch (err) {
       console.error("Failed to save contact:", err);
-      toast.error("Failed to save: " + (err as Error).message);
+      toast.error("Failed to save: " + errorMessage(err));
     }
   }
 

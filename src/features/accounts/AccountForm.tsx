@@ -8,6 +8,7 @@ import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { accountSchema, type AccountFormValues } from "./schema";
 import { FTE_RANGES, employeesToFteRange } from "@/lib/formatters";
+import { errorMessage } from "@/lib/errors";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -320,8 +321,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
       navigate(`/accounts/${savedId}`);
     } catch (err) {
       console.error("Failed to save account:", err);
-      const message = err instanceof Error ? err.message : String(err);
-      toast.error("Failed to save account: " + message);
+      toast.error("Failed to save account: " + errorMessage(err));
     }
   }
 

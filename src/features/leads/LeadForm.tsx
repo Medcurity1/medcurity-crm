@@ -7,6 +7,7 @@ import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { leadSchema, type LeadFormValues } from "./schema";
+import { errorMessage } from "@/lib/errors";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -178,7 +179,7 @@ export function LeadForm() {
       }
     } catch (err) {
       console.error("Failed to save lead:", err);
-      toast.error("Failed to save: " + (err as Error).message);
+      toast.error("Failed to save: " + errorMessage(err));
     }
   }
 

@@ -46,6 +46,7 @@ import {
 } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { formatCurrencyDetailed } from "@/lib/formatters";
+import { errorMessage } from "@/lib/errors";
 import { toast } from "sonner";
 import type { Contact, CustomFieldDefinition, Opportunity } from "@/types/crm";
 
@@ -348,7 +349,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       }
     } catch (err) {
       console.error("Failed to save opportunity:", err);
-      toast.error("Failed to save: " + (err as Error).message);
+      toast.error("Failed to save: " + errorMessage(err));
     }
   }
 
