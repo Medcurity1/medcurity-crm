@@ -21,16 +21,48 @@ import {
 import { toast } from "sonner";
 import { formatCurrencyDetailed } from "@/lib/formatters";
 
-interface AddProductDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  opportunityId: string;
+/**
+ * A row the user has staged to attach to a not-yet-created opportunity.
+ * `productName` / `productCode` are snapshot at stage time so the parent
+ * form can render a readable preview without refetching the product.
+ */
+export interface StagedOpportunityProduct {
+  product_id: string;
+  product_name: string;
+  product_code: string | null;
+  quantity: number;
+  unit_price: number;
+  arr_amount: number;
 }
 
-export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProductDialogProps) {
+type AddProductDialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+} & (
+  | {
+      /** Insert straight into opportunity_products for an existing opp. */
+      mode?: "immediate";
+      opportunityId: string;
+    }
+  | {
+      /**
+       * Stage the product in parent state; parent will flush it to the DB
+       * after the opportunity itself is created. Used on the create form.
+       */
+      mode: "staged";
+      fteRange: string | null;
+      onStage: (staged: StagedOpportunityProduct) => void;
+    }
+);
+
+export function AddProductDialog(props: AddProductDialogProps) {
+  const { open, onOpenChange } = props;
+  const isStaged = props.mode === "staged";
+
   const { data: products } = useProducts();
   const { data: priceBooks } = usePriceBooks();
-  const { data: opp } = useOpportunity(opportunityId);
+  // Only hit useOpportunity in immediate mode — staged mode has no opp yet.
+  const { data: opp } = useOpportunity(isStaged ? undefined : props.opportunityId);
   const addMutation = useAddOpportunityProduct();
 
   const [priceBookId, setPriceBookId] = useState("");
@@ -43,15 +75,32 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
 
   const { data: priceBookEntries } = usePriceBookEntries(priceBookId || undefined);
 
-  // Read FTE from the OPPORTUNITY, not the account. Opps snapshot fte_range at
-  // create time so pricing stays frozen if the account later grows/shrinks.
-  const oppFteRange = opp?.fte_range ?? null;
+  // Staged mode gets FTE from the caller (the OpportunityForm), since the
+  // opp doesn't exist yet. Immediate mode reads it off the opp itself.
+  // Open opps stay in sync with the account via a DB trigger; closed opps
+  // freeze whatever tier they had at close.
+  const oppFteRange = isStaged ? props.fteRange ?? null : opp?.fte_range ?? null;
   const activePriceBooks = priceBooks?.filter((pb) => pb.is_active) ?? [];
 
-  // Reset form when dialog opens
+  // Pick the best matching price book for this opp's FTE tier. Prefer an
+  // active book whose fte_range matches exactly; otherwise fall back to
+  // the default book, then to any active book.
+  const autoSelectedPriceBookId = (() => {
+    if (!activePriceBooks.length) return "";
+    if (oppFteRange) {
+      const tierMatch = activePriceBooks.find((pb) => pb.fte_range === oppFteRange);
+      if (tierMatch) return tierMatch.id;
+    }
+    const defaultBook = activePriceBooks.find((pb) => pb.is_default);
+    if (defaultBook) return defaultBook.id;
+    return activePriceBooks[0]?.id ?? "";
+  })();
+
+  // Reset form when dialog opens. Auto-select the tier-matching price book
+  // so reps don't have to remember which book to pick.
   useEffect(() => {
     if (open) {
-      setPriceBookId("");
+      setPriceBookId(autoSelectedPriceBookId);
       setProductId("");
       setQuantity(1);
       setUnitPrice(0);
@@ -59,7 +108,7 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
       setArrManuallyEdited(false);
       setPriceBookPriceFilled(false);
     }
-  }, [open]);
+  }, [open, autoSelectedPriceBookId]);
 
   // Look up price from price book entries when price book + product + fte range are available
   useEffect(() => {
@@ -117,9 +166,24 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
       return;
     }
 
+    const selectedProduct = products?.find((p) => p.id === productId);
+
+    if (isStaged) {
+      props.onStage({
+        product_id: productId,
+        product_name: selectedProduct?.name ?? "",
+        product_code: selectedProduct?.code ?? null,
+        quantity,
+        unit_price: unitPrice,
+        arr_amount: arrAmount,
+      });
+      onOpenChange(false);
+      return;
+    }
+
     addMutation.mutate(
       {
-        opportunity_id: opportunityId,
+        opportunity_id: props.opportunityId,
         product_id: productId,
         quantity,
         unit_price: unitPrice,
@@ -241,8 +305,8 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={addMutation.isPending}>
-              {addMutation.isPending ? "Adding..." : "Add Product"}
+            <Button type="submit" disabled={!isStaged && addMutation.isPending}>
+              {isStaged ? "Add to Opportunity" : addMutation.isPending ? "Adding..." : "Add Product"}
             </Button>
           </DialogFooter>
         </form>

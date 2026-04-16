@@ -384,6 +384,12 @@ export interface PriceBook {
   is_active: boolean;
   description: string | null;
   effective_date: string | null;
+  /**
+   * FTE tier this price book serves ("1-20", "21-50", ..., "5001-10000").
+   * Null for flat-rate books (e.g. SF's "Standard Price Book") whose
+   * products are priced the same regardless of customer size.
+   */
+  fte_range: string | null;
   created_at: string;
   updated_at: string;
 }

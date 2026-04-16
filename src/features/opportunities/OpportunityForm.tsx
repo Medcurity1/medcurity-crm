@@ -3,9 +3,18 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
+import { Plus, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { useOpportunity, useCreateOpportunity, useUpdateOpportunity } from "./api";
+import {
+  useOpportunity,
+  useCreateOpportunity,
+  useUpdateOpportunity,
+  useOpportunityProducts,
+  useAddOpportunityProduct,
+  useRemoveOpportunityProduct,
+} from "./api";
+import { AddProductDialog, type StagedOpportunityProduct } from "./AddProductDialog";
 import { useAccountsList, useAccount, useUsers } from "@/features/accounts/api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
@@ -27,6 +36,16 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { formatCurrencyDetailed } from "@/lib/formatters";
 import { toast } from "sonner";
 import type { Contact, CustomFieldDefinition, Opportunity } from "@/types/crm";
 
@@ -84,6 +103,18 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   const [newNote, setNewNote] = useState("");
 
   const preselectedAccountId = searchParams.get("account_id");
+
+  // ----- Products state -----
+  // Create mode: stage products locally and flush after the opp is created.
+  // Edit mode: products come from the DB and are mutated directly.
+  const [stagedProducts, setStagedProducts] = useState<StagedOpportunityProduct[]>([]);
+  const [showAddProduct, setShowAddProduct] = useState(false);
+  const [pendingRemoveIdx, setPendingRemoveIdx] = useState<number | null>(null);
+  const [pendingRemoveProductId, setPendingRemoveProductId] = useState<string | null>(null);
+
+  const { data: existingProducts } = useOpportunityProducts(isEditing ? id : undefined);
+  const addProductMutation = useAddOpportunityProduct();
+  const removeProductMutation = useRemoveOpportunityProduct();
 
   const {
     register,
@@ -272,7 +303,38 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
         navigate(`/opportunities/${id}`);
       } else {
         const result = await createMutation.mutateAsync(payload as Parameters<typeof createMutation.mutateAsync>[0]);
-        toast.success("Opportunity created");
+
+        // Flush any products the user staged before the opp existed. We do
+        // these sequentially so one bad line doesn't silently skip others.
+        if (stagedProducts.length > 0) {
+          let productFailures = 0;
+          for (const sp of stagedProducts) {
+            try {
+              await addProductMutation.mutateAsync({
+                opportunity_id: result.id,
+                product_id: sp.product_id,
+                quantity: sp.quantity,
+                unit_price: sp.unit_price,
+                arr_amount: sp.arr_amount,
+              });
+            } catch (err) {
+              productFailures += 1;
+              console.error("Failed to attach staged product:", sp, err);
+            }
+          }
+          if (productFailures > 0) {
+            toast.error(
+              `Opportunity created, but ${productFailures} of ${stagedProducts.length} products failed to attach. You can retry from the opportunity page.`
+            );
+          } else {
+            toast.success(
+              `Opportunity created with ${stagedProducts.length} product${stagedProducts.length !== 1 ? "s" : ""}`
+            );
+          }
+        } else {
+          toast.success("Opportunity created");
+        }
+
         navigate(`/opportunities/${result.id}`);
       }
     } catch (err) {
@@ -723,6 +785,18 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
               </div>
             </FormSection>
 
+            {/* ---- Products ---- */}
+            <FormSection title="Products">
+              <OpportunityProductsEditor
+                isEditing={isEditing}
+                stagedProducts={stagedProducts}
+                existingProducts={existingProducts ?? []}
+                onOpenAdd={() => setShowAddProduct(true)}
+                onRemoveStaged={(idx) => setPendingRemoveIdx(idx)}
+                onRemoveExisting={(productRowId) => setPendingRemoveProductId(productRowId)}
+              />
+            </FormSection>
+
             {/* ---- Custom Fields ---- */}
             {customFieldDefs && customFieldDefs.length > 0 && (
               <FormSection title="Custom Fields">
@@ -754,6 +828,174 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           </form>
         </CardContent>
       </Card>
+
+      {/* ---- Add Product dialog: immediate in edit mode, staged in create mode ---- */}
+      {isEditing && id ? (
+        <AddProductDialog
+          mode="immediate"
+          open={showAddProduct}
+          onOpenChange={setShowAddProduct}
+          opportunityId={id}
+        />
+      ) : (
+        <AddProductDialog
+          mode="staged"
+          open={showAddProduct}
+          onOpenChange={setShowAddProduct}
+          fteRange={(watch("fte_range") as string | undefined) || null}
+          onStage={(staged) => setStagedProducts((prev) => [...prev, staged])}
+        />
+      )}
+
+      <ConfirmDialog
+        open={pendingRemoveIdx !== null}
+        onOpenChange={(open) => { if (!open) setPendingRemoveIdx(null); }}
+        title="Remove Product"
+        description={
+          pendingRemoveIdx !== null && stagedProducts[pendingRemoveIdx]
+            ? `Remove ${stagedProducts[pendingRemoveIdx].product_name} from this opportunity?`
+            : ""
+        }
+        confirmLabel="Remove"
+        destructive
+        onConfirm={() => {
+          if (pendingRemoveIdx === null) return;
+          setStagedProducts((prev) => prev.filter((_, i) => i !== pendingRemoveIdx));
+          setPendingRemoveIdx(null);
+        }}
+      />
+
+      <ConfirmDialog
+        open={!!pendingRemoveProductId}
+        onOpenChange={(open) => { if (!open) setPendingRemoveProductId(null); }}
+        title="Remove Product"
+        description="Remove this product from the opportunity?"
+        confirmLabel="Remove"
+        destructive
+        onConfirm={() => {
+          if (!pendingRemoveProductId || !id) return;
+          removeProductMutation.mutate(
+            { id: pendingRemoveProductId, opportunityId: id },
+            {
+              onSuccess: () => {
+                toast.success("Product removed");
+                setPendingRemoveProductId(null);
+              },
+              onError: (err) => {
+                toast.error("Failed to remove product: " + (err as Error).message);
+                setPendingRemoveProductId(null);
+              },
+            }
+          );
+        }}
+      />
+    </div>
+  );
+}
+
+/* ---------- Products editor (staged for create, live for edit) ---------- */
+
+function OpportunityProductsEditor({
+  isEditing,
+  stagedProducts,
+  existingProducts,
+  onOpenAdd,
+  onRemoveStaged,
+  onRemoveExisting,
+}: {
+  isEditing: boolean;
+  stagedProducts: StagedOpportunityProduct[];
+  existingProducts: Array<{
+    id: string;
+    quantity: number;
+    unit_price: number;
+    arr_amount: number;
+    product?: { name?: string | null; code?: string | null } | null;
+  }>;
+  onOpenAdd: () => void;
+  onRemoveStaged: (idx: number) => void;
+  onRemoveExisting: (productRowId: string) => void;
+}) {
+  const rows = isEditing
+    ? existingProducts.map((p) => ({
+        key: p.id,
+        name: p.product?.name ?? "\u2014",
+        code: p.product?.code ?? "\u2014",
+        quantity: p.quantity,
+        unitPrice: Number(p.unit_price),
+        arrAmount: Number(p.arr_amount),
+        onRemove: () => onRemoveExisting(p.id),
+      }))
+    : stagedProducts.map((p, idx) => ({
+        key: `staged-${idx}`,
+        name: p.product_name || "\u2014",
+        code: p.product_code || "\u2014",
+        quantity: p.quantity,
+        unitPrice: p.unit_price,
+        arrAmount: p.arr_amount,
+        onRemove: () => onRemoveStaged(idx),
+      }));
+
+  const totalARR = rows.reduce((sum, r) => sum + (r.arrAmount || 0), 0);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-muted-foreground">
+          {rows.length
+            ? `${rows.length} product${rows.length !== 1 ? "s" : ""}${!isEditing ? " (will be attached on create)" : ""}`
+            : isEditing
+            ? "No products added yet"
+            : "Add products to include on the opportunity. They'll be attached when you click Create."}
+        </span>
+        <Button type="button" size="sm" onClick={onOpenAdd}>
+          <Plus className="h-4 w-4 mr-1" />
+          Add Product
+        </Button>
+      </div>
+
+      {rows.length > 0 && (
+        <div className="border rounded-lg">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Product</TableHead>
+                <TableHead>Code</TableHead>
+                <TableHead className="text-right">Qty</TableHead>
+                <TableHead className="text-right">Unit Price</TableHead>
+                <TableHead className="text-right">ARR</TableHead>
+                <TableHead className="w-10" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => (
+                <TableRow key={r.key}>
+                  <TableCell className="font-medium">{r.name}</TableCell>
+                  <TableCell className="text-muted-foreground">{r.code}</TableCell>
+                  <TableCell className="text-right">{r.quantity}</TableCell>
+                  <TableCell className="text-right">{formatCurrencyDetailed(r.unitPrice)}</TableCell>
+                  <TableCell className="text-right font-medium">{formatCurrencyDetailed(r.arrAmount)}</TableCell>
+                  <TableCell>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                      onClick={r.onRemove}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+              <TableRow className="bg-muted/50">
+                <TableCell colSpan={5} className="text-right font-semibold">Total ARR</TableCell>
+                <TableCell className="text-right font-bold">{formatCurrencyDetailed(totalARR)}</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+      )}
     </div>
   );
 }
