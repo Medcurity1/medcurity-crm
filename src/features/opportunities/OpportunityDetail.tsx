@@ -290,6 +290,18 @@ export function OpportunityDetail() {
             label="Opportunity Owner"
             value={opp.owner?.full_name ?? "Unassigned"}
           />
+          {opp.original_sales_rep && (
+            <Field
+              label="Original Sales Rep"
+              value={opp.original_sales_rep.full_name}
+            />
+          )}
+          {(opp.services_included || opp.assigned_assessor) && (
+            <Field
+              label="Assigned Assessor"
+              value={opp.assigned_assessor?.full_name ?? "Unassigned"}
+            />
+          )}
           <Field label="Opportunity Name" value={opp.name} />
           <Field
             label="Account Name"
@@ -311,6 +323,7 @@ export function OpportunityDetail() {
           />
           <Field label="Start Date" value={formatDate(opp.contract_start_date)} />
           <Field label="Maturity Date" value={formatDate(opp.contract_end_date)} />
+          <Field label="Contract Signed" value={formatDate(opp.contract_signed_date)} />
           <Field
             label="Contract Length"
             value={opp.contract_length_months != null ? `${opp.contract_length_months} months` : null}

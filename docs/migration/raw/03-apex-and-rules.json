@@ -1,0 +1,91 @@
+{
+  "generated_at": "2026-04-15",
+  "headline_findings": [
+    "ZERO bespoke Apex classes. All 396 ApexClass records belong to packages: 390 'pi' (Pardot/Account Engagement), 6 'HubSpot_Inc' (HubSpot Salesforce Connector).",
+    "ZERO bespoke Apex triggers. All 5 ApexTrigger records are from the 'pi' (Pardot) namespace.",
+    "*** HUBSPOT INTEGRATION DETECTED via Apex classes — Brayden did not flag this. There is a HubSpot Salesforce connector installed pushing data between systems. *** ",
+    "All bespoke automation lives in Flows (already documented in 02-flows-metadata-parsed.md). Migration scope is therefore well-bounded.",
+    "Only 2 Validation Rules and 2 Workflow Rules — minimal classic automation."
+  ],
+  "apex_classes_by_namespace": {
+    "pi (Pardot/Account Engagement)": 390,
+    "HubSpot_Inc (HubSpot Connector)": 6,
+    "bespoke (no namespace)": 0
+  },
+  "apex_triggers": [
+    {
+      "name": "CampaignDeleteCheck",
+      "object": "Campaign",
+      "namespace": "pi (Pardot)",
+      "events": "before delete",
+      "purpose": "Pardot package: prevents deletion of campaigns synced to Pardot"
+    },
+    {
+      "name": "(name redacted in tool output - likely PardotTaskTrigger or similar)",
+      "object": "pi__PardotTask__c",
+      "namespace": "pi (Pardot)",
+      "events": "after insert",
+      "purpose": "Pardot package: handles Pardot-generated task records"
+    },
+    {
+      "name": "LogAccountChange",
+      "object": "Account",
+      "namespace": "pi (Pardot)",
+      "events": "all (before/after insert/update/delete/undelete)",
+      "purpose": "Pardot sync: pushes Account changes to Pardot"
+    },
+    {
+      "name": "LogContactChange",
+      "object": "Contact",
+      "namespace": "pi (Pardot)",
+      "events": "before insert/update, after insert/update/delete/undelete",
+      "purpose": "Pardot sync: pushes Contact changes to Pardot"
+    },
+    {
+      "name": "LogLeadChange",
+      "object": "Lead",
+      "namespace": "pi (Pardot)",
+      "events": "before insert/update, after insert/update/delete/undelete",
+      "purpose": "Pardot sync: pushes Lead changes to Pardot"
+    }
+  ],
+  "validation_rules": [
+    {
+      "object": "Contact",
+      "name": "Only_Numbers_In_Extension",
+      "active": true,
+      "error_field": "Phone Ext",
+      "error_message": "Phone extension must contain numbers only.",
+      "rebuild_complexity": "trivial - regex check"
+    },
+    {
+      "object": "Lead",
+      "name": "Only_Numbers_In_Extension",
+      "active": true,
+      "error_field": "Phone Ext",
+      "error_message": "Phone extension must contain numbers only.",
+      "rebuild_complexity": "trivial - regex check"
+    }
+  ],
+  "workflow_rules": [
+    {
+      "name": "Copy Billing Address to Shipping Address",
+      "object": "Account",
+      "purpose": "Mirrors billing address to shipping address. Standard SF default.",
+      "rebuild_complexity": "trivial - either copy in form save handler, OR drop the shipping address field entirely if not used"
+    },
+    {
+      "name": "Task Reminder",
+      "object": "Task",
+      "purpose": "Standard SF default task reminder workflow",
+      "rebuild_complexity": "trivial - reminder field on tasks table, app-level notification"
+    }
+  ],
+  "implications_for_migration": [
+    "Migration code-complexity is LOW: no bespoke Apex to rewrite.",
+    "All custom logic is in 7 bespoke Flows (already documented). Estimated rebuild: ~2-4 weeks of Postgres triggers/scheduled jobs/app code.",
+    "The HubSpot sync is doing real work — assume HubSpot is the source-of-truth for marketing data and SF was the downstream sales-of-truth. The new CRM needs to decide: keep HubSpot sync going, replace with direct API integration, or have Postgres pull from HubSpot directly.",
+    "The Pardot/Account Engagement integration is also active and complex (390 classes, 5 triggers). If Pardot is being kept post-SF-sunset, it needs a new sync target. If not, plan its retirement separately.",
+    "Workflow rules are trivial defaults — drop them or implement as a 1-line copy in the form layer."
+  ]
+}

@@ -139,6 +139,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           contract_start_date: opp.contract_start_date ?? "",
           contract_end_date: opp.contract_end_date ?? "",
           contract_length_months: opp.contract_length_months ?? undefined,
+          contract_signed_date: opp.contract_signed_date ?? "",
           contract_year: opp.contract_year ?? undefined,
           loss_reason: opp.loss_reason ?? "",
           notes: opp.notes ?? "",
@@ -161,6 +162,8 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           fte_count: opp.fte_count ?? undefined,
           fte_range: (opp.fte_range ?? "") as OpportunityFormValues["fte_range"],
           created_by_automation: opp.created_by_automation ?? false,
+          assigned_assessor_id: opp.assigned_assessor_id ?? null,
+          original_sales_rep_id: opp.original_sales_rep_id ?? null,
           custom_fields: opp.custom_fields ?? {},
         }
       : {
@@ -177,6 +180,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           contract_start_date: "",
           contract_end_date: "",
           contract_length_months: undefined,
+          contract_signed_date: "",
           contract_year: undefined,
           loss_reason: "",
           notes: "",
@@ -199,6 +203,8 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           fte_count: undefined,
           fte_range: "",
           created_by_automation: false,
+          assigned_assessor_id: null,
+          original_sales_rep_id: null,
           custom_fields: {},
         },
   });
@@ -271,6 +277,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       contract_start_date: emptyToNull(values.contract_start_date),
       contract_end_date: emptyToNull(values.contract_end_date),
       contract_length_months: emptyToNull(values.contract_length_months),
+      contract_signed_date: emptyToNull(values.contract_signed_date),
       contract_year: emptyToNull(values.contract_year),
       loss_reason: emptyToNull(values.loss_reason),
       notes: emptyToNull(values.notes),
@@ -293,6 +300,8 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       fte_count: values.fte_count ?? null,
       fte_range: emptyToNull(values.fte_range),
       created_by_automation: values.created_by_automation ?? false,
+      assigned_assessor_id: values.assigned_assessor_id ?? null,
+      original_sales_rep_id: values.original_sales_rep_id ?? null,
       custom_fields: values.custom_fields ?? {},
     };
 
@@ -419,6 +428,40 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Assigned Assessor</Label>
+                  <Select
+                    value={watch("assigned_assessor_id") ?? "unassigned"}
+                    onValueChange={(v) => setValue("assigned_assessor_id", v === "unassigned" ? null : v)}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Select assessor" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unassigned">Unassigned</SelectItem>
+                      {users?.map((u) => (
+                        <SelectItem key={u.id} value={u.id}>{u.full_name ?? u.id}{!u.is_active ? " (inactive)" : ""}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">For SRA/NVA service assessments</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Original Sales Rep</Label>
+                  <Select
+                    value={watch("original_sales_rep_id") ?? "unassigned"}
+                    onValueChange={(v) => setValue("original_sales_rep_id", v === "unassigned" ? null : v)}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Select sales rep" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unassigned">None</SelectItem>
+                      {users?.map((u) => (
+                        <SelectItem key={u.id} value={u.id}>{u.full_name ?? u.id}{!u.is_active ? " (inactive)" : ""}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">Preserved when renewals takes ownership</p>
                 </div>
 
                 <div className="space-y-2">
@@ -571,6 +614,11 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                 <div className="space-y-2">
                   <Label htmlFor="contract_end_date">Maturity Date<RequiredIndicator fieldKey="contract_end_date" requiredFields={requiredKeys} /></Label>
                   <Input id="contract_end_date" type="date" {...register("contract_end_date")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="contract_signed_date">Contract Signed Date</Label>
+                  <Input id="contract_signed_date" type="date" {...register("contract_signed_date")} />
+                  <p className="text-xs text-muted-foreground">Auto-set on Closed Won if blank</p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="contract_length_months">Contract Length (months)</Label>

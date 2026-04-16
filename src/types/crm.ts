@@ -203,6 +203,7 @@ export interface Opportunity {
   contract_end_date: string | null;
   contract_length_months: number | null;
   contract_year: number | null;
+  contract_signed_date: string | null;
   source_opportunity_id: string | null;
   renewal_from_opportunity_id: string | null;
   loss_reason: string | null;
@@ -225,6 +226,9 @@ export interface Opportunity {
   fte_count: number | null;
   fte_range: string | null;
   created_by_automation: boolean;
+  // Assignment tracking
+  assigned_assessor_id: string | null;
+  original_sales_rep_id: string | null;
   custom_fields: Record<string, unknown>;
   archived_at: string | null;
   archived_by: string | null;
@@ -237,6 +241,8 @@ export interface Opportunity {
   owner?: UserProfile;
   account?: Account;
   primary_contact?: Contact;
+  assigned_assessor?: UserProfile;
+  original_sales_rep?: UserProfile;
   creator?: UserProfile;
   updater?: UserProfile;
 }
