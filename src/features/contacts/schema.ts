@@ -24,6 +24,42 @@ export const contactSchema = z.object({
   lead_source: z.string().nullable().optional(),
   mql_date: z.string().optional().or(z.literal("")),
   sql_date: z.string().optional().or(z.literal("")),
+  // Phase 1 SF-parity additions
+  credential: z
+    .enum([
+      "md", "do", "rn", "lpn", "np", "pa",
+      "chc", "chps", "chpc", "hipaa_certified",
+      "ceo", "cfo", "coo", "cio", "cto", "ciso", "cmo",
+      "it_director", "practice_manager", "office_manager",
+      "compliance_officer", "privacy_officer", "security_officer",
+      "other",
+    ])
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  phone_ext: z.string().optional().or(z.literal("")),
+  time_zone: z
+    .enum(["eastern", "central", "mountain", "pacific", "alaska", "hawaii", "arizona_no_dst"])
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  type: z
+    .enum(["prospect", "customer", "partner", "vendor", "referral_source", "internal", "other"])
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  business_relationship_tag: z
+    .enum([
+      "decision_maker", "influencer", "economic_buyer",
+      "technical_buyer", "champion", "detractor",
+      "end_user", "gatekeeper",
+      "executive_sponsor", "other",
+    ])
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  notes: z.string().optional().or(z.literal("")),
+  next_steps: z.string().optional().or(z.literal("")),
 });
 
 export type ContactFormValues = z.input<typeof contactSchema>;

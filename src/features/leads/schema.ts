@@ -44,6 +44,51 @@ export const leadSchema = z.object({
   mql_date: z.string().optional().or(z.literal("")),
   // Compliance
   do_not_market_to: z.boolean().optional(),
+  // Phase 1 SF-parity additions
+  credential: z
+    .enum([
+      "md", "do", "rn", "lpn", "np", "pa",
+      "chc", "chps", "chpc", "hipaa_certified",
+      "ceo", "cfo", "coo", "cio", "cto", "ciso", "cmo",
+      "it_director", "practice_manager", "office_manager",
+      "compliance_officer", "privacy_officer", "security_officer",
+      "other",
+    ])
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  phone_ext: z.string().optional().or(z.literal("")),
+  time_zone: z
+    .enum(["eastern", "central", "mountain", "pacific", "alaska", "hawaii", "arizona_no_dst"])
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  type: z
+    .enum([
+      "inbound_website", "inbound_referral",
+      "outbound_cold", "purchased_list",
+      "conference", "webinar",
+      "partner", "existing_customer_expansion",
+      "other",
+    ])
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  priority_lead: z.boolean().optional(),
+  project: z.string().optional().or(z.literal("")),
+  business_relationship_tag: z
+    .enum([
+      "decision_maker", "influencer", "economic_buyer",
+      "technical_buyer", "champion", "detractor",
+      "end_user", "gatekeeper",
+      "executive_sponsor", "other",
+    ])
+    .optional()
+    .nullable()
+    .or(z.literal("")),
+  linkedin_url: z.string().url("Must be a valid URL").optional().or(z.literal("")),
+  cold_lead: z.boolean().optional(),
+  cold_lead_source: z.string().optional().or(z.literal("")),
   // Custom fields
   custom_fields: z.record(z.string(), z.unknown()).optional(),
 });

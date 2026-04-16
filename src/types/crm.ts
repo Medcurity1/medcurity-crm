@@ -18,6 +18,40 @@ export type LeadSource = "website" | "referral" | "cold_call" | "trade_show" | "
 export type PaymentFrequency = "monthly" | "quarterly" | "semi_annually" | "annually" | "one_time";
 export type LeadQualification = "unqualified" | "mql" | "sql" | "sal";
 
+export type CredentialType =
+  | "md" | "do" | "rn" | "lpn" | "np" | "pa"
+  | "chc" | "chps" | "chpc" | "hipaa_certified"
+  | "ceo" | "cfo" | "coo" | "cio" | "cto" | "ciso" | "cmo"
+  | "it_director" | "practice_manager" | "office_manager"
+  | "compliance_officer" | "privacy_officer" | "security_officer"
+  | "other";
+
+export type UsTimeZone =
+  | "eastern" | "central" | "mountain" | "pacific"
+  | "alaska" | "hawaii" | "arizona_no_dst";
+
+export type ContactType =
+  | "prospect" | "customer" | "partner" | "vendor"
+  | "referral_source" | "internal" | "other";
+
+export type LeadTypeEnum =
+  | "inbound_website" | "inbound_referral"
+  | "outbound_cold" | "purchased_list"
+  | "conference" | "webinar"
+  | "partner" | "existing_customer_expansion"
+  | "other";
+
+export type BusinessRelationshipTag =
+  | "decision_maker" | "influencer" | "economic_buyer"
+  | "technical_buyer" | "champion" | "detractor"
+  | "end_user" | "gatekeeper"
+  | "executive_sponsor" | "other";
+
+export type RenewalCyclePattern =
+  | "annual" | "three_year"
+  | "years_1_and_3_services" | "year_2_services_only"
+  | "one_time";
+
 export interface UserProfile {
   id: string;
   full_name: string | null;
@@ -79,6 +113,7 @@ export interface Account {
   account_number: string | null;
   // Scheduling
   every_other_year: boolean;
+  do_not_auto_renew: boolean;
   // Description & next steps
   description: string | null;
   next_steps: string | null;
@@ -138,9 +173,17 @@ export interface Contact {
   email: string | null;
   title: string | null;
   phone: string | null;
+  phone_ext: string | null;
   is_primary: boolean;
   department: string | null;
   linkedin_url: string | null;
+  credential: CredentialType | null;
+  time_zone: UsTimeZone | null;
+  type: ContactType | null;
+  business_relationship_tag: BusinessRelationshipTag | null;
+  events_attended: string[] | null;
+  notes: string | null;
+  next_steps: string | null;
   do_not_contact: boolean;
   mailing_street: string | null;
   mailing_city: string | null;
@@ -214,6 +257,7 @@ export interface Opportunity {
   lead_source: LeadSource | null;
   payment_frequency: PaymentFrequency | null;
   cycle_count: number | null;
+  renewal_cycle_pattern: RenewalCyclePattern | null;
   auto_renewal: boolean;
   description: string | null;
   promo_code: string | null;
@@ -280,6 +324,16 @@ export interface Lead {
   converted_contact_id: string | null;
   converted_opportunity_id: string | null;
   do_not_market_to: boolean;
+  credential: CredentialType | null;
+  phone_ext: string | null;
+  time_zone: UsTimeZone | null;
+  type: LeadTypeEnum | null;
+  priority_lead: boolean;
+  project: string | null;
+  business_relationship_tag: BusinessRelationshipTag | null;
+  linkedin_url: string | null;
+  cold_lead: boolean;
+  cold_lead_source: string | null;
   custom_fields: Record<string, unknown>;
   archived_at: string | null;
   archived_by: string | null;
