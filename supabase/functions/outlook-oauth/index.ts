@@ -133,14 +133,14 @@ async function handleCallback(req: Request): Promise<Response> {
 
   if (error) {
     return htmlRedirect(
-      `${appBase}/admin?tab=integrations&outlook=error&reason=${encodeURIComponent(
+      `${appBase}/settings?tab=email&outlook=error&reason=${encodeURIComponent(
         error
       )}`
     );
   }
   if (!code || !state) {
     return htmlRedirect(
-      `${appBase}/admin?tab=integrations&outlook=error&reason=missing_params`
+      `${appBase}/settings?tab=email&outlook=error&reason=missing_params`
     );
   }
 
@@ -159,7 +159,7 @@ async function handleCallback(req: Request): Promise<Response> {
     .maybeSingle();
   if (stateErr || !stateRow) {
     return htmlRedirect(
-      `${appBase}/admin?tab=integrations&outlook=error&reason=state_not_found`
+      `${appBase}/settings?tab=email&outlook=error&reason=state_not_found`
     );
   }
   // Consume it.
@@ -167,7 +167,7 @@ async function handleCallback(req: Request): Promise<Response> {
 
   if (new Date(stateRow.expires_at) < new Date()) {
     return htmlRedirect(
-      `${appBase}/admin?tab=integrations&outlook=error&reason=state_expired`
+      `${appBase}/settings?tab=email&outlook=error&reason=state_expired`
     );
   }
 
@@ -176,7 +176,7 @@ async function handleCallback(req: Request): Promise<Response> {
   const redirectUri = Deno.env.get("OUTLOOK_OAUTH_REDIRECT_URI");
   if (!clientId || !clientSecret || !redirectUri) {
     return htmlRedirect(
-      `${appBase}/admin?tab=integrations&outlook=error&reason=not_configured`
+      `${appBase}/settings?tab=email&outlook=error&reason=not_configured`
     );
   }
 
@@ -200,7 +200,7 @@ async function handleCallback(req: Request): Promise<Response> {
     const detail = await tokenRes.text();
     console.error("Outlook token exchange failed:", detail);
     return htmlRedirect(
-      `${appBase}/admin?tab=integrations&outlook=error&reason=token_exchange`
+      `${appBase}/settings?tab=email&outlook=error&reason=token_exchange`
     );
   }
   const tokenData = await tokenRes.json() as {
@@ -215,7 +215,7 @@ async function handleCallback(req: Request): Promise<Response> {
   });
   if (!profileRes.ok) {
     return htmlRedirect(
-      `${appBase}/admin?tab=integrations&outlook=error&reason=profile_fetch`
+      `${appBase}/settings?tab=email&outlook=error&reason=profile_fetch`
     );
   }
   const profile = await profileRes.json() as {
@@ -246,12 +246,12 @@ async function handleCallback(req: Request): Promise<Response> {
   if (upsertErr) {
     console.error("email_sync_connections upsert failed:", upsertErr.message);
     return htmlRedirect(
-      `${appBase}/admin?tab=integrations&outlook=error&reason=save_failed`
+      `${appBase}/settings?tab=email&outlook=error&reason=save_failed`
     );
   }
 
   return htmlRedirect(
-    `${appBase}/admin?tab=integrations&outlook=connected`
+    `${appBase}/settings?tab=email&outlook=connected`
   );
 }
 

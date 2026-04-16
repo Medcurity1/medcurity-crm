@@ -40,6 +40,7 @@ const LeadListsPage = lazy(() => import("@/features/lead-lists/LeadListsPage").t
 const PartnersPage = lazy(() => import("@/features/partners/PartnersPage").then(m => ({ default: m.PartnersPage })));
 const ArchiveManager = lazy(() => import("@/features/archive/ArchiveManager").then(m => ({ default: m.ArchiveManager })));
 const AdminSettings = lazy(() => import("@/features/admin/AdminSettings").then(m => ({ default: m.AdminSettings })));
+const UserSettings = lazy(() => import("@/features/settings/UserSettings").then(m => ({ default: m.UserSettings })));
 const ChangePasswordPage = lazy(() => import("@/features/auth/ChangePasswordPage").then(m => ({ default: m.ChangePasswordPage })));
 
 export default function App() {
@@ -85,6 +86,7 @@ export default function App() {
                   <Route path="forecasting" element={<ForecastPage />} />
                   <Route path="archive" element={<ArchiveManager />} />
                   <Route path="admin" element={<AdminSettings />} />
+                  <Route path="settings" element={<UserSettings />} />
                   <Route path="change-password" element={<ChangePasswordPage />} />
                   <Route path="*" element={<NotFound />} />
                 </Route>

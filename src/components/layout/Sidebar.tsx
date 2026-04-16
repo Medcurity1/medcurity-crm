@@ -65,7 +65,7 @@ const navItems = [
 
 const adminItems = [
   { to: "/archive", icon: Archive, label: "Archive" },
-  { to: "/admin", icon: Settings, label: "Settings" },
+  { to: "/admin", icon: Settings, label: "Admin Settings" },
 ];
 
 export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps) {

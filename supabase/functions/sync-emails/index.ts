@@ -20,6 +20,33 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ---------------------------------------------------------------------------
+// Internal-domain blocklist
+// ---------------------------------------------------------------------------
+//
+// Emails involving ONLY these domains (e.g. Medcurity-to-Medcurity internal
+// mail) are discarded before any contact matching. This is a defensive
+// safety net: the contact-matching layer already filters to known external
+// contacts, but if someone accidentally added an internal teammate to the
+// contacts table, we would otherwise log those conversations. The blocklist
+// prevents that regardless of data hygiene on `contacts`.
+//
+// Configurable via the INTERNAL_EMAIL_DOMAINS env var (comma-separated) so
+// the list can be updated without redeploying code.
+const INTERNAL_EMAIL_DOMAINS: string[] = (
+  Deno.env.get("INTERNAL_EMAIL_DOMAINS") ?? "medcurity.com"
+)
+  .split(",")
+  .map((d) => d.trim().toLowerCase())
+  .filter(Boolean);
+
+function isInternalAddress(addr: string): boolean {
+  const at = addr.lastIndexOf("@");
+  if (at < 0) return false;
+  const domain = addr.slice(at + 1).toLowerCase();
+  return INTERNAL_EMAIL_DOMAINS.includes(domain);
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -473,14 +500,18 @@ async function syncConnection(
       return true;
     });
 
-    // 5. Collect all unique external email addresses to look up
+    // 5. Collect all unique external email addresses to look up.
+    //    Internal-domain addresses are filtered out before contact lookup
+    //    so we NEVER log Medcurity-to-Medcurity internal threads.
     const externalAddresses = new Set<string>();
     for (const email of filteredEmails) {
-      if (email.direction === "sent") {
-        email.to.forEach((addr) => externalAddresses.add(addr.toLowerCase()));
-        email.cc.forEach((addr) => externalAddresses.add(addr.toLowerCase()));
-      } else {
-        externalAddresses.add(email.from.toLowerCase());
+      const candidates =
+        email.direction === "sent"
+          ? [...email.to, ...email.cc]
+          : [email.from];
+      for (const addr of candidates) {
+        const lower = addr.toLowerCase();
+        if (!isInternalAddress(lower)) externalAddresses.add(lower);
       }
     }
 
@@ -490,17 +521,31 @@ async function syncConnection(
       Array.from(externalAddresses)
     );
 
-    // 7. Create activities for matched emails (dedup aware)
+    // 7. Create activities for matched emails (dedup aware).
+    //    Per Brayden 2026-04-17: when multiple contacts on the same account
+    //    are on an email, create one activity row per contact so the email
+    //    shows on EACH contact's timeline (matches Salesforce behavior).
+    //    The widened unique index (owner_user_id, external_message_id,
+    //    contact_id) keeps re-runs idempotent.
     for (const email of filteredEmails) {
-      // Determine which email address(es) to check for a contact match
       const addressesToCheck: string[] =
         email.direction === "sent"
           ? [...email.to, ...email.cc]
           : [email.from];
 
+      // Skip entirely if every candidate is internal.
+      if (addressesToCheck.every((a) => isInternalAddress(a))) continue;
+
+      // Deduplicate by contact_id within this email so CC'ing the same
+      // person twice doesn't double-write.
+      const contactsSeen = new Set<string>();
+
       for (const addr of addressesToCheck) {
+        if (isInternalAddress(addr)) continue;
         const match = contactMap.get(addr.toLowerCase());
         if (!match) continue;
+        if (contactsSeen.has(match.contact_id)) continue;
+        contactsSeen.add(match.contact_id);
 
         // Skip non-primary contacts if the config requires it
         if (conn.config.primary_only && !match.is_primary) continue;
@@ -519,7 +564,7 @@ async function syncConnection(
           opportunityId
         );
         if (inserted) created++;
-        break; // one activity per email, matched to the first contact found
+        // IMPORTANT: do NOT break — continue through every matched contact.
       }
     }
 

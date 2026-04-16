@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
+import { UserMenu } from "./UserMenu";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { NotificationsDropdown } from "@/components/NotificationsDropdown";
 import { WelcomeWizard } from "@/features/auth/WelcomeWizard";
@@ -21,7 +22,8 @@ const pathMap: Record<string, string> = {
   renewals: "Renewals",
   reports: "Reports",
   archive: "Archive",
-  admin: "Settings",
+  admin: "Admin Settings",
+  settings: "My Settings",
 };
 
 function useIsMobile(breakpoint = 768) {
@@ -97,6 +99,7 @@ export function AppLayout() {
           <div className="flex items-center gap-1">
             <GlobalSearch />
             <NotificationsDropdown />
+            <UserMenu />
           </div>
         </div>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
