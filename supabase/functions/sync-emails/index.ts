@@ -388,8 +388,24 @@ async function matchContactsByEmail(
 }
 
 /**
- * Find the most recently created open opportunity for an account, used for
- * auto-linking emails.
+ * Auto-attribute an email to an opportunity, but ONLY when it's safe.
+ *
+ * Brayden 2026-04-17: SF used to silently attach activity to the most
+ * recent open opp, which led to emails landing on the wrong deal when an
+ * account had multiple in-flight opps. We don't want that.
+ *
+ * Rules (in order):
+ *   1. If the account has exactly ONE open opp → link to it. Safe single-
+ *      candidate case; this is the common path for accounts with active
+ *      pipeline.
+ *   2. If the account has ZERO open opps → don't link to any. The activity
+ *      still attaches to the account + contact, just no opp.
+ *   3. If the account has MULTIPLE open opps → don't auto-link. The
+ *      activity stays account+contact-scoped and shows up on the account
+ *      timeline. A user can manually associate it with the right opp from
+ *      the activity detail later.
+ *
+ * Closed (closed_won / closed_lost) and archived opps are never considered.
  */
 async function findOpenOpportunity(
   supabase: SupabaseClient,
@@ -401,11 +417,10 @@ async function findOpenOpportunity(
     .eq("account_id", accountId)
     .is("archived_at", null)
     .not("stage", "in", '("closed_won","closed_lost")')
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
+    .limit(2);
 
-  return data?.id ?? null;
+  if (!data || data.length !== 1) return null; // 0 or >=2 → don't auto-link
+  return data[0].id;
 }
 
 // ---------------------------------------------------------------------------

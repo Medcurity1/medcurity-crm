@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   Clock,
@@ -57,6 +57,11 @@ interface ListFilters {
   startDate: string;
   endDate: string;
   page: number;
+  // Optional record-scope filters from URL params (account_id, contact_id,
+  // opportunity_id) so /activities?account_id=X shows only that account.
+  scopeAccountId?: string;
+  scopeContactId?: string;
+  scopeOpportunityId?: string;
 }
 
 function useActivitiesList(filters: ListFilters) {
@@ -87,6 +92,15 @@ function useActivitiesList(filters: ListFilters) {
         const end = new Date(filters.endDate);
         end.setHours(23, 59, 59, 999);
         query = query.lte("created_at", end.toISOString());
+      }
+      if (filters.scopeAccountId) {
+        query = query.eq("account_id", filters.scopeAccountId);
+      }
+      if (filters.scopeContactId) {
+        query = query.eq("contact_id", filters.scopeContactId);
+      }
+      if (filters.scopeOpportunityId) {
+        query = query.eq("opportunity_id", filters.scopeOpportunityId);
       }
 
       const from = filters.page * PAGE_SIZE;
@@ -123,9 +137,34 @@ export function ActivitiesListPage() {
   const [endDate, setEndDate] = useState("");
   const [page, setPage] = useState(0);
 
+  const [urlParams] = useSearchParams();
+  const scopeAccountId = urlParams.get("account_id") || undefined;
+  const scopeContactId = urlParams.get("contact_id") || undefined;
+  const scopeOpportunityId = urlParams.get("opportunity_id") || undefined;
+
   const filters = useMemo<ListFilters>(
-    () => ({ search, type, owner, startDate, endDate, page }),
-    [search, type, owner, startDate, endDate, page]
+    () => ({
+      search,
+      type,
+      owner,
+      startDate,
+      endDate,
+      page,
+      scopeAccountId,
+      scopeContactId,
+      scopeOpportunityId,
+    }),
+    [
+      search,
+      type,
+      owner,
+      startDate,
+      endDate,
+      page,
+      scopeAccountId,
+      scopeContactId,
+      scopeOpportunityId,
+    ]
   );
 
   const { data: result, isLoading } = useActivitiesList(filters);

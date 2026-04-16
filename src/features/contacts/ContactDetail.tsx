@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { AccountOpportunities } from "@/features/accounts/AccountOpportunities";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
+import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
 import { TasksPanel } from "@/features/activities/TasksPanel";
 import { SequencesTab } from "@/features/sequences/SequencesTab";
 
@@ -264,6 +265,39 @@ export function ContactDetail() {
         </Card>
       </div>
 
+      <DetailPageLayout
+        side={
+          <ActivityTimeline
+            contactId={contact.id}
+            accountId={contact.account_id}
+            contactEmail={contact.email ?? undefined}
+            contactName={formatName(contact.first_name, contact.last_name)}
+            compact
+          />
+        }
+      >
+
+      {/* --------- Related Tabs (top of body) --------- */}
+      <Tabs defaultValue="opportunities" className="mt-2 mb-6">
+        <TabsList>
+          <TabsTrigger value="opportunities">Opportunities</TabsTrigger>
+          <TabsTrigger value="tasks">Tasks</TabsTrigger>
+          <TabsTrigger value="sequences">Sequences</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="opportunities" className="mt-4">
+          <AccountOpportunities accountId={contact.account_id} />
+        </TabsContent>
+
+        <TabsContent value="tasks" className="mt-4">
+          <TasksPanel contactId={contact.id} />
+        </TabsContent>
+
+        <TabsContent value="sequences" className="mt-4">
+          <SequencesTab contactId={contact.id} accountId={contact.account_id} />
+        </TabsContent>
+      </Tabs>
+
       {/* --------- Contact Details Section --------- */}
       <CollapsibleSection title="Contact Details">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
@@ -354,36 +388,7 @@ export function ContactDetail() {
         </div>
       </CollapsibleSection>
 
-      {/* --------- Tabs --------- */}
-      <Tabs defaultValue="opportunities" className="mt-2">
-        <TabsList>
-          <TabsTrigger value="opportunities">Opportunities</TabsTrigger>
-          <TabsTrigger value="activities">Activities</TabsTrigger>
-          <TabsTrigger value="tasks">Tasks</TabsTrigger>
-          <TabsTrigger value="sequences">Sequences</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="opportunities" className="mt-4">
-          <AccountOpportunities accountId={contact.account_id} />
-        </TabsContent>
-
-        <TabsContent value="activities" className="mt-4">
-          <ActivityTimeline
-            contactId={contact.id}
-            accountId={contact.account_id}
-            contactEmail={contact.email ?? undefined}
-            contactName={formatName(contact.first_name, contact.last_name)}
-          />
-        </TabsContent>
-
-        <TabsContent value="tasks" className="mt-4">
-          <TasksPanel contactId={contact.id} />
-        </TabsContent>
-
-        <TabsContent value="sequences" className="mt-4">
-          <SequencesTab contactId={contact.id} accountId={contact.account_id} />
-        </TabsContent>
-      </Tabs>
+      </DetailPageLayout>
 
       <ConfirmDialog
         open={showArchive}

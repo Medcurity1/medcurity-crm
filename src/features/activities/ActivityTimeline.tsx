@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Phone,
   Mail,
@@ -13,6 +14,10 @@ import {
   ChevronDown,
   ChevronRight,
   Reply,
+  RefreshCw,
+  Maximize2,
+  ExternalLink,
+  MessagesSquare,
 } from "lucide-react";
 import { useActivities } from "./api";
 import { ActivityForm } from "./ActivityForm";
@@ -29,6 +34,22 @@ interface ActivityTimelineProps {
   opportunityId?: string;
   contactEmail?: string;
   contactName?: string;
+  /**
+   * "compact" tightens spacing and limits the visible items to make the
+   * timeline fit a side panel. The user can click "View All" to open the
+   * dedicated full-screen view.
+   */
+  compact?: boolean;
+  /** Hide the "Log Activity / Log Email" buttons (use on the full-screen page). */
+  hideLogButtons?: boolean;
+  /** Cap visible items in compact mode. Default 25. */
+  visibleLimit?: number;
+}
+
+interface ThreadGroup {
+  threadKey: string;
+  primary: Activity; // newest message
+  others: Activity[]; // earlier messages in the same thread
 }
 
 const typeIcons: Record<ActivityType, typeof Phone> = {
@@ -53,14 +74,76 @@ export function ActivityTimeline({
   opportunityId,
   contactEmail,
   contactName,
+  compact = false,
+  hideLogButtons = false,
+  visibleLimit = 25,
 }: ActivityTimelineProps) {
+  const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [showEmailForm, setShowEmailForm] = useState(false);
-  const { data: activities, isLoading } = useActivities({
+  const [allExpanded, setAllExpanded] = useState(false);
+  // Bumping this triggers a re-render so children that read it update their
+  // expand state. We don't push expand state down individually because that
+  // would be a lot of plumbing.
+  const [expandSignal, setExpandSignal] = useState(0);
+
+  const { data: activities, isLoading, refetch, isFetching } = useActivities({
     account_id: accountId,
     contact_id: contactId,
     opportunity_id: opportunityId,
   });
+
+  // Build the "View All" deep link based on which entity scope we're in.
+  const viewAllHref = (() => {
+    if (opportunityId) return `/activities?opportunity_id=${opportunityId}`;
+    if (contactId) return `/activities?contact_id=${contactId}`;
+    if (accountId) return `/activities?account_id=${accountId}`;
+    return "/activities";
+  })();
+
+  // Group consecutive emails on the same thread under one row. The newest
+  // message is the visible one; older messages collapse into a chevron.
+  // Non-email activities never group.
+  const groupedActivities = useMemo(() => {
+    if (!activities) return [] as Array<Activity | ThreadGroup>;
+    const out: Array<Activity | ThreadGroup> = [];
+    const threadIndex = new Map<string, number>();
+    for (const a of activities) {
+      const key = a.email_thread_id ?? null;
+      if (a.activity_type === "email" && key) {
+        const existingIdx = threadIndex.get(key);
+        if (existingIdx != null) {
+          const existing = out[existingIdx];
+          if ((existing as ThreadGroup).threadKey) {
+            (existing as ThreadGroup).others.push(a);
+          } else {
+            out[existingIdx] = {
+              threadKey: key,
+              primary: existing as Activity,
+              others: [a],
+            };
+          }
+          continue;
+        }
+        threadIndex.set(key, out.length);
+      }
+      out.push(a);
+    }
+    return out;
+  }, [activities]);
+
+  const visible = compact ? groupedActivities.slice(0, visibleLimit) : groupedActivities;
+  const hiddenCount = groupedActivities.length - visible.length;
+
+  function handleRefresh() {
+    refetch();
+    qc.invalidateQueries({ queryKey: ["activities"] });
+  }
+
+  function handleToggleExpandAll() {
+    setAllExpanded((v) => !v);
+    setExpandSignal((s) => s + 1);
+  }
 
   if (isLoading) {
     return (
@@ -80,23 +163,54 @@ export function ActivityTimeline({
 
   return (
     <div>
-      <QuickNoteInput
-        accountId={accountId}
-        contactId={contactId}
-        opportunityId={opportunityId}
-      />
-      <div className="mb-4 flex gap-2">
-        <Button size="sm" onClick={() => setShowForm(true)}>
-          <Plus className="h-4 w-4 mr-1" />
-          Log Activity
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => setShowEmailForm(true)}>
-          <Mail className="h-4 w-4 mr-1" />
-          Log Email
-        </Button>
-      </div>
+      {!hideLogButtons && (
+        <>
+          <QuickNoteInput
+            accountId={accountId}
+            contactId={contactId}
+            opportunityId={opportunityId}
+          />
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <Button size="sm" onClick={() => setShowForm(true)}>
+              <Plus className="h-4 w-4 mr-1" />
+              Log Activity
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setShowEmailForm(true)}>
+              <Mail className="h-4 w-4 mr-1" />
+              Log Email
+            </Button>
+            <div className="ml-auto flex items-center gap-1">
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={handleRefresh}
+                disabled={isFetching}
+                title="Refresh"
+              >
+                <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={handleToggleExpandAll}
+                title={allExpanded ? "Collapse all" : "Expand all"}
+              >
+                <Maximize2 className="h-4 w-4" />
+              </Button>
+              {compact && (
+                <Button size="sm" variant="ghost" asChild title="Open full activity view">
+                  <Link to={viewAllHref}>
+                    View All
+                    <ExternalLink className="h-3 w-3 ml-1" />
+                  </Link>
+                </Button>
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
-      {!activities?.length ? (
+      {!visible.length ? (
         <EmptyState
           icon={ClipboardList}
           title="No activities yet"
@@ -105,14 +219,40 @@ export function ActivityTimeline({
         />
       ) : (
         <div className="relative">
-          {/* Vertical timeline line */}
           <div className="absolute left-4 top-0 bottom-0 w-px bg-border" />
-
-          <div className="space-y-4">
-            {activities.map((activity) => (
-              <ActivityEntry key={activity.id} activity={activity} />
-            ))}
+          <div className={compact ? "space-y-3" : "space-y-4"}>
+            {visible.map((entry) => {
+              if ((entry as ThreadGroup).threadKey) {
+                return (
+                  <ThreadEntry
+                    key={(entry as ThreadGroup).threadKey}
+                    group={entry as ThreadGroup}
+                    expandSignal={expandSignal}
+                    forceExpanded={allExpanded}
+                  />
+                );
+              }
+              const a = entry as Activity;
+              return (
+                <ActivityEntry
+                  key={a.id}
+                  activity={a}
+                  expandSignal={expandSignal}
+                  forceExpanded={allExpanded}
+                />
+              );
+            })}
           </div>
+          {hiddenCount > 0 && (
+            <div className="mt-3 pt-3 border-t text-center">
+              <Button size="sm" variant="ghost" asChild>
+                <Link to={viewAllHref}>
+                  Show {hiddenCount} more...
+                  <ExternalLink className="h-3 w-3 ml-1" />
+                </Link>
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -144,7 +284,15 @@ function getActivityLink(activity: Activity): string | null {
   return null;
 }
 
-function ActivityEntry({ activity }: { activity: Activity }) {
+function ActivityEntry({
+  activity,
+  expandSignal,
+  forceExpanded,
+}: {
+  activity: Activity;
+  expandSignal?: number;
+  forceExpanded?: boolean;
+}) {
   const Icon = typeIcons[activity.activity_type];
   const colorClass = typeColors[activity.activity_type];
   const isCompleted = !!activity.completed_at;
@@ -152,6 +300,15 @@ function ActivityEntry({ activity }: { activity: Activity }) {
   const subjectLink = getActivityLink(activity);
   const isEmail = activity.activity_type === "email";
   const [expanded, setExpanded] = useState(false);
+
+  // React to parent's "Expand all" / "Collapse all" toggle. The signal
+  // increments on every click so this fires regardless of the current
+  // expanded state. We skip the initial 0 value so first-render doesn't
+  // collapse legitimate already-open rows.
+  useEffect(() => {
+    if (expandSignal && expandSignal > 0) setExpanded(!!forceExpanded);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandSignal]);
 
   return (
     <div className="relative flex gap-3 pl-0">
@@ -233,9 +390,12 @@ function ActivityEntry({ activity }: { activity: Activity }) {
  * actual Sent folder and goes through their normal mail signature/tracking.
  */
 function EmailDetails({ activity }: { activity: Activity }) {
-  const from = activity.email_from ?? "(unknown)";
+  const from = activity.email_from ?? "";
   const to = activity.email_to ?? [];
   const cc = activity.email_cc ?? [];
+  // Pre-metadata emails (synced before 2026-04-17) are missing From/To/Cc.
+  // Surface a clear note instead of "(unknown)" so the user knows why.
+  const isMissingMetadata = !from && to.length === 0 && cc.length === 0;
 
   const subjectForReply = activity.subject.replace(/^(Sent:|Received:)\s*/, "");
   const replySubject = subjectForReply.match(/^re:\s*/i)
@@ -244,25 +404,33 @@ function EmailDetails({ activity }: { activity: Activity }) {
 
   // Reply goes to whoever sent it (for received) or the original recipients
   // (for sent). CC everyone who was previously CC'd.
-  const replyTo =
-    activity.email_direction === "received" ? [from] : to;
+  const replyTo = activity.email_direction === "received" && from ? [from] : to;
   const replyCc = cc;
+  const canReply = replyTo.length > 0;
 
-  const mailtoHref =
-    `mailto:${encodeURIComponent(replyTo.join(","))}` +
-    `?subject=${encodeURIComponent(replySubject)}` +
-    (replyCc.length > 0 ? `&cc=${encodeURIComponent(replyCc.join(","))}` : "");
+  const mailtoHref = canReply
+    ? `mailto:${encodeURIComponent(replyTo.join(","))}` +
+      `?subject=${encodeURIComponent(replySubject)}` +
+      (replyCc.length > 0 ? `&cc=${encodeURIComponent(replyCc.join(","))}` : "")
+    : undefined;
 
   return (
     <div className="mt-3 rounded-md border bg-muted/30 p-3 space-y-2 text-sm">
-      <HeaderRow label="From" values={[from]} />
-      {to.length > 0 && <HeaderRow label="To" values={to} />}
-      {cc.length > 0 && <HeaderRow label="Cc" values={cc} />}
+      {isMissingMetadata ? (
+        <p className="text-xs text-muted-foreground italic">
+          From / To / Cc weren't captured for this email (synced before email
+          metadata was added). New emails synced from now on will have full
+          headers.
+        </p>
+      ) : (
+        <>
+          {from && <HeaderRow label="From" values={[from]} />}
+          {to.length > 0 && <HeaderRow label="To" values={to} />}
+          {cc.length > 0 && <HeaderRow label="Cc" values={cc} />}
+        </>
+      )}
       <div className="pt-2 border-t">
         {activity.email_html_body ? (
-          // Minimal HTML render. Sandboxed via srcdoc so the email can't
-          // steal auth/scripts from our origin. If we ever want clickable
-          // links we'll whitelist-post-process the HTML.
           <iframe
             title={`Email body: ${activity.subject}`}
             sandbox=""
@@ -271,18 +439,20 @@ function EmailDetails({ activity }: { activity: Activity }) {
           />
         ) : (
           <pre className="whitespace-pre-wrap font-sans text-sm text-foreground">
-            {activity.body || "(no body)"}
+            {activity.body || "(no body captured)"}
           </pre>
         )}
       </div>
-      <div className="pt-2 flex gap-2">
-        <Button size="sm" asChild>
-          <a href={mailtoHref}>
-            <Reply className="h-4 w-4 mr-1" />
-            Reply
-          </a>
-        </Button>
-      </div>
+      {canReply && (
+        <div className="pt-2 flex gap-2">
+          <Button size="sm" asChild>
+            <a href={mailtoHref}>
+              <Reply className="h-4 w-4 mr-1" />
+              Reply
+            </a>
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -292,6 +462,128 @@ function HeaderRow({ label, values }: { label: string; values: string[] }) {
     <div className="flex gap-2 text-xs">
       <span className="font-medium text-muted-foreground min-w-10">{label}:</span>
       <span className="flex-1 break-all text-foreground">{values.join(", ")}</span>
+    </div>
+  );
+}
+
+/**
+ * Renders multiple emails on the same conversation as a single timeline
+ * entry. Shows the newest message expanded-on-click and lets the user
+ * peek at every prior message in the thread without scrolling forever.
+ */
+function ThreadEntry({
+  group,
+  expandSignal,
+  forceExpanded,
+}: {
+  group: ThreadGroup;
+  expandSignal: number;
+  forceExpanded: boolean;
+}) {
+  const [showThread, setShowThread] = useState(false);
+  const messageCount = 1 + group.others.length;
+
+  useEffect(() => {
+    if (expandSignal > 0) setShowThread(!!forceExpanded);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandSignal]);
+
+  return (
+    <div className="relative flex gap-3 pl-0">
+      <button
+        type="button"
+        className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-purple-100 text-purple-600 cursor-pointer hover:opacity-80"
+        onClick={() => setShowThread((v) => !v)}
+        aria-label={showThread ? "Collapse thread" : "Expand thread"}
+      >
+        <MessagesSquare className="h-4 w-4" />
+      </button>
+      <div className="flex-1 min-w-0 pb-4">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <button
+              type="button"
+              className="flex items-center gap-1 text-left font-medium text-sm truncate text-blue-600 hover:underline"
+              onClick={() => setShowThread((v) => !v)}
+            >
+              {showThread ? (
+                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+              )}
+              <span className="truncate">{group.primary.subject}</span>
+              <span className="ml-1 text-xs text-muted-foreground font-normal whitespace-nowrap">
+                ({messageCount} messages)
+              </span>
+            </button>
+            {!showThread && group.primary.body && (
+              <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">
+                {group.primary.body}
+              </p>
+            )}
+            <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+              <span>Email Thread</span>
+              {group.primary.owner?.full_name && (
+                <span>{group.primary.owner.full_name}</span>
+              )}
+            </div>
+          </div>
+          <span className="text-xs text-muted-foreground whitespace-nowrap">
+            {formatRelativeDate(group.primary.created_at)}
+          </span>
+        </div>
+
+        {showThread && (
+          <div className="mt-3 space-y-3">
+            {/* Newest first (already sorted that way), with the primary inline */}
+            <ThreadMessage activity={group.primary} isPrimary />
+            {group.others.map((m) => (
+              <ThreadMessage key={m.id} activity={m} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ThreadMessage({
+  activity,
+  isPrimary = false,
+}: {
+  activity: Activity;
+  isPrimary?: boolean;
+}) {
+  const [open, setOpen] = useState(isPrimary);
+  const dirLabel = activity.email_direction === "sent" ? "Sent" : "Received";
+
+  return (
+    <div className="rounded-md border bg-muted/20 text-sm">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-2 px-3 py-2 hover:bg-muted/40 transition-colors"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+          )}
+          <span className="text-xs font-medium text-muted-foreground">{dirLabel}</span>
+          <span className="text-xs text-foreground truncate">
+            {activity.email_from || activity.email_to?.[0] || "(unknown sender)"}
+          </span>
+        </div>
+        <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
+          {formatDate(activity.created_at)}
+        </span>
+      </button>
+      {open && (
+        <div className="px-3 pb-3 pt-1 border-t">
+          <EmailDetails activity={activity} />
+        </div>
+      )}
     </div>
   );
 }

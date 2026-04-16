@@ -1,7 +1,6 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
-import { useUserPreferences } from "@/hooks/useUserPreferences";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Pencil, Archive, ExternalLink, ChevronDown, Phone, UserRoundCog, Plus, MapPin, History } from "lucide-react";
 import { useAccount, useUpdateAccount, useArchiveAccount, useAccountContracts } from "./api";
@@ -40,6 +39,7 @@ import { AccountContacts } from "./AccountContacts";
 import { AccountOpportunities } from "./AccountOpportunities";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
 import { TasksPanel } from "@/features/activities/TasksPanel";
+import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
 import type { AccountContract, LeadSource } from "@/types/crm";
 
 /* ---------- Collapsible section ---------- */
@@ -135,8 +135,8 @@ export function AccountDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const { prefs } = useUserPreferences();
-  const useSidePanel = prefs.detailLayout === "side_panel";
+  // Layout preference is now consumed inside DetailPageLayout. We kept the
+  // hook import but no longer need the variable here.
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { data: account, isLoading } = useAccount(id);
   const { data: contracts } = useAccountContracts(id);
@@ -319,16 +319,15 @@ export function AccountDetail() {
         </Card>
       </div>
 
-      {/* ──── Body: two-column in side_panel layout, single-column otherwise ─── */}
-      <div className={cn(useSidePanel && "flex gap-6 items-start")}>
-        <div className={cn(useSidePanel && "flex-1 min-w-0")}>
+      <DetailPageLayout
+        side={<ActivityTimeline accountId={account.id} compact />}
+      >
 
       {/* --------- Related Tabs (moved to top so they're visible without scrolling) --------- */}
-      <Tabs defaultValue={useSidePanel ? "contacts" : "contacts"} className="mt-2 mb-6">
+      <Tabs defaultValue="contacts" className="mt-2 mb-6">
         <TabsList>
           <TabsTrigger value="contacts">Contacts</TabsTrigger>
           <TabsTrigger value="opportunities">Opportunities</TabsTrigger>
-          {!useSidePanel && <TabsTrigger value="activities">Activities</TabsTrigger>}
           <TabsTrigger value="tasks">Tasks</TabsTrigger>
           <TabsTrigger value="contract_history">Contract History</TabsTrigger>
         </TabsList>
@@ -340,12 +339,6 @@ export function AccountDetail() {
         <TabsContent value="opportunities" className="mt-4">
           <AccountOpportunities accountId={account.id} />
         </TabsContent>
-
-        {!useSidePanel && (
-          <TabsContent value="activities" className="mt-4">
-            <ActivityTimeline accountId={account.id} />
-          </TabsContent>
-        )}
 
         <TabsContent value="tasks" className="mt-4">
           <TasksPanel accountId={account.id} />
@@ -627,16 +620,7 @@ export function AccountDetail() {
         </div>
       </CollapsibleSection>
 
-        </div>
-        {useSidePanel && (
-          <aside className="w-[380px] shrink-0 sticky top-20 self-start">
-            <div className="border rounded-lg p-4 bg-card max-h-[calc(100vh-6rem)] overflow-y-auto">
-              <h3 className="text-sm font-semibold mb-3">Activity</h3>
-              <ActivityTimeline accountId={account.id} />
-            </div>
-          </aside>
-        )}
-      </div>
+      </DetailPageLayout>
 
       <ConfirmDialog
         open={showArchive}

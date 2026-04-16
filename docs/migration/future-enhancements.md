@@ -44,6 +44,55 @@ Foo" and log the email against her too.
 getting it wrong pollutes the contacts table with MSP / third-party vendor
 rows that take manual cleanup.
 
+### Send emails directly from the CRM (Graph /sendMail)
+
+Today the Reply button in the email-activity expand view opens the user's
+default mail client via `mailto:` with pre-populated recipients + Re: subject.
+We chose this initially for two reasons:
+1. Replies land in the rep's actual Outlook Sent folder (because their
+   client sends them), so signatures, footers, attachments, and any
+   compliance tooling all "just work."
+2. No extra Microsoft Graph permission required beyond `Mail.Read`.
+
+**Brayden asked about sending direct from the CRM.** It's possible:
+- Use Microsoft Graph `POST /me/sendMail` with a CRM-built compose UI.
+- Already have `offline_access` + `Mail.Send` would need to be added to the
+  Azure App Registration (admin consent required).
+- Body would need to support HTML + signature injection (we'd need to
+  fetch the user's Outlook signature via Graph or let them paste/save one).
+- Outbound emails could either:
+  - Fire-and-forget (no delivery confirmation),
+  - Be tracked in the CRM as an `activity` row immediately + a follow-up
+    sync re-confirms they actually went out.
+
+**Trade-offs to weigh:**
+- Pro: rep stays in CRM, no context-switch.
+- Pro: every outbound is automatically activity-logged.
+- Con: replies don't naturally inherit Outlook signatures/footers; we'd
+  reinvent the compose stack.
+- Con: bigger blast radius if we ever have a bug — could send wrong email
+  to wrong person.
+- Con: Graph rate limits + delivery delays would need user-friendly handling.
+
+**Recommendation:** keep `mailto:` for replies for now. Build full in-CRM
+compose only if reps say the context-switch is hurting them.
+
+### Smart opportunity attribution for incoming emails
+
+Already shipped (2026-04-17): the sync function now only auto-links an
+email to an opp if the account has exactly ONE open opp. With multiple
+open opps, the email attaches to account+contact only and shows up on the
+account timeline. The user can manually associate it with the right opp.
+
+**Future improvement:** add a small "Link to Opportunity" UI on each
+account-only activity in the timeline so reps can drag/select the right
+opp from a dropdown without leaving the activity row.
+
+**Even smarter (later):** match by subject keywords against opp names
+(e.g. an email subject containing "Q3 SRA Quote" with an opp named
+"Acme Q3 SRA" → high-confidence match). This needs a confidence
+threshold and a way for users to confirm/override.
+
 ### Per-contact opt-out from email logging
 
 **Idea.** Some prospects explicitly ask "don't log our conversations."

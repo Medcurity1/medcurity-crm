@@ -28,7 +28,7 @@ import {
 } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
+// ActivityTimeline isn't used here — leads don't have an activities FK
 import { SequencesTab } from "@/features/sequences/SequencesTab";
 import type { LeadSource, LeadQualification } from "@/types/crm";
 import {
@@ -348,6 +348,17 @@ export function LeadDetail() {
         </Card>
       </div>
 
+      {/* --------- Top Tabs (sequences) --------- */}
+      <Tabs defaultValue="sequences" className="mt-2 mb-6">
+        <TabsList>
+          <TabsTrigger value="sequences">Sequences</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="sequences" className="mt-4">
+          <SequencesTab leadId={lead.id} />
+        </TabsContent>
+      </Tabs>
+
       {/* --------- Lead Details Section --------- */}
       <CollapsibleSection title="Lead Details">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
@@ -492,22 +503,6 @@ export function LeadDetail() {
           />
         </div>
       </CollapsibleSection>
-
-      {/* --------- Tabs --------- */}
-      <Tabs defaultValue="activities" className="mt-2">
-        <TabsList>
-          <TabsTrigger value="activities">Activities</TabsTrigger>
-          <TabsTrigger value="sequences">Sequences</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="activities" className="mt-4">
-          <ActivityTimeline />
-        </TabsContent>
-
-        <TabsContent value="sequences" className="mt-4">
-          <SequencesTab leadId={lead.id} />
-        </TabsContent>
-      </Tabs>
 
       <ConfirmDialog
         open={showArchive}

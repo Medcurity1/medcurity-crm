@@ -44,6 +44,7 @@ import {
 } from "@/lib/formatters";
 import { toast } from "sonner";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
+import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
 import { TasksPanel } from "@/features/activities/TasksPanel";
 
 /* ---------- Collapsible section ---------- */
@@ -281,6 +282,10 @@ export function OpportunityDetail() {
           </CardContent>
         </Card>
       )}
+
+      <DetailPageLayout
+        side={<ActivityTimeline opportunityId={opp.id} compact />}
+      >
 
       {/* --------- Details Section --------- */}
       <div className="mt-4" />
@@ -540,12 +545,13 @@ export function OpportunityDetail() {
         </div>
       </CollapsibleSection>
 
+      </DetailPageLayout>
+
       {/* --------- Tabs --------- */}
-      <Tabs defaultValue="products" className="mt-2">
+      <Tabs defaultValue="products" className="mt-6">
         <TabsList>
           <TabsTrigger value="products">Products ({products?.length ?? 0})</TabsTrigger>
           <TabsTrigger value="history">Stage History</TabsTrigger>
-          <TabsTrigger value="activities">Activities</TabsTrigger>
           <TabsTrigger value="tasks">Tasks</TabsTrigger>
           <TabsTrigger value="contacts">Contacts</TabsTrigger>
         </TabsList>
@@ -634,10 +640,6 @@ export function OpportunityDetail() {
           ) : (
             <p className="text-sm text-muted-foreground py-4">No stage changes recorded.</p>
           )}
-        </TabsContent>
-
-        <TabsContent value="activities" className="mt-4">
-          <ActivityTimeline opportunityId={opp.id} />
         </TabsContent>
 
         <TabsContent value="tasks" className="mt-4">
