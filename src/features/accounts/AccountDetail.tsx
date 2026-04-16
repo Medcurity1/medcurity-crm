@@ -1,6 +1,7 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
+import { useUserPreferences } from "@/hooks/useUserPreferences";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Pencil, Archive, ExternalLink, ChevronDown, Phone, UserRoundCog, Plus, MapPin, History } from "lucide-react";
 import { useAccount, useUpdateAccount, useArchiveAccount, useAccountContracts } from "./api";
@@ -134,6 +135,8 @@ export function AccountDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const { prefs } = useUserPreferences();
+  const useSidePanel = prefs.detailLayout === "side_panel";
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { data: account, isLoading } = useAccount(id);
   const { data: contracts } = useAccountContracts(id);
@@ -315,6 +318,43 @@ export function AccountDetail() {
           </CardContent>
         </Card>
       </div>
+
+      {/* ──── Body: two-column in side_panel layout, single-column otherwise ─── */}
+      <div className={cn(useSidePanel && "flex gap-6 items-start")}>
+        <div className={cn(useSidePanel && "flex-1 min-w-0")}>
+
+      {/* --------- Related Tabs (moved to top so they're visible without scrolling) --------- */}
+      <Tabs defaultValue={useSidePanel ? "contacts" : "contacts"} className="mt-2 mb-6">
+        <TabsList>
+          <TabsTrigger value="contacts">Contacts</TabsTrigger>
+          <TabsTrigger value="opportunities">Opportunities</TabsTrigger>
+          {!useSidePanel && <TabsTrigger value="activities">Activities</TabsTrigger>}
+          <TabsTrigger value="tasks">Tasks</TabsTrigger>
+          <TabsTrigger value="contract_history">Contract History</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="contacts" className="mt-4">
+          <AccountContacts accountId={account.id} />
+        </TabsContent>
+
+        <TabsContent value="opportunities" className="mt-4">
+          <AccountOpportunities accountId={account.id} />
+        </TabsContent>
+
+        {!useSidePanel && (
+          <TabsContent value="activities" className="mt-4">
+            <ActivityTimeline accountId={account.id} />
+          </TabsContent>
+        )}
+
+        <TabsContent value="tasks" className="mt-4">
+          <TasksPanel accountId={account.id} />
+        </TabsContent>
+
+        <TabsContent value="contract_history" className="mt-4">
+          <ContractHistoryTable contracts={contracts ?? []} />
+        </TabsContent>
+      </Tabs>
 
       {/* --------- 1. Basic Information --------- */}
       <CollapsibleSection title="Basic Information">
@@ -587,36 +627,16 @@ export function AccountDetail() {
         </div>
       </CollapsibleSection>
 
-      {/* --------- Tabs --------- */}
-      <Tabs defaultValue="contacts" className="mt-2">
-        <TabsList>
-          <TabsTrigger value="contacts">Contacts</TabsTrigger>
-          <TabsTrigger value="opportunities">Opportunities</TabsTrigger>
-          <TabsTrigger value="activities">Activities</TabsTrigger>
-          <TabsTrigger value="tasks">Tasks</TabsTrigger>
-          <TabsTrigger value="contract_history">Contract History</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="contacts" className="mt-4">
-          <AccountContacts accountId={account.id} />
-        </TabsContent>
-
-        <TabsContent value="opportunities" className="mt-4">
-          <AccountOpportunities accountId={account.id} />
-        </TabsContent>
-
-        <TabsContent value="activities" className="mt-4">
-          <ActivityTimeline accountId={account.id} />
-        </TabsContent>
-
-        <TabsContent value="tasks" className="mt-4">
-          <TasksPanel accountId={account.id} />
-        </TabsContent>
-
-        <TabsContent value="contract_history" className="mt-4">
-          <ContractHistoryTable contracts={contracts ?? []} />
-        </TabsContent>
-      </Tabs>
+        </div>
+        {useSidePanel && (
+          <aside className="w-[380px] shrink-0 sticky top-20 self-start">
+            <div className="border rounded-lg p-4 bg-card max-h-[calc(100vh-6rem)] overflow-y-auto">
+              <h3 className="text-sm font-semibold mb-3">Activity</h3>
+              <ActivityTimeline accountId={account.id} />
+            </div>
+          </aside>
+        )}
+      </div>
 
       <ConfirmDialog
         open={showArchive}

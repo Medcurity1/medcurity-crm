@@ -3,7 +3,7 @@
 
 @custom-variant dark (&:is(.dark *));
 
-@theme inline {
+@theme {
   --color-background: hsl(210 33% 98%);
   --color-foreground: hsl(210 40% 12%);
   --color-card: hsl(0 0% 100%);

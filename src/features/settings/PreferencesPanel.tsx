@@ -2,15 +2,37 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useTheme, type ThemeMode } from "@/hooks/useTheme";
-import { Sun, Moon, Monitor } from "lucide-react";
+import { useUserPreferences } from "@/hooks/useUserPreferences";
+import { Sun, Moon, Monitor, Columns2, AlignLeft } from "lucide-react";
 
 export function PreferencesPanel() {
   const { mode, setMode, resolved } = useTheme();
+  const { prefs, setPref } = useUserPreferences();
 
   const modes: Array<{ key: ThemeMode; label: string; icon: typeof Sun }> = [
     { key: "light", label: "Light", icon: Sun },
     { key: "dark", label: "Dark", icon: Moon },
     { key: "system", label: "System", icon: Monitor },
+  ];
+
+  const layouts: Array<{
+    key: "stacked" | "side_panel";
+    label: string;
+    description: string;
+    icon: typeof Columns2;
+  }> = [
+    {
+      key: "side_panel",
+      label: "Side Panel",
+      description: "Activity pinned to the right; related tabs at top.",
+      icon: Columns2,
+    },
+    {
+      key: "stacked",
+      label: "Stacked",
+      description: "Classic single-column layout with tabs at the bottom.",
+      icon: AlignLeft,
+    },
   ];
 
   return (
@@ -45,6 +67,44 @@ export function PreferencesPanel() {
           <p className="text-xs text-muted-foreground">
             Currently showing: <strong>{resolved}</strong>
             {mode === "system" ? " (following system)" : ""}
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Detail Page Layout</CardTitle>
+          <CardDescription>
+            Change the layout used on Account (and later Contact / Opportunity)
+            detail pages.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Label>Layout</Label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {layouts.map(({ key, label, description, icon: Icon }) => {
+              const active = prefs.detailLayout === key;
+              return (
+                <Button
+                  key={key}
+                  type="button"
+                  variant={active ? "default" : "outline"}
+                  onClick={() => setPref("detailLayout", key)}
+                  className="h-auto py-3 px-4 items-start justify-start text-left whitespace-normal"
+                >
+                  <Icon className="h-4 w-4 mr-2 mt-0.5 shrink-0" />
+                  <span className="flex flex-col gap-0.5">
+                    <span className="font-semibold">{label}</span>
+                    <span className="text-xs font-normal opacity-80">
+                      {description}
+                    </span>
+                  </span>
+                </Button>
+              );
+            })}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Reload a detail page after changing.
           </p>
         </CardContent>
       </Card>

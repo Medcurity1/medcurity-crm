@@ -411,6 +411,13 @@ export interface Activity {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  // Email-specific metadata (null for non-email activities)
+  email_direction: "sent" | "received" | null;
+  email_from: string | null;
+  email_to: string[] | null;
+  email_cc: string[] | null;
+  email_html_body: string | null;
+  email_thread_id: string | null;
   // joined fields
   owner?: UserProfile;
 }

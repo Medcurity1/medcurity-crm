@@ -10,6 +10,9 @@ import {
   Clock,
   Plus,
   ClipboardList,
+  ChevronDown,
+  ChevronRight,
+  Reply,
 } from "lucide-react";
 import { useActivities } from "./api";
 import { ActivityForm } from "./ActivityForm";
@@ -147,22 +150,43 @@ function ActivityEntry({ activity }: { activity: Activity }) {
   const isCompleted = !!activity.completed_at;
   const isDue = !!activity.due_at && !isCompleted;
   const subjectLink = getActivityLink(activity);
+  const isEmail = activity.activity_type === "email";
+  const [expanded, setExpanded] = useState(false);
 
   return (
     <div className="relative flex gap-3 pl-0">
-      {/* Icon */}
-      <div
-        className={`relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${colorClass}`}
+      {/* Icon (clickable for email rows to expand) */}
+      <button
+        type="button"
+        className={`relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${colorClass} ${
+          isEmail ? "cursor-pointer hover:opacity-80" : "cursor-default"
+        }`}
+        onClick={isEmail ? () => setExpanded((v) => !v) : undefined}
+        aria-label={isEmail ? (expanded ? "Collapse email" : "Expand email") : undefined}
+        disabled={!isEmail}
       >
         <Icon className="h-4 w-4" />
-      </div>
+      </button>
 
       {/* Content */}
       <div className="flex-1 min-w-0 pb-4">
         <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              {subjectLink ? (
+              {isEmail ? (
+                <button
+                  type="button"
+                  className="flex items-center gap-1 text-left font-medium text-sm truncate text-blue-600 hover:underline"
+                  onClick={() => setExpanded((v) => !v)}
+                >
+                  {expanded ? (
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                  ) : (
+                    <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                  )}
+                  <span className="truncate">{activity.subject}</span>
+                </button>
+              ) : subjectLink ? (
                 <Link to={subjectLink} className="font-medium text-sm truncate text-blue-600 hover:underline">
                   {activity.subject}
                 </Link>
@@ -173,7 +197,7 @@ function ActivityEntry({ activity }: { activity: Activity }) {
                 <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
               )}
             </div>
-            {activity.body && (
+            {activity.body && !expanded && (
               <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">
                 {activity.body}
               </p>
@@ -190,12 +214,84 @@ function ActivityEntry({ activity }: { activity: Activity }) {
                 </span>
               )}
             </div>
+            {expanded && isEmail && <EmailDetails activity={activity} />}
           </div>
           <span className="text-xs text-muted-foreground whitespace-nowrap">
             {formatRelativeDate(activity.created_at)}
           </span>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Expanded email view: From / To / Cc headers, full body (HTML if available,
+ * plain-text fallback), and a Reply button that opens the user's mail client
+ * with pre-populated recipients and subject. We use mailto: rather than
+ * calling Graph's /sendMail directly so the email ends up in the rep's
+ * actual Sent folder and goes through their normal mail signature/tracking.
+ */
+function EmailDetails({ activity }: { activity: Activity }) {
+  const from = activity.email_from ?? "(unknown)";
+  const to = activity.email_to ?? [];
+  const cc = activity.email_cc ?? [];
+
+  const subjectForReply = activity.subject.replace(/^(Sent:|Received:)\s*/, "");
+  const replySubject = subjectForReply.match(/^re:\s*/i)
+    ? subjectForReply
+    : `Re: ${subjectForReply}`;
+
+  // Reply goes to whoever sent it (for received) or the original recipients
+  // (for sent). CC everyone who was previously CC'd.
+  const replyTo =
+    activity.email_direction === "received" ? [from] : to;
+  const replyCc = cc;
+
+  const mailtoHref =
+    `mailto:${encodeURIComponent(replyTo.join(","))}` +
+    `?subject=${encodeURIComponent(replySubject)}` +
+    (replyCc.length > 0 ? `&cc=${encodeURIComponent(replyCc.join(","))}` : "");
+
+  return (
+    <div className="mt-3 rounded-md border bg-muted/30 p-3 space-y-2 text-sm">
+      <HeaderRow label="From" values={[from]} />
+      {to.length > 0 && <HeaderRow label="To" values={to} />}
+      {cc.length > 0 && <HeaderRow label="Cc" values={cc} />}
+      <div className="pt-2 border-t">
+        {activity.email_html_body ? (
+          // Minimal HTML render. Sandboxed via srcdoc so the email can't
+          // steal auth/scripts from our origin. If we ever want clickable
+          // links we'll whitelist-post-process the HTML.
+          <iframe
+            title={`Email body: ${activity.subject}`}
+            sandbox=""
+            srcDoc={activity.email_html_body}
+            className="w-full min-h-48 bg-background rounded border"
+          />
+        ) : (
+          <pre className="whitespace-pre-wrap font-sans text-sm text-foreground">
+            {activity.body || "(no body)"}
+          </pre>
+        )}
+      </div>
+      <div className="pt-2 flex gap-2">
+        <Button size="sm" asChild>
+          <a href={mailtoHref}>
+            <Reply className="h-4 w-4 mr-1" />
+            Reply
+          </a>
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function HeaderRow({ label, values }: { label: string; values: string[] }) {
+  return (
+    <div className="flex gap-2 text-xs">
+      <span className="font-medium text-muted-foreground min-w-10">{label}:</span>
+      <span className="flex-1 break-all text-foreground">{values.join(", ")}</span>
     </div>
   );
 }

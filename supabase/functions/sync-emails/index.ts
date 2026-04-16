@@ -72,11 +72,13 @@ interface ParsedEmail {
   messageId: string;
   subject: string;
   body: string;
+  htmlBody: string | null;
   from: string;
   to: string[];
   cc: string[];
   date: string;
   direction: "sent" | "received";
+  threadId: string | null;
 }
 
 interface ContactMatch {
@@ -263,11 +265,17 @@ async function fetchGmailEmails(
       messageId: msgId,
       subject: headers["subject"] ?? "(no subject)",
       body: msg.snippet ?? "",
+      // Gmail metadata-only fetch doesn't include the HTML body. To capture
+      // full body we'd need format=full; leaving as null for now to keep
+      // bandwidth + token usage reasonable. Preview + metadata is enough
+      // for most views.
+      htmlBody: null,
       from,
       to,
       cc,
       date: headers["date"] ?? new Date().toISOString(),
       direction,
+      threadId: msg.threadId ?? null,
     });
   }
 
@@ -288,7 +296,7 @@ async function fetchOutlookEmails(
   const filter = `receivedDateTime ge ${isoSince}`;
 
   const res = await fetch(
-    `https://graph.microsoft.com/v1.0/me/messages?$filter=${encodeURIComponent(filter)}&$top=100&$select=id,subject,bodyPreview,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime&$orderby=receivedDateTime desc`,
+    `https://graph.microsoft.com/v1.0/me/messages?$filter=${encodeURIComponent(filter)}&$top=100&$select=id,subject,bodyPreview,body,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,conversationId&$orderby=receivedDateTime desc`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
 
@@ -315,15 +323,25 @@ async function fetchOutlookEmails(
     const direction =
       from.toLowerCase() === userEmail.toLowerCase() ? "sent" : "received";
 
+    // Outlook body.contentType is either "html" or "text". We keep the
+    // plain preview for activities.body (used in search/previews) and
+    // separately preserve the HTML for high-fidelity rendering.
+    const bodyContentType: string = msg.body?.contentType ?? "text";
+    const bodyContent: string = msg.body?.content ?? "";
+    const htmlBody =
+      bodyContentType.toLowerCase() === "html" ? bodyContent : null;
+
     emails.push({
       messageId: msg.id,
       subject: msg.subject ?? "(no subject)",
       body: msg.bodyPreview ?? "",
+      htmlBody,
       from,
       to,
       cc,
       date: msg.receivedDateTime ?? msg.sentDateTime ?? new Date().toISOString(),
       direction,
+      threadId: msg.conversationId ?? null,
     });
   }
 
@@ -434,6 +452,12 @@ async function createEmailActivity(
     body: email.body,
     completed_at: new Date(email.date).toISOString(),
     external_message_id: externalId,
+    email_direction: email.direction,
+    email_from: email.from || null,
+    email_to: email.to.length > 0 ? email.to : null,
+    email_cc: email.cc.length > 0 ? email.cc : null,
+    email_html_body: email.htmlBody,
+    email_thread_id: email.threadId,
   });
 
   if (error) {
