@@ -18,7 +18,7 @@ import { AccountContacts } from "@/features/accounts/AccountContacts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CollapsibleTabs } from "@/components/CollapsibleTabs";
 import {
   Table,
   TableBody,
@@ -287,6 +287,45 @@ export function OpportunityDetail() {
         side={<ActivityTimeline opportunityId={opp.id} compact />}
       >
 
+      {/* Related-record tabs at the top, collapsed by default. */}
+      <CollapsibleTabs
+        className="mt-2"
+        defaultValue="products"
+        items={[
+          {
+            value: "products",
+            label: `Products (${products?.length ?? 0})`,
+            content: (
+              <ProductsTabContent
+                products={products ?? []}
+                totalARR={totalARR}
+                onAddProduct={() => setShowAddProduct(true)}
+                onRemoveProduct={(id, name) => setPendingRemoveProduct({ id, name })}
+              />
+            ),
+          },
+          {
+            value: "history",
+            label: "Stage History",
+            content: <StageHistoryTabContent history={history ?? []} />,
+          },
+          {
+            value: "tasks",
+            label: "Tasks",
+            content: <TasksPanel opportunityId={opp.id} />,
+          },
+          {
+            value: "contacts",
+            label: "Contacts",
+            content: opp.account_id ? (
+              <AccountContacts accountId={opp.account_id} />
+            ) : (
+              <p className="text-sm text-muted-foreground py-4">No account linked to this opportunity.</p>
+            ),
+          },
+        ]}
+      />
+
       {/* --------- Details Section --------- */}
       <div className="mt-4" />
       <CollapsibleSection title="Details">
@@ -547,114 +586,6 @@ export function OpportunityDetail() {
 
       </DetailPageLayout>
 
-      {/* --------- Tabs --------- */}
-      <Tabs defaultValue="products" className="mt-6">
-        <TabsList>
-          <TabsTrigger value="products">Products ({products?.length ?? 0})</TabsTrigger>
-          <TabsTrigger value="history">Stage History</TabsTrigger>
-          <TabsTrigger value="tasks">Tasks</TabsTrigger>
-          <TabsTrigger value="contacts">Contacts</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="products" className="mt-4">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm text-muted-foreground">
-              {products?.length
-                ? `${products.length} product${products.length !== 1 ? "s" : ""}`
-                : "No products added yet"}
-            </span>
-            <Button size="sm" onClick={() => setShowAddProduct(true)}>
-              <Plus className="h-4 w-4 mr-1" />
-              Add Product
-            </Button>
-          </div>
-          {products?.length ? (
-            <div className="border rounded-lg">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Product</TableHead>
-                    <TableHead>Code</TableHead>
-                    <TableHead className="text-right">Qty</TableHead>
-                    <TableHead className="text-right">Unit Price</TableHead>
-                    <TableHead className="text-right">ARR</TableHead>
-                    <TableHead className="w-10" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {products.map((p) => (
-                    <TableRow key={p.id}>
-                      <TableCell className="font-medium">{p.product?.name ?? "\u2014"}</TableCell>
-                      <TableCell className="text-muted-foreground">{p.product?.code ?? "\u2014"}</TableCell>
-                      <TableCell className="text-right">{p.quantity}</TableCell>
-                      <TableCell className="text-right">{formatCurrencyDetailed(Number(p.unit_price))}</TableCell>
-                      <TableCell className="text-right font-medium">{formatCurrencyDetailed(Number(p.arr_amount))}</TableCell>
-                      <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                          onClick={() => setPendingRemoveProduct({ id: p.id, name: p.product?.name ?? "this product" })}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  <TableRow className="bg-muted/50">
-                    <TableCell colSpan={5} className="text-right font-semibold">Total ARR</TableCell>
-                    <TableCell className="text-right font-bold">{formatCurrencyDetailed(totalARR)}</TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </div>
-          ) : null}
-        </TabsContent>
-
-        <TabsContent value="history" className="mt-4">
-          {history?.length ? (
-            <div className="space-y-3">
-              {history.map((h) => (
-                <div key={h.id} className="flex items-center gap-3 text-sm">
-                  <div className="h-2 w-2 rounded-full bg-primary shrink-0" />
-                  <div className="flex-1">
-                    {h.from_stage ? (
-                      <span>
-                        <span className="font-medium">{stageLabel(h.from_stage)}</span>
-                        {" \u2192 "}
-                        <span className="font-medium">{stageLabel(h.to_stage)}</span>
-                      </span>
-                    ) : (
-                      <span>
-                        Created as <span className="font-medium">{stageLabel(h.to_stage)}</span>
-                      </span>
-                    )}
-                    {h.changer?.full_name && (
-                      <span className="text-muted-foreground"> by {h.changer.full_name}</span>
-                    )}
-                  </div>
-                  <span className="text-muted-foreground text-xs">{formatRelativeDate(h.changed_at)}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground py-4">No stage changes recorded.</p>
-          )}
-        </TabsContent>
-
-        <TabsContent value="tasks" className="mt-4">
-          <TasksPanel opportunityId={opp.id} />
-        </TabsContent>
-
-        <TabsContent value="contacts" className="mt-4">
-          {opp.account_id ? (
-            <AccountContacts accountId={opp.account_id} />
-          ) : (
-            <p className="text-sm text-muted-foreground py-4">No account linked to this opportunity.</p>
-          )}
-        </TabsContent>
-      </Tabs>
-
       <ConfirmDialog
         open={showArchive}
         onOpenChange={setShowArchive}
@@ -738,6 +669,125 @@ export function OpportunityDetail() {
           );
         }}
       />
+    </div>
+  );
+}
+
+/* ---------- Tab content extracted for the CollapsibleTabs items ---------- */
+
+interface ProductsTabContentProps {
+  products: Array<{
+    id: string;
+    quantity: number;
+    unit_price: number | string;
+    arr_amount: number | string;
+    product?: { name?: string | null; code?: string | null } | null;
+  }>;
+  totalARR: number;
+  onAddProduct: () => void;
+  onRemoveProduct: (id: string, name: string) => void;
+}
+
+function ProductsTabContent({
+  products,
+  totalARR,
+  onAddProduct,
+  onRemoveProduct,
+}: ProductsTabContentProps) {
+  return (
+    <>
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-sm text-muted-foreground">
+          {products.length
+            ? `${products.length} product${products.length !== 1 ? "s" : ""}`
+            : "No products added yet"}
+        </span>
+        <Button size="sm" onClick={onAddProduct}>
+          <Plus className="h-4 w-4 mr-1" />
+          Add Product
+        </Button>
+      </div>
+      {products.length ? (
+        <div className="border rounded-lg">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Product</TableHead>
+                <TableHead>Code</TableHead>
+                <TableHead className="text-right">Qty</TableHead>
+                <TableHead className="text-right">Unit Price</TableHead>
+                <TableHead className="text-right">ARR</TableHead>
+                <TableHead className="w-10" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {products.map((p) => (
+                <TableRow key={p.id}>
+                  <TableCell className="font-medium">{p.product?.name ?? "\u2014"}</TableCell>
+                  <TableCell className="text-muted-foreground">{p.product?.code ?? "\u2014"}</TableCell>
+                  <TableCell className="text-right">{p.quantity}</TableCell>
+                  <TableCell className="text-right">{formatCurrencyDetailed(Number(p.unit_price))}</TableCell>
+                  <TableCell className="text-right font-medium">{formatCurrencyDetailed(Number(p.arr_amount))}</TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                      onClick={() => onRemoveProduct(p.id, p.product?.name ?? "this product")}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+              <TableRow className="bg-muted/50">
+                <TableCell colSpan={5} className="text-right font-semibold">Total ARR</TableCell>
+                <TableCell className="text-right font-bold">{formatCurrencyDetailed(totalARR)}</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+interface StageHistoryEntry {
+  id: number | string;
+  from_stage: string | null;
+  to_stage: string;
+  changed_at: string;
+  changer?: { full_name?: string | null } | null;
+}
+
+function StageHistoryTabContent({ history }: { history: StageHistoryEntry[] }) {
+  if (!history.length) {
+    return <p className="text-sm text-muted-foreground py-4">No stage changes recorded.</p>;
+  }
+  return (
+    <div className="space-y-3">
+      {history.map((h) => (
+        <div key={h.id} className="flex items-center gap-3 text-sm">
+          <div className="h-2 w-2 rounded-full bg-primary shrink-0" />
+          <div className="flex-1">
+            {h.from_stage ? (
+              <span>
+                <span className="font-medium">{stageLabel(h.from_stage as never)}</span>
+                {" \u2192 "}
+                <span className="font-medium">{stageLabel(h.to_stage as never)}</span>
+              </span>
+            ) : (
+              <span>
+                Created as <span className="font-medium">{stageLabel(h.to_stage as never)}</span>
+              </span>
+            )}
+            {h.changer?.full_name && (
+              <span className="text-muted-foreground"> by {h.changer.full_name}</span>
+            )}
+          </div>
+          <span className="text-muted-foreground text-xs">{formatRelativeDate(h.changed_at)}</span>
+        </div>
+      ))}
     </div>
   );
 }

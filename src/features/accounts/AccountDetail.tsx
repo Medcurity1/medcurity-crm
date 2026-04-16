@@ -14,7 +14,7 @@ import { RecordId } from "@/components/RecordId";
 import { InlineEdit, type InlineEditProps } from "@/components/InlineEdit";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CollapsibleTabs } from "@/components/CollapsibleTabs";
 import {
   Table,
   TableBody,
@@ -323,31 +323,35 @@ export function AccountDetail() {
         side={<ActivityTimeline accountId={account.id} compact />}
       >
 
-      {/* --------- Related Tabs (moved to top so they're visible without scrolling) --------- */}
-      <Tabs defaultValue="contacts" className="mt-2 mb-6">
-        <TabsList>
-          <TabsTrigger value="contacts">Contacts</TabsTrigger>
-          <TabsTrigger value="opportunities">Opportunities</TabsTrigger>
-          <TabsTrigger value="tasks">Tasks</TabsTrigger>
-          <TabsTrigger value="contract_history">Contract History</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="contacts" className="mt-4">
-          <AccountContacts accountId={account.id} />
-        </TabsContent>
-
-        <TabsContent value="opportunities" className="mt-4">
-          <AccountOpportunities accountId={account.id} />
-        </TabsContent>
-
-        <TabsContent value="tasks" className="mt-4">
-          <TasksPanel accountId={account.id} />
-        </TabsContent>
-
-        <TabsContent value="contract_history" className="mt-4">
-          <ContractHistoryTable contracts={contracts ?? []} />
-        </TabsContent>
-      </Tabs>
+      {/* Related tabs at the top. Collapsed by default so the page doesn't
+          lead with a wall of related-record data before the user has seen
+          the account's own fields. */}
+      <CollapsibleTabs
+        className="mt-2"
+        defaultValue="contacts"
+        items={[
+          {
+            value: "contacts",
+            label: "Contacts",
+            content: <AccountContacts accountId={account.id} />,
+          },
+          {
+            value: "opportunities",
+            label: "Opportunities",
+            content: <AccountOpportunities accountId={account.id} />,
+          },
+          {
+            value: "tasks",
+            label: "Tasks",
+            content: <TasksPanel accountId={account.id} />,
+          },
+          {
+            value: "contract_history",
+            label: "Contract History",
+            content: <ContractHistoryTable contracts={contracts ?? []} />,
+          },
+        ]}
+      />
 
       {/* --------- 1. Basic Information --------- */}
       <CollapsibleSection title="Basic Information">

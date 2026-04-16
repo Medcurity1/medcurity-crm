@@ -388,22 +388,25 @@ async function matchContactsByEmail(
 }
 
 /**
- * Auto-attribute an email to an opportunity, but ONLY when it's safe.
+ * Auto-attribute an email to an opportunity using the "actively worked"
+ * heuristic.
  *
- * Brayden 2026-04-17: SF used to silently attach activity to the most
- * recent open opp, which led to emails landing on the wrong deal when an
- * account had multiple in-flight opps. We don't want that.
+ * Brayden 2026-04-17: don't want manual attribution when there are multiple
+ * opps. So instead of skipping, we pick the opp the rep is actively touching.
  *
- * Rules (in order):
- *   1. If the account has exactly ONE open opp → link to it. Safe single-
- *      candidate case; this is the common path for accounts with active
- *      pipeline.
- *   2. If the account has ZERO open opps → don't link to any. The activity
- *      still attaches to the account + contact, just no opp.
- *   3. If the account has MULTIPLE open opps → don't auto-link. The
- *      activity stays account+contact-scoped and shows up on the account
- *      timeline. A user can manually associate it with the right opp from
- *      the activity detail later.
+ * Heuristic (in order):
+ *   1. ZERO open opps → don't link (activity stays account+contact-scoped).
+ *   2. ONE open opp → link to it. Safe single candidate.
+ *   3. MULTIPLE open opps → pick the one with the most recent updated_at
+ *      (any field edit, stage change, product add bumps updated_at). When
+ *      a rep shifts focus to a different deal, future emails follow them.
+ *      Only if NONE of the candidates have been touched in the last 90
+ *      days do we skip linking (treats them all as stale, ambiguous).
+ *
+ * Future override (documented in future-enhancements.md): we may add an
+ * `is_active_deal` boolean on opportunities so a rep can pin which opp is
+ * "the one." Until then, the updated_at heuristic alone handles the common
+ * case automatically.
  *
  * Closed (closed_won / closed_lost) and archived opps are never considered.
  */
@@ -413,14 +416,23 @@ async function findOpenOpportunity(
 ): Promise<string | null> {
   const { data } = await supabase
     .from("opportunities")
-    .select("id")
+    .select("id, updated_at")
     .eq("account_id", accountId)
     .is("archived_at", null)
     .not("stage", "in", '("closed_won","closed_lost")')
-    .limit(2);
+    .order("updated_at", { ascending: false });
 
-  if (!data || data.length !== 1) return null; // 0 or >=2 → don't auto-link
-  return data[0].id;
+  if (!data || data.length === 0) return null;
+  if (data.length === 1) return data[0].id;
+
+  // Stale-guard: if even the most-recently-touched candidate hasn't been
+  // updated in 90 days, treat the whole set as inactive and skip linking.
+  const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
+  const newest = data[0];
+  const newestAge = Date.now() - new Date(newest.updated_at).getTime();
+  if (newestAge > NINETY_DAYS_MS) return null;
+
+  return newest.id;
 }
 
 // ---------------------------------------------------------------------------

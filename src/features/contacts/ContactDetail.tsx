@@ -13,7 +13,7 @@ import { RecordId } from "@/components/RecordId";
 import { InlineEdit, type InlineEditProps } from "@/components/InlineEdit";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CollapsibleTabs } from "@/components/CollapsibleTabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatName, formatDateTime, leadSourceLabel } from "@/lib/formatters";
@@ -277,26 +277,27 @@ export function ContactDetail() {
         }
       >
 
-      {/* --------- Related Tabs (top of body) --------- */}
-      <Tabs defaultValue="opportunities" className="mt-2 mb-6">
-        <TabsList>
-          <TabsTrigger value="opportunities">Opportunities</TabsTrigger>
-          <TabsTrigger value="tasks">Tasks</TabsTrigger>
-          <TabsTrigger value="sequences">Sequences</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="opportunities" className="mt-4">
-          <AccountOpportunities accountId={contact.account_id} />
-        </TabsContent>
-
-        <TabsContent value="tasks" className="mt-4">
-          <TasksPanel contactId={contact.id} />
-        </TabsContent>
-
-        <TabsContent value="sequences" className="mt-4">
-          <SequencesTab contactId={contact.id} accountId={contact.account_id} />
-        </TabsContent>
-      </Tabs>
+      <CollapsibleTabs
+        className="mt-2"
+        defaultValue="opportunities"
+        items={[
+          {
+            value: "opportunities",
+            label: "Opportunities",
+            content: <AccountOpportunities accountId={contact.account_id} />,
+          },
+          {
+            value: "tasks",
+            label: "Tasks",
+            content: <TasksPanel contactId={contact.id} />,
+          },
+          {
+            value: "sequences",
+            label: "Sequences",
+            content: <SequencesTab contactId={contact.id} accountId={contact.account_id} />,
+          },
+        ]}
+      />
 
       {/* --------- Contact Details Section --------- */}
       <CollapsibleSection title="Contact Details">

@@ -42,7 +42,10 @@ export function DetailPageLayout({
       <div className="flex-1 min-w-0">{children}</div>
       <aside
         className={cn(
-          "w-[380px] shrink-0 sticky top-20 self-start hidden xl:block"
+          // Slightly wider so email From/To addresses + thread subjects
+          // don't truncate so aggressively. xl: only — collapses to stacked
+          // below 1280px.
+          "w-[440px] shrink-0 sticky top-20 self-start hidden xl:block"
         )}
       >
         <div className="border rounded-lg p-4 bg-card max-h-[calc(100vh-6rem)] overflow-y-auto">

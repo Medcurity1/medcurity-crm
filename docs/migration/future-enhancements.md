@@ -79,19 +79,28 @@ compose only if reps say the context-switch is hurting them.
 
 ### Smart opportunity attribution for incoming emails
 
-Already shipped (2026-04-17): the sync function now only auto-links an
-email to an opp if the account has exactly ONE open opp. With multiple
-open opps, the email attaches to account+contact only and shows up on the
-account timeline. The user can manually associate it with the right opp.
+Already shipped (2026-04-17, refined later same day):
+- Sync function picks the opp by "most recently updated" instead of
+  blindly the most recent. Reps editing an opp (stage change, field edit,
+  product add) bump its updated_at, so emails naturally follow whichever
+  deal is actively being worked.
+- 90-day staleness guard: if even the most-recent candidate hasn't been
+  touched in 90 days, skip linking (the activity stays account+contact-
+  scoped). Avoids attributing email to a forgotten dormant opp.
 
-**Future improvement:** add a small "Link to Opportunity" UI on each
-account-only activity in the timeline so reps can drag/select the right
-opp from a dropdown without leaving the activity row.
+**Future improvement:** `is_active_deal` boolean on opportunities so a
+rep can manually pin "this one is the live deal" when two opps are both
+actively being worked and updated_at can't disambiguate. Surface as a
+toggle on the opportunity detail page; default false.
 
 **Even smarter (later):** match by subject keywords against opp names
 (e.g. an email subject containing "Q3 SRA Quote" with an opp named
 "Acme Q3 SRA" → high-confidence match). This needs a confidence
 threshold and a way for users to confirm/override.
+
+**Even smarter (much later):** small "Re-attribute Activity" UI on each
+activity row that lets a user move it to a different opp on the same
+account if the auto-pick was wrong. Single dropdown + save button.
 
 ### Per-contact opt-out from email logging
 

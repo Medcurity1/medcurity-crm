@@ -327,56 +327,54 @@ function ActivityEntry({
 
       {/* Content */}
       <div className="flex-1 min-w-0 pb-4">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              {isEmail ? (
-                <button
-                  type="button"
-                  className="flex items-center gap-1 text-left font-medium text-sm truncate text-blue-600 hover:underline"
-                  onClick={() => setExpanded((v) => !v)}
-                >
-                  {expanded ? (
-                    <ChevronDown className="h-3.5 w-3.5 shrink-0" />
-                  ) : (
-                    <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-                  )}
-                  <span className="truncate">{activity.subject}</span>
-                </button>
-              ) : subjectLink ? (
-                <Link to={subjectLink} className="font-medium text-sm truncate text-blue-600 hover:underline">
-                  {activity.subject}
-                </Link>
+        {/* Subject row: subject takes available width via min-w-0 + flex-1
+            so the relative date on the right always stays visible. */}
+        <div className="flex items-center gap-2">
+          {isEmail ? (
+            <button
+              type="button"
+              className="flex items-center gap-1 text-left font-medium text-sm text-blue-600 hover:underline min-w-0 flex-1"
+              onClick={() => setExpanded((v) => !v)}
+            >
+              {expanded ? (
+                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
               ) : (
-                <p className="font-medium text-sm truncate">{activity.subject}</p>
+                <ChevronRight className="h-3.5 w-3.5 shrink-0" />
               )}
-              {isCompleted && (
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
-              )}
-            </div>
-            {activity.body && !expanded && (
-              <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">
-                {activity.body}
-              </p>
-            )}
-            <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-              <span>{activityLabel(activity.activity_type)}</span>
-              {activity.owner?.full_name && (
-                <span>{activity.owner.full_name}</span>
-              )}
-              {isDue && (
-                <span className="inline-flex items-center gap-1 text-amber-600">
-                  <Clock className="h-3 w-3" />
-                  Due {formatDate(activity.due_at)}
-                </span>
-              )}
-            </div>
-            {expanded && isEmail && <EmailDetails activity={activity} />}
-          </div>
-          <span className="text-xs text-muted-foreground whitespace-nowrap">
+              <span className="truncate">{activity.subject}</span>
+            </button>
+          ) : subjectLink ? (
+            <Link to={subjectLink} className="font-medium text-sm truncate text-blue-600 hover:underline min-w-0 flex-1">
+              {activity.subject}
+            </Link>
+          ) : (
+            <p className="font-medium text-sm truncate min-w-0 flex-1">{activity.subject}</p>
+          )}
+          {isCompleted && (
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+          )}
+          <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
             {formatRelativeDate(activity.created_at)}
           </span>
         </div>
+        {activity.body && !expanded && (
+          <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">
+            {activity.body}
+          </p>
+        )}
+        <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+          <span>{activityLabel(activity.activity_type)}</span>
+          {activity.owner?.full_name && (
+            <span>{activity.owner.full_name}</span>
+          )}
+          {isDue && (
+            <span className="inline-flex items-center gap-1 text-amber-600">
+              <Clock className="h-3 w-3" />
+              Due {formatDate(activity.due_at)}
+            </span>
+          )}
+        </div>
+        {expanded && isEmail && <EmailDetails activity={activity} />}
       </div>
     </div>
   );
@@ -499,38 +497,38 @@ function ThreadEntry({
         <MessagesSquare className="h-4 w-4" />
       </button>
       <div className="flex-1 min-w-0 pb-4">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <button
-              type="button"
-              className="flex items-center gap-1 text-left font-medium text-sm truncate text-blue-600 hover:underline"
-              onClick={() => setShowThread((v) => !v)}
-            >
-              {showThread ? (
-                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
-              ) : (
-                <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-              )}
-              <span className="truncate">{group.primary.subject}</span>
-              <span className="ml-1 text-xs text-muted-foreground font-normal whitespace-nowrap">
-                ({messageCount} messages)
-              </span>
-            </button>
-            {!showThread && group.primary.body && (
-              <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">
-                {group.primary.body}
-              </p>
+        {/* Subject row: subject truncates, message-count + date stay
+            visible on the right with shrink-0 + whitespace-nowrap. */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="flex items-center gap-1 text-left font-medium text-sm text-blue-600 hover:underline min-w-0 flex-1"
+            onClick={() => setShowThread((v) => !v)}
+          >
+            {showThread ? (
+              <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 shrink-0" />
             )}
-            <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-              <span>Email Thread</span>
-              {group.primary.owner?.full_name && (
-                <span>{group.primary.owner.full_name}</span>
-              )}
-            </div>
-          </div>
-          <span className="text-xs text-muted-foreground whitespace-nowrap">
+            <span className="truncate">{group.primary.subject}</span>
+          </button>
+          <span className="text-xs text-muted-foreground font-normal whitespace-nowrap shrink-0">
+            {messageCount} msgs
+          </span>
+          <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
             {formatRelativeDate(group.primary.created_at)}
           </span>
+        </div>
+        {!showThread && group.primary.body && (
+          <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">
+            {group.primary.body}
+          </p>
+        )}
+        <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+          <span>Email Thread</span>
+          {group.primary.owner?.full_name && (
+            <span>{group.primary.owner.full_name}</span>
+          )}
         </div>
 
         {showThread && (

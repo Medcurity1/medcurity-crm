@@ -16,7 +16,7 @@ import { InlineEdit, type InlineEditProps } from "@/components/InlineEdit";
 import { ConvertLeadDialog } from "./ConvertLeadDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CollapsibleTabs } from "@/components/CollapsibleTabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   leadStatusLabel,
@@ -348,16 +348,17 @@ export function LeadDetail() {
         </Card>
       </div>
 
-      {/* --------- Top Tabs (sequences) --------- */}
-      <Tabs defaultValue="sequences" className="mt-2 mb-6">
-        <TabsList>
-          <TabsTrigger value="sequences">Sequences</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="sequences" className="mt-4">
-          <SequencesTab leadId={lead.id} />
-        </TabsContent>
-      </Tabs>
+      <CollapsibleTabs
+        className="mt-2"
+        defaultValue="sequences"
+        items={[
+          {
+            value: "sequences",
+            label: "Sequences",
+            content: <SequencesTab leadId={lead.id} />,
+          },
+        ]}
+      />
 
       {/* --------- Lead Details Section --------- */}
       <CollapsibleSection title="Lead Details">
