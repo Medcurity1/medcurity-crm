@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { useProducts, useAddOpportunityProduct, useOpportunity } from "./api";
 import { usePriceBooks, usePriceBookEntries } from "@/features/products/api";
-import { useAccount } from "@/features/accounts/api";
 import {
   Dialog,
   DialogContent,
@@ -32,7 +31,6 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
   const { data: products } = useProducts();
   const { data: priceBooks } = usePriceBooks();
   const { data: opp } = useOpportunity(opportunityId);
-  const { data: account } = useAccount(opp?.account_id);
   const addMutation = useAddOpportunityProduct();
 
   const [priceBookId, setPriceBookId] = useState("");
@@ -45,7 +43,9 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
 
   const { data: priceBookEntries } = usePriceBookEntries(priceBookId || undefined);
 
-  const accountFteRange = account?.fte_range ?? null;
+  // Read FTE from the OPPORTUNITY, not the account. Opps snapshot fte_range at
+  // create time so pricing stays frozen if the account later grows/shrinks.
+  const oppFteRange = opp?.fte_range ?? null;
   const activePriceBooks = priceBooks?.filter((pb) => pb.is_active) ?? [];
 
   // Reset form when dialog opens
@@ -68,7 +68,7 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
     const matchingEntry = priceBookEntries.find(
       (e) =>
         e.product_id === productId &&
-        (accountFteRange ? e.fte_range === accountFteRange : e.fte_range === null)
+        (oppFteRange ? e.fte_range === oppFteRange : e.fte_range === null)
     );
 
     if (matchingEntry) {
@@ -88,7 +88,7 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
         }
       }
     }
-  }, [priceBookId, productId, priceBookEntries, accountFteRange]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [priceBookId, productId, priceBookEntries, oppFteRange]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-fill unit price from product's default_arr when product is selected (no price book)
   useEffect(() => {
@@ -161,14 +161,14 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
                 ))}
               </SelectContent>
             </Select>
-            {selectedPriceBook && accountFteRange && (
+            {selectedPriceBook && oppFteRange && (
               <p className="text-xs text-muted-foreground">
-                Using "{selectedPriceBook.name}" for FTE range: {accountFteRange}
+                Using "{selectedPriceBook.name}" for FTE range: {oppFteRange}
               </p>
             )}
-            {selectedPriceBook && !accountFteRange && (
+            {selectedPriceBook && !oppFteRange && (
               <p className="text-xs text-amber-600">
-                Account has no FTE range set. Prices may not match.
+                Opportunity has no FTE range set. Edit the opportunity to set one, or prices may not match.
               </p>
             )}
           </div>
@@ -189,7 +189,7 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
             </Select>
             {priceBookPriceFilled && selectedPriceBook && (
               <p className="text-xs text-emerald-600">
-                Price auto-filled from "{selectedPriceBook.name}" ({accountFteRange ?? "no FTE range"}): {formatCurrencyDetailed(unitPrice)}
+                Price auto-filled from "{selectedPriceBook.name}" ({oppFteRange ?? "no FTE range"}): {formatCurrencyDetailed(unitPrice)}
               </p>
             )}
           </div>

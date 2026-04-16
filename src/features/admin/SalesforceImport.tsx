@@ -133,6 +133,46 @@ function parseCSV(text: string): string[][] {
 }
 
 /* ================================================================
+   FTE-range cleanup helpers
+   ----------------------------------------------------------------
+   Medcurity's Salesforce data has FTE ranges baked into product /
+   price-book names as prefixes like "51-100 Security Risk Assessment"
+   or "1-20 Price Book". The CRM schema expects ONE product ("Security
+   Risk Assessment") with per-tier entries in price_book_entries whose
+   fte_range column carries "51-100", "1-20", etc.
+
+   During import we:
+     1. Detect FTE prefixes on product + price-book names
+     2. Strip the prefix so the canonical name survives
+     3. Dedupe products by code so the 157 SF products collapse to ~16
+     4. Collapse all tier-specific SF price books into ONE canonical
+        "Medcurity Standard" price book
+     5. For price_book_entries, parse the fte_range from the original
+        SF pricebook name and set it on the entry, while pointing
+        price_book_id at the single master book.
+   ================================================================ */
+
+// Matches leading FTE tier prefixes like "1-20", "21-50", "5001-10000",
+// "501+", followed by one or more spaces / hyphens / underscores.
+// We anchor to start-of-string so a product called "SRA for 1-20 orgs"
+// isn't accidentally stripped.
+const FTE_PREFIX_RE = /^(\d+-\d+|\d+\+)[\s_-]+/;
+
+// The single canonical price book name used after cleanup.
+const MASTER_PRICE_BOOK_NAME = "Medcurity Standard";
+
+function stripFtePrefix(value: unknown): { base: string; fteRange: string | null } {
+  if (typeof value !== "string") {
+    return { base: (value as string) ?? "", fteRange: null };
+  }
+  const trimmed = value.trim();
+  const match = trimmed.match(FTE_PREFIX_RE);
+  if (!match) return { base: trimmed, fteRange: null };
+  // match[1] is the range alone ("51-100"), match[0] includes the trailing separator.
+  return { base: trimmed.slice(match[0].length).trim(), fteRange: match[1] };
+}
+
+/* ================================================================
    Field mappings per entity
    ================================================================ */
 
@@ -1719,19 +1759,43 @@ export function SalesforceImport() {
       let contactSfMap: Map<string, string> | null = null;
       let productSfMap: Map<string, string> | null = null;
       let productCodeMap: Map<string, string> | null = null;
+      let productNameMap: Map<string, string> | null = null;
       let priceBookSfMap: Map<string, string> | null = null;
       let priceBookNameMap: Map<string, string> | null = null;
+      // CRM-id → { fte_range, fte_count } lookup, used to snapshot FTE data
+      // onto imported opportunities so per-tier pricing works on day one.
+      let accountFteByCrmId: Map<
+        string,
+        { fte_range: string | null; fte_count: number | null }
+      > | null = null;
+
+      // FTE-cleanup session state (see helper comment at top of file)
+      const seenProductCodes = new Set<string>(); // codes already inserted this session
+      const seenProductNames = new Set<string>(); // fallback dedup when code is missing
+      let masterPriceBookId: string | null = null; // canonical "Medcurity Standard" id
+
       if (
         entity === "contacts" ||
         entity === "opportunities"
       ) {
         const { data: accounts } = await supabase
           .from("accounts")
-          .select("id, sf_id")
+          .select("id, sf_id, fte_range, fte_count")
           .not("sf_id", "is", null);
         accountSfMap = new Map(
           (accounts ?? []).map((a) => [a.sf_id as string, a.id as string])
         );
+        if (entity === "opportunities") {
+          accountFteByCrmId = new Map(
+            (accounts ?? []).map((a) => [
+              a.id as string,
+              {
+                fte_range: (a.fte_range as string | null) ?? null,
+                fte_count: (a.fte_count as number | null) ?? null,
+              },
+            ])
+          );
+        }
       }
       if (entity === "opportunities") {
         const { data: contacts } = await supabase
@@ -1743,17 +1807,28 @@ export function SalesforceImport() {
         );
       }
       if (entity === "price_book_entries") {
-        // Build product lookups (by sf_id and by code)
+        // Build product lookups (by sf_id, by code, and by CLEANED name)
         const { data: products } = await supabase
           .from("products")
-          .select("id, sf_id, code");
+          .select("id, sf_id, code, name");
         productSfMap = new Map(
           (products ?? []).filter((p) => p.sf_id).map((p) => [p.sf_id as string, p.id as string])
         );
         productCodeMap = new Map(
           (products ?? []).filter((p) => p.code).map((p) => [p.code as string, p.id as string])
         );
-        // Build price book lookups
+        // Name-based lookup is what makes FTE cleanup work on PBE imports:
+        // a PBE row referencing SF product "51-100 SRA" no longer has a matching
+        // sf_id (we collapsed it), but it DOES still carry the product name in
+        // the CSV. We strip the FTE prefix and look up by the base name.
+        productNameMap = new Map(
+          (products ?? [])
+            .filter((p) => p.name)
+            .map((p) => [(p.name as string).trim().toLowerCase(), p.id as string])
+        );
+
+        // Build price book lookups (kept for backwards compat, but during
+        // FTE-cleanup imports we override every row to the master book below).
         const { data: priceBooks } = await supabase
           .from("price_books")
           .select("id, sf_id, name");
@@ -1763,6 +1838,46 @@ export function SalesforceImport() {
         priceBookNameMap = new Map(
           (priceBooks ?? []).map((pb) => [(pb.name as string).toLowerCase(), pb.id as string])
         );
+
+        // Ensure the master "Medcurity Standard" price book exists. All
+        // PBE rows will be inserted under this single book regardless of
+        // which tier-specific SF book they came from.
+        const existingMaster = (priceBooks ?? []).find(
+          (pb) => (pb.name as string) === MASTER_PRICE_BOOK_NAME
+        );
+        if (existingMaster) {
+          masterPriceBookId = existingMaster.id as string;
+        } else {
+          const { data: created, error: createErr } = await supabase
+            .from("price_books")
+            .insert({
+              name: MASTER_PRICE_BOOK_NAME,
+              description:
+                "Unified price book. Pricing varies by FTE range on each entry; the opportunity's FTE range drives auto-pricing in the product picker.",
+              is_default: true,
+              is_active: true,
+            })
+            .select("id")
+            .single();
+          if (createErr) {
+            throw new Error(
+              `Could not create master price book: ${createErr.message}`
+            );
+          }
+          masterPriceBookId = created.id as string;
+        }
+      }
+
+      if (entity === "products") {
+        // Seed session dedup state from what's already in the DB so re-runs
+        // of the products import don't try to re-insert the same canonical rows.
+        const { data: existingProducts } = await supabase
+          .from("products")
+          .select("code, name");
+        for (const p of existingProducts ?? []) {
+          if (p.code) seenProductCodes.add((p.code as string).toLowerCase());
+          if (p.name) seenProductNames.add((p.name as string).toLowerCase());
+        }
       }
 
       const tableName = entity;
@@ -1901,17 +2016,15 @@ export function SalesforceImport() {
             }
 
             // Product SF ID lookup (for price book entries)
+            // NOTE: during FTE cleanup, tier-specific SF products (e.g. "51-100 SRA")
+            // no longer exist in CRM — they were collapsed into the canonical
+            // "SRA". So a failed sf_id lookup is NOT fatal here; we fall through
+            // to the product_name base-name lookup below.
             if (field === "product_sf_id") {
               if (productSfMap) {
                 const productId = productSfMap.get(value);
                 if (productId) {
                   record.product_id = productId;
-                } else {
-                  const errMsg = `Product SF ID "${value}" not found in CRM`;
-                  errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
-                  failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
-                  failedCount[0]++;
-                  skipRow = true;
                 }
               }
               continue;
@@ -1946,7 +2059,9 @@ export function SalesforceImport() {
               continue;
             }
 
-            // Price book name lookup (fallback)
+            // Price book name lookup (fallback) — ALSO preserved into a
+            // temporary field so the FTE-cleanup transform below can parse
+            // an fte_range out of it (e.g. "51-100 Price Book" → "51-100").
             if (field === "price_book_name") {
               if (!record.price_book_id && priceBookNameMap) {
                 const pbId = priceBookNameMap.get(value.toLowerCase());
@@ -1954,11 +2069,23 @@ export function SalesforceImport() {
                   record.price_book_id = pbId;
                 }
               }
+              record.__price_book_name_raw = value;
               continue;
             }
 
-            // Product name (informational only for price book entries)
+            // Product name — used as a FALLBACK lookup for price book entries
+            // when product_sf_id didn't resolve (happens after FTE cleanup
+            // collapses tier-specific SF products). We strip any FTE prefix
+            // and match case-insensitively on the cleaned base name.
             if (field === "product_name") {
+              if (!record.product_id && productNameMap) {
+                const { base } = stripFtePrefix(value);
+                const normalized = base.trim().toLowerCase();
+                const productId = productNameMap.get(normalized);
+                if (productId) {
+                  record.product_id = productId;
+                }
+              }
               continue;
             }
 
@@ -2179,6 +2306,72 @@ export function SalesforceImport() {
             continue;
           }
 
+          // -------------------------------------------------------------
+          // FTE-range cleanup transform (products / price_books / PBE)
+          // See helper comment near the top of this file for context.
+          // -------------------------------------------------------------
+          if (entity === "products") {
+            // Strip FTE prefix from name + code.
+            if (typeof record.name === "string") {
+              record.name = stripFtePrefix(record.name).base;
+            }
+            if (typeof record.code === "string") {
+              record.code = stripFtePrefix(record.code).base;
+            }
+            // In-session dedup: if another CSV row already produced this
+            // canonical product (or it already exists in the DB), skip.
+            const codeKey =
+              typeof record.code === "string" ? record.code.toLowerCase() : "";
+            const nameKey =
+              typeof record.name === "string" ? record.name.toLowerCase() : "";
+            if (codeKey && seenProductCodes.has(codeKey)) {
+              skippedArr[0]++;
+              continue;
+            }
+            if (!codeKey && nameKey && seenProductNames.has(nameKey)) {
+              skippedArr[0]++;
+              continue;
+            }
+            if (codeKey) seenProductCodes.add(codeKey);
+            if (nameKey) seenProductNames.add(nameKey);
+          }
+
+          if (entity === "price_books") {
+            // Tier-specific SF books ("51-100 Price Book", etc.) collapse
+            // into the single master book — skip the row entirely.
+            if (typeof record.name === "string") {
+              const { fteRange } = stripFtePrefix(record.name);
+              if (fteRange) {
+                skippedArr[0]++;
+                continue;
+              }
+              // SF's default "Standard Price Book" becomes our canonical master.
+              if (record.name === "Standard Price Book") {
+                record.name = MASTER_PRICE_BOOK_NAME;
+                record.is_default = true;
+              }
+            }
+          }
+
+          if (entity === "price_book_entries") {
+            // Pivot: every entry lives under the single master price book,
+            // with fte_range carried on the entry itself (parsed from the
+            // original SF pricebook name).
+            if (masterPriceBookId) {
+              record.price_book_id = masterPriceBookId;
+            }
+            const rawPbName = record.__price_book_name_raw as
+              | string
+              | undefined;
+            if (rawPbName) {
+              const { fteRange } = stripFtePrefix(rawPbName);
+              if (fteRange && !record.fte_range) {
+                record.fte_range = fteRange;
+              }
+            }
+            delete record.__price_book_name_raw;
+          }
+
           // Check for required fields
           if (entity === "accounts" && !record.name) {
             const errMsg = "Missing account name";
@@ -2270,6 +2463,25 @@ export function SalesforceImport() {
             record.amount = record.amount ?? 0;
             record.team = record.team ?? "sales";
             record.kind = record.kind ?? "new_business";
+            // Snapshot FTE from the linked account if the SF CSV didn't
+            // already carry its own fte_range/fte_count. This is what makes
+            // AddProductDialog's tier-based pricing "just work" on imported
+            // opps — see migration 20260413000005_opportunity_fte_snapshot.
+            if (
+              accountFteByCrmId &&
+              typeof record.account_id === "string" &&
+              (record.fte_range == null || record.fte_count == null)
+            ) {
+              const acctFte = accountFteByCrmId.get(record.account_id);
+              if (acctFte) {
+                if (record.fte_range == null && acctFte.fte_range) {
+                  record.fte_range = acctFte.fte_range;
+                }
+                if (record.fte_count == null && acctFte.fte_count != null) {
+                  record.fte_count = acctFte.fte_count;
+                }
+              }
+            }
           }
           if (entity === "leads") {
             record.status = record.status ?? "new";
@@ -2789,6 +3001,46 @@ export function SalesforceImport() {
               </SelectContent>
             </Select>
           </div>
+
+          {(entity === "products" ||
+            entity === "price_books" ||
+            entity === "price_book_entries") && (
+            <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200">
+              <div className="flex gap-2">
+                <Info className="h-4 w-4 mt-0.5 shrink-0" />
+                <div className="space-y-1">
+                  <p className="font-medium">FTE-range cleanup is ON for this entity</p>
+                  {entity === "products" && (
+                    <p>
+                      FTE prefixes like "51-100 " or "1-20 " will be stripped
+                      from product names and codes, and duplicates will be
+                      collapsed into a single canonical row. Expect your
+                      ~157 Salesforce products to consolidate down to ~16.
+                    </p>
+                  )}
+                  {entity === "price_books" && (
+                    <p>
+                      Tier-specific price books ("1-20 Price Book",
+                      "21-50 Price Book", etc.) will be skipped — all entries
+                      live under a single master book named{" "}
+                      <strong>Medcurity Standard</strong>. Salesforce's
+                      "Standard Price Book" is auto-renamed to the master.
+                    </p>
+                  )}
+                  {entity === "price_book_entries" && (
+                    <p>
+                      Every entry is inserted under the{" "}
+                      <strong>Medcurity Standard</strong> master book, with
+                      the <code>fte_range</code> column populated by parsing
+                      the source Salesforce pricebook name (e.g. "51-100
+                      Price Book" → fte_range "51-100"). The master book is
+                      auto-created if it doesn't exist yet.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
