@@ -7,6 +7,7 @@ import { useLead, useUpdateLead, useArchiveLead } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
+import { Badge } from "@/components/ui/badge";
 import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
@@ -106,7 +107,7 @@ export function LeadDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const isAdmin = profile?.role === "admin";
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { data: lead, isLoading } = useLead(id);
   const { data: customFieldDefs } = useCustomFieldDefinitions("leads");
   const updateMutation = useUpdateLead();
@@ -185,6 +186,9 @@ export function LeadDetail() {
                 variant="leadSource"
                 label={leadSourceLabel(lead.source as LeadSource)}
               />
+            )}
+            {lead.do_not_market_to && (
+              <Badge variant="destructive">Do Not Market To</Badge>
             )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -355,6 +359,10 @@ export function LeadDetail() {
           <EditableField label="Industry" value={lead.industry} onSave={saveField("industry")} />
           <EditableField label="Website" value={lead.website} onSave={saveField("website")} />
           <Field label="MQL Date" value={lead.mql_date ? formatDate(lead.mql_date) : null} />
+          <Field
+            label="Do Not Market To"
+            value={lead.do_not_market_to ? "\u2713" : "\u2717"}
+          />
           {lead.description && (
             <div className="md:col-span-2">
               <Field label="Description" value={lead.description} />

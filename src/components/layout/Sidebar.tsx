@@ -73,12 +73,13 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
   const location = useLocation();
   const navigate = useNavigate();
 
-  const allItems = profile?.role === "admin"
+  const allItems = profile?.role === "admin" || profile?.role === "super_admin"
     ? [...navItems, ...adminItems]
     : navItems;
 
   function roleColor(role: string) {
     switch (role) {
+      case "super_admin": return "bg-destructive text-destructive-foreground";
       case "admin": return "bg-primary text-primary-foreground";
       case "sales": return "bg-chart-2 text-white";
       case "renewals": return "bg-chart-3 text-white";

@@ -42,10 +42,13 @@ const ROLE_OPTIONS: { value: AppRole; label: string }[] = [
   { value: "sales", label: "Sales" },
   { value: "renewals", label: "Renewals" },
   { value: "admin", label: "Admin" },
+  { value: "super_admin", label: "Super Admin" },
 ];
 
 function roleBadgeClass(role: AppRole): string {
   switch (role) {
+    case "super_admin":
+      return "bg-destructive text-destructive-foreground";
     case "admin":
       return "bg-primary text-primary-foreground";
     case "sales":

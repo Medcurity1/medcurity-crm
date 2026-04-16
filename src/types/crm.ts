@@ -1,4 +1,4 @@
-export type AppRole = "sales" | "renewals" | "admin";
+export type AppRole = "sales" | "renewals" | "admin" | "super_admin";
 export type AccountLifecycle = "prospect" | "customer" | "former_customer";
 export type AccountStatus = "discovery" | "pending" | "active" | "inactive" | "churned";
 export type RenewalType = "auto_renew" | "manual_renew" | "no_auto_renew" | "full_auto_renew" | "platform_only_auto_renew";
@@ -273,6 +273,7 @@ export interface Lead {
   converted_account_id: string | null;
   converted_contact_id: string | null;
   converted_opportunity_id: string | null;
+  do_not_market_to: boolean;
   custom_fields: Record<string, unknown>;
   archived_at: string | null;
   archived_by: string | null;

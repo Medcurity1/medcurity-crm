@@ -95,7 +95,7 @@ export function ContactDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const isAdmin = profile?.role === "admin";
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { data: contact, isLoading } = useContact(id);
   const { data: customFieldDefs } = useCustomFieldDefinitions("contacts");
   const updateMutation = useUpdateContact();

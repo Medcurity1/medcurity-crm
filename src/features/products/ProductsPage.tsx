@@ -65,7 +65,7 @@ const PRICING_MODELS = [
 
 export function ProductsPage() {
   const { profile } = useAuth();
-  const isAdmin = profile?.role === "admin";
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
 
   return (
     <div>

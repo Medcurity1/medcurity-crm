@@ -36,7 +36,7 @@ const PAGE_SIZE = 25;
 export function AccountsList() {
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const isAdmin = profile?.role === "admin";
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const [search, setSearch] = useUrlState("q", "");
   const [statusFilter, setStatusFilter] = useUrlState("status", "all");
   const [page, setPage] = useUrlNumberState("page", 0);

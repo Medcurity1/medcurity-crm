@@ -99,7 +99,7 @@ serve(async (req) => {
       );
     }
 
-    if (!["sales", "renewals", "admin"].includes(role)) {
+    if (!["sales", "renewals", "admin", "super_admin"].includes(role)) {
       return new Response(
         JSON.stringify({
           error: "Invalid role. Must be sales, renewals, or admin",

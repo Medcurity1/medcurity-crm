@@ -59,7 +59,7 @@ export function AdminSettings() {
   };
 
   useEffect(() => {
-    if (!loading && profile?.role !== "admin") {
+    if (!loading && profile?.role !== "admin" && profile?.role !== "super_admin") {
       navigate("/", { replace: true });
     }
   }, [loading, profile, navigate]);
@@ -72,7 +72,7 @@ export function AdminSettings() {
     );
   }
 
-  if (profile?.role !== "admin") {
+  if (profile?.role !== "admin" && profile?.role !== "super_admin") {
     return null;
   }
 

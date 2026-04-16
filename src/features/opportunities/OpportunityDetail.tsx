@@ -128,7 +128,7 @@ export function OpportunityDetail() {
   const [pendingStage, setPendingStage] = useState<OpportunityStage | null>(null);
   const [newNote, setNewNote] = useState("");
   const { profile } = useAuth();
-  const isAdmin = profile?.role === "admin";
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { addRecent } = useRecentRecords();
 
   useEffect(() => {

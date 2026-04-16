@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { DuplicateWarning } from "@/components/DuplicateWarning";
@@ -75,6 +76,7 @@ export function LeadForm() {
       qualification: "unqualified",
       score: "",
       mql_date: "",
+      do_not_market_to: false,
       description: "",
       employees: "",
       annual_revenue: "",
@@ -104,6 +106,7 @@ export function LeadForm() {
         qualification: lead.qualification ?? "unqualified",
         score: lead.score ?? "",
         mql_date: lead.mql_date ?? "",
+        do_not_market_to: lead.do_not_market_to ?? false,
         description: lead.description ?? "",
         employees: lead.employees ?? "",
         annual_revenue: lead.annual_revenue ?? "",
@@ -159,6 +162,7 @@ export function LeadForm() {
       state: emptyToNull(values.state),
       zip: emptyToNull(values.zip),
       country: emptyToNull(values.country),
+      do_not_market_to: values.do_not_market_to ?? false,
       custom_fields: values.custom_fields ?? {},
     };
 
@@ -319,6 +323,17 @@ export function LeadForm() {
                 <div className="space-y-2">
                   <Label htmlFor="mql_date">MQL Date<RequiredIndicator fieldKey="mql_date" requiredFields={requiredKeys} /></Label>
                   <Input id="mql_date" type="date" {...register("mql_date")} />
+                </div>
+
+                <div className="flex items-center space-x-2 pt-6">
+                  <Checkbox
+                    id="do_not_market_to"
+                    checked={watch("do_not_market_to")}
+                    onCheckedChange={(checked) => setValue("do_not_market_to", !!checked)}
+                  />
+                  <Label htmlFor="do_not_market_to" className="cursor-pointer text-destructive font-medium">
+                    Do Not Market To
+                  </Label>
                 </div>
 
                 <div className="space-y-2">

@@ -134,7 +134,7 @@ export function AccountDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const isAdmin = profile?.role === "admin";
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { data: account, isLoading } = useAccount(id);
   const { data: contracts } = useAccountContracts(id);
   const { data: customFieldDefs } = useCustomFieldDefinitions("accounts");

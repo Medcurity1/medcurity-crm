@@ -75,7 +75,7 @@ function StatCard({ label, value }: { label: string; value: number | string }) {
 export function LeadsList() {
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const isAdmin = profile?.role === "admin";
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const [search, setSearch] = useUrlState("q", "");
   const [statusFilter, setStatusFilter] = useUrlState("status", "all");
   const [sourceFilter, setSourceFilter] = useUrlState("source", "all");

@@ -42,6 +42,8 @@ export const leadSchema = z.object({
   qualification: z.enum(["unqualified", "mql", "sql", "sal"]).optional(),
   score: z.coerce.number().int().nonnegative().optional().or(z.literal("")),
   mql_date: z.string().optional().or(z.literal("")),
+  // Compliance
+  do_not_market_to: z.boolean().optional(),
   // Custom fields
   custom_fields: z.record(z.string(), z.unknown()).optional(),
 });

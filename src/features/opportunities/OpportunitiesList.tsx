@@ -37,7 +37,7 @@ const PAGE_SIZE = 25;
 export function OpportunitiesList() {
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const isAdmin = profile?.role === "admin";
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const [search, setSearch] = useUrlState("q", "");
   const [stageFilter, setStageFilter] = useUrlState("stage", "all");
   const [teamFilter, setTeamFilter] = useUrlState("team", "all");
