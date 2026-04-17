@@ -599,6 +599,26 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
 
             {/* ---- Dates & Contract ---- */}
             <FormSection title="Dates & Contract">
+              <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 dark:bg-blue-950 dark:border-blue-900 p-3 text-xs">
+                <p className="font-semibold mb-1">When do these dates move?</p>
+                <ul className="space-y-0.5 text-muted-foreground">
+                  <li>
+                    <strong>Expected Close</strong> — move this when a deal
+                    slips. Used for forecasting.
+                  </li>
+                  <li>
+                    <strong>Close Date</strong> — auto-fills on Closed Won /
+                    Lost. Edit only to fix bad data.
+                  </li>
+                  <li>
+                    <strong>Contract Start / End</strong> — only move on an
+                    actual contract amendment. These drive renewal timing —
+                    if a renewal deal slips in negotiation but the new term
+                    still starts on the original anniversary, leave these
+                    alone.
+                  </li>
+                </ul>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="expected_close_date">Expected Close Date<RequiredIndicator fieldKey="expected_close_date" requiredFields={requiredKeys} /></Label>
@@ -606,15 +626,11 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="close_date">Close Date</Label>
-                  <Input
-                    id="close_date"
-                    type="date"
-                    {...register("close_date")}
-                    readOnly
-                    className="bg-muted cursor-not-allowed"
-                  />
+                  <Input id="close_date" type="date" {...register("close_date")} />
                   <p className="text-xs text-muted-foreground">
-                    Auto-set when stage is marked Closed Won or Closed Lost.
+                    Auto-filled when stage changes to Closed Won or Closed
+                    Lost. Editable for corrections / data cleanup — every
+                    change is audit-logged.
                   </p>
                 </div>
                 <div className="space-y-2">
