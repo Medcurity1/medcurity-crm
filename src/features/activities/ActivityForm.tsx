@@ -50,10 +50,17 @@ export function ActivityForm({
       subject: "",
       body: "",
       due_at: "",
+      reminder_schedule: "none",
+      reminder_at: "",
+      reminder_channels: ["in_app"],
     },
   });
 
   function onSubmit(values: ActivityFormValues) {
+    const isTask = values.activity_type === "task";
+    const reminderSchedule = isTask
+      ? (values.reminder_schedule ?? "none")
+      : "none";
     createMutation.mutate(
       {
         activity_type: values.activity_type,
@@ -64,6 +71,15 @@ export function ActivityForm({
         contact_id: contactId,
         opportunity_id: opportunityId,
         owner_user_id: user?.id,
+        reminder_schedule: reminderSchedule,
+        reminder_at:
+          isTask && reminderSchedule !== "none" && values.reminder_at
+            ? new Date(values.reminder_at).toISOString()
+            : null,
+        reminder_channels:
+          isTask && reminderSchedule !== "none"
+            ? values.reminder_channels ?? ["in_app"]
+            : ["in_app"],
       },
       {
         onSuccess: () => {
@@ -142,6 +158,77 @@ export function ActivityForm({
             <Label htmlFor="due_at">Due Date</Label>
             <Input id="due_at" type="date" {...form.register("due_at")} />
           </div>
+
+          {/* Reminder controls — only for tasks. When schedule != none,
+              we also show the exact first-fire datetime + channels. */}
+          {selectedType === "task" && (
+            <div className="space-y-2 border rounded-md p-3">
+              <Label className="text-sm font-semibold">Reminders</Label>
+              <select
+                className="w-full border rounded-md h-9 px-2 bg-background text-sm"
+                value={form.watch("reminder_schedule") ?? "none"}
+                onChange={(e) =>
+                  form.setValue(
+                    "reminder_schedule",
+                    e.target.value as "none" | "once" | "daily" | "weekdays" | "weekly"
+                  )
+                }
+              >
+                <option value="none">No reminder</option>
+                <option value="once">Once</option>
+                <option value="daily">Daily until due</option>
+                <option value="weekdays">Weekdays (M-F) until due</option>
+                <option value="weekly">Weekly until due</option>
+              </select>
+
+              {form.watch("reminder_schedule") !== "none" &&
+                form.watch("reminder_schedule") !== undefined && (
+                  <>
+                    <Label htmlFor="reminder_at" className="text-xs text-muted-foreground">
+                      First reminder at
+                    </Label>
+                    <Input
+                      id="reminder_at"
+                      type="datetime-local"
+                      {...form.register("reminder_at")}
+                    />
+                    <div className="flex flex-wrap gap-3 pt-1">
+                      {(["in_app", "email"] as const).map((ch) => {
+                        const channels = form.watch("reminder_channels") ?? [];
+                        const checked = channels.includes(ch);
+                        return (
+                          <label
+                            key={ch}
+                            className="flex items-center gap-1 text-xs cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                const next = e.target.checked
+                                  ? [...channels, ch].filter(
+                                      (v, i, a) => a.indexOf(v) === i
+                                    )
+                                  : channels.filter((v) => v !== ch);
+                                form.setValue(
+                                  "reminder_channels",
+                                  next as Array<"in_app" | "email">
+                                );
+                              }}
+                            />
+                            {ch === "in_app" ? "In-app" : "Email"}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Email reminders require your Outlook integration to have
+                      Mail.Send permission (see admin).
+                    </p>
+                  </>
+                )}
+            </div>
+          )}
 
           <div className="flex justify-end gap-2 pt-2">
             <Button

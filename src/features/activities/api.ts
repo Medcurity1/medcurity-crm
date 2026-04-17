@@ -47,6 +47,9 @@ interface CreateActivityInput {
   subject: string;
   body?: string;
   due_at?: string | null;
+  reminder_schedule?: "none" | "once" | "daily" | "weekdays" | "weekly";
+  reminder_at?: string | null;
+  reminder_channels?: Array<"in_app" | "email">;
 }
 
 export function useCreateActivity() {

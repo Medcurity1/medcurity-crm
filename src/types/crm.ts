@@ -399,6 +399,10 @@ export interface OpportunityProduct {
   product?: Product;
 }
 
+export type ReminderSchedule =
+  | "none" | "once" | "daily" | "weekdays" | "weekly";
+export type ReminderChannel = "in_app" | "email";
+
 export interface Activity {
   id: string;
   account_id: string | null;
@@ -419,6 +423,15 @@ export interface Activity {
   email_cc: string[] | null;
   email_html_body: string | null;
   email_thread_id: string | null;
+  // Reminders (tasks) — see migration 20260417000007
+  reminder_schedule: ReminderSchedule;
+  reminder_at: string | null;
+  reminder_channels: ReminderChannel[];
+  last_reminder_sent_at: string | null;
+  // Outlook calendar sync (tasks)
+  outlook_event_id: string | null;
+  outlook_sync_error: string | null;
+  outlook_synced_at: string | null;
   // joined fields
   owner?: UserProfile;
 }
