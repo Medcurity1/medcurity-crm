@@ -102,6 +102,70 @@ export function useCompleteActivity() {
  * account-only). Brayden's SRA/NVA case: an email auto-landed on the
  * wrong opp, user wants one-click move. Also handles un-linking.
  */
+/**
+ * Reopen a completed task (clears completed_at). Lets a rep fix a
+ * mis-click or bring something back into their open-tasks list. Audit
+ * log captures the change so this can't silently "un-do" what a rep
+ * told their manager they'd finished.
+ */
+export function useReopenActivity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id }: { id: string }) => {
+      const { data, error } = await supabase
+        .from("activities")
+        .update({ completed_at: null })
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["activities"] });
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["dashboard", "my-tasks"] });
+    },
+  });
+}
+
+/**
+ * Edit a task or activity (subject, body, due_at, reminder fields).
+ * Narrow set of columns — does NOT let you change activity_type or
+ * record-association FKs (use useReattributeActivity for that).
+ */
+export function useUpdateActivity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      ...patch
+    }: {
+      id: string;
+      subject?: string;
+      body?: string | null;
+      due_at?: string | null;
+      reminder_schedule?: "none" | "once" | "daily" | "weekdays" | "weekly";
+      reminder_at?: string | null;
+      reminder_channels?: Array<"in_app" | "email">;
+    }) => {
+      const { data, error } = await supabase
+        .from("activities")
+        .update(patch)
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["activities"] });
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["dashboard", "my-tasks"] });
+    },
+  });
+}
+
 export function useReattributeActivity() {
   const qc = useQueryClient();
   return useMutation({

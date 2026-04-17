@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useCreateActivity } from "./api";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { errorMessage } from "@/lib/errors";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
@@ -48,6 +49,7 @@ export function QuickTaskDialog({
     "in_app",
   ]);
   const createMutation = useCreateActivity();
+  const { user } = useAuth();
 
   function reset() {
     setSubject("");
@@ -79,9 +81,15 @@ export function QuickTaskDialog({
     // datetime-local returns "YYYY-MM-DDTHH:mm" with no timezone.
     // new Date(value) interprets as local time, which is what users expect.
     const dueIso = dueAt ? new Date(dueAt).toISOString() : null;
+    // If schedule is set but user didn't pick a "First reminder at",
+    // default it to the due time. This matches what most people want:
+    // "remind me when it's due." Previously the reminder silently
+    // never fired because reminder_at stayed null.
     const reminderIso =
-      reminderSchedule !== "none" && reminderAt
-        ? new Date(reminderAt).toISOString()
+      reminderSchedule !== "none"
+        ? reminderAt
+          ? new Date(reminderAt).toISOString()
+          : dueIso
         : null;
 
     createMutation.mutate(
@@ -94,6 +102,10 @@ export function QuickTaskDialog({
         contact_id: contactId ?? null,
         opportunity_id: opportunityId ?? null,
         lead_id: leadId ?? null,
+        // owner_user_id MUST be set — the task-reminders function sends
+        // reminders to this user, the home-page "My Tasks" widget filters
+        // by it, and most task queries RLS-gate on it.
+        owner_user_id: user?.id ?? null,
         reminder_schedule: reminderSchedule,
         reminder_at: reminderIso,
         reminder_channels: reminderSchedule === "none" ? ["in_app"] : channels,

@@ -12,6 +12,7 @@ import { QuickCreateDialog } from "@/components/QuickCreateDialog";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useIdleLogout } from "@/hooks/useIdleLogout";
+import { useNotificationToasts } from "@/hooks/useNotificationToasts";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { IdleWarningDialog } from "@/components/IdleWarningDialog";
@@ -68,6 +69,10 @@ export function AppLayout() {
     warnMs: 60 * 1000,
     enabled: !!profile,
   });
+
+  // Poll for new in-app notifications and pop them as toasts (top-right).
+  // Runs as long as the user is signed in.
+  useNotificationToasts();
 
   // Quick Create dialog
   const [showQuickCreate, setShowQuickCreate] = useState(false);
