@@ -297,7 +297,11 @@ export function ContactDetail() {
             label: "Opportunities",
             content: <AccountOpportunities accountId={contact.account_id} />,
           },
-          // Tasks removed here — lives in the side-panel switcher.
+          {
+            value: "tasks",
+            label: "Tasks",
+            content: <TasksPanel contactId={contact.id} />,
+          },
           {
             value: "sequences",
             label: "Sequences",

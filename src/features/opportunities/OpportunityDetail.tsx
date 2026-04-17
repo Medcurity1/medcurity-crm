@@ -326,7 +326,11 @@ export function OpportunityDetail() {
             label: "Stage History",
             content: <StageHistoryTabContent history={history ?? []} />,
           },
-          // Tasks removed here — lives in the side-panel switcher.
+          {
+            value: "tasks",
+            label: "Tasks",
+            content: <TasksPanel opportunityId={opp.id} />,
+          },
           {
             value: "contacts",
             label: "Contacts",
