@@ -354,11 +354,9 @@ export function AccountDetail() {
             label: "Opportunities",
             content: <AccountOpportunities accountId={account.id} />,
           },
-          {
-            value: "tasks",
-            label: "Tasks",
-            content: <TasksPanel accountId={account.id} />,
-          },
+          // Tasks tab removed here — same content lives in the right
+          // side-panel (Activity / Tasks switcher) so having it twice
+          // is redundant. Brayden 2026-04-17.
           {
             value: "contract_history",
             label: "Contract History",
