@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -71,6 +72,13 @@ export function ContactForm() {
       lead_source: null,
       mql_date: "",
       sql_date: "",
+      credential: "",
+      phone_ext: "",
+      time_zone: "",
+      type: "",
+      business_relationship_tag: "",
+      notes: "",
+      next_steps: "",
     },
   });
 
@@ -96,6 +104,13 @@ export function ContactForm() {
         lead_source: contact.lead_source ?? null,
         mql_date: contact.mql_date ?? "",
         sql_date: contact.sql_date ?? "",
+        credential: contact.credential ?? "",
+        phone_ext: contact.phone_ext ?? "",
+        time_zone: contact.time_zone ?? "",
+        type: contact.type ?? "",
+        business_relationship_tag: contact.business_relationship_tag ?? "",
+        notes: contact.notes ?? "",
+        next_steps: contact.next_steps ?? "",
       });
     }
   }, [contact, isEditing, reset]);
@@ -127,6 +142,13 @@ export function ContactForm() {
       mailing_country: values.mailing_country || null,
       mql_date: values.mql_date || null,
       sql_date: values.sql_date || null,
+      credential: values.credential || null,
+      phone_ext: values.phone_ext || null,
+      time_zone: values.time_zone || null,
+      type: values.type || null,
+      business_relationship_tag: values.business_relationship_tag || null,
+      notes: values.notes || null,
+      next_steps: values.next_steps || null,
     };
 
     try {
@@ -227,9 +249,124 @@ export function ContactForm() {
               </div>
 
               <div className="space-y-2">
+                <Label htmlFor="phone_ext">Phone Ext</Label>
+                <Input id="phone_ext" {...register("phone_ext")} />
+              </div>
+
+              <div className="space-y-2">
                 <Label htmlFor="linkedin_url">LinkedIn URL<RequiredIndicator fieldKey="linkedin_url" requiredFields={requiredKeys} /></Label>
                 <Input id="linkedin_url" type="url" placeholder="https://linkedin.com/in/..." {...register("linkedin_url")} />
                 {errors.linkedin_url && <p className="text-sm text-destructive">{errors.linkedin_url.message}</p>}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Credential</Label>
+                <Select
+                  value={(watch("credential") as string) || "none"}
+                  onValueChange={(v) => setValue("credential", v === "none" ? "" : (v as never))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select credential..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    <SelectItem value="md">MD</SelectItem>
+                    <SelectItem value="do">DO</SelectItem>
+                    <SelectItem value="rn">RN</SelectItem>
+                    <SelectItem value="lpn">LPN</SelectItem>
+                    <SelectItem value="np">NP</SelectItem>
+                    <SelectItem value="pa">PA</SelectItem>
+                    <SelectItem value="chc">CHC</SelectItem>
+                    <SelectItem value="chps">CHPS</SelectItem>
+                    <SelectItem value="chpc">CHPC</SelectItem>
+                    <SelectItem value="hipaa_certified">HIPAA Certified</SelectItem>
+                    <SelectItem value="ceo">CEO</SelectItem>
+                    <SelectItem value="cfo">CFO</SelectItem>
+                    <SelectItem value="coo">COO</SelectItem>
+                    <SelectItem value="cio">CIO</SelectItem>
+                    <SelectItem value="cto">CTO</SelectItem>
+                    <SelectItem value="ciso">CISO</SelectItem>
+                    <SelectItem value="cmo">CMO</SelectItem>
+                    <SelectItem value="it_director">IT Director</SelectItem>
+                    <SelectItem value="practice_manager">Practice Manager</SelectItem>
+                    <SelectItem value="office_manager">Office Manager</SelectItem>
+                    <SelectItem value="compliance_officer">Compliance Officer</SelectItem>
+                    <SelectItem value="privacy_officer">Privacy Officer</SelectItem>
+                    <SelectItem value="security_officer">Security Officer</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Time Zone</Label>
+                <Select
+                  value={(watch("time_zone") as string) || "none"}
+                  onValueChange={(v) => setValue("time_zone", v === "none" ? "" : (v as never))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select time zone..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    <SelectItem value="eastern">Eastern</SelectItem>
+                    <SelectItem value="central">Central</SelectItem>
+                    <SelectItem value="mountain">Mountain</SelectItem>
+                    <SelectItem value="pacific">Pacific</SelectItem>
+                    <SelectItem value="alaska">Alaska</SelectItem>
+                    <SelectItem value="hawaii">Hawaii</SelectItem>
+                    <SelectItem value="arizona_no_dst">Arizona (no DST)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Contact Type</Label>
+                <Select
+                  value={(watch("type") as string) || "none"}
+                  onValueChange={(v) => setValue("type", v === "none" ? "" : (v as never))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select type..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    <SelectItem value="prospect">Prospect</SelectItem>
+                    <SelectItem value="customer">Customer</SelectItem>
+                    <SelectItem value="partner">Partner</SelectItem>
+                    <SelectItem value="vendor">Vendor</SelectItem>
+                    <SelectItem value="referral_source">Referral Source</SelectItem>
+                    <SelectItem value="internal">Internal</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Relationship Tag</Label>
+                <Select
+                  value={(watch("business_relationship_tag") as string) || "none"}
+                  onValueChange={(v) =>
+                    setValue("business_relationship_tag", v === "none" ? "" : (v as never))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select relationship..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    <SelectItem value="decision_maker">Decision Maker</SelectItem>
+                    <SelectItem value="influencer">Influencer</SelectItem>
+                    <SelectItem value="economic_buyer">Economic Buyer</SelectItem>
+                    <SelectItem value="technical_buyer">Technical Buyer</SelectItem>
+                    <SelectItem value="champion">Champion</SelectItem>
+                    <SelectItem value="detractor">Detractor</SelectItem>
+                    <SelectItem value="end_user">End User</SelectItem>
+                    <SelectItem value="gatekeeper">Gatekeeper</SelectItem>
+                    <SelectItem value="executive_sponsor">Executive Sponsor</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-2">
@@ -330,6 +467,16 @@ export function ContactForm() {
                 />
                 <Label htmlFor="do_not_contact" className="cursor-pointer">Do not contact</Label>
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="notes">Notes</Label>
+              <Textarea id="notes" rows={3} {...register("notes")} />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="next_steps">Next Steps</Label>
+              <Textarea id="next_steps" rows={2} {...register("next_steps")} />
             </div>
 
             <div className="flex items-center gap-3">
