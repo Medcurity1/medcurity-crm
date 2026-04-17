@@ -23,6 +23,7 @@ import { useActivities } from "./api";
 import { ActivityForm } from "./ActivityForm";
 import { LogEmailDialog } from "./LogEmailDialog";
 import { QuickNoteInput } from "./QuickNoteInput";
+import { ReattributeActivityDialog } from "./ReattributeActivityDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
 import { formatRelativeDate, formatDate, activityLabel } from "@/lib/formatters";
@@ -44,6 +45,13 @@ interface ActivityTimelineProps {
   hideLogButtons?: boolean;
   /** Cap visible items in compact mode. Default 25. */
   visibleLimit?: number;
+  /**
+   * Show the per-row "Re-attribute" menu item. Only really useful on
+   * Opportunity detail pages where the user wants to move an email to
+   * a different opp on the same account. Account and Contact timelines
+   * already show everything so re-attribution there is pointless.
+   */
+  enableReattribute?: boolean;
 }
 
 interface ThreadGroup {
@@ -77,6 +85,7 @@ export function ActivityTimeline({
   compact = false,
   hideLogButtons = false,
   visibleLimit = 25,
+  enableReattribute = false,
 }: ActivityTimelineProps) {
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
@@ -229,6 +238,7 @@ export function ActivityTimeline({
                     group={entry as ThreadGroup}
                     expandSignal={expandSignal}
                     forceExpanded={allExpanded}
+                    enableReattribute={enableReattribute}
                   />
                 );
               }
@@ -239,6 +249,7 @@ export function ActivityTimeline({
                   activity={a}
                   expandSignal={expandSignal}
                   forceExpanded={allExpanded}
+                  enableReattribute={enableReattribute}
                 />
               );
             })}
@@ -288,10 +299,12 @@ function ActivityEntry({
   activity,
   expandSignal,
   forceExpanded,
+  enableReattribute = false,
 }: {
   activity: Activity;
   expandSignal?: number;
   forceExpanded?: boolean;
+  enableReattribute?: boolean;
 }) {
   const Icon = typeIcons[activity.activity_type];
   const colorClass = typeColors[activity.activity_type];
@@ -300,6 +313,7 @@ function ActivityEntry({
   const subjectLink = getActivityLink(activity);
   const isEmail = activity.activity_type === "email";
   const [expanded, setExpanded] = useState(false);
+  const [showReattribute, setShowReattribute] = useState(false);
 
   // React to parent's "Expand all" / "Collapse all" toggle. The signal
   // increments on every click so this fires regardless of the current
@@ -374,8 +388,22 @@ function ActivityEntry({
             </span>
           )}
         </div>
-        {expanded && isEmail && <EmailDetails activity={activity} />}
+        {expanded && isEmail && (
+          <EmailDetails
+            activity={activity}
+            enableReattribute={enableReattribute}
+            onOpenReattribute={() => setShowReattribute(true)}
+          />
+        )}
       </div>
+
+      {enableReattribute && (
+        <ReattributeActivityDialog
+          open={showReattribute}
+          onOpenChange={setShowReattribute}
+          activity={activity}
+        />
+      )}
     </div>
   );
 }
@@ -387,7 +415,15 @@ function ActivityEntry({
  * calling Graph's /sendMail directly so the email ends up in the rep's
  * actual Sent folder and goes through their normal mail signature/tracking.
  */
-function EmailDetails({ activity }: { activity: Activity }) {
+function EmailDetails({
+  activity,
+  enableReattribute = false,
+  onOpenReattribute,
+}: {
+  activity: Activity;
+  enableReattribute?: boolean;
+  onOpenReattribute?: () => void;
+}) {
   const from = activity.email_from ?? "";
   const to = activity.email_to ?? [];
   const cc = activity.email_cc ?? [];
@@ -441,16 +477,21 @@ function EmailDetails({ activity }: { activity: Activity }) {
           </pre>
         )}
       </div>
-      {canReply && (
-        <div className="pt-2 flex gap-2">
+      <div className="pt-2 flex gap-2 flex-wrap">
+        {canReply && (
           <Button size="sm" asChild>
             <a href={mailtoHref}>
               <Reply className="h-4 w-4 mr-1" />
               Reply
             </a>
           </Button>
-        </div>
-      )}
+        )}
+        {enableReattribute && onOpenReattribute && (
+          <Button size="sm" variant="outline" onClick={onOpenReattribute}>
+            Re-attribute to another opportunity
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -473,10 +514,12 @@ function ThreadEntry({
   group,
   expandSignal,
   forceExpanded,
+  enableReattribute = false,
 }: {
   group: ThreadGroup;
   expandSignal: number;
   forceExpanded: boolean;
+  enableReattribute?: boolean;
 }) {
   const [showThread, setShowThread] = useState(false);
   const messageCount = 1 + group.others.length;
@@ -534,9 +577,17 @@ function ThreadEntry({
         {showThread && (
           <div className="mt-3 space-y-3">
             {/* Newest first (already sorted that way), with the primary inline */}
-            <ThreadMessage activity={group.primary} isPrimary />
+            <ThreadMessage
+              activity={group.primary}
+              isPrimary
+              enableReattribute={enableReattribute}
+            />
             {group.others.map((m) => (
-              <ThreadMessage key={m.id} activity={m} />
+              <ThreadMessage
+                key={m.id}
+                activity={m}
+                enableReattribute={enableReattribute}
+              />
             ))}
           </div>
         )}
@@ -548,11 +599,14 @@ function ThreadEntry({
 function ThreadMessage({
   activity,
   isPrimary = false,
+  enableReattribute = false,
 }: {
   activity: Activity;
   isPrimary?: boolean;
+  enableReattribute?: boolean;
 }) {
   const [open, setOpen] = useState(isPrimary);
+  const [showReattribute, setShowReattribute] = useState(false);
   const dirLabel = activity.email_direction === "sent" ? "Sent" : "Received";
 
   return (
@@ -579,8 +633,19 @@ function ThreadMessage({
       </button>
       {open && (
         <div className="px-3 pb-3 pt-1 border-t">
-          <EmailDetails activity={activity} />
+          <EmailDetails
+            activity={activity}
+            enableReattribute={enableReattribute}
+            onOpenReattribute={() => setShowReattribute(true)}
+          />
         </div>
+      )}
+      {enableReattribute && (
+        <ReattributeActivityDialog
+          open={showReattribute}
+          onOpenChange={setShowReattribute}
+          activity={activity}
+        />
       )}
     </div>
   );

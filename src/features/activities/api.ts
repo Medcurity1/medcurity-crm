@@ -88,6 +88,36 @@ export function useCompleteActivity() {
   });
 }
 
+/**
+ * Re-attribute an activity to a different opportunity (or detach it to
+ * account-only). Brayden's SRA/NVA case: an email auto-landed on the
+ * wrong opp, user wants one-click move. Also handles un-linking.
+ */
+export function useReattributeActivity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      opportunityId,
+    }: {
+      id: string;
+      opportunityId: string | null;
+    }) => {
+      const { data, error } = await supabase
+        .from("activities")
+        .update({ opportunity_id: opportunityId })
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["activities"] });
+    },
+  });
+}
+
 interface TaskFilters {
   account_id?: string;
   contact_id?: string;

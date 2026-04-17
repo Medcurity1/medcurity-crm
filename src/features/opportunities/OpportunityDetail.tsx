@@ -284,7 +284,13 @@ export function OpportunityDetail() {
       )}
 
       <DetailPageLayout
-        side={<ActivityTimeline opportunityId={opp.id} compact />}
+        side={
+          <ActivityTimeline
+            opportunityId={opp.id}
+            compact
+            enableReattribute
+          />
+        }
       >
 
       {/* Related-record tabs at the top, collapsed by default. */}
