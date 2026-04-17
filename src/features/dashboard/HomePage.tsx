@@ -945,12 +945,16 @@ export function HomePage() {
       {/* My Tasks */}
       {isWidgetVisible("tasks") && <MyTasksSection userId={userId} />}
 
-      {/* Two-column grid for default widgets */}
+      {/* My Open Opportunities gets its own full-width row so the
+          stage + amount + close-date columns don't get squeezed.
+          Brayden 2026-04-17. */}
+      {isWidgetVisible("open_opps") && (
+        <MyOpenOpportunitiesSection userId={userId} />
+      )}
+
+      {/* Two-column grid for the remaining default widgets */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {isWidgetVisible("recent_activity") && <RecentActivitySection />}
-        {isWidgetVisible("open_opps") && (
-          <MyOpenOpportunitiesSection userId={userId} />
-        )}
         {isWidgetVisible("recent_records") && <RecentRecordsWidget />}
       </div>
 

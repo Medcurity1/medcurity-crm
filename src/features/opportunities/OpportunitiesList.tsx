@@ -207,6 +207,7 @@ export function OpportunitiesList() {
                   <TableHead>Kind</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
                   <TableHead>Expected Close</TableHead>
+                  <TableHead>Close Date</TableHead>
                   <TableHead>Owner</TableHead>
                 </TableRow>
               </TableHeader>
@@ -251,6 +252,11 @@ export function OpportunitiesList() {
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {formatDate(opp.expected_close_date)}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {/* close_date is only set by the trigger when stage
+                          hits closed_won/closed_lost. Empty otherwise. */}
+                      {opp.close_date ? formatDate(opp.close_date) : "\u2014"}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {opp.owner?.full_name ?? "Unassigned"}

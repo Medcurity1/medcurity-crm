@@ -138,7 +138,10 @@ export function AppLayout() {
             <UserMenu />
           </div>
         </div>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+        {/* Widened content area: 2xl caps at 1536px (was 7xl=1280px) so
+            data tables (opportunities list, reports, etc.) have more
+            horizontal room without having to scroll. Brayden 2026-04-17. */}
+        <div className="max-w-[1800px] mx-auto px-4 sm:px-6 py-6">
           <Suspense
             fallback={
               <div className="flex items-center justify-center h-64">

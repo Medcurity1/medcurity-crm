@@ -516,8 +516,13 @@ const OPPORTUNITY_FIELDS: Record<string, string> = {
   service_description__c: "service_description",
   "service description": "service_description",
   // Dates
-  closedate: "close_date",
-  "close date": "close_date",
+  // SF "CloseDate" is a forecast/expected date until the deal closes,
+  // then it's retroactively used as the actual close date. We map it
+  // to expected_close_date; the per-row transform below also copies
+  // it into close_date for closed_won/closed_lost rows so reporting
+  // has a real booked-date.
+  closedate: "expected_close_date",
+  "close date": "expected_close_date",
   "expected close date": "expected_close_date",
   expected_close_date__c: "expected_close_date",
   "contract start date": "contract_start_date",
@@ -2456,6 +2461,18 @@ export function SalesforceImport() {
             record.amount = record.amount ?? 0;
             record.team = record.team ?? "sales";
             record.kind = record.kind ?? "new_business";
+            // SF uses a single CloseDate field that serves as forecast
+            // AND actual-close depending on stage. We split it on import:
+            // keep the value in expected_close_date for all rows, and
+            // copy it into close_date for closed_won/closed_lost rows
+            // so reporting on booked revenue works correctly.
+            if (
+              (record.stage === "closed_won" || record.stage === "closed_lost") &&
+              !record.close_date &&
+              record.expected_close_date
+            ) {
+              record.close_date = record.expected_close_date;
+            }
             // Snapshot FTE from the linked account if the SF CSV didn't
             // already carry its own fte_range/fte_count. This is what makes
             // AddProductDialog's tier-based pricing "just work" on imported

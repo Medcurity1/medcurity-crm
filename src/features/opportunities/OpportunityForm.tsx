@@ -605,8 +605,17 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                   <Input id="expected_close_date" type="date" {...register("expected_close_date")} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="close_date">Close Date<RequiredIndicator fieldKey="close_date" requiredFields={requiredKeys} /></Label>
-                  <Input id="close_date" type="date" {...register("close_date")} />
+                  <Label htmlFor="close_date">Close Date</Label>
+                  <Input
+                    id="close_date"
+                    type="date"
+                    {...register("close_date")}
+                    readOnly
+                    className="bg-muted cursor-not-allowed"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Auto-set when stage is marked Closed Won or Closed Lost.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="contract_start_date">Contract Start<RequiredIndicator fieldKey="contract_start_date" requiredFields={requiredKeys} /></Label>
