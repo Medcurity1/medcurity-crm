@@ -223,10 +223,22 @@ export function OpportunityDetail() {
         </Card>
         <Card>
           <CardHeader className="pb-1 pt-3 px-4">
+            <CardTitle className="text-xs text-muted-foreground font-medium">Expected Close</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            <p className="text-sm font-semibold">
+              {opp.expected_close_date ? formatDate(opp.expected_close_date) : "\u2014"}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-1 pt-3 px-4">
             <CardTitle className="text-xs text-muted-foreground font-medium">Close Date</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
-            <p className="text-sm font-semibold">{formatDate(opp.close_date ?? opp.expected_close_date)}</p>
+            <p className="text-sm font-semibold">
+              {opp.close_date ? formatDate(opp.close_date) : "\u2014"}
+            </p>
           </CardContent>
         </Card>
         <Card>
