@@ -10,8 +10,6 @@ import {
   Package,
   RefreshCw,
   BarChart3,
-  TrendingUp,
-  LineChart,
   Archive,
   Settings,
   ChevronLeft,
@@ -59,8 +57,7 @@ const navItems = [
   { to: "/products", icon: Package, label: "Products" },
   { to: "/renewals", icon: RefreshCw, label: "Renewals" },
   { to: "/reports", icon: BarChart3, label: "Reports" },
-  { to: "/forecasting", icon: TrendingUp, label: "Forecasting" },
-  { to: "/analytics", icon: LineChart, label: "Analytics" },
+  // Forecasting + Analytics moved into /reports as tabs (2026-04-17).
 ];
 
 const adminItems = [

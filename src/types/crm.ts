@@ -447,6 +447,53 @@ export interface OpportunityStageHistory {
   changer?: UserProfile;
 }
 
+export interface ReportFolder {
+  id: string;
+  name: string;
+  is_public: boolean;
+  owner_user_id: string;
+  parent_folder_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type DashboardLayoutWidget =
+  | { i: string; x: number; y: number; w: number; h: number; type: "kpi"; metric: DashboardKpiMetric; title?: string }
+  | { i: string; x: number; y: number; w: number; h: number; type: "report"; report_id: string; title?: string }
+  | { i: string; x: number; y: number; w: number; h: number; type: "builtin"; builtin: DashboardBuiltinWidget; title?: string };
+
+export type DashboardKpiMetric =
+  | "pipeline_arr"
+  | "closed_won_qtd"
+  | "closed_won_ytd"
+  | "renewals_next_30"
+  | "renewals_next_60"
+  | "renewals_next_90"
+  | "new_leads_week"
+  | "mql_count_week"
+  | "sql_count_week"
+  | "active_customers"
+  | "churn_qtd";
+
+export type DashboardBuiltinWidget =
+  | "pipeline_by_stage"
+  | "closed_won_by_owner_qtr"
+  | "product_growth_yoy"
+  | "churn_metrics"
+  | "arr_by_product"
+  | "renewals_calendar";
+
+export interface Dashboard {
+  id: string;
+  name: string;
+  description: string | null;
+  owner_user_id: string;
+  is_public: boolean;
+  layout: DashboardLayoutWidget[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AuditLog {
   id: number;
   table_name: string;

@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
@@ -29,11 +29,13 @@ const OpportunityForm = lazy(() => import("@/features/opportunities/OpportunityF
 const PipelineBoard = lazy(() => import("@/features/opportunities/PipelineBoard").then(m => ({ default: m.PipelineBoard })));
 const ProductsPage = lazy(() => import("@/features/products/ProductsPage").then(m => ({ default: m.ProductsPage })));
 const RenewalsQueue = lazy(() => import("@/features/renewals/RenewalsQueue").then(m => ({ default: m.RenewalsQueue })));
-const ReportBuilder = lazy(() => import("@/features/reports/ReportBuilder").then(m => ({ default: m.ReportBuilder })));
-const ForecastPage = lazy(() => import("@/features/forecasting/ForecastPage").then(m => ({ default: m.ForecastPage })));
+const ReportsHub = lazy(() => import("@/features/reports/ReportsHub").then(m => ({ default: m.ReportsHub })));
+// ForecastPage is now only reached via /reports?tab=forecasting and
+// lazy-loaded inside ReportsHub.
 const ActivityCalendar = lazy(() => import("@/features/activities/ActivityCalendar").then(m => ({ default: m.ActivityCalendar })));
 const ActivitiesListPage = lazy(() => import("@/features/activities/ActivitiesListPage").then(m => ({ default: m.ActivitiesListPage })));
-const WinLossAnalysis = lazy(() => import("@/features/analytics/WinLossAnalysis").then(m => ({ default: m.WinLossAnalysis })));
+// WinLossAnalysis is now only reached via /reports?tab=analytics and
+// lazy-loaded inside ReportsHub.
 const SequencesPage = lazy(() => import("@/features/sequences/SequencesPage").then(m => ({ default: m.SequencesPage })));
 const EmailTemplatesPage = lazy(() => import("@/features/email-templates/EmailTemplatesPage").then(m => ({ default: m.EmailTemplatesPage })));
 const LeadListsPage = lazy(() => import("@/features/lead-lists/LeadListsPage").then(m => ({ default: m.LeadListsPage })));
@@ -79,11 +81,18 @@ export default function App() {
                   <Route path="pipeline" element={<PipelineBoard />} />
                   <Route path="calendar" element={<ActivityCalendar />} />
                   <Route path="activities" element={<ActivitiesListPage />} />
-                  <Route path="analytics" element={<WinLossAnalysis />} />
                   <Route path="products" element={<ProductsPage />} />
                   <Route path="renewals" element={<RenewalsQueue />} />
-                  <Route path="reports" element={<ReportBuilder />} />
-                  <Route path="forecasting" element={<ForecastPage />} />
+                  <Route path="reports" element={<ReportsHub />} />
+                  {/* Legacy routes redirect into the reports hub tabs */}
+                  <Route
+                    path="forecasting"
+                    element={<Navigate to="/reports?tab=forecasting" replace />}
+                  />
+                  <Route
+                    path="analytics"
+                    element={<Navigate to="/reports?tab=analytics" replace />}
+                  />
                   <Route path="archive" element={<ArchiveManager />} />
                   <Route path="admin" element={<AdminSettings />} />
                   <Route path="settings" element={<UserSettings />} />

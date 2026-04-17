@@ -24,6 +24,8 @@ const pathMap: Record<string, string> = {
   pipeline: "Pipeline",
   renewals: "Renewals",
   reports: "Reports",
+  forecasting: "Reports",
+  analytics: "Reports",
   archive: "Archive",
   admin: "Admin Settings",
   settings: "My Settings",
