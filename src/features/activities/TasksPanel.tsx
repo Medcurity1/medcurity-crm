@@ -219,6 +219,7 @@ export function TasksPanel({
         accountId={accountId}
         contactId={contactId}
         opportunityId={opportunityId}
+        leadId={leadId}
       />
     </div>
   );

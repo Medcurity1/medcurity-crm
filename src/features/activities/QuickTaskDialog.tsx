@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useCreateActivity } from "./api";
+import { errorMessage } from "@/lib/errors";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 
@@ -21,7 +22,10 @@ interface QuickTaskDialogProps {
   accountId?: string;
   contactId?: string;
   opportunityId?: string;
+  leadId?: string;
 }
+
+type ReminderSchedule = "none" | "once" | "daily" | "weekdays" | "weekly";
 
 export function QuickTaskDialog({
   open,
@@ -29,34 +33,70 @@ export function QuickTaskDialog({
   accountId,
   contactId,
   opportunityId,
+  leadId,
 }: QuickTaskDialogProps) {
   const [subject, setSubject] = useState("");
-  const [dueDate, setDueDate] = useState("");
+  // Due uses datetime-local now (not just date) so users can set a time.
+  // Previously only date was captured which was too coarse for reminders
+  // and for the Outlook-calendar event we create.
+  const [dueAt, setDueAt] = useState("");
   const [notes, setNotes] = useState("");
+  const [reminderSchedule, setReminderSchedule] =
+    useState<ReminderSchedule>("none");
+  const [reminderAt, setReminderAt] = useState("");
+  const [channels, setChannels] = useState<Array<"in_app" | "email">>([
+    "in_app",
+  ]);
   const createMutation = useCreateActivity();
 
+  function reset() {
+    setSubject("");
+    setDueAt("");
+    setNotes("");
+    setReminderSchedule("none");
+    setReminderAt("");
+    setChannels(["in_app"]);
+  }
+
   function handleClose(nextOpen: boolean) {
-    if (!nextOpen) {
-      setSubject("");
-      setDueDate("");
-      setNotes("");
-    }
+    if (!nextOpen) reset();
     onOpenChange(nextOpen);
+  }
+
+  function toggleChannel(ch: "in_app" | "email", checked: boolean) {
+    setChannels((prev) => {
+      const next = checked
+        ? [...prev, ch].filter((v, i, a) => a.indexOf(v) === i)
+        : prev.filter((v) => v !== ch);
+      return next as Array<"in_app" | "email">;
+    });
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!subject.trim()) return;
 
+    // datetime-local returns "YYYY-MM-DDTHH:mm" with no timezone.
+    // new Date(value) interprets as local time, which is what users expect.
+    const dueIso = dueAt ? new Date(dueAt).toISOString() : null;
+    const reminderIso =
+      reminderSchedule !== "none" && reminderAt
+        ? new Date(reminderAt).toISOString()
+        : null;
+
     createMutation.mutate(
       {
         activity_type: "task",
         subject: subject.trim(),
         body: notes.trim() || undefined,
-        due_at: dueDate || null,
+        due_at: dueIso,
         account_id: accountId ?? null,
         contact_id: contactId ?? null,
         opportunity_id: opportunityId ?? null,
+        lead_id: leadId ?? null,
+        reminder_schedule: reminderSchedule,
+        reminder_at: reminderIso,
+        reminder_channels: reminderSchedule === "none" ? ["in_app"] : channels,
       },
       {
         onSuccess: () => {
@@ -64,11 +104,13 @@ export function QuickTaskDialog({
           handleClose(false);
         },
         onError: (err) => {
-          toast.error("Failed to create task: " + (err as Error).message);
+          toast.error("Failed to create task: " + errorMessage(err));
         },
       }
     );
   }
+
+  const showReminderDetails = reminderSchedule !== "none";
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -93,13 +135,74 @@ export function QuickTaskDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="task-due">Due Date</Label>
+            <Label htmlFor="task-due">Due</Label>
             <Input
               id="task-due"
-              type="date"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
+              type="datetime-local"
+              value={dueAt}
+              onChange={(e) => setDueAt(e.target.value)}
             />
+            <p className="text-xs text-muted-foreground">
+              Date + time. Used for calendar placement and reminder
+              cutoff.
+            </p>
+          </div>
+
+          <div className="space-y-2 border rounded-md p-3">
+            <Label className="text-sm font-semibold">Reminders</Label>
+            <select
+              className="w-full border rounded-md h-9 px-2 bg-background text-sm"
+              value={reminderSchedule}
+              onChange={(e) =>
+                setReminderSchedule(e.target.value as ReminderSchedule)
+              }
+            >
+              <option value="none">No reminder</option>
+              <option value="once">Once</option>
+              <option value="daily">Daily until due</option>
+              <option value="weekdays">Weekdays (M-F) until due</option>
+              <option value="weekly">Weekly until due</option>
+            </select>
+
+            {showReminderDetails && (
+              <>
+                <Label htmlFor="reminder-at" className="text-xs text-muted-foreground">
+                  First reminder at
+                </Label>
+                <Input
+                  id="reminder-at"
+                  type="datetime-local"
+                  value={reminderAt}
+                  onChange={(e) => setReminderAt(e.target.value)}
+                />
+                <div className="flex flex-wrap gap-3 pt-1">
+                  <label className="flex items-center gap-1 text-xs cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={channels.includes("in_app")}
+                      onChange={(e) =>
+                        toggleChannel("in_app", e.target.checked)
+                      }
+                    />
+                    In-app
+                  </label>
+                  <label className="flex items-center gap-1 text-xs cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={channels.includes("email")}
+                      onChange={(e) =>
+                        toggleChannel("email", e.target.checked)
+                      }
+                    />
+                    Email
+                  </label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Email reminders require your Outlook integration to have
+                  Mail.Send permission (admin can enable).
+                </p>
+              </>
+            )}
           </div>
 
           <div className="space-y-2">
