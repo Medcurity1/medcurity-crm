@@ -327,7 +327,7 @@ function MyTasksSection({ userId }: { userId: string }) {
 
             <div className="pt-2">
               <Button variant="ghost" size="sm" className="text-sm text-primary" asChild>
-                <Link to="#">View All Tasks</Link>
+                <Link to="/activities?type=task&owner=me">View All Tasks</Link>
               </Button>
             </div>
           </div>

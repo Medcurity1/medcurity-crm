@@ -149,14 +149,20 @@ async function processReminder(
 ): Promise<void> {
   if (!task.owner_user_id) return;
 
-  const link =
+  // Link points at the record the task is attached to, with an open_task
+  // query param so the frontend can pop the EditTaskDialog on arrival.
+  // Falls back to the "my tasks" list view when the task has no record.
+  const base =
     task.opportunity_id
       ? `/opportunities/${task.opportunity_id}`
       : task.contact_id
         ? `/contacts/${task.contact_id}`
         : task.account_id
           ? `/accounts/${task.account_id}`
-          : "/activities";
+          : `/activities?type=task&owner=me`;
+  const link = task.opportunity_id || task.contact_id || task.account_id
+    ? `${base}?open_task=${task.id}`
+    : `${base}&open_task=${task.id}`;
 
   const wantInApp = task.reminder_channels.includes("in_app");
   const wantEmail = task.reminder_channels.includes("email");

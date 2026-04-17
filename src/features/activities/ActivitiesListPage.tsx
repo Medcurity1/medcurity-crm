@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { useQuery } from "@tanstack/react-query";
 import {
   Clock,
@@ -134,14 +135,25 @@ function getRecordLink(
 }
 
 export function ActivitiesListPage() {
+  const { user } = useAuth();
+  const [urlParams] = useSearchParams();
+
+  // Allow the home "View All Tasks" link (and other deep links) to
+  // pre-seed type + owner filters via ?type=task&owner=me.
+  const initialType = urlParams.get("type") ?? "all";
+  const initialOwnerParam = urlParams.get("owner");
+  const initialOwner =
+    initialOwnerParam === "me" && user?.id
+      ? user.id
+      : initialOwnerParam ?? "all";
+
   const [search, setSearch] = useState("");
-  const [type, setType] = useState<string>("all");
-  const [owner, setOwner] = useState<string>("all");
+  const [type, setType] = useState<string>(initialType);
+  const [owner, setOwner] = useState<string>(initialOwner);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [page, setPage] = useState(0);
 
-  const [urlParams] = useSearchParams();
   const scopeAccountId = urlParams.get("account_id") || undefined;
   const scopeContactId = urlParams.get("contact_id") || undefined;
   const scopeOpportunityId = urlParams.get("opportunity_id") || undefined;

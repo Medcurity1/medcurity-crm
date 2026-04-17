@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { CheckCircle2, Circle, Clock, Plus, ChevronDown, RotateCcw, Pencil } from "lucide-react";
 import { useTasks, useCompleteActivity, useReopenActivity } from "./api";
 import { QuickTaskDialog } from "./QuickTaskDialog";
@@ -169,6 +170,26 @@ export function TasksPanel({
 
   const openTasks = data?.open ?? [];
   const completedTasks = data?.completed ?? [];
+
+  // If we were opened from a notification click with ?open_task=<id>,
+  // auto-open the edit dialog for that task. We match across both open
+  // and completed lists so reopening a completed task works too.
+  const [urlParams, setUrlParams] = useSearchParams();
+  useEffect(() => {
+    const taskId = urlParams.get("open_task");
+    if (!taskId || editingTask) return;
+    const match =
+      openTasks.find((t) => t.id === taskId) ??
+      completedTasks.find((t) => t.id === taskId);
+    if (match) {
+      setEditingTask(match);
+      // Strip the query param so refresh doesn't re-open it.
+      const next = new URLSearchParams(urlParams);
+      next.delete("open_task");
+      setUrlParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlParams, openTasks, completedTasks]);
 
   function handleComplete(id: string) {
     completeMutation.mutate(
