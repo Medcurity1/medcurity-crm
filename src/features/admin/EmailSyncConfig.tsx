@@ -66,24 +66,10 @@ export function EmailSyncConfig({
         />
       </div>
 
-      <div className="flex items-center justify-between gap-4">
-        <Label htmlFor="primary-only" className="flex-1 cursor-pointer">
-          <div>
-            <p className="text-sm font-medium">
-              Only log emails to/from primary contacts
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Limit logging to contacts marked as primary on their account
-            </p>
-          </div>
-        </Label>
-        <Switch
-          id="primary-only"
-          checked={config.primaryOnly}
-          onCheckedChange={() => toggle("primaryOnly")}
-          disabled={disabled}
-        />
-      </div>
+      {/* "Primary-only" toggle removed per Brayden 2026-04-17 — reps wanted
+          emails to log for every contact on the account, not just the one
+          marked primary. The field stays in the DB config in case we bring
+          it back, but is no longer surfaced in the UI. */}
 
       <div className="flex items-center justify-between gap-4">
         <Label htmlFor="auto-link-opps" className="flex-1 cursor-pointer">

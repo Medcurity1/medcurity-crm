@@ -9,6 +9,7 @@ interface AuthContextValue {
   profile: UserProfile | null;
   loading: boolean;
   signOut: () => Promise<void>;
+  markOnboarded: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -74,6 +75,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null);
   }
 
+  /**
+   * Mark the signed-in user as having completed (or skipped) the welcome
+   * wizard. Stamps user_profiles.onboarded_at so the wizard won't re-show
+   * on next login, across browsers/devices. Previously this used
+   * localStorage which meant clearing storage or using a new browser
+   * popped the wizard again.
+   */
+  async function markOnboarded() {
+    if (!session?.user?.id) return;
+    const { error } = await supabase
+      .from("user_profiles")
+      .update({ onboarded_at: new Date().toISOString() })
+      .eq("id", session.user.id);
+    if (error) {
+      console.error("Failed to mark onboarded:", error);
+      return;
+    }
+    setProfile((prev) =>
+      prev ? { ...prev, onboarded_at: new Date().toISOString() } : prev
+    );
+  }
+
   return (
     <AuthContext.Provider
       value={{
@@ -82,6 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profile,
         loading,
         signOut,
+        markOnboarded,
       }}
     >
       {children}

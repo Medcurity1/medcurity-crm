@@ -8,7 +8,10 @@ import { WelcomeWizard } from "@/features/auth/WelcomeWizard";
 import { QuickCreateDialog } from "@/components/QuickCreateDialog";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useIdleLogout } from "@/hooks/useIdleLogout";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { IdleWarningDialog } from "@/components/IdleWarningDialog";
 
 const pathMap: Record<string, string> = {
   "": "Home",
@@ -45,12 +48,21 @@ function useIsMobile(breakpoint = 768) {
 export function AppLayout() {
   const isMobile = useIsMobile();
   const location = useLocation();
+  const { profile, markOnboarded } = useAuth();
   const [collapsed, setCollapsed] = useState(isMobile);
 
-  // Welcome wizard state
-  const [showWizard, setShowWizard] = useState(
-    () => !localStorage.getItem("crm_onboarded")
-  );
+  // Welcome wizard shows only on true first login (no onboarded_at). Before
+  // the server-side check ran, we used localStorage which popped the wizard
+  // again on every new browser or after clearing storage.
+  const showWizard = !!profile && !profile.onboarded_at;
+
+  // Auto-logout on inactivity. Defaults to 60 min idle; shows a 60s warning
+  // modal so the user can cancel before being booted.
+  const idle = useIdleLogout({
+    idleMs: 60 * 60 * 1000,
+    warnMs: 60 * 1000,
+    enabled: !!profile,
+  });
 
   // Quick Create dialog
   const [showQuickCreate, setShowQuickCreate] = useState(false);
@@ -122,7 +134,15 @@ export function AppLayout() {
       {/* Welcome Wizard overlay */}
       <WelcomeWizard
         open={showWizard}
-        onComplete={() => setShowWizard(false)}
+        onComplete={() => {
+          void markOnboarded();
+        }}
+      />
+
+      <IdleWarningDialog
+        open={idle.warning}
+        secondsRemaining={idle.secondsRemaining}
+        onStay={idle.dismissWarning}
       />
 
       {/* Quick Create dialog */}
