@@ -36,24 +36,53 @@ import { activityLabel } from "@/lib/formatters";
 
 type CalendarActivity = Activity & {
   owner: { id: string; full_name: string | null } | null;
+  account: { id: string; name: string } | null;
+  opportunity: { id: string; name: string } | null;
+  contact: { id: string; first_name: string; last_name: string } | null;
+  lead: { id: string; first_name: string; last_name: string } | null;
 };
 
 function useMonthActivities(year: number, month: number) {
   return useQuery({
     queryKey: ["activities", "calendar", year, month],
     queryFn: async () => {
+      // Pull a generous window: anything whose effective_date
+      // (due_at || completed_at || created_at) falls in the visible
+      // month. Simpler to fetch by created_at window with margin and
+      // filter client-side, since the three-way OR is awkward in
+      // PostgREST.
       const start = new Date(year, month, 1);
       const end = new Date(year, month + 1, 0, 23, 59, 59, 999);
+      const margin = 31 * 24 * 60 * 60 * 1000; // 1-month cushion both sides
+      const fetchStart = new Date(start.getTime() - margin).toISOString();
+      const fetchEnd = new Date(end.getTime() + margin).toISOString();
       const { data, error } = await supabase
         .from("activities")
-        .select("*, owner:user_profiles!owner_user_id(id, full_name)")
-        .gte("created_at", start.toISOString())
-        .lte("created_at", end.toISOString())
-        .order("created_at", { ascending: false });
+        .select(
+          "*, owner:user_profiles!owner_user_id(id, full_name), account:accounts!account_id(id, name), opportunity:opportunities!opportunity_id(id, name), contact:contacts!contact_id(id, first_name, last_name), lead:leads!lead_id(id, first_name, last_name)"
+        )
+        .or(
+          `created_at.gte.${fetchStart},due_at.gte.${fetchStart}`
+        )
+        .or(
+          `created_at.lte.${fetchEnd},due_at.lte.${fetchEnd}`
+        );
       if (error) throw error;
       return (data ?? []) as CalendarActivity[];
     },
   });
+}
+
+/**
+ * Pick the date the user actually cares about for calendar placement.
+ *   - Tasks + meetings: due_at (when it's scheduled to happen)
+ *   - Completed items: completed_at (when it actually happened)
+ *   - Everything else: created_at (when it was logged)
+ */
+function activityCalendarDate(a: CalendarActivity): string {
+  if (a.due_at) return a.due_at;
+  if (a.completed_at) return a.completed_at;
+  return a.created_at;
 }
 
 const ACTIVITY_ICONS: Record<ActivityType, typeof Phone> = {
@@ -64,15 +93,40 @@ const ACTIVITY_ICONS: Record<ActivityType, typeof Phone> = {
   task: CheckSquare,
 };
 
-function getRecordLink(a: CalendarActivity): { to: string; label: string } | null {
-  if (a.opportunity_id) {
-    return { to: `/opportunities/${a.opportunity_id}`, label: "Opportunity" };
+function getRecordLink(
+  a: CalendarActivity
+): { to: string; label: string; name: string } | null {
+  // Priority mirrors the specificity of the scope: opp > contact >
+  // account > lead. Each gets its own badge label + the record's
+  // display name so the calendar shows "Opportunity · Acme Q3 SRA"
+  // at a glance instead of a bare "Opportunity".
+  if (a.opportunity_id && a.opportunity) {
+    return {
+      to: `/opportunities/${a.opportunity_id}`,
+      label: "Opportunity",
+      name: a.opportunity.name,
+    };
   }
-  if (a.contact_id) {
-    return { to: `/contacts/${a.contact_id}`, label: "Contact" };
+  if (a.contact_id && a.contact) {
+    return {
+      to: `/contacts/${a.contact_id}`,
+      label: "Contact",
+      name: `${a.contact.first_name} ${a.contact.last_name}`,
+    };
   }
-  if (a.account_id) {
-    return { to: `/accounts/${a.account_id}`, label: "Account" };
+  if (a.account_id && a.account) {
+    return {
+      to: `/accounts/${a.account_id}`,
+      label: "Account",
+      name: a.account.name,
+    };
+  }
+  if (a.lead_id && a.lead) {
+    return {
+      to: `/leads/${a.lead_id}`,
+      label: "Lead",
+      name: `${a.lead.first_name} ${a.lead.last_name}`,
+    };
   }
   return null;
 }
@@ -97,7 +151,7 @@ export function ActivityCalendar() {
   const countsByDate = useMemo(() => {
     const map: Record<string, number> = {};
     for (const a of activities ?? []) {
-      const key = format(parseISO(a.created_at), "yyyy-MM-dd");
+      const key = format(parseISO(activityCalendarDate(a)), "yyyy-MM-dd");
       map[key] = (map[key] || 0) + 1;
     }
     return map;
@@ -106,7 +160,7 @@ export function ActivityCalendar() {
   const selectedActivities = useMemo(() => {
     if (!selectedDate || !activities) return [];
     return activities.filter((a) =>
-      isSameDay(parseISO(a.created_at), selectedDate)
+      isSameDay(parseISO(activityCalendarDate(a)), selectedDate)
     );
   }, [activities, selectedDate]);
 
@@ -275,9 +329,10 @@ export function ActivityCalendar() {
                               <span>&middot;</span>
                               <Link
                                 to={link.to}
-                                className="text-primary hover:underline"
+                                className="text-primary hover:underline truncate max-w-[240px]"
+                                title={`${link.label}: ${link.name}`}
                               >
-                                {link.label}
+                                {link.label}: {link.name}
                               </Link>
                             </>
                           )}
