@@ -284,13 +284,24 @@ export function OpportunityDetail() {
       )}
 
       <DetailPageLayout
-        side={
-          <ActivityTimeline
-            opportunityId={opp.id}
-            compact
-            enableReattribute
-          />
-        }
+        sidePanels={[
+          {
+            key: "activity",
+            label: "Activity",
+            content: (
+              <ActivityTimeline
+                opportunityId={opp.id}
+                compact
+                enableReattribute
+              />
+            ),
+          },
+          {
+            key: "tasks",
+            label: "Tasks",
+            content: <TasksPanel opportunityId={opp.id} />,
+          },
+        ]}
       >
 
       {/* Related-record tabs at the top, collapsed by default. */}

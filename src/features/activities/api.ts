@@ -6,6 +6,7 @@ interface ActivityFilters {
   account_id?: string;
   contact_id?: string;
   opportunity_id?: string;
+  lead_id?: string;
 }
 
 export function useActivities(filters?: ActivityFilters) {
@@ -26,6 +27,9 @@ export function useActivities(filters?: ActivityFilters) {
       if (filters?.opportunity_id) {
         query = query.eq("opportunity_id", filters.opportunity_id);
       }
+      if (filters?.lead_id) {
+        query = query.eq("lead_id", filters.lead_id);
+      }
 
       const { data, error } = await query;
       if (error) throw error;
@@ -34,7 +38,8 @@ export function useActivities(filters?: ActivityFilters) {
     enabled:
       !!filters?.account_id ||
       !!filters?.contact_id ||
-      !!filters?.opportunity_id,
+      !!filters?.opportunity_id ||
+      !!filters?.lead_id,
   });
 }
 
@@ -42,6 +47,7 @@ interface CreateActivityInput {
   account_id?: string | null;
   contact_id?: string | null;
   opportunity_id?: string | null;
+  lead_id?: string | null;
   owner_user_id?: string | null;
   activity_type: string;
   subject: string;
@@ -125,6 +131,7 @@ interface TaskFilters {
   account_id?: string;
   contact_id?: string;
   opportunity_id?: string;
+  lead_id?: string;
 }
 
 export function useTasks(filters: TaskFilters) {
@@ -140,6 +147,7 @@ export function useTasks(filters: TaskFilters) {
       if (filters.account_id) query = query.eq("account_id", filters.account_id);
       if (filters.contact_id) query = query.eq("contact_id", filters.contact_id);
       if (filters.opportunity_id) query = query.eq("opportunity_id", filters.opportunity_id);
+      if (filters.lead_id) query = query.eq("lead_id", filters.lead_id);
 
       const { data, error } = await query;
       if (error) throw error;

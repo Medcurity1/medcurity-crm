@@ -266,15 +266,26 @@ export function ContactDetail() {
       </div>
 
       <DetailPageLayout
-        side={
-          <ActivityTimeline
-            contactId={contact.id}
-            accountId={contact.account_id}
-            contactEmail={contact.email ?? undefined}
-            contactName={formatName(contact.first_name, contact.last_name)}
-            compact
-          />
-        }
+        sidePanels={[
+          {
+            key: "activity",
+            label: "Activity",
+            content: (
+              <ActivityTimeline
+                contactId={contact.id}
+                accountId={contact.account_id}
+                contactEmail={contact.email ?? undefined}
+                contactName={formatName(contact.first_name, contact.last_name)}
+                compact
+              />
+            ),
+          },
+          {
+            key: "tasks",
+            label: "Tasks",
+            content: <TasksPanel contactId={contact.id} />,
+          },
+        ]}
       >
 
       <CollapsibleTabs

@@ -23,6 +23,7 @@ interface ActivityFormProps {
   accountId?: string;
   contactId?: string;
   opportunityId?: string;
+  leadId?: string;
 }
 
 const activityTypes: { value: ActivityType; label: string; icon: typeof Phone }[] = [
@@ -39,6 +40,7 @@ export function ActivityForm({
   accountId,
   contactId,
   opportunityId,
+  leadId,
 }: ActivityFormProps) {
   const { user } = useAuth();
   const createMutation = useCreateActivity();
@@ -70,6 +72,7 @@ export function ActivityForm({
         account_id: accountId,
         contact_id: contactId,
         opportunity_id: opportunityId,
+        lead_id: leadId,
         owner_user_id: user?.id,
         reminder_schedule: reminderSchedule,
         reminder_at:

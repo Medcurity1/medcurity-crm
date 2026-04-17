@@ -62,6 +62,7 @@ interface ListFilters {
   scopeAccountId?: string;
   scopeContactId?: string;
   scopeOpportunityId?: string;
+  scopeLeadId?: string;
 }
 
 function useActivitiesList(filters: ListFilters) {
@@ -102,6 +103,9 @@ function useActivitiesList(filters: ListFilters) {
       if (filters.scopeOpportunityId) {
         query = query.eq("opportunity_id", filters.scopeOpportunityId);
       }
+      if (filters.scopeLeadId) {
+        query = query.eq("lead_id", filters.scopeLeadId);
+      }
 
       const from = filters.page * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
@@ -141,6 +145,7 @@ export function ActivitiesListPage() {
   const scopeAccountId = urlParams.get("account_id") || undefined;
   const scopeContactId = urlParams.get("contact_id") || undefined;
   const scopeOpportunityId = urlParams.get("opportunity_id") || undefined;
+  const scopeLeadId = urlParams.get("lead_id") || undefined;
 
   const filters = useMemo<ListFilters>(
     () => ({
@@ -153,6 +158,7 @@ export function ActivitiesListPage() {
       scopeAccountId,
       scopeContactId,
       scopeOpportunityId,
+      scopeLeadId,
     }),
     [
       search,
@@ -164,6 +170,7 @@ export function ActivitiesListPage() {
       scopeAccountId,
       scopeContactId,
       scopeOpportunityId,
+      scopeLeadId,
     ]
   );
 

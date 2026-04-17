@@ -320,12 +320,26 @@ export function AccountDetail() {
       </div>
 
       <DetailPageLayout
-        side={<ActivityTimeline accountId={account.id} compact />}
+        sidePanels={[
+          {
+            key: "activity",
+            label: "Activity",
+            content: <ActivityTimeline accountId={account.id} compact />,
+          },
+          {
+            key: "tasks",
+            label: "Tasks",
+            content: <TasksPanel accountId={account.id} />,
+          },
+        ]}
       >
 
       {/* Related tabs at the top. Collapsed by default so the page doesn't
           lead with a wall of related-record data before the user has seen
           the account's own fields. */}
+      {/* Tab order per Brayden 2026-04-17: Opportunities used frequently,
+          second-most after Contacts. Keeping Tasks + Contract History
+          further right. */}
       <CollapsibleTabs
         className="mt-2"
         defaultValue="contacts"

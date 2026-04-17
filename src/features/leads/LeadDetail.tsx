@@ -28,7 +28,9 @@ import {
 } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-// ActivityTimeline isn't used here — leads don't have an activities FK
+import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
+import { TasksPanel } from "@/features/activities/TasksPanel";
+import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
 import { SequencesTab } from "@/features/sequences/SequencesTab";
 import type { LeadSource, LeadQualification } from "@/types/crm";
 import {
@@ -348,6 +350,28 @@ export function LeadDetail() {
         </Card>
       </div>
 
+      <DetailPageLayout
+        sidePanels={[
+          {
+            key: "activity",
+            label: "Activity",
+            content: (
+              <ActivityTimeline
+                leadId={lead.id}
+                contactEmail={lead.email ?? undefined}
+                contactName={`${lead.first_name} ${lead.last_name}`}
+                compact
+              />
+            ),
+          },
+          {
+            key: "tasks",
+            label: "Tasks",
+            content: <TasksPanel leadId={lead.id} />,
+          },
+        ]}
+      >
+
       <CollapsibleTabs
         className="mt-2"
         defaultValue="sequences"
@@ -504,6 +528,8 @@ export function LeadDetail() {
           />
         </div>
       </CollapsibleSection>
+
+      </DetailPageLayout>
 
       <ConfirmDialog
         open={showArchive}

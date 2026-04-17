@@ -33,6 +33,7 @@ interface ActivityTimelineProps {
   accountId?: string;
   contactId?: string;
   opportunityId?: string;
+  leadId?: string;
   contactEmail?: string;
   contactName?: string;
   /**
@@ -80,6 +81,7 @@ export function ActivityTimeline({
   accountId,
   contactId,
   opportunityId,
+  leadId,
   contactEmail,
   contactName,
   compact = false,
@@ -100,6 +102,7 @@ export function ActivityTimeline({
     account_id: accountId,
     contact_id: contactId,
     opportunity_id: opportunityId,
+    lead_id: leadId,
   });
 
   // Build the "View All" deep link based on which entity scope we're in.
@@ -107,6 +110,7 @@ export function ActivityTimeline({
     if (opportunityId) return `/activities?opportunity_id=${opportunityId}`;
     if (contactId) return `/activities?contact_id=${contactId}`;
     if (accountId) return `/activities?account_id=${accountId}`;
+    if (leadId) return `/activities?lead_id=${leadId}`;
     return "/activities";
   })();
 
@@ -178,6 +182,7 @@ export function ActivityTimeline({
             accountId={accountId}
             contactId={contactId}
             opportunityId={opportunityId}
+            leadId={leadId}
           />
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <Button size="sm" onClick={() => setShowForm(true)}>
@@ -273,6 +278,7 @@ export function ActivityTimeline({
         accountId={accountId}
         contactId={contactId}
         opportunityId={opportunityId}
+        leadId={leadId}
       />
 
       <LogEmailDialog
@@ -281,6 +287,7 @@ export function ActivityTimeline({
         accountId={accountId}
         contactId={contactId}
         opportunityId={opportunityId}
+        leadId={leadId}
         contactEmail={contactEmail}
         contactName={contactName}
       />

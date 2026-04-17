@@ -408,6 +408,7 @@ export interface Activity {
   account_id: string | null;
   contact_id: string | null;
   opportunity_id: string | null;
+  lead_id: string | null;
   owner_user_id: string | null;
   activity_type: ActivityType;
   subject: string;

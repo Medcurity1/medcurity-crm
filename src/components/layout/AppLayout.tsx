@@ -4,6 +4,9 @@ import { Sidebar } from "./Sidebar";
 import { UserMenu } from "./UserMenu";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { NotificationsDropdown } from "@/components/NotificationsDropdown";
+import { AiAssistantDialog } from "@/components/AiAssistantDialog";
+import { Button } from "@/components/ui/button";
+import { Sparkles } from "lucide-react";
 import { WelcomeWizard } from "@/features/auth/WelcomeWizard";
 import { QuickCreateDialog } from "@/components/QuickCreateDialog";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
@@ -72,6 +75,9 @@ export function AppLayout() {
   // Keyboard shortcuts help dialog
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
 
+  // AI assistant dialog
+  const [showAssistant, setShowAssistant] = useState(false);
+
   // Register keyboard shortcuts
   useKeyboardShortcuts({
     onQuickCreate: useCallback(() => setShowQuickCreate(true), []),
@@ -112,6 +118,17 @@ export function AppLayout() {
           <span className="text-sm font-medium text-muted-foreground">{sectionName}</span>
           <div className="flex items-center gap-1">
             <GlobalSearch />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowAssistant(true)}
+              title="AI Assistant"
+              className="gap-1.5"
+            >
+              <Sparkles className="h-4 w-4 text-primary" />
+              <span className="hidden sm:inline">Ask AI</span>
+            </Button>
             <NotificationsDropdown />
             <UserMenu />
           </div>
@@ -146,6 +163,8 @@ export function AppLayout() {
         secondsRemaining={idle.secondsRemaining}
         onStay={idle.dismissWarning}
       />
+
+      <AiAssistantDialog open={showAssistant} onOpenChange={setShowAssistant} />
 
       {/* Quick Create dialog */}
       <QuickCreateDialog

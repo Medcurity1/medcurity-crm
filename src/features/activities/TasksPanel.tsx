@@ -14,6 +14,7 @@ interface TasksPanelProps {
   accountId?: string;
   contactId?: string;
   opportunityId?: string;
+  leadId?: string;
 }
 
 function getDueDateStatus(dueAt: string | null): "overdue" | "today" | "upcoming" | null {
@@ -103,6 +104,7 @@ export function TasksPanel({
   accountId,
   contactId,
   opportunityId,
+  leadId,
 }: TasksPanelProps) {
   const [showAddTask, setShowAddTask] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
@@ -112,6 +114,7 @@ export function TasksPanel({
     account_id: accountId,
     contact_id: contactId,
     opportunity_id: opportunityId,
+    lead_id: leadId,
   });
 
   const openTasks = data?.open ?? [];
