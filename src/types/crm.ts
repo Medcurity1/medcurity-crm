@@ -335,6 +335,7 @@ export interface Lead {
   linkedin_url: string | null;
   cold_lead: boolean;
   cold_lead_source: string | null;
+  rating: LeadRating | null;
   custom_fields: Record<string, unknown>;
   archived_at: string | null;
   archived_by: string | null;
@@ -402,6 +403,8 @@ export interface OpportunityProduct {
 export type ReminderSchedule =
   | "none" | "once" | "daily" | "weekdays" | "weekly";
 export type ReminderChannel = "in_app" | "email";
+export type ActivityPriority = "high" | "normal" | "low";
+export type LeadRating = "hot" | "warm" | "cold";
 
 export interface Activity {
   id: string;
@@ -429,6 +432,7 @@ export interface Activity {
   reminder_at: string | null;
   reminder_channels: ReminderChannel[];
   last_reminder_sent_at: string | null;
+  priority: ActivityPriority | null;
   // Outlook calendar sync (tasks)
   outlook_event_id: string | null;
   outlook_sync_error: string | null;

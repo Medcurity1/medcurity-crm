@@ -56,6 +56,7 @@ interface CreateActivityInput {
   reminder_schedule?: "none" | "once" | "daily" | "weekdays" | "weekly";
   reminder_at?: string | null;
   reminder_channels?: Array<"in_app" | "email">;
+  priority?: "high" | "normal" | "low" | null;
 }
 
 export function useCreateActivity() {
@@ -148,6 +149,7 @@ export function useUpdateActivity() {
       reminder_schedule?: "none" | "once" | "daily" | "weekdays" | "weekly";
       reminder_at?: string | null;
       reminder_channels?: Array<"in_app" | "email">;
+      priority?: "high" | "normal" | "low" | null;
     }) => {
       const { data, error } = await supabase
         .from("activities")

@@ -48,6 +48,8 @@ export function QuickTaskDialog({
   const [channels, setChannels] = useState<Array<"in_app" | "email">>([
     "in_app",
   ]);
+  // Priority is optional. Null = use due_at as the implicit priority signal.
+  const [priority, setPriority] = useState<"high" | "normal" | "low" | "">("");
   const createMutation = useCreateActivity();
   const { user } = useAuth();
 
@@ -58,6 +60,7 @@ export function QuickTaskDialog({
     setReminderSchedule("none");
     setReminderAt("");
     setChannels(["in_app"]);
+    setPriority("");
   }
 
   function handleClose(nextOpen: boolean) {
@@ -109,6 +112,7 @@ export function QuickTaskDialog({
         reminder_schedule: reminderSchedule,
         reminder_at: reminderIso,
         reminder_channels: reminderSchedule === "none" ? ["in_app"] : channels,
+        priority: priority || null,
       },
       {
         onSuccess: () => {
@@ -158,6 +162,23 @@ export function QuickTaskDialog({
               Date + time. Used for calendar placement and reminder
               cutoff.
             </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="task-priority">Priority</Label>
+            <select
+              id="task-priority"
+              className="w-full border rounded-md h-9 px-2 bg-background text-sm"
+              value={priority}
+              onChange={(e) =>
+                setPriority(e.target.value as "" | "high" | "normal" | "low")
+              }
+            >
+              <option value="">No priority (use due date)</option>
+              <option value="high">High</option>
+              <option value="normal">Normal</option>
+              <option value="low">Low</option>
+            </select>
           </div>
 
           <div className="space-y-2 border rounded-md p-3">

@@ -97,6 +97,7 @@ export function LeadForm() {
       linkedin_url: "",
       cold_lead: false,
       cold_lead_source: "",
+      rating: "",
       custom_fields: {},
     },
   });
@@ -137,6 +138,7 @@ export function LeadForm() {
         linkedin_url: lead.linkedin_url ?? "",
         cold_lead: lead.cold_lead ?? false,
         cold_lead_source: lead.cold_lead_source ?? "",
+        rating: lead.rating ?? "",
         custom_fields: lead.custom_fields ?? {},
       });
     }
@@ -194,6 +196,7 @@ export function LeadForm() {
       linkedin_url: emptyToNull(values.linkedin_url),
       cold_lead: values.cold_lead ?? false,
       cold_lead_source: emptyToNull(values.cold_lead_source),
+      rating: emptyToNull(values.rating),
       custom_fields: values.custom_fields ?? {},
     };
 
@@ -392,6 +395,26 @@ export function LeadForm() {
                     placeholder="e.g. SRA, HIPAA certification"
                     {...register("project")}
                   />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Lead Rating</Label>
+                  <Select
+                    value={(watch("rating") as string) || "none"}
+                    onValueChange={(v) =>
+                      setValue("rating", v === "none" ? "" : (v as never))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Not rated" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Not rated</SelectItem>
+                      <SelectItem value="hot">Hot</SelectItem>
+                      <SelectItem value="warm">Warm</SelectItem>
+                      <SelectItem value="cold">Cold</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="md:col-span-2 flex flex-wrap gap-6">

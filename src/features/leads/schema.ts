@@ -89,6 +89,7 @@ export const leadSchema = z.object({
   linkedin_url: z.string().url("Must be a valid URL").optional().or(z.literal("")),
   cold_lead: z.boolean().optional(),
   cold_lead_source: z.string().optional().or(z.literal("")),
+  rating: z.enum(["hot", "warm", "cold"]).optional().nullable().or(z.literal("")),
   // Custom fields
   custom_fields: z.record(z.string(), z.unknown()).optional(),
 });

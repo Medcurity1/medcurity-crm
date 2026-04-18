@@ -109,6 +109,18 @@ function TaskItem({
               {task.owner.full_name}
             </span>
           )}
+          {task.priority && (
+            <span
+              className={cn(
+                "text-xs inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full font-medium",
+                task.priority === "high" && "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
+                task.priority === "normal" && "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
+                task.priority === "low" && "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+              )}
+            >
+              {task.priority}
+            </span>
+          )}
           {task.reminder_schedule && task.reminder_schedule !== "none" && (
             <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
               <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>

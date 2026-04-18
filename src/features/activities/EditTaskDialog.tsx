@@ -49,6 +49,7 @@ export function EditTaskDialog({
   const [channels, setChannels] = useState<Array<"in_app" | "email">>([
     "in_app",
   ]);
+  const [priority, setPriority] = useState<"" | "high" | "normal" | "low">("");
 
   // Re-hydrate from the task when it changes.
   useEffect(() => {
@@ -67,6 +68,7 @@ export function EditTaskDialog({
         ? task.reminder_channels
         : ["in_app"]
     );
+    setPriority(task.priority ?? "");
   }, [task]);
 
   function toggleChannel(ch: "in_app" | "email", checked: boolean) {
@@ -100,6 +102,7 @@ export function EditTaskDialog({
         reminder_schedule: reminderSchedule,
         reminder_at: reminderIso,
         reminder_channels: reminderSchedule === "none" ? ["in_app"] : channels,
+        priority: priority || null,
       });
       toast.success("Task updated");
       onOpenChange(false);
@@ -139,6 +142,23 @@ export function EditTaskDialog({
               value={dueAt}
               onChange={(e) => setDueAt(e.target.value)}
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="edit-priority">Priority</Label>
+            <select
+              id="edit-priority"
+              className="w-full border rounded-md h-9 px-2 bg-background text-sm"
+              value={priority}
+              onChange={(e) =>
+                setPriority(e.target.value as "" | "high" | "normal" | "low")
+              }
+            >
+              <option value="">No priority (use due date)</option>
+              <option value="high">High</option>
+              <option value="normal">Normal</option>
+              <option value="low">Low</option>
+            </select>
           </div>
 
           <div className="space-y-2 border rounded-md p-3">
