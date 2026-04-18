@@ -6,6 +6,15 @@ export const opportunitySchema = z.object({
   owner_user_id: z.string().uuid().nullable().optional(),
   team: z.enum(["sales", "renewals"]),
   kind: z.enum(["new_business", "renewal"]),
+  business_type: z
+    .enum([
+      "new_business",
+      "existing_business",
+      "existing_business_new_product",
+      "existing_business_new_service",
+      "opportunity",
+    ])
+    .optional().nullable().or(z.literal("")),
   name: z.string().min(1, "Opportunity name is required"),
   stage: z.enum(["lead", "qualified", "proposal", "verbal_commit", "closed_won", "closed_lost"]),
   amount: z.coerce.number().min(0, "Amount must be positive"),

@@ -63,17 +63,7 @@ export const leadSchema = z.object({
     .optional()
     .nullable()
     .or(z.literal("")),
-  type: z
-    .enum([
-      "inbound_website", "inbound_referral",
-      "outbound_cold", "purchased_list",
-      "conference", "webinar",
-      "partner", "existing_customer_expansion",
-      "other",
-    ])
-    .optional()
-    .nullable()
-    .or(z.literal("")),
+  // type field removed 2026-04-18 — was redundant with source.
   priority_lead: z.boolean().optional(),
   project: z.string().optional().or(z.literal("")),
   business_relationship_tag: z
@@ -90,6 +80,23 @@ export const leadSchema = z.object({
   cold_lead: z.boolean().optional(),
   cold_lead_source: z.string().optional().or(z.literal("")),
   rating: z.enum(["hot", "warm", "cold"]).optional().nullable().or(z.literal("")),
+  industry_category: z
+    .enum([
+      "hospital","medical_group","fqhc","rural_health_clinic","skilled_nursing",
+      "long_term_care","home_health","hospice","behavioral_health","dental",
+      "pediatrics","specialty_clinic","urgent_care","imaging_center","lab_services",
+      "pharmacy","telemedicine","tribal_health","public_health_agency",
+      "healthcare_it_vendor","managed_service_provider","healthcare_consulting",
+      "insurance_payer","other_healthcare","other",
+    ])
+    .optional().nullable().or(z.literal("")),
+  project_segment: z
+    .enum([
+      "rural_hospital","community_hospital","enterprise","medium_sized","small_sized",
+      "fqhc","voa","franchise","strategic_partner","it_vendor_third_party",
+      "independent_associations","other",
+    ])
+    .optional().nullable().or(z.literal("")),
   // Custom fields
   custom_fields: z.record(z.string(), z.unknown()).optional(),
 });

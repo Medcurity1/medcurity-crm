@@ -90,7 +90,6 @@ export function LeadForm() {
       credential: "",
       phone_ext: "",
       time_zone: "",
-      type: "",
       priority_lead: false,
       project: "",
       business_relationship_tag: "",
@@ -98,6 +97,8 @@ export function LeadForm() {
       cold_lead: false,
       cold_lead_source: "",
       rating: "",
+      industry_category: "",
+      project_segment: "",
       custom_fields: {},
     },
   });
@@ -131,7 +132,6 @@ export function LeadForm() {
         credential: lead.credential ?? "",
         phone_ext: lead.phone_ext ?? "",
         time_zone: lead.time_zone ?? "",
-        type: lead.type ?? "",
         priority_lead: lead.priority_lead ?? false,
         project: lead.project ?? "",
         business_relationship_tag: lead.business_relationship_tag ?? "",
@@ -139,6 +139,8 @@ export function LeadForm() {
         cold_lead: lead.cold_lead ?? false,
         cold_lead_source: lead.cold_lead_source ?? "",
         rating: lead.rating ?? "",
+        industry_category: lead.industry_category ?? "",
+        project_segment: lead.project_segment ?? "",
         custom_fields: lead.custom_fields ?? {},
       });
     }
@@ -189,7 +191,6 @@ export function LeadForm() {
       credential: emptyToNull(values.credential),
       phone_ext: emptyToNull(values.phone_ext),
       time_zone: emptyToNull(values.time_zone),
-      type: emptyToNull(values.type),
       priority_lead: values.priority_lead ?? false,
       project: emptyToNull(values.project),
       business_relationship_tag: emptyToNull(values.business_relationship_tag),
@@ -197,6 +198,8 @@ export function LeadForm() {
       cold_lead: values.cold_lead ?? false,
       cold_lead_source: emptyToNull(values.cold_lead_source),
       rating: emptyToNull(values.rating),
+      industry_category: emptyToNull(values.industry_category),
+      project_segment: emptyToNull(values.project_segment),
       custom_fields: values.custom_fields ?? {},
     };
 
@@ -337,25 +340,76 @@ export function LeadForm() {
                   </Select>
                 </div>
 
+                {/* Lead Type field removed 2026-04-18 — was redundant with
+                    Lead Source above. Use Lead Source for "where did this
+                    lead come from?" */}
+
                 <div className="space-y-2">
-                  <Label>Lead Type</Label>
+                  <Label>Lead Segment</Label>
                   <Select
-                    value={(watch("type") as string) || "none"}
-                    onValueChange={(v) => setValue("type", v === "none" ? "" : (v as never))}
+                    value={(watch("project_segment") as string) || "none"}
+                    onValueChange={(v) =>
+                      setValue("project_segment", v === "none" ? "" : (v as never))
+                    }
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select type..." />
+                      <SelectValue placeholder="Select segment..." />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="inbound_website">Inbound (Website)</SelectItem>
-                      <SelectItem value="inbound_referral">Inbound (Referral)</SelectItem>
-                      <SelectItem value="outbound_cold">Outbound / Cold</SelectItem>
-                      <SelectItem value="purchased_list">Purchased List</SelectItem>
-                      <SelectItem value="conference">Conference</SelectItem>
-                      <SelectItem value="webinar">Webinar</SelectItem>
-                      <SelectItem value="partner">Partner</SelectItem>
-                      <SelectItem value="existing_customer_expansion">Existing Customer Expansion</SelectItem>
+                      <SelectItem value="rural_hospital">Rural Hospital</SelectItem>
+                      <SelectItem value="community_hospital">Community Hospital</SelectItem>
+                      <SelectItem value="enterprise">Enterprise</SelectItem>
+                      <SelectItem value="medium_sized">Medium Sized</SelectItem>
+                      <SelectItem value="small_sized">Small Sized</SelectItem>
+                      <SelectItem value="fqhc">FQHC</SelectItem>
+                      <SelectItem value="voa">VoA</SelectItem>
+                      <SelectItem value="franchise">Franchise</SelectItem>
+                      <SelectItem value="strategic_partner">Strategic Partner</SelectItem>
+                      <SelectItem value="it_vendor_third_party">IT Vendor / 3rd Party</SelectItem>
+                      <SelectItem value="independent_associations">Independent Associations</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Industry</Label>
+                  <Select
+                    value={(watch("industry_category") as string) || "none"}
+                    onValueChange={(v) =>
+                      setValue("industry_category", v === "none" ? "" : (v as never))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select industry..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="hospital">Hospital</SelectItem>
+                      <SelectItem value="medical_group">Medical Group</SelectItem>
+                      <SelectItem value="fqhc">FQHC</SelectItem>
+                      <SelectItem value="rural_health_clinic">Rural Health Clinic</SelectItem>
+                      <SelectItem value="skilled_nursing">Skilled Nursing</SelectItem>
+                      <SelectItem value="long_term_care">Long-Term Care</SelectItem>
+                      <SelectItem value="home_health">Home Health</SelectItem>
+                      <SelectItem value="hospice">Hospice</SelectItem>
+                      <SelectItem value="behavioral_health">Behavioral Health</SelectItem>
+                      <SelectItem value="dental">Dental</SelectItem>
+                      <SelectItem value="pediatrics">Pediatrics</SelectItem>
+                      <SelectItem value="specialty_clinic">Specialty Clinic</SelectItem>
+                      <SelectItem value="urgent_care">Urgent Care</SelectItem>
+                      <SelectItem value="imaging_center">Imaging Center</SelectItem>
+                      <SelectItem value="lab_services">Lab Services</SelectItem>
+                      <SelectItem value="pharmacy">Pharmacy</SelectItem>
+                      <SelectItem value="telemedicine">Telemedicine</SelectItem>
+                      <SelectItem value="tribal_health">Tribal Health</SelectItem>
+                      <SelectItem value="public_health_agency">Public Health Agency</SelectItem>
+                      <SelectItem value="healthcare_it_vendor">Healthcare IT Vendor</SelectItem>
+                      <SelectItem value="managed_service_provider">Managed Service Provider</SelectItem>
+                      <SelectItem value="healthcare_consulting">Healthcare Consulting</SelectItem>
+                      <SelectItem value="insurance_payer">Insurance / Payer</SelectItem>
+                      <SelectItem value="other_healthcare">Other Healthcare</SelectItem>
                       <SelectItem value="other">Other</SelectItem>
                     </SelectContent>
                   </Select>

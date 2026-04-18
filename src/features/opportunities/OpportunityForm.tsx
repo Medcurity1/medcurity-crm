@@ -132,6 +132,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           owner_user_id: opp.owner_user_id,
           team: opp.team,
           kind: opp.kind,
+          business_type: opp.business_type ?? "",
           name: opp.name,
           stage: opp.stage,
           amount: opp.amount,
@@ -173,6 +174,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           owner_user_id: null,
           team: "sales",
           kind: "new_business",
+          business_type: "",
           name: "",
           stage: "lead",
           amount: 0,
@@ -270,6 +272,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       owner_user_id: values.owner_user_id ?? null,
       team: values.team,
       kind: values.kind,
+      business_type: emptyToNull(values.business_type),
       name: values.name,
       stage: values.stage,
       amount: Number(values.amount),
@@ -485,6 +488,34 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                       <SelectItem value="renewal">Renewal</SelectItem>
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Sales-team workflow: new_business or renewal. For revenue-reporting categorization, use Business Type below.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Business Type</Label>
+                  <Select
+                    value={(watch("business_type") as string) || "none"}
+                    onValueChange={(v) =>
+                      setValue("business_type", v === "none" ? "" : (v as never))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select business type..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="new_business">New Business</SelectItem>
+                      <SelectItem value="existing_business">Existing Business</SelectItem>
+                      <SelectItem value="existing_business_new_product">Existing Business — New Product</SelectItem>
+                      <SelectItem value="existing_business_new_service">Existing Business — New Service</SelectItem>
+                      <SelectItem value="opportunity">Opportunity (in-flight / unclassified)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Revenue-reporting category. Use "Opportunity" for in-flight deals or sales-team closed_lost so a single product loss doesn't roll up as losing a customer.
+                  </p>
                 </div>
 
                 <div className="space-y-2">

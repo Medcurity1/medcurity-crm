@@ -129,6 +129,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
           owner_user_id: account.owner_user_id,
           website: account.website ?? "",
           industry: account.industry ?? "",
+          industry_category: account.industry_category ?? "",
           account_type: account.account_type ?? "",
           account_number: account.account_number ?? "",
           parent_account_id: account.parent_account_id ?? null,
@@ -168,6 +169,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
           lead_source_detail: account.lead_source_detail ?? "",
           priority_account: account.priority_account ?? false,
           project: account.project ?? "",
+          project_segment: account.project_segment ?? "",
           description: account.description ?? "",
           notes: account.notes ?? "",
           next_steps: account.next_steps ?? "",
@@ -180,6 +182,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
           owner_user_id: null,
           website: "",
           industry: "",
+          industry_category: "",
           account_type: "",
           account_number: "",
           parent_account_id: null,
@@ -219,6 +222,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
           lead_source_detail: "",
           priority_account: false,
           project: "",
+          project_segment: "",
           description: "",
           notes: "",
           next_steps: "",
@@ -263,6 +267,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
       owner_user_id: values.owner_user_id ?? null,
       website: emptyToNull(values.website),
       industry: emptyToNull(values.industry),
+      industry_category: emptyToNull(values.industry_category),
       account_type: emptyToNull(values.account_type),
       account_number: emptyToNull(values.account_number),
       parent_account_id: values.parent_account_id ?? null,
@@ -302,6 +307,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
       lead_source_detail: emptyToNull(values.lead_source_detail),
       priority_account: values.priority_account ?? false,
       project: emptyToNull(values.project),
+      project_segment: emptyToNull(values.project_segment),
       description: emptyToNull(values.description),
       notes: emptyToNull(values.notes),
       next_steps: emptyToNull(values.next_steps),
@@ -402,8 +408,45 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="industry">Industry<RequiredIndicator fieldKey="industry" requiredFields={requiredKeys} /></Label>
-                  <Input id="industry" {...register("industry")} />
+                  <Label>Industry<RequiredIndicator fieldKey="industry_category" requiredFields={requiredKeys} /></Label>
+                  <Select
+                    value={(watch("industry_category") as string) || "none"}
+                    onValueChange={(v) =>
+                      setValue("industry_category", v === "none" ? "" : (v as never))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select industry..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="hospital">Hospital</SelectItem>
+                      <SelectItem value="medical_group">Medical Group</SelectItem>
+                      <SelectItem value="fqhc">FQHC</SelectItem>
+                      <SelectItem value="rural_health_clinic">Rural Health Clinic</SelectItem>
+                      <SelectItem value="skilled_nursing">Skilled Nursing</SelectItem>
+                      <SelectItem value="long_term_care">Long-Term Care</SelectItem>
+                      <SelectItem value="home_health">Home Health</SelectItem>
+                      <SelectItem value="hospice">Hospice</SelectItem>
+                      <SelectItem value="behavioral_health">Behavioral Health</SelectItem>
+                      <SelectItem value="dental">Dental</SelectItem>
+                      <SelectItem value="pediatrics">Pediatrics</SelectItem>
+                      <SelectItem value="specialty_clinic">Specialty Clinic</SelectItem>
+                      <SelectItem value="urgent_care">Urgent Care</SelectItem>
+                      <SelectItem value="imaging_center">Imaging Center</SelectItem>
+                      <SelectItem value="lab_services">Lab Services</SelectItem>
+                      <SelectItem value="pharmacy">Pharmacy</SelectItem>
+                      <SelectItem value="telemedicine">Telemedicine</SelectItem>
+                      <SelectItem value="tribal_health">Tribal Health</SelectItem>
+                      <SelectItem value="public_health_agency">Public Health Agency</SelectItem>
+                      <SelectItem value="healthcare_it_vendor">Healthcare IT Vendor</SelectItem>
+                      <SelectItem value="managed_service_provider">Managed Service Provider</SelectItem>
+                      <SelectItem value="healthcare_consulting">Healthcare Consulting</SelectItem>
+                      <SelectItem value="insurance_payer">Insurance / Payer</SelectItem>
+                      <SelectItem value="other_healthcare">Other Healthcare</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="space-y-2">
@@ -726,8 +769,32 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                   </Label>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="project">Project<RequiredIndicator fieldKey="project" requiredFields={requiredKeys} /></Label>
-                  <Input id="project" {...register("project")} />
+                  <Label>Project Segment<RequiredIndicator fieldKey="project_segment" requiredFields={requiredKeys} /></Label>
+                  <Select
+                    value={(watch("project_segment") as string) || "none"}
+                    onValueChange={(v) =>
+                      setValue("project_segment", v === "none" ? "" : (v as never))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select segment..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="rural_hospital">Rural Hospital</SelectItem>
+                      <SelectItem value="community_hospital">Community Hospital</SelectItem>
+                      <SelectItem value="enterprise">Enterprise</SelectItem>
+                      <SelectItem value="medium_sized">Medium Sized</SelectItem>
+                      <SelectItem value="small_sized">Small Sized</SelectItem>
+                      <SelectItem value="fqhc">FQHC</SelectItem>
+                      <SelectItem value="voa">VoA</SelectItem>
+                      <SelectItem value="franchise">Franchise</SelectItem>
+                      <SelectItem value="strategic_partner">Strategic Partner</SelectItem>
+                      <SelectItem value="it_vendor_third_party">IT Vendor / 3rd Party</SelectItem>
+                      <SelectItem value="independent_associations">Independent Associations</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2 md:col-span-2">
                   <Label htmlFor="description">Description<RequiredIndicator fieldKey="description" requiredFields={requiredKeys} /></Label>

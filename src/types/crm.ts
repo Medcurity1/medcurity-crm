@@ -34,12 +34,31 @@ export type ContactType =
   | "prospect" | "customer" | "partner" | "vendor"
   | "referral_source" | "internal" | "other";
 
-export type LeadTypeEnum =
-  | "inbound_website" | "inbound_referral"
-  | "outbound_cold" | "purchased_list"
-  | "conference" | "webinar"
-  | "partner" | "existing_customer_expansion"
-  | "other";
+// LeadTypeEnum removed 2026-04-18 — was redundant with lead_source.
+// All "where did this lead come from" goes through lead_source now.
+
+export type OpportunityBusinessType =
+  | "new_business"
+  | "existing_business"
+  | "existing_business_new_product"
+  | "existing_business_new_service"
+  | "opportunity";
+
+export type IndustryCategory =
+  | "hospital" | "medical_group" | "fqhc" | "rural_health_clinic"
+  | "skilled_nursing" | "long_term_care" | "home_health" | "hospice"
+  | "behavioral_health" | "dental" | "pediatrics" | "specialty_clinic"
+  | "urgent_care" | "imaging_center" | "lab_services" | "pharmacy"
+  | "telemedicine" | "tribal_health" | "public_health_agency"
+  | "healthcare_it_vendor" | "managed_service_provider"
+  | "healthcare_consulting" | "insurance_payer"
+  | "other_healthcare" | "other";
+
+export type ProjectSegment =
+  | "rural_hospital" | "community_hospital" | "enterprise"
+  | "medium_sized" | "small_sized" | "fqhc" | "voa" | "franchise"
+  | "strategic_partner" | "it_vendor_third_party"
+  | "independent_associations" | "other";
 
 export type BusinessRelationshipTag =
   | "decision_maker" | "influencer" | "economic_buyer"
@@ -71,6 +90,7 @@ export interface Account {
   status: AccountStatus;
   website: string | null;
   industry: string | null;
+  industry_category: IndustryCategory | null;
   notes: string | null;
   // Contract
   current_contract_start_date: string | null;
@@ -137,6 +157,7 @@ export interface Account {
   churn_date: string | null;
   // Project
   project: string | null;
+  project_segment: ProjectSegment | null;
   // Salesforce audit fields
   sf_created_by: string | null;
   sf_created_date: string | null;
@@ -234,6 +255,7 @@ export interface Opportunity {
   owner_user_id: string | null;
   team: OpportunityTeam;
   kind: OpportunityKind;
+  business_type: OpportunityBusinessType | null;
   name: string;
   stage: OpportunityStage;
   amount: number;
@@ -303,6 +325,7 @@ export interface Lead {
   company: string | null;
   title: string | null;
   industry: string | null;
+  industry_category: IndustryCategory | null;
   website: string | null;
   status: LeadStatus;
   source: LeadSource | null;
@@ -328,9 +351,10 @@ export interface Lead {
   credential: CredentialType | null;
   phone_ext: string | null;
   time_zone: UsTimeZone | null;
-  type: LeadTypeEnum | null;
+  // type field dropped 2026-04-18 — was redundant with source/lead_source.
   priority_lead: boolean;
   project: string | null;
+  project_segment: ProjectSegment | null;
   business_relationship_tag: BusinessRelationshipTag | null;
   linkedin_url: string | null;
   cold_lead: boolean;
