@@ -56,6 +56,41 @@ export function useUpdateProduct() {
   });
 }
 
+export function useDeleteProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("products").delete().eq("id", id);
+      if (error) throw error;
+      return id;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["products"] });
+      qc.invalidateQueries({ queryKey: ["price_book_entries"] });
+    },
+  });
+}
+
+// Fetch all price-book entries that reference a single product, joined
+// with the parent price book name so we can show "this product appears
+// in these price books at these prices" on a detail/expanded view.
+export function useEntriesForProduct(productId: string | undefined) {
+  return useQuery({
+    queryKey: ["price_book_entries_by_product", productId],
+    queryFn: async () => {
+      if (!productId) throw new Error("Missing product id");
+      const { data, error } = await supabase
+        .from("price_book_entries")
+        .select("*, price_book:price_books!price_book_id(id, name, is_active, is_default)")
+        .eq("product_id", productId)
+        .order("fte_range");
+      if (error) throw error;
+      return data as Array<PriceBookEntry & { price_book: { id: string; name: string; is_active: boolean; is_default: boolean } | null }>;
+    },
+    enabled: !!productId,
+  });
+}
+
 // ─── Price Books ─────────────────────────────────────────
 
 export function usePriceBooks() {

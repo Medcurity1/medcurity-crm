@@ -1,9 +1,11 @@
-import { useState } from "react";
-import { Plus, Trash2, ChevronDown, Package } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Plus, Trash2, ChevronDown, ChevronRight, Package, Cloud, User } from "lucide-react";
 import {
   useProducts,
   useCreateProduct,
   useUpdateProduct,
+  useDeleteProduct,
+  useEntriesForProduct,
   usePriceBooks,
   useCreatePriceBook,
   useUpdatePriceBook,
@@ -101,6 +103,10 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
   const { data: products, isLoading } = useProducts(showInactive);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
+  const updateMutation = useUpdateProduct();
+  const deleteMutation = useDeleteProduct();
 
   function openNew() {
     setEditingProduct(null);
@@ -110,6 +116,32 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
   function openEdit(product: Product) {
     setEditingProduct(product);
     setDialogOpen(true);
+  }
+
+  async function handleToggleActive(product: Product, next: boolean) {
+    try {
+      await updateMutation.mutateAsync({ id: product.id, is_active: next });
+      toast.success(next ? "Marked active" : "Marked inactive");
+    } catch (err) {
+      toast.error("Failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+  }
+
+  async function handleConfirmDelete() {
+    if (!deleteTarget) return;
+    try {
+      await deleteMutation.mutateAsync(deleteTarget.id);
+      toast.success(`Deleted "${deleteTarget.name}"`);
+      setDeleteTarget(null);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Foreign-key constraint: tell user to remove from price books first.
+      if (msg.toLowerCase().includes("foreign") || msg.toLowerCase().includes("violates")) {
+        toast.error("Can't delete — product is used in a price book. Remove its entries first.");
+      } else {
+        toast.error("Failed to delete: " + msg);
+      }
+    }
   }
 
   if (isLoading) {
@@ -122,10 +154,13 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
     );
   }
 
+  const importedCount = products?.filter((p) => p.sf_id).length ?? 0;
+  const manualCount = (products?.length ?? 0) - importedCount;
+
   return (
     <>
       <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <Switch
               id="show-inactive"
@@ -136,6 +171,11 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
               Show inactive
             </Label>
           </div>
+          {(importedCount > 0 || manualCount > 0) && (
+            <p className="text-sm text-muted-foreground">
+              {importedCount} imported · {manualCount} manual
+            </p>
+          )}
         </div>
         {isAdmin && (
           <Button onClick={openNew}>
@@ -161,45 +201,88 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-8" />
                 <TableHead>Name</TableHead>
                 <TableHead>Code</TableHead>
                 <TableHead>Family</TableHead>
+                <TableHead>Source</TableHead>
                 <TableHead>Pricing Model</TableHead>
                 <TableHead className="text-right">Default ARR</TableHead>
                 <TableHead className="text-center">Active</TableHead>
-                {isAdmin && <TableHead className="w-20" />}
+                {isAdmin && <TableHead className="w-32" />}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {products.map((product) => (
-                <TableRow key={product.id}>
-                  <TableCell className="font-medium">{product.name}</TableCell>
-                  <TableCell className="text-muted-foreground">{product.code}</TableCell>
-                  <TableCell className="text-muted-foreground">{product.product_family ?? "\u2014"}</TableCell>
-                  <TableCell>
-                    <Badge variant="secondary" className="capitalize">
-                      {PRICING_MODELS.find((m) => m.value === product.pricing_model)?.label ?? product.pricing_model ?? "Per FTE"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right text-muted-foreground">
-                    {product.default_arr != null ? formatCurrencyDetailed(product.default_arr) : "\u2014"}
-                  </TableCell>
-                  <TableCell className="text-center">
-                    {product.is_active ? (
-                      <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">Active</Badge>
-                    ) : (
-                      <Badge variant="secondary" className="bg-slate-100 text-slate-700">Inactive</Badge>
-                    )}
-                  </TableCell>
-                  {isAdmin && (
-                    <TableCell>
-                      <Button variant="ghost" size="sm" onClick={() => openEdit(product)}>
-                        Edit
-                      </Button>
-                    </TableCell>
-                  )}
-                </TableRow>
-              ))}
+              {products.flatMap((product) => {
+                const isExpanded = expandedId === product.id;
+                return [
+                  <TableRow key={product.id} className="cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : product.id)}>
+                      <TableCell>
+                        {isExpanded ? (
+                          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        )}
+                      </TableCell>
+                      <TableCell className="font-medium">{product.name}</TableCell>
+                      <TableCell className="text-muted-foreground">{product.code}</TableCell>
+                      <TableCell className="text-muted-foreground">{product.product_family ?? "\u2014"}</TableCell>
+                      <TableCell>
+                        {product.sf_id ? (
+                          <Badge variant="secondary" className="bg-blue-100 text-blue-700 gap-1">
+                            <Cloud className="h-3 w-3" /> Imported
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="bg-amber-100 text-amber-700 gap-1">
+                            <User className="h-3 w-3" /> Manual
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className="capitalize">
+                          {PRICING_MODELS.find((m) => m.value === product.pricing_model)?.label ?? product.pricing_model ?? "Per FTE"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground">
+                        {product.default_arr != null ? formatCurrencyDetailed(product.default_arr) : "\u2014"}
+                      </TableCell>
+                      <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
+                        <Switch
+                          checked={product.is_active}
+                          disabled={!isAdmin || updateMutation.isPending}
+                          onCheckedChange={(v) => handleToggleActive(product, v)}
+                          aria-label="Toggle active"
+                        />
+                      </TableCell>
+                      {isAdmin && (
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="sm" onClick={() => openEdit(product)}>
+                              Edit
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                              onClick={() => setDeleteTarget(product)}
+                              aria-label="Delete product"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      )}
+                  </TableRow>,
+                  ...(isExpanded ? [
+                    <TableRow key={product.id + "-detail"} className="bg-muted/20 hover:bg-muted/20">
+                      <TableCell />
+                      <TableCell colSpan={isAdmin ? 8 : 7} className="py-4">
+                        <ProductDetailPanel product={product} />
+                      </TableCell>
+                    </TableRow>
+                  ] : []),
+                ];
+              })}
             </TableBody>
           </Table>
         </div>
@@ -210,7 +293,100 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
         onOpenChange={setDialogOpen}
         product={editingProduct}
       />
+
+      <Dialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete product?</DialogTitle>
+            <DialogDescription>
+              "{deleteTarget?.name}" will be permanently removed. If it's used in any price book entries, the delete will fail and you'll need to remove those first.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleConfirmDelete} disabled={deleteMutation.isPending}>
+              {deleteMutation.isPending ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
+  );
+}
+
+/* ──────────────────────────────────────────────
+   Product Detail Panel (inline expand)
+   ────────────────────────────────────────────── */
+
+function ProductDetailPanel({ product }: { product: Product }) {
+  const { data: entries, isLoading } = useEntriesForProduct(product.id);
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+        <div>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide">Category</p>
+          <p>{product.category ?? "\u2014"}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide">Salesforce ID</p>
+          <p className="font-mono text-xs">{product.sf_id ?? "\u2014 (created in CRM)"}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide">Created</p>
+          <p>{formatDate(product.created_at)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide">Updated</p>
+          <p>{formatDate(product.updated_at)}</p>
+        </div>
+      </div>
+
+      {product.description && (
+        <div>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Description</p>
+          <p className="text-sm whitespace-pre-wrap">{product.description}</p>
+        </div>
+      )}
+
+      <div>
+        <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">Used in Price Books</p>
+        {isLoading ? (
+          <Skeleton className="h-12 w-full" />
+        ) : !entries?.length ? (
+          <p className="text-sm text-muted-foreground">Not in any price book yet.</p>
+        ) : (
+          <div className="border rounded bg-background">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Price Book</TableHead>
+                  <TableHead>FTE Range</TableHead>
+                  <TableHead className="text-right">Unit Price</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {entries.map((e) => (
+                  <TableRow key={e.id}>
+                    <TableCell className="font-medium">
+                      {e.price_book?.name ?? e.price_book_id}
+                      {e.price_book?.is_default && (
+                        <Badge variant="secondary" className="ml-2 bg-blue-100 text-blue-700 text-xs">Default</Badge>
+                      )}
+                      {e.price_book && !e.price_book.is_active && (
+                        <Badge variant="secondary" className="ml-2 bg-slate-100 text-slate-700 text-xs">Inactive</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{e.fte_range ?? "All"}</TableCell>
+                    <TableCell className="text-right">{formatCurrencyDetailed(e.unit_price)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -240,31 +416,33 @@ function ProductDialog({
   const [description, setDescription] = useState("");
   const [isActive, setIsActive] = useState(true);
 
-  // Reset form when dialog opens
-  const handleOpenChange = (v: boolean) => {
-    if (v) {
-      if (product) {
-        setName(product.name);
-        setCode(product.code);
-        setFamily(product.product_family ?? "");
-        setCategory(product.category ?? "");
-        setPricingModel(product.pricing_model ?? "per_fte");
-        setDefaultArr(product.default_arr != null ? String(product.default_arr) : "");
-        setDescription(product.description ?? "");
-        setIsActive(product.is_active);
-      } else {
-        setName("");
-        setCode("");
-        setFamily("");
-        setCategory("");
-        setPricingModel("per_fte");
-        setDefaultArr("");
-        setDescription("");
-        setIsActive(true);
-      }
+  // Sync form state from product prop whenever the dialog opens.
+  // Previously this lived in onOpenChange, but Radix only fires that
+  // when the dialog state changes from inside (close, escape, click out)
+  // — NOT when the parent flips `open` to true. So opening via an Edit
+  // button left the form blank.
+  useEffect(() => {
+    if (!open) return;
+    if (product) {
+      setName(product.name);
+      setCode(product.code);
+      setFamily(product.product_family ?? "");
+      setCategory(product.category ?? "");
+      setPricingModel(product.pricing_model ?? "per_fte");
+      setDefaultArr(product.default_arr != null ? String(product.default_arr) : "");
+      setDescription(product.description ?? "");
+      setIsActive(product.is_active);
+    } else {
+      setName("");
+      setCode("");
+      setFamily("");
+      setCategory("");
+      setPricingModel("per_fte");
+      setDefaultArr("");
+      setDescription("");
+      setIsActive(true);
     }
-    onOpenChange(v);
-  };
+  }, [open, product]);
 
   async function handleSave() {
     if (!name.trim() || !code.trim()) {
@@ -298,7 +476,7 @@ function ProductDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit Product" : "Add Product"}</DialogTitle>
@@ -699,24 +877,24 @@ function PriceBookDialog({
   const [isDefault, setIsDefault] = useState(false);
   const [isActive, setIsActive] = useState(true);
 
-  const handleOpenChange = (v: boolean) => {
-    if (v) {
-      if (priceBook) {
-        setName(priceBook.name);
-        setDescription(priceBook.description ?? "");
-        setEffectiveDate(priceBook.effective_date ?? "");
-        setIsDefault(priceBook.is_default);
-        setIsActive(priceBook.is_active);
-      } else {
-        setName("");
-        setDescription("");
-        setEffectiveDate("");
-        setIsDefault(false);
-        setIsActive(true);
-      }
+  // Sync from prop on open — see ProductDialog comment for why useEffect
+  // (controlled-open Radix doesn't fire onOpenChange).
+  useEffect(() => {
+    if (!open) return;
+    if (priceBook) {
+      setName(priceBook.name);
+      setDescription(priceBook.description ?? "");
+      setEffectiveDate(priceBook.effective_date ?? "");
+      setIsDefault(priceBook.is_default);
+      setIsActive(priceBook.is_active);
+    } else {
+      setName("");
+      setDescription("");
+      setEffectiveDate("");
+      setIsDefault(false);
+      setIsActive(true);
     }
-    onOpenChange(v);
-  };
+  }, [open, priceBook]);
 
   async function handleSave() {
     if (!name.trim()) {
@@ -747,7 +925,7 @@ function PriceBookDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit Price Book" : "Add Price Book"}</DialogTitle>
