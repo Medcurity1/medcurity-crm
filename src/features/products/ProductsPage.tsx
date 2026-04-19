@@ -15,6 +15,8 @@ import {
   usePriceBooks,
   useCreatePriceBook,
   useUpdatePriceBook,
+  useDeletePriceBook,
+  usePriceBookEntryCount,
   usePriceBookEntries,
   useSetPriceBookEntryPrice,
 } from "./api";
@@ -812,7 +814,9 @@ function PriceBooksTab({
   const { data: priceBooks, isLoading } = usePriceBooks();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingPb, setEditingPb] = useState<PriceBook | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PriceBook | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(initialExpandId ?? null);
+  const deletePbMutation = useDeletePriceBook();
 
   // If the URL says to expand a specific price book (e.g. user clicked
   // "Manage in this price book" from the delete dialog), open it once
@@ -831,6 +835,24 @@ function PriceBooksTab({
   function openEdit(pb: PriceBook) {
     setEditingPb(pb);
     setDialogOpen(true);
+  }
+
+  async function handleConfirmDeletePb(cascade: boolean) {
+    if (!deleteTarget) return;
+    try {
+      await deletePbMutation.mutateAsync({ id: deleteTarget.id, cascade });
+      toast.success(`Deleted "${deleteTarget.name}"`);
+      setDeleteTarget(null);
+    } catch (err) {
+      const msg = errorMessage(err);
+      if (msg.toLowerCase().includes("foreign") || msg.toLowerCase().includes("violates")) {
+        toast.error(
+          "Can't delete — entries are still tied to this book. Use 'Delete + remove all entries' instead."
+        );
+      } else {
+        toast.error("Failed: " + msg);
+      }
+    }
   }
 
   if (isLoading) {
@@ -871,6 +893,7 @@ function PriceBooksTab({
               expanded={expandedId === pb.id}
               onToggle={() => setExpandedId(expandedId === pb.id ? null : pb.id)}
               onEdit={() => openEdit(pb)}
+              onDelete={() => setDeleteTarget(pb)}
             />
           ))}
         </div>
@@ -881,7 +904,105 @@ function PriceBooksTab({
         onOpenChange={setDialogOpen}
         priceBook={editingPb}
       />
+
+      <DeletePriceBookDialog
+        priceBook={deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDeletePb}
+        isPending={deletePbMutation.isPending}
+      />
     </>
+  );
+}
+
+/* ──────────────────────────────────────────────
+   Delete Price Book Dialog
+   ────────────────────────────────────────────── */
+
+function DeletePriceBookDialog({
+  priceBook,
+  onClose,
+  onConfirm,
+  isPending,
+}: {
+  priceBook: PriceBook | null;
+  onClose: () => void;
+  onConfirm: (cascade: boolean) => void;
+  isPending: boolean;
+}) {
+  const { data: entryCount, isLoading } = usePriceBookEntryCount(priceBook?.id);
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    if (!priceBook) setConfirming(false);
+  }, [priceBook]);
+
+  const hasEntries = (entryCount ?? 0) > 0;
+
+  return (
+    <Dialog open={!!priceBook} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete "{priceBook?.name}"?</DialogTitle>
+          <DialogDescription>
+            Removes the price book itself. This does NOT change any opportunity line items —
+            existing opps keep their snapshotted prices.
+          </DialogDescription>
+        </DialogHeader>
+
+        {isLoading ? (
+          <Skeleton className="h-12 w-full" />
+        ) : hasEntries ? (
+          <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-900 p-3 text-sm">
+            <p className="font-medium text-amber-900 dark:text-amber-200">
+              {entryCount} pricing {entryCount === 1 ? "entry" : "entries"} on this book.
+            </p>
+            <p className="text-xs text-amber-900 dark:text-amber-300 mt-1">
+              Plain Delete will fail. Use "Delete + remove all entries" to clear them in one shot.
+              Reps quoting NEW deals from now on won't see this book; everything already quoted is unaffected.
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No entries on this book — safe to delete.
+          </p>
+        )}
+
+        <DialogFooter className="gap-2 sm:gap-2 flex-col sm:flex-row">
+          <Button variant="outline" onClick={onClose} disabled={isPending}>
+            Cancel
+          </Button>
+          {!hasEntries && (
+            <Button
+              variant="destructive"
+              onClick={() => onConfirm(false)}
+              disabled={isPending}
+            >
+              {isPending ? "Deleting..." : "Delete"}
+            </Button>
+          )}
+          {hasEntries &&
+            (!confirming ? (
+              <Button
+                variant="destructive"
+                onClick={() => setConfirming(true)}
+                disabled={isPending}
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete + remove all entries
+              </Button>
+            ) : (
+              <Button
+                variant="destructive"
+                onClick={() => onConfirm(true)}
+                disabled={isPending}
+              >
+                {isPending ? "Deleting..." : "Yes, delete book + " + entryCount + " entries"}
+              </Button>
+            ))}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -895,12 +1016,14 @@ function PriceBookCard({
   expanded,
   onToggle,
   onEdit,
+  onDelete,
 }: {
   priceBook: PriceBook;
   isAdmin: boolean;
   expanded: boolean;
   onToggle: () => void;
   onEdit: () => void;
+  onDelete: () => void;
 }) {
   return (
     <Card>
@@ -928,9 +1051,21 @@ function PriceBookCard({
             )}
           </button>
           {isAdmin && (
-            <Button variant="ghost" size="sm" onClick={onEdit}>
-              Edit
-            </Button>
+            <div className="flex gap-1">
+              <Button variant="ghost" size="sm" onClick={onEdit}>
+                Edit
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                onClick={onDelete}
+                aria-label={`Delete price book ${priceBook.name}`}
+                title="Delete price book"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
           )}
         </div>
         {priceBook.description && (

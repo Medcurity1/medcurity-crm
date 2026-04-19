@@ -283,11 +283,69 @@ export function usePriceBooks() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("price_books")
-        .select("*")
-        .order("name");
+        .select("*");
       if (error) throw error;
-      return data as PriceBook[];
+      // Sort by FTE tier ascending, then any books without an fte_range
+      // (e.g. "Standard Price Book") fall to the bottom.
+      const list = data as PriceBook[];
+      return [...list].sort((a, b) => {
+        const aFte = parseFteRange(a.fte_range);
+        const bFte = parseFteRange(b.fte_range);
+        if (aFte === null && bFte === null) return a.name.localeCompare(b.name);
+        if (aFte === null) return 1;
+        if (bFte === null) return -1;
+        return aFte - bFte;
+      });
     },
+  });
+}
+
+// Returns the lower bound of an fte_range string ("21-50" → 21, "501+" → 501).
+// null when not parseable so we can sort it to the bottom.
+function parseFteRange(s: string | null): number | null {
+  if (!s) return null;
+  const m = s.match(/^(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+export function useDeletePriceBook() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { id: string; cascade: boolean }) => {
+      // Optionally clear all entries first so the FK doesn't block.
+      if (vars.cascade) {
+        const { error: entriesErr } = await supabase
+          .from("price_book_entries")
+          .delete()
+          .eq("price_book_id", vars.id);
+        if (entriesErr) throw entriesErr;
+      }
+      const { error } = await supabase.from("price_books").delete().eq("id", vars.id);
+      if (error) throw error;
+      return vars.id;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["price_books"] });
+      qc.invalidateQueries({ queryKey: ["price_book_entries"] });
+    },
+  });
+}
+
+// Count entries on a single price book — used by the delete dialog
+// to warn before cascading.
+export function usePriceBookEntryCount(priceBookId: string | undefined) {
+  return useQuery({
+    queryKey: ["price_book_entry_count", priceBookId],
+    queryFn: async () => {
+      if (!priceBookId) throw new Error("Missing price book id");
+      const { count, error } = await supabase
+        .from("price_book_entries")
+        .select("id", { count: "exact", head: true })
+        .eq("price_book_id", priceBookId);
+      if (error) throw error;
+      return count ?? 0;
+    },
+    enabled: !!priceBookId,
   });
 }
 
