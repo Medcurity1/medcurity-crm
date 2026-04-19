@@ -1687,6 +1687,13 @@ export function SalesforceImport() {
       : -1;
     const seenSfIds = new Set<string>();
 
+    // For products: mirror the FTE-strip + slugify + canonical dedup
+    // logic that runs in handleImport, so the preview accurately reflects
+    // how many rows will actually be inserted (vs collapsed as FTE
+    // duplicates of the same canonical product).
+    const seenProductCodesPreview = new Set<string>();
+    const seenProductNamesPreview = new Set<string>();
+
     for (let i = 0; i < csvRows.length; i++) {
       const row = csvRows[i];
       const mapped = buildMappedRow(row, csvHeaders, mappings);
@@ -1712,6 +1719,36 @@ export function SalesforceImport() {
         } else {
           warnings.push({ rowNumber: i + 1, ...issue });
         }
+        continue;
+      }
+
+      // Product canonical-dedup preview (matches handleImport behavior).
+      if (entity === "products") {
+        const rawName = typeof mapped.name === "string" ? mapped.name : "";
+        const rawCode = typeof mapped.code === "string" ? mapped.code : "";
+        const baseName = rawName ? stripFtePrefix(rawName).base : "";
+        const baseCode = rawCode ? stripFtePrefix(rawCode).base : "";
+        const finalCode = baseCode || (baseName ? slugifyCode(baseName) : "");
+        const codeKey = finalCode.toLowerCase();
+        const nameKey = baseName.toLowerCase();
+        if (codeKey && seenProductCodesPreview.has(codeKey)) {
+          willSkip.push({
+            rowNumber: i + 1,
+            type: "skip",
+            message: `Duplicate product (FTE variant of "${baseName}")`,
+          });
+          continue;
+        }
+        if (!codeKey && nameKey && seenProductNamesPreview.has(nameKey)) {
+          willSkip.push({
+            rowNumber: i + 1,
+            type: "skip",
+            message: `Duplicate product name "${baseName}"`,
+          });
+          continue;
+        }
+        if (codeKey) seenProductCodesPreview.add(codeKey);
+        if (nameKey) seenProductNamesPreview.add(nameKey);
       }
     }
 
