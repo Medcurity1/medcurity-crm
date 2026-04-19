@@ -159,8 +159,10 @@ function parseCSV(text: string): string[][] {
 
 // Matches leading FTE tier prefixes like "1-20", "21-50", "5001-10000",
 // "501+", followed by one or more spaces / hyphens / underscores.
+// Tolerates stray whitespace inside the range (e.g. "251- 500", "21 -50",
+// "21 - 50") which sometimes appears in legacy SF data.
 // Anchored to start-of-string so "SRA for 1-20 orgs" isn't stripped.
-const FTE_PREFIX_RE = /^(\d+-\d+|\d+\+)[\s_-]+/;
+const FTE_PREFIX_RE = /^(\d+\s*-\s*\d+|\d+\s*\+)[\s_-]+/;
 
 function stripFtePrefix(value: unknown): { base: string; fteRange: string | null } {
   if (typeof value !== "string") {
@@ -170,7 +172,9 @@ function stripFtePrefix(value: unknown): { base: string; fteRange: string | null
   const match = trimmed.match(FTE_PREFIX_RE);
   if (!match) return { base: trimmed, fteRange: null };
   // match[1] is the range alone ("51-100"), match[0] includes the trailing separator.
-  return { base: trimmed.slice(match[0].length).trim(), fteRange: match[1] };
+  // Normalize internal whitespace in the range so "251- 500" becomes "251-500".
+  const normalizedRange = match[1].replace(/\s+/g, "");
+  return { base: trimmed.slice(match[0].length).trim(), fteRange: normalizedRange };
 }
 
 // Slugify a product name into a stable product code when the SF

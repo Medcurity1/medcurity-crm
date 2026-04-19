@@ -28,6 +28,7 @@ const OpportunityDetail = lazy(() => import("@/features/opportunities/Opportunit
 const OpportunityForm = lazy(() => import("@/features/opportunities/OpportunityForm").then(m => ({ default: m.OpportunityForm })));
 const PipelineBoard = lazy(() => import("@/features/opportunities/PipelineBoard").then(m => ({ default: m.PipelineBoard })));
 const ProductsPage = lazy(() => import("@/features/products/ProductsPage").then(m => ({ default: m.ProductsPage })));
+const ProductDetail = lazy(() => import("@/features/products/ProductDetail").then(m => ({ default: m.ProductDetail })));
 const RenewalsQueue = lazy(() => import("@/features/renewals/RenewalsQueue").then(m => ({ default: m.RenewalsQueue })));
 const ReportsHub = lazy(() => import("@/features/reports/ReportsHub").then(m => ({ default: m.ReportsHub })));
 // ForecastPage is now only reached via /reports?tab=forecasting and
@@ -82,6 +83,7 @@ export default function App() {
                   <Route path="calendar" element={<ActivityCalendar />} />
                   <Route path="activities" element={<ActivitiesListPage />} />
                   <Route path="products" element={<ProductsPage />} />
+                  <Route path="products/:id" element={<ProductDetail />} />
                   <Route path="renewals" element={<RenewalsQueue />} />
                   <Route path="reports" element={<ReportsHub />} />
                   {/* Legacy routes redirect into the reports hub tabs */}

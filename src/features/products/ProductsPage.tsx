@@ -1,11 +1,15 @@
 import { useState, useEffect } from "react";
-import { Plus, Trash2, ChevronDown, ChevronRight, Package, Cloud, User } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Plus, Trash2, ChevronDown, ChevronRight, Package, Cloud, User, Settings } from "lucide-react";
 import {
   useProducts,
   useCreateProduct,
   useUpdateProduct,
   useDeleteProduct,
   useEntriesForProduct,
+  useProductFamilies,
+  useCreateProductFamily,
+  useDeleteProductFamily,
   usePriceBooks,
   useCreatePriceBook,
   useUpdatePriceBook,
@@ -105,6 +109,7 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
+  const [familiesOpen, setFamiliesOpen] = useState(false);
   const updateMutation = useUpdateProduct();
   const deleteMutation = useDeleteProduct();
 
@@ -178,10 +183,16 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
           )}
         </div>
         {isAdmin && (
-          <Button onClick={openNew}>
-            <Plus className="h-4 w-4 mr-2" />
-            Add Product
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setFamiliesOpen(true)}>
+              <Settings className="h-4 w-4 mr-2" />
+              Manage Families
+            </Button>
+            <Button onClick={openNew}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Product
+            </Button>
+          </div>
         )}
       </div>
 
@@ -207,7 +218,7 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
                 <TableHead>Family</TableHead>
                 <TableHead>Source</TableHead>
                 <TableHead>Pricing Model</TableHead>
-                <TableHead className="text-right">Default ARR</TableHead>
+                <TableHead className="text-right">Flat Price</TableHead>
                 <TableHead className="text-center">Active</TableHead>
                 {isAdmin && <TableHead className="w-32" />}
               </TableRow>
@@ -224,7 +235,14 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
                           <ChevronRight className="h-4 w-4 text-muted-foreground" />
                         )}
                       </TableCell>
-                      <TableCell className="font-medium">{product.name}</TableCell>
+                      <TableCell className="font-medium" onClick={(e) => e.stopPropagation()}>
+                        <Link
+                          to={`/products/${product.id}`}
+                          className="hover:underline text-foreground"
+                        >
+                          {product.name}
+                        </Link>
+                      </TableCell>
                       <TableCell className="text-muted-foreground">{product.code}</TableCell>
                       <TableCell className="text-muted-foreground">{product.product_family ?? "\u2014"}</TableCell>
                       <TableCell>
@@ -244,7 +262,9 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right text-muted-foreground">
-                        {product.default_arr != null ? formatCurrencyDetailed(product.default_arr) : "\u2014"}
+                        {product.has_flat_price && product.default_arr != null
+                          ? formatCurrencyDetailed(product.default_arr)
+                          : "\u2014"}
                       </TableCell>
                       <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
                         <Switch
@@ -310,7 +330,114 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ManageFamiliesDialog open={familiesOpen} onOpenChange={setFamiliesOpen} />
     </>
+  );
+}
+
+/* ──────────────────────────────────────────────
+   Manage Families Dialog
+   ────────────────────────────────────────────── */
+
+function ManageFamiliesDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const { data: families, isLoading } = useProductFamilies();
+  const createFam = useCreateProductFamily();
+  const deleteFam = useDeleteProductFamily();
+  const [newName, setNewName] = useState("");
+
+  async function handleAdd() {
+    const name = newName.trim();
+    if (!name) return;
+    try {
+      await createFam.mutateAsync(name);
+      setNewName("");
+      toast.success("Family added");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("unique")) {
+        toast.error("That family already exists");
+      } else {
+        toast.error("Failed: " + msg);
+      }
+    }
+  }
+
+  async function handleDelete(id: string) {
+    try {
+      await deleteFam.mutateAsync(id);
+      toast.success("Family removed");
+    } catch (err) {
+      toast.error("Failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Manage Product Families</DialogTitle>
+          <DialogDescription>
+            Add or remove the picklist values reps see when assigning a Family to a product. Removing a family won't change products already using it.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div className="flex gap-2">
+            <Input
+              placeholder="New family name (e.g. Add-on)"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleAdd();
+                }
+              }}
+            />
+            <Button onClick={handleAdd} disabled={createFam.isPending || !newName.trim()}>
+              <Plus className="h-4 w-4 mr-1" />
+              Add
+            </Button>
+          </div>
+
+          {isLoading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : !families?.length ? (
+            <p className="text-sm text-muted-foreground py-2">No families yet.</p>
+          ) : (
+            <div className="border rounded-lg divide-y">
+              {families.map((f) => (
+                <div key={f.id} className="flex items-center justify-between px-3 py-2">
+                  <span className="text-sm">{f.name}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                    onClick={() => handleDelete(f.id)}
+                    aria-label={`Remove ${f.name}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Done
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -325,8 +452,14 @@ function ProductDetailPanel({ product }: { product: Product }) {
     <div className="space-y-3">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
         <div>
-          <p className="text-xs text-muted-foreground uppercase tracking-wide">Category</p>
-          <p>{product.category ?? "\u2014"}</p>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide">Flat Price</p>
+          <p>
+            {product.has_flat_price
+              ? product.default_arr != null
+                ? formatCurrencyDetailed(product.default_arr)
+                : "Enabled"
+              : "Off"}
+          </p>
         </div>
         <div>
           <p className="text-xs text-muted-foreground uppercase tracking-wide">Salesforce ID</p>
@@ -340,6 +473,14 @@ function ProductDetailPanel({ product }: { product: Product }) {
           <p className="text-xs text-muted-foreground uppercase tracking-wide">Updated</p>
           <p>{formatDate(product.updated_at)}</p>
         </div>
+      </div>
+      <div>
+        <Link
+          to={`/products/${product.id}`}
+          className="text-xs text-primary hover:underline"
+        >
+          Open full detail page →
+        </Link>
       </div>
 
       {product.description && (
@@ -407,11 +548,13 @@ function ProductDialog({
   const createMutation = useCreateProduct();
   const updateMutation = useUpdateProduct();
 
+  const { data: families } = useProductFamilies();
+
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [family, setFamily] = useState("");
-  const [category, setCategory] = useState("");
   const [pricingModel, setPricingModel] = useState("per_fte");
+  const [hasFlatPrice, setHasFlatPrice] = useState(false);
   const [defaultArr, setDefaultArr] = useState("");
   const [description, setDescription] = useState("");
   const [isActive, setIsActive] = useState(true);
@@ -427,8 +570,8 @@ function ProductDialog({
       setName(product.name);
       setCode(product.code);
       setFamily(product.product_family ?? "");
-      setCategory(product.category ?? "");
       setPricingModel(product.pricing_model ?? "per_fte");
+      setHasFlatPrice(product.has_flat_price ?? false);
       setDefaultArr(product.default_arr != null ? String(product.default_arr) : "");
       setDescription(product.description ?? "");
       setIsActive(product.is_active);
@@ -436,8 +579,8 @@ function ProductDialog({
       setName("");
       setCode("");
       setFamily("");
-      setCategory("");
       setPricingModel("per_fte");
+      setHasFlatPrice(false);
       setDefaultArr("");
       setDescription("");
       setIsActive(true);
@@ -453,10 +596,10 @@ function ProductDialog({
     const payload = {
       name: name.trim(),
       code: code.trim(),
-      product_family: family.trim() || null,
-      category: category.trim() || null,
+      product_family: family || null,
       pricing_model: pricingModel,
-      default_arr: defaultArr ? Number(defaultArr) : null,
+      has_flat_price: hasFlatPrice,
+      default_arr: hasFlatPrice && defaultArr ? Number(defaultArr) : null,
       description: description.trim() || null,
       is_active: isActive,
     };
@@ -499,16 +642,24 @@ function ProductDialog({
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="prod-family">Family</Label>
-              <Input id="prod-family" value={family} onChange={(e) => setFamily(e.target.value)} />
+              <Label>Family</Label>
+              <Select
+                value={family || "none"}
+                onValueChange={(v) => setFamily(v === "none" ? "" : v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {(families ?? []).map((f) => (
+                    <SelectItem key={f.id} value={f.name}>
+                      {f.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="prod-category">Category</Label>
-              <Input id="prod-category" value={category} onChange={(e) => setCategory(e.target.value)} />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Pricing Model</Label>
               <Select value={pricingModel} onValueChange={setPricingModel}>
@@ -522,15 +673,46 @@ function ProductDialog({
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="rounded-lg border p-3 bg-muted/20">
+            <div className="flex items-center gap-2 mb-1">
+              <Switch
+                id="prod-flat"
+                checked={hasFlatPrice}
+                onCheckedChange={setHasFlatPrice}
+              />
+              <Label htmlFor="prod-flat" className="cursor-pointer text-sm font-medium">
+                Use flat price
+              </Label>
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">
+              When off, this product is priced via price book entries. Turn on only if it has one fixed price across every opportunity.
+            </p>
             <div className="space-y-2">
-              <Label htmlFor="prod-arr">Default ARR</Label>
-              <Input id="prod-arr" type="number" step="0.01" value={defaultArr} onChange={(e) => setDefaultArr(e.target.value)} />
+              <Label htmlFor="prod-arr" className={!hasFlatPrice ? "text-muted-foreground" : ""}>
+                Flat Price (ARR)
+              </Label>
+              <Input
+                id="prod-arr"
+                type="number"
+                step="0.01"
+                disabled={!hasFlatPrice}
+                value={defaultArr}
+                onChange={(e) => setDefaultArr(e.target.value)}
+              />
             </div>
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="prod-desc">Description</Label>
-            <Textarea id="prod-desc" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
+            <Textarea
+              id="prod-desc"
+              rows={4}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What is this product? Reps will see this when adding to opportunities."
+            />
           </div>
 
           <div className="flex items-center gap-2">

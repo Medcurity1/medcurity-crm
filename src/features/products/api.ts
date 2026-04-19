@@ -1,6 +1,30 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
-import type { Product, PriceBook, PriceBookEntry } from "@/types/crm";
+import type { Product, PriceBook, PriceBookEntry, ProductFamily, UserProfile } from "@/types/crm";
+
+// ─── Single Product (for detail page) ────────────────────
+
+export function useProduct(productId: string | undefined) {
+  return useQuery({
+    queryKey: ["product", productId],
+    queryFn: async () => {
+      if (!productId) throw new Error("Missing product id");
+      const { data, error } = await supabase
+        .from("products")
+        .select(
+          "*, creator:user_profiles!products_created_by_fkey(id, full_name), updater:user_profiles!products_updated_by_fkey(id, full_name)"
+        )
+        .eq("id", productId)
+        .single();
+      if (error) throw error;
+      return data as Product & {
+        creator: Pick<UserProfile, "id" | "full_name"> | null;
+        updater: Pick<UserProfile, "id" | "full_name"> | null;
+      };
+    },
+    enabled: !!productId,
+  });
+}
 
 // ─── Products ────────────────────────────────────────────
 
@@ -200,5 +224,53 @@ export function useDeletePriceBookEntry() {
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["price_book_entries", vars.priceBookId] });
     },
+  });
+}
+
+// ─── Product Families ────────────────────────────────────
+
+export function useProductFamilies() {
+  return useQuery({
+    queryKey: ["product_families"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("product_families")
+        .select("*")
+        .order("sort_order")
+        .order("name");
+      if (error) throw error;
+      return data as ProductFamily[];
+    },
+  });
+}
+
+export function useCreateProductFamily() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (name: string) => {
+      const { data, error } = await supabase
+        .from("product_families")
+        .insert({ name: name.trim() })
+        .select()
+        .single();
+      if (error) throw error;
+      return data as ProductFamily;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["product_families"] }),
+  });
+}
+
+export function useDeleteProductFamily() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from("product_families")
+        .delete()
+        .eq("id", id);
+      if (error) throw error;
+      return id;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["product_families"] }),
   });
 }

@@ -241,8 +241,19 @@ export interface Product {
   description: string | null;
   is_active: boolean;
   default_arr: number | null;
+  has_flat_price: boolean;
   category: string | null;
   pricing_model: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+}
+
+export interface ProductFamily {
+  id: string;
+  name: string;
+  sort_order: number;
   created_at: string;
   updated_at: string;
 }
