@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, Pencil, Trash2, Cloud, User, Package } from "lucide-react";
 import {
@@ -315,58 +315,182 @@ export function ProductDetail() {
       />
 
       {/* Delete confirmation */}
-      <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Delete product?</DialogTitle>
-            <DialogDescription>
-              "{product.name}" will be permanently removed. This can't be undone.
-            </DialogDescription>
-          </DialogHeader>
-          {entries && entries.length > 0 ? (
-            <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-900 p-3 text-sm">
-              <p className="font-medium text-amber-900 dark:text-amber-200">
-                In use: {entries.length} entr{entries.length === 1 ? "y" : "ies"} across{" "}
-                {new Set(entries.map((e) => e.price_book_id)).size} price book
-                {new Set(entries.map((e) => e.price_book_id)).size === 1 ? "" : "s"}.
+      <DeleteProductFlow
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        productName={product.name}
+        entries={entries ?? []}
+        isLoading={false}
+        isPending={deleteMutation.isPending}
+        onConfirm={handleDelete}
+      />
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────
+// Delete flow — shared with ProductsPage. Keeps the same UX:
+// - List each price book as a "navigate here" entry
+// - Plus a single destructive "Delete entirely" with a 2-click guard
+// ──────────────────────────────────────────────
+
+function DeleteProductFlow({
+  open,
+  onClose,
+  productName,
+  entries,
+  isLoading,
+  isPending,
+  onConfirm,
+}: {
+  open: boolean;
+  onClose: () => void;
+  productName: string;
+  entries: Array<{
+    id: string;
+    price_book_id: string;
+    price_book?: { id: string; name: string } | null;
+  }>;
+  isLoading: boolean;
+  isPending: boolean;
+  onConfirm: (cascade: boolean) => void;
+}) {
+  const navigate = useNavigate();
+  const [confirming, setConfirming] = useState(false);
+
+  const byBook = useMemo(() => {
+    const m = new Map<string, { id: string; name: string; entryCount: number }>();
+    for (const e of entries) {
+      const key = e.price_book_id;
+      const existing = m.get(key);
+      if (existing) {
+        existing.entryCount += 1;
+      } else {
+        m.set(key, {
+          id: e.price_book_id,
+          name: e.price_book?.name ?? "Untitled Price Book",
+          entryCount: 1,
+        });
+      }
+    }
+    return Array.from(m.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [entries]);
+
+  const inUse = byBook.length > 0;
+
+  useEffect(() => {
+    if (!open) setConfirming(false);
+  }, [open]);
+
+  function navigateToBook(bookId: string) {
+    onClose();
+    navigate(`/products?tab=price_books&expand=${bookId}`);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Delete "{productName}"?</DialogTitle>
+          <DialogDescription>
+            {inUse
+              ? "This product is in one or more price books. Choose what you want to do."
+              : "This product isn't in any price book. Safe to delete."}
+          </DialogDescription>
+        </DialogHeader>
+
+        {isLoading ? null : inUse ? (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Remove from one price book</p>
+              <p className="text-xs text-muted-foreground">
+                Opens the price book and lets you remove just this product.
               </p>
-              <p className="text-xs text-amber-900 dark:text-amber-300 mt-1">
-                Plain Delete will fail. Use the second option to remove price-book entries too.
-              </p>
+              <div className="border rounded-md divide-y">
+                {byBook.map((b) => (
+                  <button
+                    type="button"
+                    key={b.id}
+                    onClick={() => navigateToBook(b.id)}
+                    className="w-full px-3 py-2 text-sm text-left hover:bg-muted transition-colors flex items-center justify-between gap-2"
+                  >
+                    <span>
+                      <span className="font-medium">{b.name}</span>
+                      <span className="text-muted-foreground ml-2 text-xs">
+                        ({b.entryCount} entr{b.entryCount === 1 ? "y" : "ies"})
+                      </span>
+                    </span>
+                    <span className="text-xs text-primary">Open →</span>
+                  </button>
+                ))}
+              </div>
             </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Not used in any price book — safe to delete.
-            </p>
-          )}
-          <DialogFooter className="gap-2 sm:gap-2 flex-col sm:flex-row">
-            <Button
-              variant="outline"
-              onClick={() => setConfirmDelete(false)}
-              disabled={deleteMutation.isPending}
-            >
-              Cancel
-            </Button>
+
+            <hr />
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Or delete the product entirely</p>
+              <p className="text-xs text-muted-foreground">
+                Removes "{productName}" from all {byBook.length} price book
+                {byBook.length === 1 ? "" : "s"} and deletes the product. Cannot be undone.
+              </p>
+              {!confirming ? (
+                <Button
+                  variant="destructive"
+                  onClick={() => setConfirming(true)}
+                  disabled={isPending}
+                  className="w-full"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete product completely
+                </Button>
+              ) : (
+                <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 space-y-2">
+                  <p className="text-sm font-medium text-destructive">
+                    Really delete? This wipes {entries.length} price-book entr
+                    {entries.length === 1 ? "y" : "ies"} too.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setConfirming(false)}
+                      disabled={isPending}
+                    >
+                      Back
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => onConfirm(true)}
+                      disabled={isPending}
+                      className="flex-1"
+                    >
+                      {isPending ? "Deleting..." : "Yes, delete everything"}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={isPending}>
+            Cancel
+          </Button>
+          {!inUse && !isLoading && (
             <Button
               variant="destructive"
-              onClick={() => handleDelete(false)}
-              disabled={deleteMutation.isPending}
+              onClick={() => onConfirm(false)}
+              disabled={isPending}
             >
-              {deleteMutation.isPending ? "Deleting..." : "Delete"}
+              {isPending ? "Deleting..." : "Delete"}
             </Button>
-            {entries && entries.length > 0 && (
-              <Button
-                variant="destructive"
-                onClick={() => handleDelete(true)}
-                disabled={deleteMutation.isPending}
-              >
-                Delete + remove from price books
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

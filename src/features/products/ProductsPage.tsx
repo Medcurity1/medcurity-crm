@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { useState, useEffect, useMemo } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, Trash2, ChevronDown, ChevronRight, Package, Cloud, User, Settings, X } from "lucide-react";
 import {
   useProducts,
@@ -71,6 +71,20 @@ const PRICING_MODELS = [
 export function ProductsPage() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get("tab") === "price_books" ? "price_books" : "products";
+  const expandPriceBookId = searchParams.get("expand");
+
+  function setTab(next: string) {
+    const params = new URLSearchParams(searchParams);
+    if (next === "products") {
+      params.delete("tab");
+      params.delete("expand");
+    } else {
+      params.set("tab", next);
+    }
+    setSearchParams(params, { replace: true });
+  }
 
   return (
     <div>
@@ -79,7 +93,7 @@ export function ProductsPage() {
         description="Manage your product catalog and pricing"
       />
 
-      <Tabs defaultValue="products">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="products">Products</TabsTrigger>
           <TabsTrigger value="price_books">Price Books</TabsTrigger>
@@ -90,7 +104,7 @@ export function ProductsPage() {
         </TabsContent>
 
         <TabsContent value="price_books" className="mt-4">
-          <PriceBooksTab isAdmin={isAdmin} />
+          <PriceBooksTab isAdmin={isAdmin} initialExpandId={expandPriceBookId} />
         </TabsContent>
       </Tabs>
     </div>
@@ -343,59 +357,151 @@ function DeleteProductDialog({
   onConfirm: (cascade: boolean) => void;
   isPending: boolean;
 }) {
-  // Pull entries to show the user how many price books reference this
-  // product, so the cascade option doesn't feel like a guess.
+  const navigate = useNavigate();
   const { data: entries, isLoading } = useEntriesForProduct(product?.id);
-  const entryCount = entries?.length ?? 0;
-  const bookCount = new Set(entries?.map((e) => e.price_book_id) ?? []).size;
+
+  // Group entries by price book so the user sees "I'm in Book A and
+  // Book B" rather than a flat list of entries.
+  const byBook = useMemo(() => {
+    const m = new Map<
+      string,
+      { id: string; name: string; entryCount: number }
+    >();
+    for (const e of entries ?? []) {
+      const key = e.price_book_id;
+      const existing = m.get(key);
+      if (existing) {
+        existing.entryCount += 1;
+      } else {
+        m.set(key, {
+          id: e.price_book_id,
+          name: e.price_book?.name ?? "Untitled Price Book",
+          entryCount: 1,
+        });
+      }
+    }
+    return Array.from(m.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [entries]);
+
+  const inUse = byBook.length > 0;
+  const [confirming, setConfirming] = useState(false);
+
+  function navigateToBook(bookId: string) {
+    onClose();
+    navigate(`/products?tab=price_books&expand=${bookId}`);
+  }
+
+  // Reset confirming state when dialog reopens
+  useEffect(() => {
+    if (!product) setConfirming(false);
+  }, [product]);
 
   return (
     <Dialog open={!!product} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Delete product?</DialogTitle>
+          <DialogTitle>Delete "{product?.name}"?</DialogTitle>
           <DialogDescription>
-            "{product?.name}" will be permanently removed. This can't be undone.
+            {inUse
+              ? "This product is in one or more price books. Choose what you want to do."
+              : "This product isn't in any price book. Safe to delete."}
           </DialogDescription>
         </DialogHeader>
 
         {isLoading ? (
-          <Skeleton className="h-12 w-full" />
-        ) : entryCount > 0 ? (
-          <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-900 p-3 text-sm">
-            <p className="font-medium text-amber-900 dark:text-amber-200">
-              In use: {entryCount} price book entr{entryCount === 1 ? "y" : "ies"} across{" "}
-              {bookCount} price book{bookCount === 1 ? "" : "s"}.
-            </p>
-            <p className="text-xs text-amber-900 dark:text-amber-300 mt-1">
-              Choose whether to remove those entries too. Plain Delete will
-              fail if the product is still referenced.
-            </p>
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Not used in any price book — safe to delete.
-          </p>
-        )}
+          <Skeleton className="h-20 w-full" />
+        ) : inUse ? (
+          <div className="space-y-4">
+            {/* Option 1: navigate to a specific price book to remove */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium">
+                Remove from one price book
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Opens the price book and lets you remove just this product. Other entries stay intact.
+              </p>
+              <div className="border rounded-md divide-y">
+                {byBook.map((b) => (
+                  <button
+                    type="button"
+                    key={b.id}
+                    onClick={() => navigateToBook(b.id)}
+                    className="w-full px-3 py-2 text-sm text-left hover:bg-muted transition-colors flex items-center justify-between gap-2"
+                  >
+                    <span>
+                      <span className="font-medium">{b.name}</span>
+                      <span className="text-muted-foreground ml-2 text-xs">
+                        ({b.entryCount} entr{b.entryCount === 1 ? "y" : "ies"})
+                      </span>
+                    </span>
+                    <span className="text-xs text-primary">Open →</span>
+                  </button>
+                ))}
+              </div>
+            </div>
 
-        <DialogFooter className="gap-2 sm:gap-2 flex-col sm:flex-row">
+            <hr />
+
+            {/* Option 2: cascade delete */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Or delete the product entirely</p>
+              <p className="text-xs text-muted-foreground">
+                Removes "{product?.name}" from all {byBook.length} price book
+                {byBook.length === 1 ? "" : "s"} and deletes the product.
+                Cannot be undone.
+              </p>
+              {!confirming ? (
+                <Button
+                  variant="destructive"
+                  onClick={() => setConfirming(true)}
+                  disabled={isPending}
+                  className="w-full"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete product completely
+                </Button>
+              ) : (
+                <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 space-y-2">
+                  <p className="text-sm font-medium text-destructive">
+                    Really delete? This wipes {entries?.length ?? 0} price-book entr
+                    {(entries?.length ?? 0) === 1 ? "y" : "ies"} too.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setConfirming(false)}
+                      disabled={isPending}
+                    >
+                      Back
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => onConfirm(true)}
+                      disabled={isPending}
+                      className="flex-1"
+                    >
+                      {isPending ? "Deleting..." : "Yes, delete everything"}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={isPending}>
             Cancel
           </Button>
-          <Button
-            variant="destructive"
-            onClick={() => onConfirm(false)}
-            disabled={isPending}
-          >
-            {isPending ? "Deleting..." : "Delete"}
-          </Button>
-          {entryCount > 0 && (
+          {!inUse && !isLoading && (
             <Button
               variant="destructive"
-              onClick={() => onConfirm(true)}
+              onClick={() => onConfirm(false)}
               disabled={isPending}
             >
-              Delete + remove from {bookCount} price book{bookCount === 1 ? "" : "s"}
+              {isPending ? "Deleting..." : "Delete"}
             </Button>
           )}
         </DialogFooter>
@@ -804,11 +910,26 @@ function ProductDialog({
    Price Books Tab
    ────────────────────────────────────────────── */
 
-function PriceBooksTab({ isAdmin }: { isAdmin: boolean }) {
+function PriceBooksTab({
+  isAdmin,
+  initialExpandId,
+}: {
+  isAdmin: boolean;
+  initialExpandId?: string | null;
+}) {
   const { data: priceBooks, isLoading } = usePriceBooks();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingPb, setEditingPb] = useState<PriceBook | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(initialExpandId ?? null);
+
+  // If the URL says to expand a specific price book (e.g. user clicked
+  // "Manage in this price book" from the delete dialog), open it once
+  // the price books load.
+  useEffect(() => {
+    if (initialExpandId && priceBooks?.some((p) => p.id === initialExpandId)) {
+      setExpandedId(initialExpandId);
+    }
+  }, [initialExpandId, priceBooks]);
 
   function openNew() {
     setEditingPb(null);
