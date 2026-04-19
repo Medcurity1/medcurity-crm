@@ -696,12 +696,10 @@ const LEAD_FIELDS: Record<string, string> = {
   donotmarketto: "do_not_market_to",
   "do not market to": "do_not_market_to",
   do_not_market_to__c: "do_not_market_to",
-  // Type — leads.type was dropped 2026-04-18 (redundant with source).
-  // Route SF Lead.Type values into lead_source_detail so the original
-  // string is preserved for any downstream remapping.
-  type: "lead_source_detail",
-  "lead type": "lead_source_detail",
-  type__c: "lead_source_detail",
+  // Type
+  type: "lead_type",
+  "lead type": "lead_type",
+  type__c: "lead_type",
   // Notes / comments
   notes: "notes",
   "lead notes": "notes",
@@ -1114,7 +1112,8 @@ function getCRMFields(entity: EntityType): string[] {
         "has_opted_out_of_email",
         "do_not_call",
         "do_not_market_to",
-        // notes (lead_type column dropped 2026-04-18)
+        // Type / notes
+        "lead_type",
         "notes",
         "comments",
         // LinkedIn
@@ -1255,6 +1254,7 @@ const FIELD_LABEL_OVERRIDES: Record<string, string> = {
   has_opted_out_of_email: "Has Opted Out of Email",
   do_not_call: "Do Not Call",
   do_not_market_to: "Do Not Market To",
+  lead_type: "Lead Type",
   notes: "Notes",
   comments: "Comments",
   priority_lead: "Priority Lead",
@@ -1372,9 +1372,11 @@ function validateRow(
   if (entity === "opportunities" && !mapped.name) {
     return { type: "skip", message: "Missing required field \"name\"" };
   }
-  if (entity === "products" && (!mapped.name || !mapped.code)) {
-    return { type: "skip", message: "Missing required field \"name\" or \"code\"" };
+  if (entity === "products" && !mapped.name) {
+    return { type: "skip", message: "Missing required field \"name\"" };
   }
+  // code is auto-generated from name via slugifyCode() during import when
+  // SF ProductCode is blank (common), so name alone is sufficient here.
   if (entity === "price_books" && !mapped.name) {
     return { type: "skip", message: "Missing required field \"name\"" };
   }
