@@ -34,7 +34,6 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
-import { ReportsDashboard } from "./ReportsDashboard";
 import {
   ENTITY_DEFS,
   ENTITY_KEYS,
@@ -100,8 +99,6 @@ import {
 import {
   Tabs,
   TabsContent,
-  TabsList,
-  TabsTrigger,
 } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -1618,6 +1615,12 @@ export function ReportBuilder() {
     }
     setHasRun(true);
     setRunTrigger((t) => t + 1);
+    // Make sure the user can see the results panel after they hit Run.
+    setTimeout(() => {
+      document
+        .getElementById("report-results")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 200);
   };
 
   const handleSave = async (name: string, isShared: boolean, folder: string | null) => {
@@ -1659,8 +1662,18 @@ export function ReportBuilder() {
     setActiveReportName(report.name);
     setActiveReportFolder(report.folder);
     setActiveReportIsShared(report.is_shared);
-    setHasRun(false);
+    // Auto-run when loading from the sidebar so the user sees rows
+    // immediately instead of a blank builder + having to find the Run
+    // button. They can still rebuild and re-run if they tweak filters.
+    setHasRun(true);
+    setRunTrigger((t) => t + 1);
     setActiveTab("builder");
+    // Smoothly scroll to the results once they render.
+    setTimeout(() => {
+      document
+        .getElementById("report-results")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 200);
   };
 
   const handleDeleteReport = async (id: string) => {
@@ -1718,17 +1731,12 @@ export function ReportBuilder() {
         {/* Main content */}
         <div className="flex-1 min-w-0 overflow-auto">
           <div className="p-6">
+            {/* Report Builder body (the old inner "Dashboard" sub-tab was
+                removed 2026-04-19 — it duplicated the top-level Dashboards
+                tab on /reports?tab=dashboards). activeTab is kept for
+                future sub-tabs but currently always "builder". */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList>
-                <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-                <TabsTrigger value="builder">Report Builder</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="dashboard" className="mt-6">
-                <ReportsDashboard />
-              </TabsContent>
-
-              <TabsContent value="builder" className="mt-6">
+              <TabsContent value="builder" className="mt-0">
                 {activeReportName && (
                   <div className="flex items-center gap-2 mb-4">
                     <h2 className="text-lg font-semibold">{activeReportName}</h2>
@@ -1834,13 +1842,15 @@ export function ReportBuilder() {
 
                     {/* Results */}
                     {hasRun && (
-                      <ResultsTable
-                        entityKey={config.entity}
-                        columns={config.columns}
-                        data={results?.data ?? []}
-                        isLoading={resultsLoading}
-                        count={results?.count ?? 0}
-                      />
+                      <div id="report-results">
+                        <ResultsTable
+                          entityKey={config.entity}
+                          columns={config.columns}
+                          data={results?.data ?? []}
+                          isLoading={resultsLoading}
+                          count={results?.count ?? 0}
+                        />
+                      </div>
                     )}
                   </CardContent>
                 </Card>

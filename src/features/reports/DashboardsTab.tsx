@@ -1,5 +1,13 @@
 import { useState, useEffect } from "react";
-import { Plus, Trash2, Pencil, Lock, Globe } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  Pencil,
+  Lock,
+  Globe,
+  ArrowLeft,
+  LayoutDashboard,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,16 +22,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EmptyState } from "@/components/EmptyState";
-import { LayoutDashboard } from "lucide-react";
 import {
   useDashboards,
   useCreateDashboard,
@@ -32,14 +34,19 @@ import {
 } from "./dashboards-api";
 import { DashboardView } from "./DashboardView";
 import { errorMessage } from "@/lib/errors";
+import { useAuth } from "@/features/auth/AuthProvider";
+import { formatDate } from "@/lib/formatters";
 import type { Dashboard } from "@/types/crm";
 
 /**
- * Top-level dashboards UI. Renders a dashboard picker + view/edit
- * controls. Users can create multiple named dashboards (personal or
- * public). The actual widget grid is rendered by DashboardView.
+ * Top-level dashboards UI. Default landing shows a grid of every
+ * dashboard the user can see (their own + public ones). Clicking one
+ * opens the full DashboardView. The picker-dropdown approach was
+ * confusing because users didn't realize multiple dashboards existed
+ * (Brayden 2026-04-19).
  */
 export function DashboardsTab() {
+  const { profile } = useAuth();
   const { data: dashboards, isLoading } = useDashboards();
   const deleteDash = useDeleteDashboard();
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -47,18 +54,14 @@ export function DashboardsTab() {
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<Dashboard | null>(null);
 
-  // Once dashboards load, default-select the first one.
+  // If the active dashboard got deleted out from under us, fall back to landing.
   useEffect(() => {
-    if (!activeId && dashboards && dashboards.length > 0) {
-      setActiveId(dashboards[0].id);
-    }
-    // If the active dashboard got deleted out from under us, fall back.
     if (
       activeId &&
       dashboards &&
       !dashboards.some((d) => d.id === activeId)
     ) {
-      setActiveId(dashboards[0]?.id ?? null);
+      setActiveId(null);
     }
   }, [dashboards, activeId]);
 
@@ -86,100 +89,181 @@ export function DashboardsTab() {
     );
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <Label className="text-sm">Dashboard</Label>
-        <Select
-          value={activeId ?? ""}
-          onValueChange={(v) => setActiveId(v)}
-        >
-          <SelectTrigger className="w-64">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {dashboards.map((d) => (
-              <SelectItem key={d.id} value={d.id}>
-                <span className="inline-flex items-center gap-1">
-                  {d.is_public ? (
-                    <Globe className="h-3 w-3 text-muted-foreground" />
-                  ) : (
-                    <Lock className="h-3 w-3 text-muted-foreground" />
-                  )}
-                  {d.name}
-                </span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => setCreating(true)}
-        >
-          <Plus className="h-4 w-4 mr-1" /> New
-        </Button>
-        {active && (
-          <>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => setEditing(active)}
-            >
-              <Pencil className="h-4 w-4 mr-1" /> Edit
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="text-destructive hover:text-destructive"
-              onClick={() => setDeleting(active)}
-            >
-              <Trash2 className="h-4 w-4 mr-1" /> Delete
-            </Button>
-          </>
+  // Detail view — clicking into one dashboard.
+  if (active) {
+    const isOwner = active.owner_user_id === profile?.id;
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => setActiveId(null)}
+          >
+            <ArrowLeft className="h-4 w-4 mr-1" /> All Dashboards
+          </Button>
+          <h2 className="text-lg font-semibold">{active.name}</h2>
+          {active.is_public ? (
+            <Badge variant="secondary" className="bg-emerald-100 text-emerald-700 gap-1">
+              <Globe className="h-3 w-3" /> Public
+            </Badge>
+          ) : (
+            <Badge variant="secondary" className="gap-1">
+              <Lock className="h-3 w-3" /> Private
+            </Badge>
+          )}
+          {isOwner && (
+            <div className="flex gap-1 ml-auto">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setEditing(active)}
+              >
+                <Pencil className="h-4 w-4 mr-1" /> Edit
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="text-destructive hover:text-destructive"
+                onClick={() => setDeleting(active)}
+              >
+                <Trash2 className="h-4 w-4 mr-1" /> Delete
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {active.description && (
+          <p className="text-sm text-muted-foreground">{active.description}</p>
+        )}
+
+        <DashboardView dashboard={active} />
+
+        {editing && (
+          <EditDashboardDialog
+            open={!!editing}
+            onOpenChange={(o) => !o && setEditing(null)}
+            dashboard={editing}
+          />
+        )}
+
+        {deleting && (
+          <ConfirmDialog
+            open={!!deleting}
+            onOpenChange={(o) => !o && setDeleting(null)}
+            title={`Delete dashboard "${deleting.name}"?`}
+            description="This can't be undone. The dashboard's widget layout will be lost."
+            confirmLabel="Delete"
+            destructive
+            onConfirm={async () => {
+              if (!deleting) return;
+              try {
+                await deleteDash.mutateAsync(deleting.id);
+                toast.success("Dashboard deleted");
+                setDeleting(null);
+                setActiveId(null);
+              } catch (err) {
+                toast.error("Failed to delete: " + errorMessage(err));
+              }
+            }}
+          />
         )}
       </div>
+    );
+  }
 
-      {active && <DashboardView dashboard={active} />}
+  // Landing view — grid of all dashboards.
+  const myDashboards = dashboards.filter((d) => d.owner_user_id === profile?.id);
+  const publicDashboards = dashboards.filter(
+    (d) => d.owner_user_id !== profile?.id && d.is_public
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-end">
+        <Button type="button" onClick={() => setCreating(true)}>
+          <Plus className="h-4 w-4 mr-1" /> New Dashboard
+        </Button>
+      </div>
+
+      {myDashboards.length > 0 && (
+        <DashboardSection
+          title="My Dashboards"
+          dashboards={myDashboards}
+          onOpen={(d) => setActiveId(d.id)}
+        />
+      )}
+
+      {publicDashboards.length > 0 && (
+        <DashboardSection
+          title="Public Dashboards"
+          dashboards={publicDashboards}
+          onOpen={(d) => setActiveId(d.id)}
+        />
+      )}
 
       <CreateDashboardDialog
         open={creating}
         onOpenChange={setCreating}
         onCreated={(d) => setActiveId(d.id)}
       />
+    </div>
+  );
+}
 
-      {editing && (
-        <EditDashboardDialog
-          open={!!editing}
-          onOpenChange={(o) => !o && setEditing(null)}
-          dashboard={editing}
-        />
-      )}
-
-      {deleting && (
-        <ConfirmDialog
-          open={!!deleting}
-          onOpenChange={(o) => !o && setDeleting(null)}
-          title={`Delete dashboard "${deleting.name}"?`}
-          description="This can't be undone. The dashboard's widget layout will be lost."
-          confirmLabel="Delete"
-          destructive
-          onConfirm={async () => {
-            if (!deleting) return;
-            const id = deleting.id;
-            try {
-              await deleteDash.mutateAsync(id);
-              toast.success("Dashboard deleted");
-              setDeleting(null);
-            } catch (err) {
-              toast.error("Failed to delete: " + errorMessage(err));
-            }
-          }}
-        />
-      )}
+function DashboardSection({
+  title,
+  dashboards,
+  onOpen,
+}: {
+  title: string;
+  dashboards: Dashboard[];
+  onOpen: (d: Dashboard) => void;
+}) {
+  return (
+    <div>
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+        {title}
+      </p>
+      <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+        {dashboards.map((d) => (
+          <Card
+            key={d.id}
+            className="cursor-pointer hover:border-primary/40 transition-colors"
+            onClick={() => onOpen(d)}
+          >
+            <CardHeader className="pb-2">
+              <div className="flex items-start justify-between gap-2">
+                <CardTitle className="text-base flex items-center gap-2 truncate">
+                  <LayoutDashboard className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                  <span className="truncate">{d.name}</span>
+                </CardTitle>
+                {d.is_public ? (
+                  <Globe className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                ) : (
+                  <Lock className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="pt-0 space-y-1">
+              {d.description ? (
+                <p className="text-sm text-muted-foreground line-clamp-2">
+                  {d.description}
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground italic">No description</p>
+              )}
+              <p className="text-xs text-muted-foreground pt-1">
+                {(d.layout?.length ?? 0)} widget{(d.layout?.length ?? 0) === 1 ? "" : "s"} ·
+                Updated {formatDate(d.updated_at)}
+              </p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     </div>
   );
 }
