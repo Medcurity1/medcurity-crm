@@ -23,11 +23,16 @@ import { useUpdateDashboard } from "./dashboards-api";
 import { errorMessage } from "@/lib/errors";
 import { KpiWidget } from "./widgets/KpiWidget";
 import { BuiltinReportWidget } from "./widgets/BuiltinReportWidget";
+import { SavedReportWidget } from "./widgets/SavedReportWidget";
+import { useSavedReports } from "./report-api";
+import { getEntityDef } from "./report-config";
 import type {
   Dashboard,
   DashboardLayoutWidget,
   DashboardKpiMetric,
   DashboardBuiltinWidget,
+  DashboardWidgetDisplay,
+  SavedReport,
 } from "@/types/crm";
 
 /**
@@ -165,9 +170,12 @@ function WidgetCard({
         {widget.type === "kpi" && <KpiWidget metric={widget.metric} />}
         {widget.type === "builtin" && <BuiltinReportWidget kind={widget.builtin} />}
         {widget.type === "report" && (
-          <p className="text-xs text-muted-foreground">
-            Saved-report widgets aren't rendered yet. Saved in layout.
-          </p>
+          <SavedReportWidget
+            reportId={widget.report_id}
+            display={widget.display ?? "table"}
+            groupBy={widget.group_by}
+            valueColumn={widget.value_column}
+          />
         )}
       </CardContent>
     </Card>
@@ -237,17 +245,32 @@ function AddWidgetDialog({
   onOpenChange: (o: boolean) => void;
   onAdd: (w: DashboardLayoutWidget) => void;
 }) {
-  const [kind, setKind] = useState<"kpi" | "builtin">("kpi");
+  const [kind, setKind] = useState<"kpi" | "builtin" | "report">("report");
   const [kpiMetric, setKpiMetric] = useState<DashboardKpiMetric>("pipeline_arr");
   const [builtinKind, setBuiltinKind] = useState<DashboardBuiltinWidget>(
     "pipeline_by_stage"
   );
+  const [reportId, setReportId] = useState<string>("");
+  const [reportDisplay, setReportDisplay] =
+    useState<DashboardWidgetDisplay>("table");
+  const [reportGroupBy, setReportGroupBy] = useState<string>("");
+  const [reportValueColumn, setReportValueColumn] = useState<string>("");
+
+  const { data: savedReports } = useSavedReports();
+
+  const selectedReport = savedReports?.find(
+    (r: SavedReport) => r.id === reportId
+  );
+  const reportColumns = selectedReport
+    ? getEntityDef(selectedReport.config.entity)
+        .columns.filter((c) => selectedReport.config.columns.includes(c.key))
+    : [];
 
   function handleAdd() {
     const i = `w_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     if (kind === "kpi") {
       onAdd({ i, x: 0, y: 0, w: 1, h: 1, type: "kpi", metric: kpiMetric });
-    } else {
+    } else if (kind === "builtin") {
       onAdd({
         i,
         x: 0,
@@ -256,6 +279,21 @@ function AddWidgetDialog({
         h: 2,
         type: "builtin",
         builtin: builtinKind,
+      });
+    } else {
+      if (!reportId) return;
+      onAdd({
+        i,
+        x: 0,
+        y: 0,
+        w: 2,
+        h: 2,
+        type: "report",
+        report_id: reportId,
+        display: reportDisplay,
+        group_by: reportGroupBy || undefined,
+        value_column: reportValueColumn || undefined,
+        title: selectedReport?.name,
       });
     }
   }
@@ -272,17 +310,110 @@ function AddWidgetDialog({
         <div className="space-y-3">
           <div className="space-y-2">
             <Label>Widget Type</Label>
-            <Select value={kind} onValueChange={(v) => setKind(v as "kpi" | "builtin")}>
+            <Select
+              value={kind}
+              onValueChange={(v) => setKind(v as "kpi" | "builtin" | "report")}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="report">Saved Report</SelectItem>
                 <SelectItem value="kpi">KPI tile (number)</SelectItem>
                 <SelectItem value="builtin">Pre-built report</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          {kind === "kpi" ? (
+          {kind === "report" ? (
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <Label>Saved Report</Label>
+                <Select value={reportId} onValueChange={setReportId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a saved report..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(savedReports ?? []).length === 0 ? (
+                      <SelectItem value="__empty__" disabled>
+                        No saved reports yet
+                      </SelectItem>
+                    ) : (
+                      (savedReports ?? []).map((r) => (
+                        <SelectItem key={r.id} value={r.id}>
+                          {r.name}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Display As</Label>
+                <Select
+                  value={reportDisplay}
+                  onValueChange={(v) =>
+                    setReportDisplay(v as DashboardWidgetDisplay)
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="table">Table preview</SelectItem>
+                    <SelectItem value="number">Row count (number)</SelectItem>
+                    <SelectItem value="bar">Bar chart</SelectItem>
+                    <SelectItem value="pie">Pie chart</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {(reportDisplay === "bar" || reportDisplay === "pie") && (
+                <>
+                  <div className="space-y-2">
+                    <Label>Group By (column)</Label>
+                    <Select
+                      value={reportGroupBy || "none"}
+                      onValueChange={(v) =>
+                        setReportGroupBy(v === "none" ? "" : v)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Pick a column..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">— required —</SelectItem>
+                        {reportColumns.map((c) => (
+                          <SelectItem key={c.key} value={c.key}>
+                            {c.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Sum Column (optional)</Label>
+                    <Select
+                      value={reportValueColumn || "count"}
+                      onValueChange={(v) =>
+                        setReportValueColumn(v === "count" ? "" : v)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="count">Count rows</SelectItem>
+                        {reportColumns.map((c) => (
+                          <SelectItem key={c.key} value={c.key}>
+                            Sum: {c.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : kind === "kpi" ? (
             <div className="space-y-2">
               <Label>Metric</Label>
               <Select

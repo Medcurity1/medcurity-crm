@@ -497,9 +497,30 @@ export interface ReportFolder {
   updated_at: string;
 }
 
+export type DashboardWidgetDisplay = "table" | "bar" | "pie" | "number";
+
 export type DashboardLayoutWidget =
   | { i: string; x: number; y: number; w: number; h: number; type: "kpi"; metric: DashboardKpiMetric; title?: string }
-  | { i: string; x: number; y: number; w: number; h: number; type: "report"; report_id: string; title?: string }
+  | {
+      i: string;
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      type: "report";
+      report_id: string;
+      title?: string;
+      /**
+       * How to render the saved report inside the widget. Defaults to
+       * "table" if missing (back-compat with widgets created before
+       * 2026-04-19 when this field was added).
+       */
+      display?: DashboardWidgetDisplay;
+      /** For bar/pie: which column to group by (column key). */
+      group_by?: string;
+      /** For bar/pie: which column to aggregate (column key). Defaults to count. */
+      value_column?: string;
+    }
   | { i: string; x: number; y: number; w: number; h: number; type: "builtin"; builtin: DashboardBuiltinWidget; title?: string };
 
 export type DashboardKpiMetric =
