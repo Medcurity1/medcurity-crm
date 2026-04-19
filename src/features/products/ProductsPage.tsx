@@ -1009,9 +1009,19 @@ function PriceBookEntriesSection({
 
   return (
     <div className="space-y-3">
+      {/* How-to banner so admins know what they're looking at the first
+          time they expand a price book. */}
+      <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">How pricing works:</span>{" "}
+        Every active product appears as a row below. Type a price into the
+        right column to add it to this price book; click outside or press Enter
+        to save. To remove a product from this book, click the X next to its
+        price. Each price book has its own independent prices.
+      </div>
+
       <div className="flex flex-wrap items-center gap-3">
         <Input
-          placeholder="Filter products..."
+          placeholder="Filter products by name or family..."
           className="max-w-xs"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
@@ -1025,8 +1035,9 @@ function PriceBookEntriesSection({
           <Label
             htmlFor={`pb-${priceBookId}-hide`}
             className="text-xs text-muted-foreground cursor-pointer"
+            title="Hide products that don't have a price set in this price book"
           >
-            Only priced
+            Hide unpriced products
           </Label>
         </div>
         <div className="flex items-center gap-2">
