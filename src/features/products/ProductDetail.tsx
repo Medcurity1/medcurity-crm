@@ -42,6 +42,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCurrencyDetailed, formatDateTime } from "@/lib/formatters";
+import { errorMessage } from "@/lib/errors";
 import { toast } from "sonner";
 
 const PRICING_MODELS = [
@@ -80,7 +81,7 @@ export function ProductDetail() {
       await updateMutation.mutateAsync({ id: product.id, is_active: next });
       toast.success(next ? "Marked active" : "Marked inactive");
     } catch (err) {
-      toast.error("Failed: " + (err instanceof Error ? err.message : String(err)));
+      toast.error("Failed: " + errorMessage(err));
     }
   }
 
@@ -91,7 +92,7 @@ export function ProductDetail() {
       toast.success(`Deleted "${product.name}"`);
       navigate("/products");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       if (msg.toLowerCase().includes("foreign") || msg.toLowerCase().includes("violates")) {
         toast.error("Can't delete — product is used in a price book. Remove its entries first.");
       } else {
@@ -415,7 +416,7 @@ function ProductEditDialog({
       toast.success("Product updated");
       onOpenChange(false);
     } catch (err) {
-      toast.error("Failed: " + (err instanceof Error ? err.message : String(err)));
+      toast.error("Failed: " + errorMessage(err));
     }
   }
 

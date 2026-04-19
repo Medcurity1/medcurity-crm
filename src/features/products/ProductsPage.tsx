@@ -53,6 +53,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { formatCurrencyDetailed, formatDate } from "@/lib/formatters";
+import { errorMessage } from "@/lib/errors";
 import { toast } from "sonner";
 import type { Product, PriceBook } from "@/types/crm";
 
@@ -126,7 +127,7 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
       await updateMutation.mutateAsync({ id: product.id, is_active: next });
       toast.success(next ? "Marked active" : "Marked inactive");
     } catch (err) {
-      toast.error("Failed: " + (err instanceof Error ? err.message : String(err)));
+      toast.error("Failed: " + errorMessage(err));
     }
   }
 
@@ -137,7 +138,7 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
       toast.success(`Deleted "${deleteTarget.name}"`);
       setDeleteTarget(null);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       // Foreign-key constraint: tell user to remove from price books first.
       if (msg.toLowerCase().includes("foreign") || msg.toLowerCase().includes("violates")) {
         toast.error("Can't delete — product is used in a price book. Remove its entries first.");
@@ -358,7 +359,7 @@ function ManageFamiliesDialog({
       setNewName("");
       toast.success("Family added");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       if (msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("unique")) {
         toast.error("That family already exists");
       } else {
@@ -372,7 +373,7 @@ function ManageFamiliesDialog({
       await deleteFam.mutateAsync(id);
       toast.success("Family removed");
     } catch (err) {
-      toast.error("Failed: " + (err instanceof Error ? err.message : String(err)));
+      toast.error("Failed: " + errorMessage(err));
     }
   }
 
@@ -612,7 +613,7 @@ function ProductDialog({
       }
       onOpenChange(false);
     } catch (err) {
-      toast.error("Failed to save product: " + (err instanceof Error ? err.message : String(err)));
+      toast.error("Failed to save product: " + errorMessage(err));
     }
   }
 
@@ -1082,7 +1083,7 @@ function PriceBookEntryRow({
     } catch (err) {
       toast.error(
         `Failed to save "${product.name}": ` +
-          (err instanceof Error ? err.message : String(err))
+          errorMessage(err)
       );
       setDraft(initialValue);
     } finally {
@@ -1206,7 +1207,7 @@ function PriceBookDialog({
       }
       onOpenChange(false);
     } catch (err) {
-      toast.error("Failed to save price book: " + (err instanceof Error ? err.message : String(err)));
+      toast.error("Failed to save price book: " + errorMessage(err));
     }
   }
 
