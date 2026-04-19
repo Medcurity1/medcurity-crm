@@ -83,7 +83,20 @@ export function useUpdateProduct() {
 export function useDeleteProduct() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async (vars: string | { id: string; cascade: boolean }) => {
+      const id = typeof vars === "string" ? vars : vars.id;
+      const cascade = typeof vars === "string" ? false : vars.cascade;
+
+      // Optionally remove all price-book entries first so the FK
+      // constraint doesn't block the product delete.
+      if (cascade) {
+        const { error: entriesErr } = await supabase
+          .from("price_book_entries")
+          .delete()
+          .eq("product_id", id);
+        if (entriesErr) throw entriesErr;
+      }
+
       const { error } = await supabase.from("products").delete().eq("id", id);
       if (error) throw error;
       return id;
@@ -91,6 +104,7 @@ export function useDeleteProduct() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["products"] });
       qc.invalidateQueries({ queryKey: ["price_book_entries"] });
+      qc.invalidateQueries({ queryKey: ["price_book_entries_by_product"] });
     },
   });
 }

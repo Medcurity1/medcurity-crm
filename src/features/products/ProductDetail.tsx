@@ -85,16 +85,20 @@ export function ProductDetail() {
     }
   }
 
-  async function handleDelete() {
+  async function handleDelete(cascade: boolean) {
     if (!product) return;
     try {
-      await deleteMutation.mutateAsync(product.id);
-      toast.success(`Deleted "${product.name}"`);
+      await deleteMutation.mutateAsync({ id: product.id, cascade });
+      toast.success(
+        cascade
+          ? `Deleted "${product.name}" and removed from all price books`
+          : `Deleted "${product.name}"`
+      );
       navigate("/products");
     } catch (err) {
       const msg = errorMessage(err);
       if (msg.toLowerCase().includes("foreign") || msg.toLowerCase().includes("violates")) {
-        toast.error("Can't delete — product is used in a price book. Remove its entries first.");
+        toast.error("Can't delete — product is still in a price book. Use 'Delete + remove from price books' instead.");
       } else {
         toast.error("Failed: " + msg);
       }
@@ -316,21 +320,49 @@ export function ProductDetail() {
           <DialogHeader>
             <DialogTitle>Delete product?</DialogTitle>
             <DialogDescription>
-              "{product.name}" will be permanently removed. If it's in any price book entries, the
-              delete will fail and you'll need to remove those first.
+              "{product.name}" will be permanently removed. This can't be undone.
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmDelete(false)}>
+          {entries && entries.length > 0 ? (
+            <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-900 p-3 text-sm">
+              <p className="font-medium text-amber-900 dark:text-amber-200">
+                In use: {entries.length} entr{entries.length === 1 ? "y" : "ies"} across{" "}
+                {new Set(entries.map((e) => e.price_book_id)).size} price book
+                {new Set(entries.map((e) => e.price_book_id)).size === 1 ? "" : "s"}.
+              </p>
+              <p className="text-xs text-amber-900 dark:text-amber-300 mt-1">
+                Plain Delete will fail. Use the second option to remove price-book entries too.
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Not used in any price book — safe to delete.
+            </p>
+          )}
+          <DialogFooter className="gap-2 sm:gap-2 flex-col sm:flex-row">
+            <Button
+              variant="outline"
+              onClick={() => setConfirmDelete(false)}
+              disabled={deleteMutation.isPending}
+            >
               Cancel
             </Button>
             <Button
               variant="destructive"
-              onClick={handleDelete}
+              onClick={() => handleDelete(false)}
               disabled={deleteMutation.isPending}
             >
               {deleteMutation.isPending ? "Deleting..." : "Delete"}
             </Button>
+            {entries && entries.length > 0 && (
+              <Button
+                variant="destructive"
+                onClick={() => handleDelete(true)}
+                disabled={deleteMutation.isPending}
+              >
+                Delete + remove from price books
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

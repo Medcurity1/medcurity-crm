@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Plus, Trash2, ChevronDown, ChevronRight, Package, Cloud, User, Settings } from "lucide-react";
+import { Plus, Trash2, ChevronDown, ChevronRight, Package, Cloud, User, Settings, X } from "lucide-react";
 import {
   useProducts,
   useCreateProduct,
@@ -131,17 +131,20 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
-  async function handleConfirmDelete() {
+  async function handleConfirmDelete(cascade: boolean) {
     if (!deleteTarget) return;
     try {
-      await deleteMutation.mutateAsync(deleteTarget.id);
-      toast.success(`Deleted "${deleteTarget.name}"`);
+      await deleteMutation.mutateAsync({ id: deleteTarget.id, cascade });
+      toast.success(
+        cascade
+          ? `Deleted "${deleteTarget.name}" and removed from all price books`
+          : `Deleted "${deleteTarget.name}"`
+      );
       setDeleteTarget(null);
     } catch (err) {
       const msg = errorMessage(err);
-      // Foreign-key constraint: tell user to remove from price books first.
       if (msg.toLowerCase().includes("foreign") || msg.toLowerCase().includes("violates")) {
-        toast.error("Can't delete — product is used in a price book. Remove its entries first.");
+        toast.error("Can't delete — product is still in a price book. Try 'Delete + remove from price books' instead.");
       } else {
         toast.error("Failed to delete: " + msg);
       }
@@ -313,25 +316,91 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
         product={editingProduct}
       />
 
-      <Dialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Delete product?</DialogTitle>
-            <DialogDescription>
-              "{deleteTarget?.name}" will be permanently removed. If it's used in any price book entries, the delete will fail and you'll need to remove those first.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
-            <Button variant="destructive" onClick={handleConfirmDelete} disabled={deleteMutation.isPending}>
-              {deleteMutation.isPending ? "Deleting..." : "Delete"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DeleteProductDialog
+        product={deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDelete}
+        isPending={deleteMutation.isPending}
+      />
 
       <ManageFamiliesDialog open={familiesOpen} onOpenChange={setFamiliesOpen} />
     </>
+  );
+}
+
+/* ──────────────────────────────────────────────
+   Delete Product Dialog
+   ────────────────────────────────────────────── */
+
+function DeleteProductDialog({
+  product,
+  onClose,
+  onConfirm,
+  isPending,
+}: {
+  product: Product | null;
+  onClose: () => void;
+  onConfirm: (cascade: boolean) => void;
+  isPending: boolean;
+}) {
+  // Pull entries to show the user how many price books reference this
+  // product, so the cascade option doesn't feel like a guess.
+  const { data: entries, isLoading } = useEntriesForProduct(product?.id);
+  const entryCount = entries?.length ?? 0;
+  const bookCount = new Set(entries?.map((e) => e.price_book_id) ?? []).size;
+
+  return (
+    <Dialog open={!!product} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete product?</DialogTitle>
+          <DialogDescription>
+            "{product?.name}" will be permanently removed. This can't be undone.
+          </DialogDescription>
+        </DialogHeader>
+
+        {isLoading ? (
+          <Skeleton className="h-12 w-full" />
+        ) : entryCount > 0 ? (
+          <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-900 p-3 text-sm">
+            <p className="font-medium text-amber-900 dark:text-amber-200">
+              In use: {entryCount} price book entr{entryCount === 1 ? "y" : "ies"} across{" "}
+              {bookCount} price book{bookCount === 1 ? "" : "s"}.
+            </p>
+            <p className="text-xs text-amber-900 dark:text-amber-300 mt-1">
+              Choose whether to remove those entries too. Plain Delete will
+              fail if the product is still referenced.
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Not used in any price book — safe to delete.
+          </p>
+        )}
+
+        <DialogFooter className="gap-2 sm:gap-2 flex-col sm:flex-row">
+          <Button variant="outline" onClick={onClose} disabled={isPending}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={() => onConfirm(false)}
+            disabled={isPending}
+          >
+            {isPending ? "Deleting..." : "Delete"}
+          </Button>
+          {entryCount > 0 && (
+            <Button
+              variant="destructive"
+              onClick={() => onConfirm(true)}
+              disabled={isPending}
+            >
+              Delete + remove from {bookCount} price book{bookCount === 1 ? "" : "s"}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1135,6 +1204,39 @@ function PriceBookEntryRow({
             }}
             className="max-w-[140px] text-right"
           />
+          {/* Explicit remove button when there's a saved entry. Faster
+              and more discoverable than "clear the input + tab out". */}
+          {existingEntry && isAdmin ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground hover:text-destructive"
+              disabled={saving}
+              onClick={async () => {
+                setSaving(true);
+                try {
+                  await saveMutation.mutateAsync({
+                    price_book_id: priceBookId,
+                    product_id: product.id,
+                    fte_range: fteRange,
+                    unit_price: null,
+                    existing_entry_id: existingEntry.id,
+                  });
+                  setDraft("");
+                } catch (err) {
+                  toast.error(`Failed to remove: ${errorMessage(err)}`);
+                } finally {
+                  setSaving(false);
+                }
+              }}
+              title="Remove from this price book"
+              aria-label={`Remove ${product.name} from this price book`}
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          ) : (
+            <span className="w-7" /> /* spacer keeps inputs aligned */
+          )}
         </div>
       </TableCell>
     </TableRow>
