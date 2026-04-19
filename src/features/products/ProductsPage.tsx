@@ -14,8 +14,7 @@ import {
   useCreatePriceBook,
   useUpdatePriceBook,
   usePriceBookEntries,
-  useCreatePriceBookEntry,
-  useDeletePriceBookEntry,
+  useSetPriceBookEntryPrice,
 } from "./api";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { PageHeader } from "@/components/PageHeader";
@@ -57,7 +56,6 @@ import { formatCurrencyDetailed, formatDate } from "@/lib/formatters";
 import { toast } from "sonner";
 import type { Product, PriceBook } from "@/types/crm";
 
-const FTE_RANGES = ["1-20", "21-50", "51-100", "101-250", "251-500", "501+"] as const;
 
 const PRICING_MODELS = [
   { value: "per_fte", label: "Per FTE" },
@@ -864,7 +862,7 @@ function PriceBookCard({
 
       {expanded && (
         <CardContent>
-          <PriceBookEntriesSection priceBookId={priceBook.id} isAdmin={isAdmin} />
+          <PriceBookEntriesSection priceBook={priceBook} isAdmin={isAdmin} />
         </CardContent>
       )}
     </Card>
@@ -876,163 +874,269 @@ function PriceBookCard({
    ────────────────────────────────────────────── */
 
 function PriceBookEntriesSection({
-  priceBookId,
+  priceBook,
   isAdmin,
 }: {
-  priceBookId: string;
+  priceBook: PriceBook;
   isAdmin: boolean;
 }) {
-  const { data: entries, isLoading } = usePriceBookEntries(priceBookId);
-  const { data: products } = useProducts();
-  const createEntry = useCreatePriceBookEntry();
-  const deleteEntry = useDeletePriceBookEntry();
-  const [showAdd, setShowAdd] = useState(false);
-  const [newProductId, setNewProductId] = useState("");
-  const [newFteRange, setNewFteRange] = useState("");
-  const [newUnitPrice, setNewUnitPrice] = useState("");
+  const priceBookId = priceBook.id;
+  // Default fte_range for new entries: book's own fte_range, else null.
+  const defaultFteRange = priceBook.fte_range ?? null;
 
-  async function handleAddEntry() {
-    if (!newProductId || !newUnitPrice) {
-      toast.error("Product and unit price are required");
-      return;
-    }
-    try {
-      await createEntry.mutateAsync({
-        price_book_id: priceBookId,
-        product_id: newProductId,
-        fte_range: newFteRange || null,
-        unit_price: Number(newUnitPrice),
-      });
-      toast.success("Entry added");
-      setShowAdd(false);
-      setNewProductId("");
-      setNewFteRange("");
-      setNewUnitPrice("");
-    } catch (err) {
-      toast.error("Failed to add entry: " + (err instanceof Error ? err.message : String(err)));
-    }
-  }
+  const { data: entries, isLoading: entriesLoading } = usePriceBookEntries(priceBookId);
+  const { data: products, isLoading: productsLoading } = useProducts();
+  const setPrice = useSetPriceBookEntryPrice();
 
-  async function handleDeleteEntry(entryId: string) {
-    try {
-      await deleteEntry.mutateAsync({ id: entryId, priceBookId });
-      toast.success("Entry removed");
-    } catch (err) {
-      toast.error("Failed to remove entry: " + (err instanceof Error ? err.message : String(err)));
-    }
-  }
+  const [showInactive, setShowInactive] = useState(false);
+  const [hideUnpriced, setHideUnpriced] = useState(false);
+  const [filter, setFilter] = useState("");
 
-  if (isLoading) {
+  if (entriesLoading || productsLoading) {
     return <Skeleton className="h-20 w-full" />;
   }
 
+  // Build a map of product_id -> entry (only counting entries that match
+  // this book's default fte_range, since we treat the book as scoped to
+  // one tier). Entries with a different fte_range are still listed for
+  // visibility but not editable inline (rare edge case).
+  const entryByProduct = new Map<string, NonNullable<typeof entries>[number]>();
+  for (const e of entries ?? []) {
+    if ((e.fte_range ?? null) === defaultFteRange) {
+      entryByProduct.set(e.product_id, e);
+    }
+  }
+  const offTierEntries =
+    entries?.filter((e) => (e.fte_range ?? null) !== defaultFteRange) ?? [];
+
+  const visibleProducts = (products ?? []).filter((p) => {
+    if (!showInactive && !p.is_active) return false;
+    const matchesFilter =
+      !filter ||
+      p.name.toLowerCase().includes(filter.toLowerCase()) ||
+      (p.product_family ?? "").toLowerCase().includes(filter.toLowerCase());
+    if (!matchesFilter) return false;
+    const hasEntry = entryByProduct.has(p.id);
+    if (hideUnpriced && !hasEntry) return false;
+    return true;
+  });
+
+  const pricedCount = entryByProduct.size;
+  const totalActive = (products ?? []).filter((p) => p.is_active).length;
+
   return (
-    <div>
-      {isAdmin && (
-        <div className="flex justify-end mb-2">
-          <Button variant="outline" size="sm" onClick={() => setShowAdd(!showAdd)}>
-            <Plus className="h-4 w-4 mr-1" />
-            Add Entry
-          </Button>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <Input
+          placeholder="Filter products..."
+          className="max-w-xs"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+        <div className="flex items-center gap-2">
+          <Switch
+            id={`pb-${priceBookId}-hide`}
+            checked={hideUnpriced}
+            onCheckedChange={setHideUnpriced}
+          />
+          <Label
+            htmlFor={`pb-${priceBookId}-hide`}
+            className="text-xs text-muted-foreground cursor-pointer"
+          >
+            Only priced
+          </Label>
         </div>
-      )}
-
-      {showAdd && (
-        <div className="border rounded-lg p-3 mb-3 bg-muted/30">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="space-y-1">
-              <Label className="text-xs">Product</Label>
-              <Select value={newProductId} onValueChange={setNewProductId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select product" />
-                </SelectTrigger>
-                <SelectContent>
-                  {products?.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">FTE Range</Label>
-              <Select
-                value={newFteRange || "all_ranges"}
-                onValueChange={(v) => setNewFteRange(v === "all_ranges" ? "" : v)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="All ranges" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all_ranges">All ranges</SelectItem>
-                  {FTE_RANGES.map((r) => (
-                    <SelectItem key={r} value={r}>{r}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Unit Price</Label>
-              <div className="flex gap-2">
-                <Input
-                  type="number"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={newUnitPrice}
-                  onChange={(e) => setNewUnitPrice(e.target.value)}
-                />
-                <Button size="sm" onClick={handleAddEntry} disabled={createEntry.isPending}>
-                  Add
-                </Button>
-              </div>
-            </div>
-          </div>
+        <div className="flex items-center gap-2">
+          <Switch
+            id={`pb-${priceBookId}-inactive`}
+            checked={showInactive}
+            onCheckedChange={setShowInactive}
+          />
+          <Label
+            htmlFor={`pb-${priceBookId}-inactive`}
+            className="text-xs text-muted-foreground cursor-pointer"
+          >
+            Show inactive products
+          </Label>
         </div>
-      )}
+        <p className="text-xs text-muted-foreground ml-auto">
+          {pricedCount} priced · {totalActive} active products
+          {defaultFteRange ? ` · FTE range ${defaultFteRange}` : ""}
+        </p>
+      </div>
 
-      {!entries?.length ? (
-        <p className="text-sm text-muted-foreground py-2">No pricing entries yet.</p>
+      {!visibleProducts.length ? (
+        <p className="text-sm text-muted-foreground py-2">No products to show.</p>
       ) : (
         <div className="border rounded-lg overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Product</TableHead>
-                <TableHead>FTE Range</TableHead>
-                <TableHead className="text-right">Unit Price</TableHead>
-                {isAdmin && <TableHead className="w-12" />}
+                <TableHead>Family</TableHead>
+                <TableHead className="text-right w-48">Unit Price</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {entries.map((entry) => (
-                <TableRow key={entry.id}>
-                  <TableCell className="font-medium">
-                    {entry.product?.name ?? entry.product_id}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {entry.fte_range ?? "All"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {formatCurrencyDetailed(entry.unit_price)}
-                  </TableCell>
-                  {isAdmin && (
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        onClick={() => handleDeleteEntry(entry.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                  )}
-                </TableRow>
-              ))}
+              {visibleProducts.map((product) => {
+                const entry = entryByProduct.get(product.id);
+                return (
+                  <PriceBookEntryRow
+                    key={product.id}
+                    product={product}
+                    existingEntry={entry ?? null}
+                    priceBookId={priceBookId}
+                    fteRange={defaultFteRange}
+                    isAdmin={isAdmin}
+                    saveMutation={setPrice}
+                  />
+                );
+              })}
             </TableBody>
           </Table>
         </div>
       )}
+
+      {offTierEntries.length > 0 && (
+        <details className="text-sm">
+          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+            {offTierEntries.length} entries on other FTE ranges (read-only here)
+          </summary>
+          <div className="border rounded-lg overflow-x-auto mt-2">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Product</TableHead>
+                  <TableHead>FTE Range</TableHead>
+                  <TableHead className="text-right">Unit Price</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {offTierEntries.map((e) => (
+                  <TableRow key={e.id}>
+                    <TableCell className="font-medium">
+                      {e.product?.name ?? e.product_id}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {e.fte_range ?? "All"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {formatCurrencyDetailed(e.unit_price)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </details>
+      )}
     </div>
+  );
+}
+
+function PriceBookEntryRow({
+  product,
+  existingEntry,
+  priceBookId,
+  fteRange,
+  isAdmin,
+  saveMutation,
+}: {
+  product: Product;
+  existingEntry: { id: string; unit_price: number } | null;
+  priceBookId: string;
+  fteRange: string | null;
+  isAdmin: boolean;
+  saveMutation: ReturnType<typeof useSetPriceBookEntryPrice>;
+}) {
+  const initialValue = existingEntry ? String(existingEntry.unit_price) : "";
+  const [draft, setDraft] = useState(initialValue);
+  const [saving, setSaving] = useState(false);
+
+  // Sync draft when the underlying entry changes (e.g. fresh load).
+  useEffect(() => {
+    setDraft(initialValue);
+  }, [initialValue]);
+
+  const isDirty = draft !== initialValue;
+
+  async function commit() {
+    if (!isDirty) return;
+    const trimmed = draft.trim();
+    const next = trimmed === "" ? null : Number(trimmed);
+    if (next !== null && (!Number.isFinite(next) || next < 0)) {
+      toast.error("Enter a valid price");
+      setDraft(initialValue);
+      return;
+    }
+    setSaving(true);
+    try {
+      await saveMutation.mutateAsync({
+        price_book_id: priceBookId,
+        product_id: product.id,
+        fte_range: fteRange,
+        unit_price: next,
+        existing_entry_id: existingEntry?.id ?? null,
+      });
+      // Don't toast on every blur — too noisy in matrix mode.
+    } catch (err) {
+      toast.error(
+        `Failed to save "${product.name}": ` +
+          (err instanceof Error ? err.message : String(err))
+      );
+      setDraft(initialValue);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <TableRow>
+      <TableCell className="font-medium">
+        <Link to={`/products/${product.id}`} className="hover:underline">
+          {product.name}
+        </Link>
+        {!product.is_active && (
+          <Badge variant="secondary" className="ml-2 bg-slate-100 text-slate-700 text-xs">
+            Inactive
+          </Badge>
+        )}
+      </TableCell>
+      <TableCell className="text-muted-foreground">
+        {product.product_family ?? "\u2014"}
+      </TableCell>
+      <TableCell className="text-right">
+        <div className="flex items-center justify-end gap-2">
+          {existingEntry && !isDirty && !saving && (
+            <span className="text-xs text-emerald-600">saved</span>
+          )}
+          {saving && <span className="text-xs text-muted-foreground">saving…</span>}
+          {isDirty && !saving && (
+            <span className="text-xs text-amber-600">unsaved</span>
+          )}
+          <Input
+            type="number"
+            step="0.01"
+            placeholder="—"
+            disabled={!isAdmin || saving}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                (e.target as HTMLInputElement).blur();
+              }
+              if (e.key === "Escape") {
+                setDraft(initialValue);
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            className="max-w-[140px] text-right"
+          />
+        </div>
+      </TableCell>
+    </TableRow>
   );
 }
 

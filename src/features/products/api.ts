@@ -210,6 +210,64 @@ export function useCreatePriceBookEntry() {
   });
 }
 
+// Set the unit price for a (price_book, product, fte_range) combo.
+// Inserts when missing, updates when present, deletes when price is
+// cleared (null/empty). Used by the matrix editor in PriceBookCard so
+// admins don't need to click "Add Entry" + select product for every row.
+export function useSetPriceBookEntryPrice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      price_book_id: string;
+      product_id: string;
+      fte_range: string | null;
+      unit_price: number | null;
+      existing_entry_id?: string | null;
+    }) => {
+      // Clear → delete
+      if (vars.unit_price === null) {
+        if (!vars.existing_entry_id) return null;
+        const { error } = await supabase
+          .from("price_book_entries")
+          .delete()
+          .eq("id", vars.existing_entry_id);
+        if (error) throw error;
+        return null;
+      }
+
+      // Existing → update price
+      if (vars.existing_entry_id) {
+        const { data, error } = await supabase
+          .from("price_book_entries")
+          .update({ unit_price: vars.unit_price })
+          .eq("id", vars.existing_entry_id)
+          .select()
+          .single();
+        if (error) throw error;
+        return data as PriceBookEntry;
+      }
+
+      // New → insert
+      const { data, error } = await supabase
+        .from("price_book_entries")
+        .insert({
+          price_book_id: vars.price_book_id,
+          product_id: vars.product_id,
+          fte_range: vars.fte_range,
+          unit_price: vars.unit_price,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return data as PriceBookEntry;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["price_book_entries", vars.price_book_id] });
+      qc.invalidateQueries({ queryKey: ["price_book_entries_by_product", vars.product_id] });
+    },
+  });
+}
+
 export function useDeletePriceBookEntry() {
   const qc = useQueryClient();
   return useMutation({
