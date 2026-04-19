@@ -3062,7 +3062,13 @@ export function SalesforceImport() {
               <div className="flex gap-2">
                 <Info className="h-4 w-4 mt-0.5 shrink-0" />
                 <div className="space-y-1">
-                  <p className="font-medium">FTE-range cleanup is ON for this entity</p>
+                  <p className="font-medium">
+                    {entity === "products"
+                      ? "FTE-range cleanup is ON — products will be deduped"
+                      : entity === "price_books"
+                      ? "FTE-range parsing is ON — price book names are kept intact"
+                      : "FTE-range parsing is ON — entries link by SF ID"}
+                  </p>
                   {entity === "products" && (
                     <p>
                       FTE prefixes like "51-100 " or "1-20 " will be stripped
