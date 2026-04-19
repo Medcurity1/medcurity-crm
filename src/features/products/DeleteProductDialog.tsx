@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Trash2 } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { Trash2, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -13,7 +14,8 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useEntriesForProduct, useProductReferences } from "./api";
-import type { Product } from "@/types/crm";
+import { formatCurrency, stageLabel } from "@/lib/formatters";
+import type { Product, OpportunityStage } from "@/types/crm";
 
 /**
  * Three options surface here, depending on what the product is in:
@@ -51,6 +53,41 @@ export function DeleteProductDialog({
   const opportunityCount = refs?.opportunityCount ?? 0;
   const entryCount = refs?.entryCount ?? 0;
   const onAnyOpp = opportunityCount > 0;
+  const opportunities = refs?.opportunities ?? [];
+
+  // Group line items by opportunity so we don't show duplicate rows
+  // when a product has 2+ entries on the same opp.
+  const oppRows = useMemo(() => {
+    const m = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        stage: string;
+        accountName: string | null;
+        accountId: string | null;
+        totalArr: number;
+      }
+    >();
+    for (const line of opportunities) {
+      const opp = line.opportunity;
+      if (!opp) continue;
+      const existing = m.get(opp.id);
+      if (existing) {
+        existing.totalArr += Number(line.arr_amount) || 0;
+      } else {
+        m.set(opp.id, {
+          id: opp.id,
+          name: opp.name,
+          stage: opp.stage,
+          accountName: opp.account?.name ?? null,
+          accountId: opp.account?.id ?? null,
+          totalArr: Number(line.arr_amount) || 0,
+        });
+      }
+    }
+    return Array.from(m.values()).sort((a, b) => b.totalArr - a.totalArr);
+  }, [opportunities]);
 
   const byBook = useMemo(() => {
     const m = new Map<string, { id: string; name: string; entryCount: number }>();
@@ -111,6 +148,48 @@ export function DeleteProductDialog({
                 {byBook.length === 1 ? "" : "s"}
               </p>
             </div>
+
+            {oppRows.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Affected opportunities</p>
+                <p className="text-xs text-muted-foreground">
+                  These keep their pricing whether you archive or remove from a price book.
+                  Click to open in a new tab.
+                </p>
+                <div className="border rounded-md divide-y max-h-56 overflow-y-auto">
+                  {oppRows.map((o) => (
+                    <Link
+                      key={o.id}
+                      to={`/opportunities/${o.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex items-center justify-between gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-medium truncate">{o.name}</span>
+                          <Badge variant="secondary" className="capitalize text-xs">
+                            {stageLabel(o.stage as OpportunityStage)}
+                          </Badge>
+                        </div>
+                        {o.accountName && (
+                          <p className="text-xs text-muted-foreground truncate">
+                            {o.accountName}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="text-xs text-muted-foreground">
+                          {formatCurrency(o.totalArr)}
+                        </span>
+                        <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {byBook.length > 0 && (
               <div className="space-y-2">

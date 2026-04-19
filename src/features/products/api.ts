@@ -56,19 +56,25 @@ export function useProducts(
   });
 }
 
-// Returns the number of opportunities and price-book entries that
-// reference the given product. Used by the delete dialog to decide
-// between "real delete" and "archive".
+// Returns the opportunities and price-book entries that reference the
+// given product. Used by the delete dialog to decide between "real
+// delete" and "archive", and to surface which records are affected.
 export function useProductReferences(productId: string | undefined) {
   return useQuery({
     queryKey: ["product_references", productId],
     queryFn: async () => {
       if (!productId) throw new Error("Missing product id");
       const [oppRes, entryRes] = await Promise.all([
+        // Pull the opp rows (limited to a reasonable preview) so we can
+        // show stage / amount / name in the delete dialog.
         supabase
           .from("opportunity_products")
-          .select("id", { count: "exact", head: true })
-          .eq("product_id", productId),
+          .select(
+            "id, quantity, unit_price, arr_amount, opportunity:opportunities!opportunity_id(id, name, stage, account_id, account:accounts!account_id(id, name))"
+          )
+          .eq("product_id", productId)
+          .order("created_at", { ascending: false })
+          .limit(100),
         supabase
           .from("price_book_entries")
           .select("id", { count: "exact", head: true })
@@ -76,9 +82,56 @@ export function useProductReferences(productId: string | undefined) {
       ]);
       if (oppRes.error) throw oppRes.error;
       if (entryRes.error) throw entryRes.error;
+      type OppLine = {
+        id: string;
+        quantity: number;
+        unit_price: number;
+        arr_amount: number;
+        opportunity:
+          | {
+              id: string;
+              name: string;
+              stage: string;
+              account: { id: string; name: string } | null;
+            }
+          | null;
+      };
+      // Normalize PostgREST join shape: foreign-key joins come back as
+      // single-element arrays even though the relationship is 1:1, so
+      // unwrap them.
+      type RawLine = {
+        id: string;
+        quantity: number;
+        unit_price: number;
+        arr_amount: number;
+        opportunity:
+          | { id: string; name: string; stage: string; account: { id: string; name: string }[] | null }
+          | { id: string; name: string; stage: string; account: { id: string; name: string }[] | null }[]
+          | null;
+      };
+      const opps: OppLine[] = ((oppRes.data ?? []) as RawLine[]).map((row) => {
+        const oppArr = Array.isArray(row.opportunity) ? row.opportunity[0] : row.opportunity;
+        const accountRaw = oppArr ? (Array.isArray(oppArr.account) ? oppArr.account[0] : oppArr.account) : null;
+        const account = accountRaw && !Array.isArray(accountRaw) ? accountRaw : null;
+        return {
+          id: row.id,
+          quantity: row.quantity,
+          unit_price: row.unit_price,
+          arr_amount: row.arr_amount,
+          opportunity: oppArr
+            ? {
+                id: oppArr.id,
+                name: oppArr.name,
+                stage: oppArr.stage,
+                account,
+              }
+            : null,
+        };
+      });
       return {
-        opportunityCount: oppRes.count ?? 0,
+        opportunityCount: opps.length,
         entryCount: entryRes.count ?? 0,
+        opportunities: opps,
       };
     },
     enabled: !!productId,

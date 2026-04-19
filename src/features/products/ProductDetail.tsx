@@ -7,6 +7,7 @@ import {
   useDeleteProduct,
   useArchiveProduct,
   useUnarchiveProduct,
+  useProductReferences,
   useEntriesForProduct,
   useProductFamilies,
 } from "./api";
@@ -282,7 +283,8 @@ export function ProductDetail() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="related" className="mt-4">
+        <TabsContent value="related" className="mt-4 space-y-4">
+          <ProductOpportunitiesCard productId={product.id} />
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Price Books</CardTitle>
@@ -556,5 +558,110 @@ function ProductEditDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/* ──────────────────────────────────────────────
+   Related Opportunities (on Related tab)
+   ────────────────────────────────────────────── */
+
+function ProductOpportunitiesCard({ productId }: { productId: string }) {
+  const { data: refs, isLoading } = useProductReferences(productId);
+  const opportunities = refs?.opportunities ?? [];
+
+  // Dedupe: a product can appear on the same opp via multiple line
+  // items (different price-book tiers). Sum them up.
+  const oppRows = (() => {
+    const m = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        stage: string;
+        accountName: string | null;
+        totalArr: number;
+        lines: number;
+      }
+    >();
+    for (const line of opportunities) {
+      const opp = line.opportunity;
+      if (!opp) continue;
+      const existing = m.get(opp.id);
+      if (existing) {
+        existing.totalArr += Number(line.arr_amount) || 0;
+        existing.lines += 1;
+      } else {
+        m.set(opp.id, {
+          id: opp.id,
+          name: opp.name,
+          stage: opp.stage,
+          accountName: opp.account?.name ?? null,
+          totalArr: Number(line.arr_amount) || 0,
+          lines: 1,
+        });
+      }
+    }
+    return Array.from(m.values()).sort((a, b) => b.totalArr - a.totalArr);
+  })();
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">
+          Opportunities {oppRows.length > 0 ? `(${oppRows.length})` : ""}
+        </CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Every opportunity that has this product on its line items. Pricing on
+          existing opps is preserved if you archive or remove from a price book.
+        </p>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <Skeleton className="h-12 w-full" />
+        ) : !oppRows.length ? (
+          <p className="text-sm text-muted-foreground py-2">
+            Not on any opportunity yet.
+          </p>
+        ) : (
+          <div className="border rounded-lg overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Opportunity</TableHead>
+                  <TableHead>Account</TableHead>
+                  <TableHead>Stage</TableHead>
+                  <TableHead className="text-right">ARR (this product)</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {oppRows.map((o) => (
+                  <TableRow key={o.id} className="cursor-pointer">
+                    <TableCell className="font-medium">
+                      <Link
+                        to={`/opportunities/${o.id}`}
+                        className="hover:underline"
+                      >
+                        {o.name}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {o.accountName ?? "—"}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary" className="capitalize text-xs">
+                        {o.stage.replace(/_/g, " ")}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {formatCurrencyDetailed(o.totalArr)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
