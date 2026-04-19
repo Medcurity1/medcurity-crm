@@ -244,6 +244,9 @@ export interface Product {
   has_flat_price: boolean;
   category: string | null;
   pricing_model: string | null;
+  archived_at: string | null;
+  archived_by: string | null;
+  archive_reason: string | null;
   created_at: string;
   updated_at: string;
   created_by: string | null;

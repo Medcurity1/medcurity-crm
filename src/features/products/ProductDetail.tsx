@@ -1,13 +1,16 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, Pencil, Trash2, Cloud, User, Package } from "lucide-react";
 import {
   useProduct,
   useUpdateProduct,
   useDeleteProduct,
+  useArchiveProduct,
+  useUnarchiveProduct,
   useEntriesForProduct,
   useProductFamilies,
 } from "./api";
+import { DeleteProductDialog } from "./DeleteProductDialog";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -62,6 +65,8 @@ export function ProductDetail() {
   const { data: entries } = useEntriesForProduct(id);
   const updateMutation = useUpdateProduct();
   const deleteMutation = useDeleteProduct();
+  const archiveMutation = useArchiveProduct();
+  const unarchiveMutation = useUnarchiveProduct();
 
   const [editOpen, setEditOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -85,20 +90,37 @@ export function ProductDetail() {
     }
   }
 
+  async function handleArchive(reason: string | null) {
+    if (!product) return;
+    try {
+      await archiveMutation.mutateAsync({ id: product.id, reason });
+      toast.success(`Archived "${product.name}"`);
+      setConfirmDelete(false);
+    } catch (err) {
+      toast.error("Failed to archive: " + errorMessage(err));
+    }
+  }
+
+  async function handleUnarchive() {
+    if (!product) return;
+    try {
+      await unarchiveMutation.mutateAsync(product.id);
+      toast.success(`Unarchived "${product.name}"`);
+    } catch (err) {
+      toast.error("Failed: " + errorMessage(err));
+    }
+  }
+
   async function handleDelete(cascade: boolean) {
     if (!product) return;
     try {
       await deleteMutation.mutateAsync({ id: product.id, cascade });
-      toast.success(
-        cascade
-          ? `Deleted "${product.name}" and removed from all price books`
-          : `Deleted "${product.name}"`
-      );
+      toast.success(`Deleted "${product.name}"`);
       navigate("/products");
     } catch (err) {
       const msg = errorMessage(err);
       if (msg.toLowerCase().includes("foreign") || msg.toLowerCase().includes("violates")) {
-        toast.error("Can't delete — product is still in a price book. Use 'Delete + remove from price books' instead.");
+        toast.error("Can't delete — product is on an opportunity. Use Archive instead.");
       } else {
         toast.error("Failed: " + msg);
       }
@@ -118,10 +140,21 @@ export function ProductDetail() {
         </Link>
         {isAdmin && (
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
-              <Pencil className="h-4 w-4 mr-2" />
-              Edit
-            </Button>
+            {product.archived_at ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleUnarchive}
+                disabled={unarchiveMutation.isPending}
+              >
+                Unarchive
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+                <Pencil className="h-4 w-4 mr-2" />
+                Edit
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -129,7 +162,7 @@ export function ProductDetail() {
               onClick={() => setConfirmDelete(true)}
             >
               <Trash2 className="h-4 w-4 mr-2" />
-              Delete
+              Remove
             </Button>
           </div>
         )}
@@ -155,6 +188,11 @@ export function ProductDetail() {
               ) : (
                 <Badge variant="secondary" className="bg-amber-100 text-amber-700 gap-1">
                   <User className="h-3 w-3" /> Manual
+                </Badge>
+              )}
+              {product.archived_at && (
+                <Badge variant="secondary" className="bg-rose-100 text-rose-700">
+                  Archived
                 </Badge>
               )}
               <div className="flex items-center gap-2 ml-2">
@@ -315,182 +353,15 @@ export function ProductDetail() {
       />
 
       {/* Delete confirmation */}
-      <DeleteProductFlow
-        open={confirmDelete}
+      <DeleteProductDialog
+        product={confirmDelete ? product : null}
+        isAdmin={isAdmin}
         onClose={() => setConfirmDelete(false)}
-        productName={product.name}
-        entries={entries ?? []}
-        isLoading={false}
-        isPending={deleteMutation.isPending}
-        onConfirm={handleDelete}
+        onArchive={handleArchive}
+        onDelete={handleDelete}
+        isPending={deleteMutation.isPending || archiveMutation.isPending}
       />
     </div>
-  );
-}
-
-// ──────────────────────────────────────────────
-// Delete flow — shared with ProductsPage. Keeps the same UX:
-// - List each price book as a "navigate here" entry
-// - Plus a single destructive "Delete entirely" with a 2-click guard
-// ──────────────────────────────────────────────
-
-function DeleteProductFlow({
-  open,
-  onClose,
-  productName,
-  entries,
-  isLoading,
-  isPending,
-  onConfirm,
-}: {
-  open: boolean;
-  onClose: () => void;
-  productName: string;
-  entries: Array<{
-    id: string;
-    price_book_id: string;
-    price_book?: { id: string; name: string } | null;
-  }>;
-  isLoading: boolean;
-  isPending: boolean;
-  onConfirm: (cascade: boolean) => void;
-}) {
-  const navigate = useNavigate();
-  const [confirming, setConfirming] = useState(false);
-
-  const byBook = useMemo(() => {
-    const m = new Map<string, { id: string; name: string; entryCount: number }>();
-    for (const e of entries) {
-      const key = e.price_book_id;
-      const existing = m.get(key);
-      if (existing) {
-        existing.entryCount += 1;
-      } else {
-        m.set(key, {
-          id: e.price_book_id,
-          name: e.price_book?.name ?? "Untitled Price Book",
-          entryCount: 1,
-        });
-      }
-    }
-    return Array.from(m.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [entries]);
-
-  const inUse = byBook.length > 0;
-
-  useEffect(() => {
-    if (!open) setConfirming(false);
-  }, [open]);
-
-  function navigateToBook(bookId: string) {
-    onClose();
-    navigate(`/products?tab=price_books&expand=${bookId}`);
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Delete "{productName}"?</DialogTitle>
-          <DialogDescription>
-            {inUse
-              ? "This product is in one or more price books. Choose what you want to do."
-              : "This product isn't in any price book. Safe to delete."}
-          </DialogDescription>
-        </DialogHeader>
-
-        {isLoading ? null : inUse ? (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Remove from one price book</p>
-              <p className="text-xs text-muted-foreground">
-                Opens the price book and lets you remove just this product.
-              </p>
-              <div className="border rounded-md divide-y">
-                {byBook.map((b) => (
-                  <button
-                    type="button"
-                    key={b.id}
-                    onClick={() => navigateToBook(b.id)}
-                    className="w-full px-3 py-2 text-sm text-left hover:bg-muted transition-colors flex items-center justify-between gap-2"
-                  >
-                    <span>
-                      <span className="font-medium">{b.name}</span>
-                      <span className="text-muted-foreground ml-2 text-xs">
-                        ({b.entryCount} entr{b.entryCount === 1 ? "y" : "ies"})
-                      </span>
-                    </span>
-                    <span className="text-xs text-primary">Open →</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <hr />
-
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Or delete the product entirely</p>
-              <p className="text-xs text-muted-foreground">
-                Removes "{productName}" from all {byBook.length} price book
-                {byBook.length === 1 ? "" : "s"} and deletes the product. Cannot be undone.
-              </p>
-              {!confirming ? (
-                <Button
-                  variant="destructive"
-                  onClick={() => setConfirming(true)}
-                  disabled={isPending}
-                  className="w-full"
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete product completely
-                </Button>
-              ) : (
-                <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 space-y-2">
-                  <p className="text-sm font-medium text-destructive">
-                    Really delete? This wipes {entries.length} price-book entr
-                    {entries.length === 1 ? "y" : "ies"} too.
-                  </p>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setConfirming(false)}
-                      disabled={isPending}
-                    >
-                      Back
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => onConfirm(true)}
-                      disabled={isPending}
-                      className="flex-1"
-                    >
-                      {isPending ? "Deleting..." : "Yes, delete everything"}
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : null}
-
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={isPending}>
-            Cancel
-          </Button>
-          {!inUse && !isLoading && (
-            <Button
-              variant="destructive"
-              onClick={() => onConfirm(false)}
-              disabled={isPending}
-            >
-              {isPending ? "Deleting..." : "Delete"}
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 

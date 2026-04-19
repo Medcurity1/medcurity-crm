@@ -201,6 +201,7 @@ export function useProducts() {
         .from("products")
         .select("*")
         .eq("is_active", true)
+        .is("archived_at", null) // hide archived products from opp pickers
         .order("name");
       if (error) throw error;
       return data;

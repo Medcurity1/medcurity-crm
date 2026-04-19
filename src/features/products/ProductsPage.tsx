@@ -1,11 +1,13 @@
-import { useState, useEffect, useMemo } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { Plus, Trash2, ChevronDown, ChevronRight, Package, Cloud, User, Settings, X } from "lucide-react";
 import {
   useProducts,
   useCreateProduct,
   useUpdateProduct,
   useDeleteProduct,
+  useArchiveProduct,
+  useUnarchiveProduct,
   useEntriesForProduct,
   useProductFamilies,
   useCreateProductFamily,
@@ -16,6 +18,7 @@ import {
   usePriceBookEntries,
   useSetPriceBookEntryPrice,
 } from "./api";
+import { DeleteProductDialog } from "./DeleteProductDialog";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
@@ -117,7 +120,11 @@ export function ProductsPage() {
 
 function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
   const [showInactive, setShowInactive] = useState(false);
-  const { data: products, isLoading } = useProducts(showInactive);
+  const [showArchived, setShowArchived] = useState(false);
+  const { data: products, isLoading } = useProducts({
+    includeInactive: showInactive,
+    includeArchived: isAdmin && showArchived,
+  });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -125,6 +132,8 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
   const [familiesOpen, setFamiliesOpen] = useState(false);
   const updateMutation = useUpdateProduct();
   const deleteMutation = useDeleteProduct();
+  const archiveMutation = useArchiveProduct();
+  const unarchiveMutation = useUnarchiveProduct();
 
   function openNew() {
     setEditingProduct(null);
@@ -145,20 +154,29 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
-  async function handleConfirmDelete(cascade: boolean) {
+  async function handleArchive(reason: string | null) {
     if (!deleteTarget) return;
     try {
-      await deleteMutation.mutateAsync({ id: deleteTarget.id, cascade });
-      toast.success(
-        cascade
-          ? `Deleted "${deleteTarget.name}" and removed from all price books`
-          : `Deleted "${deleteTarget.name}"`
-      );
+      await archiveMutation.mutateAsync({ id: deleteTarget.id, reason });
+      toast.success(`Archived "${deleteTarget.name}"`);
+      setDeleteTarget(null);
+    } catch (err) {
+      toast.error("Failed to archive: " + errorMessage(err));
+    }
+  }
+
+  async function handleDelete(cascadeEntries: boolean) {
+    if (!deleteTarget) return;
+    try {
+      await deleteMutation.mutateAsync({ id: deleteTarget.id, cascade: cascadeEntries });
+      toast.success(`Deleted "${deleteTarget.name}"`);
       setDeleteTarget(null);
     } catch (err) {
       const msg = errorMessage(err);
       if (msg.toLowerCase().includes("foreign") || msg.toLowerCase().includes("violates")) {
-        toast.error("Can't delete — product is still in a price book. Try 'Delete + remove from price books' instead.");
+        toast.error(
+          "Can't delete — product is on an opportunity. Use Archive instead to preserve revenue history."
+        );
       } else {
         toast.error("Failed to delete: " + msg);
       }
@@ -192,6 +210,21 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
               Show inactive
             </Label>
           </div>
+          {isAdmin && (
+            <div className="flex items-center gap-2">
+              <Switch
+                id="show-archived"
+                checked={showArchived}
+                onCheckedChange={setShowArchived}
+              />
+              <Label
+                htmlFor="show-archived"
+                className="text-sm text-muted-foreground cursor-pointer"
+              >
+                Show archived (admin)
+              </Label>
+            </div>
+          )}
           {(importedCount > 0 || manualCount > 0) && (
             <p className="text-sm text-muted-foreground">
               {importedCount} imported · {manualCount} manual
@@ -262,15 +295,22 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
                       <TableCell className="text-muted-foreground">{product.code}</TableCell>
                       <TableCell className="text-muted-foreground">{product.product_family ?? "\u2014"}</TableCell>
                       <TableCell>
-                        {product.sf_id ? (
-                          <Badge variant="secondary" className="bg-blue-100 text-blue-700 gap-1">
-                            <Cloud className="h-3 w-3" /> Imported
-                          </Badge>
-                        ) : (
-                          <Badge variant="secondary" className="bg-amber-100 text-amber-700 gap-1">
-                            <User className="h-3 w-3" /> Manual
-                          </Badge>
-                        )}
+                        <div className="flex flex-wrap gap-1">
+                          {product.sf_id ? (
+                            <Badge variant="secondary" className="bg-blue-100 text-blue-700 gap-1">
+                              <Cloud className="h-3 w-3" /> Imported
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary" className="bg-amber-100 text-amber-700 gap-1">
+                              <User className="h-3 w-3" /> Manual
+                            </Badge>
+                          )}
+                          {product.archived_at && (
+                            <Badge variant="secondary" className="bg-rose-100 text-rose-700">
+                              Archived
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Badge variant="secondary" className="capitalize">
@@ -293,9 +333,27 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
                       {isAdmin && (
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <div className="flex gap-1">
-                            <Button variant="ghost" size="sm" onClick={() => openEdit(product)}>
-                              Edit
-                            </Button>
+                            {product.archived_at ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={unarchiveMutation.isPending}
+                                onClick={async () => {
+                                  try {
+                                    await unarchiveMutation.mutateAsync(product.id);
+                                    toast.success(`Unarchived "${product.name}"`);
+                                  } catch (err) {
+                                    toast.error("Failed: " + errorMessage(err));
+                                  }
+                                }}
+                              >
+                                Unarchive
+                              </Button>
+                            ) : (
+                              <Button variant="ghost" size="sm" onClick={() => openEdit(product)}>
+                                Edit
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="icon"
@@ -332,181 +390,15 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
 
       <DeleteProductDialog
         product={deleteTarget}
+        isAdmin={isAdmin}
         onClose={() => setDeleteTarget(null)}
-        onConfirm={handleConfirmDelete}
-        isPending={deleteMutation.isPending}
+        onArchive={handleArchive}
+        onDelete={handleDelete}
+        isPending={deleteMutation.isPending || archiveMutation.isPending}
       />
 
       <ManageFamiliesDialog open={familiesOpen} onOpenChange={setFamiliesOpen} />
     </>
-  );
-}
-
-/* ──────────────────────────────────────────────
-   Delete Product Dialog
-   ────────────────────────────────────────────── */
-
-function DeleteProductDialog({
-  product,
-  onClose,
-  onConfirm,
-  isPending,
-}: {
-  product: Product | null;
-  onClose: () => void;
-  onConfirm: (cascade: boolean) => void;
-  isPending: boolean;
-}) {
-  const navigate = useNavigate();
-  const { data: entries, isLoading } = useEntriesForProduct(product?.id);
-
-  // Group entries by price book so the user sees "I'm in Book A and
-  // Book B" rather than a flat list of entries.
-  const byBook = useMemo(() => {
-    const m = new Map<
-      string,
-      { id: string; name: string; entryCount: number }
-    >();
-    for (const e of entries ?? []) {
-      const key = e.price_book_id;
-      const existing = m.get(key);
-      if (existing) {
-        existing.entryCount += 1;
-      } else {
-        m.set(key, {
-          id: e.price_book_id,
-          name: e.price_book?.name ?? "Untitled Price Book",
-          entryCount: 1,
-        });
-      }
-    }
-    return Array.from(m.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [entries]);
-
-  const inUse = byBook.length > 0;
-  const [confirming, setConfirming] = useState(false);
-
-  function navigateToBook(bookId: string) {
-    onClose();
-    navigate(`/products?tab=price_books&expand=${bookId}`);
-  }
-
-  // Reset confirming state when dialog reopens
-  useEffect(() => {
-    if (!product) setConfirming(false);
-  }, [product]);
-
-  return (
-    <Dialog open={!!product} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Delete "{product?.name}"?</DialogTitle>
-          <DialogDescription>
-            {inUse
-              ? "This product is in one or more price books. Choose what you want to do."
-              : "This product isn't in any price book. Safe to delete."}
-          </DialogDescription>
-        </DialogHeader>
-
-        {isLoading ? (
-          <Skeleton className="h-20 w-full" />
-        ) : inUse ? (
-          <div className="space-y-4">
-            {/* Option 1: navigate to a specific price book to remove */}
-            <div className="space-y-2">
-              <p className="text-sm font-medium">
-                Remove from one price book
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Opens the price book and lets you remove just this product. Other entries stay intact.
-              </p>
-              <div className="border rounded-md divide-y">
-                {byBook.map((b) => (
-                  <button
-                    type="button"
-                    key={b.id}
-                    onClick={() => navigateToBook(b.id)}
-                    className="w-full px-3 py-2 text-sm text-left hover:bg-muted transition-colors flex items-center justify-between gap-2"
-                  >
-                    <span>
-                      <span className="font-medium">{b.name}</span>
-                      <span className="text-muted-foreground ml-2 text-xs">
-                        ({b.entryCount} entr{b.entryCount === 1 ? "y" : "ies"})
-                      </span>
-                    </span>
-                    <span className="text-xs text-primary">Open →</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <hr />
-
-            {/* Option 2: cascade delete */}
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Or delete the product entirely</p>
-              <p className="text-xs text-muted-foreground">
-                Removes "{product?.name}" from all {byBook.length} price book
-                {byBook.length === 1 ? "" : "s"} and deletes the product.
-                Cannot be undone.
-              </p>
-              {!confirming ? (
-                <Button
-                  variant="destructive"
-                  onClick={() => setConfirming(true)}
-                  disabled={isPending}
-                  className="w-full"
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete product completely
-                </Button>
-              ) : (
-                <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 space-y-2">
-                  <p className="text-sm font-medium text-destructive">
-                    Really delete? This wipes {entries?.length ?? 0} price-book entr
-                    {(entries?.length ?? 0) === 1 ? "y" : "ies"} too.
-                  </p>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setConfirming(false)}
-                      disabled={isPending}
-                    >
-                      Back
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => onConfirm(true)}
-                      disabled={isPending}
-                      className="flex-1"
-                    >
-                      {isPending ? "Deleting..." : "Yes, delete everything"}
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : null}
-
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={isPending}>
-            Cancel
-          </Button>
-          {!inUse && !isLoading && (
-            <Button
-              variant="destructive"
-              onClick={() => onConfirm(false)}
-              disabled={isPending}
-            >
-              {isPending ? "Deleting..." : "Delete"}
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 

@@ -28,17 +28,110 @@ export function useProduct(productId: string | undefined) {
 
 // ─── Products ────────────────────────────────────────────
 
-export function useProducts(includeInactive = false) {
+export function useProducts(
+  options: { includeInactive?: boolean; includeArchived?: boolean } | boolean = false
+) {
+  // Back-compat: callers used to pass a bare boolean for includeInactive.
+  const opts =
+    typeof options === "boolean"
+      ? { includeInactive: options, includeArchived: false }
+      : { includeInactive: false, includeArchived: false, ...options };
   return useQuery({
-    queryKey: ["products", { includeInactive }],
+    queryKey: ["products", opts],
     queryFn: async () => {
       let query = supabase.from("products").select("*").order("name");
-      if (!includeInactive) {
+      if (!opts.includeInactive) {
         query = query.eq("is_active", true);
+      }
+      if (!opts.includeArchived) {
+        // Note: RLS already hides archived rows from non-admins. This
+        // filter ensures admins see only active products in the default
+        // pickers without changing their backend role.
+        query = query.is("archived_at", null);
       }
       const { data, error } = await query;
       if (error) throw error;
       return data as Product[];
+    },
+  });
+}
+
+// Returns the number of opportunities and price-book entries that
+// reference the given product. Used by the delete dialog to decide
+// between "real delete" and "archive".
+export function useProductReferences(productId: string | undefined) {
+  return useQuery({
+    queryKey: ["product_references", productId],
+    queryFn: async () => {
+      if (!productId) throw new Error("Missing product id");
+      const [oppRes, entryRes] = await Promise.all([
+        supabase
+          .from("opportunity_products")
+          .select("id", { count: "exact", head: true })
+          .eq("product_id", productId),
+        supabase
+          .from("price_book_entries")
+          .select("id", { count: "exact", head: true })
+          .eq("product_id", productId),
+      ]);
+      if (oppRes.error) throw oppRes.error;
+      if (entryRes.error) throw entryRes.error;
+      return {
+        opportunityCount: oppRes.count ?? 0,
+        entryCount: entryRes.count ?? 0,
+      };
+    },
+    enabled: !!productId,
+  });
+}
+
+export function useArchiveProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { id: string; reason?: string | null }) => {
+      const user = (await supabase.auth.getUser()).data.user;
+      if (!user) throw new Error("not signed in");
+      const { data, error } = await supabase
+        .from("products")
+        .update({
+          archived_at: new Date().toISOString(),
+          archived_by: user.id,
+          archive_reason: vars.reason ?? null,
+          is_active: false,
+        })
+        .eq("id", vars.id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data as Product;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["products"] });
+      qc.invalidateQueries({ queryKey: ["product"] });
+    },
+  });
+}
+
+export function useUnarchiveProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data, error } = await supabase
+        .from("products")
+        .update({
+          archived_at: null,
+          archived_by: null,
+          archive_reason: null,
+        })
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data as Product;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["products"] });
+      qc.invalidateQueries({ queryKey: ["product"] });
     },
   });
 }
