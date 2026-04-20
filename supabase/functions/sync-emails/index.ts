@@ -213,21 +213,31 @@ async function fetchGmailEmails(
   const sinceEpoch = Math.floor(new Date(sinceDate).getTime() / 1000);
   const query = `after:${sinceEpoch}`;
 
-  // Step 1 -- list message IDs
-  const listRes = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=100`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
-
-  if (!listRes.ok) {
-    const text = await listRes.text();
-    throw new Error(`Gmail list failed: ${listRes.status} ${text}`);
+  // Step 1 -- list message IDs, following pageToken across up to 30 pages
+  // (~3000 emails). First-ever sync does a 90-day backfill so we need this
+  // for any rep with decent email volume.
+  const MAX_PAGES = 30;
+  const messageIds: string[] = [];
+  let pageToken: string | undefined;
+  let pageCount = 0;
+  while (pageCount < MAX_PAGES) {
+    const pageParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "";
+    const listRes = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=100${pageParam}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!listRes.ok) {
+      const text = await listRes.text();
+      throw new Error(`Gmail list failed: ${listRes.status} ${text}`);
+    }
+    const listData = await listRes.json();
+    for (const m of (listData.messages ?? []) as { id: string }[]) {
+      messageIds.push(m.id);
+    }
+    pageToken = listData.nextPageToken as string | undefined;
+    pageCount++;
+    if (!pageToken) break;
   }
-
-  const listData = await listRes.json();
-  const messageIds: string[] = (listData.messages ?? []).map(
-    (m: { id: string }) => m.id
-  );
 
   if (messageIds.length === 0) return [];
 
@@ -295,20 +305,25 @@ async function fetchOutlookEmails(
   const isoSince = new Date(sinceDate).toISOString();
   const filter = `receivedDateTime ge ${isoSince}`;
 
-  const res = await fetch(
-    `https://graph.microsoft.com/v1.0/me/messages?$filter=${encodeURIComponent(filter)}&$top=100&$select=id,subject,bodyPreview,body,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,conversationId&$orderby=receivedDateTime desc`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Outlook fetch failed: ${res.status} ${text}`);
-  }
-
-  const data = await res.json();
+  // Walk @odata.nextLink until no more pages. Capped at 30 pages (≈3000 emails)
+  // as a safety ceiling — a rep with more than that in 90 days is a one-off
+  // that can be run multiple times if needed.
+  const MAX_PAGES = 30;
   const emails: ParsedEmail[] = [];
+  let url: string | null =
+    `https://graph.microsoft.com/v1.0/me/messages?$filter=${encodeURIComponent(filter)}&$top=100&$select=id,subject,bodyPreview,body,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,conversationId&$orderby=receivedDateTime desc`;
+  let pageCount = 0;
 
-  for (const msg of data.value ?? []) {
+  while (url && pageCount < MAX_PAGES) {
+    const res: Response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Outlook fetch failed: ${res.status} ${text}`);
+    }
+    const data = await res.json();
+    for (const msg of data.value ?? []) {
     const from =
       msg.from?.emailAddress?.address ?? "";
     const to = (msg.toRecipients ?? []).map(
@@ -343,6 +358,9 @@ async function fetchOutlookEmails(
       direction,
       threadId: msg.conversationId ?? null,
     });
+    }
+    url = (data["@odata.nextLink"] as string | undefined) ?? null;
+    pageCount++;
   }
 
   return emails;
@@ -525,10 +543,16 @@ async function syncConnection(
     const userEmail = conn.email_address ?? "";
 
     // 2. Determine the starting point for this sync.
+    //    First-ever sync (last_sync_at is null) backfills the last 90 days
+    //    so newly-connected users get their recent email history logged
+    //    against matching contacts. Every subsequent sync picks up from
+    //    last_sync_at.
     //    We subtract a 2-minute overlap to ride over clock drift, and rely
     //    on the activities.external_message_id dedup to prevent duplicates.
+    const INITIAL_BACKFILL_DAYS = 90;
     const baseSince =
-      conn.last_sync_at ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      conn.last_sync_at ??
+      new Date(Date.now() - INITIAL_BACKFILL_DAYS * 24 * 60 * 60 * 1000).toISOString();
     const sinceDate = new Date(
       new Date(baseSince).getTime() - 2 * 60 * 1000
     ).toISOString();
