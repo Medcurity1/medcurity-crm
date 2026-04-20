@@ -1506,6 +1506,58 @@ export function SalesforceImport() {
   const [retryEdits, setRetryEdits] = useState<Record<number, Record<string, string>>>({});
   const [retryingRows, setRetryingRows] = useState(false);
 
+  // Salesforce Product2.csv side-load for PBE imports.
+  // SF PricebookEntry exports only carry Product2Id (no name), so when our
+  // product import collapsed FTE variants, most PBE rows can't resolve their
+  // SF product ID. This map gives us SF product ID → name so we can fall
+  // back to FTE-stripped name lookup against our stored canonical products.
+  const [sfProductMap, setSfProductMap] = useState<
+    Map<string, { name: string; code: string | null }>
+  >(new Map());
+  const [productCsvLoaded, setProductCsvLoaded] = useState(false);
+  const productFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleProductFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const text = evt.target?.result as string;
+        if (!text) return;
+
+        const parsed = parseCSV(text);
+        if (parsed.length < 2) { toast.error("Product CSV is empty"); return; }
+        const headers = parsed[0];
+        const rows = parsed.slice(1);
+        const idIdx = headers.findIndex((h: string) => h.toLowerCase() === "id");
+        const nameIdx = headers.findIndex((h: string) => h.toLowerCase() === "name");
+        const codeIdx = headers.findIndex((h: string) => h.toLowerCase() === "productcode");
+
+        if (idIdx === -1 || nameIdx === -1) {
+          toast.error("Product CSV must have 'Id' and 'Name' columns");
+          return;
+        }
+
+        const map = new Map<string, { name: string; code: string | null }>();
+        for (const row of rows) {
+          const id = row[idIdx]?.trim();
+          if (!id) continue;
+          const name = row[nameIdx]?.trim() || "";
+          const code = codeIdx >= 0 ? (row[codeIdx]?.trim() || null) : null;
+          if (name) map.set(id, { name, code });
+        }
+
+        setSfProductMap(map);
+        setProductCsvLoaded(true);
+        toast.success(`Loaded ${map.size} Salesforce products for PBE matching`);
+      };
+      reader.readAsText(file);
+    },
+    []
+  );
+
   /* ---------- SF User CSV handling ---------- */
 
   const handleUserFileChange = useCallback(
@@ -2075,6 +2127,40 @@ export function SalesforceImport() {
                 const productId = productSfMap.get(value);
                 if (productId) {
                   record.product_id = productId;
+                }
+              }
+              // Salesforce PricebookEntry exports DON'T include product
+              // names. After FTE-cleanup most product SF IDs no longer
+              // match. If the user side-loaded Product2.csv, look up the
+              // SF ID there to get the original name, strip the FTE
+              // prefix, and resolve against our stored canonical
+              // products by name / code / slug.
+              if (!record.product_id && sfProductMap.size > 0) {
+                const sfProd = sfProductMap.get(value);
+                if (sfProd) {
+                  const { base } = stripFtePrefix(sfProd.name);
+                  const cleaned = base.trim();
+                  // Stash the resolved SF name for downstream use
+                  // (e.g. validation error message, dedup keys).
+                  record.__product_name_raw = sfProd.name;
+
+                  // a. exact lowercase
+                  let pid = productNameMap?.get(cleaned.toLowerCase());
+                  // b. whitespace-collapsed
+                  if (!pid && productNameMap) {
+                    pid = productNameMap.get(cleaned.replace(/\s+/g, " ").toLowerCase());
+                  }
+                  // c. SF ProductCode (if present in side-load)
+                  if (!pid && productCodeMap && sfProd.code) {
+                    pid = productCodeMap.get(sfProd.code);
+                  }
+                  // d. slugified base
+                  if (!pid && productCodeMap) {
+                    pid = productCodeMap.get(slugifyCode(cleaned));
+                  }
+                  if (pid) {
+                    record.product_id = pid;
+                  }
                 }
               }
               continue;
@@ -3179,6 +3265,49 @@ export function SalesforceImport() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Step 2c: Side-load SF Product2.csv when importing PBE.
+          Salesforce PricebookEntry CSVs DON'T carry product names —
+          only Product2Id. After FTE-cleanup most of those IDs no
+          longer match a stored product. Loading Product2.csv here
+          lets the importer resolve SF Product2Id → original name →
+          (FTE-stripped) → canonical product. */}
+      {entity === "price_book_entries" && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">
+              Step 2.5: Load Salesforce Products (for Pricebook Entry matching)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground mb-3">
+              Upload your <strong>Product2.csv</strong> from the Salesforce export.
+              SF PricebookEntry rows reference products by ID only — without this,
+              entries whose SF product was collapsed during FTE cleanup can't
+              find their canonical product in the CRM.
+              {!productCsvLoaded && (
+                <span className="text-amber-700 dark:text-amber-300">
+                  {" "}Without this, most rows will fail with "Couldn't find product".
+                </span>
+              )}
+            </p>
+            <div className="flex items-center gap-4">
+              <Input
+                ref={productFileInputRef}
+                type="file"
+                accept=".csv"
+                onChange={handleProductFileChange}
+                className="max-w-sm"
+              />
+              {productCsvLoaded && (
+                <div className="flex items-center gap-2 text-sm text-green-600 font-medium">
+                  ✅ {sfProductMap.size} Salesforce products loaded
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Step 2b: Upload Entity CSV */}
       <Card>
