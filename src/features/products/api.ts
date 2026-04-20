@@ -289,8 +289,8 @@ export function usePriceBooks() {
       // (e.g. "Standard Price Book") fall to the bottom.
       const list = data as PriceBook[];
       return [...list].sort((a, b) => {
-        const aFte = parseFteRange(a.fte_range);
-        const bFte = parseFteRange(b.fte_range);
+        const aFte = parseFteRange(a.fte_range, a.name);
+        const bFte = parseFteRange(b.fte_range, b.name);
         if (aFte === null && bFte === null) return a.name.localeCompare(b.name);
         if (aFte === null) return 1;
         if (bFte === null) return -1;
@@ -300,12 +300,21 @@ export function usePriceBooks() {
   });
 }
 
-// Returns the lower bound of an fte_range string ("21-50" → 21, "501+" → 501).
-// null when not parseable so we can sort it to the bottom.
-function parseFteRange(s: string | null): number | null {
-  if (!s) return null;
-  const m = s.match(/^(\d+)/);
-  return m ? parseInt(m[1], 10) : null;
+// Returns the lower bound of a price book's FTE tier. First tries the
+// fte_range column; if null (not populated for some imported books or
+// manually-created ones), falls back to extracting from the name itself
+// (e.g. "1-20 Pricebook" → 1). null only when truly unparseable so we
+// can sort flat-rate books like "Standard Price Book" to the bottom.
+function parseFteRange(s: string | null, name?: string): number | null {
+  if (s) {
+    const m = s.match(/^(\d+)/);
+    if (m) return parseInt(m[1], 10);
+  }
+  if (name) {
+    const m = name.match(/(\d+)\s*-\s*\d+|(\d+)\s*\+/);
+    if (m) return parseInt(m[1] ?? m[2], 10);
+  }
+  return null;
 }
 
 export function useDeletePriceBook() {

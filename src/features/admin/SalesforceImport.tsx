@@ -1882,11 +1882,27 @@ export function SalesforceImport() {
         // a PBE row referencing SF product "51-100 SRA" no longer has a matching
         // sf_id (we collapsed it), but it DOES still carry the product name in
         // the CSV. We strip the FTE prefix and look up by the base name.
-        productNameMap = new Map(
-          (products ?? [])
-            .filter((p) => p.name)
-            .map((p) => [(p.name as string).trim().toLowerCase(), p.id as string])
-        );
+        //
+        // We also strip FTE on the *stored* side defensively in case a product
+        // somehow has its FTE prefix still in the name (e.g. imported before
+        // the regex fix). And we add slug entries so PBE rows whose product
+        // name slugifies to a code we already have can still match.
+        productNameMap = new Map();
+        for (const p of products ?? []) {
+          if (!p.name) continue;
+          const id = p.id as string;
+          const rawName = (p.name as string).trim();
+          // Add the raw name lowercased
+          productNameMap.set(rawName.toLowerCase(), id);
+          // Add the FTE-stripped version (in case stored name still has prefix)
+          const { base } = stripFtePrefix(rawName);
+          if (base) productNameMap.set(base.toLowerCase(), id);
+          // Add slugified versions to both code and name maps as a fallback
+          if (base) {
+            const slug = slugifyCode(base);
+            if (slug && !productCodeMap.has(slug)) productCodeMap.set(slug, id);
+          }
+        }
 
         // Build price book lookups — PBE imports resolve the source SF
         // price book by sf_id (preferred) or name (fallback) so all 12
@@ -2109,17 +2125,30 @@ export function SalesforceImport() {
 
             // Product name — used as a FALLBACK lookup for price book entries
             // when product_sf_id didn't resolve (happens after FTE cleanup
-            // collapses tier-specific SF products). We strip any FTE prefix
-            // and match case-insensitively on the cleaned base name.
+            // collapses tier-specific SF products). We try multiple
+            // normalizations because SF product names sometimes carry weird
+            // whitespace, punctuation, or case differences.
             if (field === "product_name") {
               if (!record.product_id && productNameMap) {
                 const { base } = stripFtePrefix(value);
-                const normalized = base.trim().toLowerCase();
-                const productId = productNameMap.get(normalized);
+                const cleaned = base.trim();
+                // 1. exact lowercase match against base
+                let productId = productNameMap.get(cleaned.toLowerCase());
+                // 2. collapse internal whitespace runs
+                if (!productId) {
+                  const collapsed = cleaned.replace(/\s+/g, " ").toLowerCase();
+                  productId = productNameMap.get(collapsed);
+                }
+                // 3. slugified base — matches the code we generated for the
+                // canonical product (codes look like "compliance-officer-training")
+                if (!productId && productCodeMap) {
+                  productId = productCodeMap.get(slugifyCode(cleaned));
+                }
                 if (productId) {
                   record.product_id = productId;
                 }
               }
+              record.__product_name_raw = value;
               continue;
             }
 
@@ -2464,7 +2493,25 @@ export function SalesforceImport() {
             continue;
           }
           if (entity === "price_book_entries" && (!record.product_id || !record.price_book_id)) {
-            const errMsg = "Missing product or price book reference";
+            // Build a specific error so the user can see WHICH lookup failed
+            // and what the offending value was. This is much more debuggable
+            // than a generic "Missing product or price book reference".
+            const missingParts: string[] = [];
+            if (!record.product_id) {
+              const productName =
+                (record.__product_name_raw as string | undefined) ?? "(no name)";
+              missingParts.push(`product "${productName}"`);
+            }
+            if (!record.price_book_id) {
+              const bookName =
+                (record.__price_book_name_raw as string | undefined) ?? "(no name)";
+              missingParts.push(`price book "${bookName}"`);
+            }
+            const errMsg = `Couldn't find ${missingParts.join(" and ")} in CRM. Make sure ${
+              !record.product_id ? "products" : ""
+            }${!record.product_id && !record.price_book_id ? " and " : ""}${
+              !record.price_book_id ? "price books" : ""
+            } were imported first.`;
             errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
             failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
             failedCount[0]++;
