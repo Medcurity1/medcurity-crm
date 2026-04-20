@@ -248,6 +248,22 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     }
   }, [watchedAccountId, selectedAccount, isEditing, setValue]);
 
+  // Keep Amount = Subtotal − Discount so reps immediately see the impact
+  // of a discount on the deal total. Server-side we also recompute this
+  // whenever line items change, but recalculating here keeps the form
+  // feedback tight.
+  const watchedSubtotal = watch("subtotal");
+  const watchedDiscount = watch("discount");
+  useEffect(() => {
+    const sub = Number(watchedSubtotal) || 0;
+    const disc = Number(watchedDiscount) || 0;
+    const next = Math.max(0, sub - disc);
+    // Only set if it actually changed (prevents dirty-form toggling).
+    if (next !== Number(watch("amount"))) {
+      setValue("amount", next, { shouldDirty: true });
+    }
+  }, [watchedSubtotal, watchedDiscount, setValue, watch]);
+
   function emptyToNull(v: unknown): unknown {
     if (v === "" || v === undefined) return null;
     return v;
@@ -543,36 +559,51 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
 
             {/* ---- Financial ---- */}
             <FormSection title="Financial">
+              <p className="text-xs text-muted-foreground mb-3">
+                <span className="font-medium text-foreground">Amount</span> and{" "}
+                <span className="font-medium text-foreground">Subtotal</span> are
+                auto-calculated from the products on the opportunity. To change the
+                total, add or remove products or adjust their unit prices. Use{" "}
+                <span className="font-medium text-foreground">Discount</span> for
+                any blanket price reductions and <span className="font-medium text-foreground">Promo Code</span> if
+                the discount is tied to a marketing campaign.
+              </p>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="amount">Amount ($) *<RequiredIndicator fieldKey="amount" requiredFields={requiredKeys} /></Label>
                   <Input id="amount" type="number" step="0.01" disabled className="bg-muted" {...register("amount")} />
+                  <p className="text-xs text-muted-foreground">Total ARR — auto-calculated from line items (subtotal − discount).</p>
                   {errors.amount && <p className="text-sm text-destructive">{errors.amount.message}</p>}
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="subtotal">Subtotal ($)</Label>
                   <Input id="subtotal" type="number" step="0.01" disabled className="bg-muted" {...register("subtotal")} />
+                  <p className="text-xs text-muted-foreground">Sum of all product line items before discount.</p>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="discount">Discount ($)</Label>
-                  <Input id="discount" type="number" step="0.01" disabled className="bg-muted" {...register("discount")} />
+                  <Input id="discount" type="number" step="0.01" {...register("discount")} />
+                  <p className="text-xs text-muted-foreground">Dollar amount taken off the subtotal. Updates the Amount.</p>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="promo_code">Promo Code</Label>
                   <Input id="promo_code" {...register("promo_code")} />
+                  <p className="text-xs text-muted-foreground">Optional — tag a discount with a campaign code.</p>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="service_amount">Service Amount ($)</Label>
                   <Input id="service_amount" type="number" step="0.01" {...register("service_amount")} />
+                  <p className="text-xs text-muted-foreground">Portion of the deal that's services (onboarding, SRA, etc.).</p>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="product_amount">Product Amount ($)</Label>
                   <Input id="product_amount" type="number" step="0.01" {...register("product_amount")} />
+                  <p className="text-xs text-muted-foreground">Portion that's recurring product ARR (Platform, training, etc.).</p>
                 </div>
 
                 <div className="flex items-center gap-2 pt-6">

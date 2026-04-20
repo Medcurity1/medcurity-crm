@@ -90,6 +90,7 @@ export function LeadForm() {
       credential: "",
       phone_ext: "",
       time_zone: "",
+      type: "",
       priority_lead: false,
       project: "",
       business_relationship_tag: "",
@@ -132,6 +133,7 @@ export function LeadForm() {
         credential: lead.credential ?? "",
         phone_ext: lead.phone_ext ?? "",
         time_zone: lead.time_zone ?? "",
+        type: lead.type ?? "",
         priority_lead: lead.priority_lead ?? false,
         project: lead.project ?? "",
         business_relationship_tag: lead.business_relationship_tag ?? "",
@@ -191,6 +193,7 @@ export function LeadForm() {
       credential: emptyToNull(values.credential),
       phone_ext: emptyToNull(values.phone_ext),
       time_zone: emptyToNull(values.time_zone),
+      type: emptyToNull(values.type),
       priority_lead: values.priority_lead ?? false,
       project: emptyToNull(values.project),
       business_relationship_tag: emptyToNull(values.business_relationship_tag),
@@ -340,9 +343,29 @@ export function LeadForm() {
                   </Select>
                 </div>
 
-                {/* Lead Type field removed 2026-04-18 — was redundant with
-                    Lead Source above. Use Lead Source for "where did this
-                    lead come from?" */}
+                <div className="space-y-2">
+                  <Label>Lead Type</Label>
+                  <Select
+                    value={(watch("type") as string) || "none"}
+                    onValueChange={(v) => setValue("type", v === "none" ? "" : (v as never))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select type..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="inbound_website">Inbound (Website)</SelectItem>
+                      <SelectItem value="inbound_referral">Inbound (Referral)</SelectItem>
+                      <SelectItem value="outbound_cold">Outbound / Cold</SelectItem>
+                      <SelectItem value="purchased_list">Purchased List</SelectItem>
+                      <SelectItem value="conference">Conference</SelectItem>
+                      <SelectItem value="webinar">Webinar</SelectItem>
+                      <SelectItem value="partner">Partner</SelectItem>
+                      <SelectItem value="existing_customer_expansion">Existing Customer Expansion</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
                 <div className="space-y-2">
                   <Label>Lead Segment</Label>
@@ -478,8 +501,8 @@ export function LeadForm() {
                       checked={watch("priority_lead")}
                       onCheckedChange={(checked) => setValue("priority_lead", !!checked)}
                     />
-                    <Label htmlFor="priority_lead" className="cursor-pointer">
-                      Priority lead (needs immediate attention)
+                    <Label htmlFor="priority_lead" className="cursor-pointer font-medium">
+                      🎯 Priority lead (needs immediate attention)
                     </Label>
                   </div>
                   <div className="flex items-center space-x-2">

@@ -476,6 +476,19 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="flex items-center gap-2 md:col-span-2 pt-2">
+                  <Checkbox
+                    id="priority_account_basic"
+                    checked={watch("priority_account") ?? false}
+                    onCheckedChange={(v) => setValue("priority_account", v === true)}
+                  />
+                  <Label htmlFor="priority_account_basic" className="cursor-pointer text-sm font-medium">
+                    🎯 Priority Account
+                  </Label>
+                  <span className="text-xs text-muted-foreground ml-2">
+                    Flag for leadership attention / weekly pipeline review
+                  </span>
+                </div>
               </div>
             </FormSection>
 
@@ -755,19 +768,10 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
               </div>
             </CollapsibleFormSection>
 
-            {/* ---- 7. Additional Information (collapsible, collapsed by default) ---- */}
+            {/* ---- 7. Additional Information (collapsible, collapsed by default)
+                 Priority Account moved up to Basic Information for visibility. ---- */}
             <CollapsibleFormSection title="Additional Information" defaultOpen={false}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="flex items-center gap-2 pt-2">
-                  <Checkbox
-                    id="priority_account"
-                    checked={watch("priority_account") ?? false}
-                    onCheckedChange={(v) => setValue("priority_account", v === true)}
-                  />
-                  <Label htmlFor="priority_account" className="text-sm font-normal cursor-pointer">
-                    Priority Account
-                  </Label>
-                </div>
                 <div className="space-y-2">
                   <Label>Project Segment<RequiredIndicator fieldKey="project_segment" requiredFields={requiredKeys} /></Label>
                   <Select

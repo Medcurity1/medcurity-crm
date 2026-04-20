@@ -76,10 +76,15 @@ export function AddProductDialog(props: AddProductDialogProps) {
   const { data: priceBookEntries } = usePriceBookEntries(priceBookId || undefined);
 
   // Staged mode gets FTE from the caller (the OpportunityForm), since the
-  // opp doesn't exist yet. Immediate mode reads it off the opp itself.
-  // Open opps stay in sync with the account via a DB trigger; closed opps
-  // freeze whatever tier they had at close.
-  const oppFteRange = isStaged ? props.fteRange ?? null : opp?.fte_range ?? null;
+  // opp doesn't exist yet. Immediate mode reads it off the opp itself,
+  // falling back to the linked account's FTE tier when the opp's own
+  // column is null (which is common for imported opps and opps created
+  // before the FTE trigger existed). Open opps stay in sync with the
+  // account via a DB trigger; closed opps freeze whatever tier they had
+  // at close.
+  const oppFteRange = isStaged
+    ? props.fteRange ?? null
+    : opp?.fte_range ?? opp?.account?.fte_range ?? null;
   const activePriceBooks = priceBooks?.filter((pb) => pb.is_active) ?? [];
 
   // Pick the best matching price book for this opp's FTE tier. Prefer an
@@ -205,7 +210,7 @@ export function AddProductDialog(props: AddProductDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add Product</DialogTitle>
         </DialogHeader>
@@ -265,8 +270,19 @@ export function AddProductDialog(props: AddProductDialogProps) {
                 id="quantity"
                 type="number"
                 min={1}
-                value={quantity}
-                onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                // Track the raw string so the user can fully highlight and
+                // retype without the control snapping to 1 mid-keystroke.
+                // We still clamp to >= 1 on the parsed number used elsewhere.
+                value={String(quantity)}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === "") {
+                    setQuantity(1);
+                    return;
+                  }
+                  const n = parseInt(raw, 10);
+                  if (!Number.isNaN(n) && n >= 1) setQuantity(n);
+                }}
               />
             </div>
 
@@ -277,8 +293,16 @@ export function AddProductDialog(props: AddProductDialogProps) {
                 type="number"
                 min={0}
                 step="0.01"
-                value={unitPrice}
-                onChange={(e) => setUnitPrice(parseFloat(e.target.value) || 0)}
+                value={String(unitPrice)}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === "") {
+                    setUnitPrice(0);
+                    return;
+                  }
+                  const n = parseFloat(raw);
+                  if (!Number.isNaN(n) && n >= 0) setUnitPrice(n);
+                }}
               />
             </div>
           </div>
@@ -290,10 +314,16 @@ export function AddProductDialog(props: AddProductDialogProps) {
               type="number"
               min={0}
               step="0.01"
-              value={arrAmount}
+              value={String(arrAmount)}
               onChange={(e) => {
                 setArrManuallyEdited(true);
-                setArrAmount(parseFloat(e.target.value) || 0);
+                const raw = e.target.value;
+                if (raw === "") {
+                  setArrAmount(0);
+                  return;
+                }
+                const n = parseFloat(raw);
+                if (!Number.isNaN(n) && n >= 0) setArrAmount(n);
               }}
             />
             <p className="text-xs text-muted-foreground">
