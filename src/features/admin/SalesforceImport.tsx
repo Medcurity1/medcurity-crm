@@ -72,7 +72,24 @@ async function fetchAllRows<T>(
    Types
    ================================================================ */
 
-type EntityType = "accounts" | "contacts" | "opportunities" | "leads" | "products" | "price_books" | "price_book_entries";
+type EntityType =
+  | "accounts"
+  | "contacts"
+  | "opportunities"
+  | "leads"
+  | "products"
+  | "price_books"
+  | "price_book_entries"
+  | "opportunity_products"
+  | "tasks"
+  | "events";
+
+/** DB table that each entity imports into. Tasks + Events both flow into
+ *  `activities`; opportunity_products maps 1:1; the rest map by name. */
+function resolveImportTable(entity: EntityType): string {
+  if (entity === "tasks" || entity === "events") return "activities";
+  return entity;
+}
 
 type MappingConfidence = "exact" | "fuzzy" | "unmapped";
 
@@ -876,6 +893,97 @@ const PRICE_BOOK_ENTRY_FIELDS: Record<string, string> = {
   "last modified date": "sf_last_modified_date",
 };
 
+/* ---- Opportunity Line Items (SF OpportunityLineItem.csv) ---- */
+const OPPORTUNITY_PRODUCT_FIELDS: Record<string, string> = {
+  // Self identity (we don't persist it, but useful for dedup within file)
+  id: "sf_line_item_id",
+  oppproductid: "sf_line_item_id",
+  // References
+  opportunityid: "opportunity_sf_id",
+  "opportunity id": "opportunity_sf_id",
+  product2id: "product_sf_id",
+  "product id": "product_sf_id",
+  pricebookentryid: "price_book_entry_sf_id",
+  "pricebook entry id": "price_book_entry_sf_id",
+  productcode: "product_code_lookup",
+  "product code": "product_code_lookup",
+  // Pricing
+  quantity: "quantity",
+  unitprice: "unit_price",
+  "unit price": "unit_price",
+  listprice: "list_price",
+  "list price": "list_price",
+  totalprice: "total_price",
+  "total price": "total_price",
+  // Descriptive (for label; not persisted to a column)
+  name: "product_name_lookup",
+  "product name": "product_name_lookup",
+  description: "line_description",
+  servicedate: "service_date",
+  "service date": "service_date",
+};
+
+/* ---- Tasks (SF Task.csv) — inserted into public.activities ---- */
+const TASK_FIELDS: Record<string, string> = {
+  // Identity
+  id: "sf_task_id",
+  subject: "subject",
+  description: "body",
+  // Dates
+  activitydate: "due_at",
+  "activity date": "due_at",
+  completeddatetime: "completed_at",
+  "completed date time": "completed_at",
+  createddate: "sf_created_date",
+  // Ownership (resolved by name lookup)
+  ownerid: "owner_user_id",
+  "owner id": "owner_user_id",
+  owner: "owner_user_id",
+  "assigned to": "owner_user_id",
+  // Parent references
+  whoid: "who_id_sf_lookup",
+  "who id": "who_id_sf_lookup",
+  whatid: "what_id_sf_lookup",
+  "what id": "what_id_sf_lookup",
+  "related to id": "what_id_sf_lookup",
+  "related to": "what_id_sf_lookup",
+  // Classification (drives activity_type + filtering)
+  type: "sf_task_type",
+  status: "sf_task_status",
+  isclosed: "sf_is_closed",
+  "is closed": "sf_is_closed",
+  priority: "priority",
+};
+
+/* ---- Events (SF Event.csv) — inserted into public.activities ---- */
+const EVENT_FIELDS: Record<string, string> = {
+  // Identity
+  id: "sf_event_id",
+  subject: "subject",
+  description: "body",
+  // Dates
+  startdatetime: "due_at",
+  "start date time": "due_at",
+  activitydatetime: "due_at",
+  "activity date time": "due_at",
+  enddatetime: "completed_at",
+  "end date time": "completed_at",
+  createddate: "sf_created_date",
+  // Ownership
+  ownerid: "owner_user_id",
+  "owner id": "owner_user_id",
+  owner: "owner_user_id",
+  "assigned to": "owner_user_id",
+  // Parent references
+  whoid: "who_id_sf_lookup",
+  "who id": "who_id_sf_lookup",
+  whatid: "what_id_sf_lookup",
+  "what id": "what_id_sf_lookup",
+  "related to id": "what_id_sf_lookup",
+  "related to": "what_id_sf_lookup",
+  location: "event_location",
+};
+
 function getFieldMap(entity: EntityType): Record<string, string> {
   switch (entity) {
     case "accounts":
@@ -892,6 +1000,12 @@ function getFieldMap(entity: EntityType): Record<string, string> {
       return PRICE_BOOK_FIELDS;
     case "price_book_entries":
       return PRICE_BOOK_ENTRY_FIELDS;
+    case "opportunity_products":
+      return OPPORTUNITY_PRODUCT_FIELDS;
+    case "tasks":
+      return TASK_FIELDS;
+    case "events":
+      return EVENT_FIELDS;
   }
 }
 
@@ -1212,6 +1326,50 @@ function getCRMFields(entity: EntityType): string[] {
         "sf_created_date",
         "sf_last_modified_date",
       ];
+    case "opportunity_products":
+      return [
+        "sf_line_item_id",
+        "opportunity_sf_id",
+        "product_sf_id",
+        "price_book_entry_sf_id",
+        "product_code_lookup",
+        "product_name_lookup",
+        "quantity",
+        "unit_price",
+        "list_price",
+        "total_price",
+        "line_description",
+        "service_date",
+      ];
+    case "tasks":
+      return [
+        "sf_task_id",
+        "subject",
+        "body",
+        "due_at",
+        "completed_at",
+        "owner_user_id",
+        "who_id_sf_lookup",
+        "what_id_sf_lookup",
+        "sf_task_type",
+        "sf_task_status",
+        "sf_is_closed",
+        "priority",
+        "sf_created_date",
+      ];
+    case "events":
+      return [
+        "sf_event_id",
+        "subject",
+        "body",
+        "due_at",
+        "completed_at",
+        "owner_user_id",
+        "who_id_sf_lookup",
+        "what_id_sf_lookup",
+        "event_location",
+        "sf_created_date",
+      ];
   }
 }
 
@@ -1475,6 +1633,13 @@ export function SalesforceImport() {
   const [duplicateAction, setDuplicateAction] = useState<"skip" | "update">(
     "skip"
   );
+  // Task-import filters: by default we only import historical completed
+  // activity (calls, meetings, notes). Emails are skipped because the
+  // Outlook integration will backfill those — re-importing SF email logs
+  // would produce duplicates. Open tasks (follow-ups) are skipped to
+  // avoid cluttering the timeline with stale SF to-dos.
+  const [skipOpenTasks, setSkipOpenTasks] = useState(true);
+  const [skipEmailTasks, setSkipEmailTasks] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const userFileInputRef = useRef<HTMLInputElement>(null);
   const importStartTimeRef = useRef<number>(0);
@@ -1908,6 +2073,8 @@ export function SalesforceImport() {
       let productNameMap: Map<string, string> | null = null;
       let priceBookSfMap: Map<string, string> | null = null;
       let priceBookNameMap: Map<string, string> | null = null;
+      let opportunitySfMap: Map<string, string> | null = null;
+      let priceBookEntrySfMap: Map<string, { product_id: string; price_book_id: string; unit_price: number }> | null = null;
       // CRM-id → { fte_range, fte_count } lookup, used to snapshot FTE data
       // onto imported opportunities so per-tier pricing works on day one.
       let accountFteByCrmId: Map<
@@ -1919,10 +2086,26 @@ export function SalesforceImport() {
       const seenProductCodes = new Set<string>(); // codes already inserted this session
       const seenProductNames = new Set<string>(); // fallback dedup when code is missing
 
-      if (
+      // Activities (tasks/events) and opportunity line items all need the
+      // full accounts/contacts/opportunities/products lookup maps. Tasks and
+      // Events use account + contact + opportunity for WhatId/WhoId
+      // resolution; opportunity_products needs opp + product (and PBE).
+      const needsAccountMap =
         entity === "contacts" ||
-        entity === "opportunities"
-      ) {
+        entity === "opportunities" ||
+        entity === "tasks" ||
+        entity === "events";
+      const needsContactMap =
+        entity === "opportunities" ||
+        entity === "tasks" ||
+        entity === "events";
+      const needsOpportunityMap =
+        entity === "opportunity_products" ||
+        entity === "tasks" ||
+        entity === "events";
+      const needsProductMap = entity === "opportunity_products";
+
+      if (needsAccountMap) {
         // Paginated — PostgREST caps one fetch at 1000 rows. Skipping
         // pagination here is what caused the ~6400-contact failure on
         // the April 21 import: only the first 1000 accounts made it
@@ -1957,7 +2140,7 @@ export function SalesforceImport() {
           );
         }
       }
-      if (entity === "opportunities") {
+      if (needsContactMap) {
         const contacts = await fetchAllRows<{
           id: string;
           sf_id: string | null;
@@ -1972,6 +2155,77 @@ export function SalesforceImport() {
           contacts
             .filter((c) => c.sf_id)
             .map((c) => [c.sf_id as string, c.id])
+        );
+      }
+      if (needsOpportunityMap) {
+        const opps = await fetchAllRows<{
+          id: string;
+          sf_id: string | null;
+        }>((from, to) =>
+          supabase
+            .from("opportunities")
+            .select("id, sf_id")
+            .not("sf_id", "is", null)
+            .range(from, to)
+        );
+        opportunitySfMap = new Map(
+          opps.filter((o) => o.sf_id).map((o) => [o.sf_id as string, o.id])
+        );
+      }
+      if (needsProductMap) {
+        // Line items reference products by Product2Id (sf_id) and
+        // optionally by PricebookEntryId. Load all three lookups.
+        const products = await fetchAllRows<{
+          id: string;
+          sf_id: string | null;
+          code: string | null;
+          name: string | null;
+        }>((from, to) =>
+          supabase
+            .from("products")
+            .select("id, sf_id, code, name")
+            .range(from, to)
+        );
+        productSfMap = new Map(
+          products.filter((p) => p.sf_id).map((p) => [p.sf_id as string, p.id])
+        );
+        productCodeMap = new Map(
+          products.filter((p) => p.code).map((p) => [p.code as string, p.id])
+        );
+        productNameMap = new Map();
+        for (const p of products) {
+          if (!p.name) continue;
+          const raw = p.name.trim().toLowerCase();
+          productNameMap.set(raw, p.id);
+          const { base } = stripFtePrefix(p.name.trim());
+          if (base) productNameMap.set(base.toLowerCase(), p.id);
+        }
+        // Pre-fetch PBEs so line items can resolve via PricebookEntryId when
+        // the row lacks a Product2Id (some SF exports do). PBE rows carry
+        // product_id, price_book_id, and unit_price.
+        const pbes = await fetchAllRows<{
+          sf_id: string | null;
+          product_id: string;
+          price_book_id: string;
+          unit_price: number | null;
+        }>((from, to) =>
+          supabase
+            .from("price_book_entries")
+            .select("sf_id, product_id, price_book_id, unit_price")
+            .not("sf_id", "is", null)
+            .range(from, to)
+        );
+        priceBookEntrySfMap = new Map(
+          pbes
+            .filter((pbe) => pbe.sf_id)
+            .map((pbe) => [
+              pbe.sf_id as string,
+              {
+                product_id: pbe.product_id,
+                price_book_id: pbe.price_book_id,
+                unit_price: Number(pbe.unit_price ?? 0),
+              },
+            ])
         );
       }
       if (entity === "price_book_entries") {
@@ -2061,7 +2315,7 @@ export function SalesforceImport() {
         }
       }
 
-      const tableName = entity;
+      const tableName = resolveImportTable(entity);
       const batchSize = 50;
       const total = csvRows.length;
       const totalBatches = Math.ceil(total / batchSize);
@@ -2081,6 +2335,50 @@ export function SalesforceImport() {
           const row = batch[j];
           const mapped = buildMappedRow(row, csvHeaders, mappings);
           const csvData = buildCsvDataRow(row, csvHeaders);
+
+          // Soft-deleted SF rows (IsDeleted=1) — in the SF recycle bin, not
+          // live data. Never import.
+          const isDeletedRaw = (
+            csvData.IsDeleted ??
+            csvData.isdeleted ??
+            ""
+          ).trim();
+          if (isDeletedRaw === "1" || isDeletedRaw.toLowerCase() === "true") {
+            skippedArr[0]++;
+            continue;
+          }
+
+          // Task pre-filtering: evaluate directly off the raw CSV so we
+          // can drop rows without allocating a record. Matches the user
+          // preference: keep historical closed call/meeting logs only;
+          // emails flow through Outlook sync.
+          if (entity === "tasks") {
+            const typeRaw = (csvData.Type ?? csvData.type ?? "")
+              .trim()
+              .toLowerCase();
+            const statusRaw = (csvData.Status ?? csvData.status ?? "")
+              .trim()
+              .toLowerCase();
+            const isClosedRaw = (
+              csvData.IsClosed ??
+              csvData.isclosed ??
+              ""
+            )
+              .trim()
+              .toLowerCase();
+            const isClosed =
+              isClosedRaw === "1" ||
+              isClosedRaw === "true" ||
+              statusRaw === "completed";
+            if (skipOpenTasks && !isClosed) {
+              skippedArr[0]++;
+              continue;
+            }
+            if (skipEmailTasks && typeRaw === "email") {
+              skippedArr[0]++;
+              continue;
+            }
+          }
 
           const record: Record<string, unknown> = {};
           let skipRow = false;
@@ -2271,6 +2569,97 @@ export function SalesforceImport() {
                   skipRow = true;
                 }
               }
+              continue;
+            }
+
+            // --- Opportunity line items (OpportunityLineItem.csv) ---
+            // Resolve OpportunityId → opportunity_id. Missing opp is fatal
+            // because the line item has no parent to attach to.
+            if (field === "opportunity_sf_id") {
+              if (opportunitySfMap) {
+                const oppId = opportunitySfMap.get(value);
+                if (oppId) {
+                  record.opportunity_id = oppId;
+                } else {
+                  const errMsg = `Opportunity SF ID "${value}" not found in CRM — import opportunities first`;
+                  errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
+                  failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
+                  failedCount[0]++;
+                  skipRow = true;
+                }
+              }
+              continue;
+            }
+
+            // Line items can also resolve the product via PricebookEntryId
+            // (when Product2Id isn't present on the row). We back-fill the
+            // product_id, and use the PBE's unit_price as a fallback if the
+            // line item itself doesn't carry one.
+            if (field === "price_book_entry_sf_id") {
+              if (priceBookEntrySfMap) {
+                const pbe = priceBookEntrySfMap.get(value);
+                if (pbe) {
+                  if (!record.product_id) record.product_id = pbe.product_id;
+                  record.__pbe_unit_price_fallback = pbe.unit_price;
+                }
+                // Not fatal — product_sf_id is the primary lookup
+              }
+              continue;
+            }
+
+            // --- Activity WhoId/WhatId (Task.csv / Event.csv) ---
+            // WhoId points to a Contact (003…) or Lead (00Q…). We attach
+            // contacts; leads have no direct column on activities, so we
+            // drop that reference and let the WhatId link the row to an
+            // account or opportunity.
+            if (field === "who_id_sf_lookup") {
+              if (value.startsWith("003") && contactSfMap) {
+                const cid = contactSfMap.get(value);
+                if (cid) record.contact_id = cid;
+              }
+              continue;
+            }
+
+            // WhatId can point to an Account (001…), Opportunity (006…),
+            // Contract (800…), Campaign (701…), etc. We only resolve the
+            // first two — anything else is quietly skipped so the row
+            // still imports (attached via WhoId → contact, or orphan).
+            if (field === "what_id_sf_lookup") {
+              if (value.startsWith("001") && accountSfMap) {
+                const aid = accountSfMap.get(value);
+                if (aid) record.account_id = aid;
+              } else if (value.startsWith("006") && opportunitySfMap) {
+                const oid = opportunitySfMap.get(value);
+                if (oid) record.opportunity_id = oid;
+              }
+              continue;
+            }
+
+            // Pseudo-fields used for filtering/classification only — never
+            // persisted to a DB column. Captured onto the record under
+            // __ keys so the activity-type derivation below can read them.
+            if (
+              field === "sf_task_type" ||
+              field === "sf_task_status" ||
+              field === "sf_is_closed"
+            ) {
+              (record as Record<string, unknown>)[`__${field}`] = value;
+              continue;
+            }
+
+            // Drop all remaining SF-side identifiers/labels that have no
+            // matching column on activities / opportunity_products.
+            if (
+              field === "sf_task_id" ||
+              field === "sf_event_id" ||
+              field === "sf_line_item_id" ||
+              field === "product_name_lookup" ||
+              field === "list_price" ||
+              field === "total_price" ||
+              field === "service_date" ||
+              field === "line_description" ||
+              field === "event_location"
+            ) {
               continue;
             }
 
@@ -2689,6 +3078,50 @@ export function SalesforceImport() {
             continue;
           }
 
+          // Opportunity line items need BOTH opp and product — either one
+          // missing means the line item has nothing to hang on.
+          if (
+            entity === "opportunity_products" &&
+            (!record.opportunity_id || !record.product_id)
+          ) {
+            const missingParts: string[] = [];
+            if (!record.opportunity_id) missingParts.push("opportunity");
+            if (!record.product_id) missingParts.push("product");
+            const errMsg = `Line item missing ${missingParts.join(" and ")} reference — make sure ${missingParts
+              .map((m) => (m === "opportunity" ? "opportunities" : "products"))
+              .join(" and ")} were imported first`;
+            errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
+            failedRows.push({
+              rowNumber: rowIndex + 1,
+              csvData,
+              crmRecord: { ...record },
+              error: errMsg,
+            });
+            failedCount[0]++;
+            continue;
+          }
+
+          // Activities need at least one parent. Without any of account,
+          // contact, or opportunity the row is orphaned and invisible.
+          if (
+            (entity === "tasks" || entity === "events") &&
+            !record.account_id &&
+            !record.contact_id &&
+            !record.opportunity_id
+          ) {
+            const errMsg =
+              "Activity has no resolvable Account / Contact / Opportunity reference";
+            errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
+            failedRows.push({
+              rowNumber: rowIndex + 1,
+              csvData,
+              crmRecord: { ...record },
+              error: errMsg,
+            });
+            failedCount[0]++;
+            continue;
+          }
+
           // Email validation
           if (
             record.email &&
@@ -2760,6 +3193,78 @@ export function SalesforceImport() {
           }
           if (entity === "price_book_entries") {
             record.unit_price = record.unit_price ?? 0;
+          }
+          if (entity === "opportunity_products") {
+            record.quantity = record.quantity ?? 1;
+            // Prefer row-level unit_price; fall back to the resolved PBE's
+            // unit_price so the line item keeps the tier pricing from SF.
+            if (
+              (record.unit_price == null || record.unit_price === 0) &&
+              typeof (record as { __pbe_unit_price_fallback?: number })
+                .__pbe_unit_price_fallback === "number"
+            ) {
+              record.unit_price = (record as { __pbe_unit_price_fallback: number })
+                .__pbe_unit_price_fallback;
+            }
+            record.unit_price = record.unit_price ?? 0;
+            // arr_amount = qty * unit_price (used by pipeline reports)
+            const qty = Number(record.quantity ?? 1);
+            const price = Number(record.unit_price ?? 0);
+            if (record.arr_amount == null && !isNaN(qty) && !isNaN(price)) {
+              record.arr_amount = qty * price;
+            }
+            delete (record as Record<string, unknown>).__pbe_unit_price_fallback;
+          }
+          if (entity === "tasks") {
+            // Derive activity_type from SF Task.Type (Call/Meeting/…). We
+            // stored the raw value under __sf_task_type during the field
+            // loop. Email tasks are already filtered out upstream unless
+            // the user opted in, so they're included here for completeness.
+            const sfType = (
+              (record as Record<string, unknown>).__sf_task_type as
+                | string
+                | undefined
+            )?.toLowerCase();
+            record.activity_type =
+              sfType === "call"
+                ? "call"
+                : sfType === "meeting"
+                ? "meeting"
+                : sfType === "email"
+                ? "email"
+                : "note";
+            // Mirror due_at into completed_at when SF flagged the task as
+            // completed, so the timeline renders it as done.
+            const sfStatus = (
+              (record as Record<string, unknown>).__sf_task_status as
+                | string
+                | undefined
+            )?.toLowerCase();
+            const sfClosed = (
+              (record as Record<string, unknown>).__sf_is_closed as
+                | string
+                | undefined
+            )?.toLowerCase();
+            const isClosed =
+              sfClosed === "1" ||
+              sfClosed === "true" ||
+              sfStatus === "completed";
+            if (isClosed && record.due_at && !record.completed_at) {
+              record.completed_at = record.due_at;
+            }
+            if (!record.subject) {
+              record.subject = sfType
+                ? sfType.charAt(0).toUpperCase() + sfType.slice(1)
+                : "Activity";
+            }
+            // Strip the pseudo-fields before insert.
+            delete (record as Record<string, unknown>).__sf_task_type;
+            delete (record as Record<string, unknown>).__sf_task_status;
+            delete (record as Record<string, unknown>).__sf_is_closed;
+          }
+          if (entity === "events") {
+            record.activity_type = "meeting";
+            if (!record.subject) record.subject = "Meeting";
           }
 
           // Sanitize UUID fields — remove any SF IDs that snuck through
@@ -3258,11 +3763,18 @@ export function SalesforceImport() {
               <SelectContent>
                 <SelectItem value="accounts">Accounts</SelectItem>
                 <SelectItem value="contacts">Contacts</SelectItem>
-                <SelectItem value="opportunities">Opportunities</SelectItem>
-                <SelectItem value="leads">Leads</SelectItem>
                 <SelectItem value="products">Products</SelectItem>
                 <SelectItem value="price_books">Price Books</SelectItem>
                 <SelectItem value="price_book_entries">Price Book Entries</SelectItem>
+                <SelectItem value="opportunities">Opportunities</SelectItem>
+                <SelectItem value="opportunity_products">
+                  Opportunity Line Items (OpportunityLineItem.csv)
+                </SelectItem>
+                <SelectItem value="leads">Leads</SelectItem>
+                <SelectItem value="tasks">
+                  Tasks / Activities (Task.csv)
+                </SelectItem>
+                <SelectItem value="events">Events (Event.csv)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -3620,6 +4132,33 @@ export function SalesforceImport() {
                     </ul>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Task-only filter controls */}
+            {entity === "tasks" && (
+              <div className="rounded-md border bg-muted/30 p-3 space-y-2 text-sm">
+                <div className="font-medium">Task Import Filters</div>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={skipOpenTasks}
+                    onChange={(e) => setSkipOpenTasks(e.target.checked)}
+                  />
+                  <span>
+                    Skip open tasks (only import completed activity — recommended)
+                  </span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={skipEmailTasks}
+                    onChange={(e) => setSkipEmailTasks(e.target.checked)}
+                  />
+                  <span>
+                    Skip Email tasks (Outlook sync will backfill — recommended)
+                  </span>
+                </label>
               </div>
             )}
 
