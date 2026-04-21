@@ -54,13 +54,24 @@ export function ActivityForm({
   const updateMutation = useUpdateActivity();
   const isEditing = !!activity;
 
+  // Helper: today as YYYY-MM-DD in local time (HTML date inputs expect this).
+  // Reps usually log an activity the day it happened; defaulting to today
+  // saves clicks. They can still change it via the calendar picker.
+  const todayLocalISO = () => {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
   const form = useForm<ActivityFormValues>({
     resolver: zodResolver(activityFormSchema),
     defaultValues: {
       activity_type: "note",
       subject: "",
       body: "",
-      due_at: "",
+      due_at: todayLocalISO(),
       reminder_schedule: "none",
       reminder_at: "",
       reminder_channels: ["in_app"],
@@ -89,7 +100,7 @@ export function ActivityForm({
         activity_type: "note",
         subject: "",
         body: "",
-        due_at: "",
+        due_at: todayLocalISO(),
         reminder_schedule: "none",
         reminder_at: "",
         reminder_channels: ["in_app"],

@@ -230,13 +230,18 @@ export function LeadsList() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Sources</SelectItem>
-            <SelectItem value="website">Website</SelectItem>
-            <SelectItem value="referral">Referral</SelectItem>
             <SelectItem value="cold_call">Cold Call</SelectItem>
-            <SelectItem value="trade_show">Trade Show</SelectItem>
-            <SelectItem value="partner">Partner</SelectItem>
-            <SelectItem value="social_media">Social Media</SelectItem>
+            <SelectItem value="conference">Conference</SelectItem>
             <SelectItem value="email_campaign">Email Campaign</SelectItem>
+            <SelectItem value="mql">MQL</SelectItem>
+            <SelectItem value="partner">Partner</SelectItem>
+            <SelectItem value="podcast">Podcast</SelectItem>
+            <SelectItem value="referral">Referral</SelectItem>
+            <SelectItem value="social_media">Social Media</SelectItem>
+            <SelectItem value="sql">SQL</SelectItem>
+            <SelectItem value="trade_show">Trade Show</SelectItem>
+            <SelectItem value="webinar">Webinar</SelectItem>
+            <SelectItem value="website">Website</SelectItem>
             <SelectItem value="other">Other</SelectItem>
           </SelectContent>
         </Select>

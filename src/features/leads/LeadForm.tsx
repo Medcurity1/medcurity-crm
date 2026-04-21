@@ -602,13 +602,20 @@ export function LeadForm() {
                       <SelectValue placeholder="Select source..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="website">Website</SelectItem>
-                      <SelectItem value="referral">Referral</SelectItem>
+                      {/* Alphabetized per Summer/Anna feedback. "Other"
+                          stays at the bottom since it's a fallback. */}
                       <SelectItem value="cold_call">Cold Call</SelectItem>
-                      <SelectItem value="trade_show">Trade Show</SelectItem>
-                      <SelectItem value="partner">Partner</SelectItem>
-                      <SelectItem value="social_media">Social Media</SelectItem>
+                      <SelectItem value="conference">Conference</SelectItem>
                       <SelectItem value="email_campaign">Email Campaign</SelectItem>
+                      <SelectItem value="mql">MQL</SelectItem>
+                      <SelectItem value="partner">Partner</SelectItem>
+                      <SelectItem value="podcast">Podcast</SelectItem>
+                      <SelectItem value="referral">Referral</SelectItem>
+                      <SelectItem value="social_media">Social Media</SelectItem>
+                      <SelectItem value="sql">SQL</SelectItem>
+                      <SelectItem value="trade_show">Trade Show</SelectItem>
+                      <SelectItem value="webinar">Webinar</SelectItem>
+                      <SelectItem value="website">Website</SelectItem>
                       <SelectItem value="other">Other</SelectItem>
                     </SelectContent>
                   </Select>
@@ -634,10 +641,9 @@ export function LeadForm() {
                   </Select>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="score">Score<RequiredIndicator fieldKey="score" requiredFields={requiredKeys} /></Label>
-                  <Input id="score" type="number" min={0} {...register("score")} />
-                </div>
+                {/* Score field removed per Summer 2026-04-19. The
+                    score column still exists in the DB for any
+                    SF-imported values; can be surfaced in reports. */}
 
                 <div className="space-y-2">
                   <Label htmlFor="mql_date">MQL Date<RequiredIndicator fieldKey="mql_date" requiredFields={requiredKeys} /></Label>
@@ -700,19 +706,16 @@ export function LeadForm() {
             </FormSection>
 
             {/* ---- Company Details ---- */}
+            {/* The Industry field was removed here (dedup with the
+                Industry dropdown in Basic Info). Annual Revenue + Score
+                removed per Summer's feedback — if legacy SF data has
+                values they stay in custom_fields / DB columns, just
+                not surfaced on the form. */}
             <FormSection title="Company Details">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="industry">Industry<RequiredIndicator fieldKey="industry" requiredFields={requiredKeys} /></Label>
-                  <Input id="industry" {...register("industry")} />
-                </div>
-                <div className="space-y-2">
                   <Label htmlFor="employees">Employees<RequiredIndicator fieldKey="employees" requiredFields={requiredKeys} /></Label>
                   <Input id="employees" type="number" {...register("employees")} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="annual_revenue">Annual Revenue<RequiredIndicator fieldKey="annual_revenue" requiredFields={requiredKeys} /></Label>
-                  <Input id="annual_revenue" type="number" step="0.01" {...register("annual_revenue")} />
                 </div>
               </div>
             </FormSection>

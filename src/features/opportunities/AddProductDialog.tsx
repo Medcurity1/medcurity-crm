@@ -88,13 +88,30 @@ export function AddProductDialog(props: AddProductDialogProps) {
   const activePriceBooks = priceBooks?.filter((pb) => pb.is_active) ?? [];
 
   // Pick the best matching price book for this opp's FTE tier. Prefer an
-  // active book whose fte_range matches exactly; otherwise fall back to
-  // the default book, then to any active book.
+  // active book whose fte_range matches exactly (or whose NAME mentions
+  // the tier, e.g. "1-20 Price Book" matches fte_range "1-20"); fall
+  // back to the default book, then to any active book. Matching the name
+  // fixes cases where a price book was imported without fte_range
+  // populated on the column.
+  const normalizeTier = (s: string | null | undefined) =>
+    (s ?? "").replace(/\s+/g, "").toLowerCase();
+
   const autoSelectedPriceBookId = (() => {
     if (!activePriceBooks.length) return "";
     if (oppFteRange) {
-      const tierMatch = activePriceBooks.find((pb) => pb.fte_range === oppFteRange);
-      if (tierMatch) return tierMatch.id;
+      const target = normalizeTier(oppFteRange);
+      // 1. exact fte_range column match
+      const colMatch = activePriceBooks.find(
+        (pb) => normalizeTier(pb.fte_range) === target
+      );
+      if (colMatch) return colMatch.id;
+      // 2. name-based match: look for the tier string at the start of
+      //    the book name, e.g. "1-20 Price Book" → normalize to "1-20..."
+      const nameMatch = activePriceBooks.find((pb) => {
+        const nameTier = normalizeTier(pb.name.split(/\s+/)[0]);
+        return nameTier === target;
+      });
+      if (nameMatch) return nameMatch.id;
     }
     const defaultBook = activePriceBooks.find((pb) => pb.is_default);
     if (defaultBook) return defaultBook.id;

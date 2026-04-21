@@ -23,7 +23,6 @@ import {
   leadStatusLabel,
   leadSourceLabel,
   qualificationLabel,
-  formatCurrency,
   formatDate,
   formatDateTime,
 } from "@/lib/formatters";
@@ -393,20 +392,74 @@ export function LeadDetail() {
         ]}
       />
 
-      {/* --------- Lead Details Section --------- */}
+      {/* --------- Lead Details Section ---------
+          Full field surface so reps can see everything that's on the
+          edit form without having to click Edit. Inline editable via
+          EditableField (click a row, type, ✓ to save, ✗ to cancel).
+          Website is bumped to the top per Summer 2026-04-19. Do Not
+          Contact + Do Not Market are side-by-side with clear yes/no
+          indicators. */}
       <CollapsibleSection title="Lead Details">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
+          <EditableField label="Website" value={lead.website} onSave={saveField("website")} />
+          <EditableField label="LinkedIn" value={lead.linkedin_url} onSave={saveField("linkedin_url")} />
           <Field label="First Name" value={lead.first_name} />
           <Field label="Last Name" value={lead.last_name} />
           <EditableField label="Email" value={lead.email} onSave={saveField("email")} />
           <EditableField label="Phone" value={lead.phone} onSave={saveField("phone")} />
+          <EditableField label="Mobile / Direct" value={lead.mobile_phone} onSave={saveField("mobile_phone")} />
           <EditableField label="Title" value={lead.title} onSave={saveField("title")} />
-          <EditableField label="Industry" value={lead.industry} onSave={saveField("industry")} />
-          <EditableField label="Website" value={lead.website} onSave={saveField("website")} />
+          <Field label="Company" value={lead.company} />
+          <Field
+            label="Industry"
+            value={
+              lead.industry_category
+                ? lead.industry_category.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+                : lead.industry ?? null
+            }
+          />
+          <Field
+            label="Time Zone"
+            value={
+              lead.time_zone
+                ? lead.time_zone.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+                : null
+            }
+          />
+          <Field label="Credential" value={lead.credential ?? null} />
+          <Field
+            label="Rating"
+            value={
+              lead.rating
+                ? lead.rating === "hot"
+                  ? "🔥 Hot"
+                  : lead.rating === "warm"
+                  ? "Warm"
+                  : "❄️ Cold"
+                : null
+            }
+          />
+          <Field label="Lead Source" value={lead.source ? leadSourceLabel(lead.source) : null} />
+          <Field label="Source Detail" value={lead.lead_source_detail ?? null} />
+          <Field label="Lead Type" value={lead.type ?? null} />
+          <Field label="Segment" value={lead.project_segment ?? null} />
+          <Field label="Relationship Tag" value={lead.business_relationship_tag ?? null} />
+          <Field
+            label="Priority"
+            value={lead.priority_lead ? "\ud83c\udfaf Priority" : null}
+          />
+          <Field
+            label="Cold Lead"
+            value={lead.cold_lead ? "❄️ Yes" : null}
+          />
           <Field label="MQL Date" value={lead.mql_date ? formatDate(lead.mql_date) : null} />
           <Field
             label="Do Not Market To"
-            value={lead.do_not_market_to ? "\u2713" : "\u2717"}
+            value={lead.do_not_market_to ? "✓ Yes" : "No"}
+          />
+          <Field
+            label="Do Not Contact"
+            value={lead.do_not_contact ? "🚫 Yes" : "No"}
           />
           {lead.description && (
             <div className="md:col-span-2">
@@ -423,10 +476,6 @@ export function LeadDetail() {
           <Field
             label="Employees"
             value={lead.employees != null ? lead.employees.toLocaleString() : null}
-          />
-          <Field
-            label="Annual Revenue"
-            value={lead.annual_revenue != null ? formatCurrency(lead.annual_revenue) : null}
           />
         </div>
       </CollapsibleSection>

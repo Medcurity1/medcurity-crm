@@ -282,6 +282,18 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       return;
     }
 
+    // Force at least one product on new (manually-created) opps.
+    // Automation-created opps (created_by_automation=true) are exempt
+    // because the renewal automation attaches products after insert.
+    // This matches Anna's feedback: "make it so you are forced to add
+    // products when creating an opportunity."
+    if (!isEditing && stagedProducts.length === 0) {
+      toast.error(
+        "Add at least one product before saving — an opportunity needs something to quote."
+      );
+      return;
+    }
+
     const payload: Record<string, unknown> = {
       account_id: values.account_id,
       primary_contact_id: values.primary_contact_id || null,
