@@ -33,15 +33,25 @@ function CommandDialog({
   children,
   className,
   showCloseButton = true,
-  ...props
-}: React.ComponentProps<typeof Dialog> & {
-  title?: string
-  description?: string
-  className?: string
-  showCloseButton?: boolean
-}) {
+  open,
+  onOpenChange,
+  modal,
+  defaultOpen,
+  ...commandProps
+}: React.ComponentProps<typeof Dialog> &
+  React.ComponentProps<typeof Command> & {
+    title?: string
+    description?: string
+    className?: string
+    showCloseButton?: boolean
+  }) {
+  // Dialog props (open / onOpenChange / modal / defaultOpen) are forwarded
+  // to Radix Dialog. Everything else (e.g. shouldFilter, filter) is
+  // forwarded to the inner Command. Before this fix, unknown props fell
+  // through to Dialog and got ignored, so `shouldFilter={false}` on
+  // consumers was silently dropped.
   return (
-    <Dialog {...props}>
+    <Dialog open={open} onOpenChange={onOpenChange} modal={modal} defaultOpen={defaultOpen}>
       <DialogHeader className="sr-only">
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription>{description}</DialogDescription>
@@ -50,7 +60,13 @@ function CommandDialog({
         className={cn("overflow-hidden p-0", className)}
         showCloseButton={showCloseButton}
       >
-        <Command className="**:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5">
+        <Command
+          {...commandProps}
+          className={cn(
+            "**:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5",
+            (commandProps as { className?: string }).className
+          )}
+        >
           {children}
         </Command>
       </DialogContent>

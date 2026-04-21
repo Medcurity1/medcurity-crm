@@ -186,6 +186,12 @@ export function GlobalSearch() {
         onOpenChange={handleOpenChange}
         title="Global Search"
         description="Search across accounts, contacts, opportunities, and leads"
+        // cmdk filters items client-side by default (fuzzy-matching the `value`
+        // attr against the typed query). Our results come back already
+        // server-filtered via Supabase ilike, so cmdk's filter just hides most
+        // of them and can make the input appear "stuck" — results look empty
+        // no matter what you type. Disable it so everything we render shows.
+        shouldFilter={false}
       >
         <CommandInput
           placeholder="Search accounts, contacts, opportunities, leads..."
