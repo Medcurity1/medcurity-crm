@@ -2741,7 +2741,14 @@ export function SalesforceImport() {
             ) {
               const num = Number(value.replace(/[,$]/g, ""));
               if (!isNaN(num)) {
-                record[field] = num;
+                // cycle_count has a CHECK (cycle_count IS NULL OR > 0).
+                // SF sometimes exports 0 for "no cycles yet" — treat that
+                // as NULL so the insert doesn't violate the constraint.
+                if (field === "cycle_count" && num <= 0) {
+                  // Skip — leaves record.cycle_count undefined → NULL.
+                } else {
+                  record[field] = num;
+                }
               }
               continue;
             }
