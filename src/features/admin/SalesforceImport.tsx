@@ -915,12 +915,28 @@ const OPPORTUNITY_PRODUCT_FIELDS: Record<string, string> = {
   "list price": "list_price",
   totalprice: "total_price",
   "total price": "total_price",
+  discount: "discount_percent",
+  "discount (%)": "discount_percent",
+  "discount percent": "discount_percent",
+  discountpercent: "discount_percent",
   // Descriptive (for label; not persisted to a column)
   name: "product_name_lookup",
   "product name": "product_name_lookup",
   description: "line_description",
   servicedate: "service_date",
   "service date": "service_date",
+  // SF audit metadata — preserved verbatim so historical reporting lines
+  // up with Salesforce even after migration.
+  createddate: "sf_created_date",
+  "created date": "sf_created_date",
+  createdbyid: "sf_created_by",
+  "created by id": "sf_created_by",
+  "created by": "sf_created_by",
+  lastmodifieddate: "sf_last_modified_date",
+  "last modified date": "sf_last_modified_date",
+  lastmodifiedbyid: "sf_last_modified_by",
+  "last modified by id": "sf_last_modified_by",
+  "last modified by": "sf_last_modified_by",
 };
 
 /* ---- Tasks (SF Task.csv) — inserted into public.activities ---- */
@@ -1338,8 +1354,14 @@ function getCRMFields(entity: EntityType): string[] {
         "unit_price",
         "list_price",
         "total_price",
+        "discount_percent",
         "line_description",
         "service_date",
+        // SF audit metadata
+        "sf_created_date",
+        "sf_created_by",
+        "sf_last_modified_date",
+        "sf_last_modified_by",
       ];
     case "tasks":
       return [
@@ -2649,13 +2671,16 @@ export function SalesforceImport() {
 
             // Drop all remaining SF-side identifiers/labels that have no
             // matching column on activities / opportunity_products.
+            // Drop fields that have no matching column on the target
+            // table. total_price + discount_percent ARE columns on
+            // opportunity_products (see migration 20260421000001) so
+            // they fall through to the numeric handler below.
             if (
               field === "sf_task_id" ||
               field === "sf_event_id" ||
               field === "sf_line_item_id" ||
               field === "product_name_lookup" ||
               field === "list_price" ||
-              field === "total_price" ||
               field === "service_date" ||
               field === "line_description" ||
               field === "event_location"
@@ -2736,6 +2761,8 @@ export function SalesforceImport() {
                 "fiscal_quarter",
                 "total_opportunity_quantity",
                 "unit_price",
+                "total_price",
+                "discount_percent",
                 "default_arr",
               ].includes(field)
             ) {
