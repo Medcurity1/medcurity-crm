@@ -6,6 +6,12 @@ interface AccountFilters {
   search?: string;
   lifecycle_status?: string;
   status?: string;
+  /** Filter to a specific owner's accounts. "mine" = current user. */
+  ownerId?: string | "mine";
+  /** Filter to a specific industry_category enum value. */
+  industryCategory?: string;
+  /** Filter to only verified or only unverified accounts. */
+  verified?: "true" | "false";
   page?: number;
   pageSize?: number;
 }
@@ -23,13 +29,34 @@ export function useAccounts(filters?: AccountFilters) {
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (filters?.search) {
-        query = query.ilike("name", `%${filters.search}%`);
+        // Search covers name AND industry so reps can find all the FQHCs etc.
+        // OR between name ilike and industry_category ilike.
+        query = query.or(
+          `name.ilike.%${filters.search}%,industry.ilike.%${filters.search}%,industry_category.ilike.%${filters.search}%`
+        );
       }
       if (filters?.lifecycle_status) {
         query = query.eq("lifecycle_status", filters.lifecycle_status);
       }
       if (filters?.status) {
         query = query.eq("status", filters.status);
+      }
+      if (filters?.ownerId && filters.ownerId !== "mine") {
+        query = query.eq("owner_user_id", filters.ownerId);
+      } else if (filters?.ownerId === "mine") {
+        // Resolve "mine" to current auth user id at query time.
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData.user?.id) {
+          query = query.eq("owner_user_id", userData.user.id);
+        }
+      }
+      if (filters?.industryCategory) {
+        query = query.eq("industry_category", filters.industryCategory);
+      }
+      if (filters?.verified === "true") {
+        query = query.eq("verified", true);
+      } else if (filters?.verified === "false") {
+        query = query.eq("verified", false);
       }
 
       const { data, error, count } = await query;

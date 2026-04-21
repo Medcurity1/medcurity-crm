@@ -7,6 +7,7 @@ import { useAccount, useUpdateAccount, useArchiveAccount, useAccountContracts } 
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
+import { VerifiedBadge } from "@/components/VerifiedBadge";
 import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
@@ -211,6 +212,14 @@ export function AccountDetail() {
         title={account.name}
         actions={
           <div className="flex items-center gap-2">
+            <VerifiedBadge
+              table="accounts"
+              recordId={account.id}
+              verified={account.verified ?? false}
+              verifiedAt={account.verified_at}
+              ownerId={account.owner_user_id}
+              invalidateKeys={[["account", account.id]]}
+            />
             <StatusBadge
               value={account.status}
               variant="status"

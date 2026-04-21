@@ -8,6 +8,8 @@ interface OppFilters {
   team?: string;
   kind?: string;
   account_id?: string;
+  ownerId?: string | "mine";
+  verified?: "true" | "false";
   page?: number;
   pageSize?: number;
 }
@@ -31,6 +33,14 @@ export function useOpportunities(filters?: OppFilters) {
       if (filters?.team) query = query.eq("team", filters.team);
       if (filters?.kind) query = query.eq("kind", filters.kind);
       if (filters?.account_id) query = query.eq("account_id", filters.account_id);
+      if (filters?.ownerId && filters.ownerId !== "mine") {
+        query = query.eq("owner_user_id", filters.ownerId);
+      } else if (filters?.ownerId === "mine") {
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData.user?.id) query = query.eq("owner_user_id", userData.user.id);
+      }
+      if (filters?.verified === "true") query = query.eq("verified", true);
+      else if (filters?.verified === "false") query = query.eq("verified", false);
 
       const { data, error, count } = await query;
       if (error) throw error;

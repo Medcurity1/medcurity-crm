@@ -6,6 +6,7 @@ import { Pencil, Archive, ChevronDown, Phone, Mail, UserRoundCog, History } from
 import { useContact, useUpdateContact, useArchiveContact } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
+import { VerifiedBadge } from "@/components/VerifiedBadge";
 import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
@@ -163,6 +164,14 @@ export function ContactDetail() {
         description={contact.title ?? undefined}
         actions={
           <div className="flex items-center gap-2">
+            <VerifiedBadge
+              table="contacts"
+              recordId={contact.id}
+              verified={contact.verified ?? false}
+              verifiedAt={contact.verified_at}
+              ownerId={contact.owner_user_id}
+              invalidateKeys={[["contact", contact.id]]}
+            />
             {contact.is_primary && (
               <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">
                 Primary Contact

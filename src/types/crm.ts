@@ -34,8 +34,16 @@ export type ContactType =
   | "prospect" | "customer" | "partner" | "vendor"
   | "referral_source" | "internal" | "other";
 
-// LeadTypeEnum removed 2026-04-18 — was redundant with lead_source.
-// All "where did this lead come from" goes through lead_source now.
+// LeadTypeEnum restored 2026-04-18 — kept distinct from lead_source so we can
+// track BOTH organizational origin (source: partner/website/etc.) AND the
+// specific event that converted them (type: webinar/conference/etc.).
+// Final design TBD; review when revisiting Partners build.
+export type LeadTypeEnum =
+  | "inbound_website" | "inbound_referral"
+  | "outbound_cold" | "purchased_list"
+  | "conference" | "webinar"
+  | "partner" | "existing_customer_expansion"
+  | "other";
 
 export type OpportunityBusinessType =
   | "new_business"
@@ -59,6 +67,52 @@ export type ProjectSegment =
   | "medium_sized" | "small_sized" | "fqhc" | "voa" | "franchise"
   | "strategic_partner" | "it_vendor_third_party"
   | "independent_associations" | "other";
+
+export type PartnerRelationshipType =
+  | "referral_partner" | "reseller" | "msp" | "consulting_partner"
+  | "technology_partner" | "broker" | "gpo" | "other";
+
+export type PartnerStatus = "active" | "inactive" | "prospect";
+
+export interface Partner {
+  id: string;
+  name: string;
+  account_id: string | null;
+  partnership_type: PartnerRelationshipType | null;
+  status: PartnerStatus;
+  website: string | null;
+  primary_contact_name: string | null;
+  primary_contact_email: string | null;
+  primary_contact_phone: string | null;
+  notes: string | null;
+  legacy_partner_string: string | null;
+  owner_user_id: string | null;
+  archived_at: string | null;
+  archived_by: string | null;
+  archive_reason: string | null;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+  // joined
+  account?: { id: string; name: string } | null;
+  owner?: UserProfile | null;
+}
+
+export type AccountPartnerRole =
+  | "referring_partner" | "managing_partner" | "reseller_partner" | "other";
+
+export interface AccountPartner {
+  id: string;
+  account_id: string;
+  partner_id: string;
+  relationship_role: AccountPartnerRole;
+  notes: string | null;
+  created_at: string;
+  // joined
+  partner?: Partner;
+  account?: { id: string; name: string };
+}
 
 export type BusinessRelationshipTag =
   | "decision_maker" | "influencer" | "economic_buyer"
@@ -88,6 +142,9 @@ export interface Account {
   owner_user_id: string | null;
   lifecycle_status: AccountLifecycle;
   status: AccountStatus;
+  verified: boolean;
+  verified_at: string | null;
+  verified_by: string | null;
   website: string | null;
   industry: string | null;
   industry_category: IndustryCategory | null;
@@ -190,6 +247,9 @@ export interface Contact {
   sf_id: string | null;
   account_id: string;
   owner_user_id: string | null;
+  verified: boolean;
+  verified_at: string | null;
+  verified_by: string | null;
   first_name: string;
   last_name: string;
   email: string | null;
@@ -267,9 +327,14 @@ export interface Opportunity {
   account_id: string;
   primary_contact_id: string | null;
   owner_user_id: string | null;
+  verified: boolean;
+  verified_at: string | null;
+  verified_by: string | null;
   team: OpportunityTeam;
   kind: OpportunityKind;
   business_type: OpportunityBusinessType | null;
+  originating_partner_id: string | null;
+  sourcing_partner_id: string | null;
   name: string;
   stage: OpportunityStage;
   amount: number;
@@ -332,6 +397,9 @@ export interface Lead {
   id: string;
   sf_id: string | null;
   owner_user_id: string | null;
+  verified: boolean;
+  verified_at: string | null;
+  verified_by: string | null;
   first_name: string;
   last_name: string;
   email: string | null;
@@ -365,7 +433,7 @@ export interface Lead {
   credential: CredentialType | null;
   phone_ext: string | null;
   time_zone: UsTimeZone | null;
-  // type field dropped 2026-04-18 — was redundant with source/lead_source.
+  type: LeadTypeEnum | null;
   priority_lead: boolean;
   project: string | null;
   project_segment: ProjectSegment | null;

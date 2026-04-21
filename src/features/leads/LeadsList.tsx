@@ -80,6 +80,10 @@ export function LeadsList() {
   const [statusFilter, setStatusFilter] = useUrlState("status", "all");
   const [sourceFilter, setSourceFilter] = useUrlState("source", "all");
   const [qualificationFilter, setQualificationFilter] = useUrlState("qual", "all");
+  const [ownerFilter, setOwnerFilter] = useUrlState("owner", "all");
+  const [ratingFilter, setRatingFilter] = useUrlState("rating", "all");
+  const [industryFilter, setIndustryFilter] = useUrlState("industry", "all");
+  const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
   const [page, setPage] = useUrlNumberState("page", 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -88,6 +92,16 @@ export function LeadsList() {
     status: statusFilter !== "all" ? statusFilter : undefined,
     source: sourceFilter !== "all" ? sourceFilter : undefined,
     qualification: qualificationFilter !== "all" ? qualificationFilter : undefined,
+    ownerId:
+      ownerFilter === "all" ? undefined : ownerFilter === "mine" ? "mine" : ownerFilter,
+    rating: ratingFilter !== "all" ? ratingFilter : undefined,
+    industryCategory: industryFilter !== "all" ? industryFilter : undefined,
+    verified:
+      verifiedFilter === "verified"
+        ? "true"
+        : verifiedFilter === "unverified"
+        ? "false"
+        : undefined,
     page,
     pageSize: PAGE_SIZE,
   });
@@ -235,6 +249,74 @@ export function LeadsList() {
             <SelectItem value="mql">MQL</SelectItem>
             <SelectItem value="sql">SQL</SelectItem>
             <SelectItem value="sal">SAL</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={ownerFilter} onValueChange={(v) => { setOwnerFilter(v); setPage(0); }}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="All owners" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Owners</SelectItem>
+            <SelectItem value="mine">My Leads</SelectItem>
+            {(users ?? []).map((u) => (
+              <SelectItem key={u.id} value={u.id}>
+                {u.full_name ?? "Unknown"}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={ratingFilter} onValueChange={(v) => { setRatingFilter(v); setPage(0); }}>
+          <SelectTrigger className="w-36">
+            <SelectValue placeholder="All ratings" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Ratings</SelectItem>
+            <SelectItem value="hot">🔥 Hot</SelectItem>
+            <SelectItem value="warm">Warm</SelectItem>
+            <SelectItem value="cold">❄️ Cold</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={industryFilter} onValueChange={(v) => { setIndustryFilter(v); setPage(0); }}>
+          <SelectTrigger className="w-44">
+            <SelectValue placeholder="All industries" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Industries</SelectItem>
+            <SelectItem value="behavioral_health">Behavioral Health</SelectItem>
+            <SelectItem value="dental">Dental</SelectItem>
+            <SelectItem value="fqhc">FQHC</SelectItem>
+            <SelectItem value="healthcare_consulting">Healthcare Consulting</SelectItem>
+            <SelectItem value="healthcare_it_vendor">Healthcare IT Vendor</SelectItem>
+            <SelectItem value="home_health">Home Health</SelectItem>
+            <SelectItem value="hospice">Hospice</SelectItem>
+            <SelectItem value="hospital">Hospital</SelectItem>
+            <SelectItem value="imaging_center">Imaging Center</SelectItem>
+            <SelectItem value="insurance_payer">Insurance / Payer</SelectItem>
+            <SelectItem value="lab_services">Lab Services</SelectItem>
+            <SelectItem value="long_term_care">Long-Term Care</SelectItem>
+            <SelectItem value="managed_service_provider">Managed Service Provider</SelectItem>
+            <SelectItem value="medical_group">Medical Group</SelectItem>
+            <SelectItem value="pediatrics">Pediatrics</SelectItem>
+            <SelectItem value="pharmacy">Pharmacy</SelectItem>
+            <SelectItem value="public_health_agency">Public Health Agency</SelectItem>
+            <SelectItem value="rural_health_clinic">Rural Health Clinic</SelectItem>
+            <SelectItem value="skilled_nursing">Skilled Nursing</SelectItem>
+            <SelectItem value="specialty_clinic">Specialty Clinic</SelectItem>
+            <SelectItem value="telemedicine">Telemedicine</SelectItem>
+            <SelectItem value="tribal_health">Tribal Health</SelectItem>
+            <SelectItem value="urgent_care">Urgent Care</SelectItem>
+            <SelectItem value="other_healthcare">Other Healthcare</SelectItem>
+            <SelectItem value="other">Other</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={verifiedFilter} onValueChange={(v) => { setVerifiedFilter(v); setPage(0); }}>
+          <SelectTrigger className="w-36">
+            <SelectValue placeholder="Verified" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="verified">Verified only</SelectItem>
+            <SelectItem value="unverified">Unverified only</SelectItem>
           </SelectContent>
         </Select>
       </div>

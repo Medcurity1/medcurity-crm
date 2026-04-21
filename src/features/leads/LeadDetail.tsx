@@ -6,6 +6,7 @@ import { Pencil, Archive, ChevronDown, Phone, Mail, ArrowRightLeft, UserRoundCog
 import { useLead, useUpdateLead, useArchiveLead } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
+import { VerifiedBadge } from "@/components/VerifiedBadge";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Badge } from "@/components/ui/badge";
 import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
@@ -172,6 +173,14 @@ export function LeadDetail() {
         description={lead.company ?? undefined}
         actions={
           <div className="flex items-center gap-2">
+            <VerifiedBadge
+              table="leads"
+              recordId={lead.id}
+              verified={lead.verified ?? false}
+              verifiedAt={lead.verified_at}
+              ownerId={lead.owner_user_id}
+              invalidateKeys={[["lead", lead.id]]}
+            />
             <StatusBadge
               value={lead.status}
               variant="leadStatus"

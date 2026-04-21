@@ -41,6 +41,8 @@ export function OpportunitiesList() {
   const [search, setSearch] = useUrlState("q", "");
   const [stageFilter, setStageFilter] = useUrlState("stage", "all");
   const [teamFilter, setTeamFilter] = useUrlState("team", "all");
+  const [ownerFilter, setOwnerFilter] = useUrlState("owner", "all");
+  const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
   const [page, setPage] = useUrlNumberState("page", 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -48,6 +50,14 @@ export function OpportunitiesList() {
     search: search || undefined,
     stage: stageFilter !== "all" ? stageFilter : undefined,
     team: teamFilter !== "all" ? teamFilter : undefined,
+    ownerId:
+      ownerFilter === "all" ? undefined : ownerFilter === "mine" ? "mine" : ownerFilter,
+    verified:
+      verifiedFilter === "verified"
+        ? "true"
+        : verifiedFilter === "unverified"
+        ? "false"
+        : undefined,
     page,
     pageSize: PAGE_SIZE,
   });
@@ -166,6 +176,30 @@ export function OpportunitiesList() {
             <SelectItem value="all">All Teams</SelectItem>
             <SelectItem value="sales">Sales</SelectItem>
             <SelectItem value="renewals">Renewals</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={ownerFilter} onValueChange={(v) => { setOwnerFilter(v); setPage(0); }}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="All owners" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Owners</SelectItem>
+            <SelectItem value="mine">My Opps</SelectItem>
+            {(users ?? []).map((u) => (
+              <SelectItem key={u.id} value={u.id}>
+                {u.full_name ?? "Unknown"}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={verifiedFilter} onValueChange={(v) => { setVerifiedFilter(v); setPage(0); }}>
+          <SelectTrigger className="w-36">
+            <SelectValue placeholder="Verified" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="verified">Verified only</SelectItem>
+            <SelectItem value="unverified">Unverified only</SelectItem>
           </SelectContent>
         </Select>
       </div>

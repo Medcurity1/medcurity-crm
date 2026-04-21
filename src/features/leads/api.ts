@@ -7,6 +7,10 @@ interface LeadFilters {
   status?: string;
   source?: string;
   qualification?: string;
+  ownerId?: string | "mine";
+  rating?: string;
+  industryCategory?: string;
+  verified?: "true" | "false";
   page?: number;
   pageSize?: number;
 }
@@ -26,7 +30,7 @@ export function useLeads(filters?: LeadFilters) {
 
       if (filters?.search) {
         query = query.or(
-          `first_name.ilike.%${filters.search}%,last_name.ilike.%${filters.search}%,company.ilike.%${filters.search}%,email.ilike.%${filters.search}%`
+          `first_name.ilike.%${filters.search}%,last_name.ilike.%${filters.search}%,company.ilike.%${filters.search}%,email.ilike.%${filters.search}%,industry.ilike.%${filters.search}%`
         );
       }
       if (filters?.status) {
@@ -38,6 +42,20 @@ export function useLeads(filters?: LeadFilters) {
       if (filters?.qualification) {
         query = query.eq("qualification", filters.qualification);
       }
+      if (filters?.ownerId && filters.ownerId !== "mine") {
+        query = query.eq("owner_user_id", filters.ownerId);
+      } else if (filters?.ownerId === "mine") {
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData.user?.id) query = query.eq("owner_user_id", userData.user.id);
+      }
+      if (filters?.rating) {
+        query = query.eq("rating", filters.rating);
+      }
+      if (filters?.industryCategory) {
+        query = query.eq("industry_category", filters.industryCategory);
+      }
+      if (filters?.verified === "true") query = query.eq("verified", true);
+      else if (filters?.verified === "false") query = query.eq("verified", false);
 
       const { data, error, count } = await query;
       if (error) throw error;

@@ -8,6 +8,7 @@ import { AddProductDialog } from "./AddProductDialog";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { StageProgressBar } from "./StageProgressBar";
 import { PageHeader } from "@/components/PageHeader";
+import { VerifiedBadge } from "@/components/VerifiedBadge";
 import { StatusBadge } from "@/components/StatusBadge";
 import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -185,6 +186,14 @@ export function OpportunityDetail() {
         title={opp.name}
         actions={
           <div className="flex items-center gap-2">
+            <VerifiedBadge
+              table="opportunities"
+              recordId={opp.id}
+              verified={opp.verified ?? false}
+              verifiedAt={opp.verified_at}
+              ownerId={opp.owner_user_id}
+              invalidateKeys={[["opportunity", opp.id]]}
+            />
             <StatusBadge value={opp.stage} variant="stage" label={stageLabel(opp.stage)} />
             <StatusBadge value={opp.kind} variant="kind" label={kindLabel(opp.kind)} />
             <Button variant="outline" size="sm" onClick={() => setShowChangeOwner(true)}>

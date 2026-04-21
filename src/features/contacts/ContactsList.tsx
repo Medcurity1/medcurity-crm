@@ -23,6 +23,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatName } from "@/lib/formatters";
 
 const PAGE_SIZE = 25;
@@ -32,11 +39,21 @@ export function ContactsList() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const [search, setSearch] = useUrlState("q", "");
+  const [ownerFilter, setOwnerFilter] = useUrlState("owner", "all");
+  const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
   const [page, setPage] = useUrlNumberState("page", 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const { data: result, isLoading } = useContacts({
     search: search || undefined,
+    ownerId:
+      ownerFilter === "all" ? undefined : ownerFilter === "mine" ? "mine" : ownerFilter,
+    verified:
+      verifiedFilter === "verified"
+        ? "true"
+        : verifiedFilter === "unverified"
+        ? "false"
+        : undefined,
     page,
     pageSize: PAGE_SIZE,
   });
@@ -115,16 +132,52 @@ export function ContactsList() {
         }
       />
 
-      <div className="flex items-center gap-3 mb-4">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search by name or email..."
+            placeholder="Search by name, email, or title..."
             value={search}
             onChange={(e) => handleSearchChange(e.target.value)}
             className="pl-9"
           />
         </div>
+        <Select
+          value={ownerFilter}
+          onValueChange={(v) => {
+            setOwnerFilter(v);
+            setPage(0);
+          }}
+        >
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="All owners" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Owners</SelectItem>
+            <SelectItem value="mine">My Contacts</SelectItem>
+            {(users ?? []).map((u) => (
+              <SelectItem key={u.id} value={u.id}>
+                {u.full_name ?? "Unknown"}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={verifiedFilter}
+          onValueChange={(v) => {
+            setVerifiedFilter(v);
+            setPage(0);
+          }}
+        >
+          <SelectTrigger className="w-36">
+            <SelectValue placeholder="Verified" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="verified">Verified only</SelectItem>
+            <SelectItem value="unverified">Unverified only</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {isLoading ? (

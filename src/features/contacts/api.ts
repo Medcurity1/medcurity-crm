@@ -5,6 +5,8 @@ import type { Contact } from "@/types/crm";
 interface ContactFilters {
   search?: string;
   account_id?: string;
+  ownerId?: string | "mine";
+  verified?: "true" | "false";
   page?: number;
   pageSize?: number;
 }
@@ -22,11 +24,19 @@ export function useContacts(filters?: ContactFilters) {
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (filters?.search) {
-        query = query.or(`first_name.ilike.%${filters.search}%,last_name.ilike.%${filters.search}%,email.ilike.%${filters.search}%`);
+        query = query.or(`first_name.ilike.%${filters.search}%,last_name.ilike.%${filters.search}%,email.ilike.%${filters.search}%,title.ilike.%${filters.search}%`);
       }
       if (filters?.account_id) {
         query = query.eq("account_id", filters.account_id);
       }
+      if (filters?.ownerId && filters.ownerId !== "mine") {
+        query = query.eq("owner_user_id", filters.ownerId);
+      } else if (filters?.ownerId === "mine") {
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData.user?.id) query = query.eq("owner_user_id", userData.user.id);
+      }
+      if (filters?.verified === "true") query = query.eq("verified", true);
+      else if (filters?.verified === "false") query = query.eq("verified", false);
 
       const { data, error, count } = await query;
       if (error) throw error;
