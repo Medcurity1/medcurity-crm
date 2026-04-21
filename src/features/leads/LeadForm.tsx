@@ -27,6 +27,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { DuplicateWarning } from "@/components/DuplicateWarning";
 import { US_STATES } from "@/lib/us-states";
+import { PhoneInput } from "@/components/PhoneInput";
 import type { CustomFieldDefinition } from "@/types/crm";
 
 /* ---------- Section wrapper ---------- */
@@ -281,28 +282,22 @@ export function LeadForm() {
                   <Label htmlFor="phone">
                     Phone<RequiredIndicator fieldKey="phone" requiredFields={requiredKeys} />
                   </Label>
-                  <Input
+                  <PhoneInput
                     id="phone"
-                    placeholder="(555) 123-4567"
-                    {...register("phone")}
+                    value={watch("phone") ?? ""}
+                    onChange={(v) => setValue("phone", v)}
                   />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="phone_ext">Phone Ext</Label>
-                  <Input
-                    id="phone_ext"
-                    placeholder="123"
-                    {...register("phone_ext")}
-                  />
+                  <p className="text-xs text-muted-foreground">
+                    Include extension after the number: "(208) 555-1234 x567"
+                  </p>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="mobile_phone">Mobile / Direct Line</Label>
-                  <Input
+                  <PhoneInput
                     id="mobile_phone"
-                    placeholder="(555) 123-4567"
-                    {...register("mobile_phone")}
+                    value={watch("mobile_phone") ?? ""}
+                    onChange={(v) => setValue("mobile_phone", v)}
                   />
                 </div>
 

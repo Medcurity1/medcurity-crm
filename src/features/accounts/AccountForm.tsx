@@ -10,6 +10,7 @@ import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { accountSchema, type AccountFormValues } from "./schema";
 import { FTE_RANGES, employeesToFteRange } from "@/lib/formatters";
 import { US_STATES } from "@/lib/us-states";
+import { PhoneInput } from "@/components/PhoneInput";
 import { errorMessage } from "@/lib/errors";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -532,12 +533,17 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
             <FormSection title="Contact Information">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="phone">Phone<RequiredIndicator fieldKey="phone" requiredFields={requiredKeys} /></Label>
-                  <Input id="phone" type="tel" {...register("phone")} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="phone_extension">Phone Extension<RequiredIndicator fieldKey="phone_extension" requiredFields={requiredKeys} /></Label>
-                  <Input id="phone_extension" {...register("phone_extension")} />
+                  <Label htmlFor="phone">
+                    Phone<RequiredIndicator fieldKey="phone" requiredFields={requiredKeys} />
+                  </Label>
+                  <PhoneInput
+                    id="phone"
+                    value={watch("phone") ?? ""}
+                    onChange={(v) => setValue("phone", v)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Include extension after the number: "(208) 555-1234 x567"
+                  </p>
                 </div>
               </div>
             </FormSection>

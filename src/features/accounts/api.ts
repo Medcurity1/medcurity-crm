@@ -29,10 +29,11 @@ export function useAccounts(filters?: AccountFilters) {
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (filters?.search) {
-        // Search covers name AND industry so reps can find all the FQHCs etc.
-        // OR between name ilike and industry_category ilike.
+        // Search covers name + free-text industry column. Note:
+        // industry_category is an enum which PostgREST can't ilike; to
+        // search by industry use the Industry dropdown filter instead.
         query = query.or(
-          `name.ilike.%${filters.search}%,industry.ilike.%${filters.search}%,industry_category.ilike.%${filters.search}%`
+          `name.ilike.%${filters.search}%,industry.ilike.%${filters.search}%`
         );
       }
       if (filters?.lifecycle_status) {

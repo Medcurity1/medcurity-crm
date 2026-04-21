@@ -5,6 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useContact, useCreateContact, useUpdateContact } from "./api";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { US_STATES } from "@/lib/us-states";
+import { PhoneInput } from "@/components/PhoneInput";
 import { useAccounts } from "@/features/accounts/api";
 import { useUsers } from "@/features/accounts/api";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
@@ -248,13 +249,17 @@ export function ContactForm() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="phone">Phone<RequiredIndicator fieldKey="phone" requiredFields={requiredKeys} /></Label>
-                <Input id="phone" {...register("phone")} />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="phone_ext">Phone Ext</Label>
-                <Input id="phone_ext" {...register("phone_ext")} />
+                <Label htmlFor="phone">
+                  Phone<RequiredIndicator fieldKey="phone" requiredFields={requiredKeys} />
+                </Label>
+                <PhoneInput
+                  id="phone"
+                  value={watch("phone") ?? ""}
+                  onChange={(v) => setValue("phone", v)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Include extension after the number: "(208) 555-1234 x567"
+                </p>
               </div>
 
               <div className="space-y-2">
