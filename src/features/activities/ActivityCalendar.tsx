@@ -31,6 +31,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { activityLabel } from "@/lib/formatters";
 
@@ -134,6 +142,13 @@ function getRecordLink(
 export function ActivityCalendar() {
   const [currentMonth, setCurrentMonth] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
+  // Right-pane filters so users can scan a busy day without scrolling.
+  // Applies to selectedActivities below.
+  const [dayQuery, setDayQuery] = useState("");
+  const [dayType, setDayType] = useState<"all" | ActivityType>("all");
+  const [daySort, setDaySort] = useState<"newest" | "oldest" | "subject">(
+    "newest"
+  );
 
   const { data: activities, isLoading } = useMonthActivities(
     currentMonth.getFullYear(),
@@ -159,9 +174,32 @@ export function ActivityCalendar() {
 
   const selectedActivities = useMemo(() => {
     if (!selectedDate || !activities) return [];
-    return activities.filter((a) =>
-      isSameDay(parseISO(activityCalendarDate(a)), selectedDate)
-    );
+    const rows = activities
+      .filter((a) => isSameDay(parseISO(activityCalendarDate(a)), selectedDate))
+      .filter((a) => (dayType === "all" ? true : a.activity_type === dayType))
+      .filter((a) => {
+        if (!dayQuery) return true;
+        const q = dayQuery.toLowerCase();
+        return (
+          a.subject.toLowerCase().includes(q) ||
+          (a.body ?? "").toLowerCase().includes(q) ||
+          (a.account?.name ?? "").toLowerCase().includes(q) ||
+          (a.opportunity?.name ?? "").toLowerCase().includes(q) ||
+          `${a.contact?.first_name ?? ""} ${a.contact?.last_name ?? ""}`
+            .toLowerCase()
+            .includes(q) ||
+          `${a.lead?.first_name ?? ""} ${a.lead?.last_name ?? ""}`
+            .toLowerCase()
+            .includes(q)
+        );
+      })
+      .sort((a, b) => {
+        if (daySort === "subject") return a.subject.localeCompare(b.subject);
+        const aTime = new Date(activityCalendarDate(a)).getTime();
+        const bTime = new Date(activityCalendarDate(b)).getTime();
+        return daySort === "oldest" ? aTime - bTime : bTime - aTime;
+      });
+    return rows;
   }, [activities, selectedDate]);
 
   function colorClass(count: number): string {
@@ -289,13 +327,54 @@ export function ActivityCalendar() {
             </Button>
           </CardHeader>
           <CardContent>
+            {selectedDate && (
+              <div className="space-y-2 mb-3">
+                <Input
+                  placeholder="Search this day..."
+                  value={dayQuery}
+                  onChange={(e) => setDayQuery(e.target.value)}
+                  className="h-8 text-sm"
+                />
+                <div className="flex gap-2">
+                  <Select
+                    value={dayType}
+                    onValueChange={(v) => setDayType(v as typeof dayType)}
+                  >
+                    <SelectTrigger className="h-8 text-xs flex-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All types</SelectItem>
+                      <SelectItem value="call">Calls</SelectItem>
+                      <SelectItem value="email">Emails</SelectItem>
+                      <SelectItem value="meeting">Meetings</SelectItem>
+                      <SelectItem value="note">Notes</SelectItem>
+                      <SelectItem value="task">Tasks</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={daySort}
+                    onValueChange={(v) => setDaySort(v as typeof daySort)}
+                  >
+                    <SelectTrigger className="h-8 text-xs flex-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="newest">Newest first</SelectItem>
+                      <SelectItem value="oldest">Oldest first</SelectItem>
+                      <SelectItem value="subject">Subject A–Z</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
             {!selectedDate ? (
               <p className="text-sm text-muted-foreground py-4 text-center">
                 Click a day to see activities
               </p>
             ) : selectedActivities.length === 0 ? (
               <p className="text-sm text-muted-foreground py-4 text-center">
-                No activities for this date
+                No activities match your filters for this date
               </p>
             ) : (
               <ul className="space-y-3">

@@ -381,13 +381,45 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="account_type">Account Type<RequiredIndicator fieldKey="account_type" requiredFields={requiredKeys} /></Label>
-                  <Input id="account_type" {...register("account_type")} />
+                  <Label htmlFor="account_type">
+                    Account Type<RequiredIndicator fieldKey="account_type" requiredFields={requiredKeys} />
+                  </Label>
+                  <Select
+                    value={watch("account_type") || "none"}
+                    onValueChange={(v) =>
+                      setValue("account_type", v === "none" ? "" : v)
+                    }
+                  >
+                    <SelectTrigger id="account_type">
+                      <SelectValue placeholder="Select type..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="Customer">Customer — active paying account</SelectItem>
+                      <SelectItem value="Prospect">Prospect — not yet a customer</SelectItem>
+                      <SelectItem value="Partner">Partner — referring or reselling partner</SelectItem>
+                      <SelectItem value="Former Customer">Former Customer — churned</SelectItem>
+                      <SelectItem value="Vendor">Vendor — we buy from them</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    High-level classification of the relationship.
+                  </p>
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="account_number">Account Number<RequiredIndicator fieldKey="account_number" requiredFields={requiredKeys} /></Label>
-                  <Input id="account_number" {...register("account_number")} />
+                  <Label htmlFor="account_number">
+                    Account Number<RequiredIndicator fieldKey="account_number" requiredFields={requiredKeys} />
+                  </Label>
+                  <Input
+                    id="account_number"
+                    placeholder="Auto or internal ID"
+                    {...register("account_number")}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Internal reference ID (billing, contract number, etc.). Leave blank if you don't use these.
+                  </p>
                 </div>
 
                 <div className="space-y-2">
