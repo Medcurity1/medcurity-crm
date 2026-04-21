@@ -37,6 +37,38 @@ import {
 } from "lucide-react";
 
 /* ================================================================
+   Pagination helper
+   ----------------------------------------------------------------
+   Supabase/PostgREST caps a single `.select()` at 1000 rows by
+   default. When the lookup map is smaller than the full table,
+   sf_id lookups silently fail for every row past the cap — which
+   is exactly what produced "Account SF ID ... not found in CRM"
+   on ~6400 contacts during the first real import. Paginate until
+   no more rows come back.
+   ================================================================ */
+
+async function fetchAllRows<T>(
+  buildQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+  pageSize = 1000,
+): Promise<T[]> {
+  const all: T[] = [];
+  let from = 0;
+  // Hard stop at 500k rows — defence against an infinite loop if the
+  // server ever returns a non-empty page of the same data repeatedly.
+  const hardLimit = 500_000;
+  while (all.length < hardLimit) {
+    const to = from + pageSize - 1;
+    const { data, error } = await buildQuery(from, to);
+    if (error) throw error;
+    const rows = data ?? [];
+    all.push(...rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
+/* ================================================================
    Types
    ================================================================ */
 
@@ -1891,44 +1923,76 @@ export function SalesforceImport() {
         entity === "contacts" ||
         entity === "opportunities"
       ) {
-        const { data: accounts } = await supabase
-          .from("accounts")
-          .select("id, sf_id, fte_range, fte_count")
-          .not("sf_id", "is", null);
+        // Paginated — PostgREST caps one fetch at 1000 rows. Skipping
+        // pagination here is what caused the ~6400-contact failure on
+        // the April 21 import: only the first 1000 accounts made it
+        // into the lookup map, so every later contact's AccountId
+        // missed and got reported as "not found in CRM".
+        const accounts = await fetchAllRows<{
+          id: string;
+          sf_id: string | null;
+          fte_range: string | null;
+          fte_count: number | null;
+        }>((from, to) =>
+          supabase
+            .from("accounts")
+            .select("id, sf_id, fte_range, fte_count")
+            .not("sf_id", "is", null)
+            .range(from, to)
+        );
         accountSfMap = new Map(
-          (accounts ?? []).map((a) => [a.sf_id as string, a.id as string])
+          accounts
+            .filter((a) => a.sf_id)
+            .map((a) => [a.sf_id as string, a.id])
         );
         if (entity === "opportunities") {
           accountFteByCrmId = new Map(
-            (accounts ?? []).map((a) => [
-              a.id as string,
+            accounts.map((a) => [
+              a.id,
               {
-                fte_range: (a.fte_range as string | null) ?? null,
-                fte_count: (a.fte_count as number | null) ?? null,
+                fte_range: a.fte_range ?? null,
+                fte_count: a.fte_count ?? null,
               },
             ])
           );
         }
       }
       if (entity === "opportunities") {
-        const { data: contacts } = await supabase
-          .from("contacts")
-          .select("id, sf_id")
-          .not("sf_id", "is", null);
+        const contacts = await fetchAllRows<{
+          id: string;
+          sf_id: string | null;
+        }>((from, to) =>
+          supabase
+            .from("contacts")
+            .select("id, sf_id")
+            .not("sf_id", "is", null)
+            .range(from, to)
+        );
         contactSfMap = new Map(
-          (contacts ?? []).map((c) => [c.sf_id as string, c.id as string])
+          contacts
+            .filter((c) => c.sf_id)
+            .map((c) => [c.sf_id as string, c.id])
         );
       }
       if (entity === "price_book_entries") {
         // Build product lookups (by sf_id, by code, and by CLEANED name)
-        const { data: products } = await supabase
-          .from("products")
-          .select("id, sf_id, code, name");
+        // Paginated — same 1000-row cap concern as the accounts map.
+        const products = await fetchAllRows<{
+          id: string;
+          sf_id: string | null;
+          code: string | null;
+          name: string | null;
+        }>((from, to) =>
+          supabase
+            .from("products")
+            .select("id, sf_id, code, name")
+            .range(from, to)
+        );
         productSfMap = new Map(
-          (products ?? []).filter((p) => p.sf_id).map((p) => [p.sf_id as string, p.id as string])
+          products.filter((p) => p.sf_id).map((p) => [p.sf_id as string, p.id])
         );
         productCodeMap = new Map(
-          (products ?? []).filter((p) => p.code).map((p) => [p.code as string, p.id as string])
+          products.filter((p) => p.code).map((p) => [p.code as string, p.id])
         );
         // Name-based lookup is what makes FTE cleanup work on PBE imports:
         // a PBE row referencing SF product "51-100 SRA" no longer has a matching
@@ -1940,10 +2004,10 @@ export function SalesforceImport() {
         // the regex fix). And we add slug entries so PBE rows whose product
         // name slugifies to a code we already have can still match.
         productNameMap = new Map();
-        for (const p of products ?? []) {
+        for (const p of products) {
           if (!p.name) continue;
-          const id = p.id as string;
-          const rawName = (p.name as string).trim();
+          const id = p.id;
+          const rawName = p.name.trim();
           // Add the raw name lowercased
           productNameMap.set(rawName.toLowerCase(), id);
           // Add the FTE-stripped version (in case stored name still has prefix)
@@ -1959,26 +2023,41 @@ export function SalesforceImport() {
         // Build price book lookups — PBE imports resolve the source SF
         // price book by sf_id (preferred) or name (fallback) so all 12
         // tier-specific books stay distinct in the app.
-        const { data: priceBooks } = await supabase
-          .from("price_books")
-          .select("id, sf_id, name");
+        const priceBooks = await fetchAllRows<{
+          id: string;
+          sf_id: string | null;
+          name: string | null;
+        }>((from, to) =>
+          supabase
+            .from("price_books")
+            .select("id, sf_id, name")
+            .range(from, to)
+        );
         priceBookSfMap = new Map(
-          (priceBooks ?? []).filter((pb) => pb.sf_id).map((pb) => [pb.sf_id as string, pb.id as string])
+          priceBooks.filter((pb) => pb.sf_id).map((pb) => [pb.sf_id as string, pb.id])
         );
         priceBookNameMap = new Map(
-          (priceBooks ?? []).map((pb) => [(pb.name as string).toLowerCase(), pb.id as string])
+          priceBooks
+            .filter((pb) => pb.name)
+            .map((pb) => [(pb.name as string).toLowerCase(), pb.id])
         );
       }
 
       if (entity === "products") {
         // Seed session dedup state from what's already in the DB so re-runs
         // of the products import don't try to re-insert the same canonical rows.
-        const { data: existingProducts } = await supabase
-          .from("products")
-          .select("code, name");
-        for (const p of existingProducts ?? []) {
-          if (p.code) seenProductCodes.add((p.code as string).toLowerCase());
-          if (p.name) seenProductNames.add((p.name as string).toLowerCase());
+        const existingProducts = await fetchAllRows<{
+          code: string | null;
+          name: string | null;
+        }>((from, to) =>
+          supabase
+            .from("products")
+            .select("code, name")
+            .range(from, to)
+        );
+        for (const p of existingProducts) {
+          if (p.code) seenProductCodes.add(p.code.toLowerCase());
+          if (p.name) seenProductNames.add(p.name.toLowerCase());
         }
       }
 
