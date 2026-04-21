@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
+import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { UserPlus, Plus, Search } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -76,7 +77,7 @@ export function LeadsList() {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
-  const [search, setSearch] = useUrlState("q", "");
+  const [search, setSearch] = useDebouncedUrlState("q", "");
   const [statusFilter, setStatusFilter] = useUrlState("status", "all");
   const [sourceFilter, setSourceFilter] = useUrlState("source", "all");
   const [qualificationFilter, setQualificationFilter] = useUrlState("qual", "all");

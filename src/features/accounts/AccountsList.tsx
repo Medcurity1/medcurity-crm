@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
+import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Building2, Plus, Search } from "lucide-react";
 import { useAccounts, useArchiveAccount, useBulkUpdateOwner, useBulkDeleteAccounts, useUsers } from "./api";
@@ -37,7 +38,11 @@ export function AccountsList() {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
-  const [search, setSearch] = useUrlState("q", "");
+  // Search box uses a debounced variant so rapid typing stays
+  // responsive and we don't race the setSearchParams writes in
+  // setPage(0) / setSearch (users on slow networks were losing
+  // keystrokes on the list page).
+  const [search, setSearch] = useDebouncedUrlState("q", "");
   const [statusFilter, setStatusFilter] = useUrlState("status", "all");
   const [ownerFilter, setOwnerFilter] = useUrlState("owner", "all");
   const [industryFilter, setIndustryFilter] = useUrlState("industry", "all");
@@ -74,7 +79,10 @@ export function AccountsList() {
 
   const handleSearchChange = (value: string) => {
     setSearch(value);
-    setPage(0);
+    // Reset pagination as search changes. setPage writes the same URL
+    // object, but the debounced useDebouncedUrlState serializes its
+    // own writes so there's no race with this one.
+    if (page !== 0) setPage(0);
   };
   const handleStatusChange = (value: string) => {
     setStatusFilter(value);
@@ -143,8 +151,8 @@ export function AccountsList() {
         }
       />
 
-      <div className="flex items-center gap-3 mb-4">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="relative min-w-[220px] w-full sm:w-auto sm:flex-1 sm:max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search accounts..."

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
+import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Target, Plus, Search } from "lucide-react";
 import { useOpportunities, useArchiveOpportunity, useBulkUpdateOwner, useBulkDeleteOpportunities } from "./api";
@@ -38,7 +39,7 @@ export function OpportunitiesList() {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
-  const [search, setSearch] = useUrlState("q", "");
+  const [search, setSearch] = useDebouncedUrlState("q", "");
   const [stageFilter, setStageFilter] = useUrlState("stage", "all");
   const [teamFilter, setTeamFilter] = useUrlState("team", "all");
   const [ownerFilter, setOwnerFilter] = useUrlState("owner", "all");
@@ -145,7 +146,7 @@ export function OpportunitiesList() {
       />
 
       <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <div className="relative flex-1 max-w-sm">
+        <div className="relative min-w-[220px] w-full sm:w-auto sm:flex-1 sm:max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search opportunities..."
