@@ -92,6 +92,7 @@ export function ActivityTimeline({
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [showEmailForm, setShowEmailForm] = useState(false);
+  const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
   const [allExpanded, setAllExpanded] = useState(false);
   // Bumping this triggers a re-render so children that read it update their
   // expand state. We don't push expand state down individually because that
@@ -255,6 +256,7 @@ export function ActivityTimeline({
                   expandSignal={expandSignal}
                   forceExpanded={allExpanded}
                   enableReattribute={enableReattribute}
+                  onEdit={() => setEditingActivity(a)}
                 />
               );
             })}
@@ -279,6 +281,18 @@ export function ActivityTimeline({
         contactId={contactId}
         opportunityId={opportunityId}
         leadId={leadId}
+      />
+
+      {/* Edit dialog — reuses ActivityForm with an `activity` prop to
+          switch into update mode. */}
+      <ActivityForm
+        open={!!editingActivity}
+        onOpenChange={(v) => !v && setEditingActivity(null)}
+        accountId={accountId}
+        contactId={contactId}
+        opportunityId={opportunityId}
+        leadId={leadId}
+        activity={editingActivity}
       />
 
       <LogEmailDialog
@@ -307,11 +321,13 @@ function ActivityEntry({
   expandSignal,
   forceExpanded,
   enableReattribute = false,
+  onEdit,
 }: {
   activity: Activity;
   expandSignal?: number;
   forceExpanded?: boolean;
   enableReattribute?: boolean;
+  onEdit?: () => void;
 }) {
   const Icon = typeIcons[activity.activity_type];
   const colorClass = typeColors[activity.activity_type];
@@ -363,6 +379,18 @@ function ActivityEntry({
                 <ChevronRight className="h-3.5 w-3.5 shrink-0" />
               )}
               <span className="truncate">{activity.subject}</span>
+            </button>
+          ) : onEdit ? (
+            // Clickable-to-edit for non-email activities (call, meeting,
+            // note, task). The link to the related record is moved to the
+            // metadata line below.
+            <button
+              type="button"
+              onClick={onEdit}
+              className="font-medium text-sm truncate text-blue-600 hover:underline min-w-0 flex-1 text-left"
+              title="Click to edit"
+            >
+              {activity.subject}
             </button>
           ) : subjectLink ? (
             <Link to={subjectLink} className="font-medium text-sm truncate text-blue-600 hover:underline min-w-0 flex-1">

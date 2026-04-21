@@ -3,11 +3,13 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useAccount, useCreateAccount, useUpdateAccount, useUsers, useAccountsList } from "./api";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { accountSchema, type AccountFormValues } from "./schema";
 import { FTE_RANGES, employeesToFteRange } from "@/lib/formatters";
+import { US_STATES } from "@/lib/us-states";
 import { errorMessage } from "@/lib/errors";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -104,6 +106,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const isEditing = !!id;
+  const { user } = useAuth();
   const { data: allAccounts } = useAccountsList();
   const { data: customFieldDefs } = useCustomFieldDefinitions("accounts");
   const { data: requiredFieldsData } = useRequiredFields("accounts");
@@ -179,7 +182,8 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
           name: "",
           lifecycle_status: "prospect",
           status: "discovery",
-          owner_user_id: null,
+          // Default to current rep so "My Accounts" filter works on day 1.
+          owner_user_id: user?.id ?? null,
           website: "",
           industry: "",
           industry_category: "",
@@ -521,7 +525,24 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="billing_state">State</Label>
-                  <Input id="billing_state" {...register("billing_state")} />
+                  <Select
+                    value={watch("billing_state") || "none"}
+                    onValueChange={(v) =>
+                      setValue("billing_state", v === "none" ? "" : v)
+                    }
+                  >
+                    <SelectTrigger id="billing_state">
+                      <SelectValue placeholder="Select state..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {US_STATES.map((s) => (
+                        <SelectItem key={s.code} value={s.code}>
+                          {s.name} ({s.code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="billing_zip">Zip</Label>
@@ -556,7 +577,25 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="shipping_state">State</Label>
-                  <Input id="shipping_state" disabled={sameAsBilling} {...register("shipping_state")} />
+                  <Select
+                    value={watch("shipping_state") || "none"}
+                    onValueChange={(v) =>
+                      setValue("shipping_state", v === "none" ? "" : v)
+                    }
+                    disabled={sameAsBilling}
+                  >
+                    <SelectTrigger id="shipping_state">
+                      <SelectValue placeholder="Select state..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {US_STATES.map((s) => (
+                        <SelectItem key={s.code} value={s.code}>
+                          {s.name} ({s.code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="shipping_zip">Zip</Label>

@@ -165,7 +165,26 @@ export function useActivePipeline(filters?: { team?: string; owner_user_id?: str
       if (filters?.owner_user_id) query = query.eq("owner_user_id", filters.owner_user_id);
       const { data, error } = await query.order("amount", { ascending: false });
       if (error) throw error;
-      return data as ActivePipelineRow[];
+      const rows = (data ?? []) as ActivePipelineRow[];
+
+      // Enrich with owner_name. active_pipeline is a view we can't join
+      // against user_profiles through PostgREST, so hydrate client-side.
+      const ownerIds = Array.from(
+        new Set(rows.map((r) => r.owner_user_id).filter((v): v is string => !!v))
+      );
+      if (ownerIds.length > 0) {
+        const { data: users } = await supabase
+          .from("user_profiles")
+          .select("id, full_name")
+          .in("id", ownerIds);
+        const nameById = new Map(
+          (users ?? []).map((u) => [u.id as string, (u.full_name as string) ?? null])
+        );
+        for (const r of rows) {
+          r.owner_name = r.owner_user_id ? nameById.get(r.owner_user_id) ?? null : null;
+        }
+      }
+      return rows;
     },
   });
 }

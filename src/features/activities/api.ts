@@ -143,6 +143,7 @@ export function useUpdateActivity() {
       ...patch
     }: {
       id: string;
+      activity_type?: "call" | "email" | "meeting" | "note" | "task";
       subject?: string;
       body?: string | null;
       due_at?: string | null;

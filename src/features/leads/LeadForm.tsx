@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useLead, useCreateLead, useUpdateLead, useUsers } from "./api";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
@@ -25,6 +26,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { DuplicateWarning } from "@/components/DuplicateWarning";
+import { US_STATES } from "@/lib/us-states";
 import type { CustomFieldDefinition } from "@/types/crm";
 
 /* ---------- Section wrapper ---------- */
@@ -46,6 +48,7 @@ export function LeadForm() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const isEditing = !!id;
+  const { user } = useAuth();
   const { data: lead, isLoading: loadingLead } = useLead(id);
   const { data: users } = useUsers();
   const { data: customFieldDefs } = useCustomFieldDefinitions("leads");
@@ -68,6 +71,8 @@ export function LeadForm() {
       last_name: "",
       email: "",
       phone: "",
+      mobile_phone: "",
+      do_not_contact: false,
       company: "",
       title: "",
       industry: "",
@@ -81,7 +86,10 @@ export function LeadForm() {
       description: "",
       employees: "",
       annual_revenue: "",
-      owner_user_id: null,
+      // Default new leads to the current rep as the owner. Feedback
+      // from Summer 2026-04-19: "Make owner assignment preset to user,
+      // can change if needed."
+      owner_user_id: user?.id ?? null,
       street: "",
       city: "",
       state: "",
@@ -111,6 +119,8 @@ export function LeadForm() {
         last_name: lead.last_name,
         email: lead.email ?? "",
         phone: lead.phone ?? "",
+        mobile_phone: lead.mobile_phone ?? "",
+        do_not_contact: lead.do_not_contact ?? false,
         company: lead.company ?? "",
         title: lead.title ?? "",
         industry: lead.industry ?? "",
@@ -171,6 +181,8 @@ export function LeadForm() {
       last_name: values.last_name,
       email: emptyToNull(values.email),
       phone: emptyToNull(values.phone),
+      mobile_phone: emptyToNull(values.mobile_phone),
+      do_not_contact: values.do_not_contact ?? false,
       company: emptyToNull(values.company),
       title: emptyToNull(values.title),
       industry: emptyToNull(values.industry),
@@ -266,13 +278,32 @@ export function LeadForm() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="phone">Phone<RequiredIndicator fieldKey="phone" requiredFields={requiredKeys} /></Label>
-                  <Input id="phone" {...register("phone")} />
+                  <Label htmlFor="phone">
+                    Phone<RequiredIndicator fieldKey="phone" requiredFields={requiredKeys} />
+                  </Label>
+                  <Input
+                    id="phone"
+                    placeholder="(555) 123-4567"
+                    {...register("phone")}
+                  />
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="phone_ext">Phone Ext</Label>
-                  <Input id="phone_ext" {...register("phone_ext")} />
+                  <Input
+                    id="phone_ext"
+                    placeholder="123"
+                    {...register("phone_ext")}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="mobile_phone">Mobile / Direct Line</Label>
+                  <Input
+                    id="mobile_phone"
+                    placeholder="(555) 123-4567"
+                    {...register("mobile_phone")}
+                  />
                 </div>
 
                 <div className="space-y-2">
@@ -628,6 +659,20 @@ export function LeadForm() {
                     Do Not Market To
                   </Label>
                 </div>
+                <div className="flex items-center space-x-2 pt-6">
+                  <Checkbox
+                    id="do_not_contact"
+                    checked={watch("do_not_contact") ?? false}
+                    onCheckedChange={(checked) => setValue("do_not_contact", !!checked)}
+                  />
+                  <Label
+                    htmlFor="do_not_contact"
+                    className="cursor-pointer text-destructive font-medium"
+                    title="Blocks ALL outreach — call, email, marketing. Stronger than Do Not Market To."
+                  >
+                    🚫 Do Not Contact
+                  </Label>
+                </div>
 
                 <div className="space-y-2">
                   <Label>Owner<RequiredIndicator fieldKey="owner_user_id" requiredFields={requiredKeys} /></Label>
@@ -690,7 +735,24 @@ export function LeadForm() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="state">State</Label>
-                  <Input id="state" {...register("state")} />
+                  <Select
+                    value={watch("state") || "none"}
+                    onValueChange={(v) =>
+                      setValue("state", v === "none" ? "" : v)
+                    }
+                  >
+                    <SelectTrigger id="state">
+                      <SelectValue placeholder="Select state..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {US_STATES.map((s) => (
+                        <SelectItem key={s.code} value={s.code}>
+                          {s.name} ({s.code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="zip">Zip</Label>

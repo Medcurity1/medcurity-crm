@@ -404,6 +404,8 @@ export interface Lead {
   last_name: string;
   email: string | null;
   phone: string | null;
+  mobile_phone: string | null;
+  do_not_contact: boolean;
   company: string | null;
   title: string | null;
   industry: string | null;
@@ -677,6 +679,7 @@ export interface ActivePipelineRow {
   amount: number;
   expected_close_date: string | null;
   owner_user_id: string | null;
+  owner_name?: string | null;
   account_id: string;
   account_name: string;
 }

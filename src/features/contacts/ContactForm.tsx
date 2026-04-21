@@ -3,6 +3,8 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useContact, useCreateContact, useUpdateContact } from "./api";
+import { useAuth } from "@/features/auth/AuthProvider";
+import { US_STATES } from "@/lib/us-states";
 import { useAccounts } from "@/features/accounts/api";
 import { useUsers } from "@/features/accounts/api";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
@@ -32,6 +34,7 @@ export function ContactForm() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const isEditing = !!id;
+  const { user } = useAuth();
   const { data: contact, isLoading: loadingContact } = useContact(id);
   const { data: accountsResult } = useAccounts();
   const accounts = accountsResult?.data;
@@ -68,7 +71,8 @@ export function ContactForm() {
       mailing_zip: "",
       mailing_country: "",
       is_primary: false,
-      owner_user_id: null,
+      // Default contact owner to current user (creator). Rep can change.
+      owner_user_id: user?.id ?? null,
       lead_source: null,
       mql_date: "",
       sql_date: "",
@@ -437,7 +441,24 @@ export function ContactForm() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="mailing_state">State / Province</Label>
-                  <Input id="mailing_state" {...register("mailing_state")} />
+                  <Select
+                    value={watch("mailing_state") || "none"}
+                    onValueChange={(v) =>
+                      setValue("mailing_state", v === "none" ? "" : v)
+                    }
+                  >
+                    <SelectTrigger id="mailing_state">
+                      <SelectValue placeholder="Select state..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {US_STATES.map((s) => (
+                        <SelectItem key={s.code} value={s.code}>
+                          {s.name} ({s.code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="mailing_zip">Postal Code</Label>

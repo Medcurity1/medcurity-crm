@@ -5,6 +5,8 @@ export const leadSchema = z.object({
   last_name: z.string().min(1, "Last name is required"),
   email: z.string().email("Must be a valid email").optional().or(z.literal("")),
   phone: z.string().optional().or(z.literal("")),
+  mobile_phone: z.string().optional().or(z.literal("")),
+  do_not_contact: z.boolean().optional(),
   company: z.string().optional().or(z.literal("")),
   title: z.string().optional().or(z.literal("")),
   industry: z.string().optional().or(z.literal("")),
@@ -63,7 +65,17 @@ export const leadSchema = z.object({
     .optional()
     .nullable()
     .or(z.literal("")),
-  // type field removed 2026-04-18 — was redundant with source.
+  type: z
+    .enum([
+      "inbound_website", "inbound_referral",
+      "outbound_cold", "purchased_list",
+      "conference", "webinar",
+      "partner", "existing_customer_expansion",
+      "other",
+    ])
+    .optional()
+    .nullable()
+    .or(z.literal("")),
   priority_lead: z.boolean().optional(),
   project: z.string().optional().or(z.literal("")),
   business_relationship_tag: z

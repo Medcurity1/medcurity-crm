@@ -1,6 +1,7 @@
 import { useDraggable } from "@dnd-kit/core";
+import { User } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatCurrency, daysUntil } from "@/lib/formatters";
+import { formatCurrency, daysUntil, formatDate } from "@/lib/formatters";
 import type { ActivePipelineRow } from "@/types/crm";
 
 interface PipelineCardProps {
@@ -53,6 +54,17 @@ export function PipelineCard({ item, onClick, isDragging }: PipelineCardProps) {
         </span>
         {daysLabel && (
           <span className={cn("text-xs", daysColor)}>{daysLabel}</span>
+        )}
+      </div>
+      {/* Owner + close date line — feedback from Summer 2026-04-19:
+          "Add owner names and close date to deal cards." */}
+      <div className="flex items-center justify-between mt-2 pt-2 border-t text-xs text-muted-foreground">
+        <span className="inline-flex items-center gap-1 truncate">
+          <User className="h-3 w-3 shrink-0" />
+          <span className="truncate">{item.owner_name ?? "Unassigned"}</span>
+        </span>
+        {item.expected_close_date && (
+          <span className="shrink-0">{formatDate(item.expected_close_date)}</span>
         )}
       </div>
     </div>
