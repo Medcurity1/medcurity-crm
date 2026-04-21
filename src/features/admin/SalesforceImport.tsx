@@ -3048,24 +3048,45 @@ export function SalesforceImport() {
           }
           if (entity === "price_book_entries" && (!record.product_id || !record.price_book_id)) {
             // Build a specific error so the user can see WHICH lookup failed
-            // and what the offending value was. This is much more debuggable
-            // than a generic "Missing product or price book reference".
+            // and what the offending value was. When the PBE CSV doesn't
+            // carry a Name column (the most common case on raw SF exports)
+            // we fall back to the SF Product2Id so the user can diagnose
+            // which SF row it was — "(no name)" is useless for debugging.
+            const sfProductId =
+              csvData.Product2Id ??
+              csvData.product2id ??
+              csvData["Product 2 Id"] ??
+              "";
+            const sfPbId =
+              csvData.Pricebook2Id ??
+              csvData.pricebook2id ??
+              csvData["Pricebook 2 Id"] ??
+              "";
             const missingParts: string[] = [];
             if (!record.product_id) {
               const productName =
-                (record.__product_name_raw as string | undefined) ?? "(no name)";
+                (record.__product_name_raw as string | undefined) ??
+                (sfProductId ? `SF Product2Id=${sfProductId}` : "(unknown)");
               missingParts.push(`product "${productName}"`);
             }
             if (!record.price_book_id) {
               const bookName =
-                (record.__price_book_name_raw as string | undefined) ?? "(no name)";
+                (record.__price_book_name_raw as string | undefined) ??
+                (sfPbId ? `SF Pricebook2Id=${sfPbId}` : "(unknown)");
               missingParts.push(`price book "${bookName}"`);
             }
+            // Extra hint when the user likely just forgot Step 2.5 (the
+            // Product2.csv side-load) — detect by the side-load being
+            // empty combined with a product lookup failure.
+            const sideLoadHint =
+              !record.product_id && sfProductMap.size === 0
+                ? ' Hint: upload your raw Product2.csv in Step 2.5 so the importer can map SF Product2Id → original name → canonical product (FTE prefixes get stripped automatically).'
+                : "";
             const errMsg = `Couldn't find ${missingParts.join(" and ")} in CRM. Make sure ${
               !record.product_id ? "products" : ""
             }${!record.product_id && !record.price_book_id ? " and " : ""}${
               !record.price_book_id ? "price books" : ""
-            } were imported first.`;
+            } were imported first.${sideLoadHint}`;
             errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
             failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
             failedCount[0]++;
