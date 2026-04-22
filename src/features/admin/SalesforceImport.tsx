@@ -1007,8 +1007,9 @@ const OPPORTUNITY_PRODUCT_FIELDS: Record<string, string> = {
 
 /* ---- Tasks (SF Task.csv) — inserted into public.activities ---- */
 const TASK_FIELDS: Record<string, string> = {
-  // Identity
-  id: "sf_task_id",
+  // Identity (sf_id is the dedup key for "Update Existing")
+  id: "sf_id",
+  "task id": "sf_id",
   subject: "subject",
   description: "body",
   // Dates
@@ -1016,7 +1017,6 @@ const TASK_FIELDS: Record<string, string> = {
   "activity date": "due_at",
   completeddatetime: "completed_at",
   "completed date time": "completed_at",
-  createddate: "sf_created_date",
   // Ownership (resolved by name lookup)
   ownerid: "owner_user_id",
   "owner id": "owner_user_id",
@@ -1029,18 +1029,72 @@ const TASK_FIELDS: Record<string, string> = {
   "what id": "what_id_sf_lookup",
   "related to id": "what_id_sf_lookup",
   "related to": "what_id_sf_lookup",
+  // SF Task.csv has its own AccountId column too — use it as a
+  // backup pointer when WhatId resolved to an Opportunity (we set
+  // both account_id + opportunity_id) or when WhatId is empty.
+  accountid: "account_id_sf_lookup",
+  "account id": "account_id_sf_lookup",
   // Classification (drives activity_type + filtering)
   type: "sf_task_type",
   status: "sf_task_status",
   isclosed: "sf_is_closed",
   "is closed": "sf_is_closed",
   priority: "priority",
+  // Call-specific
+  calltype: "call_type",
+  "call type": "call_type",
+  calldisposition: "call_disposition",
+  "call disposition": "call_disposition",
+  callobject: "call_object",
+  "call object": "call_object",
+  calldurationinseconds: "call_duration_seconds",
+  "call duration": "call_duration_seconds",
+  "call duration (in seconds)": "call_duration_seconds",
+  // Recurrence
+  isrecurrence: "is_recurrence",
+  "is recurrence": "is_recurrence",
+  recurrencetype: "recurrence_type",
+  "recurrence type": "recurrence_type",
+  recurrenceinterval: "recurrence_interval",
+  "recurrence interval": "recurrence_interval",
+  // SF audit
+  createddate: "sf_created_date",
+  "created date": "sf_created_date",
+  createdbyid: "sf_created_by",
+  "created by id": "sf_created_by",
+  "created by": "sf_created_by",
+  lastmodifieddate: "sf_last_modified_date",
+  "last modified date": "sf_last_modified_date",
+  lastmodifiedbyid: "sf_last_modified_by",
+  "last modified by id": "sf_last_modified_by",
+  "last modified by": "sf_last_modified_by",
+  // Useless SF metadata — explicitly skip so the fuzzy matcher
+  // doesn't grab them (same pattern we used for Pardot leads).
+  isdeleted: "",
+  "is deleted": "",
+  isarchived: "",
+  systemmodstamp: "",
+  emailmessageid: "",
+  activityorigintype: "",
+  remindersettime: "",
+  reminderdatetime: "",
+  isreminderset: "",
+  recurrenceactivityid: "",
+  recurrencestartdateonly: "",
+  recurrenceenddateonly: "",
+  recurrencetimezonesidkey: "",
+  recurrencedayofweekmask: "",
+  recurrencedayofmonth: "",
+  recurrenceinstance: "",
+  recurrencemonthofyear: "",
+  recurrenceregeneratedtype: "",
 };
 
 /* ---- Events (SF Event.csv) — inserted into public.activities ---- */
 const EVENT_FIELDS: Record<string, string> = {
-  // Identity
-  id: "sf_event_id",
+  // Identity (sf_id is the dedup key)
+  id: "sf_id",
+  "event id": "sf_id",
   subject: "subject",
   description: "body",
   // Dates
@@ -1050,7 +1104,6 @@ const EVENT_FIELDS: Record<string, string> = {
   "activity date time": "due_at",
   enddatetime: "completed_at",
   "end date time": "completed_at",
-  createddate: "sf_created_date",
   // Ownership
   ownerid: "owner_user_id",
   "owner id": "owner_user_id",
@@ -1063,7 +1116,25 @@ const EVENT_FIELDS: Record<string, string> = {
   "what id": "what_id_sf_lookup",
   "related to id": "what_id_sf_lookup",
   "related to": "what_id_sf_lookup",
+  accountid: "account_id_sf_lookup",
+  "account id": "account_id_sf_lookup",
   location: "event_location",
+  // SF audit
+  createddate: "sf_created_date",
+  "created date": "sf_created_date",
+  createdbyid: "sf_created_by",
+  "created by id": "sf_created_by",
+  "created by": "sf_created_by",
+  lastmodifieddate: "sf_last_modified_date",
+  "last modified date": "sf_last_modified_date",
+  lastmodifiedbyid: "sf_last_modified_by",
+  "last modified by id": "sf_last_modified_by",
+  "last modified by": "sf_last_modified_by",
+  // Skip noise
+  isdeleted: "",
+  "is deleted": "",
+  isarchived: "",
+  systemmodstamp: "",
 };
 
 function getFieldMap(entity: EntityType): Record<string, string> {
@@ -1458,32 +1529,53 @@ function getCRMFields(entity: EntityType): string[] {
       ];
     case "tasks":
       return [
-        "sf_task_id",
+        // Identity / refs
+        "sf_id",
         "subject",
         "body",
-        "due_at",
-        "completed_at",
         "owner_user_id",
         "who_id_sf_lookup",
         "what_id_sf_lookup",
+        "account_id_sf_lookup",
+        // Dates
+        "due_at",
+        "completed_at",
+        // Classification
         "sf_task_type",
         "sf_task_status",
         "sf_is_closed",
         "priority",
+        // Call detail
+        "call_type",
+        "call_disposition",
+        "call_object",
+        "call_duration_seconds",
+        // Recurrence
+        "is_recurrence",
+        "recurrence_type",
+        "recurrence_interval",
+        // SF audit metadata
         "sf_created_date",
+        "sf_created_by",
+        "sf_last_modified_date",
+        "sf_last_modified_by",
       ];
     case "events":
       return [
-        "sf_event_id",
+        "sf_id",
         "subject",
         "body",
-        "due_at",
-        "completed_at",
         "owner_user_id",
         "who_id_sf_lookup",
         "what_id_sf_lookup",
+        "account_id_sf_lookup",
+        "due_at",
+        "completed_at",
         "event_location",
         "sf_created_date",
+        "sf_created_by",
+        "sf_last_modified_date",
+        "sf_last_modified_by",
       ];
   }
 }
@@ -2785,9 +2877,9 @@ export function SalesforceImport() {
             // table. total_price + discount_percent ARE columns on
             // opportunity_products (see migration 20260421000001) so
             // they fall through to the numeric handler below.
+            // sf_id (tasks/events) IS persisted now — see migration
+            // 20260421000005 — so it falls through too.
             if (
-              field === "sf_task_id" ||
-              field === "sf_event_id" ||
               field === "sf_line_item_id" ||
               field === "product_name_lookup" ||
               field === "list_price" ||
@@ -2875,6 +2967,8 @@ export function SalesforceImport() {
                 "discount_percent",
                 "default_arr",
                 "pardot_score",
+                "call_duration_seconds",
+                "recurrence_interval",
               ].includes(field)
             ) {
               const num = Number(value.replace(/[,$]/g, ""));
@@ -2898,7 +2992,7 @@ export function SalesforceImport() {
                "follow_up", "is_converted", "is_closed", "is_won",
                "created_by_automation", "has_opportunity_line_items",
                "has_opted_out_of_email", "do_not_call", "do_not_market_to", "priority_lead",
-               "cold_lead", "is_active", "is_default"].includes(field)
+               "cold_lead", "is_active", "is_default", "is_recurrence"].includes(field)
             ) {
               record[field] = value.toLowerCase() === "true" || value === "1";
               continue;
