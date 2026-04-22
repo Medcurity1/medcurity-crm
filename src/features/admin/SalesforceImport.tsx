@@ -1669,11 +1669,11 @@ function validateRow(
   if (entity === "accounts" && !mapped.name) {
     return { type: "skip", message: "Missing required field \"name\"" };
   }
-  if (entity === "contacts" && (!mapped.first_name || !mapped.last_name)) {
-    return { type: "skip", message: "Missing required field \"first_name\" or \"last_name\"" };
+  if (entity === "contacts" && !mapped.last_name) {
+    return { type: "skip", message: "Missing required field \"last_name\"" };
   }
-  if (entity === "leads" && (!mapped.first_name || !mapped.last_name)) {
-    return { type: "skip", message: "Missing required field \"first_name\" or \"last_name\"" };
+  if (entity === "leads" && !mapped.last_name) {
+    return { type: "skip", message: "Missing required field \"last_name\"" };
   }
   if (entity === "leads" && mapped.is_converted && (mapped.is_converted === "true" || mapped.is_converted === "1")) {
     return { type: "skip", message: "Converted lead — already a contact in Salesforce" };
@@ -3161,8 +3161,8 @@ export function SalesforceImport() {
             failedCount[0]++;
             continue;
           }
-          if (entity === "contacts" && (!record.first_name || !record.last_name)) {
-            const errMsg = "Missing first or last name";
+          if (entity === "contacts" && !record.last_name) {
+            const errMsg = "Missing last name (first name is optional)";
             errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
             failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
             failedCount[0]++;
@@ -3182,8 +3182,8 @@ export function SalesforceImport() {
             failedCount[0]++;
             continue;
           }
-          if (entity === "leads" && (!record.first_name || !record.last_name)) {
-            const errMsg = "Missing first or last name";
+          if (entity === "leads" && !record.last_name) {
+            const errMsg = "Missing last name (first name is optional)";
             errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
             failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
             failedCount[0]++;
