@@ -1117,13 +1117,23 @@ const EVENT_FIELDS: Record<string, string> = {
   "event id": "sf_id",
   subject: "subject",
   description: "body",
-  // Dates
-  startdatetime: "due_at",
-  "start date time": "due_at",
+  // Dates — ActivityDateTime preferred (has time), ActivityDate fallback
   activitydatetime: "due_at",
   "activity date time": "due_at",
+  activitydate: "due_at",
+  "activity date": "due_at",
+  startdatetime: "due_at",
+  "start date time": "due_at",
   enddatetime: "completed_at",
   "end date time": "completed_at",
+  // Event-specific (migration 20260422000004)
+  durationinminutes: "duration_minutes",
+  "duration in minutes": "duration_minutes",
+  duration: "duration_minutes",
+  type: "event_type",
+  isalldayevent: "is_all_day_event",
+  "is all day event": "is_all_day_event",
+  "all day event": "is_all_day_event",
   // Ownership
   ownerid: "owner_user_id",
   "owner id": "owner_user_id",
@@ -1150,11 +1160,59 @@ const EVENT_FIELDS: Record<string, string> = {
   lastmodifiedbyid: "sf_last_modified_by",
   "last modified by id": "sf_last_modified_by",
   "last modified by": "sf_last_modified_by",
-  // Skip noise
+  // Pinned skip — SF metadata that has no useful CRM home, listed
+  // explicitly so the fuzzy matcher doesn't bigram-pull them into
+  // unrelated columns (same defensive pattern we used for Pardot
+  // fields on leads).
   isdeleted: "",
   "is deleted": "",
   isarchived: "",
+  "is archived": "",
   systemmodstamp: "",
+  "system modstamp": "",
+  isprivate: "",
+  "is private": "",
+  showas: "",
+  "show as": "",
+  ischild: "",
+  "is child": "",
+  isgroupevent: "",
+  "is group event": "",
+  groupeventtype: "",
+  "group event type": "",
+  proposedeventtimeframe: "",
+  "proposed event timeframe": "",
+  // Recurrence — kept on tasks but skipped on events (per
+  // 2026-04-22 user decision: recurring meeting metadata is
+  // meaningless once the migration has happened)
+  isrecurrence: "",
+  "is recurrence": "",
+  recurrenceactivityid: "",
+  "recurrence activity id": "",
+  recurrencestartdatetime: "",
+  "recurrence start date time": "",
+  recurrenceenddateonly: "",
+  "recurrence end date only": "",
+  recurrencetimezonesidkey: "",
+  "recurrence time zone sid key": "",
+  recurrencetype: "",
+  "recurrence type": "",
+  recurrenceinterval: "",
+  "recurrence interval": "",
+  recurrencedayofweekmask: "",
+  "recurrence day of week mask": "",
+  recurrencedayofmonth: "",
+  "recurrence day of month": "",
+  recurrenceinstance: "",
+  "recurrence instance": "",
+  recurrencemonthofyear: "",
+  "recurrence month of year": "",
+  // Reminders — skip same as tasks, don't want imported events
+  // firing CRM-level reminders
+  reminderdatetime: "",
+  "reminder date time": "",
+  isreminderset: "",
+  "is reminder set": "",
 };
 
 function getFieldMap(entity: EntityType): Record<string, string> {
@@ -1606,6 +1664,9 @@ function getCRMFields(entity: EntityType): string[] {
         "due_at",
         "completed_at",
         "event_location",
+        "duration_minutes",
+        "event_type",
+        "is_all_day_event",
         "sf_created_date",
         "sf_created_by",
         "sf_last_modified_date",
@@ -3033,6 +3094,7 @@ export function SalesforceImport() {
                 "recurrence_day_of_week_mask",
                 "recurrence_day_of_month",
                 "recurrence_month_of_year",
+                "duration_minutes",
               ].includes(field)
             ) {
               const num = Number(value.replace(/[,$]/g, ""));
@@ -3057,7 +3119,7 @@ export function SalesforceImport() {
                "created_by_automation", "has_opportunity_line_items",
                "has_opted_out_of_email", "do_not_call", "do_not_market_to", "priority_lead",
                "cold_lead", "is_active", "is_default", "is_recurrence",
-               "sf_is_reminder_set"].includes(field)
+               "sf_is_reminder_set", "is_all_day_event"].includes(field)
             ) {
               record[field] = value.toLowerCase() === "true" || value === "1";
               continue;
