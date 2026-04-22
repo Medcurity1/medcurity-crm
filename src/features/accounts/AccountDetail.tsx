@@ -6,6 +6,7 @@ import { Pencil, Archive, ExternalLink, ChevronDown, Phone, UserRoundCog, Plus, 
 import { useAccount, useUpdateAccount, useArchiveAccount, useAccountContracts } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
+import { formatPhone } from "@/components/PhoneInput";
 import { StatusBadge } from "@/components/StatusBadge";
 import { VerifiedBadge } from "@/components/VerifiedBadge";
 import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
@@ -299,7 +300,7 @@ export function AccountDetail() {
             <p className="text-sm font-semibold inline-flex items-center gap-1">
               <Phone className="h-3 w-3 text-muted-foreground" />
               {account.phone
-                ? `${account.phone}${account.phone_extension ? ` x${account.phone_extension}` : ""}`
+                ? formatPhone(`${account.phone}${account.phone_extension ? ` x${account.phone_extension}` : ""}`)
                 : "\u2014"}
             </p>
           </CardContent>

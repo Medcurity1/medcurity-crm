@@ -14,6 +14,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
 import { RecordId } from "@/components/RecordId";
 import { InlineEdit, type InlineEditProps } from "@/components/InlineEdit";
+import { formatPhone } from "@/components/PhoneInput";
 import { ConvertLeadDialog } from "./ConvertLeadDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -271,18 +272,23 @@ export function LeadDetail() {
             <p className="text-sm font-semibold truncate">{lead.company ?? "\u2014"}</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="min-w-0">
           <CardHeader className="pb-1 pt-3 px-4">
             <CardTitle className="text-xs text-muted-foreground font-medium">Email</CardTitle>
           </CardHeader>
-          <CardContent className="px-4 pb-3">
+          <CardContent className="px-4 pb-3 min-w-0">
             {lead.email ? (
               <a
                 href={`mailto:${lead.email}`}
-                className="text-sm text-primary hover:underline inline-flex items-center gap-1 truncate"
+                title={lead.email}
+                // block + truncate handles overflow correctly; inline-flex
+                // here was ignoring the truncate because it expands to
+                // content width. Icon moved next to a separate span so
+                // the anchor itself can truncate.
+                className="text-sm text-primary hover:underline flex items-center gap-1 min-w-0"
               >
                 <Mail className="h-3 w-3 shrink-0" />
-                {lead.email}
+                <span className="truncate">{lead.email}</span>
               </a>
             ) : (
               <p className="text-sm text-muted-foreground">{"\u2014"}</p>
@@ -296,7 +302,7 @@ export function LeadDetail() {
           <CardContent className="px-4 pb-3">
             <p className="text-sm font-semibold inline-flex items-center gap-1">
               <Phone className="h-3 w-3 text-muted-foreground" />
-              {lead.phone ?? "\u2014"}
+              {lead.phone ? formatPhone(lead.phone) : "\u2014"}
             </p>
           </CardContent>
         </Card>

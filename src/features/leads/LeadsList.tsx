@@ -37,6 +37,7 @@ import { toast } from "sonner";
 import { leadStatusLabel, leadSourceLabel, qualificationLabel } from "@/lib/formatters";
 import type { LeadSource } from "@/types/crm";
 import { SortableHeader, type SortState } from "@/components/SortableHeader";
+import { formatPhone } from "@/components/PhoneInput";
 
 const PAGE_SIZE = 25;
 
@@ -83,11 +84,14 @@ function useLeadQuickStats() {
 }
 
 function StatCard({ label, value }: { label: string; value: number | string }) {
+  // Format numeric values with grouping commas (32145 → "32,145").
+  // Strings pass through unchanged.
+  const display = typeof value === "number" ? value.toLocaleString() : value;
   return (
     <Card>
       <CardContent className="px-4 py-3">
         <p className="text-xs text-muted-foreground font-medium">{label}</p>
-        <p className="text-2xl font-semibold mt-1">{value}</p>
+        <p className="text-2xl font-semibold mt-1">{display}</p>
       </CardContent>
     </Card>
   );
@@ -460,7 +464,7 @@ export function LeadsList() {
                       {lead.email ?? "\u2014"}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {lead.phone ?? "\u2014"}
+                      {lead.phone ? formatPhone(lead.phone) : "\u2014"}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {lead.owner?.full_name ?? "Unassigned"}

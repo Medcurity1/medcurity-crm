@@ -10,6 +10,7 @@ import { useUsers } from "@/features/accounts/api";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { Pagination } from "@/components/Pagination";
+import { formatPhone } from "@/components/PhoneInput";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -250,7 +251,7 @@ export function ContactsList() {
                     </TableCell>
                     <TableCell className="text-muted-foreground">{contact.title ?? "\u2014"}</TableCell>
                     <TableCell className="text-muted-foreground">{contact.email ?? "\u2014"}</TableCell>
-                    <TableCell className="text-muted-foreground">{contact.phone ?? "\u2014"}</TableCell>
+                    <TableCell className="text-muted-foreground">{contact.phone ? formatPhone(contact.phone) : "\u2014"}</TableCell>
                     <TableCell>
                       {contact.is_primary && (
                         <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">

@@ -18,7 +18,7 @@ export function Pagination({ page, pageSize, totalCount, onPageChange }: Paginat
   return (
     <div className="flex items-center justify-between pt-4">
       <p className="text-sm text-muted-foreground">
-        Showing {from}-{to} of {totalCount.toLocaleString()} result{totalCount !== 1 ? "s" : ""}
+        Showing {from.toLocaleString()}-{to.toLocaleString()} of {totalCount.toLocaleString()} result{totalCount !== 1 ? "s" : ""}
       </p>
       <div className="flex items-center gap-2">
         <Button

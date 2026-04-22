@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Pencil, Archive, ChevronDown, Phone, Mail, UserRoundCog, History } from "lucide-react";
+import { formatPhone } from "@/components/PhoneInput";
 import { useContact, useUpdateContact, useArchiveContact } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
@@ -244,7 +245,7 @@ export function ContactDetail() {
           <CardContent className="px-4 pb-3">
             <p className="text-sm font-semibold inline-flex items-center gap-1">
               <Phone className="h-3 w-3 text-muted-foreground" />
-              {contact.phone ?? "\u2014"}
+              {contact.phone ? formatPhone(contact.phone) : "\u2014"}
             </p>
           </CardContent>
         </Card>
