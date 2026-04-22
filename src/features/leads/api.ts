@@ -247,7 +247,7 @@ export function useConvertLead() {
             primary_contact_id: contact.id,
             name: input.opportunityName,
             amount: input.opportunityAmount ?? 0,
-            stage: input.opportunityStage ?? "lead",
+            stage: input.opportunityStage ?? "details_analysis",
             team: "sales",
             kind: "new_business",
           })

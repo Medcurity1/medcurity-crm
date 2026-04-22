@@ -4,13 +4,22 @@ export type AccountStatus = "discovery" | "pending" | "active" | "inactive" | "c
 export type RenewalType = "auto_renew" | "manual_renew" | "no_auto_renew" | "full_auto_renew" | "platform_only_auto_renew";
 export type OpportunityTeam = "sales" | "renewals";
 export type OpportunityKind = "new_business" | "renewal";
+// Matches public.opportunity_stage enum. SF-matching values are the
+// primary six; the legacy four (lead, qualified, proposal,
+// verbal_commit) remain as valid type members so old history rows
+// still type-check but are not surfaced in the UI. Migration
+// 20260422000001 migrated all rows off them.
 export type OpportunityStage =
+  | "details_analysis"
+  | "demo"
+  | "proposal_and_price_quote"
+  | "proposal_conversation"
+  | "closed_won"
+  | "closed_lost"
   | "lead"
   | "qualified"
   | "proposal"
-  | "verbal_commit"
-  | "closed_won"
-  | "closed_lost";
+  | "verbal_commit";
 export type ActivityType = "call" | "email" | "meeting" | "note" | "task";
 export type CustomFieldType = "text" | "textarea" | "number" | "currency" | "date" | "checkbox" | "select" | "multi_select" | "url" | "email" | "phone";
 export type LeadStatus = "new" | "contacted" | "qualified" | "unqualified" | "converted";

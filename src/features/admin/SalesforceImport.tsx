@@ -3127,29 +3127,42 @@ export function SalesforceImport() {
                   "pending": "pending",
                   "churned": "churned",
                 },
+                // Maps SF StageName picklist values → enum values
+                // that match SF (migration 20260422000001). SF's six
+                // real stages pass through 1:1; we also catch legacy
+                // stage names people might try to import.
                 stage: {
+                  // SF-native stages — primary path
                   "closed_won": "closed_won",
-                  "closed_lost": "closed_lost",
-                  "closed/won": "closed_won",
-                  "closed/lost": "closed_lost",
                   "closed won": "closed_won",
-                  "closed lost": "closed_lost",
+                  "closed/won": "closed_won",
                   "won": "closed_won",
+                  "closed_lost": "closed_lost",
+                  "closed lost": "closed_lost",
+                  "closed/lost": "closed_lost",
                   "lost": "closed_lost",
-                  "proposal": "proposal",
-                  "proposal/price_quote": "proposal",
-                  "qualified": "qualified",
-                  "qualification": "qualified",
-                  "needs_analysis": "qualified",
-                  "value_proposition": "proposal",
-                  "id._decision_makers": "qualified",
-                  "perception_analysis": "qualified",
-                  "negotiation/review": "verbal_commit",
-                  "negotiation": "verbal_commit",
-                  "verbal_commit": "verbal_commit",
-                  "verbal commit": "verbal_commit",
-                  "prospecting": "lead",
-                  "lead": "lead",
+                  "proposal_conversation": "proposal_conversation",
+                  "proposal conversation": "proposal_conversation",
+                  "details_analysis": "details_analysis",
+                  "details analysis": "details_analysis",
+                  "demo": "demo",
+                  "proposal_and_price_quote": "proposal_and_price_quote",
+                  "proposal and price quote": "proposal_and_price_quote",
+                  "proposal/price_quote": "proposal_and_price_quote",
+                  "proposal": "proposal_conversation",  // generic "Proposal" → closest SF match
+                  // Legacy / generic SF picklist values → best match
+                  "qualification": "details_analysis",
+                  "qualified": "details_analysis",
+                  "needs_analysis": "details_analysis",
+                  "value_proposition": "proposal_conversation",
+                  "id._decision_makers": "details_analysis",
+                  "perception_analysis": "details_analysis",
+                  "negotiation/review": "proposal_conversation",
+                  "negotiation": "proposal_conversation",
+                  "verbal_commit": "proposal_conversation",
+                  "verbal commit": "proposal_conversation",
+                  "prospecting": "details_analysis",
+                  "lead": "details_analysis",
                 },
                 kind: {
                   "new_business": "new_business",
@@ -3483,7 +3496,7 @@ export function SalesforceImport() {
             }
           }
           if (entity === "opportunities") {
-            record.stage = record.stage ?? "lead";
+            record.stage = record.stage ?? "details_analysis";
             record.amount = record.amount ?? 0;
             record.team = record.team ?? "sales";
             record.kind = record.kind ?? "new_business";

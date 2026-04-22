@@ -35,23 +35,35 @@ type ForecastOpportunity = Opportunity & {
   owner: { full_name: string | null } | null;
 };
 
+// Weighted pipeline — matches SF's default_probability_for_stage
+// percentages. Legacy values stay at their old weights so historical
+// opps that weren't migrated still get a sensible forecast number.
 const STAGE_WEIGHTS: Record<OpportunityStage, number> = {
+  details_analysis: 0.4,
+  demo: 0.6,
+  proposal_and_price_quote: 0.75,
+  proposal_conversation: 0.9,
+  closed_won: 1.0,
+  closed_lost: 0,
   lead: 0.1,
   qualified: 0.3,
   proposal: 0.6,
   verbal_commit: 0.9,
-  closed_won: 1.0,
-  closed_lost: 0,
 };
 
 const FORECAST_STAGES: OpportunityStage[] = [
-  "lead",
-  "qualified",
-  "proposal",
-  "verbal_commit",
+  "details_analysis",
+  "demo",
+  "proposal_and_price_quote",
+  "proposal_conversation",
 ];
 
 const STAGE_COLORS: Record<string, string> = {
+  details_analysis: "#94a3b8",
+  demo: "#3b82f6",
+  proposal_and_price_quote: "#8b5cf6",
+  proposal_conversation: "#a855f7",
+  // Legacy — same palette so old bars render
   lead: "#94a3b8",
   qualified: "#3b82f6",
   proposal: "#8b5cf6",

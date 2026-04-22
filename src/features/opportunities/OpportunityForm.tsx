@@ -176,7 +176,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           kind: "new_business",
           business_type: "",
           name: "",
-          stage: "lead",
+          stage: "details_analysis",
           amount: 0,
           expected_close_date: "",
           close_date: "",
@@ -551,10 +551,10 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                   <Select value={watchedStage} onValueChange={(v) => setValue("stage", v as OpportunityFormValues["stage"])}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="lead">Lead</SelectItem>
-                      <SelectItem value="qualified">Qualified</SelectItem>
-                      <SelectItem value="proposal">Proposal</SelectItem>
-                      <SelectItem value="verbal_commit">Verbal Commit</SelectItem>
+                      <SelectItem value="details_analysis">Details Analysis</SelectItem>
+                      <SelectItem value="demo">Demo</SelectItem>
+                      <SelectItem value="proposal_and_price_quote">Proposal and Price Quote</SelectItem>
+                      <SelectItem value="proposal_conversation">Proposal Conversation</SelectItem>
                       <SelectItem value="closed_won">Closed Won</SelectItem>
                       <SelectItem value="closed_lost">Closed Lost</SelectItem>
                     </SelectContent>

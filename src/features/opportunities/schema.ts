@@ -16,7 +16,22 @@ export const opportunitySchema = z.object({
     ])
     .optional().nullable().or(z.literal("")),
   name: z.string().min(1, "Opportunity name is required"),
-  stage: z.enum(["lead", "qualified", "proposal", "verbal_commit", "closed_won", "closed_lost"]),
+  stage: z.enum([
+    // SF-matching stages (primary)
+    "details_analysis",
+    "demo",
+    "proposal_and_price_quote",
+    "proposal_conversation",
+    "closed_won",
+    "closed_lost",
+    // Legacy values — accepted by the schema so existing records
+    // that still carry them don't fail validation. Not surfaced
+    // in the form picker.
+    "lead",
+    "qualified",
+    "proposal",
+    "verbal_commit",
+  ]),
   amount: z.coerce.number().min(0, "Amount must be positive"),
   expected_close_date: z.string().optional().or(z.literal("")),
   close_date: z.string().optional().or(z.literal("")),

@@ -32,7 +32,23 @@ import type { PipelineView, PipelineViewConfig, OpportunityStage } from "@/types
 const pipelineViewSchema = z.object({
   name: z.string().min(1, "Name is required"),
   stages: z
-    .array(z.enum(["lead", "qualified", "proposal", "verbal_commit", "closed_won", "closed_lost"]))
+    .array(
+      z.enum([
+        // SF-matching stages
+        "details_analysis",
+        "demo",
+        "proposal_and_price_quote",
+        "proposal_conversation",
+        "closed_won",
+        "closed_lost",
+        // Legacy values retained for editing old pipeline views
+        // whose config was saved before the stage rename.
+        "lead",
+        "qualified",
+        "proposal",
+        "verbal_commit",
+      ])
+    )
     .min(1, "Select at least one stage"),
   team_filter: z.string().optional(),
   kind_filter: z.string().optional(),
@@ -67,7 +83,7 @@ export function CreatePipelineDialog({
     resolver: zodResolver(pipelineViewSchema),
     defaultValues: {
       name: "",
-      stages: ["lead", "qualified", "proposal", "verbal_commit"],
+      stages: ["details_analysis", "demo", "proposal_and_price_quote", "proposal_conversation"],
       team_filter: "",
       kind_filter: "",
       is_shared: false,
@@ -87,7 +103,7 @@ export function CreatePipelineDialog({
       } else {
         reset({
           name: "",
-          stages: ["lead", "qualified", "proposal", "verbal_commit"],
+          stages: ["details_analysis", "demo", "proposal_and_price_quote", "proposal_conversation"],
           team_filter: "",
           kind_filter: "",
           is_shared: false,

@@ -38,12 +38,17 @@ const lifecycleLabels: Record<AccountLifecycle, string> = {
 };
 
 const stageLabels: Record<OpportunityStage, string> = {
+  details_analysis: "Details Analysis",
+  demo: "Demo",
+  proposal_and_price_quote: "Proposal and Price Quote",
+  proposal_conversation: "Proposal Conversation",
+  closed_won: "Closed Won",
+  closed_lost: "Closed Lost",
+  // Legacy labels — kept for history rows only
   lead: "Lead",
   qualified: "Qualified",
   proposal: "Proposal",
   verbal_commit: "Verbal Commit",
-  closed_won: "Closed Won",
-  closed_lost: "Closed Lost",
 };
 
 const leadStatusLabels: Record<LeadStatus, string> = {

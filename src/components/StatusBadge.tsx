@@ -11,12 +11,19 @@ import type {
 } from "@/types/crm";
 
 const stageColors: Record<OpportunityStage, string> = {
+  // SF-matching stages (primary) — colored by pipeline progression.
+  details_analysis: "bg-slate-100 text-slate-700",
+  demo: "bg-blue-100 text-blue-700",
+  proposal_and_price_quote: "bg-violet-100 text-violet-700",
+  proposal_conversation: "bg-purple-100 text-purple-700",
+  closed_won: "bg-emerald-100 text-emerald-700",
+  closed_lost: "bg-red-100 text-red-700",
+  // Legacy values — kept so history badges still render. Reused
+  // palette roughly matching the SF equivalent.
   lead: "bg-slate-100 text-slate-700",
   qualified: "bg-blue-100 text-blue-700",
   proposal: "bg-purple-100 text-purple-700",
   verbal_commit: "bg-amber-100 text-amber-700",
-  closed_won: "bg-emerald-100 text-emerald-700",
-  closed_lost: "bg-red-100 text-red-700",
 };
 
 const lifecycleColors: Record<AccountLifecycle, string> = {

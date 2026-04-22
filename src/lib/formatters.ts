@@ -44,12 +44,20 @@ export function formatName(firstName: string, lastName: string): string {
 }
 
 const stageLabels: Record<OpportunityStage, string> = {
+  // SF-matching stages (current) — these are what the UI surfaces.
+  details_analysis: "Details Analysis",
+  demo: "Demo",
+  proposal_and_price_quote: "Proposal and Price Quote",
+  proposal_conversation: "Proposal Conversation",
+  closed_won: "Closed Won",
+  closed_lost: "Closed Lost",
+  // Legacy labels — kept so old history rows still render a human
+  // name instead of crashing. Migration 20260422000001 rewrote all
+  // data to SF values, so these should be vanishingly rare.
   lead: "Lead",
   qualified: "Qualified",
   proposal: "Proposal",
   verbal_commit: "Verbal Commit",
-  closed_won: "Closed Won",
-  closed_lost: "Closed Lost",
 };
 
 export function stageLabel(stage: OpportunityStage): string {
@@ -214,11 +222,13 @@ export const OPEN_STAGES: OpportunityStage[] = [
   "verbal_commit",
 ];
 
+// Stages shown in the UI + used by pipeline-view defaults. Order
+// matches the SF probability ladder (low → high, then closed states).
 export const ALL_STAGES: OpportunityStage[] = [
-  "lead",
-  "qualified",
-  "proposal",
-  "verbal_commit",
+  "details_analysis",
+  "demo",
+  "proposal_and_price_quote",
+  "proposal_conversation",
   "closed_won",
   "closed_lost",
 ];
