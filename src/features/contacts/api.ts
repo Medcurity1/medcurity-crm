@@ -19,7 +19,7 @@ export function useContacts(filters?: ContactFilters) {
       const pageSize = filters?.pageSize ?? 25;
       let query = supabase
         .from("contacts")
-        .select("*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)", { count: "exact" })
+        .select("*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
         .order("last_name")
         .range(page * pageSize, (page + 1) * pageSize - 1);
 

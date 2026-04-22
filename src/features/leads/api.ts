@@ -11,6 +11,8 @@ interface LeadFilters {
   rating?: string;
   industryCategory?: string;
   verified?: "true" | "false";
+  sortColumn?: string | null;
+  sortDirection?: "asc" | "desc";
   page?: number;
   pageSize?: number;
 }
@@ -21,11 +23,17 @@ export function useLeads(filters?: LeadFilters) {
     queryFn: async () => {
       const page = filters?.page ?? 0;
       const pageSize = filters?.pageSize ?? 25;
+      const sortCol = filters?.sortColumn ?? "created_at";
+      const sortAsc = (filters?.sortDirection ?? (filters?.sortColumn ? "asc" : "desc")) === "asc";
       let query = supabase
         .from("leads")
-        .select("*, owner:user_profiles!owner_user_id(id, full_name)", { count: "exact" })
+        // 'estimated' uses Postgres pg_class reltuples instead of a
+        // full COUNT(*) — orders of magnitude faster on a 30k-row table
+        // and accurate enough for pagination controls. Falls back to
+        // an exact count only when the estimate is below ~1000.
+        .select("*, owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
         .is("archived_at", null)
-        .order("created_at", { ascending: false })
+        .order(sortCol, { ascending: sortAsc, nullsFirst: false })
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (filters?.search) {

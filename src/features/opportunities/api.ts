@@ -22,7 +22,7 @@ export function useOpportunities(filters?: OppFilters) {
       const pageSize = filters?.pageSize ?? 25;
       let query = supabase
         .from("opportunities")
-        .select("*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)", { count: "exact" })
+        .select("*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
         .order("created_at", { ascending: false })
         .range(page * pageSize, (page + 1) * pageSize - 1);
 

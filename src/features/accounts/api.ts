@@ -24,7 +24,7 @@ export function useAccounts(filters?: AccountFilters) {
       const pageSize = filters?.pageSize ?? 25;
       let query = supabase
         .from("accounts")
-        .select("*, owner:user_profiles!owner_user_id(id, full_name)", { count: "exact" })
+        .select("*, owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
         .order("name")
         .range(page * pageSize, (page + 1) * pageSize - 1);
 

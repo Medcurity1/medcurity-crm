@@ -3361,6 +3361,19 @@ export function SalesforceImport() {
           }
           if (entity === "leads") {
             record.status = record.status ?? "new";
+            // Derive qualification = 'mql' when MQL__c has a value. SF
+            // stores it as a date column; presence of a date is the
+            // canonical MQL signal. Without this the column stays at
+            // its 'unqualified' default and every imported MQL is
+            // hidden from the leads list / qualification filter.
+            // (SQL is only tracked on contacts per project workflow —
+            // a lead becoming SQL = it converts to a contact.)
+            if (!record.qualification && record.mql_date) {
+              record.qualification = "mql";
+              if (!record.qualification_date) {
+                record.qualification_date = record.mql_date;
+              }
+            }
           }
           if (entity === "products") {
             record.is_active = record.is_active ?? true;

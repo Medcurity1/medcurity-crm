@@ -36,6 +36,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { leadStatusLabel, leadSourceLabel, qualificationLabel } from "@/lib/formatters";
 import type { LeadSource } from "@/types/crm";
+import { SortableHeader, type SortState } from "@/components/SortableHeader";
 
 const PAGE_SIZE = 25;
 
@@ -86,7 +87,15 @@ export function LeadsList() {
   const [industryFilter, setIndustryFilter] = useUrlState("industry", "all");
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
   const [page, setPage] = useUrlNumberState("page", 0);
+  const [sort, setSort] = useState<SortState>({ column: null, direction: "desc" });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Reset to page 0 whenever sort changes so the user doesn't end up
+  // on page 47 of the new ordering with nothing visible.
+  function handleSort(next: SortState) {
+    setSort(next);
+    setPage(0);
+  }
 
   const { data: result, isLoading } = useLeads({
     search: search || undefined,
@@ -103,6 +112,8 @@ export function LeadsList() {
         : verifiedFilter === "unverified"
         ? "false"
         : undefined,
+    sortColumn: sort.column,
+    sortDirection: sort.direction,
     page,
     pageSize: PAGE_SIZE,
   });
@@ -364,13 +375,13 @@ export function LeadsList() {
                       aria-label="Select all"
                     />
                   </TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Company</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Qualification</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Phone</TableHead>
+                  <SortableHeader column="last_name" sort={sort} onSort={handleSort}>Name</SortableHeader>
+                  <SortableHeader column="company" sort={sort} onSort={handleSort}>Company</SortableHeader>
+                  <SortableHeader column="status" sort={sort} onSort={handleSort}>Status</SortableHeader>
+                  <SortableHeader column="qualification" sort={sort} onSort={handleSort}>Qualification</SortableHeader>
+                  <SortableHeader column="source" sort={sort} onSort={handleSort}>Source</SortableHeader>
+                  <SortableHeader column="email" sort={sort} onSort={handleSort}>Email</SortableHeader>
+                  <SortableHeader column="phone" sort={sort} onSort={handleSort}>Phone</SortableHeader>
                   <TableHead>Owner</TableHead>
                 </TableRow>
               </TableHeader>
