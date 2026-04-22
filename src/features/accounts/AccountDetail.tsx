@@ -39,6 +39,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { AccountContacts } from "./AccountContacts";
 import { AccountOpportunities } from "./AccountOpportunities";
+import { AccountPartners } from "./AccountPartners";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
 import { TasksPanel } from "@/features/activities/TasksPanel";
 import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
@@ -363,6 +364,15 @@ export function AccountDetail() {
             value: "opportunities",
             label: "Opportunities",
             content: <AccountOpportunities accountId={account.id} />,
+          },
+          {
+            // Always render the Partner tab — even when there's no
+            // relationship yet — so users have a consistent place
+            // to add one (matches SF UX shown in 2026-04-22 design
+            // screenshots).
+            value: "partners",
+            label: "Partner",
+            content: <AccountPartners accountId={account.id} />,
           },
           {
             value: "tasks",

@@ -111,6 +111,25 @@ export interface Partner {
 export type AccountPartnerRole =
   | "referring_partner" | "managing_partner" | "reseller_partner" | "other";
 
+/**
+ * One row in account_partners — a single partnership between two
+ * accounts. partner is the umbrella/referrer side, member is the
+ * account that came in via the partner.
+ */
+export interface AccountPartnership {
+  id: string;
+  partner_account_id: string;
+  member_account_id: string;
+  role: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  // Joined helpers (populated by the API layer)
+  partner_account?: { id: string; name: string; account_type: string | null; lifecycle_status: string | null } | null;
+  member_account?:  { id: string; name: string; account_type: string | null; lifecycle_status: string | null } | null;
+}
+
 export interface AccountPartner {
   id: string;
   account_id: string;
