@@ -2332,6 +2332,7 @@ export function SalesforceImport() {
       let priceBookSfMap: Map<string, string> | null = null;
       let priceBookNameMap: Map<string, string> | null = null;
       let opportunitySfMap: Map<string, string> | null = null;
+      let leadSfMap: Map<string, string> | null = null;
       let priceBookEntrySfMap: Map<string, { product_id: string; price_book_id: string; unit_price: number }> | null = null;
       // CRM-id → { fte_range, fte_count } lookup, used to snapshot FTE data
       // onto imported opportunities so per-tier pricing works on day one.
@@ -2361,6 +2362,12 @@ export function SalesforceImport() {
         entity === "opportunity_products" ||
         entity === "tasks" ||
         entity === "events";
+      // SF Tasks/Events frequently attach to LEADS (WhoId starts with 00Q,
+      // not 003). Without a leads SF map, ~70% of historical task rows
+      // got rejected as orphans on the April 22 import — they're cold-call
+      // notes against still-unconverted leads.
+      const needsLeadMap =
+        entity === "tasks" || entity === "events";
       const needsProductMap = entity === "opportunity_products";
 
       if (needsAccountMap) {
@@ -2428,6 +2435,21 @@ export function SalesforceImport() {
         );
         opportunitySfMap = new Map(
           opps.filter((o) => o.sf_id).map((o) => [o.sf_id as string, o.id])
+        );
+      }
+      if (needsLeadMap) {
+        const leads = await fetchAllRows<{
+          id: string;
+          sf_id: string | null;
+        }>((from, to) =>
+          supabase
+            .from("leads")
+            .select("id, sf_id")
+            .not("sf_id", "is", null)
+            .range(from, to)
+        );
+        leadSfMap = new Map(
+          leads.filter((l) => l.sf_id).map((l) => [l.sf_id as string, l.id])
         );
       }
       if (needsProductMap) {
@@ -2866,14 +2888,19 @@ export function SalesforceImport() {
             }
 
             // --- Activity WhoId/WhatId (Task.csv / Event.csv) ---
-            // WhoId points to a Contact (003…) or Lead (00Q…). We attach
-            // contacts; leads have no direct column on activities, so we
-            // drop that reference and let the WhatId link the row to an
-            // account or opportunity.
+            // WhoId points to a Contact (003…) or Lead (00Q…). Both
+            // resolve — activities has lead_id (migration
+            // 20260417000009) AND contact_id columns. Without lead
+            // resolution, ~70% of historical task rows get rejected
+            // as orphans because they're cold-call notes against
+            // still-unconverted leads with empty WhatId/AccountId.
             if (field === "who_id_sf_lookup") {
               if (value.startsWith("003") && contactSfMap) {
                 const cid = contactSfMap.get(value);
                 if (cid) record.contact_id = cid;
+              } else if (value.startsWith("00Q") && leadSfMap) {
+                const lid = leadSfMap.get(value);
+                if (lid) record.lead_id = lid;
               }
               continue;
             }
@@ -3412,15 +3439,16 @@ export function SalesforceImport() {
           }
 
           // Activities need at least one parent. Without any of account,
-          // contact, or opportunity the row is orphaned and invisible.
+          // contact, opportunity, or LEAD the row is orphaned and invisible.
           if (
             (entity === "tasks" || entity === "events") &&
             !record.account_id &&
             !record.contact_id &&
-            !record.opportunity_id
+            !record.opportunity_id &&
+            !record.lead_id
           ) {
             const errMsg =
-              "Activity has no resolvable Account / Contact / Opportunity reference";
+              "Activity has no resolvable Account / Contact / Opportunity / Lead reference";
             errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
             failedRows.push({
               rowNumber: rowIndex + 1,
@@ -3488,6 +3516,23 @@ export function SalesforceImport() {
                 if (record.fte_count == null && acctFte.fte_count != null) {
                   record.fte_count = acctFte.fte_count;
                 }
+              }
+            }
+          }
+          if (entity === "tasks" || entity === "events") {
+            // SF Priority comes through as "Normal"/"High"/"Low" with
+            // a capital first letter. Our activity_priority enum is
+            // lowercase ('high','normal','low'). Without this coercion
+            // 19,891 of the user's tasks rejected with "invalid input
+            // value for enum activity_priority: 'Normal'".
+            if (typeof record.priority === "string") {
+              const lc = record.priority.toLowerCase();
+              if (lc === "high" || lc === "normal" || lc === "low") {
+                record.priority = lc;
+              } else {
+                // Unknown SF priority value (custom picklist) — drop
+                // rather than fail the row.
+                delete record.priority;
               }
             }
           }
