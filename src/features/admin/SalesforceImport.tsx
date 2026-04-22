@@ -1068,26 +1068,46 @@ const TASK_FIELDS: Record<string, string> = {
   lastmodifiedbyid: "sf_last_modified_by",
   "last modified by id": "sf_last_modified_by",
   "last modified by": "sf_last_modified_by",
-  // Useless SF metadata — explicitly skip so the fuzzy matcher
-  // doesn't grab them (same pattern we used for Pardot leads).
+  // Activity origin (manual / Outlook / ListEmail / etc.)
+  activityorigintype: "activity_origin_type",
+  "activity origin type": "activity_origin_type",
+  "activity origin": "activity_origin_type",
+  // SF Email reference (when Task represents an email log)
+  emailmessageid: "sf_email_message_id",
+  "email message id": "sf_email_message_id",
+  // SF reminder (kept separate from CRM's own reminder_at so we
+  // don't accidentally trigger live reminders for imported data)
+  reminderdatetime: "sf_reminder_datetime",
+  "reminder date time": "sf_reminder_datetime",
+  isreminderset: "sf_is_reminder_set",
+  "is reminder set": "sf_is_reminder_set",
+  // Recurrence detail
+  recurrenceactivityid: "sf_recurrence_activity_id",
+  "recurrence activity id": "sf_recurrence_activity_id",
+  recurrencestartdateonly: "recurrence_start_date",
+  "recurrence start date only": "recurrence_start_date",
+  "recurrence start date": "recurrence_start_date",
+  recurrenceenddateonly: "recurrence_end_date",
+  "recurrence end date only": "recurrence_end_date",
+  "recurrence end date": "recurrence_end_date",
+  recurrencetimezonesidkey: "recurrence_timezone",
+  "recurrence time zone sid key": "recurrence_timezone",
+  "recurrence time zone": "recurrence_timezone",
+  recurrencedayofweekmask: "recurrence_day_of_week_mask",
+  "recurrence day of week mask": "recurrence_day_of_week_mask",
+  recurrencedayofmonth: "recurrence_day_of_month",
+  "recurrence day of month": "recurrence_day_of_month",
+  recurrenceinstance: "recurrence_instance",
+  "recurrence instance": "recurrence_instance",
+  recurrencemonthofyear: "recurrence_month_of_year",
+  "recurrence month of year": "recurrence_month_of_year",
+  // Genuinely useless SF metadata — pin so fuzzy matcher skips them.
   isdeleted: "",
   "is deleted": "",
   isarchived: "",
   systemmodstamp: "",
-  emailmessageid: "",
-  activityorigintype: "",
-  remindersettime: "",
-  reminderdatetime: "",
-  isreminderset: "",
-  recurrenceactivityid: "",
-  recurrencestartdateonly: "",
-  recurrenceenddateonly: "",
-  recurrencetimezonesidkey: "",
-  recurrencedayofweekmask: "",
-  recurrencedayofmonth: "",
-  recurrenceinstance: "",
-  recurrencemonthofyear: "",
   recurrenceregeneratedtype: "",
+  "recurrence regenerated type": "",
 };
 
 /* ---- Events (SF Event.csv) — inserted into public.activities ---- */
@@ -1545,15 +1565,29 @@ function getCRMFields(entity: EntityType): string[] {
         "sf_task_status",
         "sf_is_closed",
         "priority",
+        "activity_origin_type",
         // Call detail
         "call_type",
         "call_disposition",
         "call_object",
         "call_duration_seconds",
+        // Email link (for Task.Type = Email)
+        "sf_email_message_id",
+        // SF reminder (preserved verbatim, doesn't fire CRM reminders)
+        "sf_reminder_datetime",
+        "sf_is_reminder_set",
         // Recurrence
         "is_recurrence",
         "recurrence_type",
         "recurrence_interval",
+        "recurrence_start_date",
+        "recurrence_end_date",
+        "recurrence_timezone",
+        "recurrence_day_of_week_mask",
+        "recurrence_day_of_month",
+        "recurrence_month_of_year",
+        "recurrence_instance",
+        "sf_recurrence_activity_id",
         // SF audit metadata
         "sf_created_date",
         "sf_created_by",
@@ -2969,6 +3003,9 @@ export function SalesforceImport() {
                 "pardot_score",
                 "call_duration_seconds",
                 "recurrence_interval",
+                "recurrence_day_of_week_mask",
+                "recurrence_day_of_month",
+                "recurrence_month_of_year",
               ].includes(field)
             ) {
               const num = Number(value.replace(/[,$]/g, ""));
@@ -2992,7 +3029,8 @@ export function SalesforceImport() {
                "follow_up", "is_converted", "is_closed", "is_won",
                "created_by_automation", "has_opportunity_line_items",
                "has_opted_out_of_email", "do_not_call", "do_not_market_to", "priority_lead",
-               "cold_lead", "is_active", "is_default", "is_recurrence"].includes(field)
+               "cold_lead", "is_active", "is_default", "is_recurrence",
+               "sf_is_reminder_set"].includes(field)
             ) {
               record[field] = value.toLowerCase() === "true" || value === "1";
               continue;
