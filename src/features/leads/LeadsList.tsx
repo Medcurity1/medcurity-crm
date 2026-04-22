@@ -44,21 +44,40 @@ function useLeadQuickStats() {
   return useQuery({
     queryKey: ["leads", "quick-stats"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("leads")
-        .select("qualification, status")
-        .is("archived_at", null);
-      if (error) throw error;
-      const rows = (data ?? []) as { qualification: string | null; status: string | null }[];
-      let mql = 0;
-      let sql = 0;
-      let converted = 0;
-      for (const r of rows) {
-        if (r.qualification === "mql") mql++;
-        else if (r.qualification === "sql") sql++;
-        if (r.status === "converted") converted++;
-      }
-      return { total: rows.length, mql, sql, converted };
+      // Don't fetch rows — use head:true counts. The previous version
+      // pulled the full table and was capped at PostgREST's 1000-row
+      // default, which is why the "Total Leads" card said 1000 when
+      // the table actually has ~32k. Each count() is a single query
+      // that returns just the count via Content-Range.
+      const [totalRes, mqlRes, qualifiedRes] = await Promise.all([
+        supabase
+          .from("leads")
+          .select("id", { count: "exact", head: true })
+          .is("archived_at", null),
+        supabase
+          .from("leads")
+          .select("id", { count: "exact", head: true })
+          .is("archived_at", null)
+          .eq("qualification", "mql"),
+        // 'qualified' is the SF status that means "ready to convert"
+        // — closer in spirit to the old "converted" metric for migrated
+        // data, since converted leads aren't kept in the leads table.
+        supabase
+          .from("leads")
+          .select("id", { count: "exact", head: true })
+          .is("archived_at", null)
+          .eq("status", "qualified"),
+      ]);
+
+      if (totalRes.error) throw totalRes.error;
+      if (mqlRes.error) throw mqlRes.error;
+      if (qualifiedRes.error) throw qualifiedRes.error;
+
+      return {
+        total: totalRes.count ?? 0,
+        mql: mqlRes.count ?? 0,
+        qualified: qualifiedRes.count ?? 0,
+      };
     },
   });
 }
@@ -205,11 +224,10 @@ export function LeadsList() {
         }
       />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+      <div className="grid grid-cols-3 gap-3 mb-4">
         <StatCard label="Total Leads" value={quickStats?.total ?? 0} />
         <StatCard label="MQL" value={quickStats?.mql ?? 0} />
-        <StatCard label="SQL" value={quickStats?.sql ?? 0} />
-        <StatCard label="Converted" value={quickStats?.converted ?? 0} />
+        <StatCard label="Qualified" value={quickStats?.qualified ?? 0} />
       </div>
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -261,11 +279,13 @@ export function LeadsList() {
             <SelectValue placeholder="All qualifications" />
           </SelectTrigger>
           <SelectContent>
+            {/* SQL/SAL intentionally omitted: per project workflow,
+                a lead becoming SQL = it converts to a contact, so
+                a lead's qualification only ever takes 'unqualified'
+                or 'mql'. */}
             <SelectItem value="all">All Qualifications</SelectItem>
             <SelectItem value="unqualified">Unqualified</SelectItem>
             <SelectItem value="mql">MQL</SelectItem>
-            <SelectItem value="sql">SQL</SelectItem>
-            <SelectItem value="sal">SAL</SelectItem>
           </SelectContent>
         </Select>
         <Select value={ownerFilter} onValueChange={(v) => { setOwnerFilter(v); setPage(0); }}>
