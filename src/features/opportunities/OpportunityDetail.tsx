@@ -761,7 +761,18 @@ function ProductsTabContent({
             <TableBody>
               {products.map((p) => (
                 <TableRow key={p.id}>
-                  <TableCell className="font-medium">{p.product?.name ?? "\u2014"}</TableCell>
+                  <TableCell className="font-medium">
+                    {p.product?.id ? (
+                      <Link
+                        to={`/products/${p.product.id}`}
+                        className="text-primary hover:underline"
+                      >
+                        {p.product.name ?? "\u2014"}
+                      </Link>
+                    ) : (
+                      p.product?.name ?? "\u2014"
+                    )}
+                  </TableCell>
                   <TableCell className="text-muted-foreground">{p.product?.code ?? "\u2014"}</TableCell>
                   <TableCell className="text-right">{p.quantity}</TableCell>
                   <TableCell className="text-right">{formatCurrencyDetailed(Number(p.unit_price))}</TableCell>

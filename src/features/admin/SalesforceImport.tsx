@@ -726,6 +726,34 @@ const LEAD_FIELDS: Record<string, string> = {
   lastactivitydate: "last_activity_date",
   "last activity date": "last_activity_date",
   "last activity": "last_activity_date",
+  // Pardot fields — pinned to "" so the fuzzy matcher can't pull them
+  // into wrong fields. Without this, pi__last_activity__c was bigram-
+  // matching to last_activity_date and clobbering the real
+  // LastActivityDate; pi__first_activity__c was doing the same. None
+  // of these have a CRM home today, so they're explicitly skipped.
+  pi__needs_score_synced__c: "",
+  pi__pardot_last_scored_at__c: "",
+  pi__campaign__c: "",
+  pi__comments__c: "",
+  pi__conversion_date__c: "",
+  pi__conversion_object_name__c: "",
+  pi__conversion_object_type__c: "",
+  pi__created_date__c: "",
+  pi__first_activity__c: "",
+  pi__first_search_term__c: "",
+  pi__first_search_type__c: "",
+  pi__first_touch_url__c: "",
+  pi__grade__c: "",
+  pi__last_activity__c: "",
+  pi__notes__c: "",
+  pi__pardot_hard_bounced__c: "",
+  pi__score__c: "",
+  pi__url__c: "",
+  pi__utm_campaign__c: "",
+  pi__utm_content__c: "",
+  pi__utm_medium__c: "",
+  pi__utm_source__c: "",
+  pi__utm_term__c: "",
   // MQL
   "mql date": "mql_date",
   mql_date__c: "mql_date",
@@ -749,10 +777,44 @@ const LEAD_FIELDS: Record<string, string> = {
   donotmarketto: "do_not_market_to",
   "do not market to": "do_not_market_to",
   do_not_market_to__c: "do_not_market_to",
+  // Stronger blanket flag (added migration 20260420000002)
+  donotcontact: "do_not_contact",
+  "do not contact": "do_not_contact",
+  do_not_contact__c: "do_not_contact",
   // Type
   type: "lead_type",
   "lead type": "lead_type",
   type__c: "lead_type",
+  // Project / segment / industry category
+  project__c: "project",
+  project: "project",
+  project_segment__c: "project_segment",
+  "project segment": "project_segment",
+  industry_category__c: "industry_category",
+  "industry category": "industry_category",
+  // Time zone
+  time_zone__c: "time_zone",
+  "time zone": "time_zone",
+  timezone: "time_zone",
+  // Credential
+  credential__c: "credential",
+  credential: "credential",
+  // Business relationship
+  business_relationship_tag__c: "business_relationship_tag",
+  "business relationship tag": "business_relationship_tag",
+  // Phone extension
+  phone_ext__c: "phone_ext",
+  "phone ext": "phone_ext",
+  "phone extension": "phone_ext",
+  phoneextension: "phone_ext",
+  // Events attended
+  events__c: "events_attended",
+  "events attended": "events_attended",
+  // Cold lead
+  cold_lead__c: "cold_lead",
+  "cold lead": "cold_lead",
+  cold_lead_source__c: "cold_lead_source",
+  "cold lead source": "cold_lead_source",
   // Notes / comments
   notes: "notes",
   "lead notes": "notes",
@@ -1278,8 +1340,20 @@ function getCRMFields(entity: EntityType): string[] {
         "has_opted_out_of_email",
         "do_not_call",
         "do_not_market_to",
-        // Type / notes
+        "do_not_contact",
+        // Classification
         "lead_type",
+        "industry_category",
+        "project",
+        "project_segment",
+        "credential",
+        "business_relationship_tag",
+        "time_zone",
+        "phone_ext",
+        "events_attended",
+        "cold_lead",
+        "cold_lead_source",
+        // Notes
         "notes",
         "comments",
         // LinkedIn
@@ -1852,21 +1926,38 @@ export function SalesforceImport() {
         const crmFields = getCRMFields(entity);
         const autoMappings: ColumnMapping[] = headers.map((h) => {
           const normalized = h.toLowerCase().trim();
-          const exactMatch = fieldMap[normalized];
-          if (exactMatch) {
-            return { csvColumn: h, crmField: exactMatch, confidence: "exact" as MappingConfidence };
+          // An explicit "" mapping in the field map means "we know this
+          // column and we DELIBERATELY skip it" — fuzzy must not get a
+          // second chance to mis-map it (e.g. pi__last_activity__c was
+          // bigram-matching to last_activity_date and clobbering the
+          // real LastActivityDate value).
+          if (Object.prototype.hasOwnProperty.call(fieldMap, normalized)) {
+            const explicit = fieldMap[normalized];
+            return {
+              csvColumn: h,
+              crmField: explicit,
+              confidence: explicit ? ("exact" as MappingConfidence) : ("unmapped" as MappingConfidence),
+            };
           }
           // Try without spaces/underscores/slashes (catches "Billing Zip/Postal Code" etc.)
           const stripped = normalized.replace(/[\s_/]+/g, "");
-          const strippedMatch = fieldMap[stripped];
-          if (strippedMatch) {
-            return { csvColumn: h, crmField: strippedMatch, confidence: "exact" as MappingConfidence };
+          if (Object.prototype.hasOwnProperty.call(fieldMap, stripped)) {
+            const explicit = fieldMap[stripped];
+            return {
+              csvColumn: h,
+              crmField: explicit,
+              confidence: explicit ? ("exact" as MappingConfidence) : ("unmapped" as MappingConfidence),
+            };
           }
           // Try with spaces instead of camelCase: "BillingPostalCode" → "billing postal code"
           const spaced = normalized.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
-          const spacedMatch = fieldMap[spaced];
-          if (spacedMatch) {
-            return { csvColumn: h, crmField: spacedMatch, confidence: "exact" as MappingConfidence };
+          if (Object.prototype.hasOwnProperty.call(fieldMap, spaced)) {
+            const explicit = fieldMap[spaced];
+            return {
+              csvColumn: h,
+              crmField: explicit,
+              confidence: explicit ? ("exact" as MappingConfidence) : ("unmapped" as MappingConfidence),
+            };
           }
           // Try fuzzy match
           const fuzzy = fuzzyMatchField(h, crmFields);
@@ -2787,7 +2878,7 @@ export function SalesforceImport() {
                "follow_up", "is_converted", "is_closed", "is_won",
                "created_by_automation", "has_opportunity_line_items",
                "has_opted_out_of_email", "do_not_call", "do_not_market_to", "priority_lead",
-               "is_active", "is_default"].includes(field)
+               "cold_lead", "is_active", "is_default"].includes(field)
             ) {
               record[field] = value.toLowerCase() === "true" || value === "1";
               continue;
