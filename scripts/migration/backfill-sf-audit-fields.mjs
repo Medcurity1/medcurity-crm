@@ -27,7 +27,8 @@
 // =================================================================
 
 import { readFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 
 const folder = process.argv[2];
@@ -35,6 +36,12 @@ if (!folder) {
   console.error("Usage: node scripts/migration/backfill-sf-audit-fields.mjs <sf-export-folder>");
   process.exit(1);
 }
+
+// Resolve .env relative to the SCRIPT (worktree root), not the user's
+// cwd. Lets the user run this from anywhere without getting "Missing
+// SUPABASE_URL" because they happened to `cd scripts/migration` first.
+const __filename = fileURLToPath(import.meta.url);
+const REPO_ROOT = resolve(dirname(__filename), "..", "..");
 
 function readDotEnv(p) {
   if (!existsSync(p)) return {};
@@ -45,14 +52,78 @@ function readDotEnv(p) {
   }
   return out;
 }
-const env = { ...readDotEnv(".env"), ...readDotEnv(".env.local"), ...process.env };
+const env = {
+  ...readDotEnv(resolve(REPO_ROOT, ".env")),
+  ...readDotEnv(resolve(REPO_ROOT, ".env.local")),
+  // cwd-relative (fallback if the user has a different env layout)
+  ...readDotEnv(".env"),
+  ...readDotEnv(".env.local"),
+  ...process.env,
+};
 const SUPABASE_URL = env.SUPABASE_URL ?? env.VITE_SUPABASE_URL;
 const SERVICE_KEY = env.SUPABASE_SERVICE_ROLE_KEY;
-if (!SUPABASE_URL || !SERVICE_KEY) {
-  console.error("Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY");
+
+if (!SUPABASE_URL) {
+  console.error("✗ Missing SUPABASE_URL. Looked for:");
+  console.error(`    ${resolve(REPO_ROOT, ".env")}    (VITE_SUPABASE_URL)`);
+  console.error(`    ${resolve(REPO_ROOT, ".env.local")}`);
+  console.error("    process.env (SUPABASE_URL or VITE_SUPABASE_URL)");
   process.exit(1);
 }
+if (!SERVICE_KEY) {
+  console.error("✗ Missing SUPABASE_SERVICE_ROLE_KEY.");
+  console.error("  Get it from Supabase Dashboard → Project Settings → API → service_role");
+  console.error("  Run like: SUPABASE_SERVICE_ROLE_KEY=eyJhbG...actualkey... node scripts/migration/backfill-sf-audit-fields.mjs <folder>");
+  process.exit(1);
+}
+
+// Paranoia check #1: catch the "I left the placeholder in" case. A
+// real service-role key is a JWT that starts with "eyJ" and is
+// hundreds of chars long. If we see literal "eyJhbG..." or any short
+// string, the script was almost certainly copy-pasted with the
+// placeholder not replaced.
+if (SERVICE_KEY === "eyJhbG..." || SERVICE_KEY.length < 100 || !SERVICE_KEY.startsWith("eyJ")) {
+  console.error("✗ SUPABASE_SERVICE_ROLE_KEY looks invalid.");
+  console.error(`  (Got a value of length ${SERVICE_KEY.length}; a real service-role JWT starts with 'eyJ' and is ~200+ chars.)`);
+  console.error("  Did you leave the placeholder 'eyJhbG...' in your command? Replace it with the actual key from:");
+  console.error("    Supabase Dashboard → Project Settings → API → service_role (SECRET, not anon)");
+  process.exit(1);
+}
+
+// Paranoia check #2: is this actually the service-role key, not the
+// anon key? They're both JWTs so only the "role" claim distinguishes
+// them. If user accidentally set it to VITE_SUPABASE_ANON_KEY, every
+// update will silently fail under RLS.
+try {
+  const parts = SERVICE_KEY.split(".");
+  const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
+  if (payload.role !== "service_role") {
+    console.error(`✗ That JWT has role='${payload.role}', not 'service_role'.`);
+    console.error("  This is probably your anon key — use the service_role key instead.");
+    console.error("  Under RLS, the anon key will silently fail every update (no error, 0 rows affected).");
+    process.exit(1);
+  }
+} catch (e) {
+  console.error(`✗ Could not decode JWT: ${e.message}`);
+  console.error("  The key isn't a valid JWT. Double-check you copied the full service_role value.");
+  process.exit(1);
+}
+
+console.log(`✓ Loaded env: ${SUPABASE_URL}`);
+console.log(`✓ Using service_role key (length ${SERVICE_KEY.length})\n`);
+
 const sb = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
+
+// Connectivity smoke test — catch wrong URL / revoked key BEFORE we
+// spend 2 minutes running through rows.
+{
+  const { error } = await sb.from("accounts").select("id", { head: true, count: "estimated" });
+  if (error) {
+    console.error(`✗ Can't reach the DB: ${error.message}`);
+    console.error("  Check the URL + service_role key match the same project.");
+    process.exit(1);
+  }
+}
 
 function parseCSV(text) {
   const rows = []; let row = []; let cur = ""; let inQ = false;
