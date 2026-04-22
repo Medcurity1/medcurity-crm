@@ -729,34 +729,35 @@ const LEAD_FIELDS: Record<string, string> = {
   lasttransferdate: "last_transfer_date",
   "last transfer date": "last_transfer_date",
   "last transfer": "last_transfer_date",
-  // Pardot fields — pinned to "" so the fuzzy matcher can't pull them
-  // into wrong fields. Without this, pi__last_activity__c was bigram-
-  // matching to last_activity_date and clobbering the real
-  // LastActivityDate; pi__first_activity__c was doing the same. None
-  // of these have a CRM home today, so they're explicitly skipped.
+  // Pardot marketing-engagement fields. Migration 20260421000003
+  // adds dedicated columns for the valuable ones; the rest stay
+  // pinned to "" so the fuzzy matcher can't bigram-mismap them
+  // (e.g. pi__last_activity__c was clobbering last_activity_date
+  // before this fix landed).
+  pi__first_activity__c: "first_activity_date",
+  pi__last_activity__c: "pardot_last_activity_date",
+  pi__conversion_date__c: "conversion_date",
+  pi__campaign__c: "pardot_campaign",
+  pi__comments__c: "pardot_comments",
+  pi__grade__c: "pardot_grade",
+  pi__score__c: "pardot_score",
+  pi__url__c: "pardot_url",
+  pi__utm_source__c: "utm_source",
+  pi__utm_medium__c: "utm_medium",
+  pi__utm_campaign__c: "utm_campaign",
+  pi__utm_content__c: "utm_content",
+  pi__utm_term__c: "utm_term",
+  // Internal Pardot bookkeeping — no value to import.
   pi__needs_score_synced__c: "",
   pi__pardot_last_scored_at__c: "",
-  pi__campaign__c: "",
-  pi__comments__c: "",
-  pi__conversion_date__c: "",
   pi__conversion_object_name__c: "",
   pi__conversion_object_type__c: "",
   pi__created_date__c: "",
-  pi__first_activity__c: "",
   pi__first_search_term__c: "",
   pi__first_search_type__c: "",
   pi__first_touch_url__c: "",
-  pi__grade__c: "",
-  pi__last_activity__c: "",
   pi__notes__c: "",
   pi__pardot_hard_bounced__c: "",
-  pi__score__c: "",
-  pi__url__c: "",
-  pi__utm_campaign__c: "",
-  pi__utm_content__c: "",
-  pi__utm_medium__c: "",
-  pi__utm_source__c: "",
-  pi__utm_term__c: "",
   // MQL
   "mql date": "mql_date",
   mql_date__c: "mql_date",
@@ -1375,6 +1376,20 @@ function getCRMFields(entity: EntityType): string[] {
         // Activity
         "last_activity_date",
         "last_transfer_date",
+        // Pardot marketing fields
+        "first_activity_date",
+        "pardot_last_activity_date",
+        "conversion_date",
+        "pardot_campaign",
+        "pardot_comments",
+        "pardot_grade",
+        "pardot_score",
+        "pardot_url",
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_content",
+        "utm_term",
         // SF History
         "sf_created_by",
         "sf_created_date",
@@ -2859,6 +2874,7 @@ export function SalesforceImport() {
                 "total_price",
                 "discount_percent",
                 "default_arr",
+                "pardot_score",
               ].includes(field)
             ) {
               const num = Number(value.replace(/[,$]/g, ""));
