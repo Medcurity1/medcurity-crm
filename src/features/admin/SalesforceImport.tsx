@@ -3486,6 +3486,27 @@ export function SalesforceImport() {
             continue;
           }
 
+          // ---- Stamp CRM created_at / updated_at from SF history ----
+          // Without this, every imported record shows today's date as
+          // its "Created" timestamp — the DB column defaults to now().
+          // Preserve the SF original so the history timeline reads
+          // correctly AND list pages sort by actual creation date.
+          // (The raw SF id stays in sf_created_by — we don't resolve
+          // it to a CRM user because many SF owners have left.)
+          if (record.sf_created_date) {
+            const sfCreated = String(record.sf_created_date).trim();
+            if (sfCreated) {
+              record.created_at = sfCreated;
+              // updated_at should never be earlier than created_at —
+              // if sf_last_modified_date is present use it, otherwise
+              // fall back to created.
+              const sfMod = record.sf_last_modified_date
+                ? String(record.sf_last_modified_date).trim()
+                : "";
+              record.updated_at = sfMod || sfCreated;
+            }
+          }
+
           // Defaults
           if (entity === "accounts") {
             record.lifecycle_status = record.lifecycle_status ?? "prospect";

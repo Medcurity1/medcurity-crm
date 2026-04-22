@@ -254,6 +254,11 @@ async function main() {
       sf_created_date: col(r, "CreatedDate") || null,
       sf_last_modified_by: col(r, "LastModifiedById") || null,
       sf_last_modified_date: col(r, "LastModifiedDate") || null,
+      // Preserve the SF timeline: without this the activity shows
+      // today as its create date, which makes the timeline read
+      // backwards and sort wrong on every detail page.
+      created_at: col(r, "CreatedDate") || undefined,
+      updated_at: col(r, "LastModifiedDate") || col(r, "CreatedDate") || undefined,
     });
   }
 
