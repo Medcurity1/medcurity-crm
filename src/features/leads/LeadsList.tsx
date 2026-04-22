@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { UserPlus, Plus, Search } from "lucide-react";
+import { UserPlus, Plus, Search, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useLeads, useArchiveLead, useBulkUpdateOwner, useBulkDeleteLeads } from "./api";
 import { useUsers } from "@/features/accounts/api";
@@ -81,6 +81,22 @@ function useLeadQuickStats() {
       };
     },
   });
+}
+
+function FilterChip({ label, onClear }: { label: string; onClear: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 text-primary px-2 py-0.5">
+      {label}
+      <button
+        type="button"
+        onClick={onClear}
+        className="hover:text-destructive"
+        aria-label={`Clear ${label} filter`}
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </span>
+  );
 }
 
 function StatCard({ label, value }: { label: string; value: number | string }) {
@@ -362,6 +378,43 @@ export function LeadsList() {
         </Select>
       </div>
 
+      {/* Applied-filter chip row. Surfacing this is partly for UX
+          (clear what's filtering the table) and partly debug — when
+          filters "look like they aren't applying" the user can now
+          see whether the URL state actually updated. */}
+      {(statusFilter !== "all" ||
+        sourceFilter !== "all" ||
+        qualificationFilter !== "all" ||
+        ownerFilter !== "all" ||
+        ratingFilter !== "all" ||
+        industryFilter !== "all" ||
+        verifiedFilter !== "all") && (
+        <div className="flex flex-wrap items-center gap-2 mb-4 text-xs">
+          <span className="text-muted-foreground font-medium">Active filters:</span>
+          {statusFilter !== "all" && (
+            <FilterChip label={`Status: ${statusFilter}`} onClear={() => { setStatusFilter("all"); setPage(0); }} />
+          )}
+          {sourceFilter !== "all" && (
+            <FilterChip label={`Source: ${sourceFilter}`} onClear={() => { setSourceFilter("all"); setPage(0); }} />
+          )}
+          {qualificationFilter !== "all" && (
+            <FilterChip label={`Qual: ${qualificationFilter.toUpperCase()}`} onClear={() => { setQualificationFilter("all"); setPage(0); }} />
+          )}
+          {ownerFilter !== "all" && (
+            <FilterChip label={`Owner: ${ownerFilter === "mine" ? "Me" : (users ?? []).find((u) => u.id === ownerFilter)?.full_name ?? "Other"}`} onClear={() => { setOwnerFilter("all"); setPage(0); }} />
+          )}
+          {ratingFilter !== "all" && (
+            <FilterChip label={`Rating: ${ratingFilter}`} onClear={() => { setRatingFilter("all"); setPage(0); }} />
+          )}
+          {industryFilter !== "all" && (
+            <FilterChip label={`Industry: ${industryFilter.replace(/_/g, " ")}`} onClear={() => { setIndustryFilter("all"); setPage(0); }} />
+          )}
+          {verifiedFilter !== "all" && (
+            <FilterChip label={`Verified: ${verifiedFilter}`} onClear={() => { setVerifiedFilter("all"); setPage(0); }} />
+          )}
+        </div>
+      )}
+
       {isLoading ? (
         <div className="space-y-2">
           {Array.from({ length: 5 }).map((_, i) => (
@@ -423,17 +476,20 @@ export function LeadsList() {
                         aria-label={`Select ${lead.first_name} ${lead.last_name}`}
                       />
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="max-w-[200px]">
                       <Link
                         to={`/leads/${lead.id}`}
-                        className="font-medium text-primary hover:underline"
+                        className="font-medium text-primary hover:underline block truncate"
+                        title={`${lead.first_name ?? ""} ${lead.last_name ?? ""}`.trim()}
                         onClick={(e) => e.stopPropagation()}
                       >
                         {lead.first_name} {lead.last_name}
                       </Link>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {lead.company ?? "\u2014"}
+                    <TableCell className="text-muted-foreground max-w-[260px]">
+                      <div className="truncate" title={lead.company ?? ""}>
+                        {lead.company ?? "\u2014"}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <StatusBadge
@@ -460,14 +516,18 @@ export function LeadsList() {
                         <span className="text-muted-foreground">{"\u2014"}</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {lead.email ?? "\u2014"}
+                    <TableCell className="text-muted-foreground max-w-[240px]">
+                      <div className="truncate" title={lead.email ?? ""}>
+                        {lead.email ?? "\u2014"}
+                      </div>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
+                    <TableCell className="text-muted-foreground whitespace-nowrap">
                       {lead.phone ? formatPhone(lead.phone) : "\u2014"}
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {lead.owner?.full_name ?? "Unassigned"}
+                    <TableCell className="text-muted-foreground max-w-[160px]">
+                      <div className="truncate" title={lead.owner?.full_name ?? "Unassigned"}>
+                        {lead.owner?.full_name ?? "Unassigned"}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
