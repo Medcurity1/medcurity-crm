@@ -402,8 +402,11 @@ function ActivityEntry({
           {isCompleted && (
             <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
           )}
-          <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
-            {formatRelativeDate(activity.created_at)}
+          <span
+            className="text-xs text-muted-foreground whitespace-nowrap shrink-0"
+            title={formatDate(activity.created_at)}
+          >
+            {formatRelativeDate(activity.created_at)} · {formatDate(activity.created_at)}
           </span>
         </div>
         {activity.body && !expanded && (
@@ -593,8 +596,11 @@ function ThreadEntry({
           <span className="text-xs text-muted-foreground font-normal whitespace-nowrap shrink-0">
             {messageCount} msgs
           </span>
-          <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
-            {formatRelativeDate(group.primary.created_at)}
+          <span
+            className="text-xs text-muted-foreground whitespace-nowrap shrink-0"
+            title={formatDate(group.primary.created_at)}
+          >
+            {formatRelativeDate(group.primary.created_at)} · {formatDate(group.primary.created_at)}
           </span>
         </div>
         {!showThread && group.primary.body && (
