@@ -726,6 +726,9 @@ const LEAD_FIELDS: Record<string, string> = {
   lastactivitydate: "last_activity_date",
   "last activity date": "last_activity_date",
   "last activity": "last_activity_date",
+  lasttransferdate: "last_transfer_date",
+  "last transfer date": "last_transfer_date",
+  "last transfer": "last_transfer_date",
   // Pardot fields — pinned to "" so the fuzzy matcher can't pull them
   // into wrong fields. Without this, pi__last_activity__c was bigram-
   // matching to last_activity_date and clobbering the real
@@ -1371,6 +1374,7 @@ function getCRMFields(entity: EntityType): string[] {
         "email_bounced_date",
         // Activity
         "last_activity_date",
+        "last_transfer_date",
         // SF History
         "sf_created_by",
         "sf_created_date",
@@ -2881,6 +2885,18 @@ export function SalesforceImport() {
                "cold_lead", "is_active", "is_default"].includes(field)
             ) {
               record[field] = value.toLowerCase() === "true" || value === "1";
+              continue;
+            }
+
+            // text[] fields — SF multi-picklists arrive as ";"-delimited
+            // strings (e.g. "MGMA19;CHUG19"). Convert to a real Postgres
+            // text[] so PostgREST inserts them as arrays.
+            if (["events_attended"].includes(field)) {
+              const parts = value
+                .split(";")
+                .map((s) => s.trim())
+                .filter((s) => s.length > 0);
+              if (parts.length > 0) record[field] = parts;
               continue;
             }
 

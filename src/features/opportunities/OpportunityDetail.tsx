@@ -719,7 +719,7 @@ interface ProductsTabContentProps {
     quantity: number;
     unit_price: number | string;
     arr_amount: number | string;
-    product?: { name?: string | null; code?: string | null } | null;
+    product?: { id?: string | null; name?: string | null; code?: string | null } | null;
   }>;
   totalARR: number;
   onAddProduct: () => void;
