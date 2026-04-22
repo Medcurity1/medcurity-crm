@@ -256,9 +256,12 @@ async function main() {
       sf_last_modified_date: col(r, "LastModifiedDate") || null,
       // Preserve the SF timeline: without this the activity shows
       // today as its create date, which makes the timeline read
-      // backwards and sort wrong on every detail page.
+      // backwards and sort wrong on every detail page. imported_at
+      // captures the moment this row landed in the CRM so we can
+      // still tell "migrated" vs "native" records apart.
       created_at: col(r, "CreatedDate") || undefined,
       updated_at: col(r, "LastModifiedDate") || col(r, "CreatedDate") || undefined,
+      imported_at: col(r, "CreatedDate") ? new Date().toISOString() : undefined,
     });
   }
 

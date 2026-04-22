@@ -3486,24 +3486,29 @@ export function SalesforceImport() {
             continue;
           }
 
-          // ---- Stamp CRM created_at / updated_at from SF history ----
-          // Without this, every imported record shows today's date as
-          // its "Created" timestamp — the DB column defaults to now().
-          // Preserve the SF original so the history timeline reads
-          // correctly AND list pages sort by actual creation date.
-          // (The raw SF id stays in sf_created_by — we don't resolve
-          // it to a CRM user because many SF owners have left.)
+          // ---- Stamp SF history + mark as imported ----
+          // Three goals:
+          //   1. created_at reflects the SF original so the timeline
+          //      reads correctly + list-page sorts work. Without this
+          //      every migrated record reads as "today".
+          //   2. updated_at follows SF LastModifiedDate (or CreatedDate
+          //      as a floor — never earlier than created_at).
+          //   3. imported_at captures the moment this row landed in
+          //      the CRM. Lets admins distinguish "came from the SF
+          //      migration" vs "created live in the CRM" — native
+          //      records leave imported_at NULL.
+          // sf_created_by (the SF User Id as text) is still preserved
+          // as the author audit trail since the SF user often doesn't
+          // exist in the CRM user table.
           if (record.sf_created_date) {
             const sfCreated = String(record.sf_created_date).trim();
             if (sfCreated) {
               record.created_at = sfCreated;
-              // updated_at should never be earlier than created_at —
-              // if sf_last_modified_date is present use it, otherwise
-              // fall back to created.
               const sfMod = record.sf_last_modified_date
                 ? String(record.sf_last_modified_date).trim()
                 : "";
               record.updated_at = sfMod || sfCreated;
+              record.imported_at = new Date().toISOString();
             }
           }
 
