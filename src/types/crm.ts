@@ -77,39 +77,12 @@ export type ProjectSegment =
   | "strategic_partner" | "it_vendor_third_party"
   | "independent_associations" | "other";
 
-export type PartnerRelationshipType =
-  | "referral_partner" | "reseller" | "msp" | "consulting_partner"
-  | "technology_partner" | "broker" | "gpo" | "other";
-
-export type PartnerStatus = "active" | "inactive" | "prospect";
-
-export interface Partner {
-  id: string;
-  name: string;
-  account_id: string | null;
-  partnership_type: PartnerRelationshipType | null;
-  status: PartnerStatus;
-  website: string | null;
-  primary_contact_name: string | null;
-  primary_contact_email: string | null;
-  primary_contact_phone: string | null;
-  notes: string | null;
-  legacy_partner_string: string | null;
-  owner_user_id: string | null;
-  archived_at: string | null;
-  archived_by: string | null;
-  archive_reason: string | null;
-  created_by: string | null;
-  updated_by: string | null;
-  created_at: string;
-  updated_at: string;
-  // joined
-  account?: { id: string; name: string } | null;
-  owner?: UserProfile | null;
-}
-
-export type AccountPartnerRole =
-  | "referring_partner" | "managing_partner" | "reseller_partner" | "other";
+// NOTE: the previous "first-class Partners table" model
+// (PartnerRelationshipType / PartnerStatus / Partner interface /
+// AccountPartner with relationship_role) was removed on 2026-04-22.
+// The new model treats partners as plain accounts and stores
+// relationships in account_partners. See AccountPartnership below
+// and migration 20260422000005.
 
 /**
  * One row in account_partners — a single partnership between two
@@ -130,15 +103,19 @@ export interface AccountPartnership {
   member_account?:  { id: string; name: string; account_type: string | null; lifecycle_status: string | null } | null;
 }
 
+// Legacy interface — left here only as a stub so code that
+// imports the name doesn't break instantly. Marked deprecated;
+// use AccountPartnership above going forward.
+/** @deprecated use AccountPartnership */
 export interface AccountPartner {
   id: string;
   account_id: string;
   partner_id: string;
-  relationship_role: AccountPartnerRole;
+  relationship_role: string;
   notes: string | null;
   created_at: string;
   // joined
-  partner?: Partner;
+  partner?: unknown;
   account?: { id: string; name: string };
 }
 
