@@ -3282,7 +3282,13 @@ export function SalesforceImport() {
               const VALID_ENUMS: Record<string, Set<string>> = {
                 lead_source: new Set(["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"]),
                 source: new Set(["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"]),
-                stage: new Set(["lead", "qualified", "proposal", "verbal_commit", "closed_won", "closed_lost"]),
+                stage: new Set([
+                  // SF-matching values (current — migration 20260422000001)
+                  "details_analysis", "demo", "proposal_and_price_quote",
+                  "proposal_conversation", "closed_won", "closed_lost",
+                  // Legacy values still valid in the enum for FK safety
+                  "lead", "qualified", "proposal", "verbal_commit",
+                ]),
                 status: new Set(["active", "inactive", "discovery", "pending", "churned", "new", "contacted", "qualified", "unqualified", "converted", "dead"]),
                 lifecycle_status: new Set(["prospect", "active_client", "former_client", "partner"]),
                 kind: new Set(["new_business", "renewal"]),
