@@ -18,6 +18,7 @@ import {
   Maximize2,
   ExternalLink,
   MessagesSquare,
+  Pencil,
 } from "lucide-react";
 import { useActivities } from "./api";
 import { ActivityForm } from "./ActivityForm";
@@ -347,27 +348,32 @@ function ActivityEntry({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expandSignal]);
 
+  // Unified "click to view" behavior: every activity now expands
+  // inline on click (email shows full HTML body; other types show
+  // full body + metadata). Separate pencil icon is the ONLY way
+  // to open the edit form — prevents accidental edits when the
+  // user just wanted to read.
+  const canExpand = !!activity.body || isEmail;
   return (
     <div className="relative flex gap-3 pl-0">
-      {/* Icon (clickable for email rows to expand) */}
+      {/* Icon */}
       <button
         type="button"
         className={`relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${colorClass} ${
-          isEmail ? "cursor-pointer hover:opacity-80" : "cursor-default"
+          canExpand ? "cursor-pointer hover:opacity-80" : "cursor-default"
         }`}
-        onClick={isEmail ? () => setExpanded((v) => !v) : undefined}
-        aria-label={isEmail ? (expanded ? "Collapse email" : "Expand email") : undefined}
-        disabled={!isEmail}
+        onClick={canExpand ? () => setExpanded((v) => !v) : undefined}
+        aria-label={canExpand ? (expanded ? "Collapse" : "Expand") : undefined}
+        disabled={!canExpand}
       >
         <Icon className="h-4 w-4" />
       </button>
 
-      {/* Content */}
+      {/* Content — min-w-0 so the subject truncates cleanly even
+          with very long email subjects. */}
       <div className="flex-1 min-w-0 pb-4">
-        {/* Subject row: subject takes available width via min-w-0 + flex-1
-            so the relative date on the right always stays visible. */}
         <div className="flex items-center gap-2">
-          {isEmail ? (
+          {canExpand ? (
             <button
               type="button"
               className="flex items-center gap-1 text-left font-medium text-sm text-blue-600 hover:underline min-w-0 flex-1"
@@ -379,18 +385,6 @@ function ActivityEntry({
                 <ChevronRight className="h-3.5 w-3.5 shrink-0" />
               )}
               <span className="truncate">{activity.subject}</span>
-            </button>
-          ) : onEdit ? (
-            // Clickable-to-edit for non-email activities (call, meeting,
-            // note, task). The link to the related record is moved to the
-            // metadata line below.
-            <button
-              type="button"
-              onClick={onEdit}
-              className="font-medium text-sm truncate text-blue-600 hover:underline min-w-0 flex-1 text-left"
-              title="Click to edit"
-            >
-              {activity.subject}
             </button>
           ) : subjectLink ? (
             <Link to={subjectLink} className="font-medium text-sm truncate text-blue-600 hover:underline min-w-0 flex-1">
@@ -408,9 +402,30 @@ function ActivityEntry({
           >
             {formatRelativeDate(activity.created_at)} · {formatDate(activity.created_at)}
           </span>
+          {/* Explicit edit button. Kept small + at the right edge
+              so it doesn't compete with the subject click target.
+              Only shown when onEdit is provided by the parent
+              (e.g. account/opp detail timelines). */}
+          {onEdit && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit();
+              }}
+              className="text-muted-foreground hover:text-foreground shrink-0"
+              aria-label="Edit activity"
+              title="Edit"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
+        {/* Collapsed preview: 2 lines with word-break so long
+            unbroken strings (URLs, no-space paragraphs) don't
+            escape the card horizontally. */}
         {activity.body && !expanded && (
-          <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">
+          <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5 break-words">
             {activity.body}
           </p>
         )}
@@ -426,12 +441,22 @@ function ActivityEntry({
             </span>
           )}
         </div>
+        {/* Expanded view — emails get the full HeaderRow + HTML
+            iframe layout; other activity types get a full-text
+            dump of the body so reps don't lose any detail. */}
         {expanded && isEmail && (
           <EmailDetails
             activity={activity}
             enableReattribute={enableReattribute}
             onOpenReattribute={() => setShowReattribute(true)}
           />
+        )}
+        {expanded && !isEmail && activity.body && (
+          <div className="mt-2 rounded-md border bg-muted/30 p-3 text-sm">
+            <pre className="whitespace-pre-wrap break-words font-sans text-foreground">
+              {activity.body}
+            </pre>
+          </div>
         )}
       </div>
 
@@ -604,7 +629,7 @@ function ThreadEntry({
           </span>
         </div>
         {!showThread && group.primary.body && (
-          <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">
+          <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5 break-words">
             {group.primary.body}
           </p>
         )}

@@ -31,17 +31,20 @@ export function PartnersPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [roleFilter, setRoleFilter] = useState<"all" | "umbrella" | "member" | "top_level">("all");
   const [page, setPage] = useState(0);
 
   const { data: result, isLoading } = usePartners({
     search: search || undefined,
     status: statusFilter !== "all" ? statusFilter : undefined,
+    partnerRole: roleFilter,
     page,
     pageSize: PAGE_SIZE,
   });
 
   const partners = result?.data;
   const totalCount = result?.count ?? 0;
+  const memberCount = result?.memberCount;
 
   const handleSearchChange = (value: string) => {
     setSearch(value);
@@ -82,6 +85,26 @@ export function PartnersPage() {
             <SelectItem value="churned">Churned</SelectItem>
           </SelectContent>
         </Select>
+        {/* Role filter — lets the user distinguish umbrella partners
+            (like UTN) from accounts that are members under someone
+            else, or see strictly top-of-the-chain partners. */}
+        <Select
+          value={roleFilter}
+          onValueChange={(v) => {
+            setRoleFilter(v as typeof roleFilter);
+            setPage(0);
+          }}
+        >
+          <SelectTrigger className="w-56">
+            <SelectValue placeholder="All partner roles" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Partners</SelectItem>
+            <SelectItem value="umbrella">Umbrella (has members)</SelectItem>
+            <SelectItem value="top_level">Top-level only (no parent)</SelectItem>
+            <SelectItem value="member">Members (under a partner)</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {isLoading ? (
@@ -107,7 +130,7 @@ export function PartnersPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
-                  <TableHead>Partner Account</TableHead>
+                  <TableHead className="text-right w-24">Members</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Lead Source</TableHead>
                   <TableHead>Active Since</TableHead>
@@ -130,8 +153,14 @@ export function PartnersPage() {
                         {account.name}
                       </Link>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {account.partner_account ?? "\u2014"}
+                    <TableCell className="text-right">
+                      {(memberCount?.get(account.id) ?? 0) > 0 ? (
+                        <span className="font-medium">
+                          {memberCount?.get(account.id) ?? 0}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <StatusBadge
