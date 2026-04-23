@@ -13,7 +13,7 @@ Supabase project and the **`main`** Azure Static Web App deploy (`white-flower`)
 
 **Environment:**
 - Staging SWA = `ambitious-grass-0ad59c510.2.azurestaticapps.net` = branch `Staging`
-- **Prod SWA** = `white-flower-0f9685910.azurestaticapps.net` = branch `main`
+- **Prod SWA** = `white-flower-0f9685910.7.azurestaticapps.net` = branch `main`
 - Staging Supabase and Prod Supabase are separate projects.
 
 ---
@@ -52,17 +52,44 @@ Save into a folder, e.g. `~/Downloads/sf-prod-export/`.
 
 ## Phase 2 — Point the code at prod
 
-These happen in the GitHub Staging workflow vs Prod workflow already — when you merge `Staging → main`, the Prod workflow runs automatically. But verify the secrets are set:
+**Confirmed state as of 2026-04-23:**
 
-1. GitHub → Medcurity1/medcurity-crm → Settings → Secrets and variables → Actions
-2. Confirm these exist (values will differ from Staging):
-   - `PROD_VITE_SUPABASE_URL`
-   - `PROD_VITE_SUPABASE_ANON_KEY`
-   - `PROD_SUPABASE_PROJECT_REF`
-   - `SUPABASE_ACCESS_TOKEN` (shared)
-   - `AZURE_STATIC_WEB_APPS_API_TOKEN_WHITE_FLOWER_0F9685910`
+GitHub secrets that exist on the repo (verified via API):
+- `PRODUCTION_VITE_SUPABASE_URL` ✅
+- `PRODUCTION_VITE_SUPABASE_ANON_KEY` ✅
+- `PRODUCTION_SUPABASE_PROJECT_REF` ✅
+- `AZURE_STATIC_WEB_APPS_API_TOKEN_PRODUCTION` ✅
+- `AZURE_STATIC_WEB_APPS_API_TOKEN_WHITE_FLOWER_0F9685910` ✅
+- `SUPABASE_ACCESS_TOKEN` ✅
 
-3. Check `.github/workflows/azure-static-web-apps-white-flower-0f9685910.yml` references those same `PROD_*` names for its build step. If it still says `VITE_SUPABASE_URL` (shared), update it to `PROD_VITE_SUPABASE_URL` so prod builds against the prod project.
+Two prod workflow files exist:
+- `.github/workflows/deploy-main.yml` — CORRECT. Uses PRODUCTION_*
+  secrets + runs supabase migrations. This is on the Staging
+  branch and will merge to main in Phase 3.
+- `.github/workflows/azure-static-web-apps-white-flower-0f9685910.yml` —
+  STALE. Uses shared `VITE_SUPABASE_URL` (which points at staging)
+  and does NOT run migrations. **MUST BE DELETED** before merge
+  to prevent a race condition where prod deploys twice (once
+  with correct secrets, once with wrong secrets).
+
+### Required prep step BEFORE merging to main
+
+From your working checkout of `main`:
+
+```bash
+git checkout main
+git pull origin main
+git rm .github/workflows/azure-static-web-apps-white-flower-0f9685910.yml
+git commit -m "Remove stale production workflow (replaced by deploy-main.yml)"
+git push origin main
+```
+
+After this, only `deploy-main.yml` will fire on push to main. Then
+proceed to Phase 3.
+
+Azure custom domain confirmation (verified 2026-04-23):
+- `crm.medcurity.com` → `white-flower-0f9685910.7.azurestaticapps.net`
+  → IP 132.220.38.112. DNS is correct; no action needed.
 
 ---
 
@@ -81,7 +108,7 @@ GH Actions runs the Prod workflow:
 1. `npm ci`
 2. `npm run build` (with `PROD_VITE_*` env)
 3. `supabase db push` against prod project (applies every migration)
-4. Deploy to `white-flower.2.azurestaticapps.net`
+4. Deploy to `crm.medcurity.com (or white-flower-0f9685910.7.azurestaticapps.net directly)`
 
 Watch https://github.com/Medcurity1/medcurity-crm/actions — the run typically takes 3–5 min. **Do not proceed until it goes green.**
 
@@ -139,7 +166,7 @@ notify pgrst, 'reload schema';
 
 ### 5.1 — UI imports (browser)
 
-Log into `white-flower.2.azurestaticapps.net` with your admin account.
+Log into `crm.medcurity.com (or white-flower-0f9685910.7.azurestaticapps.net directly)` with your admin account.
 
 Go to Admin → Salesforce Import. Run **in this order**:
 
@@ -376,6 +403,22 @@ git push personal main
 Mark personal repo **private** under its Settings → General → Danger Zone.
 
 ---
+
+## Known Azure deploy gotchas
+
+**"Upload Timed Out. Unsure if deployment was successful or not."**
+Azure SWA's deploy polling times out after ~10 min on large uploads.
+Observed on 2026-04-23. Two things to know:
+
+- The build completed; the upload was in progress when polling gave
+  up. Usually the deploy completed server-side after our runner
+  disconnected. Check the live URL 2-3 min after the timeout — if
+  the site shows the latest commit, you're fine.
+- If it genuinely didn't deploy, re-run the failed workflow from the
+  Actions tab (Re-run failed jobs). Azure usually succeeds on retry
+  because the deployment token isn't locked.
+- Don't force-push or revert on timeout — often the deploy DID land
+  and you'll re-deploy the same bits twice (harmless but noisy).
 
 ## Rollback
 
