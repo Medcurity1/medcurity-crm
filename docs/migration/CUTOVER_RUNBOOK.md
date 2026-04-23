@@ -62,30 +62,17 @@ GitHub secrets that exist on the repo (verified via API):
 - `AZURE_STATIC_WEB_APPS_API_TOKEN_WHITE_FLOWER_0F9685910` ✅
 - `SUPABASE_ACCESS_TOKEN` ✅
 
-Two prod workflow files exist:
-- `.github/workflows/deploy-main.yml` — CORRECT. Uses PRODUCTION_*
-  secrets + runs supabase migrations. This is on the Staging
-  branch and will merge to main in Phase 3.
-- `.github/workflows/azure-static-web-apps-white-flower-0f9685910.yml` —
-  STALE. Uses shared `VITE_SUPABASE_URL` (which points at staging)
-  and does NOT run migrations. **MUST BE DELETED** before merge
-  to prevent a race condition where prod deploys twice (once
-  with correct secrets, once with wrong secrets).
+Prod workflow (updated 2026-04-23):
 
-### Required prep step BEFORE merging to main
+- `.github/workflows/azure-static-web-apps-white-flower-0f9685910.yml`
+  is the single production workflow. Uses `PRODUCTION_VITE_SUPABASE_URL`,
+  `PRODUCTION_VITE_SUPABASE_ANON_KEY`, and
+  `PRODUCTION_SUPABASE_PROJECT_REF`. Runs migrations via
+  `supabase db push --include-all` before the build, then deploys
+  to the `white-flower-0f9685910` SWA.
 
-From your working checkout of `main`:
-
-```bash
-git checkout main
-git pull origin main
-git rm .github/workflows/azure-static-web-apps-white-flower-0f9685910.yml
-git commit -m "Remove stale production workflow (replaced by deploy-main.yml)"
-git push origin main
-```
-
-After this, only `deploy-main.yml` will fire on push to main. Then
-proceed to Phase 3.
+No prep work needed here — when Staging merges to main in Phase 3,
+this workflow replaces the old stale one on main.
 
 Azure custom domain confirmation (verified 2026-04-23):
 - `crm.medcurity.com` → `white-flower-0f9685910.7.azurestaticapps.net`
