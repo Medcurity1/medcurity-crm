@@ -106,7 +106,7 @@ git push origin main
 
 GH Actions runs the Prod workflow:
 1. `npm ci`
-2. `npm run build` (with `PROD_VITE_*` env)
+2. `npm run build` (with `PRODUCTION_VITE_*` env)
 3. `supabase db push` against prod project (applies every migration)
 4. Deploy to `crm.medcurity.com (or white-flower-0f9685910.7.azurestaticapps.net directly)`
 
