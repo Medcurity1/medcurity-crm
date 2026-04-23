@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
@@ -7,6 +7,8 @@ import { queryClient } from "@/lib/queryClient";
 import { AuthProvider } from "@/features/auth/AuthProvider";
 import { ProtectedRoute } from "@/features/auth/ProtectedRoute";
 import { LoginPage } from "@/features/auth/LoginPage";
+import { ForgotPasswordPage } from "@/features/auth/ForgotPasswordPage";
+import { ResetPasswordPage } from "@/features/auth/ResetPasswordPage";
 import { AppLayout } from "@/components/layout/AppLayout";
 
 // Lazy-loaded route components for code splitting
@@ -26,17 +28,28 @@ const OpportunityDetail = lazy(() => import("@/features/opportunities/Opportunit
 const OpportunityForm = lazy(() => import("@/features/opportunities/OpportunityForm").then(m => ({ default: m.OpportunityForm })));
 const PipelineBoard = lazy(() => import("@/features/opportunities/PipelineBoard").then(m => ({ default: m.PipelineBoard })));
 const ProductsPage = lazy(() => import("@/features/products/ProductsPage").then(m => ({ default: m.ProductsPage })));
+const ProductDetail = lazy(() => import("@/features/products/ProductDetail").then(m => ({ default: m.ProductDetail })));
 const RenewalsQueue = lazy(() => import("@/features/renewals/RenewalsQueue").then(m => ({ default: m.RenewalsQueue })));
-const ReportBuilder = lazy(() => import("@/features/reports/ReportBuilder").then(m => ({ default: m.ReportBuilder })));
-const ForecastPage = lazy(() => import("@/features/forecasting/ForecastPage").then(m => ({ default: m.ForecastPage })));
+const ReportsHub = lazy(() => import("@/features/reports/ReportsHub").then(m => ({ default: m.ReportsHub })));
+// ForecastPage is now only reached via /reports?tab=forecasting and
+// lazy-loaded inside ReportsHub.
 const ActivityCalendar = lazy(() => import("@/features/activities/ActivityCalendar").then(m => ({ default: m.ActivityCalendar })));
 const ActivitiesListPage = lazy(() => import("@/features/activities/ActivitiesListPage").then(m => ({ default: m.ActivitiesListPage })));
-const WinLossAnalysis = lazy(() => import("@/features/analytics/WinLossAnalysis").then(m => ({ default: m.WinLossAnalysis })));
+const ActivityDetail = lazy(() => import("@/features/activities/ActivityDetail").then(m => ({ default: m.ActivityDetail })));
+const ArrRolling365 = lazy(() => import("@/features/reports/standard/ArrRolling365").then(m => ({ default: m.ArrRolling365 })));
+const MqlSqlCounts = lazy(() => import("@/features/reports/standard/MqlSqlCounts").then(m => ({ default: m.MqlSqlCounts })));
+const ActivePipeline = lazy(() => import("@/features/reports/standard/ActivePipeline").then(m => ({ default: m.ActivePipeline })));
+const RenewalsReport = lazy(() => import("@/features/reports/standard/RenewalsQueue").then(m => ({ default: m.RenewalsQueue })));
+// WinLossAnalysis is now only reached via /reports?tab=analytics and
+// lazy-loaded inside ReportsHub.
 const SequencesPage = lazy(() => import("@/features/sequences/SequencesPage").then(m => ({ default: m.SequencesPage })));
 const EmailTemplatesPage = lazy(() => import("@/features/email-templates/EmailTemplatesPage").then(m => ({ default: m.EmailTemplatesPage })));
 const LeadListsPage = lazy(() => import("@/features/lead-lists/LeadListsPage").then(m => ({ default: m.LeadListsPage })));
+const PartnersPage = lazy(() => import("@/features/partners/PartnersPage").then(m => ({ default: m.PartnersPage })));
 const ArchiveManager = lazy(() => import("@/features/archive/ArchiveManager").then(m => ({ default: m.ArchiveManager })));
 const AdminSettings = lazy(() => import("@/features/admin/AdminSettings").then(m => ({ default: m.AdminSettings })));
+const UserSettings = lazy(() => import("@/features/settings/UserSettings").then(m => ({ default: m.UserSettings })));
+const ChangePasswordPage = lazy(() => import("@/features/auth/ChangePasswordPage").then(m => ({ default: m.ChangePasswordPage })));
 
 export default function App() {
   return (
@@ -46,6 +59,8 @@ export default function App() {
           <TooltipProvider>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route element={<ProtectedRoute />}>
                 <Route element={<AppLayout />}>
                   <Route index element={<HomePage />} />
@@ -60,6 +75,7 @@ export default function App() {
                   <Route path="lead-lists" element={<LeadListsPage />} />
                   <Route path="sequences" element={<SequencesPage />} />
                   <Route path="email-templates" element={<EmailTemplatesPage />} />
+                  <Route path="partners" element={<PartnersPage />} />
                   <Route path="contacts" element={<ContactsList />} />
                   <Route path="contacts/new" element={<ContactForm />} />
                   <Route path="contacts/:id" element={<ContactDetail />} />
@@ -71,13 +87,28 @@ export default function App() {
                   <Route path="pipeline" element={<PipelineBoard />} />
                   <Route path="calendar" element={<ActivityCalendar />} />
                   <Route path="activities" element={<ActivitiesListPage />} />
-                  <Route path="analytics" element={<WinLossAnalysis />} />
+                  <Route path="activities/:id" element={<ActivityDetail />} />
                   <Route path="products" element={<ProductsPage />} />
+                  <Route path="products/:id" element={<ProductDetail />} />
                   <Route path="renewals" element={<RenewalsQueue />} />
-                  <Route path="reports" element={<ReportBuilder />} />
-                  <Route path="forecasting" element={<ForecastPage />} />
+                  <Route path="reports" element={<ReportsHub />} />
+                  <Route path="reports/standard/arr-rolling-365" element={<ArrRolling365 />} />
+                  <Route path="reports/standard/mql-sql-counts" element={<MqlSqlCounts />} />
+                  <Route path="reports/standard/active-pipeline" element={<ActivePipeline />} />
+                  <Route path="reports/standard/renewals-queue" element={<RenewalsReport />} />
+                  {/* Legacy routes redirect into the reports hub tabs */}
+                  <Route
+                    path="forecasting"
+                    element={<Navigate to="/reports?tab=forecasting" replace />}
+                  />
+                  <Route
+                    path="analytics"
+                    element={<Navigate to="/reports?tab=analytics" replace />}
+                  />
                   <Route path="archive" element={<ArchiveManager />} />
                   <Route path="admin" element={<AdminSettings />} />
+                  <Route path="settings" element={<UserSettings />} />
+                  <Route path="change-password" element={<ChangePasswordPage />} />
                   <Route path="*" element={<NotFound />} />
                 </Route>
               </Route>

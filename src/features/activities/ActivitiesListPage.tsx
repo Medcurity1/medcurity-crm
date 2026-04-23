@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { useQuery } from "@tanstack/react-query";
 import {
   Clock,
@@ -57,6 +58,12 @@ interface ListFilters {
   startDate: string;
   endDate: string;
   page: number;
+  // Optional record-scope filters from URL params (account_id, contact_id,
+  // opportunity_id) so /activities?account_id=X shows only that account.
+  scopeAccountId?: string;
+  scopeContactId?: string;
+  scopeOpportunityId?: string;
+  scopeLeadId?: string;
 }
 
 function useActivitiesList(filters: ListFilters) {
@@ -88,6 +95,18 @@ function useActivitiesList(filters: ListFilters) {
         end.setHours(23, 59, 59, 999);
         query = query.lte("created_at", end.toISOString());
       }
+      if (filters.scopeAccountId) {
+        query = query.eq("account_id", filters.scopeAccountId);
+      }
+      if (filters.scopeContactId) {
+        query = query.eq("contact_id", filters.scopeContactId);
+      }
+      if (filters.scopeOpportunityId) {
+        query = query.eq("opportunity_id", filters.scopeOpportunityId);
+      }
+      if (filters.scopeLeadId) {
+        query = query.eq("lead_id", filters.scopeLeadId);
+      }
 
       const from = filters.page * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
@@ -116,16 +135,55 @@ function getRecordLink(
 }
 
 export function ActivitiesListPage() {
+  const { user } = useAuth();
+  const [urlParams] = useSearchParams();
+
+  // Allow the home "View All Tasks" link (and other deep links) to
+  // pre-seed type + owner filters via ?type=task&owner=me.
+  const initialType = urlParams.get("type") ?? "all";
+  const initialOwnerParam = urlParams.get("owner");
+  const initialOwner =
+    initialOwnerParam === "me" && user?.id
+      ? user.id
+      : initialOwnerParam ?? "all";
+
   const [search, setSearch] = useState("");
-  const [type, setType] = useState<string>("all");
-  const [owner, setOwner] = useState<string>("all");
+  const [type, setType] = useState<string>(initialType);
+  const [owner, setOwner] = useState<string>(initialOwner);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [page, setPage] = useState(0);
 
+  const scopeAccountId = urlParams.get("account_id") || undefined;
+  const scopeContactId = urlParams.get("contact_id") || undefined;
+  const scopeOpportunityId = urlParams.get("opportunity_id") || undefined;
+  const scopeLeadId = urlParams.get("lead_id") || undefined;
+
   const filters = useMemo<ListFilters>(
-    () => ({ search, type, owner, startDate, endDate, page }),
-    [search, type, owner, startDate, endDate, page]
+    () => ({
+      search,
+      type,
+      owner,
+      startDate,
+      endDate,
+      page,
+      scopeAccountId,
+      scopeContactId,
+      scopeOpportunityId,
+      scopeLeadId,
+    }),
+    [
+      search,
+      type,
+      owner,
+      startDate,
+      endDate,
+      page,
+      scopeAccountId,
+      scopeContactId,
+      scopeOpportunityId,
+      scopeLeadId,
+    ]
   );
 
   const { data: result, isLoading } = useActivitiesList(filters);

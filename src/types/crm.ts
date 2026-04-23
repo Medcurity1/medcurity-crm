@@ -1,28 +1,141 @@
-export type AppRole = "sales" | "renewals" | "admin";
+export type AppRole = "sales" | "renewals" | "admin" | "super_admin";
 export type AccountLifecycle = "prospect" | "customer" | "former_customer";
 export type AccountStatus = "discovery" | "pending" | "active" | "inactive" | "churned";
-export type RenewalType = "auto_renew" | "manual_renew" | "no_auto_renew";
+export type RenewalType = "auto_renew" | "manual_renew" | "no_auto_renew" | "full_auto_renew" | "platform_only_auto_renew";
 export type OpportunityTeam = "sales" | "renewals";
 export type OpportunityKind = "new_business" | "renewal";
+// Matches public.opportunity_stage enum. SF-matching values are the
+// primary six; the legacy four (lead, qualified, proposal,
+// verbal_commit) remain as valid type members so old history rows
+// still type-check but are not surfaced in the UI. Migration
+// 20260422000001 migrated all rows off them.
 export type OpportunityStage =
+  | "details_analysis"
+  | "demo"
+  | "proposal_and_price_quote"
+  | "proposal_conversation"
+  | "closed_won"
+  | "closed_lost"
   | "lead"
   | "qualified"
   | "proposal"
-  | "verbal_commit"
-  | "closed_won"
-  | "closed_lost";
+  | "verbal_commit";
 export type ActivityType = "call" | "email" | "meeting" | "note" | "task";
 export type CustomFieldType = "text" | "textarea" | "number" | "currency" | "date" | "checkbox" | "select" | "multi_select" | "url" | "email" | "phone";
 export type LeadStatus = "new" | "contacted" | "qualified" | "unqualified" | "converted";
-export type LeadSource = "website" | "referral" | "cold_call" | "trade_show" | "partner" | "social_media" | "email_campaign" | "other";
+export type LeadSource = "website" | "referral" | "cold_call" | "trade_show" | "partner" | "social_media" | "email_campaign" | "webinar" | "podcast" | "conference" | "sql" | "mql" | "other";
 export type PaymentFrequency = "monthly" | "quarterly" | "semi_annually" | "annually" | "one_time";
 export type LeadQualification = "unqualified" | "mql" | "sql" | "sal";
+
+export type CredentialType =
+  | "md" | "do" | "rn" | "lpn" | "np" | "pa"
+  | "chc" | "chps" | "chpc" | "hipaa_certified"
+  | "ceo" | "cfo" | "coo" | "cio" | "cto" | "ciso" | "cmo"
+  | "it_director" | "practice_manager" | "office_manager"
+  | "compliance_officer" | "privacy_officer" | "security_officer"
+  | "other";
+
+export type UsTimeZone =
+  | "eastern" | "central" | "mountain" | "pacific"
+  | "alaska" | "hawaii" | "arizona_no_dst";
+
+export type ContactType =
+  | "prospect" | "customer" | "partner" | "vendor"
+  | "referral_source" | "internal" | "other";
+
+// LeadTypeEnum restored 2026-04-18 — kept distinct from lead_source so we can
+// track BOTH organizational origin (source: partner/website/etc.) AND the
+// specific event that converted them (type: webinar/conference/etc.).
+// Final design TBD; review when revisiting Partners build.
+export type LeadTypeEnum =
+  | "inbound_website" | "inbound_referral"
+  | "outbound_cold" | "purchased_list"
+  | "conference" | "webinar"
+  | "partner" | "existing_customer_expansion"
+  | "other";
+
+export type OpportunityBusinessType =
+  | "new_business"
+  | "existing_business"
+  | "existing_business_new_product"
+  | "existing_business_new_service"
+  | "opportunity";
+
+export type IndustryCategory =
+  | "hospital" | "medical_group" | "fqhc" | "rural_health_clinic"
+  | "skilled_nursing" | "long_term_care" | "home_health" | "hospice"
+  | "behavioral_health" | "dental" | "pediatrics" | "specialty_clinic"
+  | "urgent_care" | "imaging_center" | "lab_services" | "pharmacy"
+  | "telemedicine" | "tribal_health" | "public_health_agency"
+  | "healthcare_it_vendor" | "managed_service_provider"
+  | "healthcare_consulting" | "insurance_payer"
+  | "other_healthcare" | "other";
+
+export type ProjectSegment =
+  | "rural_hospital" | "community_hospital" | "enterprise"
+  | "medium_sized" | "small_sized" | "fqhc" | "voa" | "franchise"
+  | "strategic_partner" | "it_vendor_third_party"
+  | "independent_associations" | "other";
+
+// NOTE: the previous "first-class Partners table" model
+// (PartnerRelationshipType / PartnerStatus / Partner interface /
+// AccountPartner with relationship_role) was removed on 2026-04-22.
+// The new model treats partners as plain accounts and stores
+// relationships in account_partners. See AccountPartnership below
+// and migration 20260422000005.
+
+/**
+ * One row in account_partners — a single partnership between two
+ * accounts. partner is the umbrella/referrer side, member is the
+ * account that came in via the partner.
+ */
+export interface AccountPartnership {
+  id: string;
+  partner_account_id: string;
+  member_account_id: string;
+  role: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  // Joined helpers (populated by the API layer)
+  partner_account?: { id: string; name: string; account_type: string | null; lifecycle_status: string | null } | null;
+  member_account?:  { id: string; name: string; account_type: string | null; lifecycle_status: string | null } | null;
+}
+
+// Legacy interface — left here only as a stub so code that
+// imports the name doesn't break instantly. Marked deprecated;
+// use AccountPartnership above going forward.
+/** @deprecated use AccountPartnership */
+export interface AccountPartner {
+  id: string;
+  account_id: string;
+  partner_id: string;
+  relationship_role: string;
+  notes: string | null;
+  created_at: string;
+  // joined
+  partner?: unknown;
+  account?: { id: string; name: string };
+}
+
+export type BusinessRelationshipTag =
+  | "decision_maker" | "influencer" | "economic_buyer"
+  | "technical_buyer" | "champion" | "detractor"
+  | "end_user" | "gatekeeper"
+  | "executive_sponsor" | "other";
+
+export type RenewalCyclePattern =
+  | "annual" | "three_year"
+  | "years_1_and_3_services" | "year_2_services_only"
+  | "one_time";
 
 export interface UserProfile {
   id: string;
   full_name: string | null;
   role: AppRole;
   is_active: boolean;
+  onboarded_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -34,8 +147,12 @@ export interface Account {
   owner_user_id: string | null;
   lifecycle_status: AccountLifecycle;
   status: AccountStatus;
+  verified: boolean;
+  verified_at: string | null;
+  verified_by: string | null;
   website: string | null;
   industry: string | null;
+  industry_category: IndustryCategory | null;
   notes: string | null;
   // Contract
   current_contract_start_date: string | null;
@@ -65,6 +182,54 @@ export interface Account {
   shipping_state: string | null;
   shipping_zip: string | null;
   shipping_country: string | null;
+  // Geo-coordinates
+  billing_latitude?: number | null;
+  billing_longitude?: number | null;
+  shipping_latitude?: number | null;
+  shipping_longitude?: number | null;
+  // Contact info
+  phone: string | null;
+  phone_extension: string | null;
+  fax?: string | null;
+  // Parent account
+  parent_account_id: string | null;
+  account_number: string | null;
+  // Scheduling
+  every_other_year: boolean;
+  do_not_auto_renew: boolean;
+  // Description & next steps
+  description: string | null;
+  next_steps: string | null;
+  // Provider info
+  number_of_providers: number | null;
+  // Additional Salesforce fields
+  sic?: string | null;
+  sic_description?: string | null;
+  ownership?: string | null;
+  rating?: string | null;
+  site?: string | null;
+  ticker_symbol?: string | null;
+  last_activity_date?: string | null;
+  do_not_contact?: boolean;
+  // Priority
+  priority_account: boolean;
+  // Contracts & churn
+  contracts: string | null;
+  churn_amount: number | null;
+  churn_date: string | null;
+  // Project
+  project: string | null;
+  project_segment: ProjectSegment | null;
+  // Salesforce audit fields
+  sf_created_by: string | null;
+  sf_created_date: string | null;
+  sf_last_modified_by: string | null;
+  sf_last_modified_date: string | null;
+  // Lead / Partner
+  lead_source: string | null;
+  lead_source_detail: string | null;
+  partner_account: string | null;
+  partner_prospect: boolean;
   // Custom
   custom_fields: Record<string, unknown>;
   // System
@@ -79,6 +244,7 @@ export interface Account {
   owner?: UserProfile;
   creator?: UserProfile;
   updater?: UserProfile;
+  parent_account?: { id: string; name: string } | null;
 }
 
 export interface Contact {
@@ -86,14 +252,25 @@ export interface Contact {
   sf_id: string | null;
   account_id: string;
   owner_user_id: string | null;
+  verified: boolean;
+  verified_at: string | null;
+  verified_by: string | null;
   first_name: string;
   last_name: string;
   email: string | null;
   title: string | null;
   phone: string | null;
+  phone_ext: string | null;
   is_primary: boolean;
   department: string | null;
   linkedin_url: string | null;
+  credential: CredentialType | null;
+  time_zone: UsTimeZone | null;
+  type: ContactType | null;
+  business_relationship_tag: BusinessRelationshipTag | null;
+  events_attended: string[] | null;
+  notes: string | null;
+  next_steps: string | null;
   do_not_contact: boolean;
   mailing_street: string | null;
   mailing_city: string | null;
@@ -101,7 +278,10 @@ export interface Contact {
   mailing_zip: string | null;
   mailing_country: string | null;
   lead_source: LeadSource | null;
+  lead_source_detail?: string | null;
   original_lead_id: string | null;
+  mql_date: string | null;
+  sql_date: string | null;
   custom_fields: Record<string, unknown>;
   archived_at: string | null;
   archived_by: string | null;
@@ -119,14 +299,29 @@ export interface Contact {
 
 export interface Product {
   id: string;
+  sf_id: string | null;
   code: string;
   name: string;
   product_family: string | null;
   description: string | null;
   is_active: boolean;
   default_arr: number | null;
+  has_flat_price: boolean;
   category: string | null;
   pricing_model: string | null;
+  archived_at: string | null;
+  archived_by: string | null;
+  archive_reason: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+}
+
+export interface ProductFamily {
+  id: string;
+  name: string;
+  sort_order: number;
   created_at: string;
   updated_at: string;
 }
@@ -137,8 +332,14 @@ export interface Opportunity {
   account_id: string;
   primary_contact_id: string | null;
   owner_user_id: string | null;
+  verified: boolean;
+  verified_at: string | null;
+  verified_by: string | null;
   team: OpportunityTeam;
   kind: OpportunityKind;
+  business_type: OpportunityBusinessType | null;
+  originating_partner_id: string | null;
+  sourcing_partner_id: string | null;
   name: string;
   stage: OpportunityStage;
   amount: number;
@@ -152,6 +353,7 @@ export interface Opportunity {
   contract_end_date: string | null;
   contract_length_months: number | null;
   contract_year: number | null;
+  contract_signed_date: string | null;
   source_opportunity_id: string | null;
   renewal_from_opportunity_id: string | null;
   loss_reason: string | null;
@@ -162,12 +364,22 @@ export interface Opportunity {
   lead_source: LeadSource | null;
   payment_frequency: PaymentFrequency | null;
   cycle_count: number | null;
+  renewal_cycle_pattern: RenewalCyclePattern | null;
   auto_renewal: boolean;
   description: string | null;
   promo_code: string | null;
   discount: number | null;
   subtotal: number | null;
   follow_up: boolean;
+  one_time_project?: boolean;
+  lead_source_detail?: string | null;
+  // FTE snapshot (captured at opp creation for historical tracking)
+  fte_count: number | null;
+  fte_range: string | null;
+  created_by_automation: boolean;
+  // Assignment tracking
+  assigned_assessor_id: string | null;
+  original_sales_rep_id: string | null;
   custom_fields: Record<string, unknown>;
   archived_at: string | null;
   archived_by: string | null;
@@ -180,6 +392,8 @@ export interface Opportunity {
   owner?: UserProfile;
   account?: Account;
   primary_contact?: Contact;
+  assigned_assessor?: UserProfile;
+  original_sales_rep?: UserProfile;
   creator?: UserProfile;
   updater?: UserProfile;
 }
@@ -188,16 +402,23 @@ export interface Lead {
   id: string;
   sf_id: string | null;
   owner_user_id: string | null;
+  verified: boolean;
+  verified_at: string | null;
+  verified_by: string | null;
   first_name: string;
   last_name: string;
   email: string | null;
   phone: string | null;
+  mobile_phone: string | null;
+  do_not_contact: boolean;
   company: string | null;
   title: string | null;
   industry: string | null;
+  industry_category: IndustryCategory | null;
   website: string | null;
   status: LeadStatus;
   source: LeadSource | null;
+  lead_source_detail?: string | null;
   description: string | null;
   employees: number | null;
   annual_revenue: number | null;
@@ -208,12 +429,26 @@ export interface Lead {
   country: string | null;
   qualification: LeadQualification;
   qualification_date: string | null;
+  mql_date: string | null;
   score: number;
   score_factors: Record<string, unknown>[];
   converted_at: string | null;
   converted_account_id: string | null;
   converted_contact_id: string | null;
   converted_opportunity_id: string | null;
+  do_not_market_to: boolean;
+  credential: CredentialType | null;
+  phone_ext: string | null;
+  time_zone: UsTimeZone | null;
+  type: LeadTypeEnum | null;
+  priority_lead: boolean;
+  project: string | null;
+  project_segment: ProjectSegment | null;
+  business_relationship_tag: BusinessRelationshipTag | null;
+  linkedin_url: string | null;
+  cold_lead: boolean;
+  cold_lead_source: string | null;
+  rating: LeadRating | null;
   custom_fields: Record<string, unknown>;
   archived_at: string | null;
   archived_by: string | null;
@@ -226,6 +461,7 @@ export interface Lead {
   owner?: UserProfile;
   creator?: UserProfile;
   updater?: UserProfile;
+  parent_account?: { id: string; name: string };
 }
 
 export interface CustomFieldDefinition {
@@ -277,11 +513,18 @@ export interface OpportunityProduct {
   product?: Product;
 }
 
+export type ReminderSchedule =
+  | "none" | "once" | "daily" | "weekdays" | "weekly";
+export type ReminderChannel = "in_app" | "email";
+export type ActivityPriority = "high" | "normal" | "low";
+export type LeadRating = "hot" | "warm" | "cold";
+
 export interface Activity {
   id: string;
   account_id: string | null;
   contact_id: string | null;
   opportunity_id: string | null;
+  lead_id: string | null;
   owner_user_id: string | null;
   activity_type: ActivityType;
   subject: string;
@@ -290,6 +533,23 @@ export interface Activity {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  // Email-specific metadata (null for non-email activities)
+  email_direction: "sent" | "received" | null;
+  email_from: string | null;
+  email_to: string[] | null;
+  email_cc: string[] | null;
+  email_html_body: string | null;
+  email_thread_id: string | null;
+  // Reminders (tasks) — see migration 20260417000007
+  reminder_schedule: ReminderSchedule;
+  reminder_at: string | null;
+  reminder_channels: ReminderChannel[];
+  last_reminder_sent_at: string | null;
+  priority: ActivityPriority | null;
+  // Outlook calendar sync (tasks)
+  outlook_event_id: string | null;
+  outlook_sync_error: string | null;
+  outlook_synced_at: string | null;
   // joined fields
   owner?: UserProfile;
 }
@@ -305,6 +565,74 @@ export interface OpportunityStageHistory {
   changer?: UserProfile;
 }
 
+export interface ReportFolder {
+  id: string;
+  name: string;
+  is_public: boolean;
+  owner_user_id: string;
+  parent_folder_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type DashboardWidgetDisplay = "table" | "bar" | "pie" | "number";
+
+export type DashboardLayoutWidget =
+  | { i: string; x: number; y: number; w: number; h: number; type: "kpi"; metric: DashboardKpiMetric; title?: string }
+  | {
+      i: string;
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      type: "report";
+      report_id: string;
+      title?: string;
+      /**
+       * How to render the saved report inside the widget. Defaults to
+       * "table" if missing (back-compat with widgets created before
+       * 2026-04-19 when this field was added).
+       */
+      display?: DashboardWidgetDisplay;
+      /** For bar/pie: which column to group by (column key). */
+      group_by?: string;
+      /** For bar/pie: which column to aggregate (column key). Defaults to count. */
+      value_column?: string;
+    }
+  | { i: string; x: number; y: number; w: number; h: number; type: "builtin"; builtin: DashboardBuiltinWidget; title?: string };
+
+export type DashboardKpiMetric =
+  | "pipeline_arr"
+  | "closed_won_qtd"
+  | "closed_won_ytd"
+  | "renewals_next_30"
+  | "renewals_next_60"
+  | "renewals_next_90"
+  | "new_leads_week"
+  | "mql_count_week"
+  | "sql_count_week"
+  | "active_customers"
+  | "churn_qtd";
+
+export type DashboardBuiltinWidget =
+  | "pipeline_by_stage"
+  | "closed_won_by_owner_qtr"
+  | "product_growth_yoy"
+  | "churn_metrics"
+  | "arr_by_product"
+  | "renewals_calendar";
+
+export interface Dashboard {
+  id: string;
+  name: string;
+  description: string | null;
+  owner_user_id: string;
+  is_public: boolean;
+  layout: DashboardLayoutWidget[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AuditLog {
   id: number;
   table_name: string;
@@ -318,17 +646,25 @@ export interface AuditLog {
 
 export interface PriceBook {
   id: string;
+  sf_id: string | null;
   name: string;
   is_default: boolean;
   is_active: boolean;
   description: string | null;
   effective_date: string | null;
+  /**
+   * FTE tier this price book serves ("1-20", "21-50", ..., "5001-10000").
+   * Null for flat-rate books (e.g. SF's "Standard Price Book") whose
+   * products are priced the same regardless of customer size.
+   */
+  fte_range: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export interface PriceBookEntry {
   id: string;
+  sf_id: string | null;
   price_book_id: string;
   product_id: string;
   fte_range: string | null;
@@ -348,6 +684,7 @@ export interface ActivePipelineRow {
   amount: number;
   expected_close_date: string | null;
   owner_user_id: string | null;
+  owner_name?: string | null;
   account_id: string;
   account_name: string;
 }

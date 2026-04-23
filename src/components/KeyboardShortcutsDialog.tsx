@@ -5,6 +5,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { formatModShortcut } from "@/lib/platform";
 
 interface KeyboardShortcutsDialogProps {
   open: boolean;
@@ -16,10 +17,12 @@ interface ShortcutEntry {
   label: string;
 }
 
+// Render the mod key per platform — ⌘ on Mac, Ctrl on Windows/Linux. Was
+// hardcoded ⌘K previously which confused PC users who have to press Ctrl+K.
 const generalShortcuts: ShortcutEntry[] = [
-  { keys: ["\u2318K"], label: "Search" },
-  { keys: ["\u2318N"], label: "Quick Create" },
-  { keys: ["\u2318/"], label: "This help" },
+  { keys: [formatModShortcut("K")], label: "Search" },
+  { keys: [formatModShortcut("N")], label: "Quick Create" },
+  { keys: [formatModShortcut("/")], label: "This help" },
 ];
 
 const navigationShortcuts: ShortcutEntry[] = [

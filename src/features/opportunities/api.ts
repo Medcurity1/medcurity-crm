@@ -8,6 +8,8 @@ interface OppFilters {
   team?: string;
   kind?: string;
   account_id?: string;
+  ownerId?: string | "mine";
+  verified?: "true" | "false";
   page?: number;
   pageSize?: number;
 }
@@ -20,7 +22,7 @@ export function useOpportunities(filters?: OppFilters) {
       const pageSize = filters?.pageSize ?? 25;
       let query = supabase
         .from("opportunities")
-        .select("*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)", { count: "exact" })
+        .select("*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
         .order("created_at", { ascending: false })
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
@@ -31,6 +33,14 @@ export function useOpportunities(filters?: OppFilters) {
       if (filters?.team) query = query.eq("team", filters.team);
       if (filters?.kind) query = query.eq("kind", filters.kind);
       if (filters?.account_id) query = query.eq("account_id", filters.account_id);
+      if (filters?.ownerId && filters.ownerId !== "mine") {
+        query = query.eq("owner_user_id", filters.ownerId);
+      } else if (filters?.ownerId === "mine") {
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData.user?.id) query = query.eq("owner_user_id", userData.user.id);
+      }
+      if (filters?.verified === "true") query = query.eq("verified", true);
+      else if (filters?.verified === "false") query = query.eq("verified", false);
 
       const { data, error, count } = await query;
       if (error) throw error;
@@ -46,7 +56,7 @@ export function useOpportunity(id: string | undefined) {
       if (!id) throw new Error("Missing opportunity ID");
       const { data, error } = await supabase
         .from("opportunities")
-        .select("*, account:accounts!account_id(id, name, fte_range, fte_count), owner:user_profiles!owner_user_id(id, full_name), primary_contact:contacts!primary_contact_id(id, first_name, last_name), creator:user_profiles!created_by(id, full_name), updater:user_profiles!updated_by(id, full_name)")
+        .select("*, account:accounts!account_id(id, name, fte_range, fte_count, lead_source, partner_account), owner:user_profiles!owner_user_id(id, full_name), primary_contact:contacts!primary_contact_id(id, first_name, last_name), assigned_assessor:user_profiles!assigned_assessor_id(id, full_name), original_sales_rep:user_profiles!original_sales_rep_id(id, full_name), creator:user_profiles!created_by(id, full_name), updater:user_profiles!updated_by(id, full_name)")
         .eq("id", id)
         .single();
       if (error) throw error;
@@ -112,6 +122,22 @@ export function useBulkUpdateOwner() {
   });
 }
 
+export function useBulkDeleteOpportunities() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ids }: { ids: string[] }) => {
+      for (let i = 0; i < ids.length; i += 50) {
+        const batch = ids.slice(i, i + 50);
+        const { error } = await supabase.from("opportunities").delete().in("id", batch);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+    },
+  });
+}
+
 export function useArchiveOpportunity() {
   const qc = useQueryClient();
   return useMutation({
@@ -139,7 +165,26 @@ export function useActivePipeline(filters?: { team?: string; owner_user_id?: str
       if (filters?.owner_user_id) query = query.eq("owner_user_id", filters.owner_user_id);
       const { data, error } = await query.order("amount", { ascending: false });
       if (error) throw error;
-      return data as ActivePipelineRow[];
+      const rows = (data ?? []) as ActivePipelineRow[];
+
+      // Enrich with owner_name. active_pipeline is a view we can't join
+      // against user_profiles through PostgREST, so hydrate client-side.
+      const ownerIds = Array.from(
+        new Set(rows.map((r) => r.owner_user_id).filter((v): v is string => !!v))
+      );
+      if (ownerIds.length > 0) {
+        const { data: users } = await supabase
+          .from("user_profiles")
+          .select("id, full_name")
+          .in("id", ownerIds);
+        const nameById = new Map(
+          (users ?? []).map((u) => [u.id as string, (u.full_name as string) ?? null])
+        );
+        for (const r of rows) {
+          r.owner_name = r.owner_user_id ? nameById.get(r.owner_user_id) ?? null : null;
+        }
+      }
+      return rows;
     },
   });
 }
@@ -185,6 +230,7 @@ export function useProducts() {
         .from("products")
         .select("*")
         .eq("is_active", true)
+        .is("archived_at", null) // hide archived products from opp pickers
         .order("name");
       if (error) throw error;
       return data;

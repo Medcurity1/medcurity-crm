@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { branding } from "@/lib/branding";
+import { formatModShortcut } from "@/lib/platform";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -32,6 +33,9 @@ export function WelcomeWizard({ open, onComplete }: WelcomeWizardProps) {
   const [step, setStep] = useState(0);
 
   function finish() {
+    // Keep legacy localStorage flag in sync for any code paths still
+    // reading it; real source of truth is user_profiles.onboarded_at,
+    // set by AuthProvider.markOnboarded() which onComplete invokes.
     localStorage.setItem(STORAGE_KEY, "true");
     onComplete();
   }
@@ -188,7 +192,7 @@ function StepQuickActions() {
     {
       icon: Command,
       shortcut: "K",
-      text: "Press \u2318K to search across all records",
+      text: `Press ${formatModShortcut("K")} to search across all records`,
     },
     {
       icon: MousePointerClick,

@@ -393,6 +393,20 @@ export const DEFAULT_KPIS: Record<AppRole, string[]> = {
     "total_contacts",
     "team_closed_month",
   ],
+  super_admin: [
+    "my_open_pipeline",
+    "my_deals_in_progress",
+    "closed_won_quarter",
+    "upcoming_close",
+    "renewals_30",
+    "renewals_60",
+    "arr_at_risk",
+    "my_renewals",
+    "team_pipeline",
+    "active_accounts",
+    "total_contacts",
+    "team_closed_month",
+  ],
 };
 
 // ---------------------------------------------------------------------------

@@ -10,12 +10,14 @@ interface QuickNoteInputProps {
   accountId?: string;
   contactId?: string;
   opportunityId?: string;
+  leadId?: string;
 }
 
 export function QuickNoteInput({
   accountId,
   contactId,
   opportunityId,
+  leadId,
 }: QuickNoteInputProps) {
   const { user } = useAuth();
   const createMutation = useCreateActivity();
@@ -33,6 +35,7 @@ export function QuickNoteInput({
         account_id: accountId,
         contact_id: contactId,
         opportunity_id: opportunityId,
+        lead_id: leadId,
         owner_user_id: user?.id,
       });
       setText("");

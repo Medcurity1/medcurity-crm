@@ -1,12 +1,14 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
-import { Pencil, Archive, ChevronDown, UserRoundCog, Plus, Trash2 } from "lucide-react";
+import { Pencil, Archive, ChevronDown, UserRoundCog, Plus, Trash2, History } from "lucide-react";
 import { useOpportunity, useUpdateOpportunity, useArchiveOpportunity, useStageHistory, useOpportunityProducts, useRemoveOpportunityProduct } from "./api";
 import { AddProductDialog } from "./AddProductDialog";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { StageProgressBar } from "./StageProgressBar";
 import { PageHeader } from "@/components/PageHeader";
+import { VerifiedBadge } from "@/components/VerifiedBadge";
 import { StatusBadge } from "@/components/StatusBadge";
 import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -15,8 +17,9 @@ import { RecordId } from "@/components/RecordId";
 import { InlineEdit, type InlineEditProps } from "@/components/InlineEdit";
 import { AccountContacts } from "@/features/accounts/AccountContacts";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CollapsibleTabs } from "@/components/CollapsibleTabs";
 import {
   Table,
   TableBody,
@@ -42,6 +45,7 @@ import {
 } from "@/lib/formatters";
 import { toast } from "sonner";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
+import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
 import { TasksPanel } from "@/features/activities/TasksPanel";
 
 /* ---------- Collapsible section ---------- */
@@ -124,6 +128,9 @@ export function OpportunityDetail() {
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [pendingRemoveProduct, setPendingRemoveProduct] = useState<{ id: string; name: string } | null>(null);
   const [pendingStage, setPendingStage] = useState<OpportunityStage | null>(null);
+  const [newNote, setNewNote] = useState("");
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { addRecent } = useRecentRecords();
 
   useEffect(() => {
@@ -179,6 +186,14 @@ export function OpportunityDetail() {
         title={opp.name}
         actions={
           <div className="flex items-center gap-2">
+            <VerifiedBadge
+              table="opportunities"
+              recordId={opp.id}
+              verified={opp.verified ?? false}
+              verifiedAt={opp.verified_at}
+              ownerId={opp.owner_user_id}
+              invalidateKeys={[["opportunity", opp.id]]}
+            />
             <StatusBadge value={opp.stage} variant="stage" label={stageLabel(opp.stage)} />
             <StatusBadge value={opp.kind} variant="kind" label={kindLabel(opp.kind)} />
             <Button variant="outline" size="sm" onClick={() => setShowChangeOwner(true)}>
@@ -189,10 +204,12 @@ export function OpportunityDetail() {
               <Pencil className="h-4 w-4 mr-1" />
               Edit
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>
-              <Archive className="h-4 w-4 mr-1" />
-              Archive
-            </Button>
+            {isAdmin && (
+              <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>
+                <Archive className="h-4 w-4 mr-1" />
+                Archive
+              </Button>
+            )}
           </div>
         }
       />
@@ -215,10 +232,22 @@ export function OpportunityDetail() {
         </Card>
         <Card>
           <CardHeader className="pb-1 pt-3 px-4">
+            <CardTitle className="text-xs text-muted-foreground font-medium">Expected Close</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            <p className="text-sm font-semibold">
+              {opp.expected_close_date ? formatDate(opp.expected_close_date) : "\u2014"}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-1 pt-3 px-4">
             <CardTitle className="text-xs text-muted-foreground font-medium">Close Date</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
-            <p className="text-sm font-semibold">{formatDate(opp.close_date ?? opp.expected_close_date)}</p>
+            <p className="text-sm font-semibold">
+              {opp.close_date ? formatDate(opp.close_date) : "\u2014"}
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -242,7 +271,7 @@ export function OpportunityDetail() {
             <CardTitle className="text-xs text-muted-foreground font-medium">FTE Range</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
-            <p className="text-sm font-semibold">{opp.account?.fte_range ?? "\u2014"}</p>
+            <p className="text-sm font-semibold">{opp.fte_range ?? opp.account?.fte_range ?? "\u2014"}</p>
           </CardContent>
         </Card>
         <Card>
@@ -275,6 +304,66 @@ export function OpportunityDetail() {
         </Card>
       )}
 
+      <DetailPageLayout
+        sidePanels={[
+          {
+            key: "activity",
+            label: "Activity",
+            content: (
+              <ActivityTimeline
+                opportunityId={opp.id}
+                compact
+                enableReattribute
+              />
+            ),
+          },
+          {
+            key: "tasks",
+            label: "Tasks",
+            content: <TasksPanel opportunityId={opp.id} />,
+          },
+        ]}
+      >
+
+      {/* Related-record tabs at the top, collapsed by default. */}
+      <CollapsibleTabs
+        className="mt-2"
+        defaultValue="products"
+        items={[
+          {
+            value: "products",
+            label: `Products (${products?.length ?? 0})`,
+            content: (
+              <ProductsTabContent
+                products={products ?? []}
+                totalARR={totalARR}
+                onAddProduct={() => setShowAddProduct(true)}
+                onRemoveProduct={(id, name) => setPendingRemoveProduct({ id, name })}
+              />
+            ),
+          },
+          {
+            value: "history",
+            label: "Stage History",
+            content: <StageHistoryTabContent history={history ?? []} />,
+          },
+          {
+            value: "tasks",
+            label: "Tasks",
+            content: <TasksPanel opportunityId={opp.id} />,
+          },
+          {
+            value: "contacts",
+            label: "Contacts",
+            content: opp.account_id ? (
+              <AccountContacts accountId={opp.account_id} />
+            ) : (
+              <p className="text-sm text-muted-foreground py-4">No account linked to this opportunity.</p>
+            ),
+          },
+        ]}
+      />
+
       {/* --------- Details Section --------- */}
       <div className="mt-4" />
       <CollapsibleSection title="Details">
@@ -283,6 +372,18 @@ export function OpportunityDetail() {
             label="Opportunity Owner"
             value={opp.owner?.full_name ?? "Unassigned"}
           />
+          {opp.original_sales_rep && (
+            <Field
+              label="Original Sales Rep"
+              value={opp.original_sales_rep.full_name}
+            />
+          )}
+          {(opp.services_included || opp.assigned_assessor) && (
+            <Field
+              label="Assigned Assessor"
+              value={opp.assigned_assessor?.full_name ?? "Unassigned"}
+            />
+          )}
           <Field label="Opportunity Name" value={opp.name} />
           <Field
             label="Account Name"
@@ -304,6 +405,7 @@ export function OpportunityDetail() {
           />
           <Field label="Start Date" value={formatDate(opp.contract_start_date)} />
           <Field label="Maturity Date" value={formatDate(opp.contract_end_date)} />
+          <Field label="Contract Signed" value={formatDate(opp.contract_signed_date)} />
           <Field
             label="Contract Length"
             value={opp.contract_length_months != null ? `${opp.contract_length_months} months` : null}
@@ -336,12 +438,24 @@ export function OpportunityDetail() {
             onSave={saveField("amount", (v) => (v === "" ? 0 : Number(v)))}
             type="currency"
           />
-          <Field label="FTE Range" value={opp.account?.fte_range} />
+          <Field label="FTE Range (at time of opp)" value={opp.fte_range ?? opp.account?.fte_range} />
           <Field
-            label="FTEs"
-            value={opp.account?.fte_count != null ? opp.account.fte_count.toLocaleString() : null}
+            label="FTEs (at time of opp)"
+            value={opp.fte_count != null ? opp.fte_count.toLocaleString() : opp.account?.fte_count != null ? opp.account.fte_count.toLocaleString() : null}
           />
+          {opp.account?.fte_range && opp.fte_range && opp.fte_range !== opp.account.fte_range && (
+            <Field label="Current Account FTE Range" value={opp.account.fte_range} />
+          )}
+          <Field label="Partner" value={(opp.account as unknown as Record<string, unknown>)?.partner_account as string ?? null} />
           <Field label="Team" value={teamLabel(opp.team)} />
+          <Field
+            label="One Time Project"
+            value={opp.one_time_project ? "\u2713 Yes" : "\u2717 No"}
+          />
+          <Field
+            label="Created by Automation"
+            value={opp.created_by_automation ? "\u2713 Yes" : "\u2717 No"}
+          />
         </div>
       </CollapsibleSection>
 
@@ -351,6 +465,10 @@ export function OpportunityDetail() {
           <Field
             label="Lead Source"
             value={opp.lead_source ? leadSourceLabel(opp.lead_source) : null}
+          />
+          <Field
+            label="Lead Source Detail"
+            value={opp.lead_source_detail}
           />
           <Field
             label="Payment Frequency"
@@ -390,12 +508,72 @@ export function OpportunityDetail() {
 
       {/* --------- Notes --------- */}
       <CollapsibleSection title="Notes" defaultOpen={!!opp.notes}>
-        <InlineEdit
-          value={opp.notes}
-          onSave={saveField("notes")}
-          type="textarea"
-          placeholder="Add notes..."
-        />
+        {/* Scrollable log of existing notes */}
+        {opp.notes && (
+          <div className="border rounded-md p-3 max-h-64 overflow-y-auto bg-muted/30 space-y-1 text-sm mb-3">
+            {opp.notes.split("\n").filter(Boolean).map((line, i) => {
+              const parts = line.split(" | ");
+              if (parts.length >= 3) {
+                const [name, date, ...rest] = parts;
+                return (
+                  <div key={i} className="py-1 border-b last:border-b-0 border-muted">
+                    <span className="font-medium">{name}</span>
+                    <span className="text-muted-foreground"> - {date}: </span>
+                    <span>{rest.join(" | ")}</span>
+                  </div>
+                );
+              }
+              return <div key={i} className="py-1 border-b last:border-b-0 border-muted">{line}</div>;
+            })}
+          </div>
+        )}
+        {/* Add new note */}
+        <div className="flex gap-2">
+          <Input
+            placeholder="Add a note..."
+            value={newNote}
+            onChange={(e) => setNewNote(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (!newNote.trim() || !id) return;
+                const userName = profile?.full_name ?? "Unknown";
+                const now = new Date().toLocaleString();
+                const entry = `${userName} | ${now} | ${newNote.trim()}`;
+                const current = opp.notes ?? "";
+                const updated = current ? `${entry}\n${current}` : entry;
+                updateMutation.mutate(
+                  { id, notes: updated },
+                  {
+                    onSuccess: () => { setNewNote(""); toast.success("Note added"); },
+                    onError: (err) => toast.error("Failed to add note: " + (err as Error).message),
+                  }
+                );
+              }
+            }}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (!newNote.trim() || !id) return;
+              const userName = profile?.full_name ?? "Unknown";
+              const now = new Date().toLocaleString();
+              const entry = `${userName} | ${now} | ${newNote.trim()}`;
+              const current = opp.notes ?? "";
+              const updated = current ? `${entry}\n${current}` : entry;
+              updateMutation.mutate(
+                { id, notes: updated },
+                {
+                  onSuccess: () => { setNewNote(""); toast.success("Note added"); },
+                  onError: (err) => toast.error("Failed to add note: " + (err as Error).message),
+                }
+              );
+            }}
+          >
+            Add Note
+          </Button>
+        </div>
       </CollapsibleSection>
 
       {/* --------- Custom Fields --------- */}
@@ -417,125 +595,34 @@ export function OpportunityDetail() {
           />
           <Field
             label="Last Modified By"
-            value={opp.updater?.full_name ?? "\u2014"}
+            value={
+              <Link
+                to={`/admin?tab=audit-log&record_id=${opp.id}`}
+                className="text-primary hover:underline inline-flex items-center gap-1"
+                title="View audit history for this record"
+              >
+                {opp.updater?.full_name ?? "\u2014"}
+                <History className="h-3 w-3" />
+              </Link>
+            }
           />
           <Field label="Created" value={formatDateTime(opp.created_at)} />
-          <Field label="Last Modified" value={formatDateTime(opp.updated_at)} />
+          <Field
+            label="Last Modified"
+            value={
+              <Link
+                to={`/admin?tab=audit-log&record_id=${opp.id}`}
+                className="text-primary hover:underline"
+                title="View audit history for this record"
+              >
+                {formatDateTime(opp.updated_at)}
+              </Link>
+            }
+          />
         </div>
       </CollapsibleSection>
 
-      {/* --------- Tabs --------- */}
-      <Tabs defaultValue="products" className="mt-2">
-        <TabsList>
-          <TabsTrigger value="products">Products ({products?.length ?? 0})</TabsTrigger>
-          <TabsTrigger value="history">Stage History</TabsTrigger>
-          <TabsTrigger value="activities">Activities</TabsTrigger>
-          <TabsTrigger value="tasks">Tasks</TabsTrigger>
-          <TabsTrigger value="contacts">Contacts</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="products" className="mt-4">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm text-muted-foreground">
-              {products?.length
-                ? `${products.length} product${products.length !== 1 ? "s" : ""}`
-                : "No products added yet"}
-            </span>
-            <Button size="sm" onClick={() => setShowAddProduct(true)}>
-              <Plus className="h-4 w-4 mr-1" />
-              Add Product
-            </Button>
-          </div>
-          {products?.length ? (
-            <div className="border rounded-lg">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Product</TableHead>
-                    <TableHead>Code</TableHead>
-                    <TableHead className="text-right">Qty</TableHead>
-                    <TableHead className="text-right">Unit Price</TableHead>
-                    <TableHead className="text-right">ARR</TableHead>
-                    <TableHead className="w-10" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {products.map((p) => (
-                    <TableRow key={p.id}>
-                      <TableCell className="font-medium">{p.product?.name ?? "\u2014"}</TableCell>
-                      <TableCell className="text-muted-foreground">{p.product?.code ?? "\u2014"}</TableCell>
-                      <TableCell className="text-right">{p.quantity}</TableCell>
-                      <TableCell className="text-right">{formatCurrencyDetailed(Number(p.unit_price))}</TableCell>
-                      <TableCell className="text-right font-medium">{formatCurrencyDetailed(Number(p.arr_amount))}</TableCell>
-                      <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                          onClick={() => setPendingRemoveProduct({ id: p.id, name: p.product?.name ?? "this product" })}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  <TableRow className="bg-muted/50">
-                    <TableCell colSpan={5} className="text-right font-semibold">Total ARR</TableCell>
-                    <TableCell className="text-right font-bold">{formatCurrencyDetailed(totalARR)}</TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </div>
-          ) : null}
-        </TabsContent>
-
-        <TabsContent value="history" className="mt-4">
-          {history?.length ? (
-            <div className="space-y-3">
-              {history.map((h) => (
-                <div key={h.id} className="flex items-center gap-3 text-sm">
-                  <div className="h-2 w-2 rounded-full bg-primary shrink-0" />
-                  <div className="flex-1">
-                    {h.from_stage ? (
-                      <span>
-                        <span className="font-medium">{stageLabel(h.from_stage)}</span>
-                        {" \u2192 "}
-                        <span className="font-medium">{stageLabel(h.to_stage)}</span>
-                      </span>
-                    ) : (
-                      <span>
-                        Created as <span className="font-medium">{stageLabel(h.to_stage)}</span>
-                      </span>
-                    )}
-                    {h.changer?.full_name && (
-                      <span className="text-muted-foreground"> by {h.changer.full_name}</span>
-                    )}
-                  </div>
-                  <span className="text-muted-foreground text-xs">{formatRelativeDate(h.changed_at)}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground py-4">No stage changes recorded.</p>
-          )}
-        </TabsContent>
-
-        <TabsContent value="activities" className="mt-4">
-          <ActivityTimeline opportunityId={opp.id} />
-        </TabsContent>
-
-        <TabsContent value="tasks" className="mt-4">
-          <TasksPanel opportunityId={opp.id} />
-        </TabsContent>
-
-        <TabsContent value="contacts" className="mt-4">
-          {opp.account_id ? (
-            <AccountContacts accountId={opp.account_id} />
-          ) : (
-            <p className="text-sm text-muted-foreground py-4">No account linked to this opportunity.</p>
-          )}
-        </TabsContent>
-      </Tabs>
+      </DetailPageLayout>
 
       <ConfirmDialog
         open={showArchive}
@@ -620,6 +707,136 @@ export function OpportunityDetail() {
           );
         }}
       />
+    </div>
+  );
+}
+
+/* ---------- Tab content extracted for the CollapsibleTabs items ---------- */
+
+interface ProductsTabContentProps {
+  products: Array<{
+    id: string;
+    quantity: number;
+    unit_price: number | string;
+    arr_amount: number | string;
+    product?: { id?: string | null; name?: string | null; code?: string | null } | null;
+  }>;
+  totalARR: number;
+  onAddProduct: () => void;
+  onRemoveProduct: (id: string, name: string) => void;
+}
+
+function ProductsTabContent({
+  products,
+  totalARR,
+  onAddProduct,
+  onRemoveProduct,
+}: ProductsTabContentProps) {
+  return (
+    <>
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-sm text-muted-foreground">
+          {products.length
+            ? `${products.length} product${products.length !== 1 ? "s" : ""}`
+            : "No products added yet"}
+        </span>
+        <Button size="sm" onClick={onAddProduct}>
+          <Plus className="h-4 w-4 mr-1" />
+          Add Product
+        </Button>
+      </div>
+      {products.length ? (
+        <div className="border rounded-lg">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Product</TableHead>
+                <TableHead>Code</TableHead>
+                <TableHead className="text-right">Qty</TableHead>
+                <TableHead className="text-right">Unit Price</TableHead>
+                <TableHead className="text-right">ARR</TableHead>
+                <TableHead className="w-10" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {products.map((p) => (
+                <TableRow key={p.id}>
+                  <TableCell className="font-medium">
+                    {p.product?.id ? (
+                      <Link
+                        to={`/products/${p.product.id}`}
+                        className="text-primary hover:underline"
+                      >
+                        {p.product.name ?? "\u2014"}
+                      </Link>
+                    ) : (
+                      p.product?.name ?? "\u2014"
+                    )}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{p.product?.code ?? "\u2014"}</TableCell>
+                  <TableCell className="text-right">{p.quantity}</TableCell>
+                  <TableCell className="text-right">{formatCurrencyDetailed(Number(p.unit_price))}</TableCell>
+                  <TableCell className="text-right font-medium">{formatCurrencyDetailed(Number(p.arr_amount))}</TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                      onClick={() => onRemoveProduct(p.id, p.product?.name ?? "this product")}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+              <TableRow className="bg-muted/50">
+                <TableCell colSpan={5} className="text-right font-semibold">Total ARR</TableCell>
+                <TableCell className="text-right font-bold">{formatCurrencyDetailed(totalARR)}</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+interface StageHistoryEntry {
+  id: number | string;
+  from_stage: string | null;
+  to_stage: string;
+  changed_at: string;
+  changer?: { full_name?: string | null } | null;
+}
+
+function StageHistoryTabContent({ history }: { history: StageHistoryEntry[] }) {
+  if (!history.length) {
+    return <p className="text-sm text-muted-foreground py-4">No stage changes recorded.</p>;
+  }
+  return (
+    <div className="space-y-3">
+      {history.map((h) => (
+        <div key={h.id} className="flex items-center gap-3 text-sm">
+          <div className="h-2 w-2 rounded-full bg-primary shrink-0" />
+          <div className="flex-1">
+            {h.from_stage ? (
+              <span>
+                <span className="font-medium">{stageLabel(h.from_stage as never)}</span>
+                {" \u2192 "}
+                <span className="font-medium">{stageLabel(h.to_stage as never)}</span>
+              </span>
+            ) : (
+              <span>
+                Created as <span className="font-medium">{stageLabel(h.to_stage as never)}</span>
+              </span>
+            )}
+            {h.changer?.full_name && (
+              <span className="text-muted-foreground"> by {h.changer.full_name}</span>
+            )}
+          </div>
+          <span className="text-muted-foreground text-xs">{formatRelativeDate(h.changed_at)}</span>
+        </div>
+      ))}
     </div>
   );
 }

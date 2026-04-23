@@ -6,6 +6,7 @@ interface ActivityFilters {
   account_id?: string;
   contact_id?: string;
   opportunity_id?: string;
+  lead_id?: string;
 }
 
 export function useActivities(filters?: ActivityFilters) {
@@ -26,6 +27,9 @@ export function useActivities(filters?: ActivityFilters) {
       if (filters?.opportunity_id) {
         query = query.eq("opportunity_id", filters.opportunity_id);
       }
+      if (filters?.lead_id) {
+        query = query.eq("lead_id", filters.lead_id);
+      }
 
       const { data, error } = await query;
       if (error) throw error;
@@ -34,7 +38,8 @@ export function useActivities(filters?: ActivityFilters) {
     enabled:
       !!filters?.account_id ||
       !!filters?.contact_id ||
-      !!filters?.opportunity_id,
+      !!filters?.opportunity_id ||
+      !!filters?.lead_id,
   });
 }
 
@@ -42,11 +47,16 @@ interface CreateActivityInput {
   account_id?: string | null;
   contact_id?: string | null;
   opportunity_id?: string | null;
+  lead_id?: string | null;
   owner_user_id?: string | null;
   activity_type: string;
   subject: string;
   body?: string;
   due_at?: string | null;
+  reminder_schedule?: "none" | "once" | "daily" | "weekdays" | "weekly";
+  reminder_at?: string | null;
+  reminder_channels?: Array<"in_app" | "email">;
+  priority?: "high" | "normal" | "low" | null;
 }
 
 export function useCreateActivity() {
@@ -88,10 +98,107 @@ export function useCompleteActivity() {
   });
 }
 
+/**
+ * Re-attribute an activity to a different opportunity (or detach it to
+ * account-only). Brayden's SRA/NVA case: an email auto-landed on the
+ * wrong opp, user wants one-click move. Also handles un-linking.
+ */
+/**
+ * Reopen a completed task (clears completed_at). Lets a rep fix a
+ * mis-click or bring something back into their open-tasks list. Audit
+ * log captures the change so this can't silently "un-do" what a rep
+ * told their manager they'd finished.
+ */
+export function useReopenActivity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id }: { id: string }) => {
+      const { data, error } = await supabase
+        .from("activities")
+        .update({ completed_at: null })
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["activities"] });
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["dashboard", "my-tasks"] });
+    },
+  });
+}
+
+/**
+ * Edit a task or activity (subject, body, due_at, reminder fields).
+ * Narrow set of columns — does NOT let you change activity_type or
+ * record-association FKs (use useReattributeActivity for that).
+ */
+export function useUpdateActivity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      ...patch
+    }: {
+      id: string;
+      activity_type?: "call" | "email" | "meeting" | "note" | "task";
+      subject?: string;
+      body?: string | null;
+      due_at?: string | null;
+      reminder_schedule?: "none" | "once" | "daily" | "weekdays" | "weekly";
+      reminder_at?: string | null;
+      reminder_channels?: Array<"in_app" | "email">;
+      priority?: "high" | "normal" | "low" | null;
+    }) => {
+      const { data, error } = await supabase
+        .from("activities")
+        .update(patch)
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["activities"] });
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["dashboard", "my-tasks"] });
+    },
+  });
+}
+
+export function useReattributeActivity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      opportunityId,
+    }: {
+      id: string;
+      opportunityId: string | null;
+    }) => {
+      const { data, error } = await supabase
+        .from("activities")
+        .update({ opportunity_id: opportunityId })
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["activities"] });
+    },
+  });
+}
+
 interface TaskFilters {
   account_id?: string;
   contact_id?: string;
   opportunity_id?: string;
+  lead_id?: string;
 }
 
 export function useTasks(filters: TaskFilters) {
@@ -107,6 +214,7 @@ export function useTasks(filters: TaskFilters) {
       if (filters.account_id) query = query.eq("account_id", filters.account_id);
       if (filters.contact_id) query = query.eq("contact_id", filters.contact_id);
       if (filters.opportunity_id) query = query.eq("opportunity_id", filters.opportunity_id);
+      if (filters.lead_id) query = query.eq("lead_id", filters.lead_id);
 
       const { data, error } = await query;
       if (error) throw error;

@@ -13,6 +13,7 @@ interface BulkActionBarProps {
   selectedCount: number;
   onClear: () => void;
   onArchive?: () => void;
+  onDelete?: () => void;
   onAssignOwner?: (userId: string) => void;
   users?: { id: string; full_name: string | null }[];
 }
@@ -21,6 +22,7 @@ export function BulkActionBar({
   selectedCount,
   onClear,
   onArchive,
+  onDelete,
   onAssignOwner,
   users,
 }: BulkActionBarProps) {
@@ -53,6 +55,12 @@ export function BulkActionBar({
       {onArchive && (
         <Button variant="destructive" size="sm" onClick={onArchive}>
           Archive
+        </Button>
+      )}
+
+      {onDelete && (
+        <Button variant="destructive" size="sm" onClick={onDelete}>
+          Delete Permanently
         </Button>
       )}
 

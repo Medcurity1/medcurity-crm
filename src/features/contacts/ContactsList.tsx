@@ -1,11 +1,16 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
+import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { Users, Plus, Search } from "lucide-react";
-import { useContacts, useArchiveContact, useBulkUpdateOwner } from "./api";
+import { useContacts, useArchiveContact, useBulkUpdateOwner, useBulkDeleteContacts } from "./api";
+import { toast } from "sonner";
 import { useUsers } from "@/features/accounts/api";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { Pagination } from "@/components/Pagination";
+import { formatPhone } from "@/components/PhoneInput";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,24 +25,44 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatName } from "@/lib/formatters";
 
 const PAGE_SIZE = 25;
 
 export function ContactsList() {
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(0);
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
+  const [search, setSearch] = useDebouncedUrlState("q", "");
+  const [ownerFilter, setOwnerFilter] = useUrlState("owner", "all");
+  const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
+  const [page, setPage] = useUrlNumberState("page", 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const { data: result, isLoading } = useContacts({
     search: search || undefined,
+    ownerId:
+      ownerFilter === "all" ? undefined : ownerFilter === "mine" ? "mine" : ownerFilter,
+    verified:
+      verifiedFilter === "verified"
+        ? "true"
+        : verifiedFilter === "unverified"
+        ? "false"
+        : undefined,
     page,
     pageSize: PAGE_SIZE,
   });
   const { data: users } = useUsers();
   const archiveMutation = useArchiveContact();
   const bulkOwnerMutation = useBulkUpdateOwner();
+  const bulkDeleteMutation = useBulkDeleteContacts();
 
   const contacts = result?.data;
   const totalCount = result?.count ?? 0;
@@ -81,6 +106,13 @@ export function ContactsList() {
     setSelectedIds(new Set());
   };
 
+  const handleBulkDelete = async () => {
+    if (!confirm(`Permanently delete ${selectedIds.size} contact(s)? This cannot be undone.`)) return;
+    await bulkDeleteMutation.mutateAsync({ ids: Array.from(selectedIds) });
+    setSelectedIds(new Set());
+    toast.success(`${selectedIds.size} contact(s) deleted.`);
+  };
+
   const handleBulkAssignOwner = async (userId: string) => {
     await bulkOwnerMutation.mutateAsync({ ids: Array.from(selectedIds), owner_user_id: userId });
     setSelectedIds(new Set());
@@ -102,16 +134,52 @@ export function ContactsList() {
         }
       />
 
-      <div className="flex items-center gap-3 mb-4">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search by name or email..."
+            placeholder="Search by name, email, or title..."
             value={search}
             onChange={(e) => handleSearchChange(e.target.value)}
             className="pl-9"
           />
         </div>
+        <Select
+          value={ownerFilter}
+          onValueChange={(v) => {
+            setOwnerFilter(v);
+            setPage(0);
+          }}
+        >
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="All owners" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Owners</SelectItem>
+            <SelectItem value="mine">My Contacts</SelectItem>
+            {(users ?? []).map((u) => (
+              <SelectItem key={u.id} value={u.id}>
+                {u.full_name ?? "Unknown"}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={verifiedFilter}
+          onValueChange={(v) => {
+            setVerifiedFilter(v);
+            setPage(0);
+          }}
+        >
+          <SelectTrigger className="w-36">
+            <SelectValue placeholder="Verified" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="verified">Verified only</SelectItem>
+            <SelectItem value="unverified">Unverified only</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {isLoading ? (
@@ -183,7 +251,7 @@ export function ContactsList() {
                     </TableCell>
                     <TableCell className="text-muted-foreground">{contact.title ?? "\u2014"}</TableCell>
                     <TableCell className="text-muted-foreground">{contact.email ?? "\u2014"}</TableCell>
-                    <TableCell className="text-muted-foreground">{contact.phone ?? "\u2014"}</TableCell>
+                    <TableCell className="text-muted-foreground">{contact.phone ? formatPhone(contact.phone) : "\u2014"}</TableCell>
                     <TableCell>
                       {contact.is_primary && (
                         <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">
@@ -208,7 +276,8 @@ export function ContactsList() {
       <BulkActionBar
         selectedCount={selectedIds.size}
         onClear={() => setSelectedIds(new Set())}
-        onArchive={handleBulkArchive}
+        onArchive={isAdmin ? handleBulkArchive : undefined}
+        onDelete={isAdmin ? handleBulkDelete : undefined}
         onAssignOwner={handleBulkAssignOwner}
         users={users}
       />

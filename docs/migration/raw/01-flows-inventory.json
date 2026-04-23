@@ -1,0 +1,125 @@
+{
+  "generated_at": "2026-04-15",
+  "flow_definition_count": 16,
+  "flow_version_count": 47,
+  "active_flows_summary": [
+    {
+      "developer_name": "Renewal_Opportunity_2_No_Products",
+      "label": "Renewal Opportunity 2 - No Products",
+      "active_version_id": "301RO00000av0RaYAI",
+      "active_version_number": 4,
+      "active_last_modified": "2025-10-09",
+      "process_type": "AutoLaunchedFlow",
+      "notes": "THE ONE Brayden flagged. Active v4 was a fix for 'Fixing 3 year contract pull back (1 month)'. There is also a DRAFT v5 (301RO00000jxZb3YAE, 2026-01-22) with description 'Attempt to add products to the flow' that Brayden did NOT mention being in progress.",
+      "is_bespoke": true
+    },
+    {
+      "developer_name": "Send_Notification_for_Renewal_Opportunity",
+      "label": "Send Notification for Renewal Opportunity",
+      "active_version_id": "3015w000000nNKWAA2",
+      "active_version_number": 4,
+      "active_last_modified": "2023-08-25",
+      "process_type": "AutoLaunchedFlow",
+      "notes": "Companion flow to renewal. Brayden did not mention this.",
+      "is_bespoke": true
+    },
+    {
+      "developer_name": "Apply_Opportunity_Discount_To_New_Opp_Product",
+      "label": "Apply Opportunity Discount To New Opp Product",
+      "active_version_id": "3015w000000nNJiAAM",
+      "active_version_number": 1,
+      "active_last_modified": "2023-08-24",
+      "process_type": "AutoLaunchedFlow",
+      "notes": "Bespoke discount-propagation automation. Brayden did not mention.",
+      "is_bespoke": true
+    },
+    {
+      "developer_name": "Apply_Opportunity_Discount_to_Products_Not_Services",
+      "label": "Apply Opportunity Discount to Products Not Services",
+      "active_version_id": "3015w000000nNJTAA2",
+      "active_version_number": 2,
+      "active_last_modified": "2023-08-24",
+      "process_type": "AutoLaunchedFlow",
+      "notes": "Bespoke discount logic that excludes services. Brayden did not mention.",
+      "is_bespoke": true
+    },
+    {
+      "developer_name": "Set_FTEs_for_Account",
+      "label": "Set FTEs for Account",
+      "active_version_id": "3015w000000nNIaAAM",
+      "active_version_number": 2,
+      "active_last_modified": "2023-08-24",
+      "process_type": "AutoLaunchedFlow",
+      "notes": "Populates some FTE field on Account. Probably rolls up employee counts from another field. Brayden did not mention.",
+      "is_bespoke": true
+    },
+    {
+      "developer_name": "Opportunity_Update_Name",
+      "label": "Opportunity - Update Name",
+      "active_version_id": "301RO0000027DfJYAU",
+      "active_version_number": 1,
+      "active_last_modified": "2023-10-26",
+      "process_type": "AutoLaunchedFlow",
+      "notes": "Probably auto-names opportunities based on account + close date or similar convention. Brayden did not mention.",
+      "is_bespoke": true
+    },
+    {
+      "developer_name": "Account_Engagement_Bulk_Asset_Copy_Flow",
+      "label": "Account Engagement Bulk Asset Copy Flow",
+      "active_version_id": "301RO00000X58GWYAZ",
+      "active_version_number": 21,
+      "active_last_modified": "2025-08-06",
+      "process_type": "Flow (screen)",
+      "notes": "Namespace 'pi' = Pardot / Account Engagement managed package. Package-owned, not bespoke.",
+      "is_bespoke": false,
+      "namespace": "pi"
+    },
+    {
+      "developer_name": "Account_Engagement_Sandbox_Production_Bulk_Asset_Copy_Flow",
+      "label": "Account Engagement Sandbox-Production Bulk Asset Copy Flow",
+      "active_version_id": "301RO00000X58GXYAZ",
+      "active_version_number": 23,
+      "active_last_modified": "2025-08-06",
+      "process_type": "Flow (screen)",
+      "notes": "Pardot / Account Engagement package flow.",
+      "is_bespoke": false,
+      "namespace": "pi"
+    },
+    {
+      "developer_name": "Essentials_Email_Processing",
+      "label": "Essentials Email Processing",
+      "active_version_id": "3015w000000RnkyAAC",
+      "active_version_number": 1,
+      "active_last_modified": "2020-04-23",
+      "process_type": "Workflow",
+      "notes": "Salesforce Essentials package (org created as Essentials edition, upgraded to PE). Built-in email routing on case creation day. Dormant since 2020.",
+      "is_bespoke": false
+    },
+    {
+      "developer_name": "Essentials_Social_Processing",
+      "label": "Essentials Social Processing",
+      "active_version_id": "3015w000000RnkzAAC",
+      "active_version_number": 1,
+      "active_last_modified": "2020-04-23",
+      "process_type": "Workflow",
+      "notes": "Salesforce Essentials built-in social/twitter case routing. Dormant since 2020.",
+      "is_bespoke": false
+    }
+  ],
+  "abandoned_or_draft_flows": [
+    {"developer_name": "Renewal_Opportunity", "latest_version": "301RO00000UJu6tYAD", "status": "Draft", "last_modified": "2025-06-17", "notes": "Original renewal attempt, never activated. Superseded by Renewal_Opportunity_2_No_Products."},
+    {"developer_name": "Renewal_Opportunity_No_Products", "latest_version": "301RO00000UswM4YAJ", "status": "Obsolete", "last_modified": "2025-07-21", "notes": "v12 obsolete. Description: 'This version excludes the V1 product logic, to expedite go live on this automation.' Superseded by Renewal_Opportunity_2_No_Products."},
+    {"developer_name": "Renewal_Opportunity_Autolaunched_Testing", "latest_version": "301RO00000UtCiTYAV", "status": "Draft", "last_modified": "2025-06-28", "notes": "Test scratch flow, never activated."},
+    {"developer_name": "Renewal_Opportunity_Autolaunched_Testing_2_0", "latest_version": "301RO00000UwiHAYAZ", "status": "Draft", "last_modified": "2025-06-29", "notes": "Test scratch flow, never activated."},
+    {"developer_name": "Three_Year_Contract", "latest_version": "301RO00000TrbYdYAJ", "status": "Draft", "last_modified": "2025-06-09", "notes": "Label 'Three Year Contract?' - draft, abandoned."},
+    {"developer_name": "Three_Year_Contract_2_0", "latest_version": "301RO00000TgiyRYAR", "status": "Draft", "last_modified": "2025-06-05", "notes": "Second attempt at 3-year contract handling. Abandoned in draft."}
+  ],
+  "key_observations": [
+    "There are 8 bespoke active flows (not 1). Brayden only flagged 1. 7 need investigation.",
+    "The known renewal flow has a DRAFT v5 dated 2026-01-22 attempting to add product lines. Not activated. Either WIP or abandoned.",
+    "Multiple abandoned renewal-flow experiments (Renewal_Opportunity, Renewal_Opportunity_No_Products, 2 testing variants) indicate iteration pain. The current one is the 3rd+ attempt.",
+    "Two abandoned 'Three Year Contract' flow experiments suggest someone wanted multi-year contract handling but never shipped it. Worth asking Brayden if still needed.",
+    "Pardot (Account Engagement) flows are package-owned - leave as-is when sunsetting.",
+    "Essentials Email/Social Processing flows have never been touched since 2020 org creation - safe to treat as inactive."
+  ]
+}

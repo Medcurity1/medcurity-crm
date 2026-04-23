@@ -1,21 +1,21 @@
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Home,
   Building2,
   Users,
   UserPlus,
+  Handshake,
   Target,
   Kanban,
   Package,
   RefreshCw,
   BarChart3,
-  TrendingUp,
-  LineChart,
   Archive,
   Settings,
   ChevronLeft,
   ChevronRight,
   LogOut,
+  KeyRound,
   Search,
   PlayCircle,
   ListChecks,
@@ -45,36 +45,38 @@ const navItems = [
   { to: "/", icon: Home, label: "Home" },
   { to: "/accounts", icon: Building2, label: "Accounts" },
   { to: "/contacts", icon: Users, label: "Contacts" },
+  { to: "/opportunities", icon: Target, label: "Opportunities" },
+  { to: "/pipeline", icon: Kanban, label: "Pipeline" },
+  { to: "/partners", icon: Handshake, label: "Partners" },
   { to: "/leads", icon: UserPlus, label: "Leads" },
   { to: "/lead-lists", icon: ListChecks, label: "Lead Lists" },
   { to: "/sequences", icon: PlayCircle, label: "Sequences" },
   { to: "/email-templates", icon: Mail, label: "Email Templates" },
-  { to: "/opportunities", icon: Target, label: "Opportunities" },
-  { to: "/pipeline", icon: Kanban, label: "Pipeline" },
   { to: "/calendar", icon: CalendarIcon, label: "Calendar" },
   { to: "/activities", icon: Clock, label: "Activities" },
   { to: "/products", icon: Package, label: "Products" },
   { to: "/renewals", icon: RefreshCw, label: "Renewals" },
   { to: "/reports", icon: BarChart3, label: "Reports" },
-  { to: "/forecasting", icon: TrendingUp, label: "Forecasting" },
-  { to: "/analytics", icon: LineChart, label: "Analytics" },
+  // Forecasting + Analytics moved into /reports as tabs (2026-04-17).
 ];
 
 const adminItems = [
   { to: "/archive", icon: Archive, label: "Archive" },
-  { to: "/admin", icon: Settings, label: "Settings" },
+  { to: "/admin", icon: Settings, label: "Admin Settings" },
 ];
 
 export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps) {
   const { profile, signOut } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
 
-  const allItems = profile?.role === "admin"
+  const allItems = profile?.role === "admin" || profile?.role === "super_admin"
     ? [...navItems, ...adminItems]
     : navItems;
 
   function roleColor(role: string) {
     switch (role) {
+      case "super_admin": return "bg-destructive text-destructive-foreground";
       case "admin": return "bg-primary text-primary-foreground";
       case "sales": return "bg-chart-2 text-white";
       case "renewals": return "bg-chart-3 text-white";
@@ -199,6 +201,15 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
             variant="ghost"
             size="sm"
             className="w-full justify-start gap-2 text-muted-foreground"
+            onClick={() => navigate("/change-password")}
+          >
+            <KeyRound className="h-4 w-4" />
+            Change Password
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start gap-2 text-muted-foreground"
             onClick={signOut}
           >
             <LogOut className="h-4 w-4" />
@@ -208,7 +219,20 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
       )}
 
       {collapsed && (
-        <div className="p-2">
+        <div className="p-2 space-y-1">
+          <Tooltip delayDuration={0}>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="w-full"
+                onClick={() => navigate("/change-password")}
+              >
+                <KeyRound className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Change Password</TooltipContent>
+          </Tooltip>
           <Tooltip delayDuration={0}>
             <TooltipTrigger asChild>
               <Button

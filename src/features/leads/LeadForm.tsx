@@ -3,10 +3,12 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useLead, useCreateLead, useUpdateLead, useUsers } from "./api";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { leadSchema, type LeadFormValues } from "./schema";
+import { errorMessage } from "@/lib/errors";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,9 +22,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { DuplicateWarning } from "@/components/DuplicateWarning";
+import { US_STATES } from "@/lib/us-states";
+import { PhoneInput } from "@/components/PhoneInput";
 import type { CustomFieldDefinition } from "@/types/crm";
 
 /* ---------- Section wrapper ---------- */
@@ -44,6 +49,7 @@ export function LeadForm() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const isEditing = !!id;
+  const { user } = useAuth();
   const { data: lead, isLoading: loadingLead } = useLead(id);
   const { data: users } = useUsers();
   const { data: customFieldDefs } = useCustomFieldDefinitions("leads");
@@ -66,6 +72,8 @@ export function LeadForm() {
       last_name: "",
       email: "",
       phone: "",
+      mobile_phone: "",
+      do_not_contact: false,
       company: "",
       title: "",
       industry: "",
@@ -74,15 +82,33 @@ export function LeadForm() {
       source: "",
       qualification: "unqualified",
       score: "",
+      mql_date: "",
+      do_not_market_to: false,
       description: "",
       employees: "",
       annual_revenue: "",
-      owner_user_id: null,
+      // Default new leads to the current rep as the owner. Feedback
+      // from Summer 2026-04-19: "Make owner assignment preset to user,
+      // can change if needed."
+      owner_user_id: user?.id ?? null,
       street: "",
       city: "",
       state: "",
       zip: "",
       country: "",
+      credential: "",
+      phone_ext: "",
+      time_zone: "",
+      type: "",
+      priority_lead: false,
+      project: "",
+      business_relationship_tag: "",
+      linkedin_url: "",
+      cold_lead: false,
+      cold_lead_source: "",
+      rating: "",
+      industry_category: "",
+      project_segment: "",
       custom_fields: {},
     },
   });
@@ -94,6 +120,8 @@ export function LeadForm() {
         last_name: lead.last_name,
         email: lead.email ?? "",
         phone: lead.phone ?? "",
+        mobile_phone: lead.mobile_phone ?? "",
+        do_not_contact: lead.do_not_contact ?? false,
         company: lead.company ?? "",
         title: lead.title ?? "",
         industry: lead.industry ?? "",
@@ -102,6 +130,8 @@ export function LeadForm() {
         source: lead.source ?? "",
         qualification: lead.qualification ?? "unqualified",
         score: lead.score ?? "",
+        mql_date: lead.mql_date ?? "",
+        do_not_market_to: lead.do_not_market_to ?? false,
         description: lead.description ?? "",
         employees: lead.employees ?? "",
         annual_revenue: lead.annual_revenue ?? "",
@@ -111,6 +141,19 @@ export function LeadForm() {
         state: lead.state ?? "",
         zip: lead.zip ?? "",
         country: lead.country ?? "",
+        credential: lead.credential ?? "",
+        phone_ext: lead.phone_ext ?? "",
+        time_zone: lead.time_zone ?? "",
+        type: lead.type ?? "",
+        priority_lead: lead.priority_lead ?? false,
+        project: lead.project ?? "",
+        business_relationship_tag: lead.business_relationship_tag ?? "",
+        linkedin_url: lead.linkedin_url ?? "",
+        cold_lead: lead.cold_lead ?? false,
+        cold_lead_source: lead.cold_lead_source ?? "",
+        rating: lead.rating ?? "",
+        industry_category: lead.industry_category ?? "",
+        project_segment: lead.project_segment ?? "",
         custom_fields: lead.custom_fields ?? {},
       });
     }
@@ -139,6 +182,8 @@ export function LeadForm() {
       last_name: values.last_name,
       email: emptyToNull(values.email),
       phone: emptyToNull(values.phone),
+      mobile_phone: emptyToNull(values.mobile_phone),
+      do_not_contact: values.do_not_contact ?? false,
       company: emptyToNull(values.company),
       title: emptyToNull(values.title),
       industry: emptyToNull(values.industry),
@@ -147,6 +192,7 @@ export function LeadForm() {
       source: emptyToNull(values.source),
       qualification: values.qualification ?? "unqualified",
       score: emptyToNull(values.score),
+      mql_date: emptyToNull(values.mql_date),
       description: emptyToNull(values.description),
       employees: emptyToNull(values.employees),
       annual_revenue: emptyToNull(values.annual_revenue),
@@ -156,6 +202,20 @@ export function LeadForm() {
       state: emptyToNull(values.state),
       zip: emptyToNull(values.zip),
       country: emptyToNull(values.country),
+      do_not_market_to: values.do_not_market_to ?? false,
+      credential: emptyToNull(values.credential),
+      phone_ext: emptyToNull(values.phone_ext),
+      time_zone: emptyToNull(values.time_zone),
+      type: emptyToNull(values.type),
+      priority_lead: values.priority_lead ?? false,
+      project: emptyToNull(values.project),
+      business_relationship_tag: emptyToNull(values.business_relationship_tag),
+      linkedin_url: emptyToNull(values.linkedin_url),
+      cold_lead: values.cold_lead ?? false,
+      cold_lead_source: emptyToNull(values.cold_lead_source),
+      rating: emptyToNull(values.rating),
+      industry_category: emptyToNull(values.industry_category),
+      project_segment: emptyToNull(values.project_segment),
       custom_fields: values.custom_fields ?? {},
     };
 
@@ -171,7 +231,7 @@ export function LeadForm() {
       }
     } catch (err) {
       console.error("Failed to save lead:", err);
-      toast.error("Failed to save: " + (err as Error).message);
+      toast.error("Failed to save: " + errorMessage(err));
     }
   }
 
@@ -219,14 +279,280 @@ export function LeadForm() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="phone">Phone<RequiredIndicator fieldKey="phone" requiredFields={requiredKeys} /></Label>
-                  <Input id="phone" {...register("phone")} />
+                  <Label htmlFor="phone">
+                    Phone<RequiredIndicator fieldKey="phone" requiredFields={requiredKeys} />
+                  </Label>
+                  <PhoneInput
+                    id="phone"
+                    value={watch("phone") ?? ""}
+                    onChange={(v) => setValue("phone", v)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Include extension after the number: "(208) 555-1234 x567"
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="mobile_phone">Mobile / Direct Line</Label>
+                  <PhoneInput
+                    id="mobile_phone"
+                    value={watch("mobile_phone") ?? ""}
+                    onChange={(v) => setValue("mobile_phone", v)}
+                  />
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="company">Company<RequiredIndicator fieldKey="company" requiredFields={requiredKeys} /></Label>
                   <Input id="company" {...register("company")} />
                 </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="linkedin_url">LinkedIn URL</Label>
+                  <Input id="linkedin_url" type="url" placeholder="https://linkedin.com/in/..." {...register("linkedin_url")} />
+                  {errors.linkedin_url && <p className="text-sm text-destructive">{errors.linkedin_url.message}</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Credential</Label>
+                  <Select
+                    value={(watch("credential") as string) || "none"}
+                    onValueChange={(v) => setValue("credential", v === "none" ? "" : (v as never))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select credential..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="md">MD</SelectItem>
+                      <SelectItem value="do">DO</SelectItem>
+                      <SelectItem value="rn">RN</SelectItem>
+                      <SelectItem value="np">NP</SelectItem>
+                      <SelectItem value="pa">PA</SelectItem>
+                      <SelectItem value="chc">CHC</SelectItem>
+                      <SelectItem value="chps">CHPS</SelectItem>
+                      <SelectItem value="ceo">CEO</SelectItem>
+                      <SelectItem value="cfo">CFO</SelectItem>
+                      <SelectItem value="coo">COO</SelectItem>
+                      <SelectItem value="cio">CIO</SelectItem>
+                      <SelectItem value="cto">CTO</SelectItem>
+                      <SelectItem value="ciso">CISO</SelectItem>
+                      <SelectItem value="cmo">CMO</SelectItem>
+                      <SelectItem value="practice_manager">Practice Manager</SelectItem>
+                      <SelectItem value="office_manager">Office Manager</SelectItem>
+                      <SelectItem value="compliance_officer">Compliance Officer</SelectItem>
+                      <SelectItem value="privacy_officer">Privacy Officer</SelectItem>
+                      <SelectItem value="security_officer">Security Officer</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Time Zone</Label>
+                  <Select
+                    value={(watch("time_zone") as string) || "none"}
+                    onValueChange={(v) => setValue("time_zone", v === "none" ? "" : (v as never))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select time zone..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="eastern">Eastern</SelectItem>
+                      <SelectItem value="central">Central</SelectItem>
+                      <SelectItem value="mountain">Mountain</SelectItem>
+                      <SelectItem value="pacific">Pacific</SelectItem>
+                      <SelectItem value="alaska">Alaska</SelectItem>
+                      <SelectItem value="hawaii">Hawaii</SelectItem>
+                      <SelectItem value="arizona_no_dst">Arizona (no DST)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Lead Type</Label>
+                  <Select
+                    value={(watch("type") as string) || "none"}
+                    onValueChange={(v) => setValue("type", v === "none" ? "" : (v as never))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select type..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="inbound_website">Inbound (Website)</SelectItem>
+                      <SelectItem value="inbound_referral">Inbound (Referral)</SelectItem>
+                      <SelectItem value="outbound_cold">Outbound / Cold</SelectItem>
+                      <SelectItem value="purchased_list">Purchased List</SelectItem>
+                      <SelectItem value="conference">Conference</SelectItem>
+                      <SelectItem value="webinar">Webinar</SelectItem>
+                      <SelectItem value="partner">Partner</SelectItem>
+                      <SelectItem value="existing_customer_expansion">Existing Customer Expansion</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Lead Segment</Label>
+                  <Select
+                    value={(watch("project_segment") as string) || "none"}
+                    onValueChange={(v) =>
+                      setValue("project_segment", v === "none" ? "" : (v as never))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select segment..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="rural_hospital">Rural Hospital</SelectItem>
+                      <SelectItem value="community_hospital">Community Hospital</SelectItem>
+                      <SelectItem value="enterprise">Enterprise</SelectItem>
+                      <SelectItem value="medium_sized">Medium Sized</SelectItem>
+                      <SelectItem value="small_sized">Small Sized</SelectItem>
+                      <SelectItem value="fqhc">FQHC</SelectItem>
+                      <SelectItem value="voa">VoA</SelectItem>
+                      <SelectItem value="franchise">Franchise</SelectItem>
+                      <SelectItem value="strategic_partner">Strategic Partner</SelectItem>
+                      <SelectItem value="it_vendor_third_party">IT Vendor / 3rd Party</SelectItem>
+                      <SelectItem value="independent_associations">Independent Associations</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Industry</Label>
+                  <Select
+                    value={(watch("industry_category") as string) || "none"}
+                    onValueChange={(v) =>
+                      setValue("industry_category", v === "none" ? "" : (v as never))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select industry..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="hospital">Hospital</SelectItem>
+                      <SelectItem value="medical_group">Medical Group</SelectItem>
+                      <SelectItem value="fqhc">FQHC</SelectItem>
+                      <SelectItem value="rural_health_clinic">Rural Health Clinic</SelectItem>
+                      <SelectItem value="skilled_nursing">Skilled Nursing</SelectItem>
+                      <SelectItem value="long_term_care">Long-Term Care</SelectItem>
+                      <SelectItem value="home_health">Home Health</SelectItem>
+                      <SelectItem value="hospice">Hospice</SelectItem>
+                      <SelectItem value="behavioral_health">Behavioral Health</SelectItem>
+                      <SelectItem value="dental">Dental</SelectItem>
+                      <SelectItem value="pediatrics">Pediatrics</SelectItem>
+                      <SelectItem value="specialty_clinic">Specialty Clinic</SelectItem>
+                      <SelectItem value="urgent_care">Urgent Care</SelectItem>
+                      <SelectItem value="imaging_center">Imaging Center</SelectItem>
+                      <SelectItem value="lab_services">Lab Services</SelectItem>
+                      <SelectItem value="pharmacy">Pharmacy</SelectItem>
+                      <SelectItem value="telemedicine">Telemedicine</SelectItem>
+                      <SelectItem value="tribal_health">Tribal Health</SelectItem>
+                      <SelectItem value="public_health_agency">Public Health Agency</SelectItem>
+                      <SelectItem value="healthcare_it_vendor">Healthcare IT Vendor</SelectItem>
+                      <SelectItem value="managed_service_provider">Managed Service Provider</SelectItem>
+                      <SelectItem value="healthcare_consulting">Healthcare Consulting</SelectItem>
+                      <SelectItem value="insurance_payer">Insurance / Payer</SelectItem>
+                      <SelectItem value="other_healthcare">Other Healthcare</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Relationship Tag</Label>
+                  <Select
+                    value={(watch("business_relationship_tag") as string) || "none"}
+                    onValueChange={(v) =>
+                      setValue("business_relationship_tag", v === "none" ? "" : (v as never))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select relationship..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="decision_maker">Decision Maker</SelectItem>
+                      <SelectItem value="influencer">Influencer</SelectItem>
+                      <SelectItem value="economic_buyer">Economic Buyer</SelectItem>
+                      <SelectItem value="technical_buyer">Technical Buyer</SelectItem>
+                      <SelectItem value="champion">Champion</SelectItem>
+                      <SelectItem value="detractor">Detractor</SelectItem>
+                      <SelectItem value="end_user">End User</SelectItem>
+                      <SelectItem value="gatekeeper">Gatekeeper</SelectItem>
+                      <SelectItem value="executive_sponsor">Executive Sponsor</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="project">Project / Interest</Label>
+                  <Input
+                    id="project"
+                    placeholder="e.g. SRA, HIPAA certification"
+                    {...register("project")}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Lead Rating</Label>
+                  <Select
+                    value={(watch("rating") as string) || "none"}
+                    onValueChange={(v) =>
+                      setValue("rating", v === "none" ? "" : (v as never))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Not rated" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Not rated</SelectItem>
+                      <SelectItem value="hot">Hot</SelectItem>
+                      <SelectItem value="warm">Warm</SelectItem>
+                      <SelectItem value="cold">Cold</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="md:col-span-2 flex flex-wrap gap-6">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="priority_lead"
+                      checked={watch("priority_lead")}
+                      onCheckedChange={(checked) => setValue("priority_lead", !!checked)}
+                    />
+                    <Label htmlFor="priority_lead" className="cursor-pointer font-medium">
+                      🎯 Priority lead (needs immediate attention)
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="cold_lead"
+                      checked={watch("cold_lead")}
+                      onCheckedChange={(checked) => setValue("cold_lead", !!checked)}
+                    />
+                    <Label htmlFor="cold_lead" className="cursor-pointer">
+                      Cold lead (purchased list, pre-validation)
+                    </Label>
+                  </div>
+                </div>
+
+                {watch("cold_lead") && (
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="cold_lead_source">Cold Lead List Name</Label>
+                    <Input
+                      id="cold_lead_source"
+                      placeholder="e.g. Cold Call SMB, Athena List, eClinicalWorks List"
+                      {...register("cold_lead_source")}
+                    />
+                  </div>
+                )}
 
                 {!isEditing && (
                   <div className="md:col-span-2">
@@ -276,13 +602,20 @@ export function LeadForm() {
                       <SelectValue placeholder="Select source..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="website">Website</SelectItem>
-                      <SelectItem value="referral">Referral</SelectItem>
+                      {/* Alphabetized per Summer/Anna feedback. "Other"
+                          stays at the bottom since it's a fallback. */}
                       <SelectItem value="cold_call">Cold Call</SelectItem>
-                      <SelectItem value="trade_show">Trade Show</SelectItem>
-                      <SelectItem value="partner">Partner</SelectItem>
-                      <SelectItem value="social_media">Social Media</SelectItem>
+                      <SelectItem value="conference">Conference</SelectItem>
                       <SelectItem value="email_campaign">Email Campaign</SelectItem>
+                      <SelectItem value="mql">MQL</SelectItem>
+                      <SelectItem value="partner">Partner</SelectItem>
+                      <SelectItem value="podcast">Podcast</SelectItem>
+                      <SelectItem value="referral">Referral</SelectItem>
+                      <SelectItem value="social_media">Social Media</SelectItem>
+                      <SelectItem value="sql">SQL</SelectItem>
+                      <SelectItem value="trade_show">Trade Show</SelectItem>
+                      <SelectItem value="webinar">Webinar</SelectItem>
+                      <SelectItem value="website">Website</SelectItem>
                       <SelectItem value="other">Other</SelectItem>
                     </SelectContent>
                   </Select>
@@ -308,9 +641,38 @@ export function LeadForm() {
                   </Select>
                 </div>
 
+                {/* Score field removed per Summer 2026-04-19. The
+                    score column still exists in the DB for any
+                    SF-imported values; can be surfaced in reports. */}
+
                 <div className="space-y-2">
-                  <Label htmlFor="score">Score<RequiredIndicator fieldKey="score" requiredFields={requiredKeys} /></Label>
-                  <Input id="score" type="number" min={0} {...register("score")} />
+                  <Label htmlFor="mql_date">MQL Date<RequiredIndicator fieldKey="mql_date" requiredFields={requiredKeys} /></Label>
+                  <Input id="mql_date" type="date" {...register("mql_date")} />
+                </div>
+
+                <div className="flex items-center space-x-2 pt-6">
+                  <Checkbox
+                    id="do_not_market_to"
+                    checked={watch("do_not_market_to")}
+                    onCheckedChange={(checked) => setValue("do_not_market_to", !!checked)}
+                  />
+                  <Label htmlFor="do_not_market_to" className="cursor-pointer text-destructive font-medium">
+                    Do Not Market To
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-2 pt-6">
+                  <Checkbox
+                    id="do_not_contact"
+                    checked={watch("do_not_contact") ?? false}
+                    onCheckedChange={(checked) => setValue("do_not_contact", !!checked)}
+                  />
+                  <Label
+                    htmlFor="do_not_contact"
+                    className="cursor-pointer text-destructive font-medium"
+                    title="Blocks ALL outreach — call, email, marketing. Stronger than Do Not Market To."
+                  >
+                    🚫 Do Not Contact
+                  </Label>
                 </div>
 
                 <div className="space-y-2">
@@ -344,19 +706,16 @@ export function LeadForm() {
             </FormSection>
 
             {/* ---- Company Details ---- */}
+            {/* The Industry field was removed here (dedup with the
+                Industry dropdown in Basic Info). Annual Revenue + Score
+                removed per Summer's feedback — if legacy SF data has
+                values they stay in custom_fields / DB columns, just
+                not surfaced on the form. */}
             <FormSection title="Company Details">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="industry">Industry<RequiredIndicator fieldKey="industry" requiredFields={requiredKeys} /></Label>
-                  <Input id="industry" {...register("industry")} />
-                </div>
-                <div className="space-y-2">
                   <Label htmlFor="employees">Employees<RequiredIndicator fieldKey="employees" requiredFields={requiredKeys} /></Label>
                   <Input id="employees" type="number" {...register("employees")} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="annual_revenue">Annual Revenue<RequiredIndicator fieldKey="annual_revenue" requiredFields={requiredKeys} /></Label>
-                  <Input id="annual_revenue" type="number" step="0.01" {...register("annual_revenue")} />
                 </div>
               </div>
             </FormSection>
@@ -374,7 +733,24 @@ export function LeadForm() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="state">State</Label>
-                  <Input id="state" {...register("state")} />
+                  <Select
+                    value={watch("state") || "none"}
+                    onValueChange={(v) =>
+                      setValue("state", v === "none" ? "" : v)
+                    }
+                  >
+                    <SelectTrigger id="state">
+                      <SelectValue placeholder="Select state..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {US_STATES.map((s) => (
+                        <SelectItem key={s.code} value={s.code}>
+                          {s.name} ({s.code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="zip">Zip</Label>

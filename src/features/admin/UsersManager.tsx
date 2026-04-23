@@ -42,10 +42,13 @@ const ROLE_OPTIONS: { value: AppRole; label: string }[] = [
   { value: "sales", label: "Sales" },
   { value: "renewals", label: "Renewals" },
   { value: "admin", label: "Admin" },
+  { value: "super_admin", label: "Super Admin" },
 ];
 
 function roleBadgeClass(role: AppRole): string {
   switch (role) {
+    case "super_admin":
+      return "bg-destructive text-destructive-foreground";
     case "admin":
       return "bg-primary text-primary-foreground";
     case "sales":
@@ -119,25 +122,11 @@ function InviteUserDialog({
       { email, password, full_name: fullName, role },
       {
         onSuccess: () => {
-          toast.success(
-            "User created! They can log in with the provided credentials.",
-          );
+          toast.success("User created! Share the credentials below.");
           setCreatedPassword(password);
         },
         onError: (err) => {
-          // If the Edge Function isn't deployed yet (404 or relay error)
-          if (
-            err.message?.includes("404") ||
-            err.message?.includes("FunctionNotFound") ||
-            err.message?.includes("Relay")
-          ) {
-            toast.error(
-              "Edge Function not deployed yet. Create users in the Supabase dashboard, then set their role here.",
-              { duration: 8000 },
-            );
-          } else {
-            toast.error(`Failed to create user: ${err.message}`);
-          }
+          toast.error(`Failed to create user: ${err.message}`);
         },
       },
     );
@@ -153,8 +142,8 @@ function InviteUserDialog({
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Share these credentials with the new user. The password will not be
-              shown again.
+              Share these credentials with the new user. They will not be shown
+              again.
             </p>
             <div className="rounded-lg border bg-muted/50 p-4 space-y-2">
               <div className="flex items-center justify-between">

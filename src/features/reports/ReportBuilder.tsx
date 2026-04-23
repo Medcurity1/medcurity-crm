@@ -1,4 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
+import * as XLSX from "xlsx";
 import {
   Play,
   Save,
@@ -13,6 +15,7 @@ import {
   ChevronDown,
   Columns3,
   Download,
+  FileSpreadsheet,
   Table2,
   BarChart3,
   PieChartIcon,
@@ -31,7 +34,6 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
-import { ReportsDashboard } from "./ReportsDashboard";
 import {
   ENTITY_DEFS,
   ENTITY_KEYS,
@@ -97,8 +99,6 @@ import {
 import {
   Tabs,
   TabsContent,
-  TabsList,
-  TabsTrigger,
 } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -248,6 +248,88 @@ function exportToCSV(
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+/** Export the report to an XLSX (Excel) file. */
+function exportToXLSX(
+  columns: ColumnDef[],
+  data: Record<string, unknown>[],
+  entityName: string
+) {
+  const flat = data.map((row) => {
+    const out: Record<string, unknown> = {};
+    for (const col of columns) {
+      // Use raw values for numeric/date columns so Excel can sort & filter them;
+      // fall back to formatted label for enums/booleans/text.
+      const raw = row[col.key];
+      if (col.type === "currency" || col.type === "number") {
+        const n = Number(raw);
+        out[col.label] = Number.isFinite(n) ? n : null;
+      } else if (col.type === "date") {
+        out[col.label] = raw ? String(raw) : null;
+      } else {
+        out[col.label] = formatCellValue(raw, col);
+      }
+    }
+    return out;
+  });
+
+  const ws = XLSX.utils.json_to_sheet(flat);
+  // Auto-size columns to content (basic heuristic)
+  const colWidths = columns.map((col) => ({
+    wch: Math.min(
+      Math.max(
+        col.label.length,
+        ...flat.map((r) => String(r[col.label] ?? "").length)
+      ) + 2,
+      60
+    ),
+  }));
+  ws["!cols"] = colWidths;
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, entityName.slice(0, 31));
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  XLSX.writeFile(wb, `report-${entityName}-${timestamp}.xlsx`);
+}
+
+/** Map from entity key to the detail route prefix. */
+const ENTITY_DETAIL_ROUTES: Record<string, string | null> = {
+  accounts: "/accounts",
+  contacts: "/contacts",
+  opportunities: "/opportunities",
+  leads: "/leads",
+  activities: null, // no dedicated detail page
+  opportunity_products: null,
+};
+
+/** Given an entity key and a row, return the URL to open the primary record, or null. */
+function getRowDetailUrl(
+  entityKey: string,
+  row: Record<string, unknown>
+): string | null {
+  const prefix = ENTITY_DETAIL_ROUTES[entityKey];
+  if (!prefix) {
+    // For activities/line items: fall back to the parent account/opportunity detail
+    if (entityKey === "activities") {
+      if (typeof row.opportunity_id === "string")
+        return `/opportunities/${row.opportunity_id}`;
+      if (typeof row.contact_id === "string")
+        return `/contacts/${row.contact_id}`;
+      if (typeof row.account_id === "string")
+        return `/accounts/${row.account_id}`;
+      return null;
+    }
+    if (entityKey === "opportunity_products") {
+      if (typeof row.opportunity_id === "string")
+        return `/opportunities/${row.opportunity_id}`;
+      return null;
+    }
+    return null;
+  }
+  const id = row.id;
+  if (typeof id !== "string") return null;
+  return `${prefix}/${id}`;
 }
 
 function makeDefaultConfig(entityKey: string): ReportConfig {
@@ -843,6 +925,7 @@ function ResultsTable({
   isLoading: boolean;
   count: number;
 }) {
+  const navigate = useNavigate();
   const entity = getEntityDef(entityKey);
   const visibleCols = columns
     .map((key) => entity.columns.find((c) => c.key === key))
@@ -959,28 +1042,38 @@ function ResultsTable({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.map((row, rowIdx) => (
-                <TableRow key={rowIdx}>
-                  {visibleCols.map((col) => {
-                    const rawValue = row[col.key];
-                    const formatted = formatCellValue(rawValue, col);
+              {data.map((row, rowIdx) => {
+                const detailUrl = getRowDetailUrl(entityKey, row);
+                return (
+                  <TableRow
+                    key={rowIdx}
+                    className={detailUrl ? "cursor-pointer hover:bg-muted/50" : ""}
+                    onClick={() => {
+                      if (detailUrl) navigate(detailUrl);
+                    }}
+                    title={detailUrl ? "Click to open record" : undefined}
+                  >
+                    {visibleCols.map((col) => {
+                      const rawValue = row[col.key];
+                      const formatted = formatCellValue(rawValue, col);
 
-                    return (
-                      <TableCell key={col.key} className="whitespace-nowrap">
-                        {col.type === "enum" ? (
-                          <Badge variant="secondary">{formatted}</Badge>
-                        ) : col.type === "boolean" ? (
-                          <Badge variant={rawValue ? "default" : "outline"}>
-                            {formatted}
-                          </Badge>
-                        ) : (
-                          formatted
-                        )}
-                      </TableCell>
-                    );
-                  })}
-                </TableRow>
-              ))}
+                      return (
+                        <TableCell key={col.key} className="whitespace-nowrap">
+                          {col.type === "enum" ? (
+                            <Badge variant="secondary">{formatted}</Badge>
+                          ) : col.type === "boolean" ? (
+                            <Badge variant={rawValue ? "default" : "outline"}>
+                              {formatted}
+                            </Badge>
+                          ) : (
+                            formatted
+                          )}
+                        </TableCell>
+                      );
+                    })}
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>
@@ -1522,6 +1615,12 @@ export function ReportBuilder() {
     }
     setHasRun(true);
     setRunTrigger((t) => t + 1);
+    // Make sure the user can see the results panel after they hit Run.
+    setTimeout(() => {
+      document
+        .getElementById("report-results")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 200);
   };
 
   const handleSave = async (name: string, isShared: boolean, folder: string | null) => {
@@ -1563,8 +1662,18 @@ export function ReportBuilder() {
     setActiveReportName(report.name);
     setActiveReportFolder(report.folder);
     setActiveReportIsShared(report.is_shared);
-    setHasRun(false);
+    // Auto-run when loading from the sidebar so the user sees rows
+    // immediately instead of a blank builder + having to find the Run
+    // button. They can still rebuild and re-run if they tweak filters.
+    setHasRun(true);
+    setRunTrigger((t) => t + 1);
     setActiveTab("builder");
+    // Smoothly scroll to the results once they render.
+    setTimeout(() => {
+      document
+        .getElementById("report-results")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 200);
   };
 
   const handleDeleteReport = async (id: string) => {
@@ -1622,17 +1731,12 @@ export function ReportBuilder() {
         {/* Main content */}
         <div className="flex-1 min-w-0 overflow-auto">
           <div className="p-6">
+            {/* Report Builder body (the old inner "Dashboard" sub-tab was
+                removed 2026-04-19 — it duplicated the top-level Dashboards
+                tab on /reports?tab=dashboards). activeTab is kept for
+                future sub-tabs but currently always "builder". */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList>
-                <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-                <TabsTrigger value="builder">Report Builder</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="dashboard" className="mt-6">
-                <ReportsDashboard />
-              </TabsContent>
-
-              <TabsContent value="builder" className="mt-6">
+              <TabsContent value="builder" className="mt-0">
                 {activeReportName && (
                   <div className="flex items-center gap-2 mb-4">
                     <h2 className="text-lg font-semibold">{activeReportName}</h2>
@@ -1705,31 +1809,48 @@ export function ReportBuilder() {
                         </Button>
                       )}
                       {hasRun && (results?.data?.length ?? 0) > 0 && (
-                        <Button
-                          variant="outline"
-                          onClick={() => {
-                            const entity = getEntityDef(config.entity);
-                            const visibleCols = config.columns
-                              .map((key) => entity.columns.find((c) => c.key === key))
-                              .filter((c): c is ColumnDef => !!c);
-                            exportToCSV(visibleCols, results?.data ?? [], config.entity);
-                          }}
-                        >
-                          <Download className="h-4 w-4 mr-1.5" />
-                          Export CSV
-                        </Button>
+                        <>
+                          <Button
+                            variant="outline"
+                            onClick={() => {
+                              const entity = getEntityDef(config.entity);
+                              const visibleCols = config.columns
+                                .map((key) => entity.columns.find((c) => c.key === key))
+                                .filter((c): c is ColumnDef => !!c);
+                              exportToCSV(visibleCols, results?.data ?? [], config.entity);
+                            }}
+                          >
+                            <Download className="h-4 w-4 mr-1.5" />
+                            Export CSV
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={() => {
+                              const entity = getEntityDef(config.entity);
+                              const visibleCols = config.columns
+                                .map((key) => entity.columns.find((c) => c.key === key))
+                                .filter((c): c is ColumnDef => !!c);
+                              exportToXLSX(visibleCols, results?.data ?? [], config.entity);
+                            }}
+                          >
+                            <FileSpreadsheet className="h-4 w-4 mr-1.5" />
+                            Export Excel
+                          </Button>
+                        </>
                       )}
                     </div>
 
                     {/* Results */}
                     {hasRun && (
-                      <ResultsTable
-                        entityKey={config.entity}
-                        columns={config.columns}
-                        data={results?.data ?? []}
-                        isLoading={resultsLoading}
-                        count={results?.count ?? 0}
-                      />
+                      <div id="report-results">
+                        <ResultsTable
+                          entityKey={config.entity}
+                          columns={config.columns}
+                          data={results?.data ?? []}
+                          isLoading={resultsLoading}
+                          count={results?.count ?? 0}
+                        />
+                      </div>
                     )}
                   </CardContent>
                 </Card>

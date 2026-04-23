@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
+import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { Target, Plus, Search } from "lucide-react";
-import { useOpportunities, useArchiveOpportunity, useBulkUpdateOwner } from "./api";
+import { useOpportunities, useArchiveOpportunity, useBulkUpdateOwner, useBulkDeleteOpportunities } from "./api";
+import { toast } from "sonner";
 import { useUsers } from "@/features/accounts/api";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
@@ -33,22 +37,35 @@ const PAGE_SIZE = 25;
 
 export function OpportunitiesList() {
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
-  const [stageFilter, setStageFilter] = useState<string>("all");
-  const [teamFilter, setTeamFilter] = useState<string>("all");
-  const [page, setPage] = useState(0);
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
+  const [search, setSearch] = useDebouncedUrlState("q", "");
+  const [stageFilter, setStageFilter] = useUrlState("stage", "all");
+  const [teamFilter, setTeamFilter] = useUrlState("team", "all");
+  const [ownerFilter, setOwnerFilter] = useUrlState("owner", "all");
+  const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
+  const [page, setPage] = useUrlNumberState("page", 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const { data: result, isLoading } = useOpportunities({
     search: search || undefined,
     stage: stageFilter !== "all" ? stageFilter : undefined,
     team: teamFilter !== "all" ? teamFilter : undefined,
+    ownerId:
+      ownerFilter === "all" ? undefined : ownerFilter === "mine" ? "mine" : ownerFilter,
+    verified:
+      verifiedFilter === "verified"
+        ? "true"
+        : verifiedFilter === "unverified"
+        ? "false"
+        : undefined,
     page,
     pageSize: PAGE_SIZE,
   });
   const { data: users } = useUsers();
   const archiveMutation = useArchiveOpportunity();
   const bulkOwnerMutation = useBulkUpdateOwner();
+  const bulkDeleteMutation = useBulkDeleteOpportunities();
 
   const opps = result?.data;
   const totalCount = result?.count ?? 0;
@@ -100,6 +117,13 @@ export function OpportunitiesList() {
     setSelectedIds(new Set());
   };
 
+  const handleBulkDelete = async () => {
+    if (!confirm(`Permanently delete ${selectedIds.size} opportunity(ies)? This cannot be undone.`)) return;
+    await bulkDeleteMutation.mutateAsync({ ids: Array.from(selectedIds) });
+    setSelectedIds(new Set());
+    toast.success(`${selectedIds.size} opportunity(ies) deleted.`);
+  };
+
   const handleBulkAssignOwner = async (userId: string) => {
     await bulkOwnerMutation.mutateAsync({ ids: Array.from(selectedIds), owner_user_id: userId });
     setSelectedIds(new Set());
@@ -122,7 +146,7 @@ export function OpportunitiesList() {
       />
 
       <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <div className="relative flex-1 max-w-sm">
+        <div className="relative min-w-[220px] w-full sm:w-auto sm:flex-1 sm:max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search opportunities..."
@@ -137,10 +161,10 @@ export function OpportunitiesList() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Stages</SelectItem>
-            <SelectItem value="lead">Lead</SelectItem>
-            <SelectItem value="qualified">Qualified</SelectItem>
-            <SelectItem value="proposal">Proposal</SelectItem>
-            <SelectItem value="verbal_commit">Verbal Commit</SelectItem>
+            <SelectItem value="details_analysis">Details Analysis</SelectItem>
+            <SelectItem value="demo">Demo</SelectItem>
+            <SelectItem value="proposal_and_price_quote">Proposal and Price Quote</SelectItem>
+            <SelectItem value="proposal_conversation">Proposal Conversation</SelectItem>
             <SelectItem value="closed_won">Closed Won</SelectItem>
             <SelectItem value="closed_lost">Closed Lost</SelectItem>
           </SelectContent>
@@ -153,6 +177,30 @@ export function OpportunitiesList() {
             <SelectItem value="all">All Teams</SelectItem>
             <SelectItem value="sales">Sales</SelectItem>
             <SelectItem value="renewals">Renewals</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={ownerFilter} onValueChange={(v) => { setOwnerFilter(v); setPage(0); }}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="All owners" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Owners</SelectItem>
+            <SelectItem value="mine">My Opps</SelectItem>
+            {(users ?? []).map((u) => (
+              <SelectItem key={u.id} value={u.id}>
+                {u.full_name ?? "Unknown"}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={verifiedFilter} onValueChange={(v) => { setVerifiedFilter(v); setPage(0); }}>
+          <SelectTrigger className="w-36">
+            <SelectValue placeholder="Verified" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="verified">Verified only</SelectItem>
+            <SelectItem value="unverified">Unverified only</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -194,6 +242,7 @@ export function OpportunitiesList() {
                   <TableHead>Kind</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
                   <TableHead>Expected Close</TableHead>
+                  <TableHead>Close Date</TableHead>
                   <TableHead>Owner</TableHead>
                 </TableRow>
               </TableHeader>
@@ -240,6 +289,11 @@ export function OpportunitiesList() {
                       {formatDate(opp.expected_close_date)}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
+                      {/* close_date is only set by the trigger when stage
+                          hits closed_won/closed_lost. Empty otherwise. */}
+                      {opp.close_date ? formatDate(opp.close_date) : "\u2014"}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
                       {opp.owner?.full_name ?? "Unassigned"}
                     </TableCell>
                   </TableRow>
@@ -259,7 +313,8 @@ export function OpportunitiesList() {
       <BulkActionBar
         selectedCount={selectedIds.size}
         onClear={() => setSelectedIds(new Set())}
-        onArchive={handleBulkArchive}
+        onArchive={isAdmin ? handleBulkArchive : undefined}
+        onDelete={isAdmin ? handleBulkDelete : undefined}
         onAssignOwner={handleBulkAssignOwner}
         users={users}
       />

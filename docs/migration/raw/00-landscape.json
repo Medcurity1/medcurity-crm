@@ -1,0 +1,78 @@
+{
+  "generated_at": "2026-04-15",
+  "session_user": "James Parrish (jamesp@medcurity.com), Profile: System Administrator",
+  "note": "Brayden requested exploration; we are logged in as James Parrish with sysadmin access.",
+  "org": {
+    "name": "Medcurity, Inc.",
+    "id": "00D5w000002rxCXEAY",
+    "instance": "USA440",
+    "edition": "Professional Edition",
+    "is_sandbox": false,
+    "created": "2020-04-23T22:48:39Z",
+    "api_version_used": "v66.0"
+  },
+  "data_volumes": {
+    "accounts": 5642,
+    "contacts": 8140,
+    "leads": 42697,
+    "opportunities": 2207,
+    "cases": 354,
+    "tasks": 6625,
+    "events": 129,
+    "email_messages": 0,
+    "campaigns": 8,
+    "contracts": 0,
+    "orders": 0,
+    "assets": 0
+  },
+  "customization_counts": {
+    "custom_objects": 21,
+    "custom_fields_total": 203,
+    "validation_rules": 2,
+    "workflow_rules": 2,
+    "workflow_field_updates": 5,
+    "apex_classes": 396,
+    "apex_triggers": 5,
+    "email_templates": 21
+  },
+  "integration_counts": {
+    "named_credentials": 0,
+    "external_data_sources": 0,
+    "connected_apps": 21,
+    "remote_site_settings": 8,
+    "installed_packages": "ERR - query rejected; retry via different endpoint"
+  },
+  "reporting_counts": {
+    "reports": 710,
+    "dashboards": 26
+  },
+  "users_and_security": {
+    "active_users": 16,
+    "total_users": 43,
+    "profiles": 22,
+    "permission_sets": 110,
+    "permission_set_assignments": 101,
+    "roles": 0,
+    "queues": 2,
+    "public_groups": 0,
+    "assignment_rules": 0,
+    "auto_response_rules": 1
+  },
+  "queries_that_failed_and_need_alternate_endpoints": [
+    "FlowDefinitionView (use FlowDefinition or MetadataContainer)",
+    "AsyncApexJob (data API, not tooling)",
+    "CronTrigger (data API, not tooling)",
+    "CronJobDetail (data API, not tooling)",
+    "SharingRules (use /sobjects or per-object AccountSharingRules, etc.)",
+    "InstalledSubscriberPackage (500 - needs different approach)"
+  ],
+  "initial_observations": [
+    "42,697 leads is massive relative to 2,207 opps (~5% conversion territory) - lead hygiene/qualification flow likely matters.",
+    "0 EmailMessage rows + 129 Events + 6,625 Tasks suggests Einstein Activity Capture is likely ON (emails aren't persisted to SF) OR email logging is not wired up. Must investigate.",
+    "0 Orders/Contracts/Assets: SF is being used for Lead/Opp/Account/Contact + Activities + Cases. No post-sale lifecycle in SF.",
+    "396 Apex classes vs only 5 Apex triggers: classes are almost certainly dominated by installed-package code, not bespoke logic.",
+    "0 Roles + 0 Public Groups + 0 Sharing Rules: security model is profile + permission-set based, not hierarchy-based. Makes RLS translation easier.",
+    "Professional Edition: many advanced features unavailable (limits workflow rules, flow features, etc.). Rebuild can be simpler.",
+    "110 permission sets on 43 users is high - likely lots of legacy / package-installed perm sets. Need to see which are actually assigned."
+  ]
+}

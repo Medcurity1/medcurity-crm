@@ -38,12 +38,17 @@ const lifecycleLabels: Record<AccountLifecycle, string> = {
 };
 
 const stageLabels: Record<OpportunityStage, string> = {
+  details_analysis: "Details Analysis",
+  demo: "Demo",
+  proposal_and_price_quote: "Proposal and Price Quote",
+  proposal_conversation: "Proposal Conversation",
+  closed_won: "Closed Won",
+  closed_lost: "Closed Lost",
+  // Legacy labels — kept for history rows only
   lead: "Lead",
   qualified: "Qualified",
   proposal: "Proposal",
   verbal_commit: "Verbal Commit",
-  closed_won: "Closed Won",
-  closed_lost: "Closed Lost",
 };
 
 const leadStatusLabels: Record<LeadStatus, string> = {
@@ -186,6 +191,12 @@ export function GlobalSearch() {
         onOpenChange={handleOpenChange}
         title="Global Search"
         description="Search across accounts, contacts, opportunities, and leads"
+        // cmdk filters items client-side by default (fuzzy-matching the `value`
+        // attr against the typed query). Our results come back already
+        // server-filtered via Supabase ilike, so cmdk's filter just hides most
+        // of them and can make the input appear "stuck" — results look empty
+        // no matter what you type. Disable it so everything we render shows.
+        shouldFilter={false}
       >
         <CommandInput
           placeholder="Search accounts, contacts, opportunities, leads..."

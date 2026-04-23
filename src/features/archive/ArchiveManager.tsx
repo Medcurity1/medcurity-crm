@@ -137,7 +137,7 @@ function ArchivedTable({ table }: { table: string }) {
 export function ArchiveManager() {
   const { profile } = useAuth();
 
-  if (profile?.role !== "admin") {
+  if (profile?.role !== "admin" && profile?.role !== "super_admin") {
     return <Navigate to="/accounts" replace />;
   }
 

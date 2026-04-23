@@ -32,7 +32,7 @@ export function ChangeOwnerDialog({
   onConfirm,
   title = "Change Owner",
 }: ChangeOwnerDialogProps) {
-  const { data: users } = useUsers();
+  const { data: users } = useUsers(true);
   const [selectedUserId, setSelectedUserId] = useState<string>("");
 
   useEffect(() => {
@@ -64,7 +64,7 @@ export function ChangeOwnerDialog({
             <SelectContent>
               {users?.map((user) => (
                 <SelectItem key={user.id} value={user.id}>
-                  {user.full_name ?? user.id}
+                  {user.full_name ?? user.id}{!user.is_active ? " (inactive)" : ""}
                 </SelectItem>
               ))}
             </SelectContent>

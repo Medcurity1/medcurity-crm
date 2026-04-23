@@ -155,3 +155,98 @@ export function useAutomationLog(ruleId?: string) {
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Renewal automation (Phase 8)
+// ---------------------------------------------------------------------------
+
+export interface RenewalAutomationConfig {
+  id: number;
+  enabled: boolean;
+  lookahead_days: number;
+  last_run_at: string | null;
+  last_run_created_count: number | null;
+  last_run_error: string | null;
+  updated_at: string;
+}
+
+export interface RenewalAutomationRun {
+  id: number;
+  started_at: string;
+  finished_at: string | null;
+  created_count: number;
+  skipped_count: number;
+  error_message: string | null;
+  triggered_by: "cron" | "manual";
+}
+
+/** Fetch the singleton renewal automation config row. */
+export function useRenewalAutomationConfig() {
+  return useQuery({
+    queryKey: ["renewal_automation_config"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("renewal_automation_config")
+        .select("*")
+        .eq("id", 1)
+        .maybeSingle();
+      if (error) throw error;
+      return (data ?? null) as RenewalAutomationConfig | null;
+    },
+  });
+}
+
+/** Update the singleton config row. */
+export function useUpdateRenewalAutomationConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (
+      values: Partial<Pick<RenewalAutomationConfig, "enabled" | "lookahead_days">>
+    ) => {
+      const { data, error } = await supabase
+        .from("renewal_automation_config")
+        .update(values)
+        .eq("id", 1)
+        .select()
+        .single();
+      if (error) throw error;
+      return data as RenewalAutomationConfig;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["renewal_automation_config"] });
+    },
+  });
+}
+
+/** Fetch the most recent renewal automation runs. */
+export function useRenewalAutomationRuns(limit = 10) {
+  return useQuery({
+    queryKey: ["renewal_automation_runs", limit],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("renewal_automation_runs")
+        .select("*")
+        .order("started_at", { ascending: false })
+        .limit(limit);
+      if (error) throw error;
+      return (data ?? []) as RenewalAutomationRun[];
+    },
+  });
+}
+
+/** Trigger a manual renewal automation run via the admin RPC. */
+export function useRunRenewalAutomationNow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.rpc("run_renewal_automation_now");
+      if (error) throw error;
+      return (data ?? []) as { created_count: number; skipped_count: number }[];
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["renewal_automation_config"] });
+      qc.invalidateQueries({ queryKey: ["renewal_automation_runs"] });
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+    },
+  });
+}

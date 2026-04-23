@@ -41,7 +41,7 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
     `${lead.company ?? lead.last_name} - New Business`
   );
   const [opportunityAmount, setOpportunityAmount] = useState<string>("");
-  const [opportunityStage, setOpportunityStage] = useState("lead");
+  const [opportunityStage, setOpportunityStage] = useState("details_analysis");
 
   async function handleConvert() {
     try {
@@ -168,10 +168,10 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="lead">Lead</SelectItem>
-                        <SelectItem value="qualified">Qualified</SelectItem>
-                        <SelectItem value="proposal">Proposal</SelectItem>
-                        <SelectItem value="verbal_commit">Verbal Commit</SelectItem>
+                        <SelectItem value="details_analysis">Details Analysis</SelectItem>
+                        <SelectItem value="demo">Demo</SelectItem>
+                        <SelectItem value="proposal_and_price_quote">Proposal and Price Quote</SelectItem>
+                        <SelectItem value="proposal_conversation">Proposal Conversation</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

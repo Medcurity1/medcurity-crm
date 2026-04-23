@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
+import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { Building2, Plus, Search } from "lucide-react";
-import { useAccounts, useArchiveAccount, useBulkUpdateOwner, useUsers } from "./api";
+import { useAccounts, useArchiveAccount, useBulkUpdateOwner, useBulkDeleteAccounts, useUsers } from "./api";
+import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -32,27 +36,53 @@ const PAGE_SIZE = 25;
 
 export function AccountsList() {
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [page, setPage] = useState(0);
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
+  // Search box uses a debounced variant so rapid typing stays
+  // responsive and we don't race the setSearchParams writes in
+  // setPage(0) / setSearch (users on slow networks were losing
+  // keystrokes on the list page).
+  const [search, setSearch] = useDebouncedUrlState("q", "");
+  const [statusFilter, setStatusFilter] = useUrlState("status", "all");
+  const [ownerFilter, setOwnerFilter] = useUrlState("owner", "all");
+  const [industryFilter, setIndustryFilter] = useUrlState("industry", "all");
+  const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
+  const [page, setPage] = useUrlNumberState("page", 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const { data: result, isLoading } = useAccounts({
     search: search || undefined,
     status: statusFilter !== "all" ? statusFilter : undefined,
+    ownerId:
+      ownerFilter === "all"
+        ? undefined
+        : ownerFilter === "mine"
+        ? "mine"
+        : ownerFilter,
+    industryCategory: industryFilter !== "all" ? industryFilter : undefined,
+    verified:
+      verifiedFilter === "verified"
+        ? "true"
+        : verifiedFilter === "unverified"
+        ? "false"
+        : undefined,
     page,
     pageSize: PAGE_SIZE,
   });
   const { data: users } = useUsers();
   const archiveMutation = useArchiveAccount();
   const bulkOwnerMutation = useBulkUpdateOwner();
+  const bulkDeleteMutation = useBulkDeleteAccounts();
 
   const accounts = result?.data;
   const totalCount = result?.count ?? 0;
 
   const handleSearchChange = (value: string) => {
     setSearch(value);
-    setPage(0);
+    // Reset pagination as search changes. setPage writes the same URL
+    // object, but the debounced useDebouncedUrlState serializes its
+    // own writes so there's no race with this one.
+    if (page !== 0) setPage(0);
   };
   const handleStatusChange = (value: string) => {
     setStatusFilter(value);
@@ -93,6 +123,13 @@ export function AccountsList() {
     setSelectedIds(new Set());
   };
 
+  const handleBulkDelete = async () => {
+    if (!confirm(`Permanently delete ${selectedIds.size} account(s)? This cannot be undone.`)) return;
+    await bulkDeleteMutation.mutateAsync({ ids: Array.from(selectedIds) });
+    setSelectedIds(new Set());
+    toast.success(`${selectedIds.size} account(s) deleted.`);
+  };
+
   const handleBulkAssignOwner = async (userId: string) => {
     await bulkOwnerMutation.mutateAsync({ ids: Array.from(selectedIds), owner_user_id: userId });
     setSelectedIds(new Set());
@@ -114,8 +151,8 @@ export function AccountsList() {
         }
       />
 
-      <div className="flex items-center gap-3 mb-4">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="relative min-w-[220px] w-full sm:w-auto sm:flex-1 sm:max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search accounts..."
@@ -125,7 +162,7 @@ export function AccountsList() {
           />
         </div>
         <Select value={statusFilter} onValueChange={handleStatusChange}>
-          <SelectTrigger className="w-44">
+          <SelectTrigger className="w-40">
             <SelectValue placeholder="All statuses" />
           </SelectTrigger>
           <SelectContent>
@@ -135,6 +172,84 @@ export function AccountsList() {
             <SelectItem value="active">Active</SelectItem>
             <SelectItem value="inactive">Inactive</SelectItem>
             <SelectItem value="churned">Churned</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select
+          value={ownerFilter}
+          onValueChange={(v) => {
+            setOwnerFilter(v);
+            setPage(0);
+          }}
+        >
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="All owners" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Owners</SelectItem>
+            <SelectItem value="mine">My Accounts</SelectItem>
+            {(users ?? []).map((u) => (
+              <SelectItem key={u.id} value={u.id}>
+                {u.full_name ?? "Unknown"}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select
+          value={industryFilter}
+          onValueChange={(v) => {
+            setIndustryFilter(v);
+            setPage(0);
+          }}
+        >
+          <SelectTrigger className="w-44">
+            <SelectValue placeholder="All industries" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Industries</SelectItem>
+            <SelectItem value="hospital">Hospital</SelectItem>
+            <SelectItem value="medical_group">Medical Group</SelectItem>
+            <SelectItem value="fqhc">FQHC</SelectItem>
+            <SelectItem value="rural_health_clinic">Rural Health Clinic</SelectItem>
+            <SelectItem value="skilled_nursing">Skilled Nursing</SelectItem>
+            <SelectItem value="long_term_care">Long-Term Care</SelectItem>
+            <SelectItem value="home_health">Home Health</SelectItem>
+            <SelectItem value="hospice">Hospice</SelectItem>
+            <SelectItem value="behavioral_health">Behavioral Health</SelectItem>
+            <SelectItem value="dental">Dental</SelectItem>
+            <SelectItem value="pediatrics">Pediatrics</SelectItem>
+            <SelectItem value="specialty_clinic">Specialty Clinic</SelectItem>
+            <SelectItem value="urgent_care">Urgent Care</SelectItem>
+            <SelectItem value="imaging_center">Imaging Center</SelectItem>
+            <SelectItem value="lab_services">Lab Services</SelectItem>
+            <SelectItem value="pharmacy">Pharmacy</SelectItem>
+            <SelectItem value="telemedicine">Telemedicine</SelectItem>
+            <SelectItem value="tribal_health">Tribal Health</SelectItem>
+            <SelectItem value="public_health_agency">Public Health Agency</SelectItem>
+            <SelectItem value="healthcare_it_vendor">Healthcare IT Vendor</SelectItem>
+            <SelectItem value="managed_service_provider">Managed Service Provider</SelectItem>
+            <SelectItem value="healthcare_consulting">Healthcare Consulting</SelectItem>
+            <SelectItem value="insurance_payer">Insurance / Payer</SelectItem>
+            <SelectItem value="other_healthcare">Other Healthcare</SelectItem>
+            <SelectItem value="other">Other</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select
+          value={verifiedFilter}
+          onValueChange={(v) => {
+            setVerifiedFilter(v);
+            setPage(0);
+          }}
+        >
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="Verified" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="verified">Verified only</SelectItem>
+            <SelectItem value="unverified">Unverified only</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -229,7 +344,8 @@ export function AccountsList() {
       <BulkActionBar
         selectedCount={selectedIds.size}
         onClear={() => setSelectedIds(new Set())}
-        onArchive={handleBulkArchive}
+        onArchive={isAdmin ? handleBulkArchive : undefined}
+        onDelete={isAdmin ? handleBulkDelete : undefined}
         onAssignOwner={handleBulkAssignOwner}
         users={users}
       />

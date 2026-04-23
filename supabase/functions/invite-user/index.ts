@@ -46,9 +46,32 @@ serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } },
     );
 
-    const { data: profile, error: profileError } = await callerClient
+    // Get the caller's user ID from their JWT
+    const {
+      data: { user: callerUser },
+      error: callerError,
+    } = await callerClient.auth.getUser();
+
+    if (callerError || !callerUser) {
+      return new Response(
+        JSON.stringify({ error: "Invalid or expired token" }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    // Use service role to check profile (bypasses RLS issues)
+    const adminCheckClient = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+
+    const { data: profile, error: profileError } = await adminCheckClient
       .from("user_profiles")
       .select("role")
+      .eq("id", callerUser.id)
       .single();
 
     if (profileError || profile?.role !== "admin") {
@@ -76,7 +99,7 @@ serve(async (req) => {
       );
     }
 
-    if (!["sales", "renewals", "admin"].includes(role)) {
+    if (!["sales", "renewals", "admin", "super_admin"].includes(role)) {
       return new Response(
         JSON.stringify({
           error: "Invalid role. Must be sales, renewals, or admin",

@@ -7,6 +7,12 @@ interface LeadFilters {
   status?: string;
   source?: string;
   qualification?: string;
+  ownerId?: string | "mine";
+  rating?: string;
+  industryCategory?: string;
+  verified?: "true" | "false";
+  sortColumn?: string | null;
+  sortDirection?: "asc" | "desc";
   page?: number;
   pageSize?: number;
 }
@@ -17,16 +23,22 @@ export function useLeads(filters?: LeadFilters) {
     queryFn: async () => {
       const page = filters?.page ?? 0;
       const pageSize = filters?.pageSize ?? 25;
+      const sortCol = filters?.sortColumn ?? "created_at";
+      const sortAsc = (filters?.sortDirection ?? (filters?.sortColumn ? "asc" : "desc")) === "asc";
       let query = supabase
         .from("leads")
-        .select("*, owner:user_profiles!owner_user_id(id, full_name)", { count: "exact" })
+        // 'estimated' uses Postgres pg_class reltuples instead of a
+        // full COUNT(*) — orders of magnitude faster on a 30k-row table
+        // and accurate enough for pagination controls. Falls back to
+        // an exact count only when the estimate is below ~1000.
+        .select("*, owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
         .is("archived_at", null)
-        .order("created_at", { ascending: false })
+        .order(sortCol, { ascending: sortAsc, nullsFirst: false })
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (filters?.search) {
         query = query.or(
-          `first_name.ilike.%${filters.search}%,last_name.ilike.%${filters.search}%,company.ilike.%${filters.search}%,email.ilike.%${filters.search}%`
+          `first_name.ilike.%${filters.search}%,last_name.ilike.%${filters.search}%,company.ilike.%${filters.search}%,email.ilike.%${filters.search}%,industry.ilike.%${filters.search}%`
         );
       }
       if (filters?.status) {
@@ -38,6 +50,20 @@ export function useLeads(filters?: LeadFilters) {
       if (filters?.qualification) {
         query = query.eq("qualification", filters.qualification);
       }
+      if (filters?.ownerId && filters.ownerId !== "mine") {
+        query = query.eq("owner_user_id", filters.ownerId);
+      } else if (filters?.ownerId === "mine") {
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData.user?.id) query = query.eq("owner_user_id", userData.user.id);
+      }
+      if (filters?.rating) {
+        query = query.eq("rating", filters.rating);
+      }
+      if (filters?.industryCategory) {
+        query = query.eq("industry_category", filters.industryCategory);
+      }
+      if (filters?.verified === "true") query = query.eq("verified", true);
+      else if (filters?.verified === "false") query = query.eq("verified", false);
 
       const { data, error, count } = await query;
       if (error) throw error;
@@ -109,6 +135,23 @@ export function useBulkUpdateOwner() {
         supabase.from("leads").update({ owner_user_id }).eq("id", id)
       );
       await Promise.all(promises);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    },
+  });
+}
+
+export function useBulkDeleteLeads() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ids }: { ids: string[] }) => {
+      // Delete in batches of 50
+      for (let i = 0; i < ids.length; i += 50) {
+        const batch = ids.slice(i, i + 50);
+        const { error } = await supabase.from("leads").delete().in("id", batch);
+        if (error) throw error;
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["leads"] });
@@ -204,7 +247,7 @@ export function useConvertLead() {
             primary_contact_id: contact.id,
             name: input.opportunityName,
             amount: input.opportunityAmount ?? 0,
-            stage: input.opportunityStage ?? "lead",
+            stage: input.opportunityStage ?? "details_analysis",
             team: "sales",
             kind: "new_business",
           })

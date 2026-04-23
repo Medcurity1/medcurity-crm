@@ -1,32 +1,38 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
-import { Pencil, Archive, ChevronDown, Phone, Mail, ArrowRightLeft, UserRoundCog } from "lucide-react";
+import { useAuth } from "@/features/auth/AuthProvider";
+import { Pencil, Archive, ChevronDown, Phone, Mail, ArrowRightLeft, UserRoundCog, History } from "lucide-react";
 import { useLead, useUpdateLead, useArchiveLead } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
+import { VerifiedBadge } from "@/components/VerifiedBadge";
 import { StatusBadge } from "@/components/StatusBadge";
+import { Badge } from "@/components/ui/badge";
 import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
 import { RecordId } from "@/components/RecordId";
 import { InlineEdit, type InlineEditProps } from "@/components/InlineEdit";
+import { formatPhone } from "@/components/PhoneInput";
 import { ConvertLeadDialog } from "./ConvertLeadDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CollapsibleTabs } from "@/components/CollapsibleTabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   leadStatusLabel,
   leadSourceLabel,
   qualificationLabel,
-  formatCurrency,
   formatDate,
   formatDateTime,
+  industryCategoryLabel,
 } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
+import { TasksPanel } from "@/features/activities/TasksPanel";
+import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
 import { SequencesTab } from "@/features/sequences/SequencesTab";
 import type { LeadSource, LeadQualification } from "@/types/crm";
 import {
@@ -104,6 +110,8 @@ function EditableField({
 export function LeadDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { data: lead, isLoading } = useLead(id);
   const { data: customFieldDefs } = useCustomFieldDefinitions("leads");
   const updateMutation = useUpdateLead();
@@ -166,6 +174,14 @@ export function LeadDetail() {
         description={lead.company ?? undefined}
         actions={
           <div className="flex items-center gap-2">
+            <VerifiedBadge
+              table="leads"
+              recordId={lead.id}
+              verified={lead.verified ?? false}
+              verifiedAt={lead.verified_at}
+              ownerId={lead.owner_user_id}
+              invalidateKeys={[["lead", lead.id]]}
+            />
             <StatusBadge
               value={lead.status}
               variant="leadStatus"
@@ -182,6 +198,9 @@ export function LeadDetail() {
                 variant="leadSource"
                 label={leadSourceLabel(lead.source as LeadSource)}
               />
+            )}
+            {lead.do_not_market_to && (
+              <Badge variant="destructive">Do Not Market To</Badge>
             )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -232,10 +251,12 @@ export function LeadDetail() {
                 Convert
               </Button>
             )}
-            <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>
-              <Archive className="h-4 w-4 mr-1" />
-              Archive
-            </Button>
+            {isAdmin && (
+              <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>
+                <Archive className="h-4 w-4 mr-1" />
+                Archive
+              </Button>
+            )}
           </div>
         }
       />
@@ -252,18 +273,23 @@ export function LeadDetail() {
             <p className="text-sm font-semibold truncate">{lead.company ?? "\u2014"}</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="min-w-0">
           <CardHeader className="pb-1 pt-3 px-4">
             <CardTitle className="text-xs text-muted-foreground font-medium">Email</CardTitle>
           </CardHeader>
-          <CardContent className="px-4 pb-3">
+          <CardContent className="px-4 pb-3 min-w-0">
             {lead.email ? (
               <a
                 href={`mailto:${lead.email}`}
-                className="text-sm text-primary hover:underline inline-flex items-center gap-1 truncate"
+                title={lead.email}
+                // block + truncate handles overflow correctly; inline-flex
+                // here was ignoring the truncate because it expands to
+                // content width. Icon moved next to a separate span so
+                // the anchor itself can truncate.
+                className="text-sm text-primary hover:underline flex items-center gap-1 min-w-0"
               >
                 <Mail className="h-3 w-3 shrink-0" />
-                {lead.email}
+                <span className="truncate">{lead.email}</span>
               </a>
             ) : (
               <p className="text-sm text-muted-foreground">{"\u2014"}</p>
@@ -277,7 +303,7 @@ export function LeadDetail() {
           <CardContent className="px-4 pb-3">
             <p className="text-sm font-semibold inline-flex items-center gap-1">
               <Phone className="h-3 w-3 text-muted-foreground" />
-              {lead.phone ?? "\u2014"}
+              {lead.phone ? formatPhone(lead.phone) : "\u2014"}
             </p>
           </CardContent>
         </Card>
@@ -339,16 +365,112 @@ export function LeadDetail() {
         </Card>
       </div>
 
-      {/* --------- Lead Details Section --------- */}
+      <DetailPageLayout
+        sidePanels={[
+          {
+            key: "activity",
+            label: "Activity",
+            content: (
+              <ActivityTimeline
+                leadId={lead.id}
+                contactEmail={lead.email ?? undefined}
+                contactName={`${lead.first_name} ${lead.last_name}`}
+                compact
+              />
+            ),
+          },
+          {
+            key: "tasks",
+            label: "Tasks",
+            content: <TasksPanel leadId={lead.id} />,
+          },
+        ]}
+      >
+
+      <CollapsibleTabs
+        className="mt-2"
+        defaultValue="sequences"
+        items={[
+          {
+            value: "sequences",
+            label: "Sequences",
+            content: <SequencesTab leadId={lead.id} />,
+          },
+        ]}
+      />
+
+      {/* --------- Lead Details Section ---------
+          Full field surface so reps can see everything that's on the
+          edit form without having to click Edit. Inline editable via
+          EditableField (click a row, type, ✓ to save, ✗ to cancel).
+          Website is bumped to the top per Summer 2026-04-19. Do Not
+          Contact + Do Not Market are side-by-side with clear yes/no
+          indicators. */}
       <CollapsibleSection title="Lead Details">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
+          <EditableField label="Website" value={lead.website} onSave={saveField("website")} />
+          <EditableField label="LinkedIn" value={lead.linkedin_url} onSave={saveField("linkedin_url")} />
           <Field label="First Name" value={lead.first_name} />
           <Field label="Last Name" value={lead.last_name} />
           <EditableField label="Email" value={lead.email} onSave={saveField("email")} />
           <EditableField label="Phone" value={lead.phone} onSave={saveField("phone")} />
+          <EditableField label="Mobile / Direct" value={lead.mobile_phone} onSave={saveField("mobile_phone")} />
           <EditableField label="Title" value={lead.title} onSave={saveField("title")} />
-          <EditableField label="Industry" value={lead.industry} onSave={saveField("industry")} />
-          <EditableField label="Website" value={lead.website} onSave={saveField("website")} />
+          <Field label="Company" value={lead.company} />
+          {/* industry_category (enum) is the source of truth; lead.industry
+              (free text) is legacy and only surfaces if the enum is null
+              — matches the pattern on AccountDetail. */}
+          <Field
+            label="Industry"
+            value={
+              lead.industry_category
+                ? industryCategoryLabel(lead.industry_category)
+                : lead.industry ?? null
+            }
+          />
+          <Field
+            label="Time Zone"
+            value={
+              lead.time_zone
+                ? lead.time_zone.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+                : null
+            }
+          />
+          <Field label="Credential" value={lead.credential ?? null} />
+          <Field
+            label="Rating"
+            value={
+              lead.rating
+                ? lead.rating === "hot"
+                  ? "🔥 Hot"
+                  : lead.rating === "warm"
+                  ? "Warm"
+                  : "❄️ Cold"
+                : null
+            }
+          />
+          <Field label="Lead Source" value={lead.source ? leadSourceLabel(lead.source) : null} />
+          <Field label="Source Detail" value={lead.lead_source_detail ?? null} />
+          <Field label="Lead Type" value={lead.type ?? null} />
+          <Field label="Segment" value={lead.project_segment ?? null} />
+          <Field label="Relationship Tag" value={lead.business_relationship_tag ?? null} />
+          <Field
+            label="Priority"
+            value={lead.priority_lead ? "\ud83c\udfaf Priority" : null}
+          />
+          <Field
+            label="Cold Lead"
+            value={lead.cold_lead ? "❄️ Yes" : null}
+          />
+          <Field label="MQL Date" value={lead.mql_date ? formatDate(lead.mql_date) : null} />
+          <Field
+            label="Do Not Market To"
+            value={lead.do_not_market_to ? "✓ Yes" : "No"}
+          />
+          <Field
+            label="Do Not Contact"
+            value={lead.do_not_contact ? "🚫 Yes" : "No"}
+          />
           {lead.description && (
             <div className="md:col-span-2">
               <Field label="Description" value={lead.description} />
@@ -364,10 +486,6 @@ export function LeadDetail() {
           <Field
             label="Employees"
             value={lead.employees != null ? lead.employees.toLocaleString() : null}
-          />
-          <Field
-            label="Annual Revenue"
-            value={lead.annual_revenue != null ? formatCurrency(lead.annual_revenue) : null}
           />
         </div>
       </CollapsibleSection>
@@ -452,28 +570,34 @@ export function LeadDetail() {
           />
           <Field
             label="Last Modified By"
-            value={lead.updater?.full_name ?? "\u2014"}
+            value={
+              <Link
+                to={`/admin?tab=audit-log&record_id=${lead.id}`}
+                className="text-primary hover:underline inline-flex items-center gap-1"
+                title="View audit history for this record"
+              >
+                {lead.updater?.full_name ?? "\u2014"}
+                <History className="h-3 w-3" />
+              </Link>
+            }
           />
           <Field label="Created" value={formatDateTime(lead.created_at)} />
-          <Field label="Last Modified" value={formatDateTime(lead.updated_at)} />
+          <Field
+            label="Last Modified"
+            value={
+              <Link
+                to={`/admin?tab=audit-log&record_id=${lead.id}`}
+                className="text-primary hover:underline"
+                title="View audit history for this record"
+              >
+                {formatDateTime(lead.updated_at)}
+              </Link>
+            }
+          />
         </div>
       </CollapsibleSection>
 
-      {/* --------- Tabs --------- */}
-      <Tabs defaultValue="activities" className="mt-2">
-        <TabsList>
-          <TabsTrigger value="activities">Activities</TabsTrigger>
-          <TabsTrigger value="sequences">Sequences</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="activities" className="mt-4">
-          <ActivityTimeline />
-        </TabsContent>
-
-        <TabsContent value="sequences" className="mt-4">
-          <SequencesTab leadId={lead.id} />
-        </TabsContent>
-      </Tabs>
+      </DetailPageLayout>
 
       <ConfirmDialog
         open={showArchive}

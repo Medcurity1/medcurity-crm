@@ -1,16 +1,26 @@
-import { useState } from "react";
-import { Plus, Trash2, ChevronDown, Package } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { Plus, Trash2, ChevronDown, ChevronRight, Package, Cloud, User, Settings, X } from "lucide-react";
 import {
   useProducts,
   useCreateProduct,
   useUpdateProduct,
+  useDeleteProduct,
+  useArchiveProduct,
+  useUnarchiveProduct,
+  useEntriesForProduct,
+  useProductFamilies,
+  useCreateProductFamily,
+  useDeleteProductFamily,
   usePriceBooks,
   useCreatePriceBook,
   useUpdatePriceBook,
+  useDeletePriceBook,
+  usePriceBookEntryCount,
   usePriceBookEntries,
-  useCreatePriceBookEntry,
-  useDeletePriceBookEntry,
+  useSetPriceBookEntryPrice,
 } from "./api";
+import { DeleteProductDialog } from "./DeleteProductDialog";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
@@ -48,10 +58,10 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { formatCurrencyDetailed, formatDate } from "@/lib/formatters";
+import { errorMessage } from "@/lib/errors";
 import { toast } from "sonner";
 import type { Product, PriceBook } from "@/types/crm";
 
-const FTE_RANGES = ["1-20", "21-50", "51-100", "101-250", "251-500", "501+"] as const;
 
 const PRICING_MODELS = [
   { value: "per_fte", label: "Per FTE" },
@@ -65,7 +75,21 @@ const PRICING_MODELS = [
 
 export function ProductsPage() {
   const { profile } = useAuth();
-  const isAdmin = profile?.role === "admin";
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get("tab") === "price_books" ? "price_books" : "products";
+  const expandPriceBookId = searchParams.get("expand");
+
+  function setTab(next: string) {
+    const params = new URLSearchParams(searchParams);
+    if (next === "products") {
+      params.delete("tab");
+      params.delete("expand");
+    } else {
+      params.set("tab", next);
+    }
+    setSearchParams(params, { replace: true });
+  }
 
   return (
     <div>
@@ -74,7 +98,7 @@ export function ProductsPage() {
         description="Manage your product catalog and pricing"
       />
 
-      <Tabs defaultValue="products">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="products">Products</TabsTrigger>
           <TabsTrigger value="price_books">Price Books</TabsTrigger>
@@ -85,7 +109,7 @@ export function ProductsPage() {
         </TabsContent>
 
         <TabsContent value="price_books" className="mt-4">
-          <PriceBooksTab isAdmin={isAdmin} />
+          <PriceBooksTab isAdmin={isAdmin} initialExpandId={expandPriceBookId} />
         </TabsContent>
       </Tabs>
     </div>
@@ -98,9 +122,20 @@ export function ProductsPage() {
 
 function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
   const [showInactive, setShowInactive] = useState(false);
-  const { data: products, isLoading } = useProducts(showInactive);
+  const [showArchived, setShowArchived] = useState(false);
+  const { data: products, isLoading } = useProducts({
+    includeInactive: showInactive,
+    includeArchived: isAdmin && showArchived,
+  });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
+  const [familiesOpen, setFamiliesOpen] = useState(false);
+  const updateMutation = useUpdateProduct();
+  const deleteMutation = useDeleteProduct();
+  const archiveMutation = useArchiveProduct();
+  const unarchiveMutation = useUnarchiveProduct();
 
   function openNew() {
     setEditingProduct(null);
@@ -110,6 +145,44 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
   function openEdit(product: Product) {
     setEditingProduct(product);
     setDialogOpen(true);
+  }
+
+  async function handleToggleActive(product: Product, next: boolean) {
+    try {
+      await updateMutation.mutateAsync({ id: product.id, is_active: next });
+      toast.success(next ? "Marked active" : "Marked inactive");
+    } catch (err) {
+      toast.error("Failed: " + errorMessage(err));
+    }
+  }
+
+  async function handleArchive(reason: string | null) {
+    if (!deleteTarget) return;
+    try {
+      await archiveMutation.mutateAsync({ id: deleteTarget.id, reason });
+      toast.success(`Archived "${deleteTarget.name}"`);
+      setDeleteTarget(null);
+    } catch (err) {
+      toast.error("Failed to archive: " + errorMessage(err));
+    }
+  }
+
+  async function handleDelete(cascadeEntries: boolean) {
+    if (!deleteTarget) return;
+    try {
+      await deleteMutation.mutateAsync({ id: deleteTarget.id, cascade: cascadeEntries });
+      toast.success(`Deleted "${deleteTarget.name}"`);
+      setDeleteTarget(null);
+    } catch (err) {
+      const msg = errorMessage(err);
+      if (msg.toLowerCase().includes("foreign") || msg.toLowerCase().includes("violates")) {
+        toast.error(
+          "Can't delete — product is on an opportunity. Use Archive instead to preserve revenue history."
+        );
+      } else {
+        toast.error("Failed to delete: " + msg);
+      }
+    }
   }
 
   if (isLoading) {
@@ -122,10 +195,13 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
     );
   }
 
+  const importedCount = products?.filter((p) => p.sf_id).length ?? 0;
+  const manualCount = (products?.length ?? 0) - importedCount;
+
   return (
     <>
       <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <Switch
               id="show-inactive"
@@ -136,12 +212,38 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
               Show inactive
             </Label>
           </div>
+          {isAdmin && (
+            <div className="flex items-center gap-2">
+              <Switch
+                id="show-archived"
+                checked={showArchived}
+                onCheckedChange={setShowArchived}
+              />
+              <Label
+                htmlFor="show-archived"
+                className="text-sm text-muted-foreground cursor-pointer"
+              >
+                Show archived (admin)
+              </Label>
+            </div>
+          )}
+          {(importedCount > 0 || manualCount > 0) && (
+            <p className="text-sm text-muted-foreground">
+              {importedCount} imported · {manualCount} manual
+            </p>
+          )}
         </div>
         {isAdmin && (
-          <Button onClick={openNew}>
-            <Plus className="h-4 w-4 mr-2" />
-            Add Product
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setFamiliesOpen(true)}>
+              <Settings className="h-4 w-4 mr-2" />
+              Manage Families
+            </Button>
+            <Button onClick={openNew}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Product
+            </Button>
+          </div>
         )}
       </div>
 
@@ -161,45 +263,122 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-8" />
                 <TableHead>Name</TableHead>
                 <TableHead>Code</TableHead>
                 <TableHead>Family</TableHead>
+                <TableHead>Source</TableHead>
                 <TableHead>Pricing Model</TableHead>
-                <TableHead className="text-right">Default ARR</TableHead>
+                <TableHead className="text-right">Flat Price</TableHead>
                 <TableHead className="text-center">Active</TableHead>
-                {isAdmin && <TableHead className="w-20" />}
+                {isAdmin && <TableHead className="w-32" />}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {products.map((product) => (
-                <TableRow key={product.id}>
-                  <TableCell className="font-medium">{product.name}</TableCell>
-                  <TableCell className="text-muted-foreground">{product.code}</TableCell>
-                  <TableCell className="text-muted-foreground">{product.product_family ?? "\u2014"}</TableCell>
-                  <TableCell>
-                    <Badge variant="secondary" className="capitalize">
-                      {PRICING_MODELS.find((m) => m.value === product.pricing_model)?.label ?? product.pricing_model ?? "Per FTE"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right text-muted-foreground">
-                    {product.default_arr != null ? formatCurrencyDetailed(product.default_arr) : "\u2014"}
-                  </TableCell>
-                  <TableCell className="text-center">
-                    {product.is_active ? (
-                      <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">Active</Badge>
-                    ) : (
-                      <Badge variant="secondary" className="bg-slate-100 text-slate-700">Inactive</Badge>
-                    )}
-                  </TableCell>
-                  {isAdmin && (
-                    <TableCell>
-                      <Button variant="ghost" size="sm" onClick={() => openEdit(product)}>
-                        Edit
-                      </Button>
-                    </TableCell>
-                  )}
-                </TableRow>
-              ))}
+              {products.flatMap((product) => {
+                const isExpanded = expandedId === product.id;
+                return [
+                  <TableRow key={product.id} className="cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : product.id)}>
+                      <TableCell>
+                        {isExpanded ? (
+                          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        )}
+                      </TableCell>
+                      <TableCell className="font-medium" onClick={(e) => e.stopPropagation()}>
+                        <Link
+                          to={`/products/${product.id}`}
+                          className="hover:underline text-foreground"
+                        >
+                          {product.name}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{product.code}</TableCell>
+                      <TableCell className="text-muted-foreground">{product.product_family ?? "\u2014"}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {product.sf_id ? (
+                            <Badge variant="secondary" className="bg-blue-100 text-blue-700 gap-1">
+                              <Cloud className="h-3 w-3" /> Imported
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary" className="bg-amber-100 text-amber-700 gap-1">
+                              <User className="h-3 w-3" /> Manual
+                            </Badge>
+                          )}
+                          {product.archived_at && (
+                            <Badge variant="secondary" className="bg-rose-100 text-rose-700">
+                              Archived
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className="capitalize">
+                          {PRICING_MODELS.find((m) => m.value === product.pricing_model)?.label ?? product.pricing_model ?? "Per FTE"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground">
+                        {product.has_flat_price && product.default_arr != null
+                          ? formatCurrencyDetailed(product.default_arr)
+                          : "\u2014"}
+                      </TableCell>
+                      <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
+                        <Switch
+                          checked={product.is_active}
+                          disabled={!isAdmin || updateMutation.isPending}
+                          onCheckedChange={(v) => handleToggleActive(product, v)}
+                          aria-label="Toggle active"
+                        />
+                      </TableCell>
+                      {isAdmin && (
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <div className="flex gap-1">
+                            {product.archived_at ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={unarchiveMutation.isPending}
+                                onClick={async () => {
+                                  try {
+                                    await unarchiveMutation.mutateAsync(product.id);
+                                    toast.success(`Unarchived "${product.name}"`);
+                                  } catch (err) {
+                                    toast.error("Failed: " + errorMessage(err));
+                                  }
+                                }}
+                              >
+                                Unarchive
+                              </Button>
+                            ) : (
+                              <Button variant="ghost" size="sm" onClick={() => openEdit(product)}>
+                                Edit
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                              onClick={() => setDeleteTarget(product)}
+                              aria-label="Delete product"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      )}
+                  </TableRow>,
+                  ...(isExpanded ? [
+                    <TableRow key={product.id + "-detail"} className="bg-muted/20 hover:bg-muted/20">
+                      <TableCell />
+                      <TableCell colSpan={isAdmin ? 8 : 7} className="py-4">
+                        <ProductDetailPanel product={product} />
+                      </TableCell>
+                    </TableRow>
+                  ] : []),
+                ];
+              })}
             </TableBody>
           </Table>
         </div>
@@ -210,7 +389,213 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
         onOpenChange={setDialogOpen}
         product={editingProduct}
       />
+
+      <DeleteProductDialog
+        product={deleteTarget}
+        isAdmin={isAdmin}
+        onClose={() => setDeleteTarget(null)}
+        onArchive={handleArchive}
+        onDelete={handleDelete}
+        isPending={deleteMutation.isPending || archiveMutation.isPending}
+      />
+
+      <ManageFamiliesDialog open={familiesOpen} onOpenChange={setFamiliesOpen} />
     </>
+  );
+}
+
+/* ──────────────────────────────────────────────
+   Manage Families Dialog
+   ────────────────────────────────────────────── */
+
+function ManageFamiliesDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const { data: families, isLoading } = useProductFamilies();
+  const createFam = useCreateProductFamily();
+  const deleteFam = useDeleteProductFamily();
+  const [newName, setNewName] = useState("");
+
+  async function handleAdd() {
+    const name = newName.trim();
+    if (!name) return;
+    try {
+      await createFam.mutateAsync(name);
+      setNewName("");
+      toast.success("Family added");
+    } catch (err) {
+      const msg = errorMessage(err);
+      if (msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("unique")) {
+        toast.error("That family already exists");
+      } else {
+        toast.error("Failed: " + msg);
+      }
+    }
+  }
+
+  async function handleDelete(id: string) {
+    try {
+      await deleteFam.mutateAsync(id);
+      toast.success("Family removed");
+    } catch (err) {
+      toast.error("Failed: " + errorMessage(err));
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Manage Product Families</DialogTitle>
+          <DialogDescription>
+            Add or remove the picklist values reps see when assigning a Family to a product. Removing a family won't change products already using it.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div className="flex gap-2">
+            <Input
+              placeholder="New family name (e.g. Add-on)"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleAdd();
+                }
+              }}
+            />
+            <Button onClick={handleAdd} disabled={createFam.isPending || !newName.trim()}>
+              <Plus className="h-4 w-4 mr-1" />
+              Add
+            </Button>
+          </div>
+
+          {isLoading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : !families?.length ? (
+            <p className="text-sm text-muted-foreground py-2">No families yet.</p>
+          ) : (
+            <div className="border rounded-lg divide-y">
+              {families.map((f) => (
+                <div key={f.id} className="flex items-center justify-between px-3 py-2">
+                  <span className="text-sm">{f.name}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                    onClick={() => handleDelete(f.id)}
+                    aria-label={`Remove ${f.name}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Done
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ──────────────────────────────────────────────
+   Product Detail Panel (inline expand)
+   ────────────────────────────────────────────── */
+
+function ProductDetailPanel({ product }: { product: Product }) {
+  const { data: entries, isLoading } = useEntriesForProduct(product.id);
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+        <div>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide">Flat Price</p>
+          <p>
+            {product.has_flat_price
+              ? product.default_arr != null
+                ? formatCurrencyDetailed(product.default_arr)
+                : "Enabled"
+              : "Off"}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide">Salesforce ID</p>
+          <p className="font-mono text-xs">{product.sf_id ?? "\u2014 (created in CRM)"}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide">Created</p>
+          <p>{formatDate(product.created_at)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide">Updated</p>
+          <p>{formatDate(product.updated_at)}</p>
+        </div>
+      </div>
+      <div>
+        <Link
+          to={`/products/${product.id}`}
+          className="text-xs text-primary hover:underline"
+        >
+          Open full detail page →
+        </Link>
+      </div>
+
+      {product.description && (
+        <div>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Description</p>
+          <p className="text-sm whitespace-pre-wrap">{product.description}</p>
+        </div>
+      )}
+
+      <div>
+        <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">Used in Price Books</p>
+        {isLoading ? (
+          <Skeleton className="h-12 w-full" />
+        ) : !entries?.length ? (
+          <p className="text-sm text-muted-foreground">Not in any price book yet.</p>
+        ) : (
+          <div className="border rounded bg-background">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Price Book</TableHead>
+                  <TableHead>FTE Range</TableHead>
+                  <TableHead className="text-right">Unit Price</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {entries.map((e) => (
+                  <TableRow key={e.id}>
+                    <TableCell className="font-medium">
+                      {e.price_book?.name ?? e.price_book_id}
+                      {e.price_book?.is_default && (
+                        <Badge variant="secondary" className="ml-2 bg-blue-100 text-blue-700 text-xs">Default</Badge>
+                      )}
+                      {e.price_book && !e.price_book.is_active && (
+                        <Badge variant="secondary" className="ml-2 bg-slate-100 text-slate-700 text-xs">Inactive</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{e.fte_range ?? "All"}</TableCell>
+                    <TableCell className="text-right">{formatCurrencyDetailed(e.unit_price)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -231,40 +616,44 @@ function ProductDialog({
   const createMutation = useCreateProduct();
   const updateMutation = useUpdateProduct();
 
+  const { data: families } = useProductFamilies();
+
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [family, setFamily] = useState("");
-  const [category, setCategory] = useState("");
   const [pricingModel, setPricingModel] = useState("per_fte");
+  const [hasFlatPrice, setHasFlatPrice] = useState(false);
   const [defaultArr, setDefaultArr] = useState("");
   const [description, setDescription] = useState("");
   const [isActive, setIsActive] = useState(true);
 
-  // Reset form when dialog opens
-  const handleOpenChange = (v: boolean) => {
-    if (v) {
-      if (product) {
-        setName(product.name);
-        setCode(product.code);
-        setFamily(product.product_family ?? "");
-        setCategory(product.category ?? "");
-        setPricingModel(product.pricing_model ?? "per_fte");
-        setDefaultArr(product.default_arr != null ? String(product.default_arr) : "");
-        setDescription(product.description ?? "");
-        setIsActive(product.is_active);
-      } else {
-        setName("");
-        setCode("");
-        setFamily("");
-        setCategory("");
-        setPricingModel("per_fte");
-        setDefaultArr("");
-        setDescription("");
-        setIsActive(true);
-      }
+  // Sync form state from product prop whenever the dialog opens.
+  // Previously this lived in onOpenChange, but Radix only fires that
+  // when the dialog state changes from inside (close, escape, click out)
+  // — NOT when the parent flips `open` to true. So opening via an Edit
+  // button left the form blank.
+  useEffect(() => {
+    if (!open) return;
+    if (product) {
+      setName(product.name);
+      setCode(product.code);
+      setFamily(product.product_family ?? "");
+      setPricingModel(product.pricing_model ?? "per_fte");
+      setHasFlatPrice(product.has_flat_price ?? false);
+      setDefaultArr(product.default_arr != null ? String(product.default_arr) : "");
+      setDescription(product.description ?? "");
+      setIsActive(product.is_active);
+    } else {
+      setName("");
+      setCode("");
+      setFamily("");
+      setPricingModel("per_fte");
+      setHasFlatPrice(false);
+      setDefaultArr("");
+      setDescription("");
+      setIsActive(true);
     }
-    onOpenChange(v);
-  };
+  }, [open, product]);
 
   async function handleSave() {
     if (!name.trim() || !code.trim()) {
@@ -275,10 +664,10 @@ function ProductDialog({
     const payload = {
       name: name.trim(),
       code: code.trim(),
-      product_family: family.trim() || null,
-      category: category.trim() || null,
+      product_family: family || null,
       pricing_model: pricingModel,
-      default_arr: defaultArr ? Number(defaultArr) : null,
+      has_flat_price: hasFlatPrice,
+      default_arr: hasFlatPrice && defaultArr ? Number(defaultArr) : null,
       description: description.trim() || null,
       is_active: isActive,
     };
@@ -293,12 +682,12 @@ function ProductDialog({
       }
       onOpenChange(false);
     } catch (err) {
-      toast.error("Failed to save product: " + (err instanceof Error ? err.message : String(err)));
+      toast.error("Failed to save product: " + errorMessage(err));
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit Product" : "Add Product"}</DialogTitle>
@@ -321,16 +710,24 @@ function ProductDialog({
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="prod-family">Family</Label>
-              <Input id="prod-family" value={family} onChange={(e) => setFamily(e.target.value)} />
+              <Label>Family</Label>
+              <Select
+                value={family || "none"}
+                onValueChange={(v) => setFamily(v === "none" ? "" : v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {(families ?? []).map((f) => (
+                    <SelectItem key={f.id} value={f.name}>
+                      {f.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="prod-category">Category</Label>
-              <Input id="prod-category" value={category} onChange={(e) => setCategory(e.target.value)} />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Pricing Model</Label>
               <Select value={pricingModel} onValueChange={setPricingModel}>
@@ -344,15 +741,46 @@ function ProductDialog({
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="rounded-lg border p-3 bg-muted/20">
+            <div className="flex items-center gap-2 mb-1">
+              <Switch
+                id="prod-flat"
+                checked={hasFlatPrice}
+                onCheckedChange={setHasFlatPrice}
+              />
+              <Label htmlFor="prod-flat" className="cursor-pointer text-sm font-medium">
+                Use flat price
+              </Label>
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">
+              When off, this product is priced via price book entries. Turn on only if it has one fixed price across every opportunity.
+            </p>
             <div className="space-y-2">
-              <Label htmlFor="prod-arr">Default ARR</Label>
-              <Input id="prod-arr" type="number" step="0.01" value={defaultArr} onChange={(e) => setDefaultArr(e.target.value)} />
+              <Label htmlFor="prod-arr" className={!hasFlatPrice ? "text-muted-foreground" : ""}>
+                Flat Price (ARR)
+              </Label>
+              <Input
+                id="prod-arr"
+                type="number"
+                step="0.01"
+                disabled={!hasFlatPrice}
+                value={defaultArr}
+                onChange={(e) => setDefaultArr(e.target.value)}
+              />
             </div>
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="prod-desc">Description</Label>
-            <Textarea id="prod-desc" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
+            <Textarea
+              id="prod-desc"
+              rows={4}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What is this product? Reps will see this when adding to opportunities."
+            />
           </div>
 
           <div className="flex items-center gap-2">
@@ -376,11 +804,28 @@ function ProductDialog({
    Price Books Tab
    ────────────────────────────────────────────── */
 
-function PriceBooksTab({ isAdmin }: { isAdmin: boolean }) {
+function PriceBooksTab({
+  isAdmin,
+  initialExpandId,
+}: {
+  isAdmin: boolean;
+  initialExpandId?: string | null;
+}) {
   const { data: priceBooks, isLoading } = usePriceBooks();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingPb, setEditingPb] = useState<PriceBook | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PriceBook | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(initialExpandId ?? null);
+  const deletePbMutation = useDeletePriceBook();
+
+  // If the URL says to expand a specific price book (e.g. user clicked
+  // "Manage in this price book" from the delete dialog), open it once
+  // the price books load.
+  useEffect(() => {
+    if (initialExpandId && priceBooks?.some((p) => p.id === initialExpandId)) {
+      setExpandedId(initialExpandId);
+    }
+  }, [initialExpandId, priceBooks]);
 
   function openNew() {
     setEditingPb(null);
@@ -390,6 +835,24 @@ function PriceBooksTab({ isAdmin }: { isAdmin: boolean }) {
   function openEdit(pb: PriceBook) {
     setEditingPb(pb);
     setDialogOpen(true);
+  }
+
+  async function handleConfirmDeletePb(cascade: boolean) {
+    if (!deleteTarget) return;
+    try {
+      await deletePbMutation.mutateAsync({ id: deleteTarget.id, cascade });
+      toast.success(`Deleted "${deleteTarget.name}"`);
+      setDeleteTarget(null);
+    } catch (err) {
+      const msg = errorMessage(err);
+      if (msg.toLowerCase().includes("foreign") || msg.toLowerCase().includes("violates")) {
+        toast.error(
+          "Can't delete — entries are still tied to this book. Use 'Delete + remove all entries' instead."
+        );
+      } else {
+        toast.error("Failed: " + msg);
+      }
+    }
   }
 
   if (isLoading) {
@@ -430,6 +893,7 @@ function PriceBooksTab({ isAdmin }: { isAdmin: boolean }) {
               expanded={expandedId === pb.id}
               onToggle={() => setExpandedId(expandedId === pb.id ? null : pb.id)}
               onEdit={() => openEdit(pb)}
+              onDelete={() => setDeleteTarget(pb)}
             />
           ))}
         </div>
@@ -440,7 +904,105 @@ function PriceBooksTab({ isAdmin }: { isAdmin: boolean }) {
         onOpenChange={setDialogOpen}
         priceBook={editingPb}
       />
+
+      <DeletePriceBookDialog
+        priceBook={deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDeletePb}
+        isPending={deletePbMutation.isPending}
+      />
     </>
+  );
+}
+
+/* ──────────────────────────────────────────────
+   Delete Price Book Dialog
+   ────────────────────────────────────────────── */
+
+function DeletePriceBookDialog({
+  priceBook,
+  onClose,
+  onConfirm,
+  isPending,
+}: {
+  priceBook: PriceBook | null;
+  onClose: () => void;
+  onConfirm: (cascade: boolean) => void;
+  isPending: boolean;
+}) {
+  const { data: entryCount, isLoading } = usePriceBookEntryCount(priceBook?.id);
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    if (!priceBook) setConfirming(false);
+  }, [priceBook]);
+
+  const hasEntries = (entryCount ?? 0) > 0;
+
+  return (
+    <Dialog open={!!priceBook} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete "{priceBook?.name}"?</DialogTitle>
+          <DialogDescription>
+            Removes the price book itself. This does NOT change any opportunity line items —
+            existing opps keep their snapshotted prices.
+          </DialogDescription>
+        </DialogHeader>
+
+        {isLoading ? (
+          <Skeleton className="h-12 w-full" />
+        ) : hasEntries ? (
+          <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-900 p-3 text-sm">
+            <p className="font-medium text-amber-900 dark:text-amber-200">
+              {entryCount} pricing {entryCount === 1 ? "entry" : "entries"} on this book.
+            </p>
+            <p className="text-xs text-amber-900 dark:text-amber-300 mt-1">
+              Plain Delete will fail. Use "Delete + remove all entries" to clear them in one shot.
+              Reps quoting NEW deals from now on won't see this book; everything already quoted is unaffected.
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No entries on this book — safe to delete.
+          </p>
+        )}
+
+        <DialogFooter className="gap-2 sm:gap-2 flex-col sm:flex-row">
+          <Button variant="outline" onClick={onClose} disabled={isPending}>
+            Cancel
+          </Button>
+          {!hasEntries && (
+            <Button
+              variant="destructive"
+              onClick={() => onConfirm(false)}
+              disabled={isPending}
+            >
+              {isPending ? "Deleting..." : "Delete"}
+            </Button>
+          )}
+          {hasEntries &&
+            (!confirming ? (
+              <Button
+                variant="destructive"
+                onClick={() => setConfirming(true)}
+                disabled={isPending}
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete + remove all entries
+              </Button>
+            ) : (
+              <Button
+                variant="destructive"
+                onClick={() => onConfirm(true)}
+                disabled={isPending}
+              >
+                {isPending ? "Deleting..." : "Yes, delete book + " + entryCount + " entries"}
+              </Button>
+            ))}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -454,12 +1016,14 @@ function PriceBookCard({
   expanded,
   onToggle,
   onEdit,
+  onDelete,
 }: {
   priceBook: PriceBook;
   isAdmin: boolean;
   expanded: boolean;
   onToggle: () => void;
   onEdit: () => void;
+  onDelete: () => void;
 }) {
   return (
     <Card>
@@ -487,9 +1051,21 @@ function PriceBookCard({
             )}
           </button>
           {isAdmin && (
-            <Button variant="ghost" size="sm" onClick={onEdit}>
-              Edit
-            </Button>
+            <div className="flex gap-1">
+              <Button variant="ghost" size="sm" onClick={onEdit}>
+                Edit
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                onClick={onDelete}
+                aria-label={`Delete price book ${priceBook.name}`}
+                title="Delete price book"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
           )}
         </div>
         {priceBook.description && (
@@ -504,7 +1080,7 @@ function PriceBookCard({
 
       {expanded && (
         <CardContent>
-          <PriceBookEntriesSection priceBookId={priceBook.id} isAdmin={isAdmin} />
+          <PriceBookEntriesSection priceBook={priceBook} isAdmin={isAdmin} />
         </CardContent>
       )}
     </Card>
@@ -516,163 +1092,313 @@ function PriceBookCard({
    ────────────────────────────────────────────── */
 
 function PriceBookEntriesSection({
-  priceBookId,
+  priceBook,
   isAdmin,
 }: {
-  priceBookId: string;
+  priceBook: PriceBook;
   isAdmin: boolean;
 }) {
-  const { data: entries, isLoading } = usePriceBookEntries(priceBookId);
-  const { data: products } = useProducts();
-  const createEntry = useCreatePriceBookEntry();
-  const deleteEntry = useDeletePriceBookEntry();
-  const [showAdd, setShowAdd] = useState(false);
-  const [newProductId, setNewProductId] = useState("");
-  const [newFteRange, setNewFteRange] = useState("");
-  const [newUnitPrice, setNewUnitPrice] = useState("");
+  const priceBookId = priceBook.id;
+  // Default fte_range for new entries: book's own fte_range, else null.
+  const defaultFteRange = priceBook.fte_range ?? null;
 
-  async function handleAddEntry() {
-    if (!newProductId || !newUnitPrice) {
-      toast.error("Product and unit price are required");
-      return;
-    }
-    try {
-      await createEntry.mutateAsync({
-        price_book_id: priceBookId,
-        product_id: newProductId,
-        fte_range: newFteRange || null,
-        unit_price: Number(newUnitPrice),
-      });
-      toast.success("Entry added");
-      setShowAdd(false);
-      setNewProductId("");
-      setNewFteRange("");
-      setNewUnitPrice("");
-    } catch (err) {
-      toast.error("Failed to add entry: " + (err instanceof Error ? err.message : String(err)));
-    }
-  }
+  const { data: entries, isLoading: entriesLoading } = usePriceBookEntries(priceBookId);
+  const { data: products, isLoading: productsLoading } = useProducts();
+  const setPrice = useSetPriceBookEntryPrice();
 
-  async function handleDeleteEntry(entryId: string) {
-    try {
-      await deleteEntry.mutateAsync({ id: entryId, priceBookId });
-      toast.success("Entry removed");
-    } catch (err) {
-      toast.error("Failed to remove entry: " + (err instanceof Error ? err.message : String(err)));
-    }
-  }
+  const [showInactive, setShowInactive] = useState(false);
+  const [hideUnpriced, setHideUnpriced] = useState(false);
+  const [filter, setFilter] = useState("");
 
-  if (isLoading) {
+  if (entriesLoading || productsLoading) {
     return <Skeleton className="h-20 w-full" />;
   }
 
+  // Build a map of product_id -> entry (only counting entries that match
+  // this book's default fte_range, since we treat the book as scoped to
+  // one tier). Entries with a different fte_range are still listed for
+  // visibility but not editable inline (rare edge case).
+  const entryByProduct = new Map<string, NonNullable<typeof entries>[number]>();
+  for (const e of entries ?? []) {
+    if ((e.fte_range ?? null) === defaultFteRange) {
+      entryByProduct.set(e.product_id, e);
+    }
+  }
+  const offTierEntries =
+    entries?.filter((e) => (e.fte_range ?? null) !== defaultFteRange) ?? [];
+
+  const visibleProducts = (products ?? []).filter((p) => {
+    if (!showInactive && !p.is_active) return false;
+    const matchesFilter =
+      !filter ||
+      p.name.toLowerCase().includes(filter.toLowerCase()) ||
+      (p.product_family ?? "").toLowerCase().includes(filter.toLowerCase());
+    if (!matchesFilter) return false;
+    const hasEntry = entryByProduct.has(p.id);
+    if (hideUnpriced && !hasEntry) return false;
+    return true;
+  });
+
+  const pricedCount = entryByProduct.size;
+  const totalActive = (products ?? []).filter((p) => p.is_active).length;
+
   return (
-    <div>
-      {isAdmin && (
-        <div className="flex justify-end mb-2">
-          <Button variant="outline" size="sm" onClick={() => setShowAdd(!showAdd)}>
-            <Plus className="h-4 w-4 mr-1" />
-            Add Entry
-          </Button>
-        </div>
-      )}
+    <div className="space-y-3">
+      {/* How-to banner so admins know what they're looking at the first
+          time they expand a price book. */}
+      <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">How pricing works:</span>{" "}
+        Every active product appears as a row below. Type a price into the
+        right column to add it to this price book; click outside or press Enter
+        to save. To remove a product from this book, click the X next to its
+        price. Each price book has its own independent prices.
+      </div>
 
-      {showAdd && (
-        <div className="border rounded-lg p-3 mb-3 bg-muted/30">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="space-y-1">
-              <Label className="text-xs">Product</Label>
-              <Select value={newProductId} onValueChange={setNewProductId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select product" />
-                </SelectTrigger>
-                <SelectContent>
-                  {products?.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">FTE Range</Label>
-              <Select
-                value={newFteRange || "all_ranges"}
-                onValueChange={(v) => setNewFteRange(v === "all_ranges" ? "" : v)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="All ranges" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all_ranges">All ranges</SelectItem>
-                  {FTE_RANGES.map((r) => (
-                    <SelectItem key={r} value={r}>{r}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Unit Price</Label>
-              <div className="flex gap-2">
-                <Input
-                  type="number"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={newUnitPrice}
-                  onChange={(e) => setNewUnitPrice(e.target.value)}
-                />
-                <Button size="sm" onClick={handleAddEntry} disabled={createEntry.isPending}>
-                  Add
-                </Button>
-              </div>
-            </div>
-          </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <Input
+          placeholder="Filter products by name or family..."
+          className="max-w-xs"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+        <div className="flex items-center gap-2">
+          <Switch
+            id={`pb-${priceBookId}-hide`}
+            checked={hideUnpriced}
+            onCheckedChange={setHideUnpriced}
+          />
+          <Label
+            htmlFor={`pb-${priceBookId}-hide`}
+            className="text-xs text-muted-foreground cursor-pointer"
+            title="Hide products that don't have a price set in this price book"
+          >
+            Hide unpriced products
+          </Label>
         </div>
-      )}
+        <div className="flex items-center gap-2">
+          <Switch
+            id={`pb-${priceBookId}-inactive`}
+            checked={showInactive}
+            onCheckedChange={setShowInactive}
+          />
+          <Label
+            htmlFor={`pb-${priceBookId}-inactive`}
+            className="text-xs text-muted-foreground cursor-pointer"
+          >
+            Show inactive products
+          </Label>
+        </div>
+        <p className="text-xs text-muted-foreground ml-auto">
+          {pricedCount} priced · {totalActive} active products
+          {defaultFteRange ? ` · FTE range ${defaultFteRange}` : ""}
+        </p>
+      </div>
 
-      {!entries?.length ? (
-        <p className="text-sm text-muted-foreground py-2">No pricing entries yet.</p>
+      {!visibleProducts.length ? (
+        <p className="text-sm text-muted-foreground py-2">No products to show.</p>
       ) : (
         <div className="border rounded-lg overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Product</TableHead>
-                <TableHead>FTE Range</TableHead>
-                <TableHead className="text-right">Unit Price</TableHead>
-                {isAdmin && <TableHead className="w-12" />}
+                <TableHead>Family</TableHead>
+                <TableHead className="text-right w-48">Unit Price</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {entries.map((entry) => (
-                <TableRow key={entry.id}>
-                  <TableCell className="font-medium">
-                    {entry.product?.name ?? entry.product_id}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {entry.fte_range ?? "All"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {formatCurrencyDetailed(entry.unit_price)}
-                  </TableCell>
-                  {isAdmin && (
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        onClick={() => handleDeleteEntry(entry.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                  )}
-                </TableRow>
-              ))}
+              {visibleProducts.map((product) => {
+                const entry = entryByProduct.get(product.id);
+                return (
+                  <PriceBookEntryRow
+                    key={product.id}
+                    product={product}
+                    existingEntry={entry ?? null}
+                    priceBookId={priceBookId}
+                    fteRange={defaultFteRange}
+                    isAdmin={isAdmin}
+                    saveMutation={setPrice}
+                  />
+                );
+              })}
             </TableBody>
           </Table>
         </div>
       )}
+
+      {offTierEntries.length > 0 && (
+        <details className="text-sm">
+          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+            {offTierEntries.length} entries on other FTE ranges (read-only here)
+          </summary>
+          <div className="border rounded-lg overflow-x-auto mt-2">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Product</TableHead>
+                  <TableHead>FTE Range</TableHead>
+                  <TableHead className="text-right">Unit Price</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {offTierEntries.map((e) => (
+                  <TableRow key={e.id}>
+                    <TableCell className="font-medium">
+                      {e.product?.name ?? e.product_id}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {e.fte_range ?? "All"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {formatCurrencyDetailed(e.unit_price)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </details>
+      )}
     </div>
+  );
+}
+
+function PriceBookEntryRow({
+  product,
+  existingEntry,
+  priceBookId,
+  fteRange,
+  isAdmin,
+  saveMutation,
+}: {
+  product: Product;
+  existingEntry: { id: string; unit_price: number } | null;
+  priceBookId: string;
+  fteRange: string | null;
+  isAdmin: boolean;
+  saveMutation: ReturnType<typeof useSetPriceBookEntryPrice>;
+}) {
+  const initialValue = existingEntry ? String(existingEntry.unit_price) : "";
+  const [draft, setDraft] = useState(initialValue);
+  const [saving, setSaving] = useState(false);
+
+  // Sync draft when the underlying entry changes (e.g. fresh load).
+  useEffect(() => {
+    setDraft(initialValue);
+  }, [initialValue]);
+
+  const isDirty = draft !== initialValue;
+
+  async function commit() {
+    if (!isDirty) return;
+    const trimmed = draft.trim();
+    const next = trimmed === "" ? null : Number(trimmed);
+    if (next !== null && (!Number.isFinite(next) || next < 0)) {
+      toast.error("Enter a valid price");
+      setDraft(initialValue);
+      return;
+    }
+    setSaving(true);
+    try {
+      await saveMutation.mutateAsync({
+        price_book_id: priceBookId,
+        product_id: product.id,
+        fte_range: fteRange,
+        unit_price: next,
+        existing_entry_id: existingEntry?.id ?? null,
+      });
+      // Don't toast on every blur — too noisy in matrix mode.
+    } catch (err) {
+      toast.error(
+        `Failed to save "${product.name}": ` +
+          errorMessage(err)
+      );
+      setDraft(initialValue);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <TableRow>
+      <TableCell className="font-medium">
+        <Link to={`/products/${product.id}`} className="hover:underline">
+          {product.name}
+        </Link>
+        {!product.is_active && (
+          <Badge variant="secondary" className="ml-2 bg-slate-100 text-slate-700 text-xs">
+            Inactive
+          </Badge>
+        )}
+      </TableCell>
+      <TableCell className="text-muted-foreground">
+        {product.product_family ?? "\u2014"}
+      </TableCell>
+      <TableCell className="text-right">
+        <div className="flex items-center justify-end gap-2">
+          {existingEntry && !isDirty && !saving && (
+            <span className="text-xs text-emerald-600">saved</span>
+          )}
+          {saving && <span className="text-xs text-muted-foreground">saving…</span>}
+          {isDirty && !saving && (
+            <span className="text-xs text-amber-600">unsaved</span>
+          )}
+          <Input
+            type="number"
+            step="0.01"
+            placeholder="—"
+            disabled={!isAdmin || saving}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                (e.target as HTMLInputElement).blur();
+              }
+              if (e.key === "Escape") {
+                setDraft(initialValue);
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            className="max-w-[140px] text-right"
+          />
+          {/* Explicit remove button when there's a saved entry. Faster
+              and more discoverable than "clear the input + tab out". */}
+          {existingEntry && isAdmin ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground hover:text-destructive"
+              disabled={saving}
+              onClick={async () => {
+                setSaving(true);
+                try {
+                  await saveMutation.mutateAsync({
+                    price_book_id: priceBookId,
+                    product_id: product.id,
+                    fte_range: fteRange,
+                    unit_price: null,
+                    existing_entry_id: existingEntry.id,
+                  });
+                  setDraft("");
+                } catch (err) {
+                  toast.error(`Failed to remove: ${errorMessage(err)}`);
+                } finally {
+                  setSaving(false);
+                }
+              }}
+              title="Remove from this price book"
+              aria-label={`Remove ${product.name} from this price book`}
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          ) : (
+            <span className="w-7" /> /* spacer keeps inputs aligned */
+          )}
+        </div>
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -699,24 +1425,24 @@ function PriceBookDialog({
   const [isDefault, setIsDefault] = useState(false);
   const [isActive, setIsActive] = useState(true);
 
-  const handleOpenChange = (v: boolean) => {
-    if (v) {
-      if (priceBook) {
-        setName(priceBook.name);
-        setDescription(priceBook.description ?? "");
-        setEffectiveDate(priceBook.effective_date ?? "");
-        setIsDefault(priceBook.is_default);
-        setIsActive(priceBook.is_active);
-      } else {
-        setName("");
-        setDescription("");
-        setEffectiveDate("");
-        setIsDefault(false);
-        setIsActive(true);
-      }
+  // Sync from prop on open — see ProductDialog comment for why useEffect
+  // (controlled-open Radix doesn't fire onOpenChange).
+  useEffect(() => {
+    if (!open) return;
+    if (priceBook) {
+      setName(priceBook.name);
+      setDescription(priceBook.description ?? "");
+      setEffectiveDate(priceBook.effective_date ?? "");
+      setIsDefault(priceBook.is_default);
+      setIsActive(priceBook.is_active);
+    } else {
+      setName("");
+      setDescription("");
+      setEffectiveDate("");
+      setIsDefault(false);
+      setIsActive(true);
     }
-    onOpenChange(v);
-  };
+  }, [open, priceBook]);
 
   async function handleSave() {
     if (!name.trim()) {
@@ -742,12 +1468,12 @@ function PriceBookDialog({
       }
       onOpenChange(false);
     } catch (err) {
-      toast.error("Failed to save price book: " + (err instanceof Error ? err.message : String(err)));
+      toast.error("Failed to save price book: " + errorMessage(err));
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit Price Book" : "Add Price Book"}</DialogTitle>

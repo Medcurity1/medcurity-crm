@@ -6,6 +6,12 @@ interface AccountFilters {
   search?: string;
   lifecycle_status?: string;
   status?: string;
+  /** Filter to a specific owner's accounts. "mine" = current user. */
+  ownerId?: string | "mine";
+  /** Filter to a specific industry_category enum value. */
+  industryCategory?: string;
+  /** Filter to only verified or only unverified accounts. */
+  verified?: "true" | "false";
   page?: number;
   pageSize?: number;
 }
@@ -18,18 +24,40 @@ export function useAccounts(filters?: AccountFilters) {
       const pageSize = filters?.pageSize ?? 25;
       let query = supabase
         .from("accounts")
-        .select("*, owner:user_profiles!owner_user_id(id, full_name)", { count: "exact" })
+        .select("*, owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
         .order("name")
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (filters?.search) {
-        query = query.ilike("name", `%${filters.search}%`);
+        // Search covers name + free-text industry column. Note:
+        // industry_category is an enum which PostgREST can't ilike; to
+        // search by industry use the Industry dropdown filter instead.
+        query = query.or(
+          `name.ilike.%${filters.search}%,industry.ilike.%${filters.search}%`
+        );
       }
       if (filters?.lifecycle_status) {
         query = query.eq("lifecycle_status", filters.lifecycle_status);
       }
       if (filters?.status) {
         query = query.eq("status", filters.status);
+      }
+      if (filters?.ownerId && filters.ownerId !== "mine") {
+        query = query.eq("owner_user_id", filters.ownerId);
+      } else if (filters?.ownerId === "mine") {
+        // Resolve "mine" to current auth user id at query time.
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData.user?.id) {
+          query = query.eq("owner_user_id", userData.user.id);
+        }
+      }
+      if (filters?.industryCategory) {
+        query = query.eq("industry_category", filters.industryCategory);
+      }
+      if (filters?.verified === "true") {
+        query = query.eq("verified", true);
+      } else if (filters?.verified === "false") {
+        query = query.eq("verified", false);
       }
 
       const { data, error, count } = await query;
@@ -46,7 +74,7 @@ export function useAccount(id: string | undefined) {
       if (!id) throw new Error("Missing account ID");
       const { data, error } = await supabase
         .from("accounts")
-        .select("*, owner:user_profiles!owner_user_id(id, full_name), creator:user_profiles!created_by(id, full_name), updater:user_profiles!updated_by(id, full_name)")
+        .select("*, owner:user_profiles!owner_user_id(id, full_name), creator:user_profiles!created_by(id, full_name), updater:user_profiles!updated_by(id, full_name), parent_account:accounts!parent_account_id(id, name)")
         .eq("id", id)
         .single();
       if (error) throw error;
@@ -90,6 +118,22 @@ export function useUpdateAccount() {
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["accounts"] });
       qc.invalidateQueries({ queryKey: ["accounts", vars.id] });
+    },
+  });
+}
+
+export function useBulkDeleteAccounts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ids }: { ids: string[] }) => {
+      for (let i = 0; i < ids.length; i += 50) {
+        const batch = ids.slice(i, i + 50);
+        const { error } = await supabase.from("accounts").delete().in("id", batch);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["accounts"] });
     },
   });
 }
@@ -143,15 +187,33 @@ export function useBulkUpdateOwner() {
   });
 }
 
-export function useUsers() {
+export function useAccountsList() {
   return useQuery({
-    queryKey: ["users"],
+    queryKey: ["accounts_list"],
     queryFn: async () => {
       const { data, error } = await supabase
+        .from("accounts")
+        .select("id, name")
+        .is("archived_at", null)
+        .order("name");
+      if (error) throw error;
+      return data as { id: string; name: string }[];
+    },
+  });
+}
+
+export function useUsers(includeInactive = false) {
+  return useQuery({
+    queryKey: ["users", { includeInactive }],
+    queryFn: async () => {
+      let query = supabase
         .from("user_profiles")
         .select("*")
-        .eq("is_active", true)
         .order("full_name");
+      if (!includeInactive) {
+        query = query.eq("is_active", true);
+      }
+      const { data, error } = await query;
       if (error) throw error;
       return data;
     },

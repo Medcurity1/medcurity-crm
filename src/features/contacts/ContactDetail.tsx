@@ -1,10 +1,13 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
-import { Pencil, Archive, ChevronDown, Phone, Mail, UserRoundCog } from "lucide-react";
+import { useAuth } from "@/features/auth/AuthProvider";
+import { Pencil, Archive, ChevronDown, Phone, Mail, UserRoundCog, History } from "lucide-react";
+import { formatPhone } from "@/components/PhoneInput";
 import { useContact, useUpdateContact, useArchiveContact } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
+import { VerifiedBadge } from "@/components/VerifiedBadge";
 import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
@@ -12,7 +15,7 @@ import { RecordId } from "@/components/RecordId";
 import { InlineEdit, type InlineEditProps } from "@/components/InlineEdit";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CollapsibleTabs } from "@/components/CollapsibleTabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatName, formatDateTime, leadSourceLabel } from "@/lib/formatters";
@@ -22,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { AccountOpportunities } from "@/features/accounts/AccountOpportunities";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
+import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
 import { TasksPanel } from "@/features/activities/TasksPanel";
 import { SequencesTab } from "@/features/sequences/SequencesTab";
 
@@ -93,6 +97,8 @@ function EditableField({
 export function ContactDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { data: contact, isLoading } = useContact(id);
   const { data: customFieldDefs } = useCustomFieldDefinitions("contacts");
   const updateMutation = useUpdateContact();
@@ -159,6 +165,14 @@ export function ContactDetail() {
         description={contact.title ?? undefined}
         actions={
           <div className="flex items-center gap-2">
+            <VerifiedBadge
+              table="contacts"
+              recordId={contact.id}
+              verified={contact.verified ?? false}
+              verifiedAt={contact.verified_at}
+              ownerId={contact.owner_user_id}
+              invalidateKeys={[["contact", contact.id]]}
+            />
             {contact.is_primary && (
               <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">
                 Primary Contact
@@ -175,10 +189,12 @@ export function ContactDetail() {
               <Pencil className="h-4 w-4 mr-1" />
               Edit
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>
-              <Archive className="h-4 w-4 mr-1" />
-              Archive
-            </Button>
+            {isAdmin && (
+              <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>
+                <Archive className="h-4 w-4 mr-1" />
+                Archive
+              </Button>
+            )}
           </div>
         }
       />
@@ -229,7 +245,7 @@ export function ContactDetail() {
           <CardContent className="px-4 pb-3">
             <p className="text-sm font-semibold inline-flex items-center gap-1">
               <Phone className="h-3 w-3 text-muted-foreground" />
-              {contact.phone ?? "\u2014"}
+              {contact.phone ? formatPhone(contact.phone) : "\u2014"}
             </p>
           </CardContent>
         </Card>
@@ -259,6 +275,51 @@ export function ContactDetail() {
         </Card>
       </div>
 
+      <DetailPageLayout
+        sidePanels={[
+          {
+            key: "activity",
+            label: "Activity",
+            content: (
+              <ActivityTimeline
+                contactId={contact.id}
+                accountId={contact.account_id}
+                contactEmail={contact.email ?? undefined}
+                contactName={formatName(contact.first_name, contact.last_name)}
+                compact
+              />
+            ),
+          },
+          {
+            key: "tasks",
+            label: "Tasks",
+            content: <TasksPanel contactId={contact.id} />,
+          },
+        ]}
+      >
+
+      <CollapsibleTabs
+        className="mt-2"
+        defaultValue="opportunities"
+        items={[
+          {
+            value: "opportunities",
+            label: "Opportunities",
+            content: <AccountOpportunities accountId={contact.account_id} />,
+          },
+          {
+            value: "tasks",
+            label: "Tasks",
+            content: <TasksPanel contactId={contact.id} />,
+          },
+          {
+            value: "sequences",
+            label: "Sequences",
+            content: <SequencesTab contactId={contact.id} accountId={contact.account_id} />,
+          },
+        ]}
+      />
+
       {/* --------- Contact Details Section --------- */}
       <CollapsibleSection title="Contact Details">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
@@ -285,6 +346,8 @@ export function ContactDetail() {
               }
             />
           )}
+          <Field label="MQL Date" value={contact.mql_date} />
+          <Field label="SQL Date" value={contact.sql_date} />
         </div>
       </CollapsibleSection>
 
@@ -320,43 +383,34 @@ export function ContactDetail() {
           />
           <Field
             label="Last Modified By"
-            value={contact.updater?.full_name ?? "\u2014"}
+            value={
+              <Link
+                to={`/admin?tab=audit-log&record_id=${contact.id}`}
+                className="text-primary hover:underline inline-flex items-center gap-1"
+                title="View audit history for this record"
+              >
+                {contact.updater?.full_name ?? "\u2014"}
+                <History className="h-3 w-3" />
+              </Link>
+            }
           />
           <Field label="Created" value={formatDateTime(contact.created_at)} />
-          <Field label="Last Modified" value={formatDateTime(contact.updated_at)} />
+          <Field
+            label="Last Modified"
+            value={
+              <Link
+                to={`/admin?tab=audit-log&record_id=${contact.id}`}
+                className="text-primary hover:underline"
+                title="View audit history for this record"
+              >
+                {formatDateTime(contact.updated_at)}
+              </Link>
+            }
+          />
         </div>
       </CollapsibleSection>
 
-      {/* --------- Tabs --------- */}
-      <Tabs defaultValue="opportunities" className="mt-2">
-        <TabsList>
-          <TabsTrigger value="opportunities">Opportunities</TabsTrigger>
-          <TabsTrigger value="activities">Activities</TabsTrigger>
-          <TabsTrigger value="tasks">Tasks</TabsTrigger>
-          <TabsTrigger value="sequences">Sequences</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="opportunities" className="mt-4">
-          <AccountOpportunities accountId={contact.account_id} />
-        </TabsContent>
-
-        <TabsContent value="activities" className="mt-4">
-          <ActivityTimeline
-            contactId={contact.id}
-            accountId={contact.account_id}
-            contactEmail={contact.email ?? undefined}
-            contactName={formatName(contact.first_name, contact.last_name)}
-          />
-        </TabsContent>
-
-        <TabsContent value="tasks" className="mt-4">
-          <TasksPanel contactId={contact.id} />
-        </TabsContent>
-
-        <TabsContent value="sequences" className="mt-4">
-          <SequencesTab contactId={contact.id} accountId={contact.account_id} />
-        </TabsContent>
-      </Tabs>
+      </DetailPageLayout>
 
       <ConfirmDialog
         open={showArchive}

@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
+import { employeesToFteRange } from "@/lib/formatters";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,13 +31,65 @@ import {
   XCircle,
   Download,
   Clock,
+  RotateCcw,
+  Pencil,
+  Trash2,
 } from "lucide-react";
+
+/* ================================================================
+   Pagination helper
+   ----------------------------------------------------------------
+   Supabase/PostgREST caps a single `.select()` at 1000 rows by
+   default. When the lookup map is smaller than the full table,
+   sf_id lookups silently fail for every row past the cap — which
+   is exactly what produced "Account SF ID ... not found in CRM"
+   on ~6400 contacts during the first real import. Paginate until
+   no more rows come back.
+   ================================================================ */
+
+async function fetchAllRows<T>(
+  buildQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+  pageSize = 1000,
+): Promise<T[]> {
+  const all: T[] = [];
+  let from = 0;
+  // Hard stop at 500k rows — defence against an infinite loop if the
+  // server ever returns a non-empty page of the same data repeatedly.
+  const hardLimit = 500_000;
+  while (all.length < hardLimit) {
+    const to = from + pageSize - 1;
+    const { data, error } = await buildQuery(from, to);
+    if (error) throw error;
+    const rows = data ?? [];
+    all.push(...rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
 
 /* ================================================================
    Types
    ================================================================ */
 
-type EntityType = "accounts" | "contacts" | "opportunities" | "leads";
+type EntityType =
+  | "accounts"
+  | "contacts"
+  | "opportunities"
+  | "leads"
+  | "products"
+  | "price_books"
+  | "price_book_entries"
+  | "opportunity_products"
+  | "tasks"
+  | "events";
+
+/** DB table that each entity imports into. Tasks + Events both flow into
+ *  `activities`; opportunity_products maps 1:1; the rest map by name. */
+function resolveImportTable(entity: EntityType): string {
+  if (entity === "tasks" || entity === "events") return "activities";
+  return entity;
+}
 
 type MappingConfidence = "exact" | "fuzzy" | "unmapped";
 
@@ -49,6 +102,7 @@ interface ColumnMapping {
 interface FailedRow {
   rowNumber: number;
   csvData: Record<string, string>;
+  crmRecord: Record<string, unknown>;
   error: string;
 }
 
@@ -58,6 +112,9 @@ interface ImportResult {
   failed: number;
   errors: string[];
   failedRows: FailedRow[];
+  importedIds: string[];
+  entity: EntityType;
+  timestamp: string;
 }
 
 interface ValidationIssue {
@@ -125,68 +182,1037 @@ function parseCSV(text: string): string[][] {
 }
 
 /* ================================================================
+   FTE-range cleanup helpers
+   ----------------------------------------------------------------
+   Medcurity's Salesforce data has FTE ranges baked into product and
+   price-book names as prefixes like "51-100 Security Risk Assessment"
+   or "1-20 Price Book". On import we:
+
+     1. Strip FTE prefixes from product names + codes and dedupe so the
+        ~157 SF products collapse to ~16 canonical rows. Codes that come
+        back empty (SF ProductCode is often blank) get slugified from
+        the name so the UNIQUE NOT NULL constraint is satisfied.
+     2. Preserve all 12 tier-specific price books exactly as-is from
+        Salesforce, AND populate a new price_books.fte_range column by
+        parsing each book's name. The app reads that column to auto-
+        select the right book for an opportunity's FTE tier.
+     3. For price_book_entries, keep the source SF price book (no
+        master-book collapse) but also stamp fte_range onto each entry
+        for backwards compatibility with AddProductDialog's entry
+        lookup.
+     4. Fall back to case-insensitive product-name lookup (with FTE
+        prefix stripped) when a PBE row's product_sf_id no longer
+        resolves — this is what keeps PBE imports working after
+        products are deduped.
+   ================================================================ */
+
+// Matches leading FTE tier prefixes like "1-20", "21-50", "5001-10000",
+// "501+", followed by one or more spaces / hyphens / underscores.
+// Tolerates stray whitespace inside the range (e.g. "251- 500", "21 -50",
+// "21 - 50") which sometimes appears in legacy SF data.
+// Anchored to start-of-string so "SRA for 1-20 orgs" isn't stripped.
+const FTE_PREFIX_RE = /^(\d+\s*-\s*\d+|\d+\s*\+)[\s_-]+/;
+
+function stripFtePrefix(value: unknown): { base: string; fteRange: string | null } {
+  if (typeof value !== "string") {
+    return { base: (value as string) ?? "", fteRange: null };
+  }
+  const trimmed = value.trim();
+  const match = trimmed.match(FTE_PREFIX_RE);
+  if (!match) return { base: trimmed, fteRange: null };
+  // match[1] is the range alone ("51-100"), match[0] includes the trailing separator.
+  // Normalize internal whitespace in the range so "251- 500" becomes "251-500".
+  const normalizedRange = match[1].replace(/\s+/g, "");
+  return { base: trimmed.slice(match[0].length).trim(), fteRange: normalizedRange };
+}
+
+// Slugify a product name into a stable product code when the SF
+// ProductCode column is blank. Lowercase, collapse non-alphanumerics
+// into single hyphens, strip leading/trailing hyphens, cap at 80 chars
+// to stay well under any practical DB length limit.
+function slugifyCode(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+/* ================================================================
    Field mappings per entity
    ================================================================ */
 
 const ACCOUNT_FIELDS: Record<string, string> = {
-  "account name": "name",
+  // Identity
+  id: "sf_id",
   "account id": "sf_id",
+  "account name": "name",
+  name: "name",
+  // Owner — only map the 005 ID column, NOT the text name column
+  // (text "Account Owner" column causes false warnings; users can manually map if needed)
+  ownerid: "owner_user_id",
+  "owner id": "owner_user_id",
+  // Basic info
   industry: "industry",
   website: "website",
-  phone: "notes",
-  "billing street": "billing_street",
-  "billing city": "billing_city",
-  "billing state/province": "billing_state",
-  "billing state": "billing_state",
-  "billing zip/postal code": "billing_zip",
-  "billing zip": "billing_zip",
-  "billing country": "billing_country",
-  "account owner": "owner_user_id",
+  phone: "phone",
+  description: "description",
   type: "account_type",
   "annual revenue": "annual_revenue",
+  annualrevenue: "annual_revenue",
   employees: "employees",
+  "number of employees": "employees",
+  numberofemployees: "employees",
+  // Billing address
+  "billing street": "billing_street",
+  billingstreet: "billing_street",
+  "billing city": "billing_city",
+  billingcity: "billing_city",
+  "billing state/province": "billing_state",
+  "billing state": "billing_state",
+  billingstate: "billing_state",
+  "billing zip/postal code": "billing_zip",
+  "billing zip": "billing_zip",
+  "billing postal code": "billing_zip",
+  billingpostalcode: "billing_zip",
+  "billing country": "billing_country",
+  billingcountry: "billing_country",
+  "billing latitude": "billing_latitude",
+  billinglatitude: "billing_latitude",
+  "billing longitude": "billing_longitude",
+  billinglongitude: "billing_longitude",
+  // Shipping address
+  "shipping street": "shipping_street",
+  shippingstreet: "shipping_street",
+  "shipping city": "shipping_city",
+  shippingcity: "shipping_city",
+  "shipping state/province": "shipping_state",
+  "shipping state": "shipping_state",
+  shippingstate: "shipping_state",
+  "shipping zip/postal code": "shipping_zip",
+  "shipping zip": "shipping_zip",
+  "shipping postal code": "shipping_zip",
+  shippingpostalcode: "shipping_zip",
+  "shipping country": "shipping_country",
+  shippingcountry: "shipping_country",
+  "shipping latitude": "shipping_latitude",
+  shippinglatitude: "shipping_latitude",
+  "shipping longitude": "shipping_longitude",
+  shippinglongitude: "shipping_longitude",
+  // Misc fields
+  fax: "fax",
+  sic: "sic",
+  "sic desc": "sic_description",
+  sicdesc: "sic_description",
+  rating: "rating",
+  site: "site",
+  "ticker symbol": "ticker_symbol",
+  tickersymbol: "ticker_symbol",
+  ownership: "ownership",
+  "last activity date": "last_activity_date",
+  lastactivitydate: "last_activity_date",
+  "do not contact": "do_not_contact",
+  // Source & partner
+  "lead source": "lead_source",
+  leadsource: "lead_source",
+  "lead source detail": "lead_source_detail",
+  "partner account": "partner_account",
+  "referring partner": "partner_account",
+  "partner prospect": "partner_prospect",
+  "partner source": "lead_source_detail",
+  "account source": "lead_source",
+  // Company details
+  locations: "locations",
+  status: "status",
+  "active since": "active_since",
+  // FTE — support both "FTEs" label and "FTEs__c" API name
+  ftes: "fte_count",
+  "ftes__c": "fte_count",
+  "fte count": "fte_count",
+  "fte range": "fte_range",
+  "fte_range__c": "fte_range",
+  // Financial
+  "lifetime value": "lifetime_value",
+  lifetime_value__c: "lifetime_value",
+  // Settings
+  "time zone": "timezone",
+  timezone: "timezone",
+  "renewal type": "renewal_type",
+  renewal_type__c: "renewal_type",
+  "account number": "account_number",
+  accountnumber: "account_number",
+  // SF metadata
+  "created date": "sf_created_date",
+  createddate: "sf_created_date",
+  "created by id": "sf_created_by",
+  createdbyid: "sf_created_by",
+  "last modified date": "sf_last_modified_date",
+  lastmodifieddate: "sf_last_modified_date",
+  "last modified by id": "sf_last_modified_by",
+  lastmodifiedbyid: "sf_last_modified_by",
+  // Parent & hierarchy
+  "parent id": "parent_account_id",
+  parentid: "parent_account_id",
+  "number of providers": "number_of_providers",
+  number_of_providers__c: "number_of_providers",
+  // Custom fields
+  project: "project",
+  project__c: "project",
+  "churn amount": "churn_amount",
+  churn_amount__c: "churn_amount",
+  "churn date": "churn_date",
+  churn_date__c: "churn_date",
+  contracts: "contracts",
+  contracts__c: "contracts",
+  "next steps": "next_steps",
+  next_steps__c: "next_steps",
+  "priority account": "priority_account",
+  priority_account__c: "priority_account",
+  "every other year": "every_other_year",
+  every_other_year__c: "every_other_year",
 };
 
 const CONTACT_FIELDS: Record<string, string> = {
+  // Identity
+  id: "sf_id",
+  contactid: "sf_id",
+  "contact id": "sf_id",
   "first name": "first_name",
+  firstname: "first_name",
   "last name": "last_name",
+  lastname: "last_name",
+  name: "first_name", // Will need manual adjustment if full name
   email: "email",
+  "email address": "email",
   title: "title",
   phone: "phone",
+  "phone number": "phone",
+  "business phone": "phone",
+  mobilephone: "mobile_phone",
+  "mobile phone": "mobile_phone",
+  "mobile number": "mobile_phone",
+  homephone: "home_phone",
+  "home phone": "home_phone",
+  otherphone: "other_phone",
+  "other phone": "other_phone",
+  fax: "fax",
+  salutation: "salutation",
+  // References
+  accountid: "account_id_sf_lookup",
   "account id": "account_id_sf_lookup",
-  "contact id": "sf_id",
+  "account name": "account_id_sf_lookup",
+  ownerid: "owner_user_id",
+  "owner id": "owner_user_id",
+  "contact owner": "owner_user_id",
+  reportstoid: "reports_to",
+  "reports to id": "reports_to",
+  "reports to": "reports_to",
+  // Details
+  department: "department",
+  description: "description",
+  "contact description": "description",
+  "do not call": "do_not_contact",
+  donotcall: "do_not_contact",
+  "has opted out of email": "do_not_contact",
+  hasoptedoutofemail: "do_not_contact",
+  "email opt out": "do_not_contact",
+  hasoptedoutoffax: "do_not_contact",
+  "lead source": "lead_source",
+  leadsource: "lead_source",
+  "is primary": "is_primary",
+  birthdate: "birthdate",
+  "date of birth": "birthdate",
+  assistantname: "assistant_name",
+  "assistant name": "assistant_name",
+  "assistant's name": "assistant_name",
+  assistantphone: "assistant_phone",
+  "assistant phone": "assistant_phone",
+  linkedin: "linkedin_url",
+  "linkedin url": "linkedin_url",
+  "linkedin profile": "linkedin_url",
+  linkedin__c: "linkedin_url",
+  // Mailing address
+  "mailing street": "mailing_street",
+  mailingstreet: "mailing_street",
+  "mailing city": "mailing_city",
+  mailingcity: "mailing_city",
+  "mailing state/province": "mailing_state",
+  "mailing state": "mailing_state",
+  mailingstate: "mailing_state",
+  "mailing zip/postal code": "mailing_zip",
+  "mailing zip": "mailing_zip",
+  mailingpostalcode: "mailing_zip",
+  "mailing country": "mailing_country",
+  mailingcountry: "mailing_country",
+  // Other address
+  "other street": "other_street",
+  otherstreet: "other_street",
+  "other city": "other_city",
+  othercity: "other_city",
+  "other state/province": "other_state",
+  "other state": "other_state",
+  otherstate: "other_state",
+  "other zip/postal code": "other_zip",
+  "other zip": "other_zip",
+  otherpostalcode: "other_zip",
+  "other country": "other_country",
+  othercountry: "other_country",
+  // Email bounce
+  emailbouncedreason: "email_bounced_reason",
+  "email bounced reason": "email_bounced_reason",
+  emailbounceddate: "email_bounced_date",
+  "email bounced date": "email_bounced_date",
+  // Activity
+  lastactivitydate: "last_activity_date",
+  "last activity date": "last_activity_date",
+  "last activity": "last_activity_date",
+  // MQL/SQL
+  "mql date": "mql_date",
+  mql_date__c: "mql_date",
+  mql__c: "mql_date",
+  "mql": "mql_date",
+  "sql date": "sql_date",
+  sql_date__c: "sql_date",
+  sql__c: "sql_date",
+  "sql": "sql_date",
+  // Partner & next steps
+  "partner source": "partner_source",
+  partner_source__c: "partner_source",
+  partner__c: "partner_source",
+  "partner": "partner_source",
+  "next steps": "next_steps",
+  next_steps__c: "next_steps",
+  "next step": "next_steps",
+  next_step__c: "next_steps",
+  // SF metadata
+  createddate: "sf_created_date",
+  "created date": "sf_created_date",
+  createdbyid: "sf_created_by",
+  "created by id": "sf_created_by",
+  "created by": "sf_created_by",
+  lastmodifieddate: "sf_last_modified_date",
+  "last modified date": "sf_last_modified_date",
+  lastmodifiedbyid: "sf_last_modified_by",
+  "last modified by id": "sf_last_modified_by",
+  "last modified by": "sf_last_modified_by",
 };
 
 const OPPORTUNITY_FIELDS: Record<string, string> = {
-  "opportunity name": "name",
-  "account id": "account_id_sf_lookup",
-  stage: "stage",
-  amount: "amount",
-  "close date": "close_date",
+  // Identity
+  id: "sf_id",
+  opportunityid: "sf_id",
   "opportunity id": "sf_id",
+  name: "name",
+  "opportunity name": "name",
+  // References
+  accountid: "account_id_sf_lookup",
+  "account id": "account_id_sf_lookup",
+  "account name": "account_id_sf_lookup",
+  ownerid: "owner_user_id",
+  "owner id": "owner_user_id",
+  "opportunity owner": "owner_user_id",
+  contactid: "primary_contact_id_sf_lookup",
+  "contact id": "primary_contact_id_sf_lookup",
+  "primary contact id": "primary_contact_id_sf_lookup",
+  "primary contact": "primary_contact_id_sf_lookup",
+  // Stage & type
+  stagename: "stage",
+  stage: "stage",
+  "stage name": "stage",
   type: "kind",
+  "opportunity type": "kind",
+  team: "team",
+  team__c: "team",
+  isclosed: "is_closed",
+  "is closed": "is_closed",
+  iswon: "is_won",
+  "is won": "is_won",
+  forecastcategory: "forecast_category",
+  "forecast category": "forecast_category",
+  forecastcategoryname: "forecast_category",
+  "forecast category name": "forecast_category",
+  stagesortorder: "stage_sort_order",
+  "stage sort order": "stage_sort_order",
+  // Contract reference (SF Contract object, NOT contract_year)
+  contractid: "sf_contract_id",
+  "contract id": "sf_contract_id",
+  // Product / pricebook
+  hasopportunitylineitem: "has_opportunity_line_items",
+  "has opportunity line item": "has_opportunity_line_items",
+  pricebook2id: "sf_pricebook_id",
+  "price book id": "sf_pricebook_id",
+  "pricebook id": "sf_pricebook_id",
+  // Quantity
+  totalopportunityquantity: "total_opportunity_quantity",
+  "total opportunity quantity": "total_opportunity_quantity",
+  total_opportunity_quantity__c: "total_opportunity_quantity",
+  // Automation
+  created_by_automation__c: "created_by_automation",
+  "created by automation": "created_by_automation",
+  // Financial
+  amount: "amount",
+  discount: "discount",
+  discount__c: "discount",
+  subtotal: "subtotal",
+  subtotal__c: "subtotal",
+  probability: "probability",
+  "probability (%)": "probability",
+  expectedrevenue: "expected_revenue",
+  "expected revenue": "expected_revenue",
+  service_amount__c: "service_amount",
+  "service amount": "service_amount",
+  product_amount__c: "product_amount",
+  "product amount": "product_amount",
+  services_included__c: "services_included",
+  "services included": "services_included",
+  service_description__c: "service_description",
+  "service description": "service_description",
+  // Dates
+  // SF "CloseDate" is a forecast/expected date until the deal closes,
+  // then it's retroactively used as the actual close date. We map it
+  // to expected_close_date; the per-row transform below also copies
+  // it into close_date for closed_won/closed_lost rows so reporting
+  // has a real booked-date.
+  closedate: "expected_close_date",
+  "close date": "expected_close_date",
+  "expected close date": "expected_close_date",
+  expected_close_date__c: "expected_close_date",
+  "contract start date": "contract_start_date",
+  contract_start_date__c: "contract_start_date",
+  "contract end date": "contract_end_date",
+  contract_end_date__c: "contract_end_date",
+  "maturity date": "contract_end_date",
+  maturity_date__c: "contract_end_date",
+  "current contract start date": "contract_start_date",
+  "current contract end date": "contract_end_date",
+  current_contract_start_date__c: "contract_start_date",
+  current_contract_end_date__c: "contract_end_date",
+  // Contract details
+  "contract length": "contract_length_months",
+  "contract length (months)": "contract_length_months",
+  contract_length__c: "contract_length_months",
+  contract_length_months__c: "contract_length_months",
+  "contract year": "contract_year",
+  contract_year__c: "contract_year",
+  "payment frequency": "payment_frequency",
+  payment_frequency__c: "payment_frequency",
+  "cycle count": "cycle_count",
+  cycle_count__c: "cycle_count",
+  "auto renewal": "auto_renewal",
+  auto_renewal__c: "auto_renewal",
+  "one time project": "one_time_project",
+  one_time_project__c: "one_time_project",
+  "promo code": "promo_code",
+  promo_code__c: "promo_code",
+  "follow up": "follow_up",
+  follow_up__c: "follow_up",
+  // Source
+  "lead source": "lead_source",
+  leadsource: "lead_source",
+  "lead source detail": "lead_source_detail",
+  lead_source_detail__c: "lead_source_detail",
+  campaignid: "campaign_id",
+  "campaign id": "campaign_id",
+  "campaign": "campaign_id",
+  // Details
+  description: "description",
+  "next step": "next_step",
+  nextstep: "next_step",
+  next_step__c: "next_step",
+  notes: "notes",
+  notes__c: "notes",
+  "loss reason": "loss_reason",
+  loss_reason__c: "loss_reason",
+  // FTE snapshot
+  ftes__c: "fte_count",
+  "fte count": "fte_count",
+  fte_count__c: "fte_count",
+  "number of ftes": "fte_count",
+  fte_range__c: "fte_range",
+  "fte range": "fte_range",
+  // Activity
+  lastactivitydate: "last_activity_date",
+  "last activity date": "last_activity_date",
+  "last activity": "last_activity_date",
+  laststagechangedate: "last_stage_change_date",
+  "last stage change date": "last_stage_change_date",
+  // SF metadata
+  createddate: "sf_created_date",
+  "created date": "sf_created_date",
+  createdbyid: "sf_created_by",
+  "created by id": "sf_created_by",
+  "created by": "sf_created_by",
+  lastmodifieddate: "sf_last_modified_date",
+  "last modified date": "sf_last_modified_date",
+  lastmodifiedbyid: "sf_last_modified_by",
+  "last modified by id": "sf_last_modified_by",
+  "last modified by": "sf_last_modified_by",
+  fiscalyear: "fiscal_year",
+  "fiscal year": "fiscal_year",
+  fiscalquarter: "fiscal_quarter",
+  "fiscal quarter": "fiscal_quarter",
 };
 
 const LEAD_FIELDS: Record<string, string> = {
-  "first name": "first_name",
-  "last name": "last_name",
-  email: "email",
-  company: "company",
-  status: "status",
-  "lead source": "source",
+  // Identity
+  id: "sf_id",
+  leadid: "sf_id",
   "lead id": "sf_id",
+  "first name": "first_name",
+  firstname: "first_name",
+  "last name": "last_name",
+  lastname: "last_name",
+  name: "first_name",
+  salutation: "salutation",
+  email: "email",
+  "email address": "email",
+  company: "company",
+  "company name": "company",
+  // Status & source
+  status: "status",
+  "lead status": "status",
+  "lead source": "source",
+  leadsource: "source",
+  rating: "rating",
+  "lead rating": "rating",
+  // Owner
+  ownerid: "owner_user_id",
+  "owner id": "owner_user_id",
+  "lead owner": "owner_user_id",
+  // Contact info
   phone: "phone",
+  "phone number": "phone",
+  mobilephone: "mobile_phone",
+  "mobile phone": "mobile_phone",
+  "mobile number": "mobile_phone",
+  fax: "fax",
   title: "title",
+  "job title": "title",
+  // Company details
   industry: "industry",
   website: "website",
   employees: "employees",
+  numberofemployees: "employees",
+  "number of employees": "employees",
   "annual revenue": "annual_revenue",
+  annualrevenue: "annual_revenue",
+  // Address
   street: "street",
+  address: "street",
   city: "city",
   state: "state",
+  "state/province": "state",
   "zip/postal code": "zip",
+  postalcode: "zip",
   zip: "zip",
+  "postal code": "zip",
   country: "country",
+  // Details
+  description: "description",
+  "lead description": "description",
+  // Conversion
+  isconverted: "is_converted",
+  "is converted": "is_converted",
+  converteddate: "converted_at",
+  "converted date": "converted_at",
+  convertedaccountid: "converted_account_id",
+  "converted account id": "converted_account_id",
+  convertedcontactid: "converted_contact_id",
+  "converted contact id": "converted_contact_id",
+  convertedopportunityid: "converted_opportunity_id",
+  "converted opportunity id": "converted_opportunity_id",
+  // Activity
+  lastactivitydate: "last_activity_date",
+  "last activity date": "last_activity_date",
+  "last activity": "last_activity_date",
+  lasttransferdate: "last_transfer_date",
+  "last transfer date": "last_transfer_date",
+  "last transfer": "last_transfer_date",
+  // Pardot marketing-engagement fields. Migration 20260421000003
+  // adds dedicated columns for the valuable ones; the rest stay
+  // pinned to "" so the fuzzy matcher can't bigram-mismap them
+  // (e.g. pi__last_activity__c was clobbering last_activity_date
+  // before this fix landed).
+  pi__first_activity__c: "first_activity_date",
+  pi__last_activity__c: "pardot_last_activity_date",
+  pi__conversion_date__c: "conversion_date",
+  pi__campaign__c: "pardot_campaign",
+  pi__comments__c: "pardot_comments",
+  pi__grade__c: "pardot_grade",
+  pi__score__c: "pardot_score",
+  pi__url__c: "pardot_url",
+  pi__utm_source__c: "utm_source",
+  pi__utm_medium__c: "utm_medium",
+  pi__utm_campaign__c: "utm_campaign",
+  pi__utm_content__c: "utm_content",
+  pi__utm_term__c: "utm_term",
+  // Internal Pardot bookkeeping — no value to import.
+  pi__needs_score_synced__c: "",
+  pi__pardot_last_scored_at__c: "",
+  pi__conversion_object_name__c: "",
+  pi__conversion_object_type__c: "",
+  pi__created_date__c: "",
+  pi__first_search_term__c: "",
+  pi__first_search_type__c: "",
+  pi__first_touch_url__c: "",
+  pi__notes__c: "",
+  pi__pardot_hard_bounced__c: "",
+  // MQL
+  "mql date": "mql_date",
+  mql_date__c: "mql_date",
+  mql__c: "mql_date",
+  "mql": "mql_date",
+  // Partner & next steps
+  "partner source": "partner_source",
+  partner_source__c: "partner_source",
+  "next steps": "next_steps",
+  next_steps__c: "next_steps",
+  "next step": "next_steps",
+  // Opt-out & do-not flags
+  hasoptedoutofemail: "has_opted_out_of_email",
+  "has opted out of email": "has_opted_out_of_email",
+  emailoptout: "has_opted_out_of_email",
+  "email opt out": "has_opted_out_of_email",
+  has_opted_out_of_email__c: "has_opted_out_of_email",
+  donotcall: "do_not_call",
+  "do not call": "do_not_call",
+  do_not_call__c: "do_not_call",
+  donotmarketto: "do_not_market_to",
+  "do not market to": "do_not_market_to",
+  do_not_market_to__c: "do_not_market_to",
+  // Stronger blanket flag (added migration 20260420000002)
+  donotcontact: "do_not_contact",
+  "do not contact": "do_not_contact",
+  do_not_contact__c: "do_not_contact",
+  // Type
+  type: "lead_type",
+  "lead type": "lead_type",
+  type__c: "lead_type",
+  // Project / segment / industry category
+  project__c: "project",
+  project: "project",
+  project_segment__c: "project_segment",
+  "project segment": "project_segment",
+  industry_category__c: "industry_category",
+  "industry category": "industry_category",
+  // Time zone
+  time_zone__c: "time_zone",
+  "time zone": "time_zone",
+  timezone: "time_zone",
+  // Credential
+  credential__c: "credential",
+  credential: "credential",
+  // Business relationship
+  business_relationship_tag__c: "business_relationship_tag",
+  "business relationship tag": "business_relationship_tag",
+  // Phone extension
+  phone_ext__c: "phone_ext",
+  "phone ext": "phone_ext",
+  "phone extension": "phone_ext",
+  phoneextension: "phone_ext",
+  // Events attended
+  events__c: "events_attended",
+  "events attended": "events_attended",
+  // Cold lead
+  cold_lead__c: "cold_lead",
+  "cold lead": "cold_lead",
+  cold_lead_source__c: "cold_lead_source",
+  "cold lead source": "cold_lead_source",
+  // Notes / comments
+  notes: "notes",
+  "lead notes": "notes",
+  notes__c: "notes",
+  comments: "comments",
+  "lead comments": "comments",
+  comments__c: "comments",
+  // LinkedIn
+  linkedin: "linkedin_url",
+  "linkedin profile": "linkedin_url",
+  "linkedin url": "linkedin_url",
+  linkedin_profile__c: "linkedin_url",
+  linkedin_url__c: "linkedin_url",
+  linkedinprofile: "linkedin_url",
+  linkedinurl: "linkedin_url",
+  // Priority
+  "priority lead": "priority_lead",
+  priority_lead__c: "priority_lead",
+  prioritylead: "priority_lead",
+  // Email bounce
+  emailbouncedreason: "email_bounced_reason",
+  "email bounced reason": "email_bounced_reason",
+  emailbounceddate: "email_bounced_date",
+  "email bounced date": "email_bounced_date",
+  // SF metadata
+  createddate: "sf_created_date",
+  "created date": "sf_created_date",
+  createdbyid: "sf_created_by",
+  "created by id": "sf_created_by",
+  "created by": "sf_created_by",
+  lastmodifieddate: "sf_last_modified_date",
+  "last modified date": "sf_last_modified_date",
+  lastmodifiedbyid: "sf_last_modified_by",
+  "last modified by id": "sf_last_modified_by",
+  "last modified by": "sf_last_modified_by",
+};
+
+/* ---- Products ---- */
+const PRODUCT_FIELDS: Record<string, string> = {
+  // Identity
+  id: "sf_id",
+  product2id: "sf_id",
+  "product id": "sf_id",
+  productcode: "code",
+  "product code": "code",
+  code: "code",
+  name: "name",
+  "product name": "name",
+  // Details
+  family: "product_family",
+  "product family": "product_family",
+  productfamily: "product_family",
+  description: "description",
+  "product description": "description",
+  isactive: "is_active",
+  "is active": "is_active",
+  active: "is_active",
+  // Pricing
+  "default arr": "default_arr",
+  default_arr__c: "default_arr",
+  defaultarr: "default_arr",
+  category: "category",
+  "product category": "category",
+  "pricing model": "pricing_model",
+  pricing_model__c: "pricing_model",
+  pricingmodel: "pricing_model",
+  // SF metadata
+  createddate: "sf_created_date",
+  "created date": "sf_created_date",
+  lastmodifieddate: "sf_last_modified_date",
+  "last modified date": "sf_last_modified_date",
+};
+
+/* ---- Price Books ---- */
+const PRICE_BOOK_FIELDS: Record<string, string> = {
+  id: "sf_id",
+  pricebook2id: "sf_id",
+  "price book id": "sf_id",
+  "pricebook id": "sf_id",
+  name: "name",
+  "price book name": "name",
+  pricebookname: "name",
+  description: "description",
+  isactive: "is_active",
+  "is active": "is_active",
+  active: "is_active",
+  isstandard: "is_default",
+  "is standard": "is_default",
+  "is default": "is_default",
+  effectivedate: "effective_date",
+  "effective date": "effective_date",
+  createddate: "sf_created_date",
+  "created date": "sf_created_date",
+  lastmodifieddate: "sf_last_modified_date",
+  "last modified date": "sf_last_modified_date",
+};
+
+/* ---- Price Book Entries ---- */
+const PRICE_BOOK_ENTRY_FIELDS: Record<string, string> = {
+  // Identity
+  id: "sf_id",
+  pricebookentryid: "sf_id",
+  "pricebook entry id": "sf_id",
+  // References
+  pricebook2id: "price_book_sf_id",
+  "price book id": "price_book_sf_id",
+  "pricebook id": "price_book_sf_id",
+  product2id: "product_sf_id",
+  "product id": "product_sf_id",
+  "product 2 id": "product_sf_id",
+  productcode: "product_code_lookup",
+  "product code": "product_code_lookup",
+  // Pricing
+  unitprice: "unit_price",
+  "unit price": "unit_price",
+  "list price": "unit_price",
+  listprice: "unit_price",
+  price: "unit_price",
+  // FTE range
+  "fte range": "fte_range",
+  fte_range__c: "fte_range",
+  fterange: "fte_range",
+  // Status
+  isactive: "is_active",
+  "is active": "is_active",
+  active: "is_active",
+  // Product name (informational, for display)
+  name: "product_name",
+  "product name": "product_name",
+  // Price book name (informational)
+  "pricebook name": "price_book_name",
+  "price book name": "price_book_name",
+  pricebook2name: "price_book_name",
+  // SF metadata
+  createddate: "sf_created_date",
+  "created date": "sf_created_date",
+  lastmodifieddate: "sf_last_modified_date",
+  "last modified date": "sf_last_modified_date",
+};
+
+/* ---- Opportunity Line Items (SF OpportunityLineItem.csv) ---- */
+const OPPORTUNITY_PRODUCT_FIELDS: Record<string, string> = {
+  // Self identity (we don't persist it, but useful for dedup within file)
+  id: "sf_line_item_id",
+  oppproductid: "sf_line_item_id",
+  // References
+  opportunityid: "opportunity_sf_id",
+  "opportunity id": "opportunity_sf_id",
+  product2id: "product_sf_id",
+  "product id": "product_sf_id",
+  pricebookentryid: "price_book_entry_sf_id",
+  "pricebook entry id": "price_book_entry_sf_id",
+  productcode: "product_code_lookup",
+  "product code": "product_code_lookup",
+  // Pricing
+  quantity: "quantity",
+  unitprice: "unit_price",
+  "unit price": "unit_price",
+  listprice: "list_price",
+  "list price": "list_price",
+  totalprice: "total_price",
+  "total price": "total_price",
+  discount: "discount_percent",
+  "discount (%)": "discount_percent",
+  "discount percent": "discount_percent",
+  discountpercent: "discount_percent",
+  // Descriptive (for label; not persisted to a column)
+  name: "product_name_lookup",
+  "product name": "product_name_lookup",
+  description: "line_description",
+  servicedate: "service_date",
+  "service date": "service_date",
+  // SF audit metadata — preserved verbatim so historical reporting lines
+  // up with Salesforce even after migration.
+  createddate: "sf_created_date",
+  "created date": "sf_created_date",
+  createdbyid: "sf_created_by",
+  "created by id": "sf_created_by",
+  "created by": "sf_created_by",
+  lastmodifieddate: "sf_last_modified_date",
+  "last modified date": "sf_last_modified_date",
+  lastmodifiedbyid: "sf_last_modified_by",
+  "last modified by id": "sf_last_modified_by",
+  "last modified by": "sf_last_modified_by",
+};
+
+/* ---- Tasks (SF Task.csv) — inserted into public.activities ---- */
+const TASK_FIELDS: Record<string, string> = {
+  // Identity (sf_id is the dedup key for "Update Existing")
+  id: "sf_id",
+  "task id": "sf_id",
+  subject: "subject",
+  description: "body",
+  // Dates
+  activitydate: "due_at",
+  "activity date": "due_at",
+  completeddatetime: "completed_at",
+  "completed date time": "completed_at",
+  // Ownership (resolved by name lookup)
+  ownerid: "owner_user_id",
+  "owner id": "owner_user_id",
+  owner: "owner_user_id",
+  "assigned to": "owner_user_id",
+  // Parent references
+  whoid: "who_id_sf_lookup",
+  "who id": "who_id_sf_lookup",
+  whatid: "what_id_sf_lookup",
+  "what id": "what_id_sf_lookup",
+  "related to id": "what_id_sf_lookup",
+  "related to": "what_id_sf_lookup",
+  // SF Task.csv has its own AccountId column too — use it as a
+  // backup pointer when WhatId resolved to an Opportunity (we set
+  // both account_id + opportunity_id) or when WhatId is empty.
+  accountid: "account_id_sf_lookup",
+  "account id": "account_id_sf_lookup",
+  // Classification (drives activity_type + filtering)
+  type: "sf_task_type",
+  status: "sf_task_status",
+  isclosed: "sf_is_closed",
+  "is closed": "sf_is_closed",
+  priority: "priority",
+  // Call-specific
+  calltype: "call_type",
+  "call type": "call_type",
+  calldisposition: "call_disposition",
+  "call disposition": "call_disposition",
+  callobject: "call_object",
+  "call object": "call_object",
+  calldurationinseconds: "call_duration_seconds",
+  "call duration": "call_duration_seconds",
+  "call duration (in seconds)": "call_duration_seconds",
+  // Recurrence
+  isrecurrence: "is_recurrence",
+  "is recurrence": "is_recurrence",
+  recurrencetype: "recurrence_type",
+  "recurrence type": "recurrence_type",
+  recurrenceinterval: "recurrence_interval",
+  "recurrence interval": "recurrence_interval",
+  // SF audit
+  createddate: "sf_created_date",
+  "created date": "sf_created_date",
+  createdbyid: "sf_created_by",
+  "created by id": "sf_created_by",
+  "created by": "sf_created_by",
+  lastmodifieddate: "sf_last_modified_date",
+  "last modified date": "sf_last_modified_date",
+  lastmodifiedbyid: "sf_last_modified_by",
+  "last modified by id": "sf_last_modified_by",
+  "last modified by": "sf_last_modified_by",
+  // Activity origin (manual / Outlook / ListEmail / etc.)
+  activityorigintype: "activity_origin_type",
+  "activity origin type": "activity_origin_type",
+  "activity origin": "activity_origin_type",
+  // SF Email reference (when Task represents an email log)
+  emailmessageid: "sf_email_message_id",
+  "email message id": "sf_email_message_id",
+  // SF reminder (kept separate from CRM's own reminder_at so we
+  // don't accidentally trigger live reminders for imported data)
+  reminderdatetime: "sf_reminder_datetime",
+  "reminder date time": "sf_reminder_datetime",
+  isreminderset: "sf_is_reminder_set",
+  "is reminder set": "sf_is_reminder_set",
+  // Recurrence detail
+  recurrenceactivityid: "sf_recurrence_activity_id",
+  "recurrence activity id": "sf_recurrence_activity_id",
+  recurrencestartdateonly: "recurrence_start_date",
+  "recurrence start date only": "recurrence_start_date",
+  "recurrence start date": "recurrence_start_date",
+  recurrenceenddateonly: "recurrence_end_date",
+  "recurrence end date only": "recurrence_end_date",
+  "recurrence end date": "recurrence_end_date",
+  recurrencetimezonesidkey: "recurrence_timezone",
+  "recurrence time zone sid key": "recurrence_timezone",
+  "recurrence time zone": "recurrence_timezone",
+  recurrencedayofweekmask: "recurrence_day_of_week_mask",
+  "recurrence day of week mask": "recurrence_day_of_week_mask",
+  recurrencedayofmonth: "recurrence_day_of_month",
+  "recurrence day of month": "recurrence_day_of_month",
+  recurrenceinstance: "recurrence_instance",
+  "recurrence instance": "recurrence_instance",
+  recurrencemonthofyear: "recurrence_month_of_year",
+  "recurrence month of year": "recurrence_month_of_year",
+  // Genuinely useless SF metadata — pin so fuzzy matcher skips them.
+  isdeleted: "",
+  "is deleted": "",
+  isarchived: "",
+  systemmodstamp: "",
+  recurrenceregeneratedtype: "",
+  "recurrence regenerated type": "",
+};
+
+/* ---- Events (SF Event.csv) — inserted into public.activities ---- */
+const EVENT_FIELDS: Record<string, string> = {
+  // Identity (sf_id is the dedup key)
+  id: "sf_id",
+  "event id": "sf_id",
+  subject: "subject",
+  description: "body",
+  // Dates — ActivityDateTime preferred (has time), ActivityDate fallback
+  activitydatetime: "due_at",
+  "activity date time": "due_at",
+  activitydate: "due_at",
+  "activity date": "due_at",
+  startdatetime: "due_at",
+  "start date time": "due_at",
+  enddatetime: "completed_at",
+  "end date time": "completed_at",
+  // Event-specific (migration 20260422000004)
+  durationinminutes: "duration_minutes",
+  "duration in minutes": "duration_minutes",
+  duration: "duration_minutes",
+  type: "event_type",
+  isalldayevent: "is_all_day_event",
+  "is all day event": "is_all_day_event",
+  "all day event": "is_all_day_event",
+  // Ownership
+  ownerid: "owner_user_id",
+  "owner id": "owner_user_id",
+  owner: "owner_user_id",
+  "assigned to": "owner_user_id",
+  // Parent references
+  whoid: "who_id_sf_lookup",
+  "who id": "who_id_sf_lookup",
+  whatid: "what_id_sf_lookup",
+  "what id": "what_id_sf_lookup",
+  "related to id": "what_id_sf_lookup",
+  "related to": "what_id_sf_lookup",
+  accountid: "account_id_sf_lookup",
+  "account id": "account_id_sf_lookup",
+  location: "event_location",
+  // SF audit
+  createddate: "sf_created_date",
+  "created date": "sf_created_date",
+  createdbyid: "sf_created_by",
+  "created by id": "sf_created_by",
+  "created by": "sf_created_by",
+  lastmodifieddate: "sf_last_modified_date",
+  "last modified date": "sf_last_modified_date",
+  lastmodifiedbyid: "sf_last_modified_by",
+  "last modified by id": "sf_last_modified_by",
+  "last modified by": "sf_last_modified_by",
+  // Pinned skip — SF metadata that has no useful CRM home, listed
+  // explicitly so the fuzzy matcher doesn't bigram-pull them into
+  // unrelated columns (same defensive pattern we used for Pardot
+  // fields on leads).
+  isdeleted: "",
+  "is deleted": "",
+  isarchived: "",
+  "is archived": "",
+  systemmodstamp: "",
+  "system modstamp": "",
+  isprivate: "",
+  "is private": "",
+  showas: "",
+  "show as": "",
+  ischild: "",
+  "is child": "",
+  isgroupevent: "",
+  "is group event": "",
+  groupeventtype: "",
+  "group event type": "",
+  proposedeventtimeframe: "",
+  "proposed event timeframe": "",
+  // Recurrence — kept on tasks but skipped on events (per
+  // 2026-04-22 user decision: recurring meeting metadata is
+  // meaningless once the migration has happened)
+  isrecurrence: "",
+  "is recurrence": "",
+  recurrenceactivityid: "",
+  "recurrence activity id": "",
+  recurrencestartdatetime: "",
+  "recurrence start date time": "",
+  recurrenceenddateonly: "",
+  "recurrence end date only": "",
+  recurrencetimezonesidkey: "",
+  "recurrence time zone sid key": "",
+  recurrencetype: "",
+  "recurrence type": "",
+  recurrenceinterval: "",
+  "recurrence interval": "",
+  recurrencedayofweekmask: "",
+  "recurrence day of week mask": "",
+  recurrencedayofmonth: "",
+  "recurrence day of month": "",
+  recurrenceinstance: "",
+  "recurrence instance": "",
+  recurrencemonthofyear: "",
+  "recurrence month of year": "",
+  // Reminders — skip same as tasks, don't want imported events
+  // firing CRM-level reminders
+  reminderdatetime: "",
+  "reminder date time": "",
+  isreminderset: "",
+  "is reminder set": "",
 };
 
 function getFieldMap(entity: EntityType): Record<string, string> {
@@ -199,6 +1225,18 @@ function getFieldMap(entity: EntityType): Record<string, string> {
       return OPPORTUNITY_FIELDS;
     case "leads":
       return LEAD_FIELDS;
+    case "products":
+      return PRODUCT_FIELDS;
+    case "price_books":
+      return PRICE_BOOK_FIELDS;
+    case "price_book_entries":
+      return PRICE_BOOK_ENTRY_FIELDS;
+    case "opportunity_products":
+      return OPPORTUNITY_PRODUCT_FIELDS;
+    case "tasks":
+      return TASK_FIELDS;
+    case "events":
+      return EVENT_FIELDS;
   }
 }
 
@@ -207,81 +1245,534 @@ function getCRMFields(entity: EntityType): string[] {
   switch (entity) {
     case "accounts":
       return [
+        // Basic
         "name",
         "sf_id",
+        "owner_user_id",
+        "account_type",
+        "account_number",
+        "status",
+        "lifecycle_status",
         "industry",
         "website",
-        "notes",
+        "parent_account_id",
+        // Contact
+        "phone",
+        "phone_extension",
+        // Billing Address
         "billing_street",
         "billing_city",
         "billing_state",
         "billing_zip",
         "billing_country",
-        "owner_user_id",
-        "account_type",
-        "annual_revenue",
-        "employees",
-        "lifecycle_status",
-        "status",
-        "timezone",
+        // Shipping Address
+        "shipping_street",
+        "shipping_city",
+        "shipping_state",
+        "shipping_zip",
+        "shipping_country",
+        // Geo-coordinates
+        "billing_latitude",
+        "billing_longitude",
+        "shipping_latitude",
+        "shipping_longitude",
+        // Company Details
         "fte_count",
         "fte_range",
+        "employees",
+        "number_of_providers",
         "locations",
+        "annual_revenue",
+        "timezone",
+        // Contract & Renewal
+        "active_since",
+        "renewal_type",
+        "every_other_year",
+        "contracts",
+        "acv",
+        "lifetime_value",
+        "churn_amount",
+        "churn_date",
+        "current_contract_start_date",
+        "current_contract_end_date",
+        "current_contract_length_months",
+        // Partner
+        "partner_account",
+        "partner_prospect",
+        "lead_source",
+        "lead_source_detail",
+        // Additional
+        "fax",
+        "sic",
+        "sic_description",
+        "ownership",
+        "rating",
+        "site",
+        "ticker_symbol",
+        "last_activity_date",
+        "do_not_contact",
+        "priority_account",
+        "project",
+        "description",
+        "notes",
+        "next_steps",
+        // SF History
+        "sf_created_by",
+        "sf_created_date",
+        "sf_last_modified_by",
+        "sf_last_modified_date",
       ];
     case "contacts":
       return [
+        // Identity
         "first_name",
         "last_name",
         "email",
         "title",
         "phone",
+        "mobile_phone",
+        "home_phone",
+        "other_phone",
+        "fax",
+        "salutation",
         "sf_id",
+        // References
         "account_id_sf_lookup",
+        "owner_user_id",
+        "reports_to",
+        // Details
         "is_primary",
         "department",
+        "description",
         "linkedin_url",
+        "do_not_contact",
+        "lead_source",
+        "lead_source_detail",
+        "birthdate",
+        "assistant_name",
+        "assistant_phone",
+        // Mailing address
+        "mailing_street",
+        "mailing_city",
+        "mailing_state",
+        "mailing_zip",
+        "mailing_country",
+        // Other address
+        "other_street",
+        "other_city",
+        "other_state",
+        "other_zip",
+        "other_country",
+        // MQL/SQL
+        "mql_date",
+        "sql_date",
+        // Partner & next steps
+        "partner_source",
+        "next_steps",
+        // Email bounce
+        "email_bounced_reason",
+        "email_bounced_date",
+        // Activity
+        "last_activity_date",
+        // SF History
+        "sf_created_by",
+        "sf_created_date",
+        "sf_last_modified_by",
+        "sf_last_modified_date",
       ];
     case "opportunities":
       return [
         "name",
         "sf_id",
         "account_id_sf_lookup",
+        "primary_contact_id_sf_lookup",
+        "owner_user_id",
         "stage",
         "amount",
         "close_date",
-        "kind",
         "expected_close_date",
-        "notes",
+        "kind",
+        "team",
         "probability",
+        // Status flags
+        "is_closed",
+        "is_won",
+        "forecast_category",
+        "stage_sort_order",
+        // Automation
+        "created_by_automation",
+        // SF references
+        "sf_contract_id",
+        "has_opportunity_line_items",
+        "sf_pricebook_id",
+        "total_opportunity_quantity",
+        // Contract
+        "contract_start_date",
+        "contract_end_date",
+        "contract_length_months",
+        "contract_year",
+        // Financial
+        "discount",
+        "subtotal",
+        "expected_revenue",
+        "service_amount",
+        "product_amount",
+        "services_included",
+        "service_description",
+        "promo_code",
+        "payment_frequency",
+        "cycle_count",
+        "auto_renewal",
+        "one_time_project",
+        // FTE snapshot
+        "fte_count",
+        "fte_range",
+        // Lead / Source
+        "lead_source",
+        "lead_source_detail",
+        "campaign_id",
+        // Details
         "description",
+        "notes",
+        "next_step",
+        "follow_up",
+        "loss_reason",
+        // Activity
+        "last_activity_date",
+        "last_stage_change_date",
+        // SF History
+        "sf_created_by",
+        "sf_created_date",
+        "sf_last_modified_by",
+        "sf_last_modified_date",
+        "fiscal_year",
+        "fiscal_quarter",
       ];
     case "leads":
       return [
+        // Identity
         "first_name",
         "last_name",
         "email",
+        "salutation",
         "company",
+        "sf_id",
+        // Status & source
         "status",
         "source",
-        "sf_id",
+        "rating",
+        // Owner
+        "owner_user_id",
+        // Contact info
         "phone",
+        "mobile_phone",
+        "fax",
         "title",
+        // Company details
         "industry",
         "website",
         "employees",
         "annual_revenue",
+        // Address
         "street",
         "city",
         "state",
         "zip",
         "country",
+        // Details
         "description",
+        "lead_source_detail",
+        "qualification",
+        "score",
+        // MQL
+        "mql_date",
+        // Partner & next steps
+        "partner_source",
+        "next_steps",
+        // Opt-out & flags
+        "has_opted_out_of_email",
+        "do_not_call",
+        "do_not_market_to",
+        "do_not_contact",
+        // Classification
+        "lead_type",
+        "industry_category",
+        "project",
+        "project_segment",
+        "credential",
+        "business_relationship_tag",
+        "time_zone",
+        "phone_ext",
+        "events_attended",
+        "cold_lead",
+        "cold_lead_source",
+        // Notes
+        "notes",
+        "comments",
+        // LinkedIn
+        "linkedin_url",
+        // Priority
+        "priority_lead",
+        // Conversion
+        "is_converted",
+        "converted_at",
+        "converted_account_id",
+        "converted_contact_id",
+        "converted_opportunity_id",
+        // Email bounce
+        "email_bounced_reason",
+        "email_bounced_date",
+        // Activity
+        "last_activity_date",
+        "last_transfer_date",
+        // Pardot marketing fields
+        "first_activity_date",
+        "pardot_last_activity_date",
+        "conversion_date",
+        "pardot_campaign",
+        "pardot_comments",
+        "pardot_grade",
+        "pardot_score",
+        "pardot_url",
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_content",
+        "utm_term",
+        // SF History
+        "sf_created_by",
+        "sf_created_date",
+        "sf_last_modified_by",
+        "sf_last_modified_date",
+      ];
+    case "products":
+      return [
+        "sf_id",
+        "code",
+        "name",
+        "product_family",
+        "description",
+        "is_active",
+        "default_arr",
+        "category",
+        "pricing_model",
+        "sf_created_date",
+        "sf_last_modified_date",
+      ];
+    case "price_books":
+      return [
+        "sf_id",
+        "name",
+        "description",
+        "is_active",
+        "is_default",
+        "effective_date",
+        "sf_created_date",
+        "sf_last_modified_date",
+      ];
+    case "price_book_entries":
+      return [
+        "sf_id",
+        "price_book_sf_id",
+        "product_sf_id",
+        "product_code_lookup",
+        "unit_price",
+        "fte_range",
+        "is_active",
+        "product_name",
+        "price_book_name",
+        "sf_created_date",
+        "sf_last_modified_date",
+      ];
+    case "opportunity_products":
+      return [
+        "sf_line_item_id",
+        "opportunity_sf_id",
+        "product_sf_id",
+        "price_book_entry_sf_id",
+        "product_code_lookup",
+        "product_name_lookup",
+        "quantity",
+        "unit_price",
+        "list_price",
+        "total_price",
+        "discount_percent",
+        "line_description",
+        "service_date",
+        // SF audit metadata
+        "sf_created_date",
+        "sf_created_by",
+        "sf_last_modified_date",
+        "sf_last_modified_by",
+      ];
+    case "tasks":
+      return [
+        // Identity / refs
+        "sf_id",
+        "subject",
+        "body",
+        "owner_user_id",
+        "who_id_sf_lookup",
+        "what_id_sf_lookup",
+        "account_id_sf_lookup",
+        // Dates
+        "due_at",
+        "completed_at",
+        // Classification
+        "sf_task_type",
+        "sf_task_status",
+        "sf_is_closed",
+        "priority",
+        "activity_origin_type",
+        // Call detail
+        "call_type",
+        "call_disposition",
+        "call_object",
+        "call_duration_seconds",
+        // Email link (for Task.Type = Email)
+        "sf_email_message_id",
+        // SF reminder (preserved verbatim, doesn't fire CRM reminders)
+        "sf_reminder_datetime",
+        "sf_is_reminder_set",
+        // Recurrence
+        "is_recurrence",
+        "recurrence_type",
+        "recurrence_interval",
+        "recurrence_start_date",
+        "recurrence_end_date",
+        "recurrence_timezone",
+        "recurrence_day_of_week_mask",
+        "recurrence_day_of_month",
+        "recurrence_month_of_year",
+        "recurrence_instance",
+        "sf_recurrence_activity_id",
+        // SF audit metadata
+        "sf_created_date",
+        "sf_created_by",
+        "sf_last_modified_date",
+        "sf_last_modified_by",
+      ];
+    case "events":
+      return [
+        "sf_id",
+        "subject",
+        "body",
+        "owner_user_id",
+        "who_id_sf_lookup",
+        "what_id_sf_lookup",
+        "account_id_sf_lookup",
+        "due_at",
+        "completed_at",
+        "event_location",
+        "duration_minutes",
+        "event_type",
+        "is_all_day_event",
+        "sf_created_date",
+        "sf_created_by",
+        "sf_last_modified_date",
+        "sf_last_modified_by",
       ];
   }
 }
 
+/** Human-readable label overrides for specific CRM field keys. */
+const FIELD_LABEL_OVERRIDES: Record<string, string> = {
+  owner_user_id: "Owner",
+  sf_id: "Salesforce ID",
+  account_id_sf_lookup: "Account (SF ID Lookup)",
+  primary_contact_id_sf_lookup: "Primary Contact (SF ID Lookup)",
+  sf_created_by: "SF Created By",
+  sf_created_date: "SF Created Date",
+  sf_last_modified_by: "SF Last Modified By",
+  sf_last_modified_date: "SF Last Modified Date",
+  acv: "ACV (Annual Contract Value)",
+  fte_count: "FTE Count",
+  fte_range: "FTE Range",
+  billing_latitude: "Billing Latitude",
+  billing_longitude: "Billing Longitude",
+  shipping_latitude: "Shipping Latitude",
+  shipping_longitude: "Shipping Longitude",
+  sic_description: "SIC Description",
+  do_not_contact: "Do Not Contact",
+  last_activity_date: "Last Activity Date",
+  // Contact fields
+  mobile_phone: "Mobile Phone",
+  home_phone: "Home Phone",
+  other_phone: "Other Phone",
+  linkedin_url: "LinkedIn URL",
+  is_primary: "Is Primary Contact",
+  reports_to: "Reports To",
+  assistant_name: "Assistant Name",
+  assistant_phone: "Assistant Phone",
+  email_bounced_reason: "Email Bounced Reason",
+  email_bounced_date: "Email Bounced Date",
+  other_street: "Other Street",
+  other_city: "Other City",
+  other_state: "Other State",
+  other_zip: "Other Zip",
+  other_country: "Other Country",
+  // Opportunity fields
+  is_closed: "Is Closed",
+  is_won: "Is Won",
+  forecast_category: "Forecast Category",
+  expected_revenue: "Expected Revenue",
+  services_included: "Services Included",
+  service_description: "Service Description",
+  service_amount: "Service Amount",
+  product_amount: "Product Amount",
+  contract_length_months: "Contract Length (Months)",
+  payment_frequency: "Payment Frequency",
+  auto_renewal: "Auto Renewal",
+  one_time_project: "One-Time Project",
+  campaign_id: "Campaign",
+  last_stage_change_date: "Last Stage Change Date",
+  fiscal_year: "Fiscal Year",
+  fiscal_quarter: "Fiscal Quarter",
+  loss_reason: "Loss Reason",
+  // Lead fields
+  is_converted: "Is Converted",
+  converted_at: "Converted Date",
+  converted_account_id: "Converted Account ID",
+  converted_contact_id: "Converted Contact ID",
+  converted_opportunity_id: "Converted Opportunity ID",
+  lead_source_detail: "Lead Source Detail",
+  mql_date: "MQL Date",
+  sql_date: "SQL Date",
+  partner_source: "Partner Source",
+  next_steps: "Next Steps",
+  created_by_automation: "Created by Automation",
+  sf_contract_id: "SF Contract ID",
+  has_opportunity_line_items: "Has Line Items",
+  sf_pricebook_id: "SF Price Book ID",
+  stage_sort_order: "Stage Sort Order",
+  total_opportunity_quantity: "Total Opportunity Quantity",
+  // Lead opt-out & flags
+  has_opted_out_of_email: "Has Opted Out of Email",
+  do_not_call: "Do Not Call",
+  do_not_market_to: "Do Not Market To",
+  lead_type: "Lead Type",
+  notes: "Notes",
+  comments: "Comments",
+  priority_lead: "Priority Lead",
+  // Product fields
+  code: "Product Code",
+  product_family: "Product Family",
+  default_arr: "Default ARR",
+  pricing_model: "Pricing Model",
+  // Price book entry fields
+  price_book_sf_id: "Price Book (SF ID)",
+  product_sf_id: "Product (SF ID)",
+  product_code_lookup: "Product (Code Lookup)",
+  unit_price: "Unit Price",
+  product_name: "Product Name",
+  price_book_name: "Price Book Name",
+  is_default: "Is Default/Standard",
+  effective_date: "Effective Date",
+};
+
 /** Human-readable label for a CRM field key. */
 function fieldLabel(key: string): string {
+  if (FIELD_LABEL_OVERRIDES[key]) return FIELD_LABEL_OVERRIDES[key];
   return key
     .replace(/_sf_lookup$/, " (SF Lookup)")
     .replace(/_/g, " ")
@@ -365,14 +1856,28 @@ function validateRow(
   if (entity === "accounts" && !mapped.name) {
     return { type: "skip", message: "Missing required field \"name\"" };
   }
-  if (entity === "contacts" && (!mapped.first_name || !mapped.last_name)) {
-    return { type: "skip", message: "Missing required field \"first_name\" or \"last_name\"" };
+  if (entity === "contacts" && !mapped.last_name) {
+    return { type: "skip", message: "Missing required field \"last_name\"" };
   }
-  if (entity === "leads" && (!mapped.first_name || !mapped.last_name)) {
-    return { type: "skip", message: "Missing required field \"first_name\" or \"last_name\"" };
+  if (entity === "leads" && !mapped.last_name) {
+    return { type: "skip", message: "Missing required field \"last_name\"" };
+  }
+  if (entity === "leads" && mapped.is_converted && (mapped.is_converted === "true" || mapped.is_converted === "1")) {
+    return { type: "skip", message: "Converted lead — already a contact in Salesforce" };
   }
   if (entity === "opportunities" && !mapped.name) {
     return { type: "skip", message: "Missing required field \"name\"" };
+  }
+  if (entity === "products" && !mapped.name) {
+    return { type: "skip", message: "Missing required field \"name\"" };
+  }
+  // code is auto-generated from name via slugifyCode() during import when
+  // SF ProductCode is blank (common), so name alone is sufficient here.
+  if (entity === "price_books" && !mapped.name) {
+    return { type: "skip", message: "Missing required field \"name\"" };
+  }
+  if (entity === "price_book_entries" && !mapped.unit_price) {
+    return { type: "skip", message: "Missing required field \"unit_price\"" };
   }
 
   return null;
@@ -425,12 +1930,178 @@ export function SalesforceImport() {
   const [currentBatch, setCurrentBatch] = useState({ batch: 0, totalBatches: 0 });
   const [estimatedTimeRemaining, setEstimatedTimeRemaining] = useState<string | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
+  const [undoing, setUndoing] = useState(false);
   const [validation, setValidation] = useState<ValidationSummary | null>(null);
   const [duplicateAction, setDuplicateAction] = useState<"skip" | "update">(
     "skip"
   );
+  // Task-import filters: by default we only import historical completed
+  // activity (calls, meetings, notes). Emails are skipped because the
+  // Outlook integration will backfill those — re-importing SF email logs
+  // would produce duplicates. Open tasks (follow-ups) are skipped to
+  // avoid cluttering the timeline with stale SF to-dos.
+  const [skipOpenTasks, setSkipOpenTasks] = useState(true);
+  const [skipEmailTasks, setSkipEmailTasks] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const userFileInputRef = useRef<HTMLInputElement>(null);
   const importStartTimeRef = useRef<number>(0);
+
+  // Salesforce User ID → { name, email } mapping
+  // Pre-loaded from Salesforce User export. Can be overridden by uploading a new User CSV.
+  const [sfUserMap, setSfUserMap] = useState<Map<string, { name: string; email: string }>>(new Map([
+    ["0055w00000A9RjVAAV", { name: "Joe Gellatly", email: "joeg@medcurity.com" }],
+    ["0055w00000A9RnmAAF", { name: "Chatter Expert", email: "noreply@chatter.salesforce.com" }],
+    ["0055w00000A9RnnAAF", { name: "System", email: "rachelk@medcurity.com" }],
+    ["0055w00000A9Rs9AAF", { name: "April Needham", email: "apriln@medcurity.com" }],
+    ["0055w00000A9RsJAAV", { name: "Amanda Hepper", email: "amanda@medcurity.com" }],
+    ["0055w00000A9RsOAAV", { name: "Lorraine Gary", email: "lorraineg@medcurity.com" }],
+    ["0055w00000BmnpFAAR", { name: "Christian Williams", email: "christianw@medcurity.com" }],
+    ["0055w00000BmnpKAAR", { name: "Brayden Frost", email: "braydenf@medcurity.com" }],
+    ["0055w00000ByXXDAA3", { name: "Integration User", email: "marketing@medcurity.com" }],
+    ["0055w00000ByXXEAA3", { name: "Automated Process", email: "wharley@00d5w000002rxcxeay" }],
+    ["0055w00000ByXXFAA3", { name: "Salesforce Administrator", email: "wharley@00d5w000002rxcxeay" }],
+    ["0055w00000ByXXIAA3", { name: "Security User", email: "insightssecurity@example.com" }],
+    ["0055w00000ByXXJAA3", { name: "Platform Integration User", email: "noreply@00d5w000002rxcxeay" }],
+    ["0055w00000CT0VRAA1", { name: "Rachel Kunkel", email: "rachelk@medcurity.com" }],
+    ["0055w00000CwK1jAAF", { name: "Gabe Ellzey", email: "gabe.ellzey@ziplineinteractive.com" }],
+    ["0055w00000CwNfdAAF", { name: "Salesforce Mobile Apps", email: "noreply@salesforce.com" }],
+    ["0055w00000CwNq2AAF", { name: "Website API", email: "brandon.perdue@ziplineinteractive.com" }],
+    ["0055w00000CwNsmAAF", { name: "Matt Bayley", email: "mattb@medcurity.com" }],
+    ["0055w00000CwOJYAA3", { name: "Public User", email: "externalWho@00d5w000002rxcxeay.ext" }],
+    ["0055w00000CwT2zAAF", { name: "Ari Van Peursem", email: "arivp@medcurity.com" }],
+    ["0055w00000Cx2CmAAJ", { name: "Alexa Fouch", email: "alexaf@medcurity.com" }],
+    ["0055w00000Cx9ziAAB", { name: "Grant Miller", email: "grantm@medcurity.com" }],
+    ["0055w00000CyBoMAAV", { name: "Walt Maxwell", email: "walterm@medcurity.com" }],
+    ["0055w00000CyFm2AAF", { name: "Meghan Andrews", email: "meghana@medcurity.com" }],
+    ["0055w00000CycSrAAJ", { name: "Aaric Gomez", email: "aaricg@medcurity.com" }],
+    ["0055w00000Cz7s1AAB", { name: "Wyatt Watkins", email: "wyattw@medcurity.com" }],
+    ["0055w00000Cz7sGAAR", { name: "Rachel Moe", email: "rachelm@medcurity.com" }],
+    ["0055w00000D0QMMAA3", { name: "Gavin Weiler", email: "gavinw@medcurity.com" }],
+    ["0055w00000FNiqqAAD", { name: "Dave Westenskow", email: "davew@medcurity.com" }],
+    ["0055w00000FPhNGAA1", { name: "Dennis Hake", email: "dennis.hake@outlook.com" }],
+    ["0055w00000FPhNLAA1", { name: "Mel (Old) Nevala (Old)", email: "meln@medcurity.com" }],
+    ["0055w00000FPjGCAA1", { name: "Bobby Seegmiller", email: "bobbys@medcurity.com" }],
+    ["0055w00000FPjvUAAT", { name: "Client Admin", email: "client.admin@minlopro.com" }],
+    ["0055w00000FPlKxAAL", { name: "Integrated User", email: "marketing@medcurity.com" }],
+    ["0055w00000FPlYJAA1", { name: "Salesforce Connected Apps", email: "noreply@salesforce.com" }],
+    ["0055w00000FPlfhAAD", { name: "HubSpot Integration", email: "noreply@salesforce.com" }],
+    ["0055w00000FPnYXAA1", { name: "Abby Jones", email: "abbyj@medcurity.com" }],
+    ["005RO000002CtcHYAS", { name: "Margaret Karatzas", email: "margaretl@medcurity.com" }],
+    ["005RO000002DRpFYAW", { name: "Jordan Scherich", email: "jordans@medcurity.com" }],
+    ["005RO000002cb8fYAA", { name: "SalesforceIQ Integration", email: "salesforceiqintegration@00d5w000002rxcxeay.ext" }],
+    ["005RO000002cb8gYAA", { name: "Insights Integration", email: "insightsintegration@00d5w000002rxcxeay.ext" }],
+    ["005RO000002cb8hYAA", { name: "B2BMA Integration", email: "noreply@salesforce.com" }],
+    ["005RO000002cbAHYAY", { name: "b2bmaIntegration", email: "noreply@salesforce.com" }],
+    ["005RO000002ccG1YAI", { name: "Sales Insights", email: "noreply@salesforce.com" }],
+    ["005RO000002gHUjYAM", { name: "Pardot", email: "noreply@salesforce.com" }],
+    ["005RO000002w6DZYAY", { name: "Sai Gudivada", email: "sai.gudivada@olooptech.com" }],
+    ["005RO0000030yorYAA", { name: "Niharika Medavaram", email: "niharika.medavaram@olooptech.com" }],
+    ["005RO000003nrpRYAQ", { name: "Summer Hume", email: "summerh@medcurity.com" }],
+    ["005RO000005BrJ4YAK", { name: "Molly Miller", email: "mollym@medcurity.com" }],
+    ["005RO000005BtHeYAK", { name: "Vaughn Handel", email: "vaughnh@medcurity.com" }],
+    ["005RO000005C4kvYAC", { name: "Mel Nevala", email: "meln@medcurity.com" }],
+  ]));
+  const [userCsvLoaded, setUserCsvLoaded] = useState(true);
+  const [retryEdits, setRetryEdits] = useState<Record<number, Record<string, string>>>({});
+  const [retryingRows, setRetryingRows] = useState(false);
+
+  // Salesforce Product2.csv side-load for PBE imports.
+  // SF PricebookEntry exports only carry Product2Id (no name), so when our
+  // product import collapsed FTE variants, most PBE rows can't resolve their
+  // SF product ID. This map gives us SF product ID → name so we can fall
+  // back to FTE-stripped name lookup against our stored canonical products.
+  const [sfProductMap, setSfProductMap] = useState<
+    Map<string, { name: string; code: string | null }>
+  >(new Map());
+  const [productCsvLoaded, setProductCsvLoaded] = useState(false);
+  const productFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleProductFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const text = evt.target?.result as string;
+        if (!text) return;
+
+        const parsed = parseCSV(text);
+        if (parsed.length < 2) { toast.error("Product CSV is empty"); return; }
+        const headers = parsed[0];
+        const rows = parsed.slice(1);
+        const idIdx = headers.findIndex((h: string) => h.toLowerCase() === "id");
+        const nameIdx = headers.findIndex((h: string) => h.toLowerCase() === "name");
+        const codeIdx = headers.findIndex((h: string) => h.toLowerCase() === "productcode");
+
+        if (idIdx === -1 || nameIdx === -1) {
+          toast.error("Product CSV must have 'Id' and 'Name' columns");
+          return;
+        }
+
+        const map = new Map<string, { name: string; code: string | null }>();
+        for (const row of rows) {
+          const id = row[idIdx]?.trim();
+          if (!id) continue;
+          const name = row[nameIdx]?.trim() || "";
+          const code = codeIdx >= 0 ? (row[codeIdx]?.trim() || null) : null;
+          if (name) map.set(id, { name, code });
+        }
+
+        setSfProductMap(map);
+        setProductCsvLoaded(true);
+        toast.success(`Loaded ${map.size} Salesforce products for PBE matching`);
+      };
+      reader.readAsText(file);
+    },
+    []
+  );
+
+  /* ---------- SF User CSV handling ---------- */
+
+  const handleUserFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const text = evt.target?.result as string;
+        if (!text) return;
+
+        const parsed = parseCSV(text);
+        if (parsed.length < 2) { toast.error("User CSV is empty"); return; }
+        const headers = parsed[0];
+        const rows = parsed.slice(1);
+        const idIdx = headers.findIndex((h: string) => h.toLowerCase() === "id");
+        const firstIdx = headers.findIndex((h: string) => h.toLowerCase() === "firstname");
+        const lastIdx = headers.findIndex((h: string) => h.toLowerCase() === "lastname");
+        const emailIdx = headers.findIndex((h: string) => h.toLowerCase() === "email");
+
+        if (idIdx === -1) {
+          toast.error("User CSV must have an 'Id' column");
+          return;
+        }
+
+        const map = new Map<string, { name: string; email: string }>();
+        for (const row of rows) {
+          const id = row[idIdx]?.trim();
+          if (!id) continue;
+          const first = firstIdx >= 0 ? row[firstIdx]?.trim() || "" : "";
+          const last = lastIdx >= 0 ? row[lastIdx]?.trim() || "" : "";
+          const email = emailIdx >= 0 ? row[emailIdx]?.trim() || "" : "";
+          const name = `${first} ${last}`.trim();
+          map.set(id, { name, email });
+        }
+
+        setSfUserMap(map);
+        setUserCsvLoaded(true);
+        toast.success(`Loaded ${map.size} Salesforce users for owner matching`);
+      };
+      reader.readAsText(file);
+    },
+    []
+  );
 
   /* ---------- File handling ---------- */
 
@@ -461,9 +2132,38 @@ export function SalesforceImport() {
         const crmFields = getCRMFields(entity);
         const autoMappings: ColumnMapping[] = headers.map((h) => {
           const normalized = h.toLowerCase().trim();
-          const exactMatch = fieldMap[normalized];
-          if (exactMatch) {
-            return { csvColumn: h, crmField: exactMatch, confidence: "exact" as MappingConfidence };
+          // An explicit "" mapping in the field map means "we know this
+          // column and we DELIBERATELY skip it" — fuzzy must not get a
+          // second chance to mis-map it (e.g. pi__last_activity__c was
+          // bigram-matching to last_activity_date and clobbering the
+          // real LastActivityDate value).
+          if (Object.prototype.hasOwnProperty.call(fieldMap, normalized)) {
+            const explicit = fieldMap[normalized];
+            return {
+              csvColumn: h,
+              crmField: explicit,
+              confidence: explicit ? ("exact" as MappingConfidence) : ("unmapped" as MappingConfidence),
+            };
+          }
+          // Try without spaces/underscores/slashes (catches "Billing Zip/Postal Code" etc.)
+          const stripped = normalized.replace(/[\s_/]+/g, "");
+          if (Object.prototype.hasOwnProperty.call(fieldMap, stripped)) {
+            const explicit = fieldMap[stripped];
+            return {
+              csvColumn: h,
+              crmField: explicit,
+              confidence: explicit ? ("exact" as MappingConfidence) : ("unmapped" as MappingConfidence),
+            };
+          }
+          // Try with spaces instead of camelCase: "BillingPostalCode" → "billing postal code"
+          const spaced = normalized.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+          if (Object.prototype.hasOwnProperty.call(fieldMap, spaced)) {
+            const explicit = fieldMap[spaced];
+            return {
+              csvColumn: h,
+              crmField: explicit,
+              confidence: explicit ? ("exact" as MappingConfidence) : ("unmapped" as MappingConfidence),
+            };
           }
           // Try fuzzy match
           const fuzzy = fuzzyMatchField(h, crmFields);
@@ -504,7 +2204,17 @@ export function SalesforceImport() {
     headers.forEach((header, idx) => {
       const mapping = columnMappings.find((m) => m.csvColumn === header);
       if (mapping?.crmField) {
-        mapped[mapping.crmField] = rowValues[idx] ?? "";
+        const val = rowValues[idx] ?? "";
+        // For owner_user_id: prefer 005 SF IDs over text names
+        // (if two columns both map to owner_user_id, keep the 005 value)
+        if (mapping.crmField === "owner_user_id" && mapped.owner_user_id) {
+          if (val.startsWith("005") && !mapped.owner_user_id.startsWith("005")) {
+            mapped.owner_user_id = val; // 005 ID replaces text name
+          }
+          // Otherwise keep the existing value (don't let text overwrite 005)
+          return;
+        }
+        mapped[mapping.crmField] = val;
       }
     });
     return mapped;
@@ -549,6 +2259,13 @@ export function SalesforceImport() {
       : -1;
     const seenSfIds = new Set<string>();
 
+    // For products: mirror the FTE-strip + slugify + canonical dedup
+    // logic that runs in handleImport, so the preview accurately reflects
+    // how many rows will actually be inserted (vs collapsed as FTE
+    // duplicates of the same canonical product).
+    const seenProductCodesPreview = new Set<string>();
+    const seenProductNamesPreview = new Set<string>();
+
     for (let i = 0; i < csvRows.length; i++) {
       const row = csvRows[i];
       const mapped = buildMappedRow(row, csvHeaders, mappings);
@@ -574,6 +2291,36 @@ export function SalesforceImport() {
         } else {
           warnings.push({ rowNumber: i + 1, ...issue });
         }
+        continue;
+      }
+
+      // Product canonical-dedup preview (matches handleImport behavior).
+      if (entity === "products") {
+        const rawName = typeof mapped.name === "string" ? mapped.name : "";
+        const rawCode = typeof mapped.code === "string" ? mapped.code : "";
+        const baseName = rawName ? stripFtePrefix(rawName).base : "";
+        const baseCode = rawCode ? stripFtePrefix(rawCode).base : "";
+        const finalCode = baseCode || (baseName ? slugifyCode(baseName) : "");
+        const codeKey = finalCode.toLowerCase();
+        const nameKey = baseName.toLowerCase();
+        if (codeKey && seenProductCodesPreview.has(codeKey)) {
+          willSkip.push({
+            rowNumber: i + 1,
+            type: "skip",
+            message: `Duplicate product (FTE variant of "${baseName}")`,
+          });
+          continue;
+        }
+        if (!codeKey && nameKey && seenProductNamesPreview.has(nameKey)) {
+          willSkip.push({
+            rowNumber: i + 1,
+            type: "skip",
+            message: `Duplicate product name "${baseName}"`,
+          });
+          continue;
+        }
+        if (codeKey) seenProductCodesPreview.add(codeKey);
+        if (nameKey) seenProductNamesPreview.add(nameKey);
       }
     }
 
@@ -603,28 +2350,313 @@ export function SalesforceImport() {
     const failedCount: number[] = [0];
     const errors: string[] = [];
     const failedRows: FailedRow[] = [];
+    const importedIds: string[] = [];
+
+    // Track unmatched SF owner IDs to warn user
+    const unmatchedOwners = new Map<string, string[]>();
 
     try {
-      // Pre-fetch lookup data
+      // Pre-fetch lookup data — user_profiles doesn't have email,
+      // so we fetch from auth.users via the admin RPC or match by name.
+      // We also build a reverse map from the pre-loaded sfUserMap:
+      // SF User email → CRM user full_name → CRM user id
       const { data: users } = await supabase
         .from("user_profiles")
         .select("id, full_name");
 
+      // Build lookup maps from CRM users for owner matching
+      const crmEmailLookup = new Map<string, string>();
+      const crmNameLookup = new Map<string, string>();
+
+      if (users) {
+        for (const u of users) {
+          if (u.full_name) crmNameLookup.set((u.full_name as string).toLowerCase(), u.id as string);
+        }
+        // Build email lookup by matching SF user emails to CRM user names
+        // Since user_profiles has no email, we match SF user name → CRM user name
+        // then register the SF user's email as pointing to that CRM user ID
+        for (const [, sfUser] of sfUserMap) {
+          if (sfUser.email && sfUser.name) {
+            const crmId = crmNameLookup.get(sfUser.name.toLowerCase());
+            if (crmId) {
+              crmEmailLookup.set(sfUser.email.toLowerCase(), crmId);
+            }
+          }
+        }
+      }
+
       let accountSfMap: Map<string, string> | null = null;
-      if (
+      let contactSfMap: Map<string, string> | null = null;
+      let productSfMap: Map<string, string> | null = null;
+      let productCodeMap: Map<string, string> | null = null;
+      let productNameMap: Map<string, string> | null = null;
+      let priceBookSfMap: Map<string, string> | null = null;
+      let priceBookNameMap: Map<string, string> | null = null;
+      let opportunitySfMap: Map<string, string> | null = null;
+      let leadSfMap: Map<string, string> | null = null;
+      let priceBookEntrySfMap: Map<string, { product_id: string; price_book_id: string; unit_price: number }> | null = null;
+      // CRM-id → { fte_range, fte_count } lookup, used to snapshot FTE data
+      // onto imported opportunities so per-tier pricing works on day one.
+      let accountFteByCrmId: Map<
+        string,
+        { fte_range: string | null; fte_count: number | null }
+      > | null = null;
+
+      // FTE-cleanup session state (see helper comment at top of file)
+      const seenProductCodes = new Set<string>(); // codes already inserted this session
+      const seenProductNames = new Set<string>(); // fallback dedup when code is missing
+
+      // Activities (tasks/events) and opportunity line items all need the
+      // full accounts/contacts/opportunities/products lookup maps. Tasks and
+      // Events use account + contact + opportunity for WhatId/WhoId
+      // resolution; opportunity_products needs opp + product (and PBE).
+      const needsAccountMap =
         entity === "contacts" ||
-        entity === "opportunities"
-      ) {
-        const { data: accounts } = await supabase
-          .from("accounts")
-          .select("id, sf_id")
-          .not("sf_id", "is", null);
+        entity === "opportunities" ||
+        entity === "tasks" ||
+        entity === "events";
+      const needsContactMap =
+        entity === "opportunities" ||
+        entity === "tasks" ||
+        entity === "events";
+      const needsOpportunityMap =
+        entity === "opportunity_products" ||
+        entity === "tasks" ||
+        entity === "events";
+      // SF Tasks/Events frequently attach to LEADS (WhoId starts with 00Q,
+      // not 003). Without a leads SF map, ~70% of historical task rows
+      // got rejected as orphans on the April 22 import — they're cold-call
+      // notes against still-unconverted leads.
+      const needsLeadMap =
+        entity === "tasks" || entity === "events";
+      const needsProductMap = entity === "opportunity_products";
+
+      if (needsAccountMap) {
+        // Paginated — PostgREST caps one fetch at 1000 rows. Skipping
+        // pagination here is what caused the ~6400-contact failure on
+        // the April 21 import: only the first 1000 accounts made it
+        // into the lookup map, so every later contact's AccountId
+        // missed and got reported as "not found in CRM".
+        const accounts = await fetchAllRows<{
+          id: string;
+          sf_id: string | null;
+          fte_range: string | null;
+          fte_count: number | null;
+        }>((from, to) =>
+          supabase
+            .from("accounts")
+            .select("id, sf_id, fte_range, fte_count")
+            .not("sf_id", "is", null)
+            .range(from, to)
+        );
         accountSfMap = new Map(
-          (accounts ?? []).map((a) => [a.sf_id as string, a.id as string])
+          accounts
+            .filter((a) => a.sf_id)
+            .map((a) => [a.sf_id as string, a.id])
+        );
+        if (entity === "opportunities") {
+          accountFteByCrmId = new Map(
+            accounts.map((a) => [
+              a.id,
+              {
+                fte_range: a.fte_range ?? null,
+                fte_count: a.fte_count ?? null,
+              },
+            ])
+          );
+        }
+      }
+      if (needsContactMap) {
+        const contacts = await fetchAllRows<{
+          id: string;
+          sf_id: string | null;
+        }>((from, to) =>
+          supabase
+            .from("contacts")
+            .select("id, sf_id")
+            .not("sf_id", "is", null)
+            .range(from, to)
+        );
+        contactSfMap = new Map(
+          contacts
+            .filter((c) => c.sf_id)
+            .map((c) => [c.sf_id as string, c.id])
+        );
+      }
+      if (needsOpportunityMap) {
+        const opps = await fetchAllRows<{
+          id: string;
+          sf_id: string | null;
+        }>((from, to) =>
+          supabase
+            .from("opportunities")
+            .select("id, sf_id")
+            .not("sf_id", "is", null)
+            .range(from, to)
+        );
+        opportunitySfMap = new Map(
+          opps.filter((o) => o.sf_id).map((o) => [o.sf_id as string, o.id])
+        );
+      }
+      if (needsLeadMap) {
+        const leads = await fetchAllRows<{
+          id: string;
+          sf_id: string | null;
+        }>((from, to) =>
+          supabase
+            .from("leads")
+            .select("id, sf_id")
+            .not("sf_id", "is", null)
+            .range(from, to)
+        );
+        leadSfMap = new Map(
+          leads.filter((l) => l.sf_id).map((l) => [l.sf_id as string, l.id])
+        );
+      }
+      if (needsProductMap) {
+        // Line items reference products by Product2Id (sf_id) and
+        // optionally by PricebookEntryId. Load all three lookups.
+        const products = await fetchAllRows<{
+          id: string;
+          sf_id: string | null;
+          code: string | null;
+          name: string | null;
+        }>((from, to) =>
+          supabase
+            .from("products")
+            .select("id, sf_id, code, name")
+            .range(from, to)
+        );
+        productSfMap = new Map(
+          products.filter((p) => p.sf_id).map((p) => [p.sf_id as string, p.id])
+        );
+        productCodeMap = new Map(
+          products.filter((p) => p.code).map((p) => [p.code as string, p.id])
+        );
+        productNameMap = new Map();
+        for (const p of products) {
+          if (!p.name) continue;
+          const raw = p.name.trim().toLowerCase();
+          productNameMap.set(raw, p.id);
+          const { base } = stripFtePrefix(p.name.trim());
+          if (base) productNameMap.set(base.toLowerCase(), p.id);
+        }
+        // Pre-fetch PBEs so line items can resolve via PricebookEntryId when
+        // the row lacks a Product2Id (some SF exports do). PBE rows carry
+        // product_id, price_book_id, and unit_price.
+        const pbes = await fetchAllRows<{
+          sf_id: string | null;
+          product_id: string;
+          price_book_id: string;
+          unit_price: number | null;
+        }>((from, to) =>
+          supabase
+            .from("price_book_entries")
+            .select("sf_id, product_id, price_book_id, unit_price")
+            .not("sf_id", "is", null)
+            .range(from, to)
+        );
+        priceBookEntrySfMap = new Map(
+          pbes
+            .filter((pbe) => pbe.sf_id)
+            .map((pbe) => [
+              pbe.sf_id as string,
+              {
+                product_id: pbe.product_id,
+                price_book_id: pbe.price_book_id,
+                unit_price: Number(pbe.unit_price ?? 0),
+              },
+            ])
+        );
+      }
+      if (entity === "price_book_entries") {
+        // Build product lookups (by sf_id, by code, and by CLEANED name)
+        // Paginated — same 1000-row cap concern as the accounts map.
+        const products = await fetchAllRows<{
+          id: string;
+          sf_id: string | null;
+          code: string | null;
+          name: string | null;
+        }>((from, to) =>
+          supabase
+            .from("products")
+            .select("id, sf_id, code, name")
+            .range(from, to)
+        );
+        productSfMap = new Map(
+          products.filter((p) => p.sf_id).map((p) => [p.sf_id as string, p.id])
+        );
+        productCodeMap = new Map(
+          products.filter((p) => p.code).map((p) => [p.code as string, p.id])
+        );
+        // Name-based lookup is what makes FTE cleanup work on PBE imports:
+        // a PBE row referencing SF product "51-100 SRA" no longer has a matching
+        // sf_id (we collapsed it), but it DOES still carry the product name in
+        // the CSV. We strip the FTE prefix and look up by the base name.
+        //
+        // We also strip FTE on the *stored* side defensively in case a product
+        // somehow has its FTE prefix still in the name (e.g. imported before
+        // the regex fix). And we add slug entries so PBE rows whose product
+        // name slugifies to a code we already have can still match.
+        productNameMap = new Map();
+        for (const p of products) {
+          if (!p.name) continue;
+          const id = p.id;
+          const rawName = p.name.trim();
+          // Add the raw name lowercased
+          productNameMap.set(rawName.toLowerCase(), id);
+          // Add the FTE-stripped version (in case stored name still has prefix)
+          const { base } = stripFtePrefix(rawName);
+          if (base) productNameMap.set(base.toLowerCase(), id);
+          // Add slugified versions to both code and name maps as a fallback
+          if (base) {
+            const slug = slugifyCode(base);
+            if (slug && !productCodeMap.has(slug)) productCodeMap.set(slug, id);
+          }
+        }
+
+        // Build price book lookups — PBE imports resolve the source SF
+        // price book by sf_id (preferred) or name (fallback) so all 12
+        // tier-specific books stay distinct in the app.
+        const priceBooks = await fetchAllRows<{
+          id: string;
+          sf_id: string | null;
+          name: string | null;
+        }>((from, to) =>
+          supabase
+            .from("price_books")
+            .select("id, sf_id, name")
+            .range(from, to)
+        );
+        priceBookSfMap = new Map(
+          priceBooks.filter((pb) => pb.sf_id).map((pb) => [pb.sf_id as string, pb.id])
+        );
+        priceBookNameMap = new Map(
+          priceBooks
+            .filter((pb) => pb.name)
+            .map((pb) => [(pb.name as string).toLowerCase(), pb.id])
         );
       }
 
-      const tableName = entity;
+      if (entity === "products") {
+        // Seed session dedup state from what's already in the DB so re-runs
+        // of the products import don't try to re-insert the same canonical rows.
+        const existingProducts = await fetchAllRows<{
+          code: string | null;
+          name: string | null;
+        }>((from, to) =>
+          supabase
+            .from("products")
+            .select("code, name")
+            .range(from, to)
+        );
+        for (const p of existingProducts) {
+          if (p.code) seenProductCodes.add(p.code.toLowerCase());
+          if (p.name) seenProductNames.add(p.name.toLowerCase());
+        }
+      }
+
+      const tableName = resolveImportTable(entity);
       const batchSize = 50;
       const total = csvRows.length;
       const totalBatches = Math.ceil(total / batchSize);
@@ -645,6 +2677,50 @@ export function SalesforceImport() {
           const mapped = buildMappedRow(row, csvHeaders, mappings);
           const csvData = buildCsvDataRow(row, csvHeaders);
 
+          // Soft-deleted SF rows (IsDeleted=1) — in the SF recycle bin, not
+          // live data. Never import.
+          const isDeletedRaw = (
+            csvData.IsDeleted ??
+            csvData.isdeleted ??
+            ""
+          ).trim();
+          if (isDeletedRaw === "1" || isDeletedRaw.toLowerCase() === "true") {
+            skippedArr[0]++;
+            continue;
+          }
+
+          // Task pre-filtering: evaluate directly off the raw CSV so we
+          // can drop rows without allocating a record. Matches the user
+          // preference: keep historical closed call/meeting logs only;
+          // emails flow through Outlook sync.
+          if (entity === "tasks") {
+            const typeRaw = (csvData.Type ?? csvData.type ?? "")
+              .trim()
+              .toLowerCase();
+            const statusRaw = (csvData.Status ?? csvData.status ?? "")
+              .trim()
+              .toLowerCase();
+            const isClosedRaw = (
+              csvData.IsClosed ??
+              csvData.isclosed ??
+              ""
+            )
+              .trim()
+              .toLowerCase();
+            const isClosed =
+              isClosedRaw === "1" ||
+              isClosedRaw === "true" ||
+              statusRaw === "completed";
+            if (skipOpenTasks && !isClosed) {
+              skippedArr[0]++;
+              continue;
+            }
+            if (skipEmailTasks && typeRaw === "email") {
+              skippedArr[0]++;
+              continue;
+            }
+          }
+
           const record: Record<string, unknown> = {};
           let skipRow = false;
 
@@ -652,14 +2728,81 @@ export function SalesforceImport() {
             if (!value && value !== "0") continue;
 
             if (field === "owner_user_id") {
-              // Lookup user by name
-              const user = users?.find(
-                (u) =>
-                  u.full_name?.toLowerCase() === value.toLowerCase()
-              );
-              if (user) {
-                record.owner_user_id = user.id;
+              // SF CSVs often have BOTH "Account Owner" (text name) and "Owner Id" (005 ID).
+              // The 005 ID is more reliable. If we already resolved from a 005 ID, skip.
+              // If this is a text name and owner was already set, skip.
+              if (record.owner_user_id) {
+                continue;
               }
+
+              let matched = false;
+              const valueLower = value.toLowerCase().trim();
+
+              // Salesforce User ID (starts with 005) — most reliable
+              if (value.startsWith("005") && sfUserMap.size > 0) {
+                const sfUser = sfUserMap.get(value);
+                if (sfUser) {
+                  if (sfUser.email && crmEmailLookup) {
+                    const crmId = crmEmailLookup.get(sfUser.email.toLowerCase());
+                    if (crmId) {
+                      record.owner_user_id = crmId;
+                      matched = true;
+                    }
+                  }
+                  if (!matched && sfUser.name && crmNameLookup) {
+                    const crmId = crmNameLookup.get(sfUser.name.toLowerCase());
+                    if (crmId) {
+                      record.owner_user_id = crmId;
+                      matched = true;
+                    }
+                  }
+                  if (!matched) {
+                    const label = `${sfUser.name} (${sfUser.email})`;
+                    const existing = unmatchedOwners.get(label) || [];
+                    existing.push(`Row ${rowIndex + 1}`);
+                    unmatchedOwners.set(label, existing);
+                  }
+                }
+              }
+
+              // Text name match — only if no 005 ID was available
+              if (!matched && !value.startsWith("005")) {
+                // Check if there's ALSO a 005 Owner Id column mapped — if so,
+                // skip the text name; the 005 column will handle it more reliably
+                // Check if ANY mapped owner column has a 005 value in this row
+                const ownerMappings = mappings.filter((m) => m.crmField === "owner_user_id");
+                const has005Column = ownerMappings.some((m) => {
+                  const colIdx = csvHeaders.indexOf(m.csvColumn);
+                  return colIdx >= 0 && row[colIdx]?.startsWith("005");
+                });
+
+                if (has005Column) {
+                  // Skip text name — the 005 column will resolve this row
+                  continue;
+                }
+
+                // No 005 column — try matching the text name directly
+                const userByName = users?.find(
+                  (u) => u.full_name?.toLowerCase() === valueLower
+                );
+                if (userByName) {
+                  record.owner_user_id = userByName.id;
+                  matched = true;
+                }
+                if (!matched && value.includes("@")) {
+                  const crmId = crmEmailLookup.get(valueLower);
+                  if (crmId) {
+                    record.owner_user_id = crmId;
+                    matched = true;
+                  }
+                }
+                if (!matched) {
+                  const existing = unmatchedOwners.get(value) || [];
+                  existing.push(`Row ${rowIndex + 1}`);
+                  unmatchedOwners.set(value, existing);
+                }
+              }
+
               continue;
             }
 
@@ -672,11 +2815,243 @@ export function SalesforceImport() {
                 } else {
                   const errMsg = `Account SF ID "${value}" not found in CRM`;
                   errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
-                  failedRows.push({ rowNumber: rowIndex + 1, csvData, error: errMsg });
+                  failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
                   failedCount[0]++;
                   skipRow = true;
                 }
               }
+              continue;
+            }
+
+            if (field === "primary_contact_id_sf_lookup") {
+              // Lookup contact by SF ID
+              if (contactSfMap) {
+                const contactId = contactSfMap.get(value);
+                if (contactId) {
+                  record.primary_contact_id = contactId;
+                }
+                // Don't fail — primary contact is optional
+              }
+              continue;
+            }
+
+            // Product SF ID lookup (for price book entries)
+            // NOTE: during FTE cleanup, tier-specific SF products (e.g. "51-100 SRA")
+            // no longer exist in CRM — they were collapsed into the canonical
+            // "SRA". So a failed sf_id lookup is NOT fatal here; we fall through
+            // to the product_name base-name lookup below.
+            if (field === "product_sf_id") {
+              if (productSfMap) {
+                const productId = productSfMap.get(value);
+                if (productId) {
+                  record.product_id = productId;
+                }
+              }
+              // Salesforce PricebookEntry exports DON'T include product
+              // names. After FTE-cleanup most product SF IDs no longer
+              // match. If the user side-loaded Product2.csv, look up the
+              // SF ID there to get the original name, strip the FTE
+              // prefix, and resolve against our stored canonical
+              // products by name / code / slug.
+              if (!record.product_id && sfProductMap.size > 0) {
+                const sfProd = sfProductMap.get(value);
+                if (sfProd) {
+                  const { base } = stripFtePrefix(sfProd.name);
+                  const cleaned = base.trim();
+                  // Stash the resolved SF name for downstream use
+                  // (e.g. validation error message, dedup keys).
+                  record.__product_name_raw = sfProd.name;
+
+                  // a. exact lowercase
+                  let pid = productNameMap?.get(cleaned.toLowerCase());
+                  // b. whitespace-collapsed
+                  if (!pid && productNameMap) {
+                    pid = productNameMap.get(cleaned.replace(/\s+/g, " ").toLowerCase());
+                  }
+                  // c. SF ProductCode (if present in side-load)
+                  if (!pid && productCodeMap && sfProd.code) {
+                    pid = productCodeMap.get(sfProd.code);
+                  }
+                  // d. slugified base
+                  if (!pid && productCodeMap) {
+                    pid = productCodeMap.get(slugifyCode(cleaned));
+                  }
+                  if (pid) {
+                    record.product_id = pid;
+                  }
+                }
+              }
+              continue;
+            }
+
+            // Product code lookup (for price book entries)
+            if (field === "product_code_lookup") {
+              if (!record.product_id && productCodeMap) {
+                const productId = productCodeMap.get(value);
+                if (productId) {
+                  record.product_id = productId;
+                }
+                // Don't fail — product_sf_id is the primary lookup
+              }
+              continue;
+            }
+
+            // Price book SF ID lookup
+            if (field === "price_book_sf_id") {
+              if (priceBookSfMap) {
+                const pbId = priceBookSfMap.get(value);
+                if (pbId) {
+                  record.price_book_id = pbId;
+                } else {
+                  const errMsg = `Price Book SF ID "${value}" not found in CRM — import price books first`;
+                  errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
+                  failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
+                  failedCount[0]++;
+                  skipRow = true;
+                }
+              }
+              continue;
+            }
+
+            // --- Opportunity line items (OpportunityLineItem.csv) ---
+            // Resolve OpportunityId → opportunity_id. Missing opp is fatal
+            // because the line item has no parent to attach to.
+            if (field === "opportunity_sf_id") {
+              if (opportunitySfMap) {
+                const oppId = opportunitySfMap.get(value);
+                if (oppId) {
+                  record.opportunity_id = oppId;
+                } else {
+                  const errMsg = `Opportunity SF ID "${value}" not found in CRM — import opportunities first`;
+                  errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
+                  failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
+                  failedCount[0]++;
+                  skipRow = true;
+                }
+              }
+              continue;
+            }
+
+            // Line items can also resolve the product via PricebookEntryId
+            // (when Product2Id isn't present on the row). We back-fill the
+            // product_id, and use the PBE's unit_price as a fallback if the
+            // line item itself doesn't carry one.
+            if (field === "price_book_entry_sf_id") {
+              if (priceBookEntrySfMap) {
+                const pbe = priceBookEntrySfMap.get(value);
+                if (pbe) {
+                  if (!record.product_id) record.product_id = pbe.product_id;
+                  record.__pbe_unit_price_fallback = pbe.unit_price;
+                }
+                // Not fatal — product_sf_id is the primary lookup
+              }
+              continue;
+            }
+
+            // --- Activity WhoId/WhatId (Task.csv / Event.csv) ---
+            // WhoId points to a Contact (003…) or Lead (00Q…). Both
+            // resolve — activities has lead_id (migration
+            // 20260417000009) AND contact_id columns. Without lead
+            // resolution, ~70% of historical task rows get rejected
+            // as orphans because they're cold-call notes against
+            // still-unconverted leads with empty WhatId/AccountId.
+            if (field === "who_id_sf_lookup") {
+              if (value.startsWith("003") && contactSfMap) {
+                const cid = contactSfMap.get(value);
+                if (cid) record.contact_id = cid;
+              } else if (value.startsWith("00Q") && leadSfMap) {
+                const lid = leadSfMap.get(value);
+                if (lid) record.lead_id = lid;
+              }
+              continue;
+            }
+
+            // WhatId can point to an Account (001…), Opportunity (006…),
+            // Contract (800…), Campaign (701…), etc. We only resolve the
+            // first two — anything else is quietly skipped so the row
+            // still imports (attached via WhoId → contact, or orphan).
+            if (field === "what_id_sf_lookup") {
+              if (value.startsWith("001") && accountSfMap) {
+                const aid = accountSfMap.get(value);
+                if (aid) record.account_id = aid;
+              } else if (value.startsWith("006") && opportunitySfMap) {
+                const oid = opportunitySfMap.get(value);
+                if (oid) record.opportunity_id = oid;
+              }
+              continue;
+            }
+
+            // Pseudo-fields used for filtering/classification only — never
+            // persisted to a DB column. Captured onto the record under
+            // __ keys so the activity-type derivation below can read them.
+            if (
+              field === "sf_task_type" ||
+              field === "sf_task_status" ||
+              field === "sf_is_closed"
+            ) {
+              (record as Record<string, unknown>)[`__${field}`] = value;
+              continue;
+            }
+
+            // Drop all remaining SF-side identifiers/labels that have no
+            // matching column on activities / opportunity_products.
+            // Drop fields that have no matching column on the target
+            // table. total_price + discount_percent ARE columns on
+            // opportunity_products (see migration 20260421000001) so
+            // they fall through to the numeric handler below.
+            // sf_id (tasks/events) IS persisted now — see migration
+            // 20260421000005 — so it falls through too.
+            if (
+              field === "sf_line_item_id" ||
+              field === "product_name_lookup" ||
+              field === "list_price" ||
+              field === "service_date" ||
+              field === "line_description" ||
+              field === "event_location"
+            ) {
+              continue;
+            }
+
+            // Price book name lookup (fallback) — ALSO preserved into a
+            // temporary field so the FTE-cleanup transform below can parse
+            // an fte_range out of it (e.g. "51-100 Price Book" → "51-100").
+            if (field === "price_book_name") {
+              if (!record.price_book_id && priceBookNameMap) {
+                const pbId = priceBookNameMap.get(value.toLowerCase());
+                if (pbId) {
+                  record.price_book_id = pbId;
+                }
+              }
+              record.__price_book_name_raw = value;
+              continue;
+            }
+
+            // Product name — used as a FALLBACK lookup for price book entries
+            // when product_sf_id didn't resolve (happens after FTE cleanup
+            // collapses tier-specific SF products). We try multiple
+            // normalizations because SF product names sometimes carry weird
+            // whitespace, punctuation, or case differences.
+            if (field === "product_name") {
+              if (!record.product_id && productNameMap) {
+                const { base } = stripFtePrefix(value);
+                const cleaned = base.trim();
+                // 1. exact lowercase match against base
+                let productId = productNameMap.get(cleaned.toLowerCase());
+                // 2. collapse internal whitespace runs
+                if (!productId) {
+                  const collapsed = cleaned.replace(/\s+/g, " ").toLowerCase();
+                  productId = productNameMap.get(collapsed);
+                }
+                // 3. slugified base — matches the code we generated for the
+                // canonical product (codes look like "compliance-officer-training")
+                if (!productId && productCodeMap) {
+                  productId = productCodeMap.get(slugifyCode(cleaned));
+                }
+                if (productId) {
+                  record.product_id = productId;
+                }
+              }
+              record.__product_name_raw = value;
               continue;
             }
 
@@ -689,18 +3064,252 @@ export function SalesforceImport() {
                 "probability",
                 "fte_count",
                 "locations",
+                "number_of_providers",
+                "lifetime_value",
+                "churn_amount",
+                "acv",
+                "discount",
+                "subtotal",
+                "service_amount",
+                "product_amount",
+                "cycle_count",
+                "contract_length_months",
+                "contract_year",
+                "score",
+                "billing_latitude",
+                "billing_longitude",
+                "shipping_latitude",
+                "shipping_longitude",
+                "expected_revenue",
+                "fiscal_year",
+                "fiscal_quarter",
+                "total_opportunity_quantity",
+                "unit_price",
+                "total_price",
+                "discount_percent",
+                "default_arr",
+                "pardot_score",
+                "call_duration_seconds",
+                "recurrence_interval",
+                "recurrence_day_of_week_mask",
+                "recurrence_day_of_month",
+                "recurrence_month_of_year",
+                "duration_minutes",
               ].includes(field)
             ) {
               const num = Number(value.replace(/[,$]/g, ""));
               if (!isNaN(num)) {
-                record[field] = num;
+                // cycle_count has a CHECK (cycle_count IS NULL OR > 0).
+                // SF sometimes exports 0 for "no cycles yet" — treat that
+                // as NULL so the insert doesn't violate the constraint.
+                if (field === "cycle_count" && num <= 0) {
+                  // Skip — leaves record.cycle_count undefined → NULL.
+                } else {
+                  record[field] = num;
+                }
               }
               continue;
             }
 
             // Boolean fields
-            if (field === "is_primary") {
+            if (
+              ["is_primary", "do_not_contact", "partner_prospect", "priority_account",
+               "every_other_year", "one_time_project", "auto_renewal", "services_included",
+               "follow_up", "is_converted", "is_closed", "is_won",
+               "created_by_automation", "has_opportunity_line_items",
+               "has_opted_out_of_email", "do_not_call", "do_not_market_to", "priority_lead",
+               "cold_lead", "is_active", "is_default", "is_recurrence",
+               "sf_is_reminder_set", "is_all_day_event"].includes(field)
+            ) {
               record[field] = value.toLowerCase() === "true" || value === "1";
+              continue;
+            }
+
+            // text[] fields — SF multi-picklists arrive as ";"-delimited
+            // strings (e.g. "MGMA19;CHUG19"). Convert to a real Postgres
+            // text[] so PostgREST inserts them as arrays.
+            if (["events_attended"].includes(field)) {
+              const parts = value
+                .split(";")
+                .map((s) => s.trim())
+                .filter((s) => s.length > 0);
+              if (parts.length > 0) record[field] = parts;
+              continue;
+            }
+
+            // UUID reference fields — only accept valid UUIDs, skip SF IDs and null placeholders
+            if (
+              ["parent_account_id", "converted_account_id", "converted_contact_id",
+               "converted_opportunity_id", "campaign_id"].includes(field)
+            ) {
+              // Only store valid UUIDs (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+              const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+              if (UUID_REGEX.test(value)) {
+                record[field] = value;
+              }
+              // Skip anything that's not a valid UUID (SF IDs, null placeholders, etc.)
+              continue;
+            }
+
+            // SF user ID fields (CreatedById, LastModifiedById) — resolve to ORIGINAL names for history
+            if (["sf_created_by", "sf_last_modified_by"].includes(field)) {
+              if (value.startsWith("005") && sfUserMap.size > 0) {
+                // For historical fields, use the original SF name (not the remapped name)
+                // e.g. James Parrish's ID is remapped to Brayden Frost for ownership,
+                // but Created By / Modified By should show the original person
+                const historicalNames: Record<string, string> = {
+                  "0055w00000BmnpKAAR": "James Parrish",
+                };
+                const sfUser = sfUserMap.get(value);
+                record[field] = historicalNames[value] ?? (sfUser ? sfUser.name : value);
+              } else {
+                record[field] = value;
+              }
+              continue;
+            }
+
+            // Normalize enum values: "No Auto Renew" → "no_auto_renew", etc.
+            if (["renewal_type", "status", "lifecycle_status", "stage", "kind",
+                 "team", "lead_source", "source", "payment_frequency", "qualification"].includes(field)) {
+              // Convert human-readable to snake_case enum: lowercase, trim, replace spaces with underscores
+              const normalized = value.toLowerCase().trim().replace(/[\s-]+/g, "_");
+              // Map common Salesforce values to CRM enum values
+              const enumMappings: Record<string, Record<string, string>> = {
+                renewal_type: {
+                  "no_auto_renew": "no_auto_renew",
+                  "auto_renew": "auto_renew",
+                  "manual_renew": "manual_renew",
+                  "full_auto_renew": "full_auto_renew",
+                  "platform_only_auto_renew": "platform_only_auto_renew",
+                },
+                status: {
+                  "active": "active",
+                  "inactive": "inactive",
+                  "discovery": "discovery",
+                  "pending": "pending",
+                  "churned": "churned",
+                },
+                // Maps SF StageName picklist values → enum values
+                // that match SF (migration 20260422000001). SF's six
+                // real stages pass through 1:1; we also catch legacy
+                // stage names people might try to import.
+                stage: {
+                  // SF-native stages — primary path
+                  "closed_won": "closed_won",
+                  "closed won": "closed_won",
+                  "closed/won": "closed_won",
+                  "won": "closed_won",
+                  "closed_lost": "closed_lost",
+                  "closed lost": "closed_lost",
+                  "closed/lost": "closed_lost",
+                  "lost": "closed_lost",
+                  "proposal_conversation": "proposal_conversation",
+                  "proposal conversation": "proposal_conversation",
+                  "details_analysis": "details_analysis",
+                  "details analysis": "details_analysis",
+                  "demo": "demo",
+                  "proposal_and_price_quote": "proposal_and_price_quote",
+                  "proposal and price quote": "proposal_and_price_quote",
+                  "proposal/price_quote": "proposal_and_price_quote",
+                  "proposal": "proposal_conversation",  // generic "Proposal" → closest SF match
+                  // Legacy / generic SF picklist values → best match
+                  "qualification": "details_analysis",
+                  "qualified": "details_analysis",
+                  "needs_analysis": "details_analysis",
+                  "value_proposition": "proposal_conversation",
+                  "id._decision_makers": "details_analysis",
+                  "perception_analysis": "details_analysis",
+                  "negotiation/review": "proposal_conversation",
+                  "negotiation": "proposal_conversation",
+                  "verbal_commit": "proposal_conversation",
+                  "verbal commit": "proposal_conversation",
+                  "prospecting": "details_analysis",
+                  "lead": "details_analysis",
+                },
+                kind: {
+                  "new_business": "new_business",
+                  "new business": "new_business",
+                  "new": "new_business",
+                  "renewal": "renewal",
+                  "existing_business": "renewal",
+                  "existing business": "renewal",
+                  "existing_business___renewal": "renewal",
+                },
+                lead_source: {
+                  "cold_call": "cold_call",
+                  "cold call": "cold_call",
+                  "cold_call___smb": "cold_call",
+                  "trade_show": "trade_show",
+                  "trade show": "trade_show",
+                  "social_media": "social_media",
+                  "social media": "social_media",
+                  "email_campaign": "email_campaign",
+                  "email campaign": "email_campaign",
+                  "web": "website",
+                  "inbound": "website",
+                  "advertisement": "other",
+                  "employee_referral": "referral",
+                  "employee referral": "referral",
+                  "external_referral": "referral",
+                  "external referral": "referral",
+                  "purchased_list": "other",
+                  "purchased list": "other",
+                  "public_relations": "other",
+                  "public relations": "other",
+                  "seminar___internal": "webinar",
+                  "seminar___partner": "partner",
+                },
+                source: {
+                  "cold_call": "cold_call",
+                  "cold call": "cold_call",
+                  "trade_show": "trade_show",
+                  "trade show": "trade_show",
+                  "social_media": "social_media",
+                  "social media": "social_media",
+                  "email_campaign": "email_campaign",
+                  "email campaign": "email_campaign",
+                  "web": "website",
+                  "inbound": "website",
+                  "employee_referral": "referral",
+                  "external_referral": "referral",
+                  "seminar___internal": "webinar",
+                },
+              };
+              const mapping = enumMappings[field];
+              const mappedValue = mapping?.[normalized] ?? normalized;
+
+              // Validate against known enum values — unknown values get stored as detail
+              const VALID_ENUMS: Record<string, Set<string>> = {
+                lead_source: new Set(["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"]),
+                source: new Set(["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"]),
+                stage: new Set([
+                  // SF-matching values (current — migration 20260422000001)
+                  "details_analysis", "demo", "proposal_and_price_quote",
+                  "proposal_conversation", "closed_won", "closed_lost",
+                  // Legacy values still valid in the enum for FK safety
+                  "lead", "qualified", "proposal", "verbal_commit",
+                ]),
+                status: new Set(["active", "inactive", "discovery", "pending", "churned", "new", "contacted", "qualified", "unqualified", "converted", "dead"]),
+                lifecycle_status: new Set(["prospect", "active_client", "former_client", "partner"]),
+                kind: new Set(["new_business", "renewal"]),
+                team: new Set(["sales", "renewals"]),
+                payment_frequency: new Set(["monthly", "quarterly", "semi_annually", "annually", "one_time"]),
+                qualification: new Set(["unqualified", "mql", "sql", "opportunity"]),
+                renewal_type: new Set(["auto_renew", "manual_renew", "no_auto_renew", "full_auto_renew", "platform_only_auto_renew"]),
+              };
+              const validSet = VALID_ENUMS[field];
+              if (validSet && !validSet.has(mappedValue)) {
+                // Unknown enum value — store original in lead_source_detail and set to "other"
+                if (field === "lead_source" || field === "source") {
+                  record[field] = "other";
+                  if (!record.lead_source_detail) {
+                    record.lead_source_detail = value; // preserve original SF value
+                  }
+                }
+                // For other enum fields, just skip the unknown value (use defaults)
+              } else {
+                record[field] = mappedValue;
+              }
               continue;
             }
 
@@ -711,39 +3320,223 @@ export function SalesforceImport() {
             continue;
           }
 
+          // -------------------------------------------------------------
+          // FTE-range cleanup transform (products / price_books / PBE)
+          // See helper comment near the top of this file for context.
+          // -------------------------------------------------------------
+          if (entity === "products") {
+            // Strip FTE prefix from name + code.
+            if (typeof record.name === "string") {
+              record.name = stripFtePrefix(record.name).base;
+            }
+            if (typeof record.code === "string") {
+              record.code = stripFtePrefix(record.code).base;
+            }
+            // products.code is NOT NULL + UNIQUE, but Salesforce often
+            // leaves ProductCode blank. Slugify the cleaned name to
+            // generate a stable code. If two SF rows slugify to the same
+            // code (same base name), our in-session dedup catches it.
+            if (
+              (!record.code || typeof record.code !== "string" || record.code === "") &&
+              typeof record.name === "string" &&
+              record.name.length > 0
+            ) {
+              record.code = slugifyCode(record.name);
+            }
+            // In-session dedup: if another CSV row already produced this
+            // canonical product (or it already exists in the DB), skip.
+            const codeKey =
+              typeof record.code === "string" ? record.code.toLowerCase() : "";
+            const nameKey =
+              typeof record.name === "string" ? record.name.toLowerCase() : "";
+            if (codeKey && seenProductCodes.has(codeKey)) {
+              skippedArr[0]++;
+              continue;
+            }
+            if (!codeKey && nameKey && seenProductNames.has(nameKey)) {
+              skippedArr[0]++;
+              continue;
+            }
+            if (codeKey) seenProductCodes.add(codeKey);
+            if (nameKey) seenProductNames.add(nameKey);
+          }
+
+          if (entity === "price_books") {
+            // Preserve all 12 tier-specific SF price books AS-IS. Just
+            // populate the fte_range column by parsing each name so the
+            // app can auto-pick the right book per opportunity. Books
+            // without an FTE prefix (e.g. "Standard Price Book") keep a
+            // null fte_range — their products are priced flat.
+            if (typeof record.name === "string" && !record.fte_range) {
+              const { fteRange } = stripFtePrefix(record.name);
+              if (fteRange) {
+                record.fte_range = fteRange;
+              }
+            }
+          }
+
+          if (entity === "price_book_entries") {
+            // Keep the source SF price book (i.e. the tier-specific book
+            // this entry came from — see 1702/PRICE_BOOK_ENTRY_FIELDS
+            // for how price_book_id is resolved). We additionally parse
+            // fte_range off the source book name and stamp it on the
+            // entry for AddProductDialog's lookup compatibility.
+            const rawPbName = record.__price_book_name_raw as
+              | string
+              | undefined;
+            if (rawPbName && !record.fte_range) {
+              const { fteRange } = stripFtePrefix(rawPbName);
+              if (fteRange) {
+                record.fte_range = fteRange;
+              }
+            }
+            delete record.__price_book_name_raw;
+          }
+
           // Check for required fields
           if (entity === "accounts" && !record.name) {
             const errMsg = "Missing account name";
             errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
-            failedRows.push({ rowNumber: rowIndex + 1, csvData, error: errMsg });
+            failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
             failedCount[0]++;
             continue;
           }
-          if (entity === "contacts" && (!record.first_name || !record.last_name)) {
-            const errMsg = "Missing first or last name";
+          if (entity === "contacts" && !record.last_name) {
+            const errMsg = "Missing last name (first name is optional)";
             errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
-            failedRows.push({ rowNumber: rowIndex + 1, csvData, error: errMsg });
+            failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
             failedCount[0]++;
             continue;
           }
           if (entity === "contacts" && !record.account_id) {
             const errMsg = "Missing account reference";
             errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
-            failedRows.push({ rowNumber: rowIndex + 1, csvData, error: errMsg });
+            failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
             failedCount[0]++;
             continue;
           }
           if (entity === "opportunities" && (!record.name || !record.account_id)) {
             const errMsg = "Missing name or account reference";
             errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
-            failedRows.push({ rowNumber: rowIndex + 1, csvData, error: errMsg });
+            failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
             failedCount[0]++;
             continue;
           }
-          if (entity === "leads" && (!record.first_name || !record.last_name)) {
-            const errMsg = "Missing first or last name";
+          if (entity === "leads" && !record.last_name) {
+            const errMsg = "Missing last name (first name is optional)";
             errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
-            failedRows.push({ rowNumber: rowIndex + 1, csvData, error: errMsg });
+            failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
+            failedCount[0]++;
+            continue;
+          }
+          if (entity === "products" && (!record.name || !record.code)) {
+            const errMsg = "Missing product name or code";
+            errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
+            failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
+            failedCount[0]++;
+            continue;
+          }
+          if (entity === "price_books" && !record.name) {
+            const errMsg = "Missing price book name";
+            errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
+            failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
+            failedCount[0]++;
+            continue;
+          }
+          if (entity === "price_book_entries" && (!record.product_id || !record.price_book_id)) {
+            // Build a specific error so the user can see WHICH lookup failed
+            // and what the offending value was. When the PBE CSV doesn't
+            // carry a Name column (the most common case on raw SF exports)
+            // we fall back to the SF Product2Id so the user can diagnose
+            // which SF row it was — "(no name)" is useless for debugging.
+            const sfProductId =
+              csvData.Product2Id ??
+              csvData.product2id ??
+              csvData["Product 2 Id"] ??
+              "";
+            const sfPbId =
+              csvData.Pricebook2Id ??
+              csvData.pricebook2id ??
+              csvData["Pricebook 2 Id"] ??
+              "";
+            const missingParts: string[] = [];
+            if (!record.product_id) {
+              const productName =
+                (record.__product_name_raw as string | undefined) ??
+                (sfProductId ? `SF Product2Id=${sfProductId}` : "(unknown)");
+              missingParts.push(`product "${productName}"`);
+            }
+            if (!record.price_book_id) {
+              const bookName =
+                (record.__price_book_name_raw as string | undefined) ??
+                (sfPbId ? `SF Pricebook2Id=${sfPbId}` : "(unknown)");
+              missingParts.push(`price book "${bookName}"`);
+            }
+            // Extra hint when the user likely just forgot Step 2.5 (the
+            // Product2.csv side-load) — detect by the side-load being
+            // empty combined with a product lookup failure.
+            const sideLoadHint =
+              !record.product_id && sfProductMap.size === 0
+                ? ' Hint: upload your raw Product2.csv in Step 2.5 so the importer can map SF Product2Id → original name → canonical product (FTE prefixes get stripped automatically).'
+                : "";
+            const errMsg = `Couldn't find ${missingParts.join(" and ")} in CRM. Make sure ${
+              !record.product_id ? "products" : ""
+            }${!record.product_id && !record.price_book_id ? " and " : ""}${
+              !record.price_book_id ? "price books" : ""
+            } were imported first.${sideLoadHint}`;
+            errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
+            failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
+            failedCount[0]++;
+            continue;
+          }
+
+          // Skip converted leads — they're already contacts in Salesforce
+          if (entity === "leads" && record.is_converted === true) {
+            skippedArr[0]++;
+            continue;
+          }
+
+          // Opportunity line items need BOTH opp and product — either one
+          // missing means the line item has nothing to hang on.
+          if (
+            entity === "opportunity_products" &&
+            (!record.opportunity_id || !record.product_id)
+          ) {
+            const missingParts: string[] = [];
+            if (!record.opportunity_id) missingParts.push("opportunity");
+            if (!record.product_id) missingParts.push("product");
+            const errMsg = `Line item missing ${missingParts.join(" and ")} reference — make sure ${missingParts
+              .map((m) => (m === "opportunity" ? "opportunities" : "products"))
+              .join(" and ")} were imported first`;
+            errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
+            failedRows.push({
+              rowNumber: rowIndex + 1,
+              csvData,
+              crmRecord: { ...record },
+              error: errMsg,
+            });
+            failedCount[0]++;
+            continue;
+          }
+
+          // Activities need at least one parent. Without any of account,
+          // contact, opportunity, or LEAD the row is orphaned and invisible.
+          if (
+            (entity === "tasks" || entity === "events") &&
+            !record.account_id &&
+            !record.contact_id &&
+            !record.opportunity_id &&
+            !record.lead_id
+          ) {
+            const errMsg =
+              "Activity has no resolvable Account / Contact / Opportunity / Lead reference";
+            errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
+            failedRows.push({
+              rowNumber: rowIndex + 1,
+              csvData,
+              crmRecord: { ...record },
+              error: errMsg,
+            });
             failedCount[0]++;
             continue;
           }
@@ -756,24 +3549,290 @@ export function SalesforceImport() {
           ) {
             const errMsg = `Invalid email format "${record.email}"`;
             errors.push(`Row ${rowIndex + 1}: ${errMsg}`);
-            failedRows.push({ rowNumber: rowIndex + 1, csvData, error: errMsg });
+            failedRows.push({ rowNumber: rowIndex + 1, csvData, crmRecord: { ...record }, error: errMsg });
             failedCount[0]++;
             continue;
+          }
+
+          // ---- Stamp SF history + mark as imported ----
+          // Three goals:
+          //   1. created_at reflects the SF original so the timeline
+          //      reads correctly + list-page sorts work. Without this
+          //      every migrated record reads as "today".
+          //   2. updated_at follows SF LastModifiedDate (or CreatedDate
+          //      as a floor — never earlier than created_at).
+          //   3. imported_at captures the moment this row landed in
+          //      the CRM. Lets admins distinguish "came from the SF
+          //      migration" vs "created live in the CRM" — native
+          //      records leave imported_at NULL.
+          // sf_created_by (the SF User Id as text) is still preserved
+          // as the author audit trail since the SF user often doesn't
+          // exist in the CRM user table.
+          if (record.sf_created_date) {
+            const sfCreated = String(record.sf_created_date).trim();
+            if (sfCreated) {
+              record.created_at = sfCreated;
+              const sfMod = record.sf_last_modified_date
+                ? String(record.sf_last_modified_date).trim()
+                : "";
+              record.updated_at = sfMod || sfCreated;
+              record.imported_at = new Date().toISOString();
+            }
           }
 
           // Defaults
           if (entity === "accounts") {
             record.lifecycle_status = record.lifecycle_status ?? "prospect";
             record.status = record.status ?? "discovery";
+            // Auto-calculate FTE Range from employees if not already set
+            if (!record.fte_range && typeof record.employees === "number" && record.employees > 0) {
+              record.fte_range = employeesToFteRange(record.employees as number);
+            }
           }
           if (entity === "opportunities") {
-            record.stage = record.stage ?? "lead";
+            record.stage = record.stage ?? "details_analysis";
             record.amount = record.amount ?? 0;
             record.team = record.team ?? "sales";
             record.kind = record.kind ?? "new_business";
+            // SF uses a single CloseDate field that serves as forecast
+            // AND actual-close depending on stage. We split it on import:
+            // keep the value in expected_close_date for all rows, and
+            // copy it into close_date for closed_won/closed_lost rows
+            // so reporting on booked revenue works correctly.
+            if (
+              (record.stage === "closed_won" || record.stage === "closed_lost") &&
+              !record.close_date &&
+              record.expected_close_date
+            ) {
+              record.close_date = record.expected_close_date;
+            }
+            // Snapshot FTE from the linked account if the SF CSV didn't
+            // already carry its own fte_range/fte_count. This is what makes
+            // AddProductDialog's tier-based pricing "just work" on imported
+            // opps — see migration 20260413000005_opportunity_fte_snapshot.
+            if (
+              accountFteByCrmId &&
+              typeof record.account_id === "string" &&
+              (record.fte_range == null || record.fte_count == null)
+            ) {
+              const acctFte = accountFteByCrmId.get(record.account_id);
+              if (acctFte) {
+                if (record.fte_range == null && acctFte.fte_range) {
+                  record.fte_range = acctFte.fte_range;
+                }
+                if (record.fte_count == null && acctFte.fte_count != null) {
+                  record.fte_count = acctFte.fte_count;
+                }
+              }
+            }
+          }
+          if (entity === "tasks" || entity === "events") {
+            // SF Priority comes through as "Normal"/"High"/"Low" with
+            // a capital first letter. Our activity_priority enum is
+            // lowercase ('high','normal','low'). Without this coercion
+            // 19,891 of the user's tasks rejected with "invalid input
+            // value for enum activity_priority: 'Normal'".
+            if (typeof record.priority === "string") {
+              const lc = record.priority.toLowerCase();
+              if (lc === "high" || lc === "normal" || lc === "low") {
+                record.priority = lc;
+              } else {
+                // Unknown SF priority value (custom picklist) — drop
+                // rather than fail the row.
+                delete record.priority;
+              }
+            }
           }
           if (entity === "leads") {
             record.status = record.status ?? "new";
+            // Derive qualification = 'mql' when MQL__c has a value. SF
+            // stores it as a date column; presence of a date is the
+            // canonical MQL signal. Without this the column stays at
+            // its 'unqualified' default and every imported MQL is
+            // hidden from the leads list / qualification filter.
+            // (SQL is only tracked on contacts per project workflow —
+            // a lead becoming SQL = it converts to a contact.)
+            if (!record.qualification && record.mql_date) {
+              record.qualification = "mql";
+              if (!record.qualification_date) {
+                record.qualification_date = record.mql_date;
+              }
+            }
+          }
+          if (entity === "products") {
+            record.is_active = record.is_active ?? true;
+          }
+          if (entity === "price_books") {
+            record.is_active = record.is_active ?? true;
+            record.is_default = record.is_default ?? false;
+          }
+          if (entity === "price_book_entries") {
+            record.unit_price = record.unit_price ?? 0;
+          }
+          if (entity === "opportunity_products") {
+            record.quantity = record.quantity ?? 1;
+            // Prefer row-level unit_price; fall back to the resolved PBE's
+            // unit_price so the line item keeps the tier pricing from SF.
+            if (
+              (record.unit_price == null || record.unit_price === 0) &&
+              typeof (record as { __pbe_unit_price_fallback?: number })
+                .__pbe_unit_price_fallback === "number"
+            ) {
+              record.unit_price = (record as { __pbe_unit_price_fallback: number })
+                .__pbe_unit_price_fallback;
+            }
+            record.unit_price = record.unit_price ?? 0;
+            // arr_amount = qty * unit_price (used by pipeline reports)
+            const qty = Number(record.quantity ?? 1);
+            const price = Number(record.unit_price ?? 0);
+            if (record.arr_amount == null && !isNaN(qty) && !isNaN(price)) {
+              record.arr_amount = qty * price;
+            }
+            delete (record as Record<string, unknown>).__pbe_unit_price_fallback;
+          }
+          if (entity === "tasks") {
+            // Derive activity_type from SF Task.Type (Call/Meeting/…). We
+            // stored the raw value under __sf_task_type during the field
+            // loop. Email tasks are already filtered out upstream unless
+            // the user opted in, so they're included here for completeness.
+            const sfType = (
+              (record as Record<string, unknown>).__sf_task_type as
+                | string
+                | undefined
+            )?.toLowerCase();
+            record.activity_type =
+              sfType === "call"
+                ? "call"
+                : sfType === "meeting"
+                ? "meeting"
+                : sfType === "email"
+                ? "email"
+                : "note";
+            // Mirror due_at into completed_at when SF flagged the task as
+            // completed, so the timeline renders it as done.
+            const sfStatus = (
+              (record as Record<string, unknown>).__sf_task_status as
+                | string
+                | undefined
+            )?.toLowerCase();
+            const sfClosed = (
+              (record as Record<string, unknown>).__sf_is_closed as
+                | string
+                | undefined
+            )?.toLowerCase();
+            const isClosed =
+              sfClosed === "1" ||
+              sfClosed === "true" ||
+              sfStatus === "completed";
+            if (isClosed && record.due_at && !record.completed_at) {
+              record.completed_at = record.due_at;
+            }
+            if (!record.subject) {
+              record.subject = sfType
+                ? sfType.charAt(0).toUpperCase() + sfType.slice(1)
+                : "Activity";
+            }
+            // Strip the pseudo-fields before insert.
+            delete (record as Record<string, unknown>).__sf_task_type;
+            delete (record as Record<string, unknown>).__sf_task_status;
+            delete (record as Record<string, unknown>).__sf_is_closed;
+          }
+          if (entity === "events") {
+            record.activity_type = "meeting";
+            if (!record.subject) record.subject = "Meeting";
+          }
+
+          // Sanitize UUID fields — remove any SF IDs that snuck through
+          // These DB columns are uuid type and will reject non-UUID values
+          const UUID_COLUMNS = new Set([
+            "account_id", "primary_contact_id", "owner_user_id", "parent_account_id",
+            "converted_account_id", "converted_contact_id", "converted_opportunity_id",
+            "source_opportunity_id", "renewal_from_opportunity_id", "campaign_id",
+            "original_lead_id", "price_book_id", "product_id",
+          ]);
+          const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+          for (const key of Object.keys(record)) {
+            if (UUID_COLUMNS.has(key) && typeof record[key] === "string" && !UUID_RE.test(record[key] as string)) {
+              delete record[key]; // Strip non-UUID values (SF IDs, etc.)
+            }
+          }
+
+          // Move non-DB fields into custom_fields JSONB
+          const CONTACT_DB_COLS = new Set([
+            "id", "sf_id", "account_id", "owner_user_id", "first_name", "last_name",
+            "email", "title", "phone", "is_primary", "department", "linkedin_url",
+            "mailing_street", "mailing_city", "mailing_state", "mailing_zip", "mailing_country",
+            "do_not_contact", "lead_source", "original_lead_id", "mql_date", "sql_date",
+            "custom_fields", "created_by", "updated_by", "created_at", "updated_at", "archived_at",
+          ]);
+          const OPP_DB_COLS = new Set([
+            "id", "sf_id", "account_id", "primary_contact_id", "owner_user_id",
+            "team", "kind", "name", "stage", "amount", "service_amount", "product_amount",
+            "services_included", "service_description", "expected_close_date", "close_date",
+            "contract_start_date", "contract_end_date", "contract_length_months", "contract_year",
+            "source_opportunity_id", "renewal_from_opportunity_id", "loss_reason", "notes",
+            "probability", "next_step", "lead_source", "payment_frequency", "cycle_count",
+            "auto_renewal", "description", "promo_code", "discount", "subtotal", "follow_up",
+            "one_time_project", "lead_source_detail", "fte_count", "fte_range",
+            "created_by_automation",
+            "custom_fields", "created_by", "updated_by", "created_at", "updated_at", "archived_at",
+          ]);
+          const LEAD_DB_COLS = new Set([
+            "id", "sf_id", "owner_user_id", "first_name", "last_name", "email", "phone",
+            "company", "title", "industry", "website", "status", "source", "description",
+            "employees", "annual_revenue", "street", "city", "state", "zip", "country",
+            "converted_at", "converted_account_id", "converted_contact_id", "converted_opportunity_id",
+            "custom_fields", "qualification", "qualification_date", "mql_date", "score", "score_factors",
+            "created_by", "updated_by", "created_at", "updated_at", "archived_at",
+          ]);
+
+          // Products & price book entries — strip unknown fields (no custom_fields JSONB)
+          const PRODUCT_DB_COLS = new Set([
+            "id", "sf_id", "code", "name", "product_family", "description",
+            "is_active", "default_arr", "category", "pricing_model",
+            "created_at", "updated_at",
+          ]);
+          const PB_DB_COLS = new Set([
+            "id", "sf_id", "name", "is_default", "is_active", "description",
+            "effective_date", "created_at", "updated_at",
+          ]);
+          const PBE_DB_COLS = new Set([
+            "id", "sf_id", "price_book_id", "product_id", "fte_range",
+            "unit_price", "created_at", "updated_at",
+          ]);
+
+          const dbCols = entity === "contacts" ? CONTACT_DB_COLS
+            : entity === "opportunities" ? OPP_DB_COLS
+            : entity === "leads" ? LEAD_DB_COLS
+            : entity === "products" ? PRODUCT_DB_COLS
+            : entity === "price_books" ? PB_DB_COLS
+            : entity === "price_book_entries" ? PBE_DB_COLS
+            : null; // accounts handled separately
+
+          if (dbCols) {
+            const hasCustomFields = entity !== "products" && entity !== "price_books" && entity !== "price_book_entries";
+            const customFields: Record<string, unknown> = {};
+            const sfHistoryFields = ["sf_created_by", "sf_created_date", "sf_last_modified_by", "sf_last_modified_date"];
+            for (const key of Object.keys(record)) {
+              if (!dbCols.has(key) && !sfHistoryFields.includes(key)) {
+                if (hasCustomFields) {
+                  customFields[key] = record[key];
+                }
+                delete record[key];
+              }
+            }
+            // SF history fields → store in custom_fields as well (only for entities that have it)
+            for (const sfKey of sfHistoryFields) {
+              if (record[sfKey]) {
+                if (hasCustomFields) {
+                  customFields[sfKey] = record[sfKey];
+                }
+                delete record[sfKey];
+              }
+            }
+            if (hasCustomFields && Object.keys(customFields).length > 0) {
+              record.custom_fields = customFields;
+            }
           }
 
           records.push(record);
@@ -829,17 +3888,42 @@ export function SalesforceImport() {
           }
         }
 
-        // Insert new records
+        // Insert new records — try batch first, fall back to individual on failure
         if (toInsert.length > 0) {
-          const { error: insertError } = await supabase
+          const { data: insertedData, error: insertError } = await supabase
             .from(tableName)
-            .insert(toInsert);
+            .insert(toInsert)
+            .select("id");
           if (insertError) {
-            errors.push(
-              `Batch at row ${i + 1}: ${insertError.message}`
-            );
+            // Batch failed — insert one at a time so good records still go through
+            for (let r = 0; r < toInsert.length; r++) {
+              const { data: singleData, error: singleError } = await supabase
+                .from(tableName)
+                .insert(toInsert[r])
+                .select("id");
+              if (singleError) {
+                const rowNum = recordRowIndices[r] + 1;
+                const name = (toInsert[r].name as string) || `Row ${rowNum}`;
+                errors.push(`Row ${rowNum} (${name}): ${singleError.message}`);
+                failedRows.push({
+                  rowNumber: rowNum,
+                  csvData: buildCsvDataRow(csvRows[recordRowIndices[r]], csvHeaders),
+                  crmRecord: { ...toInsert[r] },
+                  error: singleError.message,
+                });
+                failedCount[0]++;
+              } else {
+                imported[0]++;
+                if (singleData?.[0]?.id) importedIds.push(singleData[0].id as string);
+              }
+            }
           } else {
             imported[0] += toInsert.length;
+            if (insertedData) {
+              for (const row of insertedData) {
+                if (row.id) importedIds.push(row.id as string);
+              }
+            }
           }
         }
 
@@ -865,6 +3949,14 @@ export function SalesforceImport() {
       errors.push(`Unexpected error: ${(err as Error).message}`);
     }
 
+    // Warn about unmatched owners (only if records were actually imported/updated, not just skipped)
+    if (unmatchedOwners.size > 0 && (imported[0] > 0 || failedCount[0] > 0)) {
+      const ownerWarnings = Array.from(unmatchedOwners.entries()).map(
+        ([owner, rows]) => `Owner "${owner}" not found in CRM — records imported without owner (${rows.length} rows: ${rows.slice(0, 3).join(", ")}${rows.length > 3 ? "..." : ""})`
+      );
+      errors.push(...ownerWarnings);
+    }
+
     setImporting(false);
     setEstimatedTimeRemaining(null);
     setResult({
@@ -873,9 +3965,16 @@ export function SalesforceImport() {
       failed: failedCount[0],
       errors,
       failedRows,
+      importedIds,
+      entity,
+      timestamp: new Date().toISOString(),
     });
 
-    if (errors.length === 0) {
+    if (unmatchedOwners.size > 0) {
+      toast.warning(
+        `⚠️ ${unmatchedOwners.size} Salesforce user(s) not found in CRM — those records imported without an owner. See details below.`
+      );
+    } else if (errors.length === 0) {
       toast.success(
         `Import complete: ${imported[0]} records imported, ${skippedArr[0]} skipped.`
       );
@@ -917,9 +4016,146 @@ export function SalesforceImport() {
     setProgress({ current: 0, total: 0 });
     setCurrentBatch({ batch: 0, totalBatches: 0 });
     setEstimatedTimeRemaining(null);
+    setRetryEdits({});
+    setRetryingRows(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+  }
+
+  /* ---------- Retry Failed Rows ---------- */
+
+  function initRetryEdits() {
+    if (!result) return;
+    const edits: Record<number, Record<string, string>> = {};
+    result.failedRows.forEach((fr, idx) => {
+      // Build editable fields from the CRM record
+      const fields: Record<string, string> = {};
+      for (const [key, val] of Object.entries(fr.crmRecord)) {
+        fields[key] = val == null ? "" : String(val);
+      }
+      edits[idx] = fields;
+    });
+    setRetryEdits(edits);
+  }
+
+  function updateRetryField(rowIdx: number, field: string, value: string) {
+    setRetryEdits((prev) => ({
+      ...prev,
+      [rowIdx]: { ...prev[rowIdx], [field]: value },
+    }));
+  }
+
+  function removeRetryRow(rowIdx: number) {
+    if (!result) return;
+    const newFailedRows = result.failedRows.filter((_, i) => i !== rowIdx);
+    setResult({ ...result, failedRows: newFailedRows, failed: newFailedRows.length });
+    setRetryEdits((prev) => {
+      const next: Record<number, Record<string, string>> = {};
+      // Re-index remaining edits
+      let newIdx = 0;
+      for (let i = 0; i < result.failedRows.length; i++) {
+        if (i !== rowIdx) {
+          next[newIdx] = prev[i] ?? {};
+          newIdx++;
+        }
+      }
+      return next;
+    });
+  }
+
+  async function handleRetryFailed() {
+    if (!result || result.failedRows.length === 0) return;
+    setRetryingRows(true);
+
+    const tableName = entity;
+    const stillFailed: FailedRow[] = [];
+    let retrySuccess = 0;
+
+    for (let i = 0; i < result.failedRows.length; i++) {
+      const fr = result.failedRows[i];
+      const edits = retryEdits[i];
+      if (!edits) continue;
+
+      // Build the record from edited fields
+      const record: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(edits)) {
+        if (val === "") continue;
+        // Handle booleans
+        if (["do_not_contact", "partner_prospect", "priority_account",
+             "every_other_year", "one_time_project", "auto_renewal"].includes(key)) {
+          record[key] = val === "true" || val === "1" || val.toLowerCase() === "yes";
+          continue;
+        }
+        // Handle numbers
+        if (["employees", "locations", "fte_count", "annual_revenue", "acv",
+             "lifetime_value", "churn_amount", "number_of_providers", "amount",
+             "subtotal", "discount", "score", "billing_latitude", "billing_longitude",
+             "shipping_latitude", "shipping_longitude"].includes(key)) {
+          const num = Number(val);
+          if (!isNaN(num)) { record[key] = num; continue; }
+        }
+        record[key] = val;
+      }
+
+      const { error } = await supabase.from(tableName).insert(record);
+      if (error) {
+        stillFailed.push({ ...fr, crmRecord: record, error: error.message });
+      } else {
+        retrySuccess++;
+      }
+    }
+
+    setResult({
+      ...result,
+      imported: result.imported + retrySuccess,
+      failed: stillFailed.length,
+      failedRows: stillFailed,
+      errors: stillFailed.map((fr) => `Row ${fr.rowNumber}: ${fr.error}`),
+    });
+    setRetryEdits({});
+    setRetryingRows(false);
+
+    if (stillFailed.length === 0) {
+      toast.success(`All ${retrySuccess} previously failed rows imported successfully!`);
+    } else {
+      toast.warning(`${retrySuccess} rows fixed, ${stillFailed.length} still failing.`);
+      // Re-init edits for still-failed rows
+      const edits: Record<number, Record<string, string>> = {};
+      stillFailed.forEach((fr, idx) => {
+        const fields: Record<string, string> = {};
+        for (const [key, val] of Object.entries(fr.crmRecord)) {
+          fields[key] = val == null ? "" : String(val);
+        }
+        edits[idx] = fields;
+      });
+      setRetryEdits(edits);
+    }
+  }
+
+  /** Return dropdown options for enum fields, or null for free-text fields */
+  function getEnumOptions(field: string): string[] | null {
+    const enums: Record<string, string[]> = {
+      renewal_type: ["auto_renew", "manual_renew", "no_auto_renew", "full_auto_renew", "platform_only_auto_renew"],
+      status: ["discovery", "pending", "active", "inactive", "churned"],
+      lifecycle_status: ["prospect", "customer", "former_customer"],
+      stage: ["lead", "qualified", "proposal", "verbal_commit", "closed_won", "closed_lost"],
+      kind: ["new_business", "renewal"],
+      team: ["sales", "renewals"],
+      lead_source: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"],
+      payment_frequency: ["monthly", "quarterly", "semi_annually", "annually"],
+      qualification: ["unqualified", "mql", "sql", "sal"],
+    };
+    return enums[field] ?? null;
+  }
+
+  /** Get the fields that are most likely problematic based on the error message */
+  function getErrorHighlightField(error: string): string | null {
+    const enumMatch = error.match(/enum (\w+)/);
+    if (enumMatch) return enumMatch[1];
+    const colMatch = error.match(/column "(\w+)"/);
+    if (colMatch) return colMatch[1];
+    return null;
   }
 
   /* ---------- Render ---------- */
@@ -929,6 +4165,28 @@ export function SalesforceImport() {
     progress.total > 0
       ? Math.round((progress.current / progress.total) * 100)
       : 0;
+
+  async function handleUndoImport() {
+    if (!result || result.importedIds.length === 0) return;
+    if (!confirm(`Delete ${result.importedIds.length} records from this import? This cannot be undone.`)) return;
+
+    setUndoing(true);
+    try {
+      const ids = result.importedIds;
+      const table = result.entity;
+      for (let i = 0; i < ids.length; i += 50) {
+        const batch = ids.slice(i, i + 50);
+        const { error } = await supabase.from(table).delete().in("id", batch);
+        if (error) throw error;
+      }
+      toast.success(`Undo complete — ${ids.length} records deleted from ${table}.`);
+      setResult(null);
+    } catch (err) {
+      toast.error(`Undo failed: ${(err as Error).message}`);
+    } finally {
+      setUndoing(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -980,18 +4238,147 @@ export function SalesforceImport() {
               <SelectContent>
                 <SelectItem value="accounts">Accounts</SelectItem>
                 <SelectItem value="contacts">Contacts</SelectItem>
+                <SelectItem value="products">Products</SelectItem>
+                <SelectItem value="price_books">Price Books</SelectItem>
+                <SelectItem value="price_book_entries">Price Book Entries</SelectItem>
                 <SelectItem value="opportunities">Opportunities</SelectItem>
+                <SelectItem value="opportunity_products">
+                  Opportunity Line Items (OpportunityLineItem.csv)
+                </SelectItem>
                 <SelectItem value="leads">Leads</SelectItem>
+                <SelectItem value="tasks">
+                  Tasks / Activities (Task.csv)
+                </SelectItem>
+                <SelectItem value="events">Events (Event.csv)</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          {(entity === "products" ||
+            entity === "price_books" ||
+            entity === "price_book_entries") && (
+            <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200">
+              <div className="flex gap-2">
+                <Info className="h-4 w-4 mt-0.5 shrink-0" />
+                <div className="space-y-1">
+                  <p className="font-medium">
+                    {entity === "products"
+                      ? "FTE-range cleanup is ON — products will be deduped"
+                      : entity === "price_books"
+                      ? "FTE-range parsing is ON — price book names are kept intact"
+                      : "FTE-range parsing is ON — entries link by SF ID"}
+                  </p>
+                  {entity === "products" && (
+                    <p>
+                      FTE prefixes like "51-100 " or "1-20 " will be stripped
+                      from product names and codes, and duplicates will be
+                      collapsed into a single canonical row. Expect your
+                      ~157 Salesforce products to consolidate down to ~16.
+                    </p>
+                  )}
+                  {entity === "price_books" && (
+                    <p>
+                      All 12 tier-specific price books ("1-20 Price Book",
+                      "21-50 Price Book", etc.) are imported as-is. We also
+                      populate a <code>fte_range</code> column on each book
+                      by parsing the prefix from its name (e.g. "51-100 Price
+                      Book" → <code>fte_range</code> "51-100"). The app uses
+                      that column to auto-pick the correct book for an
+                      opportunity based on its FTE tier.
+                    </p>
+                  )}
+                  {entity === "price_book_entries" && (
+                    <p>
+                      Each entry is linked to its original Salesforce price
+                      book (by <code>sf_id</code>, falling back to name), and
+                      we also stamp the tier's <code>fte_range</code> onto
+                      the entry itself. Product references fall back to a
+                      case-insensitive base-name lookup when the SF product
+                      ID no longer resolves after dedupe.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Step 2a: Upload SF User CSV (for owner mapping) */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Step 2: Load Salesforce Users (for Owner Mapping)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground mb-3">
+            Upload your <strong>User.csv</strong> or <strong>User TEST.csv</strong> from the Salesforce export.
+            This maps Salesforce Owner IDs to CRM users by matching email addresses.
+            {!userCsvLoaded && " Without this, owner fields won't be assigned."}
+          </p>
+          <div className="flex items-center gap-4">
+            <Input
+              ref={userFileInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleUserFileChange}
+              className="max-w-sm"
+            />
+            {userCsvLoaded && (
+              <div className="flex items-center gap-2 text-sm text-green-600 font-medium">
+                ✅ {sfUserMap.size} Salesforce users loaded
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
 
-      {/* Step 2: Upload CSV */}
+      {/* Step 2c: Side-load SF Product2.csv when importing PBE.
+          Salesforce PricebookEntry CSVs DON'T carry product names —
+          only Product2Id. After FTE-cleanup most of those IDs no
+          longer match a stored product. Loading Product2.csv here
+          lets the importer resolve SF Product2Id → original name →
+          (FTE-stripped) → canonical product. */}
+      {entity === "price_book_entries" && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">
+              Step 2.5: Load Salesforce Products (for Pricebook Entry matching)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground mb-3">
+              Upload your <strong>Product2.csv</strong> from the Salesforce export.
+              SF PricebookEntry rows reference products by ID only — without this,
+              entries whose SF product was collapsed during FTE cleanup can't
+              find their canonical product in the CRM.
+              {!productCsvLoaded && (
+                <span className="text-amber-700 dark:text-amber-300">
+                  {" "}Without this, most rows will fail with "Couldn't find product".
+                </span>
+              )}
+            </p>
+            <div className="flex items-center gap-4">
+              <Input
+                ref={productFileInputRef}
+                type="file"
+                accept=".csv"
+                onChange={handleProductFileChange}
+                className="max-w-sm"
+              />
+              {productCsvLoaded && (
+                <div className="flex items-center gap-2 text-sm text-green-600 font-medium">
+                  ✅ {sfProductMap.size} Salesforce products loaded
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Step 2b: Upload Entity CSV */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Step 2: Upload CSV</CardTitle>
+          <CardTitle className="text-base">Step 3: Upload CSV</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex items-center gap-4">
@@ -1223,6 +4610,33 @@ export function SalesforceImport() {
               </div>
             )}
 
+            {/* Task-only filter controls */}
+            {entity === "tasks" && (
+              <div className="rounded-md border bg-muted/30 p-3 space-y-2 text-sm">
+                <div className="font-medium">Task Import Filters</div>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={skipOpenTasks}
+                    onChange={(e) => setSkipOpenTasks(e.target.checked)}
+                  />
+                  <span>
+                    Skip open tasks (only import completed activity — recommended)
+                  </span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={skipEmailTasks}
+                    onChange={(e) => setSkipEmailTasks(e.target.checked)}
+                  />
+                  <span>
+                    Skip Email tasks (Outlook sync will backfill — recommended)
+                  </span>
+                </label>
+              </div>
+            )}
+
             {/* Import controls */}
             <div className="flex items-center gap-4">
               <div className="space-y-1">
@@ -1317,6 +4731,18 @@ export function SalesforceImport() {
                 <CheckCircle2 className="h-4 w-4" />
                 {result.imported} records imported successfully
               </div>
+              {result.importedIds.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto text-destructive border-destructive/30 hover:bg-destructive/10"
+                  onClick={handleUndoImport}
+                  disabled={undoing}
+                >
+                  <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                  {undoing ? "Undoing..." : `Undo Import (${result.importedIds.length} records)`}
+                </Button>
+              )}
               {result.skipped > 0 && (
                 <div className="flex items-center gap-2 text-sm text-yellow-600">
                   <AlertTriangle className="h-4 w-4" />
@@ -1331,41 +4757,13 @@ export function SalesforceImport() {
               )}
             </div>
 
-            {/* Failed rows details */}
-            {result.failedRows.length > 0 && (
-              <div className="space-y-3">
-                <div className="bg-destructive/5 border border-destructive/20 rounded-md p-3 max-h-48 overflow-y-auto">
-                  <p className="text-sm font-medium text-destructive mb-2">
-                    Failed rows:
-                  </p>
-                  <ul className="text-xs text-destructive space-y-1">
-                    {result.failedRows.map((fr, idx) => (
-                      <li key={idx}>
-                        <span className="font-medium">Row {fr.rowNumber}:</span>{" "}
-                        {fr.error}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => downloadErrorReport(result.failedRows)}
-                >
-                  <Download className="h-4 w-4 mr-1.5" />
-                  Download Error Report
-                </Button>
-              </div>
-            )}
-
-            {/* Non-row-specific errors (batch errors) */}
+            {/* Non-row-specific errors (owner warnings etc.) */}
             {result.errors.length > 0 && result.errors.some((e) => !result.failedRows.some((fr) => e.includes(`Row ${fr.rowNumber}`))) && (
-              <div className="bg-destructive/5 border border-destructive/20 rounded-md p-3 max-h-48 overflow-y-auto">
-                <p className="text-sm font-medium text-destructive mb-1">
-                  Other errors:
+              <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md p-3 max-h-48 overflow-y-auto">
+                <p className="text-sm font-medium text-amber-700 dark:text-amber-400 mb-1">
+                  Warnings:
                 </p>
-                <ul className="text-xs text-destructive space-y-0.5">
+                <ul className="text-xs text-amber-600 dark:text-amber-500 space-y-0.5">
                   {result.errors
                     .filter((e) => !result.failedRows.some((fr) => e.startsWith(`Row ${fr.rowNumber}:`)))
                     .map((err, idx) => (
@@ -1375,12 +4773,197 @@ export function SalesforceImport() {
               </div>
             )}
 
-            <Button
-              variant="outline"
-              onClick={handleReset}
-            >
-              Start New Import
-            </Button>
+            {/* Failed rows — editable retry UI */}
+            {result.failedRows.length > 0 && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-medium text-destructive flex items-center gap-1.5">
+                    <XCircle className="h-4 w-4" />
+                    {result.failedRows.length} Failed Row{result.failedRows.length !== 1 ? "s" : ""}
+                  </h4>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => downloadErrorReport(result.failedRows)}
+                    >
+                      <Download className="h-4 w-4 mr-1.5" />
+                      Download CSV
+                    </Button>
+                    {Object.keys(retryEdits).length === 0 ? (
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={initRetryEdits}
+                      >
+                        <Pencil className="h-4 w-4 mr-1.5" />
+                        Edit & Retry Failed Rows
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={handleRetryFailed}
+                        disabled={retryingRows}
+                      >
+                        <RotateCcw className="h-4 w-4 mr-1.5" />
+                        {retryingRows ? "Retrying..." : `Retry ${result.failedRows.length} Row${result.failedRows.length !== 1 ? "s" : ""}`}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {/* If NOT in edit mode, show error summary */}
+                {Object.keys(retryEdits).length === 0 && (
+                  <div className="bg-destructive/5 border border-destructive/20 rounded-md p-3">
+                    <ul className="text-xs text-destructive space-y-1">
+                      {result.failedRows.map((fr, idx) => {
+                        const recordName = (fr.crmRecord.name as string) || `Row ${fr.rowNumber}`;
+                        return (
+                          <li key={idx}>
+                            <span className="font-medium">{recordName} (Row {fr.rowNumber}):</span>{" "}
+                            {fr.error}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Editable retry cards */}
+                {Object.keys(retryEdits).length > 0 && (
+                  <div className="space-y-3">
+                    {result.failedRows.map((fr, idx) => {
+                      const edits = retryEdits[idx];
+                      if (!edits) return null;
+                      const errorField = getErrorHighlightField(fr.error);
+                      const recordName = (edits.name) || `Row ${fr.rowNumber}`;
+
+                      // Get important fields first, then the rest
+                      const fieldEntries = Object.entries(edits);
+                      const importantFields = errorField
+                        ? fieldEntries.filter(([k]) => k === errorField)
+                        : [];
+                      const otherFields = errorField
+                        ? fieldEntries.filter(([k]) => k !== errorField)
+                        : fieldEntries;
+
+                      return (
+                        <div key={idx} className="border rounded-md overflow-hidden">
+                          {/* Row header */}
+                          <div className="bg-destructive/5 px-4 py-2 flex items-center justify-between border-b">
+                            <div>
+                              <span className="text-sm font-medium">{recordName}</span>
+                              <span className="text-xs text-muted-foreground ml-2">(CSV Row {fr.rowNumber})</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge variant="destructive" className="text-[10px]">
+                                {fr.error}
+                              </Badge>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                                onClick={() => removeRetryRow(idx)}
+                                title="Remove this row (skip it)"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+
+                          {/* Error field highlighted at top */}
+                          {importantFields.length > 0 && (
+                            <div className="px-4 py-3 bg-red-50 dark:bg-red-950/20 border-b border-red-200 dark:border-red-800">
+                              <p className="text-xs font-medium text-red-700 dark:text-red-400 mb-2 flex items-center gap-1">
+                                <AlertTriangle className="h-3 w-3" />
+                                Fix this field:
+                              </p>
+                              {importantFields.map(([field, val]) => (
+                                <div key={field} className="flex items-center gap-2">
+                                  <Label className="text-xs font-medium w-40 text-red-700 dark:text-red-400">{fieldLabel(field)}</Label>
+                                  {getEnumOptions(field) ? (
+                                    <Select
+                                      value={val || "__empty__"}
+                                      onValueChange={(v) => updateRetryField(idx, field, v === "__empty__" ? "" : v)}
+                                    >
+                                      <SelectTrigger className="h-8 text-xs border-red-300 dark:border-red-700 w-[200px]">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="__empty__">-- Clear --</SelectItem>
+                                        {getEnumOptions(field)!.map((opt) => (
+                                          <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  ) : (
+                                    <Input
+                                      value={val}
+                                      onChange={(e) => updateRetryField(idx, field, e.target.value)}
+                                      className="h-8 text-xs border-red-300 dark:border-red-700 max-w-xs"
+                                    />
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Other fields in a compact grid */}
+                          <div className="px-4 py-3">
+                            <details className="group">
+                              <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">
+                                {otherFields.length} other fields (click to expand)
+                              </summary>
+                              <div className="mt-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                {otherFields.map(([field, val]) => (
+                                  <div key={field} className="flex items-center gap-1.5">
+                                    <Label className="text-[11px] font-medium text-muted-foreground w-32 shrink-0 truncate" title={field}>
+                                      {fieldLabel(field)}
+                                    </Label>
+                                    {getEnumOptions(field) ? (
+                                      <Select
+                                        value={val || "__empty__"}
+                                        onValueChange={(v) => updateRetryField(idx, field, v === "__empty__" ? "" : v)}
+                                      >
+                                        <SelectTrigger className="h-7 text-[11px] flex-1">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="__empty__">-- Clear --</SelectItem>
+                                          {getEnumOptions(field)!.map((opt) => (
+                                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    ) : (
+                                      <Input
+                                        value={val}
+                                        onChange={(e) => updateRetryField(idx, field, e.target.value)}
+                                        className="h-7 text-[11px] flex-1"
+                                      />
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </details>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={handleReset}
+              >
+                Start New Import
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}

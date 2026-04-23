@@ -20,6 +20,33 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ---------------------------------------------------------------------------
+// Internal-domain blocklist
+// ---------------------------------------------------------------------------
+//
+// Emails involving ONLY these domains (e.g. Medcurity-to-Medcurity internal
+// mail) are discarded before any contact matching. This is a defensive
+// safety net: the contact-matching layer already filters to known external
+// contacts, but if someone accidentally added an internal teammate to the
+// contacts table, we would otherwise log those conversations. The blocklist
+// prevents that regardless of data hygiene on `contacts`.
+//
+// Configurable via the INTERNAL_EMAIL_DOMAINS env var (comma-separated) so
+// the list can be updated without redeploying code.
+const INTERNAL_EMAIL_DOMAINS: string[] = (
+  Deno.env.get("INTERNAL_EMAIL_DOMAINS") ?? "medcurity.com"
+)
+  .split(",")
+  .map((d) => d.trim().toLowerCase())
+  .filter(Boolean);
+
+function isInternalAddress(addr: string): boolean {
+  const at = addr.lastIndexOf("@");
+  if (at < 0) return false;
+  const domain = addr.slice(at + 1).toLowerCase();
+  return INTERNAL_EMAIL_DOMAINS.includes(domain);
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -45,11 +72,13 @@ interface ParsedEmail {
   messageId: string;
   subject: string;
   body: string;
+  htmlBody: string | null;
   from: string;
   to: string[];
   cc: string[];
   date: string;
   direction: "sent" | "received";
+  threadId: string | null;
 }
 
 interface ContactMatch {
@@ -184,21 +213,31 @@ async function fetchGmailEmails(
   const sinceEpoch = Math.floor(new Date(sinceDate).getTime() / 1000);
   const query = `after:${sinceEpoch}`;
 
-  // Step 1 -- list message IDs
-  const listRes = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=100`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
-
-  if (!listRes.ok) {
-    const text = await listRes.text();
-    throw new Error(`Gmail list failed: ${listRes.status} ${text}`);
+  // Step 1 -- list message IDs, following pageToken across up to 30 pages
+  // (~3000 emails). First-ever sync does a 90-day backfill so we need this
+  // for any rep with decent email volume.
+  const MAX_PAGES = 30;
+  const messageIds: string[] = [];
+  let pageToken: string | undefined;
+  let pageCount = 0;
+  while (pageCount < MAX_PAGES) {
+    const pageParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "";
+    const listRes = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=100${pageParam}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!listRes.ok) {
+      const text = await listRes.text();
+      throw new Error(`Gmail list failed: ${listRes.status} ${text}`);
+    }
+    const listData = await listRes.json();
+    for (const m of (listData.messages ?? []) as { id: string }[]) {
+      messageIds.push(m.id);
+    }
+    pageToken = listData.nextPageToken as string | undefined;
+    pageCount++;
+    if (!pageToken) break;
   }
-
-  const listData = await listRes.json();
-  const messageIds: string[] = (listData.messages ?? []).map(
-    (m: { id: string }) => m.id
-  );
 
   if (messageIds.length === 0) return [];
 
@@ -236,11 +275,17 @@ async function fetchGmailEmails(
       messageId: msgId,
       subject: headers["subject"] ?? "(no subject)",
       body: msg.snippet ?? "",
+      // Gmail metadata-only fetch doesn't include the HTML body. To capture
+      // full body we'd need format=full; leaving as null for now to keep
+      // bandwidth + token usage reasonable. Preview + metadata is enough
+      // for most views.
+      htmlBody: null,
       from,
       to,
       cc,
       date: headers["date"] ?? new Date().toISOString(),
       direction,
+      threadId: msg.threadId ?? null,
     });
   }
 
@@ -260,20 +305,25 @@ async function fetchOutlookEmails(
   const isoSince = new Date(sinceDate).toISOString();
   const filter = `receivedDateTime ge ${isoSince}`;
 
-  const res = await fetch(
-    `https://graph.microsoft.com/v1.0/me/messages?$filter=${encodeURIComponent(filter)}&$top=100&$select=id,subject,bodyPreview,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime&$orderby=receivedDateTime desc`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Outlook fetch failed: ${res.status} ${text}`);
-  }
-
-  const data = await res.json();
+  // Walk @odata.nextLink until no more pages. Capped at 30 pages (≈3000 emails)
+  // as a safety ceiling — a rep with more than that in 90 days is a one-off
+  // that can be run multiple times if needed.
+  const MAX_PAGES = 30;
   const emails: ParsedEmail[] = [];
+  let url: string | null =
+    `https://graph.microsoft.com/v1.0/me/messages?$filter=${encodeURIComponent(filter)}&$top=100&$select=id,subject,bodyPreview,body,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,conversationId&$orderby=receivedDateTime desc`;
+  let pageCount = 0;
 
-  for (const msg of data.value ?? []) {
+  while (url && pageCount < MAX_PAGES) {
+    const res: Response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Outlook fetch failed: ${res.status} ${text}`);
+    }
+    const data = await res.json();
+    for (const msg of data.value ?? []) {
     const from =
       msg.from?.emailAddress?.address ?? "";
     const to = (msg.toRecipients ?? []).map(
@@ -288,16 +338,29 @@ async function fetchOutlookEmails(
     const direction =
       from.toLowerCase() === userEmail.toLowerCase() ? "sent" : "received";
 
+    // Outlook body.contentType is either "html" or "text". We keep the
+    // plain preview for activities.body (used in search/previews) and
+    // separately preserve the HTML for high-fidelity rendering.
+    const bodyContentType: string = msg.body?.contentType ?? "text";
+    const bodyContent: string = msg.body?.content ?? "";
+    const htmlBody =
+      bodyContentType.toLowerCase() === "html" ? bodyContent : null;
+
     emails.push({
       messageId: msg.id,
       subject: msg.subject ?? "(no subject)",
       body: msg.bodyPreview ?? "",
+      htmlBody,
       from,
       to,
       cc,
       date: msg.receivedDateTime ?? msg.sentDateTime ?? new Date().toISOString(),
       direction,
+      threadId: msg.conversationId ?? null,
     });
+    }
+    url = (data["@odata.nextLink"] as string | undefined) ?? null;
+    pageCount++;
   }
 
   return emails;
@@ -343,8 +406,27 @@ async function matchContactsByEmail(
 }
 
 /**
- * Find the most recently created open opportunity for an account, used for
- * auto-linking emails.
+ * Auto-attribute an email to an opportunity using the "actively worked"
+ * heuristic.
+ *
+ * Brayden 2026-04-17: don't want manual attribution when there are multiple
+ * opps. So instead of skipping, we pick the opp the rep is actively touching.
+ *
+ * Heuristic (in order):
+ *   1. ZERO open opps → don't link (activity stays account+contact-scoped).
+ *   2. ONE open opp → link to it. Safe single candidate.
+ *   3. MULTIPLE open opps → pick the one with the most recent updated_at
+ *      (any field edit, stage change, product add bumps updated_at). When
+ *      a rep shifts focus to a different deal, future emails follow them.
+ *      Only if NONE of the candidates have been touched in the last 90
+ *      days do we skip linking (treats them all as stale, ambiguous).
+ *
+ * Future override (documented in future-enhancements.md): we may add an
+ * `is_active_deal` boolean on opportunities so a rep can pin which opp is
+ * "the one." Until then, the updated_at heuristic alone handles the common
+ * case automatically.
+ *
+ * Closed (closed_won / closed_lost) and archived opps are never considered.
  */
 async function findOpenOpportunity(
   supabase: SupabaseClient,
@@ -352,15 +434,23 @@ async function findOpenOpportunity(
 ): Promise<string | null> {
   const { data } = await supabase
     .from("opportunities")
-    .select("id")
+    .select("id, updated_at")
     .eq("account_id", accountId)
     .is("archived_at", null)
     .not("stage", "in", '("closed_won","closed_lost")')
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
+    .order("updated_at", { ascending: false });
 
-  return data?.id ?? null;
+  if (!data || data.length === 0) return null;
+  if (data.length === 1) return data[0].id;
+
+  // Stale-guard: if even the most-recently-touched candidate hasn't been
+  // updated in 90 days, treat the whole set as inactive and skip linking.
+  const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
+  const newest = data[0];
+  const newestAge = Date.now() - new Date(newest.updated_at).getTime();
+  if (newestAge > NINETY_DAYS_MS) return null;
+
+  return newest.id;
 }
 
 // ---------------------------------------------------------------------------
@@ -369,6 +459,13 @@ async function findOpenOpportunity(
 
 /**
  * Create an activity record for a matched email.
+ *
+ * Deduplicates via (owner_user_id, external_message_id) — the migration
+ * adds a partial unique index, so a concurrent or replayed sync won't
+ * produce duplicate rows.
+ *
+ * Returns true if a new row was created, false if the email was already
+ * recorded or the insert failed.
  */
 async function createEmailActivity(
   supabase: SupabaseClient,
@@ -376,8 +473,19 @@ async function createEmailActivity(
   email: ParsedEmail,
   match: ContactMatch,
   opportunityId: string | null
-) {
+): Promise<boolean> {
   const dirLabel = email.direction === "sent" ? "Sent" : "Received";
+  const externalId = `${conn.provider}:${email.messageId}`;
+
+  // Check first — cheaper and avoids noisy unique-violation errors in logs.
+  const { data: existing } = await supabase
+    .from("activities")
+    .select("id")
+    .eq("owner_user_id", conn.user_id)
+    .eq("external_message_id", externalId)
+    .maybeSingle();
+
+  if (existing) return false;
 
   const { error } = await supabase.from("activities").insert({
     account_id: match.account_id,
@@ -388,11 +496,25 @@ async function createEmailActivity(
     subject: `${dirLabel}: ${email.subject}`,
     body: email.body,
     completed_at: new Date(email.date).toISOString(),
+    external_message_id: externalId,
+    email_direction: email.direction,
+    email_from: email.from || null,
+    email_to: email.to.length > 0 ? email.to : null,
+    email_cc: email.cc.length > 0 ? email.cc : null,
+    email_html_body: email.htmlBody,
+    email_thread_id: email.threadId,
   });
 
   if (error) {
-    console.error(`Failed to create activity for message ${email.messageId}:`, error.message);
+    // If it's the unique-violation race, treat as a non-error dupe.
+    if (error.code === "23505") return false;
+    console.error(
+      `Failed to create activity for message ${email.messageId}:`,
+      error.message
+    );
+    return false;
   }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -405,15 +527,35 @@ async function syncConnection(
 ): Promise<{ created: number; errors: number }> {
   let created = 0;
   let errors = 0;
+  let fetched = 0;
+
+  // Open a run-log row so we get observability even if we throw.
+  const { data: runRow } = await supabase
+    .from("email_sync_runs")
+    .insert({ connection_id: conn.id })
+    .select("id")
+    .single();
+  const runId: number | null = runRow?.id ?? null;
 
   try {
     // 1. Ensure we have a valid access token
     const accessToken = await ensureValidToken(supabase, conn);
     const userEmail = conn.email_address ?? "";
 
-    // 2. Determine the starting point for this sync
-    const sinceDate =
-      conn.last_sync_at ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    // 2. Determine the starting point for this sync.
+    //    First-ever sync (last_sync_at is null) backfills the last 90 days
+    //    so newly-connected users get their recent email history logged
+    //    against matching contacts. Every subsequent sync picks up from
+    //    last_sync_at.
+    //    We subtract a 2-minute overlap to ride over clock drift, and rely
+    //    on the activities.external_message_id dedup to prevent duplicates.
+    const INITIAL_BACKFILL_DAYS = 90;
+    const baseSince =
+      conn.last_sync_at ??
+      new Date(Date.now() - INITIAL_BACKFILL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const sinceDate = new Date(
+      new Date(baseSince).getTime() - 2 * 60 * 1000
+    ).toISOString();
 
     // 3. Fetch emails from the appropriate provider
     const emails =
@@ -421,6 +563,7 @@ async function syncConnection(
         ? await fetchGmailEmails(accessToken, userEmail, sinceDate)
         : await fetchOutlookEmails(accessToken, userEmail, sinceDate);
 
+    fetched = emails.length;
     console.log(
       `Fetched ${emails.length} emails for ${conn.provider} connection ${conn.id}`
     );
@@ -432,14 +575,18 @@ async function syncConnection(
       return true;
     });
 
-    // 5. Collect all unique external email addresses to look up
+    // 5. Collect all unique external email addresses to look up.
+    //    Internal-domain addresses are filtered out before contact lookup
+    //    so we NEVER log Medcurity-to-Medcurity internal threads.
     const externalAddresses = new Set<string>();
     for (const email of filteredEmails) {
-      if (email.direction === "sent") {
-        email.to.forEach((addr) => externalAddresses.add(addr.toLowerCase()));
-        email.cc.forEach((addr) => externalAddresses.add(addr.toLowerCase()));
-      } else {
-        externalAddresses.add(email.from.toLowerCase());
+      const candidates =
+        email.direction === "sent"
+          ? [...email.to, ...email.cc]
+          : [email.from];
+      for (const addr of candidates) {
+        const lower = addr.toLowerCase();
+        if (!isInternalAddress(lower)) externalAddresses.add(lower);
       }
     }
 
@@ -449,17 +596,31 @@ async function syncConnection(
       Array.from(externalAddresses)
     );
 
-    // 7. Create activities for matched emails
+    // 7. Create activities for matched emails (dedup aware).
+    //    Per Brayden 2026-04-17: when multiple contacts on the same account
+    //    are on an email, create one activity row per contact so the email
+    //    shows on EACH contact's timeline (matches Salesforce behavior).
+    //    The widened unique index (owner_user_id, external_message_id,
+    //    contact_id) keeps re-runs idempotent.
     for (const email of filteredEmails) {
-      // Determine which email address(es) to check for a contact match
       const addressesToCheck: string[] =
         email.direction === "sent"
           ? [...email.to, ...email.cc]
           : [email.from];
 
+      // Skip entirely if every candidate is internal.
+      if (addressesToCheck.every((a) => isInternalAddress(a))) continue;
+
+      // Deduplicate by contact_id within this email so CC'ing the same
+      // person twice doesn't double-write.
+      const contactsSeen = new Set<string>();
+
       for (const addr of addressesToCheck) {
+        if (isInternalAddress(addr)) continue;
         const match = contactMap.get(addr.toLowerCase());
         if (!match) continue;
+        if (contactsSeen.has(match.contact_id)) continue;
+        contactsSeen.add(match.contact_id);
 
         // Skip non-primary contacts if the config requires it
         if (conn.config.primary_only && !match.is_primary) continue;
@@ -470,9 +631,15 @@ async function syncConnection(
           opportunityId = await findOpenOpportunity(supabase, match.account_id);
         }
 
-        await createEmailActivity(supabase, conn, email, match, opportunityId);
-        created++;
-        break; // one activity per email, matched to the first contact found
+        const inserted = await createEmailActivity(
+          supabase,
+          conn,
+          email,
+          match,
+          opportunityId
+        );
+        if (inserted) created++;
+        // IMPORTANT: do NOT break — continue through every matched contact.
       }
     }
 
@@ -481,12 +648,35 @@ async function syncConnection(
       .from("email_sync_connections")
       .update({ last_sync_at: new Date().toISOString() })
       .eq("id", conn.id);
+
+    if (runId) {
+      await supabase
+        .from("email_sync_runs")
+        .update({
+          finished_at: new Date().toISOString(),
+          activities_created: created,
+          emails_fetched: fetched,
+        })
+        .eq("id", runId);
+    }
   } catch (err) {
     errors++;
+    const message = (err as Error).message;
     console.error(
       `Error syncing connection ${conn.id} (${conn.provider}):`,
-      (err as Error).message
+      message
     );
+    if (runId) {
+      await supabase
+        .from("email_sync_runs")
+        .update({
+          finished_at: new Date().toISOString(),
+          activities_created: created,
+          emails_fetched: fetched,
+          error_message: message,
+        })
+        .eq("id", runId);
+    }
   }
 
   return { created, errors };
@@ -507,7 +697,19 @@ function extractEmail(header: string): string {
 // Main handler
 // ---------------------------------------------------------------------------
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
 serve(async (req) => {
+  // Handle CORS preflight so the browser can invoke this function from the app
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -516,21 +718,44 @@ serve(async (req) => {
       auth: { persistSession: false },
     });
 
+    // Optional scoping: if the caller passes { user_id } in the body, only
+    // sync that user's connections. Otherwise sync everyone (the cron path).
+    let scopedUserId: string | null = null;
+    try {
+      const body = await req.json();
+      if (body && typeof body.user_id === "string") {
+        scopedUserId = body.user_id;
+      }
+    } catch {
+      // No body (cron path) — sync all connections.
+    }
+
     // Fetch all active email sync connections
-    const { data: connections, error: connError } = await supabase
+    let q = supabase
       .from("email_sync_connections")
       .select("*")
       .eq("is_active", true);
+    if (scopedUserId) q = q.eq("user_id", scopedUserId);
+
+    const { data: connections, error: connError } = await q;
 
     if (connError) {
       throw new Error(`Failed to load connections: ${connError.message}`);
     }
 
     if (!connections || connections.length === 0) {
-      return new Response(JSON.stringify({ message: "No active connections" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({
+          message: "No active connections",
+          connections_processed: 0,
+          activities_created: 0,
+          errors: 0,
+        }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
     console.log(`Processing ${connections.length} active connection(s)`);
@@ -554,7 +779,7 @@ serve(async (req) => {
       }),
       {
         status: 200,
-        headers: { "Content-Type": "application/json" },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
   } catch (err) {
@@ -563,7 +788,7 @@ serve(async (req) => {
       JSON.stringify({ error: (err as Error).message }),
       {
         status: 500,
-        headers: { "Content-Type": "application/json" },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
   }

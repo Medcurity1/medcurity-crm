@@ -1,9 +1,11 @@
-import { useState, Fragment } from "react";
-import { Link } from "react-router-dom";
+import { useState, Fragment, useMemo } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { Pagination } from "@/components/Pagination";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -20,10 +22,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Search, Download, X } from "lucide-react";
 import { formatRelativeDate } from "@/lib/formatters";
 import { format, parseISO, subDays, subHours } from "date-fns";
-import type { AuditLog } from "@/types/crm";
+import { toast } from "sonner";
+import * as XLSX from "xlsx";
 
 const PAGE_SIZE = 25;
 
@@ -33,6 +36,14 @@ const ENTITY_OPTIONS = [
   { value: "contacts", label: "Contacts" },
   { value: "opportunities", label: "Opportunities" },
   { value: "leads", label: "Leads" },
+  { value: "activities", label: "Activities" },
+  { value: "products", label: "Products" },
+  { value: "opportunity_products", label: "Opp. Products" },
+  { value: "price_books", label: "Price Books" },
+  { value: "price_book_entries", label: "Price Book Entries" },
+  { value: "automation_rules", label: "Automation Rules" },
+  { value: "email_templates", label: "Email Templates" },
+  { value: "user_profiles", label: "Users" },
 ] as const;
 
 const ACTION_OPTIONS = [
@@ -57,7 +68,11 @@ const ENTITY_LABELS: Record<string, string> = {
   activities: "Activity",
   products: "Product",
   opportunity_products: "Opp. Product",
+  price_books: "Price Book",
+  price_book_entries: "Price Book Entry",
   user_profiles: "User",
+  automation_rules: "Automation Rule",
+  email_templates: "Email Template",
 };
 
 const ENTITY_ROUTES: Record<string, string> = {
@@ -70,8 +85,17 @@ const ENTITY_ROUTES: Record<string, string> = {
 /** Fields to skip when showing changes */
 const SKIP_FIELDS = new Set(["updated_at", "created_at"]);
 
-interface AuditLogWithChanger extends AuditLog {
-  changer: { full_name: string | null } | null;
+interface AuditLogRow {
+  id: number;
+  table_name: string;
+  record_id: string;
+  action: string;
+  changed_by: string | null;
+  changed_at: string;
+  old_data: Record<string, unknown> | null;
+  new_data: Record<string, unknown> | null;
+  changer_full_name: string | null;
+  total_count: number;
 }
 
 function getDateCutoff(range: string): string | null {
@@ -92,41 +116,59 @@ function useAuditLogs(filters: {
   entity: string;
   action: string;
   dateRange: string;
+  search: string;
+  recordId: string;
   page: number;
 }) {
   return useQuery({
-    queryKey: ["audit_logs", filters],
+    queryKey: ["audit_logs_search", filters],
     queryFn: async () => {
-      let query = supabase
-        .from("audit_logs")
-        .select("*, changer:user_profiles!changed_by(full_name)", {
-          count: "exact",
-        })
-        .order("changed_at", { ascending: false })
-        .range(
-          filters.page * PAGE_SIZE,
-          (filters.page + 1) * PAGE_SIZE - 1
-        );
-
-      if (filters.entity !== "all") {
-        query = query.eq("table_name", filters.entity);
-      }
-      if (filters.action !== "all") {
-        query = query.eq("action", filters.action);
-      }
-      const cutoff = getDateCutoff(filters.dateRange);
-      if (cutoff) {
-        query = query.gte("changed_at", cutoff);
-      }
-
-      const { data, error, count } = await query;
+      const { data, error } = await supabase.rpc("search_audit_logs", {
+        search_term: filters.search || null,
+        entity_filter: filters.entity === "all" ? null : filters.entity,
+        action_filter: filters.action === "all" ? null : filters.action,
+        record_id_filter: filters.recordId || null,
+        date_cutoff: getDateCutoff(filters.dateRange),
+        page_offset: filters.page * PAGE_SIZE,
+        page_limit: PAGE_SIZE,
+      });
       if (error) throw error;
+      const rows = (data ?? []) as AuditLogRow[];
       return {
-        logs: data as AuditLogWithChanger[],
-        totalCount: count ?? 0,
+        logs: rows,
+        totalCount: rows[0]?.total_count ?? 0,
       };
     },
   });
+}
+
+/** Fetch ALL matching rows for export (caps at 5000 to avoid runaway downloads) */
+async function fetchAllForExport(filters: {
+  entity: string;
+  action: string;
+  dateRange: string;
+  search: string;
+  recordId: string;
+}): Promise<AuditLogRow[]> {
+  const all: AuditLogRow[] = [];
+  const EXPORT_PAGE = 500;
+  const MAX = 5000;
+  for (let offset = 0; offset < MAX; offset += EXPORT_PAGE) {
+    const { data, error } = await supabase.rpc("search_audit_logs", {
+      search_term: filters.search || null,
+      entity_filter: filters.entity === "all" ? null : filters.entity,
+      action_filter: filters.action === "all" ? null : filters.action,
+      record_id_filter: filters.recordId || null,
+      date_cutoff: getDateCutoff(filters.dateRange),
+      page_offset: offset,
+      page_limit: EXPORT_PAGE,
+    });
+    if (error) throw error;
+    const rows = (data ?? []) as AuditLogRow[];
+    all.push(...rows);
+    if (rows.length < EXPORT_PAGE) break;
+  }
+  return all;
 }
 
 function formatTimestamp(dateString: string): string {
@@ -168,6 +210,19 @@ function formatValue(val: unknown): string {
   return String(val);
 }
 
+function changesSummaryText(log: AuditLogRow): string {
+  if (log.action === "INSERT") return "Created";
+  if (log.action === "DELETE") return "Deleted";
+  const changes = computeChanges(log.old_data, log.new_data);
+  if (!changes.length) return "No field changes";
+  return changes
+    .map(
+      (c) =>
+        `${c.field}: "${formatValue(c.oldValue)}" → "${formatValue(c.newValue)}"`
+    )
+    .join("; ");
+}
+
 function ActionBadge({ action }: { action: string }) {
   const classes =
     action === "INSERT"
@@ -183,7 +238,7 @@ function ActionBadge({ action }: { action: string }) {
   );
 }
 
-function ChangesSummary({ log }: { log: AuditLogWithChanger }) {
+function ChangesSummary({ log }: { log: AuditLogRow }) {
   const [showAll, setShowAll] = useState(false);
 
   if (log.action === "INSERT") {
@@ -229,7 +284,7 @@ function ChangesSummary({ log }: { log: AuditLogWithChanger }) {
   );
 }
 
-function ExpandedRow({ log }: { log: AuditLogWithChanger }) {
+function ExpandedRow({ log }: { log: AuditLogRow }) {
   return (
     <TableRow>
       <TableCell colSpan={7} className="bg-muted/30 p-4">
@@ -257,72 +312,238 @@ function ExpandedRow({ log }: { log: AuditLogWithChanger }) {
 }
 
 export function AuditLogViewer() {
-  const [entity, setEntity] = useState("all");
-  const [action, setAction] = useState("all");
-  const [dateRange, setDateRange] = useState("7d");
-  const [page, setPage] = useState(0);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const entity = searchParams.get("entity") ?? "all";
+  const action = searchParams.get("action") ?? "all";
+  const dateRange = searchParams.get("range") ?? "7d";
+  const search = searchParams.get("q") ?? "";
+  const recordId = searchParams.get("record_id") ?? "";
+  const page = Number(searchParams.get("page") ?? "0");
+
+  const [searchInput, setSearchInput] = useState(search);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [exporting, setExporting] = useState(false);
 
-  const handleEntityChange = (v: string) => {
-    setEntity(v);
-    setPage(0);
-  };
-  const handleActionChange = (v: string) => {
-    setAction(v);
-    setPage(0);
-  };
-  const handleDateRangeChange = (v: string) => {
-    setDateRange(v);
-    setPage(0);
-  };
+  function updateParam(key: string, value: string | null) {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value === null || value === "" || value === "all") {
+          next.delete(key);
+        } else {
+          next.set(key, value);
+        }
+        if (key !== "page") next.delete("page");
+        return next;
+      },
+      { replace: true }
+    );
+  }
 
-  const { data, isLoading } = useAuditLogs({ entity, action, dateRange, page });
+  const { data, isLoading } = useAuditLogs({
+    entity,
+    action,
+    dateRange,
+    search,
+    recordId,
+    page,
+  });
 
   const logs = data?.logs ?? [];
   const totalCount = data?.totalCount ?? 0;
 
+  const filters = useMemo(
+    () => ({ entity, action, dateRange, search, recordId }),
+    [entity, action, dateRange, search, recordId]
+  );
+
+  function handleSearchSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    updateParam("q", searchInput.trim() || null);
+  }
+
+  function handleClearRecordFilter() {
+    updateParam("record_id", null);
+  }
+
+  async function handleExport(fmt: "csv" | "xlsx") {
+    setExporting(true);
+    try {
+      const rows = await fetchAllForExport(filters);
+      if (rows.length === 0) {
+        toast.info("No audit entries to export for the current filters");
+        return;
+      }
+      const flat = rows.map((r) => ({
+        Timestamp: formatTimestamp(r.changed_at),
+        Entity: ENTITY_LABELS[r.table_name] ?? r.table_name,
+        Action: r.action,
+        "Changed By": r.changer_full_name ?? "System",
+        "Record ID": r.record_id,
+        Changes: changesSummaryText(r),
+        "Old Data": r.old_data ? JSON.stringify(r.old_data) : "",
+        "New Data": r.new_data ? JSON.stringify(r.new_data) : "",
+      }));
+
+      const stamp = format(new Date(), "yyyyMMdd_HHmm");
+      if (fmt === "csv") {
+        const header = Object.keys(flat[0]);
+        const csvRows = [
+          header.join(","),
+          ...flat.map((row) =>
+            header
+              .map((h) => {
+                const v = String(row[h as keyof typeof row] ?? "");
+                const escaped = v.replace(/"/g, '""');
+                return /[",\n]/.test(escaped) ? `"${escaped}"` : escaped;
+              })
+              .join(",")
+          ),
+        ];
+        const blob = new Blob([csvRows.join("\n")], {
+          type: "text/csv;charset=utf-8;",
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `audit_log_${stamp}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } else {
+        const ws = XLSX.utils.json_to_sheet(flat);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Audit Log");
+        XLSX.writeFile(wb, `audit_log_${stamp}.xlsx`);
+      }
+      toast.success(`Exported ${rows.length} audit entries`);
+    } catch (err) {
+      console.error(err);
+      toast.error("Export failed: " + (err as Error).message);
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <Select value={entity} onValueChange={handleEntityChange}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Entity" />
-          </SelectTrigger>
-          <SelectContent>
-            {ENTITY_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="space-y-3">
+        <form onSubmit={handleSearchSubmit} className="flex gap-2">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search record ID, user, or any field value..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <Button type="submit" variant="secondary">
+            Search
+          </Button>
+          {search && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSearchInput("");
+                updateParam("q", null);
+              }}
+            >
+              Clear
+            </Button>
+          )}
+        </form>
 
-        <Select value={action} onValueChange={handleActionChange}>
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Action" />
-          </SelectTrigger>
-          <SelectContent>
-            {ACTION_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {recordId && (
+          <div className="flex items-center gap-2 text-sm">
+            <Badge variant="outline" className="gap-1">
+              Record: <span className="font-mono">{truncateUUID(recordId)}</span>
+              <button
+                type="button"
+                onClick={handleClearRecordFilter}
+                className="ml-1 hover:text-destructive"
+                aria-label="Clear record filter"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+            <span className="text-xs text-muted-foreground">
+              Showing history for one record
+            </span>
+          </div>
+        )}
 
-        <Select value={dateRange} onValueChange={handleDateRangeChange}>
-          <SelectTrigger className="w-[170px]">
-            <SelectValue placeholder="Date Range" />
-          </SelectTrigger>
-          <SelectContent>
-            {DATE_RANGE_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex flex-wrap items-center gap-3">
+          <Select value={entity} onValueChange={(v) => updateParam("entity", v)}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Entity" />
+            </SelectTrigger>
+            <SelectContent>
+              {ENTITY_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={action} onValueChange={(v) => updateParam("action", v)}>
+            <SelectTrigger className="w-[160px]">
+              <SelectValue placeholder="Action" />
+            </SelectTrigger>
+            <SelectContent>
+              {ACTION_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={dateRange}
+            onValueChange={(v) => updateParam("range", v)}
+          >
+            <SelectTrigger className="w-[170px]">
+              <SelectValue placeholder="Date Range" />
+            </SelectTrigger>
+            <SelectContent>
+              {DATE_RANGE_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <div className="ml-auto flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => handleExport("csv")}
+              disabled={exporting}
+            >
+              <Download className="h-4 w-4 mr-1.5" />
+              CSV
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => handleExport("xlsx")}
+              disabled={exporting}
+            >
+              <Download className="h-4 w-4 mr-1.5" />
+              Excel
+            </Button>
+          </div>
+        </div>
       </div>
 
       {/* Table */}
@@ -383,7 +604,7 @@ export function AuditLogViewer() {
                         <ActionBadge action={log.action} />
                       </TableCell>
                       <TableCell className="text-sm">
-                        {log.changer?.full_name ?? "System"}
+                        {log.changer_full_name ?? "System"}
                       </TableCell>
                       <TableCell className="text-sm font-mono">
                         {route ? (
@@ -415,7 +636,7 @@ export function AuditLogViewer() {
         page={page}
         pageSize={PAGE_SIZE}
         totalCount={totalCount}
-        onPageChange={setPage}
+        onPageChange={(p) => updateParam("page", String(p))}
       />
     </div>
   );

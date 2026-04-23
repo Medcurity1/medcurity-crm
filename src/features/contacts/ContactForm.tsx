@@ -3,16 +3,21 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useContact, useCreateContact, useUpdateContact } from "./api";
+import { useAuth } from "@/features/auth/AuthProvider";
+import { US_STATES } from "@/lib/us-states";
+import { PhoneInput } from "@/components/PhoneInput";
 import { useAccounts } from "@/features/accounts/api";
 import { useUsers } from "@/features/accounts/api";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { contactSchema, type ContactFormValues } from "./schema";
+import { errorMessage } from "@/lib/errors";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -30,6 +35,7 @@ export function ContactForm() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const isEditing = !!id;
+  const { user } = useAuth();
   const { data: contact, isLoading: loadingContact } = useContact(id);
   const { data: accountsResult } = useAccounts();
   const accounts = accountsResult?.data;
@@ -57,9 +63,27 @@ export function ContactForm() {
       email: "",
       title: "",
       phone: "",
+      department: "",
+      linkedin_url: "",
+      do_not_contact: false,
+      mailing_street: "",
+      mailing_city: "",
+      mailing_state: "",
+      mailing_zip: "",
+      mailing_country: "",
       is_primary: false,
-      owner_user_id: null,
+      // Default contact owner to current user (creator). Rep can change.
+      owner_user_id: user?.id ?? null,
       lead_source: null,
+      mql_date: "",
+      sql_date: "",
+      credential: "",
+      phone_ext: "",
+      time_zone: "",
+      type: "",
+      business_relationship_tag: "",
+      notes: "",
+      next_steps: "",
     },
   });
 
@@ -72,9 +96,26 @@ export function ContactForm() {
         email: contact.email ?? "",
         title: contact.title ?? "",
         phone: contact.phone ?? "",
+        department: contact.department ?? "",
+        linkedin_url: contact.linkedin_url ?? "",
+        do_not_contact: contact.do_not_contact ?? false,
+        mailing_street: contact.mailing_street ?? "",
+        mailing_city: contact.mailing_city ?? "",
+        mailing_state: contact.mailing_state ?? "",
+        mailing_zip: contact.mailing_zip ?? "",
+        mailing_country: contact.mailing_country ?? "",
         is_primary: contact.is_primary,
         owner_user_id: contact.owner_user_id,
         lead_source: contact.lead_source ?? null,
+        mql_date: contact.mql_date ?? "",
+        sql_date: contact.sql_date ?? "",
+        credential: contact.credential ?? "",
+        phone_ext: contact.phone_ext ?? "",
+        time_zone: contact.time_zone ?? "",
+        type: contact.type ?? "",
+        business_relationship_tag: contact.business_relationship_tag ?? "",
+        notes: contact.notes ?? "",
+        next_steps: contact.next_steps ?? "",
       });
     }
   }, [contact, isEditing, reset]);
@@ -97,6 +138,22 @@ export function ContactForm() {
       email: values.email || null,
       title: values.title || null,
       phone: values.phone || null,
+      department: values.department || null,
+      linkedin_url: values.linkedin_url || null,
+      mailing_street: values.mailing_street || null,
+      mailing_city: values.mailing_city || null,
+      mailing_state: values.mailing_state || null,
+      mailing_zip: values.mailing_zip || null,
+      mailing_country: values.mailing_country || null,
+      mql_date: values.mql_date || null,
+      sql_date: values.sql_date || null,
+      credential: values.credential || null,
+      phone_ext: values.phone_ext || null,
+      time_zone: values.time_zone || null,
+      type: values.type || null,
+      business_relationship_tag: values.business_relationship_tag || null,
+      notes: values.notes || null,
+      next_steps: values.next_steps || null,
     };
 
     try {
@@ -111,7 +168,7 @@ export function ContactForm() {
       }
     } catch (err) {
       console.error("Failed to save contact:", err);
-      toast.error("Failed to save: " + (err as Error).message);
+      toast.error("Failed to save: " + errorMessage(err));
     }
   }
 
@@ -187,8 +244,138 @@ export function ContactForm() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="phone">Phone<RequiredIndicator fieldKey="phone" requiredFields={requiredKeys} /></Label>
-                <Input id="phone" {...register("phone")} />
+                <Label htmlFor="department">Department<RequiredIndicator fieldKey="department" requiredFields={requiredKeys} /></Label>
+                <Input id="department" {...register("department")} />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="phone">
+                  Phone<RequiredIndicator fieldKey="phone" requiredFields={requiredKeys} />
+                </Label>
+                <PhoneInput
+                  id="phone"
+                  value={watch("phone") ?? ""}
+                  onChange={(v) => setValue("phone", v)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Include extension after the number: "(208) 555-1234 x567"
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="linkedin_url">LinkedIn URL<RequiredIndicator fieldKey="linkedin_url" requiredFields={requiredKeys} /></Label>
+                <Input id="linkedin_url" type="url" placeholder="https://linkedin.com/in/..." {...register("linkedin_url")} />
+                {errors.linkedin_url && <p className="text-sm text-destructive">{errors.linkedin_url.message}</p>}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Credential</Label>
+                <Select
+                  value={(watch("credential") as string) || "none"}
+                  onValueChange={(v) => setValue("credential", v === "none" ? "" : (v as never))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select credential..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    <SelectItem value="md">MD</SelectItem>
+                    <SelectItem value="do">DO</SelectItem>
+                    <SelectItem value="rn">RN</SelectItem>
+                    <SelectItem value="lpn">LPN</SelectItem>
+                    <SelectItem value="np">NP</SelectItem>
+                    <SelectItem value="pa">PA</SelectItem>
+                    <SelectItem value="chc">CHC</SelectItem>
+                    <SelectItem value="chps">CHPS</SelectItem>
+                    <SelectItem value="chpc">CHPC</SelectItem>
+                    <SelectItem value="hipaa_certified">HIPAA Certified</SelectItem>
+                    <SelectItem value="ceo">CEO</SelectItem>
+                    <SelectItem value="cfo">CFO</SelectItem>
+                    <SelectItem value="coo">COO</SelectItem>
+                    <SelectItem value="cio">CIO</SelectItem>
+                    <SelectItem value="cto">CTO</SelectItem>
+                    <SelectItem value="ciso">CISO</SelectItem>
+                    <SelectItem value="cmo">CMO</SelectItem>
+                    <SelectItem value="it_director">IT Director</SelectItem>
+                    <SelectItem value="practice_manager">Practice Manager</SelectItem>
+                    <SelectItem value="office_manager">Office Manager</SelectItem>
+                    <SelectItem value="compliance_officer">Compliance Officer</SelectItem>
+                    <SelectItem value="privacy_officer">Privacy Officer</SelectItem>
+                    <SelectItem value="security_officer">Security Officer</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Time Zone</Label>
+                <Select
+                  value={(watch("time_zone") as string) || "none"}
+                  onValueChange={(v) => setValue("time_zone", v === "none" ? "" : (v as never))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select time zone..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    <SelectItem value="eastern">Eastern</SelectItem>
+                    <SelectItem value="central">Central</SelectItem>
+                    <SelectItem value="mountain">Mountain</SelectItem>
+                    <SelectItem value="pacific">Pacific</SelectItem>
+                    <SelectItem value="alaska">Alaska</SelectItem>
+                    <SelectItem value="hawaii">Hawaii</SelectItem>
+                    <SelectItem value="arizona_no_dst">Arizona (no DST)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Contact Type</Label>
+                <Select
+                  value={(watch("type") as string) || "none"}
+                  onValueChange={(v) => setValue("type", v === "none" ? "" : (v as never))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select type..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    <SelectItem value="prospect">Prospect</SelectItem>
+                    <SelectItem value="customer">Customer</SelectItem>
+                    <SelectItem value="partner">Partner</SelectItem>
+                    <SelectItem value="vendor">Vendor</SelectItem>
+                    <SelectItem value="referral_source">Referral Source</SelectItem>
+                    <SelectItem value="internal">Internal</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Relationship Tag</Label>
+                <Select
+                  value={(watch("business_relationship_tag") as string) || "none"}
+                  onValueChange={(v) =>
+                    setValue("business_relationship_tag", v === "none" ? "" : (v as never))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select relationship..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    <SelectItem value="decision_maker">Decision Maker</SelectItem>
+                    <SelectItem value="influencer">Influencer</SelectItem>
+                    <SelectItem value="economic_buyer">Economic Buyer</SelectItem>
+                    <SelectItem value="technical_buyer">Technical Buyer</SelectItem>
+                    <SelectItem value="champion">Champion</SelectItem>
+                    <SelectItem value="detractor">Detractor</SelectItem>
+                    <SelectItem value="end_user">End User</SelectItem>
+                    <SelectItem value="gatekeeper">Gatekeeper</SelectItem>
+                    <SelectItem value="executive_sponsor">Executive Sponsor</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-2">
@@ -233,15 +420,89 @@ export function ContactForm() {
                   </SelectContent>
                 </Select>
               </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="mql_date">MQL Date<RequiredIndicator fieldKey="mql_date" requiredFields={requiredKeys} /></Label>
+                <Input id="mql_date" type="date" {...register("mql_date")} />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="sql_date">SQL Date<RequiredIndicator fieldKey="sql_date" requiredFields={requiredKeys} /></Label>
+                <Input id="sql_date" type="date" {...register("sql_date")} />
+              </div>
             </div>
 
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="is_primary"
-                checked={watch("is_primary")}
-                onCheckedChange={(checked) => setValue("is_primary", !!checked)}
-              />
-              <Label htmlFor="is_primary" className="cursor-pointer">Primary contact for this account</Label>
+            {/* Mailing address */}
+            <div className="space-y-3 pt-2">
+              <h3 className="text-sm font-medium text-muted-foreground">Mailing Address</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="mailing_street">Street</Label>
+                  <Input id="mailing_street" {...register("mailing_street")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="mailing_city">City</Label>
+                  <Input id="mailing_city" {...register("mailing_city")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="mailing_state">State / Province</Label>
+                  <Select
+                    value={watch("mailing_state") || "none"}
+                    onValueChange={(v) =>
+                      setValue("mailing_state", v === "none" ? "" : v)
+                    }
+                  >
+                    <SelectTrigger id="mailing_state">
+                      <SelectValue placeholder="Select state..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {US_STATES.map((s) => (
+                        <SelectItem key={s.code} value={s.code}>
+                          {s.name} ({s.code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="mailing_zip">Postal Code</Label>
+                  <Input id="mailing_zip" {...register("mailing_zip")} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="mailing_country">Country</Label>
+                  <Input id="mailing_country" {...register("mailing_country")} />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="is_primary"
+                  checked={watch("is_primary")}
+                  onCheckedChange={(checked) => setValue("is_primary", !!checked)}
+                />
+                <Label htmlFor="is_primary" className="cursor-pointer">Primary contact for this account</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="do_not_contact"
+                  checked={watch("do_not_contact")}
+                  onCheckedChange={(checked) => setValue("do_not_contact", !!checked)}
+                />
+                <Label htmlFor="do_not_contact" className="cursor-pointer">Do not contact</Label>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="notes">Notes</Label>
+              <Textarea id="notes" rows={3} {...register("notes")} />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="next_steps">Next Steps</Label>
+              <Textarea id="next_steps" rows={2} {...register("next_steps")} />
             </div>
 
             <div className="flex items-center gap-3">

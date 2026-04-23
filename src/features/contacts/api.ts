@@ -5,6 +5,8 @@ import type { Contact } from "@/types/crm";
 interface ContactFilters {
   search?: string;
   account_id?: string;
+  ownerId?: string | "mine";
+  verified?: "true" | "false";
   page?: number;
   pageSize?: number;
 }
@@ -17,16 +19,24 @@ export function useContacts(filters?: ContactFilters) {
       const pageSize = filters?.pageSize ?? 25;
       let query = supabase
         .from("contacts")
-        .select("*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)", { count: "exact" })
+        .select("*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
         .order("last_name")
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (filters?.search) {
-        query = query.or(`first_name.ilike.%${filters.search}%,last_name.ilike.%${filters.search}%,email.ilike.%${filters.search}%`);
+        query = query.or(`first_name.ilike.%${filters.search}%,last_name.ilike.%${filters.search}%,email.ilike.%${filters.search}%,title.ilike.%${filters.search}%`);
       }
       if (filters?.account_id) {
         query = query.eq("account_id", filters.account_id);
       }
+      if (filters?.ownerId && filters.ownerId !== "mine") {
+        query = query.eq("owner_user_id", filters.ownerId);
+      } else if (filters?.ownerId === "mine") {
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData.user?.id) query = query.eq("owner_user_id", userData.user.id);
+      }
+      if (filters?.verified === "true") query = query.eq("verified", true);
+      else if (filters?.verified === "false") query = query.eq("verified", false);
 
       const { data, error, count } = await query;
       if (error) throw error;
@@ -98,6 +108,22 @@ export function useBulkUpdateOwner() {
         supabase.from("contacts").update({ owner_user_id }).eq("id", id)
       );
       await Promise.all(promises);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+    },
+  });
+}
+
+export function useBulkDeleteContacts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ids }: { ids: string[] }) => {
+      for (let i = 0; i < ids.length; i += 50) {
+        const batch = ids.slice(i, i + 50);
+        const { error } = await supabase.from("contacts").delete().in("id", batch);
+        if (error) throw error;
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contacts"] });

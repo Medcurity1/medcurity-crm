@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { useProducts, useAddOpportunityProduct, useOpportunity } from "./api";
 import { usePriceBooks, usePriceBookEntries } from "@/features/products/api";
-import { useAccount } from "@/features/accounts/api";
 import {
   Dialog,
   DialogContent,
@@ -22,17 +21,48 @@ import {
 import { toast } from "sonner";
 import { formatCurrencyDetailed } from "@/lib/formatters";
 
-interface AddProductDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  opportunityId: string;
+/**
+ * A row the user has staged to attach to a not-yet-created opportunity.
+ * `productName` / `productCode` are snapshot at stage time so the parent
+ * form can render a readable preview without refetching the product.
+ */
+export interface StagedOpportunityProduct {
+  product_id: string;
+  product_name: string;
+  product_code: string | null;
+  quantity: number;
+  unit_price: number;
+  arr_amount: number;
 }
 
-export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProductDialogProps) {
+type AddProductDialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+} & (
+  | {
+      /** Insert straight into opportunity_products for an existing opp. */
+      mode?: "immediate";
+      opportunityId: string;
+    }
+  | {
+      /**
+       * Stage the product in parent state; parent will flush it to the DB
+       * after the opportunity itself is created. Used on the create form.
+       */
+      mode: "staged";
+      fteRange: string | null;
+      onStage: (staged: StagedOpportunityProduct) => void;
+    }
+);
+
+export function AddProductDialog(props: AddProductDialogProps) {
+  const { open, onOpenChange } = props;
+  const isStaged = props.mode === "staged";
+
   const { data: products } = useProducts();
   const { data: priceBooks } = usePriceBooks();
-  const { data: opp } = useOpportunity(opportunityId);
-  const { data: account } = useAccount(opp?.account_id);
+  // Only hit useOpportunity in immediate mode — staged mode has no opp yet.
+  const { data: opp } = useOpportunity(isStaged ? undefined : props.opportunityId);
   const addMutation = useAddOpportunityProduct();
 
   const [priceBookId, setPriceBookId] = useState("");
@@ -45,13 +75,54 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
 
   const { data: priceBookEntries } = usePriceBookEntries(priceBookId || undefined);
 
-  const accountFteRange = account?.fte_range ?? null;
+  // Staged mode gets FTE from the caller (the OpportunityForm), since the
+  // opp doesn't exist yet. Immediate mode reads it off the opp itself,
+  // falling back to the linked account's FTE tier when the opp's own
+  // column is null (which is common for imported opps and opps created
+  // before the FTE trigger existed). Open opps stay in sync with the
+  // account via a DB trigger; closed opps freeze whatever tier they had
+  // at close.
+  const oppFteRange = isStaged
+    ? props.fteRange ?? null
+    : opp?.fte_range ?? opp?.account?.fte_range ?? null;
   const activePriceBooks = priceBooks?.filter((pb) => pb.is_active) ?? [];
 
-  // Reset form when dialog opens
+  // Pick the best matching price book for this opp's FTE tier. Prefer an
+  // active book whose fte_range matches exactly (or whose NAME mentions
+  // the tier, e.g. "1-20 Price Book" matches fte_range "1-20"); fall
+  // back to the default book, then to any active book. Matching the name
+  // fixes cases where a price book was imported without fte_range
+  // populated on the column.
+  const normalizeTier = (s: string | null | undefined) =>
+    (s ?? "").replace(/\s+/g, "").toLowerCase();
+
+  const autoSelectedPriceBookId = (() => {
+    if (!activePriceBooks.length) return "";
+    if (oppFteRange) {
+      const target = normalizeTier(oppFteRange);
+      // 1. exact fte_range column match
+      const colMatch = activePriceBooks.find(
+        (pb) => normalizeTier(pb.fte_range) === target
+      );
+      if (colMatch) return colMatch.id;
+      // 2. name-based match: look for the tier string at the start of
+      //    the book name, e.g. "1-20 Price Book" → normalize to "1-20..."
+      const nameMatch = activePriceBooks.find((pb) => {
+        const nameTier = normalizeTier(pb.name.split(/\s+/)[0]);
+        return nameTier === target;
+      });
+      if (nameMatch) return nameMatch.id;
+    }
+    const defaultBook = activePriceBooks.find((pb) => pb.is_default);
+    if (defaultBook) return defaultBook.id;
+    return activePriceBooks[0]?.id ?? "";
+  })();
+
+  // Reset form when dialog opens. Auto-select the tier-matching price book
+  // so reps don't have to remember which book to pick.
   useEffect(() => {
     if (open) {
-      setPriceBookId("");
+      setPriceBookId(autoSelectedPriceBookId);
       setProductId("");
       setQuantity(1);
       setUnitPrice(0);
@@ -59,7 +130,7 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
       setArrManuallyEdited(false);
       setPriceBookPriceFilled(false);
     }
-  }, [open]);
+  }, [open, autoSelectedPriceBookId]);
 
   // Look up price from price book entries when price book + product + fte range are available
   useEffect(() => {
@@ -68,7 +139,7 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
     const matchingEntry = priceBookEntries.find(
       (e) =>
         e.product_id === productId &&
-        (accountFteRange ? e.fte_range === accountFteRange : e.fte_range === null)
+        (oppFteRange ? e.fte_range === oppFteRange : e.fte_range === null)
     );
 
     if (matchingEntry) {
@@ -88,7 +159,7 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
         }
       }
     }
-  }, [priceBookId, productId, priceBookEntries, accountFteRange]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [priceBookId, productId, priceBookEntries, oppFteRange]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-fill unit price from product's default_arr when product is selected (no price book)
   useEffect(() => {
@@ -117,9 +188,24 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
       return;
     }
 
+    const selectedProduct = products?.find((p) => p.id === productId);
+
+    if (isStaged) {
+      props.onStage({
+        product_id: productId,
+        product_name: selectedProduct?.name ?? "",
+        product_code: selectedProduct?.code ?? null,
+        quantity,
+        unit_price: unitPrice,
+        arr_amount: arrAmount,
+      });
+      onOpenChange(false);
+      return;
+    }
+
     addMutation.mutate(
       {
-        opportunity_id: opportunityId,
+        opportunity_id: props.opportunityId,
         product_id: productId,
         quantity,
         unit_price: unitPrice,
@@ -141,7 +227,7 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add Product</DialogTitle>
         </DialogHeader>
@@ -161,14 +247,14 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
                 ))}
               </SelectContent>
             </Select>
-            {selectedPriceBook && accountFteRange && (
+            {selectedPriceBook && oppFteRange && (
               <p className="text-xs text-muted-foreground">
-                Using "{selectedPriceBook.name}" for FTE range: {accountFteRange}
+                Using "{selectedPriceBook.name}" for FTE range: {oppFteRange}
               </p>
             )}
-            {selectedPriceBook && !accountFteRange && (
+            {selectedPriceBook && !oppFteRange && (
               <p className="text-xs text-amber-600">
-                Account has no FTE range set. Prices may not match.
+                Opportunity has no FTE range set. Edit the opportunity to set one, or prices may not match.
               </p>
             )}
           </div>
@@ -189,7 +275,7 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
             </Select>
             {priceBookPriceFilled && selectedPriceBook && (
               <p className="text-xs text-emerald-600">
-                Price auto-filled from "{selectedPriceBook.name}" ({accountFteRange ?? "no FTE range"}): {formatCurrencyDetailed(unitPrice)}
+                Price auto-filled from "{selectedPriceBook.name}" ({oppFteRange ?? "no FTE range"}): {formatCurrencyDetailed(unitPrice)}
               </p>
             )}
           </div>
@@ -201,8 +287,19 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
                 id="quantity"
                 type="number"
                 min={1}
-                value={quantity}
-                onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                // Track the raw string so the user can fully highlight and
+                // retype without the control snapping to 1 mid-keystroke.
+                // We still clamp to >= 1 on the parsed number used elsewhere.
+                value={String(quantity)}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === "") {
+                    setQuantity(1);
+                    return;
+                  }
+                  const n = parseInt(raw, 10);
+                  if (!Number.isNaN(n) && n >= 1) setQuantity(n);
+                }}
               />
             </div>
 
@@ -213,8 +310,16 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
                 type="number"
                 min={0}
                 step="0.01"
-                value={unitPrice}
-                onChange={(e) => setUnitPrice(parseFloat(e.target.value) || 0)}
+                value={String(unitPrice)}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === "") {
+                    setUnitPrice(0);
+                    return;
+                  }
+                  const n = parseFloat(raw);
+                  if (!Number.isNaN(n) && n >= 0) setUnitPrice(n);
+                }}
               />
             </div>
           </div>
@@ -226,10 +331,16 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
               type="number"
               min={0}
               step="0.01"
-              value={arrAmount}
+              value={String(arrAmount)}
               onChange={(e) => {
                 setArrManuallyEdited(true);
-                setArrAmount(parseFloat(e.target.value) || 0);
+                const raw = e.target.value;
+                if (raw === "") {
+                  setArrAmount(0);
+                  return;
+                }
+                const n = parseFloat(raw);
+                if (!Number.isNaN(n) && n >= 0) setArrAmount(n);
               }}
             />
             <p className="text-xs text-muted-foreground">
@@ -241,8 +352,8 @@ export function AddProductDialog({ open, onOpenChange, opportunityId }: AddProdu
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={addMutation.isPending}>
-              {addMutation.isPending ? "Adding..." : "Add Product"}
+            <Button type="submit" disabled={!isStaged && addMutation.isPending}>
+              {isStaged ? "Add to Opportunity" : addMutation.isPending ? "Adding..." : "Add Product"}
             </Button>
           </DialogFooter>
         </form>

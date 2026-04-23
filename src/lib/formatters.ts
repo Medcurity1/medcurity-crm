@@ -1,5 +1,5 @@
 import { format, formatDistanceToNow, parseISO, differenceInDays } from "date-fns";
-import type { OpportunityStage, AccountLifecycle, AccountStatus, RenewalType, ActivityType, OpportunityKind, OpportunityTeam, LeadStatus, LeadSource, PaymentFrequency, LeadQualification } from "@/types/crm";
+import type { OpportunityStage, AccountLifecycle, AccountStatus, RenewalType, ActivityType, OpportunityKind, OpportunityTeam, LeadStatus, LeadSource, PaymentFrequency, LeadQualification, IndustryCategory, ProjectSegment } from "@/types/crm";
 
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -44,12 +44,20 @@ export function formatName(firstName: string, lastName: string): string {
 }
 
 const stageLabels: Record<OpportunityStage, string> = {
+  // SF-matching stages (current) — these are what the UI surfaces.
+  details_analysis: "Details Analysis",
+  demo: "Demo",
+  proposal_and_price_quote: "Proposal and Price Quote",
+  proposal_conversation: "Proposal Conversation",
+  closed_won: "Closed Won",
+  closed_lost: "Closed Lost",
+  // Legacy labels — kept so old history rows still render a human
+  // name instead of crashing. Migration 20260422000001 rewrote all
+  // data to SF values, so these should be vanishingly rare.
   lead: "Lead",
   qualified: "Qualified",
   proposal: "Proposal",
   verbal_commit: "Verbal Commit",
-  closed_won: "Closed Won",
-  closed_lost: "Closed Lost",
 };
 
 export function stageLabel(stage: OpportunityStage): string {
@@ -112,6 +120,8 @@ const renewalTypeLabels: Record<RenewalType, string> = {
   auto_renew: "Auto Renew",
   manual_renew: "Manual Renew",
   no_auto_renew: "No Auto Renew",
+  full_auto_renew: "Full Auto Renew",
+  platform_only_auto_renew: "Platform Only Auto Renew",
 };
 
 export function renewalTypeLabel(type: RenewalType): string {
@@ -138,6 +148,11 @@ const leadSourceLabels: Record<LeadSource, string> = {
   partner: "Partner",
   social_media: "Social Media",
   email_campaign: "Email Campaign",
+  webinar: "Webinar",
+  podcast: "Podcast",
+  conference: "Conference",
+  sql: "SQL",
+  mql: "MQL",
   other: "Other",
 };
 
@@ -168,6 +183,38 @@ export function qualificationLabel(q: LeadQualification): string {
   return qualificationLabels[q];
 }
 
+/* ---- FTE Range ---- */
+
+export const FTE_RANGES = [
+  "1-20",
+  "21-50",
+  "51-100",
+  "101-250",
+  "251-500",
+  "501-750",
+  "751-1000",
+  "1001-1500",
+  "1501-2000",
+  "2001-5000",
+  "5001-10000",
+] as const;
+
+/** Given a number of employees, return the matching FTE range bucket */
+export function employeesToFteRange(employees: number | null | undefined): string {
+  if (employees == null || employees <= 0) return "";
+  if (employees <= 20) return "1-20";
+  if (employees <= 50) return "21-50";
+  if (employees <= 100) return "51-100";
+  if (employees <= 250) return "101-250";
+  if (employees <= 500) return "251-500";
+  if (employees <= 750) return "501-750";
+  if (employees <= 1000) return "751-1000";
+  if (employees <= 1500) return "1001-1500";
+  if (employees <= 2000) return "1501-2000";
+  if (employees <= 5000) return "2001-5000";
+  return "5001-10000";
+}
+
 export const OPEN_STAGES: OpportunityStage[] = [
   "lead",
   "qualified",
@@ -175,11 +222,71 @@ export const OPEN_STAGES: OpportunityStage[] = [
   "verbal_commit",
 ];
 
+// Stages shown in the UI + used by pipeline-view defaults. Order
+// matches the SF probability ladder (low → high, then closed states).
 export const ALL_STAGES: OpportunityStage[] = [
-  "lead",
-  "qualified",
-  "proposal",
-  "verbal_commit",
+  "details_analysis",
+  "demo",
+  "proposal_and_price_quote",
+  "proposal_conversation",
   "closed_won",
   "closed_lost",
 ];
+
+// Human-readable labels for the industry_category enum. Source of
+// truth for every place the category renders (detail card, edit
+// dropdown, filter dropdown). Matches the picklist the form already
+// surfaces; collecting the labels here prevents the
+// "text column vs enum column" bug that hit accounts.industry.
+const INDUSTRY_CATEGORY_LABELS: Record<IndustryCategory, string> = {
+  hospital: "Hospital",
+  medical_group: "Medical Group",
+  fqhc: "FQHC",
+  rural_health_clinic: "Rural Health Clinic",
+  skilled_nursing: "Skilled Nursing",
+  long_term_care: "Long-Term Care",
+  home_health: "Home Health",
+  hospice: "Hospice",
+  behavioral_health: "Behavioral Health",
+  dental: "Dental",
+  pediatrics: "Pediatrics",
+  specialty_clinic: "Specialty Clinic",
+  urgent_care: "Urgent Care",
+  imaging_center: "Imaging Center",
+  lab_services: "Lab Services",
+  pharmacy: "Pharmacy",
+  telemedicine: "Telemedicine",
+  tribal_health: "Tribal Health",
+  public_health_agency: "Public Health Agency",
+  healthcare_it_vendor: "Healthcare IT Vendor",
+  managed_service_provider: "Managed Service Provider",
+  healthcare_consulting: "Healthcare Consulting",
+  insurance_payer: "Insurance Payer",
+  other_healthcare: "Other Healthcare",
+  other: "Other",
+};
+
+export function industryCategoryLabel(v: IndustryCategory | null | undefined): string {
+  if (!v) return "—";
+  return INDUSTRY_CATEGORY_LABELS[v] ?? v;
+}
+
+const PROJECT_SEGMENT_LABELS: Record<ProjectSegment, string> = {
+  rural_hospital: "Rural Hospital",
+  community_hospital: "Community Hospital",
+  enterprise: "Enterprise",
+  medium_sized: "Medium-Sized",
+  small_sized: "Small-Sized",
+  fqhc: "FQHC",
+  voa: "VOA",
+  franchise: "Franchise",
+  strategic_partner: "Strategic Partner",
+  it_vendor_third_party: "IT Vendor / Third Party",
+  independent_associations: "Independent Associations",
+  other: "Other",
+};
+
+export function projectSegmentLabel(v: ProjectSegment | null | undefined): string {
+  if (!v) return "—";
+  return PROJECT_SEGMENT_LABELS[v] ?? v;
+}
