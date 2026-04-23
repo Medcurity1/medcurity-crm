@@ -167,5 +167,22 @@ alter table public.opportunities add column if not exists follow_up boolean defa
 
 -- ============================================================
 -- 4. Saved report folders
+-- ----------------------------------------------------------------
+-- Note: public.saved_reports is actually created in the next
+-- migration (20260403000003_pipeline_views_and_saved_reports).
+-- The original `alter table` here was a forward-reference bug that
+-- stayed silent on staging (the table got created out-of-order in
+-- early dev) but blocked the prod migration runner on its first
+-- pass against an empty DB. Guard the ALTER with a table-exists
+-- check — when the table is later created with this column already
+-- in scope, this is a no-op.
 -- ============================================================
-alter table public.saved_reports add column if not exists folder text;
+do $$
+begin
+  if exists (
+    select 1 from information_schema.tables
+    where table_schema = 'public' and table_name = 'saved_reports'
+  ) then
+    alter table public.saved_reports add column if not exists folder text;
+  end if;
+end $$;
