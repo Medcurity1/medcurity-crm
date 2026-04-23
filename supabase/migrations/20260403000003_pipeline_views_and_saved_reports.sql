@@ -60,6 +60,11 @@ create table if not exists public.saved_reports (
   is_shared boolean not null default false,
   config jsonb not null default '{}'::jsonb,
   -- config schema: { entity: string, columns: string[], filters: Filter[], sort: Sort, group_by?: string }
+  -- Added in 20260403000002 originally as a separate ALTER, but
+  -- the ALTER was now guarded by a table-exists check; baking the
+  -- column directly into the CREATE makes a fresh DB land on the
+  -- same shape regardless of migration order.
+  folder text,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
