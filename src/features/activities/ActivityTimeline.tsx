@@ -237,29 +237,11 @@ export function ActivityTimeline({
         <div className="relative">
           <div className="absolute left-4 top-0 bottom-0 w-px bg-border" />
           <div className={compact ? "space-y-3" : "space-y-4"}>
-            {visible.map((entry) => {
-              if ((entry as ThreadGroup).threadKey) {
-                return (
-                  <ThreadEntry
-                    key={(entry as ThreadGroup).threadKey}
-                    group={entry as ThreadGroup}
-                    expandSignal={expandSignal}
-                    forceExpanded={allExpanded}
-                    enableReattribute={enableReattribute}
-                  />
-                );
-              }
-              const a = entry as Activity;
-              return (
-                <ActivityEntry
-                  key={a.id}
-                  activity={a}
-                  expandSignal={expandSignal}
-                  forceExpanded={allExpanded}
-                  enableReattribute={enableReattribute}
-                  onEdit={() => setEditingActivity(a)}
-                />
-              );
+            {renderGroupedByMonth(visible, {
+              expandSignal,
+              allExpanded,
+              enableReattribute,
+              onEdit: (a) => setEditingActivity(a),
             })}
           </div>
           {hiddenCount > 0 && (
@@ -317,6 +299,119 @@ function getActivityLink(activity: Activity): string | null {
   return null;
 }
 
+/**
+ * Render the chronological list with SF-style "April 2026 / March 2026"
+ * collapsible month headers. Everything in the current month shows by
+ * default expanded; older months collapse by default but preview the
+ * first entry.
+ */
+function renderGroupedByMonth(
+  entries: (Activity | ThreadGroup)[],
+  opts: {
+    expandSignal?: number;
+    allExpanded: boolean;
+    enableReattribute: boolean;
+    onEdit: (a: Activity) => void;
+  }
+) {
+  // Pick the sort-key date for each entry. Emails / notes / calls use
+  // created_at; tasks/meetings prefer due_at when set since that's
+  // what the user actually scheduled it for.
+  const keyDate = (e: Activity | ThreadGroup): string => {
+    const a = (e as ThreadGroup).threadKey ? (e as ThreadGroup).primary : (e as Activity);
+    return a.due_at || a.created_at;
+  };
+
+  // Group by "YYYY-MM". Keeps insertion order since entries are already
+  // sorted most-recent-first by the parent list.
+  const groups = new Map<string, { label: string; items: (Activity | ThreadGroup)[] }>();
+  const now = new Date();
+  const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastMonthKey = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, "0")}`;
+
+  for (const entry of entries) {
+    const d = new Date(keyDate(entry));
+    if (isNaN(d.getTime())) continue;
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    let label = d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+    if (key === thisMonthKey) label = `${label} · This Month`;
+    else if (key === lastMonthKey) label = `${label} · Last Month`;
+    if (!groups.has(key)) groups.set(key, { label, items: [] });
+    groups.get(key)!.items.push(entry);
+  }
+
+  return Array.from(groups.entries()).map(([key, group]) => (
+    <MonthGroup
+      key={key}
+      label={group.label}
+      defaultOpen={key === thisMonthKey || key === lastMonthKey}
+      items={group.items}
+      opts={opts}
+    />
+  ));
+}
+
+function MonthGroup({
+  label,
+  defaultOpen,
+  items,
+  opts,
+}: {
+  label: string;
+  defaultOpen: boolean;
+  items: (Activity | ThreadGroup)[];
+  opts: {
+    expandSignal?: number;
+    allExpanded: boolean;
+    enableReattribute: boolean;
+    onEdit: (a: Activity) => void;
+  };
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground py-1 mb-2"
+      >
+        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        <span className="uppercase tracking-wider">{label}</span>
+        <span className="font-normal">({items.length})</span>
+      </button>
+      {open && (
+        <div className="space-y-3 mb-4">
+          {items.map((entry) => {
+            if ((entry as ThreadGroup).threadKey) {
+              return (
+                <ThreadEntry
+                  key={(entry as ThreadGroup).threadKey}
+                  group={entry as ThreadGroup}
+                  expandSignal={opts.expandSignal}
+                  forceExpanded={opts.allExpanded}
+                  enableReattribute={opts.enableReattribute}
+                />
+              );
+            }
+            const a = entry as Activity;
+            return (
+              <ActivityEntry
+                key={a.id}
+                activity={a}
+                expandSignal={opts.expandSignal}
+                forceExpanded={opts.allExpanded}
+                enableReattribute={opts.enableReattribute}
+                onEdit={() => opts.onEdit(a)}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ActivityEntry({
   activity,
   expandSignal,
@@ -334,7 +429,11 @@ function ActivityEntry({
   const colorClass = typeColors[activity.activity_type];
   const isCompleted = !!activity.completed_at;
   const isDue = !!activity.due_at && !isCompleted;
-  const subjectLink = getActivityLink(activity);
+  // subjectLink kept for parity with older timelines that might want
+  // the related-record shortcut — currently unused because we navigate
+  // to /activities/:id on click. Leaving for now in case a consumer
+  // wants related-record linking back.
+  void getActivityLink;
   const isEmail = activity.activity_type === "email";
   const [expanded, setExpanded] = useState(false);
   const [showReattribute, setShowReattribute] = useState(false);
@@ -348,51 +447,38 @@ function ActivityEntry({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expandSignal]);
 
-  // Unified "click to view" behavior: every activity now expands
-  // inline on click (email shows full HTML body; other types show
-  // full body + metadata). Separate pencil icon is the ONLY way
-  // to open the edit form — prevents accidental edits when the
-  // user just wanted to read.
+  // Click behavior:
+  //   - Subject (link) navigates to /activities/:id for the full-page
+  //     view. This is what SF does.
+  //   - Icon still toggles an inline preview for quick scanning
+  //     without leaving the current page.
+  //   - Pencil icon opens the edit form.
   const canExpand = !!activity.body || isEmail;
   return (
     <div className="relative flex gap-3 pl-0">
-      {/* Icon */}
+      {/* Icon — click to toggle inline preview */}
       <button
         type="button"
         className={`relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${colorClass} ${
           canExpand ? "cursor-pointer hover:opacity-80" : "cursor-default"
         }`}
         onClick={canExpand ? () => setExpanded((v) => !v) : undefined}
-        aria-label={canExpand ? (expanded ? "Collapse" : "Expand") : undefined}
+        aria-label={canExpand ? (expanded ? "Hide preview" : "Show preview") : undefined}
         disabled={!canExpand}
       >
         <Icon className="h-4 w-4" />
       </button>
 
-      {/* Content — min-w-0 so the subject truncates cleanly even
-          with very long email subjects. */}
+      {/* Content */}
       <div className="flex-1 min-w-0 pb-4">
         <div className="flex items-center gap-2">
-          {canExpand ? (
-            <button
-              type="button"
-              className="flex items-center gap-1 text-left font-medium text-sm text-blue-600 hover:underline min-w-0 flex-1"
-              onClick={() => setExpanded((v) => !v)}
-            >
-              {expanded ? (
-                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
-              ) : (
-                <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-              )}
-              <span className="truncate">{activity.subject}</span>
-            </button>
-          ) : subjectLink ? (
-            <Link to={subjectLink} className="font-medium text-sm truncate text-blue-600 hover:underline min-w-0 flex-1">
-              {activity.subject}
-            </Link>
-          ) : (
-            <p className="font-medium text-sm truncate min-w-0 flex-1">{activity.subject}</p>
-          )}
+          <Link
+            to={`/activities/${activity.id}`}
+            className="font-medium text-sm truncate text-blue-600 hover:underline min-w-0 flex-1"
+            title="Open full view"
+          >
+            {activity.subject}
+          </Link>
           {isCompleted && (
             <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
           )}
@@ -580,7 +666,7 @@ function ThreadEntry({
   enableReattribute = false,
 }: {
   group: ThreadGroup;
-  expandSignal: number;
+  expandSignal?: number;
   forceExpanded: boolean;
   enableReattribute?: boolean;
 }) {
@@ -588,7 +674,7 @@ function ThreadEntry({
   const messageCount = 1 + group.others.length;
 
   useEffect(() => {
-    if (expandSignal > 0) setShowThread(!!forceExpanded);
+    if (expandSignal && expandSignal > 0) setShowThread(!!forceExpanded);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expandSignal]);
 

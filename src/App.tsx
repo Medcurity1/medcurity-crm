@@ -35,6 +35,7 @@ const ReportsHub = lazy(() => import("@/features/reports/ReportsHub").then(m => 
 // lazy-loaded inside ReportsHub.
 const ActivityCalendar = lazy(() => import("@/features/activities/ActivityCalendar").then(m => ({ default: m.ActivityCalendar })));
 const ActivitiesListPage = lazy(() => import("@/features/activities/ActivitiesListPage").then(m => ({ default: m.ActivitiesListPage })));
+const ActivityDetail = lazy(() => import("@/features/activities/ActivityDetail").then(m => ({ default: m.ActivityDetail })));
 // WinLossAnalysis is now only reached via /reports?tab=analytics and
 // lazy-loaded inside ReportsHub.
 const SequencesPage = lazy(() => import("@/features/sequences/SequencesPage").then(m => ({ default: m.SequencesPage })));
@@ -82,6 +83,7 @@ export default function App() {
                   <Route path="pipeline" element={<PipelineBoard />} />
                   <Route path="calendar" element={<ActivityCalendar />} />
                   <Route path="activities" element={<ActivitiesListPage />} />
+                  <Route path="activities/:id" element={<ActivityDetail />} />
                   <Route path="products" element={<ProductsPage />} />
                   <Route path="products/:id" element={<ProductDetail />} />
                   <Route path="renewals" element={<RenewalsQueue />} />
