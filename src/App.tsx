@@ -37,6 +37,9 @@ const ActivityCalendar = lazy(() => import("@/features/activities/ActivityCalend
 const ActivitiesListPage = lazy(() => import("@/features/activities/ActivitiesListPage").then(m => ({ default: m.ActivitiesListPage })));
 const ActivityDetail = lazy(() => import("@/features/activities/ActivityDetail").then(m => ({ default: m.ActivityDetail })));
 const ArrRolling365 = lazy(() => import("@/features/reports/standard/ArrRolling365").then(m => ({ default: m.ArrRolling365 })));
+const MqlSqlCounts = lazy(() => import("@/features/reports/standard/MqlSqlCounts").then(m => ({ default: m.MqlSqlCounts })));
+const ActivePipeline = lazy(() => import("@/features/reports/standard/ActivePipeline").then(m => ({ default: m.ActivePipeline })));
+const RenewalsReport = lazy(() => import("@/features/reports/standard/RenewalsQueue").then(m => ({ default: m.RenewalsQueue })));
 // WinLossAnalysis is now only reached via /reports?tab=analytics and
 // lazy-loaded inside ReportsHub.
 const SequencesPage = lazy(() => import("@/features/sequences/SequencesPage").then(m => ({ default: m.SequencesPage })));
@@ -90,6 +93,9 @@ export default function App() {
                   <Route path="renewals" element={<RenewalsQueue />} />
                   <Route path="reports" element={<ReportsHub />} />
                   <Route path="reports/standard/arr-rolling-365" element={<ArrRolling365 />} />
+                  <Route path="reports/standard/mql-sql-counts" element={<MqlSqlCounts />} />
+                  <Route path="reports/standard/active-pipeline" element={<ActivePipeline />} />
+                  <Route path="reports/standard/renewals-queue" element={<RenewalsReport />} />
                   {/* Legacy routes redirect into the reports hub tabs */}
                   <Route
                     path="forecasting"

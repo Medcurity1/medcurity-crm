@@ -45,7 +45,7 @@ const REPORTS: ReportCard[] = [
     description:
       "Monthly MQL / SQL counts with dedup logic so a lead that converted to a contact doesn't get double-counted.",
     icon: Target,
-    status: "coming_soon",
+    status: "live",
   },
   {
     id: "new-customers-by-period",
@@ -69,7 +69,7 @@ const REPORTS: ReportCard[] = [
     description:
       "Open opportunities by stage + owner, weighted by probability.",
     icon: Activity,
-    status: "coming_soon",
+    status: "live",
   },
   {
     id: "renewals-queue",
@@ -77,7 +77,7 @@ const REPORTS: ReportCard[] = [
     description:
       "Upcoming renewals in the next 120 days, with ARR, owner, and last-contact activity.",
     icon: RefreshCw,
-    status: "coming_soon",
+    status: "live",
   },
   {
     id: "nrr",
