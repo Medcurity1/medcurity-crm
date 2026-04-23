@@ -26,6 +26,7 @@ import {
   qualificationLabel,
   formatDate,
   formatDateTime,
+  industryCategoryLabel,
 } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -416,11 +417,14 @@ export function LeadDetail() {
           <EditableField label="Mobile / Direct" value={lead.mobile_phone} onSave={saveField("mobile_phone")} />
           <EditableField label="Title" value={lead.title} onSave={saveField("title")} />
           <Field label="Company" value={lead.company} />
+          {/* industry_category (enum) is the source of truth; lead.industry
+              (free text) is legacy and only surfaces if the enum is null
+              — matches the pattern on AccountDetail. */}
           <Field
             label="Industry"
             value={
               lead.industry_category
-                ? lead.industry_category.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+                ? industryCategoryLabel(lead.industry_category)
                 : lead.industry ?? null
             }
           />

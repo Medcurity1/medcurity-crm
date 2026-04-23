@@ -341,11 +341,17 @@ function renderGroupedByMonth(
     groups.get(key)!.items.push(entry);
   }
 
+  // Default open for the two most recent months with activity
+  // (not strict current/last-month — if a rep hasn't logged anything
+  // for 3 months, show them the last 2 months WITH data so the
+  // timeline isn't collapsed to headers on arrival).
+  const topTwoKeys = new Set(Array.from(groups.keys()).slice(0, 2));
+
   return Array.from(groups.entries()).map(([key, group]) => (
     <MonthGroup
       key={key}
       label={group.label}
-      defaultOpen={key === thisMonthKey || key === lastMonthKey}
+      defaultOpen={topTwoKeys.has(key)}
       items={group.items}
       opts={opts}
     />
@@ -531,11 +537,25 @@ function ActivityEntry({
             iframe layout; other activity types get a full-text
             dump of the body so reps don't lose any detail. */}
         {expanded && isEmail && (
-          <EmailDetails
-            activity={activity}
-            enableReattribute={enableReattribute}
-            onOpenReattribute={() => setShowReattribute(true)}
-          />
+          <>
+            <EmailDetails
+              activity={activity}
+              enableReattribute={enableReattribute}
+              onOpenReattribute={() => setShowReattribute(true)}
+            />
+            {/* Quick link to the full-page view — that page parses
+                the quoted reply chain into collapsible message cards.
+                The inline preview keeps it flat for quick scanning. */}
+            <div className="mt-2">
+              <Link
+                to={`/activities/${activity.id}`}
+                className="text-xs text-primary hover:underline inline-flex items-center gap-1"
+              >
+                <ExternalLink className="h-3 w-3" />
+                Open full thread view
+              </Link>
+            </div>
+          </>
         )}
         {expanded && !isEmail && activity.body && (
           <div className="mt-2 rounded-md border bg-muted/30 p-3 text-sm">

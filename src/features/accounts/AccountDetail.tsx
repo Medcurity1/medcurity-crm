@@ -34,6 +34,7 @@ import {
   formatDate,
   formatDateTime,
   formatCurrency,
+  industryCategoryLabel,
 } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -270,7 +271,12 @@ export function AccountDetail() {
             <CardTitle className="text-xs text-muted-foreground font-medium">Industry</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
-            <p className="text-sm font-semibold truncate">{account.industry ?? "\u2014"}</p>
+            {/* Source of truth: industry_category (enum). accounts.industry
+                is the legacy free-text column kept for historical trace of
+                SF's original value — never surface it in the UI, since
+                having both visible caused the "why does editing show a
+                dropdown but the card shows free text?" bug. */}
+            <p className="text-sm font-semibold truncate">{industryCategoryLabel(account.industry_category)}</p>
           </CardContent>
         </Card>
         <Card>
@@ -393,7 +399,10 @@ export function AccountDetail() {
           <EditableField label="Account Type" value={account.account_type} onSave={saveField("account_type")} />
           <Field label="Account Number" value={account.account_number} />
           <Field label="Customer Type" value={lifecycleLabel(account.lifecycle_status)} />
-          <EditableField label="Industry" value={account.industry} onSave={saveField("industry")} />
+          {/* Industry is driven by industry_category (enum). Editing
+              happens on the Edit page via the dropdown; inline edit
+              here would bring back the free-text bug the user hit. */}
+          <Field label="Industry" value={industryCategoryLabel(account.industry_category)} />
           <EditableField label="Website" value={account.website} onSave={saveField("website")} />
           <Field
             label="Parent Account"

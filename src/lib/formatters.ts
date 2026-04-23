@@ -1,5 +1,5 @@
 import { format, formatDistanceToNow, parseISO, differenceInDays } from "date-fns";
-import type { OpportunityStage, AccountLifecycle, AccountStatus, RenewalType, ActivityType, OpportunityKind, OpportunityTeam, LeadStatus, LeadSource, PaymentFrequency, LeadQualification } from "@/types/crm";
+import type { OpportunityStage, AccountLifecycle, AccountStatus, RenewalType, ActivityType, OpportunityKind, OpportunityTeam, LeadStatus, LeadSource, PaymentFrequency, LeadQualification, IndustryCategory, ProjectSegment } from "@/types/crm";
 
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -232,3 +232,61 @@ export const ALL_STAGES: OpportunityStage[] = [
   "closed_won",
   "closed_lost",
 ];
+
+// Human-readable labels for the industry_category enum. Source of
+// truth for every place the category renders (detail card, edit
+// dropdown, filter dropdown). Matches the picklist the form already
+// surfaces; collecting the labels here prevents the
+// "text column vs enum column" bug that hit accounts.industry.
+const INDUSTRY_CATEGORY_LABELS: Record<IndustryCategory, string> = {
+  hospital: "Hospital",
+  medical_group: "Medical Group",
+  fqhc: "FQHC",
+  rural_health_clinic: "Rural Health Clinic",
+  skilled_nursing: "Skilled Nursing",
+  long_term_care: "Long-Term Care",
+  home_health: "Home Health",
+  hospice: "Hospice",
+  behavioral_health: "Behavioral Health",
+  dental: "Dental",
+  pediatrics: "Pediatrics",
+  specialty_clinic: "Specialty Clinic",
+  urgent_care: "Urgent Care",
+  imaging_center: "Imaging Center",
+  lab_services: "Lab Services",
+  pharmacy: "Pharmacy",
+  telemedicine: "Telemedicine",
+  tribal_health: "Tribal Health",
+  public_health_agency: "Public Health Agency",
+  healthcare_it_vendor: "Healthcare IT Vendor",
+  managed_service_provider: "Managed Service Provider",
+  healthcare_consulting: "Healthcare Consulting",
+  insurance_payer: "Insurance Payer",
+  other_healthcare: "Other Healthcare",
+  other: "Other",
+};
+
+export function industryCategoryLabel(v: IndustryCategory | null | undefined): string {
+  if (!v) return "—";
+  return INDUSTRY_CATEGORY_LABELS[v] ?? v;
+}
+
+const PROJECT_SEGMENT_LABELS: Record<ProjectSegment, string> = {
+  rural_hospital: "Rural Hospital",
+  community_hospital: "Community Hospital",
+  enterprise: "Enterprise",
+  medium_sized: "Medium-Sized",
+  small_sized: "Small-Sized",
+  fqhc: "FQHC",
+  voa: "VOA",
+  franchise: "Franchise",
+  strategic_partner: "Strategic Partner",
+  it_vendor_third_party: "IT Vendor / Third Party",
+  independent_associations: "Independent Associations",
+  other: "Other",
+};
+
+export function projectSegmentLabel(v: ProjectSegment | null | undefined): string {
+  if (!v) return "—";
+  return PROJECT_SEGMENT_LABELS[v] ?? v;
+}
