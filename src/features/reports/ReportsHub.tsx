@@ -22,8 +22,11 @@ const WinLossAnalysis = lazy(() =>
 const DashboardsTab = lazy(() =>
   import("./DashboardsTab").then((m) => ({ default: m.DashboardsTab }))
 );
+const StandardReports = lazy(() =>
+  import("./StandardReports").then((m) => ({ default: m.StandardReports }))
+);
 
-const VALID_TABS = ["reports", "dashboards", "forecasting", "analytics"] as const;
+const VALID_TABS = ["standard", "reports", "dashboards", "forecasting", "analytics"] as const;
 type TabValue = (typeof VALID_TABS)[number];
 
 function LazyPanel({ children }: { children: React.ReactNode }) {
@@ -50,7 +53,9 @@ export function ReportsHub() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = ((): TabValue => {
     const t = searchParams.get("tab") as TabValue | null;
-    return t && (VALID_TABS as readonly string[]).includes(t) ? t : "reports";
+    // Default to the new Standard Reports catalog — most users land
+    // here wanting a curated report, not the custom builder.
+    return t && (VALID_TABS as readonly string[]).includes(t) ? t : "standard";
   })();
 
   const setActiveTab = (tab: string) => {
@@ -73,11 +78,18 @@ export function ReportsHub() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="reports">Reports</TabsTrigger>
+          <TabsTrigger value="standard">Standard</TabsTrigger>
+          <TabsTrigger value="reports">Custom Builder</TabsTrigger>
           <TabsTrigger value="dashboards">Dashboards</TabsTrigger>
           <TabsTrigger value="forecasting">Forecasting</TabsTrigger>
           <TabsTrigger value="analytics">Win/Loss</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="standard" className="mt-4">
+          <LazyPanel>
+            <StandardReports />
+          </LazyPanel>
+        </TabsContent>
 
         <TabsContent value="reports" className="mt-4">
           <LazyPanel>

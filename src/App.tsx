@@ -36,6 +36,7 @@ const ReportsHub = lazy(() => import("@/features/reports/ReportsHub").then(m => 
 const ActivityCalendar = lazy(() => import("@/features/activities/ActivityCalendar").then(m => ({ default: m.ActivityCalendar })));
 const ActivitiesListPage = lazy(() => import("@/features/activities/ActivitiesListPage").then(m => ({ default: m.ActivitiesListPage })));
 const ActivityDetail = lazy(() => import("@/features/activities/ActivityDetail").then(m => ({ default: m.ActivityDetail })));
+const ArrRolling365 = lazy(() => import("@/features/reports/standard/ArrRolling365").then(m => ({ default: m.ArrRolling365 })));
 // WinLossAnalysis is now only reached via /reports?tab=analytics and
 // lazy-loaded inside ReportsHub.
 const SequencesPage = lazy(() => import("@/features/sequences/SequencesPage").then(m => ({ default: m.SequencesPage })));
@@ -88,6 +89,7 @@ export default function App() {
                   <Route path="products/:id" element={<ProductDetail />} />
                   <Route path="renewals" element={<RenewalsQueue />} />
                   <Route path="reports" element={<ReportsHub />} />
+                  <Route path="reports/standard/arr-rolling-365" element={<ArrRolling365 />} />
                   {/* Legacy routes redirect into the reports hub tabs */}
                   <Route
                     path="forecasting"
