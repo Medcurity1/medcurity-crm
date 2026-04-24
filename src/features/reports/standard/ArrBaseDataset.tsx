@@ -97,16 +97,21 @@ export function ArrBaseDataset() {
         account_id: string | null;
         owner_user_id: string | null;
       };
-      // Matches the SF "ARR - Chad" filter: all opps where
-      //   - name ≠ "Customer Service"
-      //   - archived_at null
-      //   - type in (New Business, Existing Business, blank) — the
-      //     importer only lets `kind` be new_business/renewal/null,
-      //     so this is automatic.
-      // Do NOT filter on one_time_project here. The ARR *metric*
-      // (rolling 365) excludes one-time projects, but the BASE DATASET
-      // shows them with the column populated so downstream analysts
-      // can filter as they wish.
+      // Matches the SF "ARR - Chad" filter panel EXACTLY:
+      //   - Show Me: All opportunities                    → no scope filter
+      //   - Close Date: All Time                          → date range picker
+      //   - Opportunity Status: Any                       → no stage filter
+      //   - Probability: All                              → no probability filter
+      //   - Type equals Existing Business, New Business, "" (literal blank)
+      //   - Opportunity Name not equal to Customer Service
+      //
+      // Our CRM stores:
+      //   kind = 'new_business'          → Type = "New Business"
+      //   kind = 'renewal'               → Type = "Existing Business"
+      //   kind = null                    → Type = "" (blank, allowed)
+      // SF allowed Type="Opportunity" as a literal default value in ~640
+      // rows — our importer rejected those into kind=null, so that's
+      // already filtered.
       const opps = (await fetchAllRows<OppRaw>(() => {
         let q = supabase
           .from("opportunities")
@@ -196,10 +201,18 @@ export function ArrBaseDataset() {
   const summary = useMemo(() => {
     const list = rows ?? [];
     const totalAmount = list.reduce((s, r) => s + Number(r.amount ?? 0), 0);
+    // Stage is stored as the human label now ("Closed Won"), not the
+    // DB enum. Match on the label.
     const wonAmount = list
-      .filter((r) => r.stage === "closed_won")
+      .filter((r) => r.stage === "Closed Won")
       .reduce((s, r) => s + Number(r.amount ?? 0), 0);
-    return { count: list.length, totalAmount, wonAmount };
+    const lostAmount = list
+      .filter((r) => r.stage === "Closed Lost")
+      .reduce((s, r) => s + Number(r.amount ?? 0), 0);
+    const openAmount = list
+      .filter((r) => r.stage !== "Closed Won" && r.stage !== "Closed Lost")
+      .reduce((s, r) => s + Number(r.amount ?? 0), 0);
+    return { count: list.length, totalAmount, wonAmount, lostAmount, openAmount };
   }, [rows]);
 
   function exportCsv() {
@@ -293,8 +306,8 @@ export function ArrBaseDataset() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Kpi label="Opportunities" value={summary.count.toLocaleString()} />
         <Kpi label="Total Amount" value={formatCurrency(summary.totalAmount)} />
-        <Kpi label="Closed Won Amount" value={formatCurrency(summary.wonAmount)} />
-        <Kpi label="API" value="/rest/v1/v_arr_base_dataset" tiny />
+        <Kpi label="Closed Won" value={formatCurrency(summary.wonAmount)} />
+        <Kpi label="Closed Lost" value={formatCurrency(summary.lostAmount)} />
       </div>
 
       <PreviewNote total={rows?.length ?? 0} shown={PREVIEW_LIMIT} />
