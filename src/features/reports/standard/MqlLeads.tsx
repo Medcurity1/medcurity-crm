@@ -30,17 +30,18 @@ import {
   resolveRange,
   type DateRangeKey,
 } from "./report-helpers";
+import { fetchUsersById } from "./report-fetchers";
 
 interface MqlLeadRow {
   lead_id: string;
-  lead_source: string | null;
-  first_name: string | null;
-  last_name: string | null;
-  title: string | null;
-  email: string | null;
-  phone: string | null;
-  mobile: string | null;
-  lead_owner: string | null;
+  lead_source: string;
+  first_name: string;
+  last_name: string;
+  title: string;
+  email: string;
+  phone: string;
+  mobile: string;
+  lead_owner: string;
   mql_date: string | null;
 }
 
@@ -48,15 +49,13 @@ export function MqlLeads() {
   const [range, setRange] = useState<DateRangeKey>("current_quarter");
   const { start, end } = resolveRange(range);
 
-  const { data: rows, isLoading } = useQuery({
-    queryKey: ["report", "mql-leads", start, end],
-    queryFn: async () => {
+  const { data: rows, isLoading, error } = useQuery({
+    queryKey: ["report", "mql-leads-v2", start, end],
+    queryFn: async (): Promise<MqlLeadRow[]> => {
       let q = supabase
         .from("leads")
         .select(
-          "id, first_name, last_name, title, email, phone, mobile_phone, " +
-          "lead_source, mql_date, status, " +
-          "owner:user_profiles!owner_user_id(full_name)",
+          "id, first_name, last_name, title, email, phone, mobile_phone, lead_source, mql_date, status, owner_user_id",
         )
         .not("mql_date", "is", null)
         .neq("status", "converted")
@@ -66,37 +65,32 @@ export function MqlLeads() {
       q = q.order("mql_date", { ascending: false });
       const { data, error } = await q;
       if (error) throw error;
-      type Raw = {
-        id: string;
-        first_name: string | null;
-        last_name: string | null;
-        title: string | null;
-        email: string | null;
-        phone: string | null;
-        mobile_phone: string | null;
-        lead_source: string | null;
-        mql_date: string | null;
-        owner: { full_name: string | null } | null;
-      };
-      return ((data ?? []) as unknown as Raw[]).map((r) => ({
-        lead_id: r.id,
-        lead_source: r.lead_source ?? "unknown",
-        first_name: r.first_name,
-        last_name: r.last_name,
-        title: r.title,
-        email: r.email,
-        phone: r.phone,
-        mobile: r.mobile_phone,
-        lead_owner: r.owner?.full_name ?? "Unassigned",
-        mql_date: r.mql_date,
-      })) as MqlLeadRow[];
+
+      const leads = data ?? [];
+      const ownerIds = new Set<string>(
+        leads.map((l) => l.owner_user_id as string).filter(Boolean),
+      );
+      const users = await fetchUsersById(ownerIds);
+
+      return leads.map((l) => ({
+        lead_id: l.id as string,
+        lead_source: (l.lead_source as string) ?? "unknown",
+        first_name: (l.first_name as string) ?? "",
+        last_name: (l.last_name as string) ?? "",
+        title: (l.title as string) ?? "",
+        email: (l.email as string) ?? "",
+        phone: (l.phone as string) ?? "",
+        mobile: (l.mobile_phone as string) ?? "",
+        lead_owner: users.get(l.owner_user_id as string)?.full_name ?? "Unassigned",
+        mql_date: l.mql_date as string | null,
+      }));
     },
   });
 
   const grouped = useMemo(() => {
     const m = new Map<string, MqlLeadRow[]>();
     for (const r of rows ?? []) {
-      const key = r.lead_source ?? "unknown";
+      const key = r.lead_source || "unknown";
       const list = m.get(key) ?? [];
       list.push(r);
       m.set(key, list);
@@ -117,14 +111,14 @@ export function MqlLeads() {
       "MQL",
     ];
     const data = (rows ?? []).map((r) => [
-      r.lead_source ?? "",
-      r.first_name ?? "",
-      r.last_name ?? "",
-      r.title ?? "",
-      r.email ?? "",
-      r.phone ?? "",
-      r.mobile ?? "",
-      r.lead_owner ?? "",
+      r.lead_source,
+      r.first_name,
+      r.last_name,
+      r.title,
+      r.email,
+      r.phone,
+      r.mobile,
+      r.lead_owner,
       r.mql_date ?? "",
     ]);
     downloadCsv(`mql-leads-${todayStamp()}.csv`, [header, ...data]);
@@ -165,6 +159,12 @@ export function MqlLeads() {
           </div>
         }
       />
+
+      {error && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+          Error: {(error as Error).message}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <Kpi label="MQL Leads" value={(rows?.length ?? 0).toLocaleString()} />
@@ -250,13 +250,13 @@ function SourceGroup({ source, list }: { source: string; list: MqlLeadRow[] }) {
           <TableBody>
             {list.map((r) => (
               <TableRow key={r.lead_id}>
-                <TableCell className="pl-8">{r.first_name ?? ""}</TableCell>
-                <TableCell>{r.last_name ?? ""}</TableCell>
-                <TableCell>{r.title ?? ""}</TableCell>
-                <TableCell>{r.email ?? ""}</TableCell>
-                <TableCell>{r.phone ?? ""}</TableCell>
-                <TableCell>{r.mobile ?? ""}</TableCell>
-                <TableCell>{r.lead_owner ?? ""}</TableCell>
+                <TableCell className="pl-8">{r.first_name}</TableCell>
+                <TableCell>{r.last_name}</TableCell>
+                <TableCell>{r.title}</TableCell>
+                <TableCell>{r.email}</TableCell>
+                <TableCell>{r.phone}</TableCell>
+                <TableCell>{r.mobile}</TableCell>
+                <TableCell>{r.lead_owner}</TableCell>
                 <TableCell>{formatDate(r.mql_date)}</TableCell>
               </TableRow>
             ))}

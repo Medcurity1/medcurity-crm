@@ -35,15 +35,16 @@ import {
   resolveRange,
   type DateRangeKey,
 } from "./report-helpers";
+import { fetchAccountsById, fetchUsersById } from "./report-fetchers";
 
 interface RenewalRow {
   id: string;
-  owner_role: string | null;
-  opportunity_owner: string | null;
-  account_name: string | null;
-  opportunity_name: string | null;
+  owner_role: string;
+  opportunity_owner: string;
+  account_name: string;
+  opportunity_name: string;
   stage: OpportunityStage | null;
-  fiscal_period: string | null;
+  fiscal_period: string;
   amount: number | null;
   probability: number | null;
   age: number | null;
@@ -51,23 +52,20 @@ interface RenewalRow {
   created_date: string | null;
   next_step: string | null;
   lead_source: string | null;
-  type: string | null;
+  type: string;
 }
 
 export function RenewalsQueue() {
   const [range, setRange] = useState<DateRangeKey>("current_quarter");
   const { start, end } = resolveRange(range);
 
-  const { data: rows, isLoading } = useQuery({
-    queryKey: ["report", "renewals", start, end],
-    queryFn: async () => {
+  const { data: rows, isLoading, error } = useQuery({
+    queryKey: ["report", "renewals-v2", start, end],
+    queryFn: async (): Promise<RenewalRow[]> => {
       let q = supabase
         .from("opportunities")
         .select(
-          "id, name, amount, close_date, created_at, next_step, lead_source, " +
-          "probability, stage, kind, " +
-          "account:accounts!account_id(name), " +
-          "owner:user_profiles!owner_user_id(full_name, role)",
+          "id, name, amount, close_date, created_at, next_step, lead_source, probability, stage, kind, account_id, owner_user_id",
         )
         .eq("stage", "closed_won")
         .eq("kind", "renewal")
@@ -78,42 +76,46 @@ export function RenewalsQueue() {
       q = q.order("close_date", { ascending: false, nullsFirst: false });
       const { data, error } = await q;
       if (error) throw error;
-      type Raw = {
-        id: string;
-        name: string;
-        amount: number | null;
-        close_date: string | null;
-        created_at: string;
-        next_step: string | null;
-        lead_source: string | null;
-        probability: number | null;
-        stage: OpportunityStage;
-        kind: string | null;
-        account: { name: string } | null;
-        owner: { full_name: string | null; role: string | null } | null;
-      };
+
+      const opps = data ?? [];
+      const accountIds = new Set<string>(
+        opps.map((o) => o.account_id as string).filter(Boolean),
+      );
+      const ownerIds = new Set<string>(
+        opps.map((o) => o.owner_user_id as string).filter(Boolean),
+      );
+      const [accounts, users] = await Promise.all([
+        fetchAccountsById(accountIds),
+        fetchUsersById(ownerIds),
+      ]);
+
       const today = new Date();
-      return ((data ?? []) as unknown as Raw[]).map((r) => ({
-        id: r.id,
-        owner_role: r.owner?.role ?? null,
-        opportunity_owner: r.owner?.full_name ?? "Unassigned",
-        account_name: r.account?.name ?? null,
-        opportunity_name: r.name,
-        stage: r.stage,
-        fiscal_period: fiscalPeriod(r.close_date),
-        amount: r.amount,
-        probability: r.probability,
-        age: r.close_date
-          ? Math.floor(
-              (today.getTime() - new Date(r.close_date).getTime()) / 86400000,
-            )
-          : null,
-        close_date: r.close_date,
-        created_date: r.created_at?.slice(0, 10) ?? null,
-        next_step: r.next_step,
-        lead_source: r.lead_source,
-        type: typeLabel(r.kind),
-      })) as RenewalRow[];
+      return opps.map((o) => {
+        const owner = users.get(o.owner_user_id as string);
+        const closeDate = o.close_date as string | null;
+        return {
+          id: o.id as string,
+          owner_role: ownerRoleLabel(owner?.role),
+          opportunity_owner: owner?.full_name ?? "Unassigned",
+          account_name: accounts.get(o.account_id as string)?.name ?? "",
+          opportunity_name: (o.name as string) ?? "",
+          stage: o.stage as OpportunityStage,
+          fiscal_period: fiscalPeriod(closeDate),
+          amount: o.amount as number | null,
+          probability: o.probability as number | null,
+          age: closeDate
+            ? Math.floor(
+                (today.getTime() - new Date(closeDate).getTime()) / 86400000,
+              )
+            : null,
+          close_date: closeDate,
+          created_date:
+            (o.created_at as string | null)?.slice(0, 10) ?? null,
+          next_step: o.next_step as string | null,
+          lead_source: o.lead_source as string | null,
+          type: typeLabel(o.kind as string | null),
+        };
+      });
     },
   });
 
@@ -141,12 +143,12 @@ export function RenewalsQueue() {
       "Type",
     ];
     const data = (rows ?? []).map((r) => [
-      ownerRoleLabel(r.owner_role),
-      r.opportunity_owner ?? "",
-      r.account_name ?? "",
-      r.opportunity_name ?? "",
+      r.owner_role,
+      r.opportunity_owner,
+      r.account_name,
+      r.opportunity_name,
       r.stage ? stageLabel(r.stage) : "",
-      r.fiscal_period ?? "",
+      r.fiscal_period,
       csvCurrency(r.amount),
       r.probability ?? "",
       r.age ?? "",
@@ -154,7 +156,7 @@ export function RenewalsQueue() {
       r.created_date ?? "",
       r.next_step ?? "",
       r.lead_source ?? "",
-      r.type ?? "",
+      r.type,
     ]);
     downloadCsv(`renewals-${todayStamp()}.csv`, [header, ...data]);
   }
@@ -194,6 +196,12 @@ export function RenewalsQueue() {
           </div>
         }
       />
+
+      {error && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+          Error: {(error as Error).message}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <Kpi label="Renewals Closed" value={summary.count.toLocaleString()} />
@@ -241,12 +249,12 @@ export function RenewalsQueue() {
                 ) : (
                   rows.map((r) => (
                     <TableRow key={r.id}>
-                      <TableCell>{ownerRoleLabel(r.owner_role)}</TableCell>
-                      <TableCell>{r.opportunity_owner ?? ""}</TableCell>
-                      <TableCell className="font-medium">{r.account_name ?? ""}</TableCell>
-                      <TableCell>{r.opportunity_name ?? ""}</TableCell>
+                      <TableCell>{r.owner_role}</TableCell>
+                      <TableCell>{r.opportunity_owner}</TableCell>
+                      <TableCell className="font-medium">{r.account_name}</TableCell>
+                      <TableCell>{r.opportunity_name}</TableCell>
                       <TableCell>{r.stage ? stageLabel(r.stage) : ""}</TableCell>
-                      <TableCell>{r.fiscal_period ?? ""}</TableCell>
+                      <TableCell>{r.fiscal_period}</TableCell>
                       <TableCell className="text-right">
                         {formatCurrency(Number(r.amount ?? 0))}
                       </TableCell>

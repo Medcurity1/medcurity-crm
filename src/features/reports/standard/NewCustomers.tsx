@@ -32,19 +32,14 @@ import {
   typeLabel,
   type DateRangeKey,
 } from "./report-helpers";
+import { fetchAccountsById, fetchUsersById } from "./report-fetchers";
 
-/**
- * New Customers — closed_won + kind=new_business.
- * Default range: current fiscal quarter. Configurable via picker.
- * Queries opportunities directly so any range works (the QTD view
- * is only used when range is locked to current quarter).
- */
 interface NewCustRow {
   id: string;
-  opportunity_owner: string | null;
-  account_name: string | null;
-  opportunity_name: string | null;
-  type: string | null;
+  opportunity_owner: string;
+  account_name: string;
+  opportunity_name: string;
+  type: string;
   amount: number | null;
   close_date: string | null;
   lead_source: string | null;
@@ -54,15 +49,13 @@ export function NewCustomers() {
   const [range, setRange] = useState<DateRangeKey>("current_quarter");
   const { start, end } = resolveRange(range);
 
-  const { data: rows, isLoading } = useQuery({
-    queryKey: ["report", "new-customers", start, end],
-    queryFn: async () => {
+  const { data: rows, isLoading, error } = useQuery({
+    queryKey: ["report", "new-customers-v2", start, end],
+    queryFn: async (): Promise<NewCustRow[]> => {
       let q = supabase
         .from("opportunities")
         .select(
-          "id, name, amount, close_date, lead_source, kind, " +
-          "account:accounts!account_id(name), " +
-          "owner:user_profiles!owner_user_id(full_name)",
+          "id, name, amount, close_date, lead_source, kind, account_id, owner_user_id",
         )
         .eq("stage", "closed_won")
         .eq("kind", "new_business")
@@ -72,26 +65,30 @@ export function NewCustomers() {
       q = q.order("close_date", { ascending: false, nullsFirst: false });
       const { data, error } = await q;
       if (error) throw error;
-      type Raw = {
-        id: string;
-        name: string;
-        amount: number | null;
-        close_date: string | null;
-        lead_source: string | null;
-        kind: string | null;
-        account: { name: string } | null;
-        owner: { full_name: string | null } | null;
-      };
-      return ((data ?? []) as unknown as Raw[]).map((r) => ({
-        id: r.id,
-        opportunity_owner: r.owner?.full_name ?? "Unassigned",
-        account_name: r.account?.name ?? null,
-        opportunity_name: r.name,
-        type: typeLabel(r.kind),
-        amount: r.amount,
-        close_date: r.close_date,
-        lead_source: r.lead_source,
-      })) as NewCustRow[];
+
+      const opps = data ?? [];
+      const accountIds = new Set<string>(
+        opps.map((o) => o.account_id as string).filter(Boolean),
+      );
+      const ownerIds = new Set<string>(
+        opps.map((o) => o.owner_user_id as string).filter(Boolean),
+      );
+      const [accounts, users] = await Promise.all([
+        fetchAccountsById(accountIds),
+        fetchUsersById(ownerIds),
+      ]);
+
+      return opps.map((o) => ({
+        id: o.id as string,
+        opportunity_owner:
+          users.get(o.owner_user_id as string)?.full_name ?? "Unassigned",
+        account_name: accounts.get(o.account_id as string)?.name ?? "",
+        opportunity_name: (o.name as string) ?? "",
+        type: typeLabel(o.kind as string | null),
+        amount: o.amount as number | null,
+        close_date: o.close_date as string | null,
+        lead_source: o.lead_source as string | null,
+      }));
     },
   });
 
@@ -112,10 +109,10 @@ export function NewCustomers() {
       "Lead Source",
     ];
     const data = (rows ?? []).map((r) => [
-      r.opportunity_owner ?? "",
-      r.account_name ?? "",
-      r.opportunity_name ?? "",
-      r.type ?? "",
+      r.opportunity_owner,
+      r.account_name,
+      r.opportunity_name,
+      r.type,
       csvCurrency(r.amount),
       r.close_date ?? "",
       r.lead_source ?? "",
@@ -159,6 +156,12 @@ export function NewCustomers() {
         }
       />
 
+      {error && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+          Error: {(error as Error).message}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <Kpi label="Count" value={summary.count.toLocaleString()} />
         <Kpi label="Amount" value={formatCurrency(summary.total)} />
@@ -195,10 +198,10 @@ export function NewCustomers() {
               ) : (
                 rows.map((r) => (
                   <TableRow key={r.id}>
-                    <TableCell>{r.opportunity_owner ?? ""}</TableCell>
-                    <TableCell className="font-medium">{r.account_name ?? ""}</TableCell>
-                    <TableCell>{r.opportunity_name ?? ""}</TableCell>
-                    <TableCell>{r.type ?? ""}</TableCell>
+                    <TableCell>{r.opportunity_owner}</TableCell>
+                    <TableCell className="font-medium">{r.account_name}</TableCell>
+                    <TableCell>{r.opportunity_name}</TableCell>
+                    <TableCell>{r.type}</TableCell>
                     <TableCell className="text-right">
                       {formatCurrency(Number(r.amount ?? 0))}
                     </TableCell>

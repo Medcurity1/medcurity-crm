@@ -43,51 +43,57 @@ interface PipelineRow {
 
 export function ActivePipeline() {
   const { data: rows, isLoading } = useQuery({
-    queryKey: ["report", "active-pipeline"],
+    queryKey: ["report", "active-pipeline-v2"],
     queryFn: async () => {
-      // Query opportunities directly (not the view) for resilience
-      // against any GRANT/RLS surprises.
+      // Batch-fetch + client join. Embedded PostgREST joins were
+      // silently returning empty in staging.
+      const { fetchAccountsById, fetchUsersById } = await import("./report-fetchers");
       const { data, error } = await supabase
         .from("opportunities")
         .select(
-          "id, name, stage, amount, probability, close_date, kind, " +
-          "account:accounts!account_id(name), " +
-          "owner:user_profiles!owner_user_id(full_name)",
+          "id, name, stage, amount, probability, close_date, kind, account_id, owner_user_id",
         )
         .not("stage", "in", "(closed_won,closed_lost)")
         .is("archived_at", null)
         .order("stage", { ascending: true })
         .order("amount", { ascending: false, nullsFirst: false });
       if (error) throw error;
-      type Raw = {
-        id: string;
-        name: string;
-        stage: OpportunityStage;
-        amount: number | null;
-        probability: number | null;
-        close_date: string | null;
-        kind: string | null;
-        account: { name: string } | null;
-        owner: { full_name: string | null } | null;
-      };
-      return ((data ?? []) as unknown as Raw[]).map((r) => ({
-        id: r.id,
-        stage: r.stage,
-        type:
-          r.kind === "new_business"
-            ? "New Business"
-            : r.kind === "renewal"
-              ? "Existing Business"
-              : "",
-        opportunity_name: r.name,
-        account_name: r.account?.name ?? null,
-        close_date: r.close_date,
-        amount: r.amount,
-        probability: r.probability,
-        weighted_amount:
-          (Number(r.amount ?? 0) * Number(r.probability ?? 0)) / 100,
-        opportunity_owner: r.owner?.full_name ?? "Unassigned",
-      })) as PipelineRow[];
+
+      const opps = data ?? [];
+      const accountIds = new Set<string>(
+        opps.map((o) => o.account_id as string).filter(Boolean),
+      );
+      const ownerIds = new Set<string>(
+        opps.map((o) => o.owner_user_id as string).filter(Boolean),
+      );
+      const [accounts, users] = await Promise.all([
+        fetchAccountsById(accountIds),
+        fetchUsersById(ownerIds),
+      ]);
+
+      return opps.map((r) => {
+        const amount = r.amount as number | null;
+        const probability = r.probability as number | null;
+        return {
+          id: r.id as string,
+          stage: r.stage as OpportunityStage,
+          type:
+            r.kind === "new_business"
+              ? "New Business"
+              : r.kind === "renewal"
+                ? "Existing Business"
+                : "",
+          opportunity_name: (r.name as string) ?? "",
+          account_name: accounts.get(r.account_id as string)?.name ?? null,
+          close_date: r.close_date as string | null,
+          amount,
+          probability,
+          weighted_amount:
+            (Number(amount ?? 0) * Number(probability ?? 0)) / 100,
+          opportunity_owner:
+            users.get(r.owner_user_id as string)?.full_name ?? "Unassigned",
+        };
+      }) as PipelineRow[];
     },
   });
 

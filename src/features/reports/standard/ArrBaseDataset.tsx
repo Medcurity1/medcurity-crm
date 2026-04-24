@@ -72,16 +72,74 @@ export function ArrBaseDataset() {
   const [range, setRange] = useState<DateRangeKey>("all_time");
   const { start, end } = resolveRange(range);
 
-  const { data: rows, isLoading } = useQuery({
-    queryKey: ["report", "arr-base-dataset", start, end],
-    queryFn: async () => {
-      let q = supabase.from("v_arr_base_dataset").select("*").limit(5000);
+  const { data: rows, isLoading, error: fetchError } = useQuery({
+    queryKey: ["report", "arr-base-dataset-v2", start, end],
+    queryFn: async (): Promise<ArrRow[]> => {
+      const { fetchAccountsById, fetchUsersById } = await import("./report-fetchers");
+      let q = supabase
+        .from("opportunities")
+        .select(
+          "id, name, amount, close_date, created_at, payment_frequency, " +
+          "one_time_project, stage, kind, lead_source, account_id, owner_user_id",
+        )
+        .is("archived_at", null)
+        .neq("name", "Customer Service")
+        .eq("one_time_project", false)
+        .limit(5000);
       if (start) q = q.gte("close_date", start);
       if (end) q = q.lte("close_date", end);
       q = q.order("close_date", { ascending: false, nullsFirst: false });
       const { data, error } = await q;
       if (error) throw error;
-      return ((data ?? []) as unknown) as ArrRow[];
+
+      const opps = data ?? [];
+      const accountIds = new Set<string>(
+        opps.map((o) => o.account_id as string).filter(Boolean),
+      );
+      const ownerIds = new Set<string>(
+        opps.map((o) => o.owner_user_id as string).filter(Boolean),
+      );
+      const [accounts, users] = await Promise.all([
+        fetchAccountsById(accountIds),
+        fetchUsersById(ownerIds),
+      ]);
+
+      const today = new Date();
+      return opps.map((o) => {
+        const a = accounts.get(o.account_id as string);
+        const closeDate = o.close_date as string | null;
+        return {
+          id: o.id as string,
+          account_name: a?.name ?? null,
+          account_number: a?.account_number ?? null,
+          opportunity_name: (o.name as string) ?? null,
+          opportunity_owner:
+            users.get(o.owner_user_id as string)?.full_name ?? "Unassigned",
+          created_date: (o.created_at as string | null)?.slice(0, 10) ?? null,
+          close_date: closeDate,
+          age: closeDate
+            ? Math.floor(
+                (today.getTime() - new Date(closeDate).getTime()) / 86400000,
+              )
+            : null,
+          amount: o.amount as number | null,
+          fiscal_period: closeDate
+            ? `Q${Math.floor(new Date(closeDate).getUTCMonth() / 3) + 1}-${new Date(closeDate).getUTCFullYear()}`
+            : null,
+          payment_frequency: (o.payment_frequency as string | null) ?? null,
+          one_time_project: o.one_time_project as boolean | null,
+          stage: (o.stage as string | null) ?? null,
+          type:
+            o.kind === "new_business"
+              ? "New Business"
+              : o.kind === "renewal"
+                ? "Existing Business"
+                : "",
+          account_type: a?.account_type ?? null,
+          primary_partner: null, // not fetched in v2; add later if needed
+          lead_source: (o.lead_source as string | null) ?? null,
+        };
+      });
     },
   });
 
@@ -169,6 +227,12 @@ export function ArrBaseDataset() {
           </div>
         }
       />
+
+      {fetchError && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+          Error: {(fetchError as Error).message}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Kpi label="Opportunities" value={summary.count.toLocaleString()} />

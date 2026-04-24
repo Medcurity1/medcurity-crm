@@ -30,18 +30,19 @@ import {
   resolveRange,
   type DateRangeKey,
 } from "./report-helpers";
+import { fetchAccountsById, fetchUsersById } from "./report-fetchers";
 
 interface SqlRow {
   contact_id: string;
   account_id: string;
-  first_name: string | null;
-  last_name: string | null;
-  title: string | null;
-  account_name: string | null;
-  account_owner: string | null;
+  first_name: string;
+  last_name: string;
+  title: string;
+  account_name: string;
+  account_owner: string;
   account_created_date: string | null;
-  lead_source: string | null;
-  description: string | null;
+  lead_source: string;
+  description: string;
   sql_date: string | null;
   mql_date: string | null;
 }
@@ -50,16 +51,12 @@ export function SqlAccounts() {
   const [range, setRange] = useState<DateRangeKey>("current_quarter");
   const { start, end } = resolveRange(range);
 
-  const { data: rows, isLoading } = useQuery({
-    queryKey: ["report", "sql-accounts", start, end],
-    queryFn: async () => {
+  const { data: rows, isLoading, error } = useQuery({
+    queryKey: ["report", "sql-accounts-v2", start, end],
+    queryFn: async (): Promise<SqlRow[]> => {
       let q = supabase
         .from("contacts")
-        .select(
-          "id, first_name, last_name, title, sql_date, mql_date, " +
-          "account:accounts!account_id(id, name, notes, lead_source, created_at, " +
-            "owner:user_profiles!owner_user_id(full_name))",
-        )
+        .select("id, first_name, last_name, title, sql_date, mql_date, account_id")
         .not("sql_date", "is", null)
         .is("archived_at", null);
       if (start) q = q.gte("sql_date", start);
@@ -67,47 +64,46 @@ export function SqlAccounts() {
       q = q.order("sql_date", { ascending: false });
       const { data, error } = await q;
       if (error) throw error;
-      type Raw = {
-        id: string;
-        first_name: string | null;
-        last_name: string | null;
-        title: string | null;
-        sql_date: string | null;
-        mql_date: string | null;
-        account:
-          | {
-              id: string;
-              name: string;
-              notes: string | null;
-              lead_source: string | null;
-              created_at: string | null;
-              owner: { full_name: string | null } | null;
-            }
-          | null;
-      };
-      return ((data ?? []) as unknown as Raw[])
-        .filter((r) => r.account)
-        .map((r) => ({
-          contact_id: r.id,
-          account_id: r.account!.id,
-          first_name: r.first_name,
-          last_name: r.last_name,
-          title: r.title,
-          account_name: r.account!.name,
-          account_owner: r.account!.owner?.full_name ?? "Unassigned",
-          account_created_date: r.account!.created_at?.slice(0, 10) ?? null,
-          lead_source: r.account!.lead_source,
-          description: r.account!.notes,
-          sql_date: r.sql_date,
-          mql_date: r.mql_date,
-        })) as SqlRow[];
+
+      const contacts = data ?? [];
+      const accountIds = new Set<string>(
+        contacts.map((c) => c.account_id as string).filter(Boolean),
+      );
+      const accounts = await fetchAccountsById(accountIds);
+      const ownerIds = new Set<string>(
+        Array.from(accounts.values())
+          .map((a) => a.owner_user_id as string)
+          .filter(Boolean),
+      );
+      const users = await fetchUsersById(ownerIds);
+
+      return contacts
+        .filter((c) => accounts.has(c.account_id as string))
+        .map((c) => {
+          const a = accounts.get(c.account_id as string)!;
+          const owner = a.owner_user_id ? users.get(a.owner_user_id) : undefined;
+          return {
+            contact_id: c.id as string,
+            account_id: c.account_id as string,
+            first_name: (c.first_name as string) ?? "",
+            last_name: (c.last_name as string) ?? "",
+            title: (c.title as string) ?? "",
+            account_name: a.name,
+            account_owner: owner?.full_name ?? "Unassigned",
+            account_created_date: a.created_at?.slice(0, 10) ?? null,
+            lead_source: a.lead_source ?? "",
+            description: a.notes ?? "",
+            sql_date: c.sql_date as string | null,
+            mql_date: c.mql_date as string | null,
+          };
+        });
     },
   });
 
   const grouped = useMemo(() => {
     const m = new Map<string, SqlRow[]>();
     for (const r of rows ?? []) {
-      const key = r.account_name ?? "Unknown";
+      const key = r.account_name || "Unknown";
       const list = m.get(key) ?? [];
       list.push(r);
       m.set(key, list);
@@ -129,14 +125,14 @@ export function SqlAccounts() {
       "MQL",
     ];
     const data = (rows ?? []).map((r) => [
-      r.account_name ?? "",
-      r.first_name ?? "",
-      r.last_name ?? "",
-      r.title ?? "",
-      r.account_owner ?? "",
+      r.account_name,
+      r.first_name,
+      r.last_name,
+      r.title,
+      r.account_owner,
       r.account_created_date ?? "",
-      r.lead_source ?? "",
-      r.description ?? "",
+      r.lead_source,
+      r.description,
       r.sql_date ?? "",
       r.mql_date ?? "",
     ]);
@@ -178,6 +174,12 @@ export function SqlAccounts() {
           </div>
         }
       />
+
+      {error && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+          Error: {(error as Error).message}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <Kpi label="Accounts" value={grouped.size.toLocaleString()} />
@@ -240,12 +242,12 @@ export function SqlAccounts() {
                     <TableBody>
                       {contacts.map((c) => (
                         <TableRow key={c.contact_id}>
-                          <TableCell>{c.first_name ?? ""}</TableCell>
-                          <TableCell>{c.last_name ?? ""}</TableCell>
-                          <TableCell>{c.title ?? ""}</TableCell>
-                          <TableCell>{c.account_owner ?? ""}</TableCell>
+                          <TableCell>{c.first_name}</TableCell>
+                          <TableCell>{c.last_name}</TableCell>
+                          <TableCell>{c.title}</TableCell>
+                          <TableCell>{c.account_owner}</TableCell>
                           <TableCell>{formatDate(c.account_created_date)}</TableCell>
-                          <TableCell>{c.lead_source ?? ""}</TableCell>
+                          <TableCell>{c.lead_source}</TableCell>
                           <TableCell>{formatDate(c.sql_date)}</TableCell>
                           <TableCell>{formatDate(c.mql_date)}</TableCell>
                         </TableRow>
