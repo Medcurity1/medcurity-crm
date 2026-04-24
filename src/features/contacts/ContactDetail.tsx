@@ -323,6 +323,7 @@ export function ContactDetail() {
       {/* --------- Contact Details Section --------- */}
       <CollapsibleSection title="Contact Details">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
+          <Field label="Contact Number" value={contact.contact_number} />
           <Field label="First Name" value={contact.first_name} />
           <Field label="Last Name" value={contact.last_name} />
           <EditableField label="Email" value={contact.email} onSave={saveField("email")} />
