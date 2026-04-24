@@ -47,18 +47,7 @@ export function ActivePipeline() {
     queryFn: async () => {
       // Batch-fetch + client join. Embedded PostgREST joins were
       // silently returning empty in staging.
-      const { fetchAccountsById, fetchUsersById } = await import("./report-fetchers");
-      const { data, error } = await supabase
-        .from("opportunities")
-        .select(
-          "id, name, stage, amount, probability, close_date, kind, account_id, owner_user_id",
-        )
-        .not("stage", "in", "(closed_won,closed_lost)")
-        .is("archived_at", null)
-        .order("stage", { ascending: true })
-        .order("amount", { ascending: false, nullsFirst: false });
-      if (error) throw error;
-
+      const { fetchAccountsById, fetchUsersById, fetchAllRows } = await import("./report-fetchers");
       type OppRaw = {
         id: string;
         name: string | null;
@@ -70,7 +59,17 @@ export function ActivePipeline() {
         account_id: string | null;
         owner_user_id: string | null;
       };
-      const opps = ((data ?? []) as unknown) as OppRaw[];
+      const opps = await fetchAllRows<OppRaw>(() =>
+        supabase
+          .from("opportunities")
+          .select(
+            "id, name, stage, amount, probability, close_date, kind, account_id, owner_user_id",
+          )
+          .not("stage", "in", "(closed_won,closed_lost)")
+          .is("archived_at", null)
+          .order("stage", { ascending: true })
+          .order("amount", { ascending: false, nullsFirst: false }),
+      );
       const accountIds = new Set<string>(
         opps.map((o) => o.account_id as string).filter(Boolean),
       );

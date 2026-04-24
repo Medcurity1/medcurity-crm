@@ -31,6 +31,7 @@ import {
   resolveRange,
   type DateRangeKey,
 } from "./report-helpers";
+import { PreviewNote, PREVIEW_LIMIT } from "./PreviewNote";
 
 /**
  * ARR Base Dataset — matches SF report column-for-column:
@@ -75,23 +76,7 @@ export function ArrBaseDataset() {
   const { data: rows, isLoading, error: fetchError } = useQuery({
     queryKey: ["report", "arr-base-dataset-v2", start, end],
     queryFn: async (): Promise<ArrRow[]> => {
-      const { fetchAccountsById, fetchUsersById } = await import("./report-fetchers");
-      let q = supabase
-        .from("opportunities")
-        .select(
-          "id, name, amount, close_date, created_at, payment_frequency, " +
-          "one_time_project, stage, kind, lead_source, account_id, owner_user_id",
-        )
-        .is("archived_at", null)
-        .neq("name", "Customer Service")
-        .eq("one_time_project", false)
-        .limit(5000);
-      if (start) q = q.gte("close_date", start);
-      if (end) q = q.lte("close_date", end);
-      q = q.order("close_date", { ascending: false, nullsFirst: false });
-      const { data, error } = await q;
-      if (error) throw error;
-
+      const { fetchAccountsById, fetchUsersById, fetchAllRows } = await import("./report-fetchers");
       type OppRaw = {
         id: string;
         name: string | null;
@@ -106,7 +91,20 @@ export function ArrBaseDataset() {
         account_id: string | null;
         owner_user_id: string | null;
       };
-      const opps = ((data ?? []) as unknown) as OppRaw[];
+      const opps = (await fetchAllRows<OppRaw>(() => {
+        let q = supabase
+          .from("opportunities")
+          .select(
+            "id, name, amount, close_date, created_at, payment_frequency, " +
+            "one_time_project, stage, kind, lead_source, account_id, owner_user_id",
+          )
+          .is("archived_at", null)
+          .neq("name", "Customer Service")
+          .eq("one_time_project", false);
+        if (start) q = q.gte("close_date", start);
+        if (end) q = q.lte("close_date", end);
+        return q.order("close_date", { ascending: false, nullsFirst: false });
+      })) as OppRaw[];
       const accountIds = new Set<string>(
         opps.map((o) => o.account_id as string).filter(Boolean),
       );
@@ -255,6 +253,8 @@ export function ArrBaseDataset() {
         <Kpi label="API" value="/rest/v1/v_arr_base_dataset" tiny />
       </div>
 
+      <PreviewNote total={rows?.length ?? 0} shown={PREVIEW_LIMIT} />
+
       <Card>
         <CardContent className="p-0">
           <div className="overflow-auto">
@@ -296,7 +296,7 @@ export function ArrBaseDataset() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rows.map((r) => (
+                  rows.slice(0, PREVIEW_LIMIT).map((r) => (
                     <TableRow key={r.id}>
                       <TableCell className="font-medium">{r.account_name ?? "—"}</TableCell>
                       <TableCell>{r.account_number ?? ""}</TableCell>

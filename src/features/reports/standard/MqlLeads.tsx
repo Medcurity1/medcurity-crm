@@ -30,7 +30,8 @@ import {
   resolveRange,
   type DateRangeKey,
 } from "./report-helpers";
-import { fetchUsersById } from "./report-fetchers";
+import { fetchUsersById, fetchAllRows } from "./report-fetchers";
+import { PreviewNote, PREVIEW_LIMIT } from "./PreviewNote";
 
 interface MqlLeadRow {
   lead_id: string;
@@ -52,20 +53,6 @@ export function MqlLeads() {
   const { data: rows, isLoading, error } = useQuery({
     queryKey: ["report", "mql-leads-v2", start, end],
     queryFn: async (): Promise<MqlLeadRow[]> => {
-      let q = supabase
-        .from("leads")
-        .select(
-          "id, first_name, last_name, title, email, phone, mobile_phone, lead_source, mql_date, status, owner_user_id",
-        )
-        .not("mql_date", "is", null)
-        .neq("status", "converted")
-        .is("archived_at", null);
-      if (start) q = q.gte("mql_date", start);
-      if (end) q = q.lte("mql_date", end);
-      q = q.order("mql_date", { ascending: false });
-      const { data, error } = await q;
-      if (error) throw error;
-
       type LeadRaw = {
         id: string;
         first_name: string | null;
@@ -79,7 +66,19 @@ export function MqlLeads() {
         status: string | null;
         owner_user_id: string | null;
       };
-      const leads = ((data ?? []) as unknown) as LeadRaw[];
+      const leads = await fetchAllRows<LeadRaw>(() => {
+        let q = supabase
+          .from("leads")
+          .select(
+            "id, first_name, last_name, title, email, phone, mobile_phone, lead_source, mql_date, status, owner_user_id",
+          )
+          .not("mql_date", "is", null)
+          .neq("status", "converted")
+          .is("archived_at", null);
+        if (start) q = q.gte("mql_date", start);
+        if (end) q = q.lte("mql_date", end);
+        return q.order("mql_date", { ascending: false });
+      });
       const ownerIds = new Set<string>(
         leads.map((l) => l.owner_user_id as string).filter(Boolean),
       );
@@ -101,6 +100,7 @@ export function MqlLeads() {
   });
 
   const grouped = useMemo(() => {
+    // Group ALL rows so "Sources" KPI reflects reality.
     const m = new Map<string, MqlLeadRow[]>();
     for (const r of rows ?? []) {
       const key = r.lead_source || "unknown";
@@ -110,6 +110,19 @@ export function MqlLeads() {
     }
     return m;
   }, [rows]);
+
+  /** Grouped, but each group truncated to PREVIEW_LIMIT for render. */
+  const groupedPreview = useMemo(() => {
+    const m = new Map<string, MqlLeadRow[]>();
+    let remaining = PREVIEW_LIMIT;
+    for (const [key, list] of grouped) {
+      if (remaining <= 0) break;
+      const take = list.slice(0, remaining);
+      m.set(key, take);
+      remaining -= take.length;
+    }
+    return m;
+  }, [grouped]);
 
   function exportCsv() {
     const header = [
@@ -185,6 +198,8 @@ export function MqlLeads() {
         <Kpi label="Range" value={DATE_RANGE_OPTIONS.find((o) => o.value === range)?.label ?? ""} />
       </div>
 
+      <PreviewNote total={rows?.length ?? 0} shown={PREVIEW_LIMIT} />
+
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
@@ -218,7 +233,7 @@ export function MqlLeads() {
             </div>
           ) : (
             <div className="divide-y">
-              {Array.from(grouped.entries()).map(([source, list]) => (
+              {Array.from(groupedPreview.entries()).map(([source, list]) => (
                 <SourceGroup key={source} source={source} list={list} />
               ))}
             </div>

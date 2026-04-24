@@ -30,7 +30,8 @@ import {
   resolveRange,
   type DateRangeKey,
 } from "./report-helpers";
-import { fetchAccountsById, fetchUsersById } from "./report-fetchers";
+import { fetchAccountsById, fetchUsersById, fetchAllRows } from "./report-fetchers";
+import { PreviewNote, PREVIEW_LIMIT } from "./PreviewNote";
 
 interface MqlContactRow {
   contact_id: string;
@@ -52,21 +53,6 @@ export function MqlContacts() {
   const { data: rows, isLoading, error } = useQuery({
     queryKey: ["report", "mql-contacts-v2", start, end],
     queryFn: async (): Promise<MqlContactRow[]> => {
-      let q = supabase
-        .from("contacts")
-        .select(
-          "id, first_name, last_name, title, email, phone, mobile_phone, mql_date, sql_date, do_not_contact, account_id",
-        )
-        .not("mql_date", "is", null)
-        .is("sql_date", null)
-        .eq("do_not_contact", false)
-        .is("archived_at", null);
-      if (start) q = q.gte("mql_date", start);
-      if (end) q = q.lte("mql_date", end);
-      q = q.order("mql_date", { ascending: false });
-      const { data, error } = await q;
-      if (error) throw error;
-
       type ContactRaw = {
         id: string;
         first_name: string | null;
@@ -80,7 +66,20 @@ export function MqlContacts() {
         do_not_contact: boolean | null;
         account_id: string | null;
       };
-      const contacts = ((data ?? []) as unknown) as ContactRaw[];
+      const contacts = await fetchAllRows<ContactRaw>(() => {
+        let q = supabase
+          .from("contacts")
+          .select(
+            "id, first_name, last_name, title, email, phone, mobile_phone, mql_date, sql_date, do_not_contact, account_id",
+          )
+          .not("mql_date", "is", null)
+          .is("sql_date", null)
+          .eq("do_not_contact", false)
+          .is("archived_at", null);
+        if (start) q = q.gte("mql_date", start);
+        if (end) q = q.lte("mql_date", end);
+        return q.order("mql_date", { ascending: false });
+      });
       const accountIds = new Set<string>(
         contacts.map((c) => c.account_id as string).filter(Boolean),
       );
@@ -186,6 +185,8 @@ export function MqlContacts() {
         <Kpi label="Range" value={DATE_RANGE_OPTIONS.find((o) => o.value === range)?.label ?? ""} />
       </div>
 
+      <PreviewNote total={rows?.length ?? 0} shown={PREVIEW_LIMIT} />
+
       <Card>
         <CardContent className="p-0">
           <div className="overflow-auto">
@@ -217,7 +218,7 @@ export function MqlContacts() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rows.map((r) => (
+                  rows.slice(0, PREVIEW_LIMIT).map((r) => (
                     <TableRow key={r.contact_id}>
                       <TableCell>{r.first_name}</TableCell>
                       <TableCell>{r.last_name}</TableCell>

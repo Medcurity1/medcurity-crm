@@ -35,7 +35,8 @@ import {
   resolveRange,
   type DateRangeKey,
 } from "./report-helpers";
-import { fetchAccountsById, fetchUsersById } from "./report-fetchers";
+import { fetchAccountsById, fetchUsersById, fetchAllRows } from "./report-fetchers";
+import { PreviewNote, PREVIEW_LIMIT } from "./PreviewNote";
 
 interface RenewalRow {
   id: string;
@@ -62,21 +63,6 @@ export function RenewalsQueue() {
   const { data: rows, isLoading, error } = useQuery({
     queryKey: ["report", "renewals-v2", start, end],
     queryFn: async (): Promise<RenewalRow[]> => {
-      let q = supabase
-        .from("opportunities")
-        .select(
-          "id, name, amount, close_date, created_at, next_step, lead_source, probability, stage, kind, account_id, owner_user_id",
-        )
-        .eq("stage", "closed_won")
-        .eq("kind", "renewal")
-        .neq("name", "EHR Implementation")
-        .is("archived_at", null);
-      if (start) q = q.gte("close_date", start);
-      if (end) q = q.lte("close_date", end);
-      q = q.order("close_date", { ascending: false, nullsFirst: false });
-      const { data, error } = await q;
-      if (error) throw error;
-
       type OppRaw = {
         id: string;
         name: string | null;
@@ -91,7 +77,20 @@ export function RenewalsQueue() {
         account_id: string | null;
         owner_user_id: string | null;
       };
-      const opps = ((data ?? []) as unknown) as OppRaw[];
+      const opps = await fetchAllRows<OppRaw>(() => {
+        let q = supabase
+          .from("opportunities")
+          .select(
+            "id, name, amount, close_date, created_at, next_step, lead_source, probability, stage, kind, account_id, owner_user_id",
+          )
+          .eq("stage", "closed_won")
+          .eq("kind", "renewal")
+          .neq("name", "EHR Implementation")
+          .is("archived_at", null);
+        if (start) q = q.gte("close_date", start);
+        if (end) q = q.lte("close_date", end);
+        return q.order("close_date", { ascending: false, nullsFirst: false });
+      });
       const accountIds = new Set<string>(
         opps.map((o) => o.account_id as string).filter(Boolean),
       );
@@ -223,6 +222,8 @@ export function RenewalsQueue() {
         <Kpi label="Range" value={DATE_RANGE_OPTIONS.find((o) => o.value === range)?.label ?? ""} />
       </div>
 
+      <PreviewNote total={rows?.length ?? 0} shown={PREVIEW_LIMIT} />
+
       <Card>
         <CardContent className="p-0">
           <div className="overflow-auto">
@@ -261,7 +262,7 @@ export function RenewalsQueue() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rows.map((r) => (
+                  rows.slice(0, PREVIEW_LIMIT).map((r) => (
                     <TableRow key={r.id}>
                       <TableCell>{r.owner_role}</TableCell>
                       <TableCell>{r.opportunity_owner}</TableCell>

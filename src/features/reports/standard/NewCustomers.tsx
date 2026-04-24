@@ -32,7 +32,8 @@ import {
   typeLabel,
   type DateRangeKey,
 } from "./report-helpers";
-import { fetchAccountsById, fetchUsersById } from "./report-fetchers";
+import { fetchAccountsById, fetchUsersById, fetchAllRows } from "./report-fetchers";
+import { PreviewNote, PREVIEW_LIMIT } from "./PreviewNote";
 
 interface NewCustRow {
   id: string;
@@ -52,20 +53,6 @@ export function NewCustomers() {
   const { data: rows, isLoading, error } = useQuery({
     queryKey: ["report", "new-customers-v2", start, end],
     queryFn: async (): Promise<NewCustRow[]> => {
-      let q = supabase
-        .from("opportunities")
-        .select(
-          "id, name, amount, close_date, lead_source, kind, account_id, owner_user_id",
-        )
-        .eq("stage", "closed_won")
-        .eq("kind", "new_business")
-        .is("archived_at", null);
-      if (start) q = q.gte("close_date", start);
-      if (end) q = q.lte("close_date", end);
-      q = q.order("close_date", { ascending: false, nullsFirst: false });
-      const { data, error } = await q;
-      if (error) throw error;
-
       type OppRaw = {
         id: string;
         name: string | null;
@@ -76,7 +63,19 @@ export function NewCustomers() {
         account_id: string | null;
         owner_user_id: string | null;
       };
-      const opps = ((data ?? []) as unknown) as OppRaw[];
+      const opps = await fetchAllRows<OppRaw>(() => {
+        let q = supabase
+          .from("opportunities")
+          .select(
+            "id, name, amount, close_date, lead_source, kind, account_id, owner_user_id",
+          )
+          .eq("stage", "closed_won")
+          .eq("kind", "new_business")
+          .is("archived_at", null);
+        if (start) q = q.gte("close_date", start);
+        if (end) q = q.lte("close_date", end);
+        return q.order("close_date", { ascending: false, nullsFirst: false });
+      });
       const accountIds = new Set<string>(
         opps.map((o) => o.account_id as string).filter(Boolean),
       );
@@ -178,6 +177,8 @@ export function NewCustomers() {
         <Kpi label="Range" value={DATE_RANGE_OPTIONS.find((o) => o.value === range)?.label ?? ""} />
       </div>
 
+      <PreviewNote total={rows?.length ?? 0} shown={PREVIEW_LIMIT} />
+
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -206,7 +207,7 @@ export function NewCustomers() {
                   </TableCell>
                 </TableRow>
               ) : (
-                rows.map((r) => (
+                rows.slice(0, PREVIEW_LIMIT).map((r) => (
                   <TableRow key={r.id}>
                     <TableCell>{r.opportunity_owner}</TableCell>
                     <TableCell className="font-medium">{r.account_name}</TableCell>

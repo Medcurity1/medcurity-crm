@@ -30,7 +30,8 @@ import {
   resolveRange,
   type DateRangeKey,
 } from "./report-helpers";
-import { fetchAccountsById, fetchUsersById } from "./report-fetchers";
+import { fetchAccountsById, fetchUsersById, fetchAllRows } from "./report-fetchers";
+import { PreviewNote, PREVIEW_LIMIT } from "./PreviewNote";
 
 interface SqlRow {
   contact_id: string;
@@ -54,17 +55,6 @@ export function SqlAccounts() {
   const { data: rows, isLoading, error } = useQuery({
     queryKey: ["report", "sql-accounts-v2", start, end],
     queryFn: async (): Promise<SqlRow[]> => {
-      let q = supabase
-        .from("contacts")
-        .select("id, first_name, last_name, title, sql_date, mql_date, account_id")
-        .not("sql_date", "is", null)
-        .is("archived_at", null);
-      if (start) q = q.gte("sql_date", start);
-      if (end) q = q.lte("sql_date", end);
-      q = q.order("sql_date", { ascending: false });
-      const { data, error } = await q;
-      if (error) throw error;
-
       type ContactRaw = {
         id: string;
         first_name: string | null;
@@ -74,7 +64,16 @@ export function SqlAccounts() {
         mql_date: string | null;
         account_id: string | null;
       };
-      const contacts = ((data ?? []) as unknown) as ContactRaw[];
+      const contacts = await fetchAllRows<ContactRaw>(() => {
+        let q = supabase
+          .from("contacts")
+          .select("id, first_name, last_name, title, sql_date, mql_date, account_id")
+          .not("sql_date", "is", null)
+          .is("archived_at", null);
+        if (start) q = q.gte("sql_date", start);
+        if (end) q = q.lte("sql_date", end);
+        return q.order("sql_date", { ascending: false });
+      });
       const accountIds = new Set<string>(
         contacts.map((c) => c.account_id as string).filter(Boolean),
       );
@@ -119,6 +118,19 @@ export function SqlAccounts() {
     }
     return m;
   }, [rows]);
+
+  /** Truncated groups for on-screen preview. */
+  const groupedPreview = useMemo(() => {
+    const m = new Map<string, SqlRow[]>();
+    let remaining = PREVIEW_LIMIT;
+    for (const [key, list] of grouped) {
+      if (remaining <= 0) break;
+      const take = list.slice(0, remaining);
+      m.set(key, take);
+      remaining -= take.length;
+    }
+    return m;
+  }, [grouped]);
 
   function exportCsv() {
     const header = [
@@ -190,6 +202,8 @@ export function SqlAccounts() {
         </div>
       )}
 
+      <PreviewNote total={rows?.length ?? 0} shown={PREVIEW_LIMIT} />
+
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <Kpi label="Accounts" value={grouped.size.toLocaleString()} />
         <Kpi label="Contacts (SQL)" value={(rows?.length ?? 0).toLocaleString()} />
@@ -230,7 +244,7 @@ export function SqlAccounts() {
             </div>
           ) : (
             <div className="divide-y">
-              {Array.from(grouped.entries()).map(([accountName, contacts]) => (
+              {Array.from(groupedPreview.entries()).map(([accountName, contacts]) => (
                 <div key={accountName}>
                   <div className="px-4 py-2 bg-muted/50 font-semibold text-sm">
                     {accountName} · {contacts.length} contact{contacts.length === 1 ? "" : "s"}

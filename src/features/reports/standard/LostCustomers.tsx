@@ -34,7 +34,8 @@ import {
   resolveRange,
   type DateRangeKey,
 } from "./report-helpers";
-import { fetchAccountsById } from "./report-fetchers";
+import { fetchAccountsById, fetchAllRows } from "./report-fetchers";
+import { PreviewNote, PREVIEW_LIMIT } from "./PreviewNote";
 
 /**
  * Lost Customers — Existing Business closed-lost deals.
@@ -69,20 +70,6 @@ export function LostCustomers() {
   const { data: rows, isLoading, error } = useQuery({
     queryKey: ["report", "lost-customers-v2", start, end, inactiveOnly],
     queryFn: async (): Promise<LostRow[]> => {
-      let q = supabase
-        .from("opportunities")
-        .select(
-          "id, name, amount, close_date, created_at, next_step, lead_source, probability, stage, kind, account_id",
-        )
-        .eq("stage", "closed_lost")
-        .eq("kind", "renewal")
-        .is("archived_at", null);
-      if (start) q = q.gte("close_date", start);
-      if (end) q = q.lte("close_date", end);
-      q = q.order("close_date", { ascending: false, nullsFirst: false });
-      const { data, error } = await q;
-      if (error) throw error;
-
       type OppRaw = {
         id: string;
         name: string | null;
@@ -96,7 +83,19 @@ export function LostCustomers() {
         kind: string | null;
         account_id: string | null;
       };
-      const opps = ((data ?? []) as unknown) as OppRaw[];
+      const opps = await fetchAllRows<OppRaw>(() => {
+        let q = supabase
+          .from("opportunities")
+          .select(
+            "id, name, amount, close_date, created_at, next_step, lead_source, probability, stage, kind, account_id",
+          )
+          .eq("stage", "closed_lost")
+          .eq("kind", "renewal")
+          .is("archived_at", null);
+        if (start) q = q.gte("close_date", start);
+        if (end) q = q.lte("close_date", end);
+        return q.order("close_date", { ascending: false, nullsFirst: false });
+      });
       const accountIds = new Set<string>(
         opps.map((o) => o.account_id as string).filter(Boolean),
       );
@@ -234,6 +233,8 @@ export function LostCustomers() {
         <Kpi label="Range" value={DATE_RANGE_OPTIONS.find((o) => o.value === range)?.label ?? ""} />
       </div>
 
+      <PreviewNote total={rows?.length ?? 0} shown={PREVIEW_LIMIT} />
+
       <Card>
         <CardContent className="p-0">
           <div className="overflow-auto">
@@ -272,7 +273,7 @@ export function LostCustomers() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rows.map((r) => (
+                  rows.slice(0, PREVIEW_LIMIT).map((r) => (
                     <TableRow key={r.id}>
                       <TableCell className="font-medium">{r.account_name}</TableCell>
                       <TableCell>{r.opportunity_name}</TableCell>
