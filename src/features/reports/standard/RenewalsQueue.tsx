@@ -42,6 +42,7 @@ interface RenewalOpp {
   amount: number | null;
   maturity_date: string | null;
   close_date: string | null;
+  next_step: string | null;
   account: {
     id: string;
     name: string;
@@ -64,7 +65,7 @@ export function RenewalsQueue() {
       const { data, error } = await supabase
         .from("opportunities")
         .select(
-          "id, name, amount, maturity_date, close_date, " +
+          "id, name, amount, maturity_date, close_date, next_step, " +
           "account:accounts!account_id(id, name, renewal_type, lifecycle_status), " +
           "owner:user_profiles!owner_user_id(id, full_name)"
         )
@@ -98,14 +99,29 @@ export function RenewalsQueue() {
   }, [opps]);
 
   function exportCsv() {
-    const header = ["Account", "Opportunity", "Maturity Date", "Amount", "Owner", "Renewal Type"];
+    // Column shape mirrors the SF "Open Renewal Opportunities" report so
+    // existing pivot tables / Excel templates downstream keep working.
+    const header = [
+      "Close Month",
+      "Opportunity Owner",
+      "Account Name",
+      "Opportunity Name",
+      "Close Date",
+      "Maturity Date",
+      "Amount",
+      "Renewal Type",
+      "Next Step",
+    ];
     const rows = (opps ?? []).map((o) => [
+      o.maturity_date ? o.maturity_date.slice(0, 7) : "",
+      o.owner?.full_name ?? "Unassigned",
       o.account?.name ?? "",
       o.name,
+      o.close_date ?? "",
       o.maturity_date ?? "",
       Number(o.amount ?? 0).toFixed(2),
-      o.owner?.full_name ?? "Unassigned",
       o.account?.renewal_type ?? "",
+      o.next_step ?? "",
     ]);
     const csv = [header, ...rows]
       .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
