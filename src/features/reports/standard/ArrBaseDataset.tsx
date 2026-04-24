@@ -97,6 +97,16 @@ export function ArrBaseDataset() {
         account_id: string | null;
         owner_user_id: string | null;
       };
+      // Matches the SF "ARR - Chad" filter: all opps where
+      //   - name ≠ "Customer Service"
+      //   - archived_at null
+      //   - type in (New Business, Existing Business, blank) — the
+      //     importer only lets `kind` be new_business/renewal/null,
+      //     so this is automatic.
+      // Do NOT filter on one_time_project here. The ARR *metric*
+      // (rolling 365) excludes one-time projects, but the BASE DATASET
+      // shows them with the column populated so downstream analysts
+      // can filter as they wish.
       const opps = (await fetchAllRows<OppRaw>(() => {
         let q = supabase
           .from("opportunities")
@@ -105,18 +115,11 @@ export function ArrBaseDataset() {
             "one_time_project, stage, kind, lead_source, lead_source_detail, account_id, owner_user_id",
           )
           .is("archived_at", null)
-          .neq("name", "Customer Service")
-          .eq("one_time_project", false);
+          .neq("name", "Customer Service");
         if (start) q = q.gte("close_date", start);
         if (end) q = q.lte("close_date", end);
         return q.order("close_date", { ascending: false, nullsFirst: false });
       })) as OppRaw[];
-
-      // SF "ARR - Chad" spec: Type must be New Business, Existing Business,
-      // or blank (but NOT a stale SF default). Our CRM maps kind values
-      // (new_business | renewal | null) directly to those — no extra filter
-      // needed here. If you want to hide blank-type opps, uncomment below.
-      // const oppsFiltered = opps.filter((o) => o.kind !== null);
       const accountIds = new Set<string>(
         opps.map((o) => o.account_id as string).filter(Boolean),
       );
@@ -178,7 +181,11 @@ export function ArrBaseDataset() {
               : o.kind === "renewal"
                 ? "Existing Business"
                 : "",
-          account_type: a?.account_type ?? null,
+          // Normalize common SF variants so downstream pivots group correctly.
+          account_type:
+            a?.account_type === "Self Service"
+              ? "Self-Service"
+              : (a?.account_type ?? null),
           primary_partner: partners.get(o.account_id as string) ?? null,
           lead_source: leadSourceDisplay,
         };
