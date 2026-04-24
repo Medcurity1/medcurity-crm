@@ -45,19 +45,27 @@ interface PipelineOpp {
 
 /**
  * Active Pipeline — open opportunities by stage and owner, weighted
- * by probability. Stage ladder order mirrors the SF probability
- * progression (Details Analysis 40% → Demo 60% → Proposal/Price
- * Quote 75% → Proposal Conversation 90%).
+ * by probability. Matches SF "Open Opportunities" report definition:
+ * any opp not Closed Won and not Closed Lost.
+ *
+ * Stage ladder: Lead → Qualified → Details Analysis (40%) → Demo (60%)
+ * → Proposal / Price Quote (75%) → Proposal Conversation (90%) →
+ * Verbal Commit. The legacy 4-stage probability ladder was too narrow
+ * — Lead and Qualified count as pipeline too.
  *
  * Weighted $ = amount × probability / 100
  * Both raw and weighted are shown because reps care about raw pipeline
  * and leadership cares about the forecast.
  */
 const ACTIVE_STAGES: OpportunityStage[] = [
+  "lead",
+  "qualified",
   "details_analysis",
   "demo",
   "proposal_and_price_quote",
+  "proposal",
   "proposal_conversation",
+  "verbal_commit",
 ];
 
 export function ActivePipeline() {
@@ -117,14 +125,34 @@ export function ActivePipeline() {
   const totalCount = byStage.reduce((s, r) => s + r.count, 0);
 
   function exportCsv() {
-    const header = ["Stage", "Count", "Total $", "Weighted $"];
-    const rows = byStage.map((r) => [
-      r.label,
-      r.count,
-      r.amount.toFixed(2),
-      r.weighted.toFixed(2),
-    ]);
-    const csv = [header, ...rows]
+    // Per-opportunity rows (matches the SF "Open Opportunities" report
+    // shape so downstream pivots/Excel templates keep working).
+    // Falls back to by-stage summary if no detail rows are loaded yet.
+    const header = [
+      "Stage",
+      "Opportunity Owner",
+      "Account Name",
+      "Opportunity Name",
+      "Close Date",
+      "Amount",
+      "Probability",
+      "Weighted $",
+    ];
+    const detailRows = (opps ?? []).map((o) => {
+      const prob = Number(o.probability ?? 0);
+      const weighted = Number(o.amount ?? 0) * (prob / 100);
+      return [
+        stageLabel(o.stage),
+        o.owner?.full_name ?? "Unassigned",
+        o.account?.name ?? "",
+        o.name,
+        o.close_date ?? "",
+        Number(o.amount ?? 0).toFixed(2),
+        prob ? `${prob}%` : "",
+        weighted.toFixed(2),
+      ];
+    });
+    const csv = [header, ...detailRows]
       .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
       .join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
