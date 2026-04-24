@@ -2,7 +2,9 @@
 
 /**
  * Download a 2-D table (header row + data rows) as a CSV file.
- * Values are coerced to strings and CSV-escaped.
+ * - Raw numbers are written unquoted so Excel/Sheets treats them as
+ *   numeric (e.g. Account Number = 3345, not "3345").
+ * - Strings are quoted and CSV-escaped.
  */
 export function downloadCsv(filename: string, rows: unknown[][]) {
   const csv = rows
@@ -10,8 +12,11 @@ export function downloadCsv(filename: string, rows: unknown[][]) {
       row
         .map((cell) => {
           if (cell === null || cell === undefined) return "";
+          if (typeof cell === "number" && Number.isFinite(cell)) {
+            // Bare numeric — no quotes.
+            return String(cell);
+          }
           const s = String(cell);
-          // Always quote and escape — simpler + safer than conditional.
           return `"${s.replace(/"/g, '""')}"`;
         })
         .join(","),

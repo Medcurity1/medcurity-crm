@@ -22,7 +22,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatCurrency, formatDate } from "@/lib/formatters";
+import { formatCurrency, formatDate, stageLabel } from "@/lib/formatters";
+import type { OpportunityStage } from "@/types/crm";
 import {
   downloadCsv,
   todayStamp,
@@ -76,7 +77,12 @@ export function ArrBaseDataset() {
   const { data: rows, isLoading, error: fetchError } = useQuery({
     queryKey: ["report", "arr-base-dataset-v2", start, end],
     queryFn: async (): Promise<ArrRow[]> => {
-      const { fetchAccountsById, fetchUsersById, fetchAllRows } = await import("./report-fetchers");
+      const {
+        fetchAccountsById,
+        fetchUsersById,
+        fetchAllRows,
+        fetchPrimaryPartnersByMemberId,
+      } = await import("./report-fetchers");
       type OppRaw = {
         id: string;
         name: string | null;
@@ -88,6 +94,7 @@ export function ArrBaseDataset() {
         stage: string | null;
         kind: string | null;
         lead_source: string | null;
+        lead_source_detail: string | null;
         account_id: string | null;
         owner_user_id: string | null;
       };
@@ -96,7 +103,7 @@ export function ArrBaseDataset() {
           .from("opportunities")
           .select(
             "id, name, amount, close_date, created_at, payment_frequency, " +
-            "one_time_project, stage, kind, lead_source, account_id, owner_user_id",
+            "one_time_project, stage, kind, lead_source, lead_source_detail, account_id, owner_user_id",
           )
           .is("archived_at", null)
           .neq("name", "Customer Service")
@@ -105,21 +112,44 @@ export function ArrBaseDataset() {
         if (end) q = q.lte("close_date", end);
         return q.order("close_date", { ascending: false, nullsFirst: false });
       })) as OppRaw[];
+
+      // SF "ARR - Chad" spec: Type must be New Business, Existing Business,
+      // or blank (but NOT a stale SF default). Our CRM maps kind values
+      // (new_business | renewal | null) directly to those — no extra filter
+      // needed here. If you want to hide blank-type opps, uncomment below.
+      // const oppsFiltered = opps.filter((o) => o.kind !== null);
       const accountIds = new Set<string>(
         opps.map((o) => o.account_id as string).filter(Boolean),
       );
       const ownerIds = new Set<string>(
         opps.map((o) => o.owner_user_id as string).filter(Boolean),
       );
-      const [accounts, users] = await Promise.all([
+      const [accounts, users, partners] = await Promise.all([
         fetchAccountsById(accountIds),
         fetchUsersById(ownerIds),
+        fetchPrimaryPartnersByMemberId(accountIds),
       ]);
 
       const today = new Date();
       return opps.map((o) => {
         const a = accounts.get(o.account_id as string);
         const closeDate = o.close_date as string | null;
+        // Prefer the preserved SF lead source label (lead_source_detail)
+        // over the coarse enum value (lead_source). The importer stashes
+        // the original SF string in lead_source_detail when the value
+        // didn't match a CRM enum (`other`) so it's the real human label.
+        const ls = o.lead_source as string | null;
+        const lsd = o.lead_source_detail as string | null;
+        const leadSourceDisplay =
+          lsd && lsd.trim() !== ""
+            ? lsd
+            : ls && ls !== "other"
+              ? // Convert snake_case enum value to Title Case label.
+                ls
+                  .split("_")
+                  .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+                  .join(" ")
+              : (ls ?? "");
         return {
           id: o.id as string,
           account_name: a?.name ?? null,
@@ -140,7 +170,9 @@ export function ArrBaseDataset() {
             : null,
           payment_frequency: (o.payment_frequency as string | null) ?? null,
           one_time_project: o.one_time_project as boolean | null,
-          stage: (o.stage as string | null) ?? null,
+          stage: o.stage
+            ? stageLabel(o.stage as OpportunityStage)
+            : null,
           type:
             o.kind === "new_business"
               ? "New Business"
@@ -148,8 +180,8 @@ export function ArrBaseDataset() {
                 ? "Existing Business"
                 : "",
           account_type: a?.account_type ?? null,
-          primary_partner: null, // not fetched in v2; add later if needed
-          lead_source: (o.lead_source as string | null) ?? null,
+          primary_partner: partners.get(o.account_id as string) ?? null,
+          lead_source: leadSourceDisplay,
         };
       });
     },
@@ -185,13 +217,19 @@ export function ArrBaseDataset() {
     ];
     const data = (rows ?? []).map((r) => [
       r.account_name ?? "",
-      r.account_number ?? "",
+      // Account Number as a bare number, not a quoted string — matches
+      // the SF "ARR - Chad" column format so pivot tables can use it
+      // as a numeric key.
+      r.account_number != null && r.account_number !== ""
+        ? Number(r.account_number)
+        : "",
       r.opportunity_name ?? "",
       r.opportunity_owner ?? "",
       r.created_date ?? "",
       r.close_date ?? "",
       r.age ?? "",
-      csvCurrency(r.amount),
+      // Bare numeric so Excel treats Amount as a number for SUM/pivots.
+      r.amount != null ? Number(r.amount) : "",
       r.fiscal_period ?? "",
       r.payment_frequency ?? "",
       r.one_time_project ? "TRUE" : "FALSE",

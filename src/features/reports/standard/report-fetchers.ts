@@ -84,6 +84,65 @@ export async function fetchAccountsById(ids: Set<string>): Promise<
 }
 
 /**
+ * Look up the "primary partner" display name for a set of member account
+ * IDs. The primary partner is the earliest account_partners row pointing
+ * at this account as a member.
+ *
+ * Returns a map member_account_id → partner display name.
+ */
+export async function fetchPrimaryPartnersByMemberId(memberIds: Set<string>): Promise<
+  Map<string, string>
+> {
+  const map = new Map<string, string>();
+  const idList = Array.from(memberIds);
+  if (idList.length === 0) return map;
+
+  // 1. Get all partnership rows for these members (includes created_at so
+  //    we can pick the earliest = "primary" partner).
+  const chunkSize = 500;
+  const partnerships: {
+    partner_account_id: string;
+    member_account_id: string;
+    created_at: string;
+  }[] = [];
+  for (let i = 0; i < idList.length; i += chunkSize) {
+    const chunk = idList.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from("account_partners")
+      .select("partner_account_id, member_account_id, created_at")
+      .in("member_account_id", chunk);
+    if (error) throw error;
+    for (const p of data ?? [])
+      partnerships.push(p as {
+        partner_account_id: string;
+        member_account_id: string;
+        created_at: string;
+      });
+  }
+
+  // 2. Reduce to first-per-member.
+  const earliestByMember = new Map<string, { pid: string; at: string }>();
+  for (const p of partnerships) {
+    const cur = earliestByMember.get(p.member_account_id);
+    if (!cur || p.created_at < cur.at) {
+      earliestByMember.set(p.member_account_id, { pid: p.partner_account_id, at: p.created_at });
+    }
+  }
+
+  // 3. Batch-fetch the partner account names.
+  const partnerIds = new Set(
+    Array.from(earliestByMember.values()).map((v) => v.pid),
+  );
+  const partnerAccounts = await fetchAccountsById(partnerIds);
+
+  for (const [memberId, { pid }] of earliestByMember) {
+    const name = partnerAccounts.get(pid)?.name;
+    if (name) map.set(memberId, name);
+  }
+  return map;
+}
+
+/**
  * Fetch user_profiles by a set of IDs, return map id → {full_name, role}.
  */
 export async function fetchUsersById(ids: Set<string>): Promise<
