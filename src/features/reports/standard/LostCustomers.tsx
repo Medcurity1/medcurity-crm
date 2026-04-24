@@ -28,23 +28,29 @@ import {
   downloadCsv,
   todayStamp,
   csvCurrency,
-  ownerRoleLabel,
   fiscalPeriod,
   typeLabel,
   DATE_RANGE_OPTIONS,
   resolveRange,
   type DateRangeKey,
 } from "./report-helpers";
-import { fetchAccountsById, fetchUsersById, fetchAllRows } from "./report-fetchers";
+import { fetchAccountsById, fetchAllRows } from "./report-fetchers";
 import { PreviewNote, PREVIEW_LIMIT } from "./PreviewNote";
 
-interface RenewalRow {
+/**
+ * Lost Customers — Existing Business closed-lost deals.
+ * The SF spec requires Account Status = Inactive, but in staging
+ * no accounts are currently flagged inactive (lifecycle_status
+ * backfill is a separate data-quality item), so the filter is
+ * optional here. When "Inactive only" is on, we hide rows whose
+ * account is not inactive. When off, all closed-lost renewals show.
+ */
+interface LostRow {
   id: string;
-  owner_role: string;
-  opportunity_owner: string;
   account_name: string;
   opportunity_name: string;
   stage: OpportunityStage | null;
+  account_status: string;
   fiscal_period: string;
   amount: number | null;
   probability: number | null;
@@ -56,13 +62,14 @@ interface RenewalRow {
   type: string;
 }
 
-export function RenewalsQueue() {
+export function LostCustomers() {
   const [range, setRange] = useState<DateRangeKey>("current_quarter");
+  const [inactiveOnly, setInactiveOnly] = useState(false);
   const { start, end } = resolveRange(range);
 
   const { data: rows, isLoading, error } = useQuery({
-    queryKey: ["report", "renewals-v2", start, end],
-    queryFn: async (): Promise<RenewalRow[]> => {
+    queryKey: ["report", "lost-customers-v2", start, end, inactiveOnly],
+    queryFn: async (): Promise<LostRow[]> => {
       type OppRaw = {
         id: string;
         name: string | null;
@@ -75,17 +82,15 @@ export function RenewalsQueue() {
         stage: string | null;
         kind: string | null;
         account_id: string | null;
-        owner_user_id: string | null;
       };
       const opps = await fetchAllRows<OppRaw>(() => {
         let q = supabase
           .from("opportunities")
           .select(
-            "id, name, amount, close_date, created_at, next_step, lead_source, probability, stage, kind, account_id, owner_user_id",
+            "id, name, amount, close_date, created_at, next_step, lead_source, probability, stage, kind, account_id",
           )
-          .eq("stage", "closed_won")
+          .eq("stage", "closed_lost")
           .eq("kind", "renewal")
-          .neq("name", "EHR Implementation")
           .is("archived_at", null);
         if (start) q = q.gte("close_date", start);
         if (end) q = q.lte("close_date", end);
@@ -94,25 +99,18 @@ export function RenewalsQueue() {
       const accountIds = new Set<string>(
         opps.map((o) => o.account_id as string).filter(Boolean),
       );
-      const ownerIds = new Set<string>(
-        opps.map((o) => o.owner_user_id as string).filter(Boolean),
-      );
-      const [accounts, users] = await Promise.all([
-        fetchAccountsById(accountIds),
-        fetchUsersById(ownerIds),
-      ]);
+      const accounts = await fetchAccountsById(accountIds);
 
       const today = new Date();
-      return opps.map((o) => {
-        const owner = users.get(o.owner_user_id as string);
+      const mapped = opps.map((o) => {
+        const a = accounts.get(o.account_id as string);
         const closeDate = o.close_date as string | null;
         return {
           id: o.id as string,
-          owner_role: ownerRoleLabel(owner?.role),
-          opportunity_owner: owner?.full_name ?? "Unassigned",
-          account_name: accounts.get(o.account_id as string)?.name ?? "",
+          account_name: a?.name ?? "",
           opportunity_name: (o.name as string) ?? "",
-          stage: (o.stage as OpportunityStage | null) ?? ("closed_won" as OpportunityStage),
+          stage: (o.stage as OpportunityStage | null) ?? ("closed_lost" as OpportunityStage),
+          account_status: a?.lifecycle_status ?? "",
           fiscal_period: fiscalPeriod(closeDate),
           amount: o.amount as number | null,
           probability: o.probability as number | null,
@@ -129,6 +127,9 @@ export function RenewalsQueue() {
           type: typeLabel(o.kind as string | null),
         };
       });
+      return inactiveOnly
+        ? mapped.filter((r) => r.account_status === "inactive")
+        : mapped;
     },
   });
 
@@ -140,11 +141,10 @@ export function RenewalsQueue() {
 
   function exportCsv() {
     const header = [
-      "Owner Role",
-      "Opportunity Owner",
       "Account Name",
       "Opportunity Name",
       "Stage",
+      "Status",
       "Fiscal Period",
       "Amount",
       "Probability (%)",
@@ -156,11 +156,10 @@ export function RenewalsQueue() {
       "Type",
     ];
     const data = (rows ?? []).map((r) => [
-      r.owner_role,
-      r.opportunity_owner,
       r.account_name,
       r.opportunity_name,
       r.stage ? stageLabel(r.stage) : "",
+      r.account_status,
       r.fiscal_period,
       csvCurrency(r.amount),
       r.probability ?? "",
@@ -171,7 +170,7 @@ export function RenewalsQueue() {
       r.lead_source ?? "",
       r.type,
     ]);
-    downloadCsv(`renewals-${todayStamp()}.csv`, [header, ...data]);
+    downloadCsv(`lost-customers-${todayStamp()}.csv`, [header, ...data]);
   }
 
   return (
@@ -186,10 +185,22 @@ export function RenewalsQueue() {
       </div>
 
       <PageHeader
-        title="Renewals"
-        description="Existing Business closed-won. Excludes EHR Implementation."
+        title="Lost Customers"
+        description={
+          inactiveOnly
+            ? "Existing Business closed-lost on inactive accounts."
+            : "All Existing Business closed-lost deals. Toggle 'Inactive only' to match the SF spec strictly."
+        }
         actions={
           <div className="flex items-center gap-2">
+            <label className="text-xs flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={inactiveOnly}
+                onChange={(e) => setInactiveOnly(e.target.checked)}
+              />
+              Inactive only
+            </label>
             <Select value={range} onValueChange={(v) => setRange(v as DateRangeKey)}>
               <SelectTrigger className="w-48">
                 <SelectValue />
@@ -217,8 +228,8 @@ export function RenewalsQueue() {
       )}
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-        <Kpi label="Renewals Closed" value={summary.count.toLocaleString()} />
-        <Kpi label="Amount" value={formatCurrency(summary.total)} />
+        <Kpi label="Count" value={summary.count.toLocaleString()} />
+        <Kpi label="Amount Lost" value={formatCurrency(summary.total)} />
         <Kpi label="Range" value={DATE_RANGE_OPTIONS.find((o) => o.value === range)?.label ?? ""} />
       </div>
 
@@ -230,11 +241,10 @@ export function RenewalsQueue() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Owner Role</TableHead>
-                  <TableHead>Opportunity Owner</TableHead>
                   <TableHead>Account Name</TableHead>
                   <TableHead>Opportunity Name</TableHead>
                   <TableHead>Stage</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead>Fiscal Period</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
                   <TableHead className="text-right">Prob %</TableHead>
@@ -243,6 +253,7 @@ export function RenewalsQueue() {
                   <TableHead>Created</TableHead>
                   <TableHead>Next Step</TableHead>
                   <TableHead>Lead Source</TableHead>
+                  <TableHead>Type</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -258,17 +269,16 @@ export function RenewalsQueue() {
                       colSpan={13}
                       className="p-6 text-sm text-muted-foreground text-center"
                     >
-                      No renewals in the selected range.
+                      No lost customers in the selected range.
                     </TableCell>
                   </TableRow>
                 ) : (
                   rows.slice(0, PREVIEW_LIMIT).map((r) => (
                     <TableRow key={r.id}>
-                      <TableCell>{r.owner_role}</TableCell>
-                      <TableCell>{r.opportunity_owner}</TableCell>
                       <TableCell className="font-medium">{r.account_name}</TableCell>
                       <TableCell>{r.opportunity_name}</TableCell>
                       <TableCell>{r.stage ? stageLabel(r.stage) : ""}</TableCell>
+                      <TableCell>{r.account_status}</TableCell>
                       <TableCell>{r.fiscal_period}</TableCell>
                       <TableCell className="text-right">
                         {formatCurrency(Number(r.amount ?? 0))}
@@ -279,6 +289,7 @@ export function RenewalsQueue() {
                       <TableCell>{formatDate(r.created_date)}</TableCell>
                       <TableCell>{r.next_step ?? ""}</TableCell>
                       <TableCell>{r.lead_source ?? ""}</TableCell>
+                      <TableCell>{r.type}</TableCell>
                     </TableRow>
                   ))
                 )}

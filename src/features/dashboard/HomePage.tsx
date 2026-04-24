@@ -345,7 +345,7 @@ function MyOpenOpportunitiesSection({ userId }: { userId: string }) {
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="text-base">My Open Opportunities</CardTitle>
         <Link
-          to="/opportunities"
+          to="/opportunities?owner=mine"
           className="text-sm text-primary hover:underline"
         >
           View All

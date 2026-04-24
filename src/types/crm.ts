@@ -250,6 +250,7 @@ export interface Account {
 export interface Contact {
   id: string;
   sf_id: string | null;
+  contact_number: string | null;
   account_id: string;
   owner_user_id: string | null;
   verified: boolean;

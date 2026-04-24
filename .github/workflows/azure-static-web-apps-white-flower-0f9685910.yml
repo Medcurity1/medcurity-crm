@@ -43,6 +43,44 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ secrets.PRODUCTION_SUPABASE_PROJECT_REF }}
 
+      - name: Push Edge Function Secrets (Production)
+        # Syncs Microsoft / integration secrets from GitHub → prod
+        # Supabase Edge Function env. Idempotent — safe to re-run on
+        # every deploy. Skips cleanly if PRODUCTION_MICROSOFT_CLIENT_ID
+        # isn't set (i.e. Outlook hasn't been bootstrapped yet).
+        if: ${{ secrets.PRODUCTION_MICROSOFT_CLIENT_ID != '' }}
+        run: |
+          set -e
+          npx supabase link --project-ref $SUPABASE_PROJECT_REF
+          npx supabase secrets set \
+            MICROSOFT_CLIENT_ID="$MICROSOFT_CLIENT_ID" \
+            MICROSOFT_CLIENT_SECRET="$MICROSOFT_CLIENT_SECRET" \
+            OUTLOOK_OAUTH_REDIRECT_URI="$OUTLOOK_OAUTH_REDIRECT_URI" \
+            APP_BASE_URL="$APP_BASE_URL" \
+            INTERNAL_EMAIL_DOMAINS="$INTERNAL_EMAIL_DOMAINS"
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.PRODUCTION_SUPABASE_PROJECT_REF }}
+          MICROSOFT_CLIENT_ID: ${{ secrets.PRODUCTION_MICROSOFT_CLIENT_ID }}
+          MICROSOFT_CLIENT_SECRET: ${{ secrets.PRODUCTION_MICROSOFT_CLIENT_SECRET }}
+          OUTLOOK_OAUTH_REDIRECT_URI: https://${{ secrets.PRODUCTION_SUPABASE_PROJECT_REF }}.functions.supabase.co/outlook-oauth/callback
+          APP_BASE_URL: https://crm.medcurity.com
+          INTERNAL_EMAIL_DOMAINS: medcurity.com
+
+      - name: Deploy Edge Functions (Production)
+        # Deploys the three Outlook-related edge functions. The
+        # outlook-oauth callback receives requests from Microsoft
+        # (not an authenticated browser), so it needs --no-verify-jwt.
+        run: |
+          set -e
+          npx supabase link --project-ref $SUPABASE_PROJECT_REF
+          npx supabase functions deploy outlook-oauth --no-verify-jwt
+          npx supabase functions deploy sync-emails
+          npx supabase functions deploy outlook-calendar-sync
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.PRODUCTION_SUPABASE_PROJECT_REF }}
+
       - name: Deploy
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1

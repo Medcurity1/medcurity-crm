@@ -36,10 +36,15 @@ const ReportsHub = lazy(() => import("@/features/reports/ReportsHub").then(m => 
 const ActivityCalendar = lazy(() => import("@/features/activities/ActivityCalendar").then(m => ({ default: m.ActivityCalendar })));
 const ActivitiesListPage = lazy(() => import("@/features/activities/ActivitiesListPage").then(m => ({ default: m.ActivitiesListPage })));
 const ActivityDetail = lazy(() => import("@/features/activities/ActivityDetail").then(m => ({ default: m.ActivityDetail })));
-const ArrRolling365 = lazy(() => import("@/features/reports/standard/ArrRolling365").then(m => ({ default: m.ArrRolling365 })));
-const MqlSqlCounts = lazy(() => import("@/features/reports/standard/MqlSqlCounts").then(m => ({ default: m.MqlSqlCounts })));
+const ArrBaseDataset = lazy(() => import("@/features/reports/standard/ArrBaseDataset").then(m => ({ default: m.ArrBaseDataset })));
+const NewCustomers = lazy(() => import("@/features/reports/standard/NewCustomers").then(m => ({ default: m.NewCustomers })));
+const LostCustomers = lazy(() => import("@/features/reports/standard/LostCustomers").then(m => ({ default: m.LostCustomers })));
 const ActivePipeline = lazy(() => import("@/features/reports/standard/ActivePipeline").then(m => ({ default: m.ActivePipeline })));
 const RenewalsReport = lazy(() => import("@/features/reports/standard/RenewalsQueue").then(m => ({ default: m.RenewalsQueue })));
+const SqlAccounts = lazy(() => import("@/features/reports/standard/SqlAccounts").then(m => ({ default: m.SqlAccounts })));
+const MqlContacts = lazy(() => import("@/features/reports/standard/MqlContacts").then(m => ({ default: m.MqlContacts })));
+const MqlLeads = lazy(() => import("@/features/reports/standard/MqlLeads").then(m => ({ default: m.MqlLeads })));
+const ReportsDiagnostic = lazy(() => import("@/features/reports/standard/ReportsDiagnostic").then(m => ({ default: m.ReportsDiagnostic })));
 // WinLossAnalysis is now only reached via /reports?tab=analytics and
 // lazy-loaded inside ReportsHub.
 const SequencesPage = lazy(() => import("@/features/sequences/SequencesPage").then(m => ({ default: m.SequencesPage })));
@@ -92,10 +97,19 @@ export default function App() {
                   <Route path="products/:id" element={<ProductDetail />} />
                   <Route path="renewals" element={<RenewalsQueue />} />
                   <Route path="reports" element={<ReportsHub />} />
-                  <Route path="reports/standard/arr-rolling-365" element={<ArrRolling365 />} />
-                  <Route path="reports/standard/mql-sql-counts" element={<MqlSqlCounts />} />
+                  <Route path="reports/standard/arr-base-dataset" element={<ArrBaseDataset />} />
+                  <Route path="reports/standard/new-customers" element={<NewCustomers />} />
+                  <Route path="reports/standard/lost-customers" element={<LostCustomers />} />
                   <Route path="reports/standard/active-pipeline" element={<ActivePipeline />} />
+                  <Route path="reports/standard/renewals" element={<RenewalsReport />} />
+                  <Route path="reports/standard/sql" element={<SqlAccounts />} />
+                  <Route path="reports/standard/mql-contacts" element={<MqlContacts />} />
+                  <Route path="reports/standard/mql-leads" element={<MqlLeads />} />
+                  <Route path="reports/standard/diagnostic" element={<ReportsDiagnostic />} />
+                  {/* Legacy route aliases — keep old URLs working */}
+                  <Route path="reports/standard/arr-rolling-365" element={<ArrBaseDataset />} />
                   <Route path="reports/standard/renewals-queue" element={<RenewalsReport />} />
+                  <Route path="reports/standard/mql-sql-counts" element={<MqlLeads />} />
                   {/* Legacy routes redirect into the reports hub tabs */}
                   <Route
                     path="forecasting"

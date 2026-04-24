@@ -1,17 +1,8 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Download } from "lucide-react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { ArrowLeft, Download, ChevronDown, ChevronRight } from "lucide-react";
+import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -25,117 +16,139 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatCurrency, stageLabel } from "@/lib/formatters";
+import { formatCurrency, formatDate, stageLabel } from "@/lib/formatters";
 import type { OpportunityStage } from "@/types/crm";
-
-// PostgREST can't auto-infer the shape of a `select` with embedded
-// joins when multiple relations come back, so declare the shape
-// here and cast. Cheaper than pulling in a generated types file
-// for one query.
-interface PipelineOpp {
-  id: string;
-  name: string;
-  stage: OpportunityStage;
-  amount: number | null;
-  probability: number | null;
-  close_date: string | null;
-  account: { id: string; name: string } | null;
-  owner: { id: string; full_name: string | null } | null;
-}
+import { downloadCsv, todayStamp, csvCurrency } from "./report-helpers";
 
 /**
- * Active Pipeline — open opportunities by stage and owner, weighted
- * by probability. Stage ladder order mirrors the SF probability
- * progression (Details Analysis 40% → Demo 60% → Proposal/Price
- * Quote 75% → Proposal Conversation 90%).
+ * Active Pipeline — open opportunities (not Closed Won / Closed Lost).
+ * Columns match SF "Active Pipeline":
+ *   Opportunity Name, Account Name, Close Date, Amount, Opportunity Owner
+ * Grouping: Stage → Type
  *
- * Weighted $ = amount × probability / 100
- * Both raw and weighted are shown because reps care about raw pipeline
- * and leadership cares about the forecast.
+ * API: /rest/v1/v_active_pipeline?select=*
  */
-const ACTIVE_STAGES: OpportunityStage[] = [
-  "details_analysis",
-  "demo",
-  "proposal_and_price_quote",
-  "proposal_conversation",
-];
+interface PipelineRow {
+  id: string;
+  stage: OpportunityStage;
+  type: string | null;
+  opportunity_name: string | null;
+  account_name: string | null;
+  close_date: string | null;
+  amount: number | null;
+  probability: number | null;
+  weighted_amount: number | null;
+  opportunity_owner: string | null;
+}
 
 export function ActivePipeline() {
-  const { data: opps, isLoading } = useQuery({
-    queryKey: ["report", "active-pipeline"],
+  const { data: rows, isLoading } = useQuery({
+    queryKey: ["report", "active-pipeline-v2"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("opportunities")
-        .select(
-          "id, name, stage, amount, probability, close_date, " +
-          "account:accounts!account_id(id, name), " +
-          "owner:user_profiles!owner_user_id(id, full_name)"
-        )
-        .in("stage", ACTIVE_STAGES);
-      if (error) throw error;
-      return ((data ?? []) as unknown) as PipelineOpp[];
+      // Batch-fetch + client join. Embedded PostgREST joins were
+      // silently returning empty in staging.
+      const { fetchAccountsById, fetchUsersById, fetchAllRows } = await import("./report-fetchers");
+      type OppRaw = {
+        id: string;
+        name: string | null;
+        stage: string | null;
+        amount: number | null;
+        probability: number | null;
+        close_date: string | null;
+        kind: string | null;
+        account_id: string | null;
+        owner_user_id: string | null;
+      };
+      const opps = await fetchAllRows<OppRaw>(() =>
+        supabase
+          .from("opportunities")
+          .select(
+            "id, name, stage, amount, probability, close_date, kind, account_id, owner_user_id",
+          )
+          .not("stage", "in", "(closed_won,closed_lost)")
+          .is("archived_at", null)
+          .order("stage", { ascending: true })
+          .order("amount", { ascending: false, nullsFirst: false }),
+      );
+      const accountIds = new Set<string>(
+        opps.map((o) => o.account_id as string).filter(Boolean),
+      );
+      const ownerIds = new Set<string>(
+        opps.map((o) => o.owner_user_id as string).filter(Boolean),
+      );
+      const [accounts, users] = await Promise.all([
+        fetchAccountsById(accountIds),
+        fetchUsersById(ownerIds),
+      ]);
+
+      return opps.map((r) => {
+        const amount = r.amount as number | null;
+        const probability = r.probability as number | null;
+        return {
+          id: r.id as string,
+          stage: (r.stage as OpportunityStage | null) ?? ("lead" as OpportunityStage),
+          type:
+            r.kind === "new_business"
+              ? "New Business"
+              : r.kind === "renewal"
+                ? "Existing Business"
+                : "",
+          opportunity_name: (r.name as string) ?? "",
+          account_name: accounts.get(r.account_id as string)?.name ?? null,
+          close_date: r.close_date as string | null,
+          amount,
+          probability,
+          weighted_amount:
+            (Number(amount ?? 0) * Number(probability ?? 0)) / 100,
+          opportunity_owner:
+            users.get(r.owner_user_id as string)?.full_name ?? "Unassigned",
+        };
+      }) as PipelineRow[];
     },
   });
 
-  const byStage = useMemo(() => {
-    const m = new Map<OpportunityStage, { count: number; amount: number; weighted: number }>();
-    for (const s of ACTIVE_STAGES) m.set(s, { count: 0, amount: 0, weighted: 0 });
-    for (const o of opps ?? []) {
-      const cur = m.get(o.stage);
-      if (!cur) continue;
-      const amt = Number(o.amount ?? 0);
-      const p = Number(o.probability ?? 0) / 100;
-      cur.count += 1;
-      cur.amount += amt;
-      cur.weighted += amt * p;
+  // Group by Stage → Type → rows
+  const grouped = useMemo(() => {
+    const byStage = new Map<OpportunityStage, Map<string, PipelineRow[]>>();
+    for (const r of rows ?? []) {
+      const stageMap = byStage.get(r.stage) ?? new Map();
+      const typeKey = r.type || "Unspecified";
+      const list = stageMap.get(typeKey) ?? [];
+      list.push(r);
+      stageMap.set(typeKey, list);
+      byStage.set(r.stage, stageMap);
     }
-    return Array.from(m.entries()).map(([stage, v]) => ({
-      stage,
-      label: stageLabel(stage),
-      ...v,
-    }));
-  }, [opps]);
+    return byStage;
+  }, [rows]);
 
-  const byOwner = useMemo(() => {
-    const m = new Map<string, { name: string; count: number; amount: number; weighted: number }>();
-    for (const o of opps ?? []) {
-      const oid = o.owner?.id ?? "__unassigned";
-      const oname = o.owner?.full_name ?? "Unassigned";
-      if (!m.has(oid)) m.set(oid, { name: oname, count: 0, amount: 0, weighted: 0 });
-      const cur = m.get(oid)!;
-      const amt = Number(o.amount ?? 0);
-      const p = Number(o.probability ?? 0) / 100;
-      cur.count += 1;
-      cur.amount += amt;
-      cur.weighted += amt * p;
-    }
-    return Array.from(m.values()).sort((a, b) => b.weighted - a.weighted);
-  }, [opps]);
-
-  const totalAmount = byStage.reduce((s, r) => s + r.amount, 0);
-  const totalWeighted = byStage.reduce((s, r) => s + r.weighted, 0);
-  const totalCount = byStage.reduce((s, r) => s + r.count, 0);
+  const totals = useMemo(() => {
+    const list = rows ?? [];
+    const count = list.length;
+    const amount = list.reduce((s, r) => s + Number(r.amount ?? 0), 0);
+    const weighted = list.reduce((s, r) => s + Number(r.weighted_amount ?? 0), 0);
+    return { count, amount, weighted };
+  }, [rows]);
 
   function exportCsv() {
-    const header = ["Stage", "Count", "Total $", "Weighted $"];
-    const rows = byStage.map((r) => [
-      r.label,
-      r.count,
-      r.amount.toFixed(2),
-      r.weighted.toFixed(2),
+    const header = [
+      "Stage",
+      "Type",
+      "Opportunity Name",
+      "Account Name",
+      "Close Date",
+      "Amount",
+      "Opportunity Owner",
+    ];
+    const data = (rows ?? []).map((r) => [
+      r.stage ? stageLabel(r.stage) : "",
+      r.type ?? "",
+      r.opportunity_name ?? "",
+      r.account_name ?? "",
+      r.close_date ?? "",
+      csvCurrency(r.amount),
+      r.opportunity_owner ?? "",
     ]);
-    const csv = [header, ...rows]
-      .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `active-pipeline-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadCsv(`active-pipeline-${todayStamp()}.csv`, [header, ...data]);
   }
 
   return (
@@ -151,7 +164,7 @@ export function ActivePipeline() {
 
       <PageHeader
         title="Active Pipeline"
-        description="Open opportunities by stage and owner, weighted by probability."
+        description="All open opportunities grouped by Stage → Type. Matches the SF Active Pipeline report."
         actions={
           <Button variant="outline" size="sm" onClick={exportCsv} disabled={isLoading}>
             <Download className="h-4 w-4 mr-1" />
@@ -161,95 +174,110 @@ export function ActivePipeline() {
       />
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-        <Kpi label="Open Opportunities" value={totalCount.toLocaleString()} />
-        <Kpi label="Total Pipeline $" value={formatCurrency(totalAmount)} />
-        <Kpi label="Weighted Pipeline $" value={formatCurrency(totalWeighted)} />
+        <Kpi label="Open Opportunities" value={totals.count.toLocaleString()} />
+        <Kpi label="Total Pipeline" value={formatCurrency(totals.amount)} />
+        <Kpi label="Weighted" value={formatCurrency(totals.weighted)} />
       </div>
 
       <Card>
-        <CardContent className="p-4">
-          <h3 className="text-sm font-semibold mb-3">By Stage</h3>
+        <CardContent className="p-0">
           {isLoading ? (
-            <Skeleton className="h-64 w-full" />
+            <div className="p-4">
+              <Skeleton className="h-64 w-full" />
+            </div>
+          ) : !rows?.length ? (
+            <p className="p-6 text-sm text-muted-foreground text-center">
+              No open opportunities.
+            </p>
           ) : (
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={byStage}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                  <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                  <YAxis
-                    tickFormatter={(v) => (v === 0 ? "$0" : `$${(v / 1000).toFixed(0)}k`)}
-                    tick={{ fontSize: 12 }}
-                  />
-                  <Tooltip
-                    formatter={(v) => (typeof v === "number" ? formatCurrency(v) : String(v ?? ""))}
-                    contentStyle={{ fontSize: 12 }}
-                  />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="amount" name="Raw $" fill="#3b82f6" />
-                  <Bar dataKey="weighted" name="Weighted $" fill="#f59e0b" />
-                </BarChart>
-              </ResponsiveContainer>
+            <div className="divide-y">
+              {Array.from(grouped.entries()).map(([stage, typeMap]) => (
+                <StageGroup
+                  key={stage}
+                  stage={stage}
+                  typeMap={typeMap}
+                />
+              ))}
             </div>
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
 
-      <Card>
-        <CardContent className="p-4">
-          <h3 className="text-sm font-semibold mb-3">By Stage (Table)</h3>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Stage</TableHead>
-                <TableHead className="text-right">Count</TableHead>
-                <TableHead className="text-right">Total $</TableHead>
-                <TableHead className="text-right">Weighted $</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {byStage.map((r) => (
-                <TableRow key={r.stage}>
-                  <TableCell>{r.label}</TableCell>
-                  <TableCell className="text-right">{r.count}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(r.amount)}</TableCell>
-                  <TableCell className="text-right font-medium">
-                    {formatCurrency(r.weighted)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+function StageGroup({
+  stage,
+  typeMap,
+}: {
+  stage: OpportunityStage;
+  typeMap: Map<string, PipelineRow[]>;
+}) {
+  const [open, setOpen] = useState(true);
+  const stageCount = Array.from(typeMap.values()).reduce((s, l) => s + l.length, 0);
+  const stageAmount = Array.from(typeMap.values())
+    .flat()
+    .reduce((s, r) => s + Number(r.amount ?? 0), 0);
 
-      <Card>
-        <CardContent className="p-4">
-          <h3 className="text-sm font-semibold mb-3">By Owner</h3>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Owner</TableHead>
-                <TableHead className="text-right">Count</TableHead>
-                <TableHead className="text-right">Total $</TableHead>
-                <TableHead className="text-right">Weighted $</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {byOwner.map((r, i) => (
-                <TableRow key={i}>
-                  <TableCell>{r.name}</TableCell>
-                  <TableCell className="text-right">{r.count}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(r.amount)}</TableCell>
-                  <TableCell className="text-right font-medium">
-                    {formatCurrency(r.weighted)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+  return (
+    <div>
+      <button
+        type="button"
+        className="w-full flex items-center gap-2 px-4 py-3 bg-muted/50 hover:bg-muted text-left"
+        onClick={() => setOpen((v) => !v)}
+      >
+        {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        <span className="font-semibold">{stageLabel(stage)}</span>
+        <span className="text-sm text-muted-foreground ml-2">
+          {stageCount} opp{stageCount === 1 ? "" : "s"} · {formatCurrency(stageAmount)}
+        </span>
+      </button>
+      {open &&
+        Array.from(typeMap.entries()).map(([type, list]) => (
+          <TypeGroup key={type} type={type} list={list} />
+        ))}
+    </div>
+  );
+}
+
+function TypeGroup({ type, list }: { type: string; list: PipelineRow[] }) {
+  const typeAmount = list.reduce((s, r) => s + Number(r.amount ?? 0), 0);
+  return (
+    <div className="border-t">
+      <div className="px-8 py-2 text-xs uppercase tracking-wide text-muted-foreground bg-muted/20">
+        {type} · {list.length} · {formatCurrency(typeAmount)}
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="pl-12">Opportunity Name</TableHead>
+            <TableHead>Account Name</TableHead>
+            <TableHead>Close Date</TableHead>
+            <TableHead className="text-right">Amount</TableHead>
+            <TableHead>Opportunity Owner</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {list.map((r) => (
+            <TableRow key={r.id}>
+              <TableCell className="pl-12">
+                <Link
+                  to={`/opportunities/${r.id}`}
+                  className="text-primary hover:underline"
+                >
+                  {r.opportunity_name ?? "—"}
+                </Link>
+              </TableCell>
+              <TableCell>{r.account_name ?? ""}</TableCell>
+              <TableCell>{formatDate(r.close_date)}</TableCell>
+              <TableCell className="text-right">
+                {formatCurrency(Number(r.amount ?? 0))}
+              </TableCell>
+              <TableCell>{r.opportunity_owner ?? ""}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </div>
   );
 }
