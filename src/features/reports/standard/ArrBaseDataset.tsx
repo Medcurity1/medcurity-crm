@@ -179,39 +179,46 @@ export function ArrBaseDataset() {
 
       <Card>
         <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-4">
-              <Skeleton className="h-64 w-full" />
-            </div>
-          ) : !rows?.length ? (
-            <p className="p-6 text-sm text-muted-foreground text-center">
-              No opportunities in the selected range.
-            </p>
-          ) : (
-            <div className="overflow-auto">
-              <Table>
-                <TableHeader>
+          <div className="overflow-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Account Name</TableHead>
+                  <TableHead>Account #</TableHead>
+                  <TableHead>Opportunity</TableHead>
+                  <TableHead>Owner</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead>Close</TableHead>
+                  <TableHead className="text-right">Age</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead>Fiscal Period</TableHead>
+                  <TableHead>Pay Freq</TableHead>
+                  <TableHead>One-Time</TableHead>
+                  <TableHead>Stage</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Acct Type</TableHead>
+                  <TableHead>Primary Partner</TableHead>
+                  <TableHead>Lead Source</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
                   <TableRow>
-                    <TableHead>Account Name</TableHead>
-                    <TableHead>Account #</TableHead>
-                    <TableHead>Opportunity</TableHead>
-                    <TableHead>Owner</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead>Close</TableHead>
-                    <TableHead className="text-right">Age</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                    <TableHead>Fiscal Period</TableHead>
-                    <TableHead>Pay Freq</TableHead>
-                    <TableHead>One-Time</TableHead>
-                    <TableHead>Stage</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Acct Type</TableHead>
-                    <TableHead>Primary Partner</TableHead>
-                    <TableHead>Lead Source</TableHead>
+                    <TableCell colSpan={16} className="p-4">
+                      <Skeleton className="h-48 w-full" />
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.map((r) => (
+                ) : !rows?.length ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={16}
+                      className="p-6 text-sm text-muted-foreground text-center"
+                    >
+                      No opportunities in the selected range.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  rows.map((r) => (
                     <TableRow key={r.id}>
                       <TableCell className="font-medium">{r.account_name ?? "—"}</TableCell>
                       <TableCell>{r.account_number ?? ""}</TableCell>
@@ -232,11 +239,11 @@ export function ArrBaseDataset() {
                       <TableCell>{r.primary_partner ?? ""}</TableCell>
                       <TableCell>{r.lead_source ?? ""}</TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
     </div>

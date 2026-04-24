@@ -31,15 +31,6 @@ import {
   type DateRangeKey,
 } from "./report-helpers";
 
-/**
- * SQL — contacts that have been qualified (sql_date set) on their
- * account. Matches SF "SQL" report columns:
- *   First Name, Last Name, Title, Account Owner, Account Created Date,
- *   Lead Source, Description, SQL, MQL
- * Grouping: Account Name
- *
- * API: /rest/v1/v_sql_accounts?select=*
- */
 interface SqlRow {
   contact_id: string;
   account_id: string;
@@ -62,13 +53,54 @@ export function SqlAccounts() {
   const { data: rows, isLoading } = useQuery({
     queryKey: ["report", "sql-accounts", start, end],
     queryFn: async () => {
-      let q = supabase.from("v_sql_accounts").select("*");
+      let q = supabase
+        .from("contacts")
+        .select(
+          "id, first_name, last_name, title, sql_date, mql_date, " +
+          "account:accounts!account_id(id, name, notes, lead_source, created_at, " +
+            "owner:user_profiles!owner_user_id(full_name))",
+        )
+        .not("sql_date", "is", null)
+        .is("archived_at", null);
       if (start) q = q.gte("sql_date", start);
       if (end) q = q.lte("sql_date", end);
-      q = q.order("sql_date", { ascending: false, nullsFirst: false });
+      q = q.order("sql_date", { ascending: false });
       const { data, error } = await q;
       if (error) throw error;
-      return ((data ?? []) as unknown) as SqlRow[];
+      type Raw = {
+        id: string;
+        first_name: string | null;
+        last_name: string | null;
+        title: string | null;
+        sql_date: string | null;
+        mql_date: string | null;
+        account:
+          | {
+              id: string;
+              name: string;
+              notes: string | null;
+              lead_source: string | null;
+              created_at: string | null;
+              owner: { full_name: string | null } | null;
+            }
+          | null;
+      };
+      return ((data ?? []) as unknown as Raw[])
+        .filter((r) => r.account)
+        .map((r) => ({
+          contact_id: r.id,
+          account_id: r.account!.id,
+          first_name: r.first_name,
+          last_name: r.last_name,
+          title: r.title,
+          account_name: r.account!.name,
+          account_owner: r.account!.owner?.full_name ?? "Unassigned",
+          account_created_date: r.account!.created_at?.slice(0, 10) ?? null,
+          lead_source: r.account!.lead_source,
+          description: r.account!.notes,
+          sql_date: r.sql_date,
+          mql_date: r.mql_date,
+        })) as SqlRow[];
     },
   });
 
@@ -157,12 +189,34 @@ export function SqlAccounts() {
         <CardContent className="p-0">
           {isLoading ? (
             <div className="p-4">
-              <Skeleton className="h-64 w-full" />
+              <Skeleton className="h-48 w-full" />
             </div>
           ) : !rows?.length ? (
-            <p className="p-6 text-sm text-muted-foreground text-center">
-              No SQL events in the selected range.
-            </p>
+            <div className="overflow-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Account Name</TableHead>
+                    <TableHead>First Name</TableHead>
+                    <TableHead>Last Name</TableHead>
+                    <TableHead>Title</TableHead>
+                    <TableHead>Account Owner</TableHead>
+                    <TableHead>Account Created</TableHead>
+                    <TableHead>Lead Source</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead>SQL</TableHead>
+                    <TableHead>MQL</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow>
+                    <TableCell colSpan={10} className="p-6 text-sm text-muted-foreground text-center">
+                      No SQL events in the selected range.
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
           ) : (
             <div className="divide-y">
               {Array.from(grouped.entries()).map(([accountName, contacts]) => (

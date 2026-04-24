@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Download } from "lucide-react";
@@ -7,6 +7,13 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -17,19 +24,18 @@ import {
 } from "@/components/ui/table";
 import { formatCurrency, formatDate, stageLabel } from "@/lib/formatters";
 import type { OpportunityStage } from "@/types/crm";
-import { downloadCsv, todayStamp, csvCurrency, ownerRoleLabel } from "./report-helpers";
+import {
+  downloadCsv,
+  todayStamp,
+  csvCurrency,
+  ownerRoleLabel,
+  fiscalPeriod,
+  typeLabel,
+  DATE_RANGE_OPTIONS,
+  resolveRange,
+  type DateRangeKey,
+} from "./report-helpers";
 
-/**
- * Renewals — current fiscal quarter, closed_won, kind=renewal
- * (Existing Business). Opportunity Name ≠ 'EHR Implementation'.
- * Columns match SF "Renewals":
- *   Owner Role, Opportunity Owner, Account Name, Opportunity Name,
- *   Stage, Fiscal Period, Amount, Probability (%), Age, Close Date,
- *   Created Date, Next Step, Lead Source
- * Grouping: Type
- *
- * API: /rest/v1/v_renewals_qtd?select=*
- */
 interface RenewalRow {
   id: string;
   owner_role: string | null;
@@ -49,15 +55,65 @@ interface RenewalRow {
 }
 
 export function RenewalsQueue() {
+  const [range, setRange] = useState<DateRangeKey>("current_quarter");
+  const { start, end } = resolveRange(range);
+
   const { data: rows, isLoading } = useQuery({
-    queryKey: ["report", "renewals-qtd"],
+    queryKey: ["report", "renewals", start, end],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("v_renewals_qtd")
-        .select("*")
-        .order("close_date", { ascending: false });
+      let q = supabase
+        .from("opportunities")
+        .select(
+          "id, name, amount, close_date, created_at, next_step, lead_source, " +
+          "probability, stage, kind, " +
+          "account:accounts!account_id(name), " +
+          "owner:user_profiles!owner_user_id(full_name, role)",
+        )
+        .eq("stage", "closed_won")
+        .eq("kind", "renewal")
+        .neq("name", "EHR Implementation")
+        .is("archived_at", null);
+      if (start) q = q.gte("close_date", start);
+      if (end) q = q.lte("close_date", end);
+      q = q.order("close_date", { ascending: false, nullsFirst: false });
+      const { data, error } = await q;
       if (error) throw error;
-      return ((data ?? []) as unknown) as RenewalRow[];
+      type Raw = {
+        id: string;
+        name: string;
+        amount: number | null;
+        close_date: string | null;
+        created_at: string;
+        next_step: string | null;
+        lead_source: string | null;
+        probability: number | null;
+        stage: OpportunityStage;
+        kind: string | null;
+        account: { name: string } | null;
+        owner: { full_name: string | null; role: string | null } | null;
+      };
+      const today = new Date();
+      return ((data ?? []) as unknown as Raw[]).map((r) => ({
+        id: r.id,
+        owner_role: r.owner?.role ?? null,
+        opportunity_owner: r.owner?.full_name ?? "Unassigned",
+        account_name: r.account?.name ?? null,
+        opportunity_name: r.name,
+        stage: r.stage,
+        fiscal_period: fiscalPeriod(r.close_date),
+        amount: r.amount,
+        probability: r.probability,
+        age: r.close_date
+          ? Math.floor(
+              (today.getTime() - new Date(r.close_date).getTime()) / 86400000,
+            )
+          : null,
+        close_date: r.close_date,
+        created_date: r.created_at?.slice(0, 10) ?? null,
+        next_step: r.next_step,
+        lead_source: r.lead_source,
+        type: typeLabel(r.kind),
+      })) as RenewalRow[];
     },
   });
 
@@ -116,53 +172,74 @@ export function RenewalsQueue() {
 
       <PageHeader
         title="Renewals"
-        description="Existing Business closed-won this fiscal quarter. Excludes EHR Implementation."
+        description="Existing Business closed-won. Excludes EHR Implementation."
         actions={
-          <Button variant="outline" size="sm" onClick={exportCsv} disabled={isLoading}>
-            <Download className="h-4 w-4 mr-1" />
-            Export CSV
-          </Button>
+          <div className="flex items-center gap-2">
+            <Select value={range} onValueChange={(v) => setRange(v as DateRangeKey)}>
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {DATE_RANGE_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="sm" onClick={exportCsv} disabled={isLoading}>
+              <Download className="h-4 w-4 mr-1" />
+              Export CSV
+            </Button>
+          </div>
         }
       />
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <Kpi label="Renewals Closed" value={summary.count.toLocaleString()} />
         <Kpi label="Amount" value={formatCurrency(summary.total)} />
-        <Kpi label="Fiscal Period" value={rows?.[0]?.fiscal_period ?? ""} />
+        <Kpi label="Range" value={DATE_RANGE_OPTIONS.find((o) => o.value === range)?.label ?? ""} />
       </div>
 
       <Card>
         <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-4">
-              <Skeleton className="h-64 w-full" />
-            </div>
-          ) : !rows?.length ? (
-            <p className="p-6 text-sm text-muted-foreground text-center">
-              No renewals closed this fiscal quarter yet.
-            </p>
-          ) : (
-            <div className="overflow-auto">
-              <Table>
-                <TableHeader>
+          <div className="overflow-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Owner Role</TableHead>
+                  <TableHead>Opportunity Owner</TableHead>
+                  <TableHead>Account Name</TableHead>
+                  <TableHead>Opportunity Name</TableHead>
+                  <TableHead>Stage</TableHead>
+                  <TableHead>Fiscal Period</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead className="text-right">Prob %</TableHead>
+                  <TableHead className="text-right">Age</TableHead>
+                  <TableHead>Close Date</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead>Next Step</TableHead>
+                  <TableHead>Lead Source</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
                   <TableRow>
-                    <TableHead>Owner Role</TableHead>
-                    <TableHead>Opportunity Owner</TableHead>
-                    <TableHead>Account Name</TableHead>
-                    <TableHead>Opportunity Name</TableHead>
-                    <TableHead>Stage</TableHead>
-                    <TableHead>Fiscal Period</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                    <TableHead className="text-right">Prob %</TableHead>
-                    <TableHead className="text-right">Age</TableHead>
-                    <TableHead>Close Date</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead>Next Step</TableHead>
-                    <TableHead>Lead Source</TableHead>
+                    <TableCell colSpan={13} className="p-4">
+                      <Skeleton className="h-48 w-full" />
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.map((r) => (
+                ) : !rows?.length ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={13}
+                      className="p-6 text-sm text-muted-foreground text-center"
+                    >
+                      No renewals in the selected range.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  rows.map((r) => (
                     <TableRow key={r.id}>
                       <TableCell>{ownerRoleLabel(r.owner_role)}</TableCell>
                       <TableCell>{r.opportunity_owner ?? ""}</TableCell>
@@ -180,11 +257,11 @@ export function RenewalsQueue() {
                       <TableCell>{r.next_step ?? ""}</TableCell>
                       <TableCell>{r.lead_source ?? ""}</TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
     </div>

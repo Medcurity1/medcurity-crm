@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Download } from "lucide-react";
@@ -8,6 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -16,15 +23,21 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCurrency, formatDate } from "@/lib/formatters";
-import { downloadCsv, todayStamp, csvCurrency } from "./report-helpers";
+import {
+  downloadCsv,
+  todayStamp,
+  csvCurrency,
+  DATE_RANGE_OPTIONS,
+  resolveRange,
+  typeLabel,
+  type DateRangeKey,
+} from "./report-helpers";
 
 /**
- * New Customers — closed_won + kind=new_business in the current fiscal
- * quarter. Columns match SF:
- *   Opportunity Owner, Account Name, Opportunity Name, Type, Amount,
- *   Close Date, Lead Source
- *
- * API: /rest/v1/v_new_customers_qtd?select=*
+ * New Customers — closed_won + kind=new_business.
+ * Default range: current fiscal quarter. Configurable via picker.
+ * Queries opportunities directly so any range works (the QTD view
+ * is only used when range is locked to current quarter).
  */
 interface NewCustRow {
   id: string;
@@ -35,19 +48,50 @@ interface NewCustRow {
   amount: number | null;
   close_date: string | null;
   lead_source: string | null;
-  fiscal_period: string | null;
 }
 
 export function NewCustomers() {
+  const [range, setRange] = useState<DateRangeKey>("current_quarter");
+  const { start, end } = resolveRange(range);
+
   const { data: rows, isLoading } = useQuery({
-    queryKey: ["report", "new-customers-qtd"],
+    queryKey: ["report", "new-customers", start, end],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("v_new_customers_qtd")
-        .select("*")
-        .order("close_date", { ascending: false });
+      let q = supabase
+        .from("opportunities")
+        .select(
+          "id, name, amount, close_date, lead_source, kind, " +
+          "account:accounts!account_id(name), " +
+          "owner:user_profiles!owner_user_id(full_name)",
+        )
+        .eq("stage", "closed_won")
+        .eq("kind", "new_business")
+        .is("archived_at", null);
+      if (start) q = q.gte("close_date", start);
+      if (end) q = q.lte("close_date", end);
+      q = q.order("close_date", { ascending: false, nullsFirst: false });
+      const { data, error } = await q;
       if (error) throw error;
-      return ((data ?? []) as unknown) as NewCustRow[];
+      type Raw = {
+        id: string;
+        name: string;
+        amount: number | null;
+        close_date: string | null;
+        lead_source: string | null;
+        kind: string | null;
+        account: { name: string } | null;
+        owner: { full_name: string | null } | null;
+      };
+      return ((data ?? []) as unknown as Raw[]).map((r) => ({
+        id: r.id,
+        opportunity_owner: r.owner?.full_name ?? "Unassigned",
+        account_name: r.account?.name ?? null,
+        opportunity_name: r.name,
+        type: typeLabel(r.kind),
+        amount: r.amount,
+        close_date: r.close_date,
+        lead_source: r.lead_source,
+      })) as NewCustRow[];
     },
   });
 
@@ -92,46 +136,64 @@ export function NewCustomers() {
 
       <PageHeader
         title="New Customers"
-        description="New Business closed-won this fiscal quarter."
+        description="New Business closed-won opportunities."
         actions={
-          <Button variant="outline" size="sm" onClick={exportCsv} disabled={isLoading}>
-            <Download className="h-4 w-4 mr-1" />
-            Export CSV
-          </Button>
+          <div className="flex items-center gap-2">
+            <Select value={range} onValueChange={(v) => setRange(v as DateRangeKey)}>
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {DATE_RANGE_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="sm" onClick={exportCsv} disabled={isLoading}>
+              <Download className="h-4 w-4 mr-1" />
+              Export CSV
+            </Button>
+          </div>
         }
       />
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <Kpi label="Count" value={summary.count.toLocaleString()} />
         <Kpi label="Amount" value={formatCurrency(summary.total)} />
-        <Kpi label="Fiscal Period" value={rows?.[0]?.fiscal_period ?? ""} />
+        <Kpi label="Range" value={DATE_RANGE_OPTIONS.find((o) => o.value === range)?.label ?? ""} />
       </div>
 
       <Card>
         <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-4">
-              <Skeleton className="h-64 w-full" />
-            </div>
-          ) : !rows?.length ? (
-            <p className="p-6 text-sm text-muted-foreground text-center">
-              No new customers in the current fiscal quarter yet.
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Opportunity Owner</TableHead>
+                <TableHead>Account Name</TableHead>
+                <TableHead>Opportunity Name</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead className="text-right">Amount</TableHead>
+                <TableHead>Close Date</TableHead>
+                <TableHead>Lead Source</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
                 <TableRow>
-                  <TableHead>Opportunity Owner</TableHead>
-                  <TableHead>Account Name</TableHead>
-                  <TableHead>Opportunity Name</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead>Close Date</TableHead>
-                  <TableHead>Lead Source</TableHead>
+                  <TableCell colSpan={7} className="p-4">
+                    <Skeleton className="h-48 w-full" />
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((r) => (
+              ) : !rows?.length ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="p-6 text-sm text-muted-foreground text-center">
+                    No new customers in the selected range.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                rows.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell>{r.opportunity_owner ?? ""}</TableCell>
                     <TableCell className="font-medium">{r.account_name ?? ""}</TableCell>
@@ -143,10 +205,10 @@ export function NewCustomers() {
                     <TableCell>{formatDate(r.close_date)}</TableCell>
                     <TableCell>{r.lead_source ?? ""}</TableCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
+                ))
+              )}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
     </div>

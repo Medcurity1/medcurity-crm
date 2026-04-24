@@ -1,13 +1,19 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Download, ChevronDown, ChevronRight } from "lucide-react";
-import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -17,17 +23,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDate, leadSourceLabel } from "@/lib/formatters";
-import { downloadCsv, todayStamp } from "./report-helpers";
+import {
+  downloadCsv,
+  todayStamp,
+  DATE_RANGE_OPTIONS,
+  resolveRange,
+  type DateRangeKey,
+} from "./report-helpers";
 
-/**
- * MQL (Leads) — leads with MQL date in current fiscal quarter, not
- * converted. Columns match SF:
- *   First Name, Last Name, Title, Email, Phone, Mobile,
- *   Lead Owner, MQL
- * Grouping: Lead Source
- *
- * API: /rest/v1/v_mql_leads_qtd?select=*
- */
 interface MqlLeadRow {
   lead_id: string;
   lead_source: string | null;
@@ -42,15 +45,51 @@ interface MqlLeadRow {
 }
 
 export function MqlLeads() {
+  const [range, setRange] = useState<DateRangeKey>("current_quarter");
+  const { start, end } = resolveRange(range);
+
   const { data: rows, isLoading } = useQuery({
-    queryKey: ["report", "mql-leads-qtd"],
+    queryKey: ["report", "mql-leads", start, end],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("v_mql_leads_qtd")
-        .select("*")
-        .order("mql_date", { ascending: false });
+      let q = supabase
+        .from("leads")
+        .select(
+          "id, first_name, last_name, title, email, phone, mobile_phone, " +
+          "lead_source, mql_date, status, " +
+          "owner:user_profiles!owner_user_id(full_name)",
+        )
+        .not("mql_date", "is", null)
+        .neq("status", "converted")
+        .is("archived_at", null);
+      if (start) q = q.gte("mql_date", start);
+      if (end) q = q.lte("mql_date", end);
+      q = q.order("mql_date", { ascending: false });
+      const { data, error } = await q;
       if (error) throw error;
-      return ((data ?? []) as unknown) as MqlLeadRow[];
+      type Raw = {
+        id: string;
+        first_name: string | null;
+        last_name: string | null;
+        title: string | null;
+        email: string | null;
+        phone: string | null;
+        mobile_phone: string | null;
+        lead_source: string | null;
+        mql_date: string | null;
+        owner: { full_name: string | null } | null;
+      };
+      return ((data ?? []) as unknown as Raw[]).map((r) => ({
+        lead_id: r.id,
+        lead_source: r.lead_source ?? "unknown",
+        first_name: r.first_name,
+        last_name: r.last_name,
+        title: r.title,
+        email: r.email,
+        phone: r.phone,
+        mobile: r.mobile_phone,
+        lead_owner: r.owner?.full_name ?? "Unassigned",
+        mql_date: r.mql_date,
+      })) as MqlLeadRow[];
     },
   });
 
@@ -78,7 +117,7 @@ export function MqlLeads() {
       "MQL",
     ];
     const data = (rows ?? []).map((r) => [
-      leadSourceLabel(r.lead_source as never) ?? r.lead_source ?? "",
+      r.lead_source ?? "",
       r.first_name ?? "",
       r.last_name ?? "",
       r.title ?? "",
@@ -104,31 +143,66 @@ export function MqlLeads() {
 
       <PageHeader
         title="MQL (Leads)"
-        description="Leads with MQL date this fiscal quarter, not yet converted."
+        description="Leads with MQL date, not yet converted. Grouped by Lead Source."
         actions={
-          <Button variant="outline" size="sm" onClick={exportCsv} disabled={isLoading}>
-            <Download className="h-4 w-4 mr-1" />
-            Export CSV
-          </Button>
+          <div className="flex items-center gap-2">
+            <Select value={range} onValueChange={(v) => setRange(v as DateRangeKey)}>
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {DATE_RANGE_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="sm" onClick={exportCsv} disabled={isLoading}>
+              <Download className="h-4 w-4 mr-1" />
+              Export CSV
+            </Button>
+          </div>
         }
       />
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <Kpi label="MQL Leads" value={(rows?.length ?? 0).toLocaleString()} />
         <Kpi label="Sources" value={grouped.size.toLocaleString()} />
-        <Kpi label="API" value="/rest/v1/v_mql_leads_qtd" tiny />
+        <Kpi label="Range" value={DATE_RANGE_OPTIONS.find((o) => o.value === range)?.label ?? ""} />
       </div>
 
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
             <div className="p-4">
-              <Skeleton className="h-64 w-full" />
+              <Skeleton className="h-48 w-full" />
             </div>
           ) : !rows?.length ? (
-            <p className="p-6 text-sm text-muted-foreground text-center">
-              No MQL leads this fiscal quarter.
-            </p>
+            <div className="overflow-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Lead Source</TableHead>
+                    <TableHead>First Name</TableHead>
+                    <TableHead>Last Name</TableHead>
+                    <TableHead>Title</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Phone</TableHead>
+                    <TableHead>Mobile</TableHead>
+                    <TableHead>Lead Owner</TableHead>
+                    <TableHead>MQL</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow>
+                    <TableCell colSpan={9} className="p-6 text-sm text-muted-foreground text-center">
+                      No MQL leads in the selected range.
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
           ) : (
             <div className="divide-y">
               {Array.from(grouped.entries()).map(([source, list]) => (
@@ -193,14 +267,12 @@ function SourceGroup({ source, list }: { source: string; list: MqlLeadRow[] }) {
   );
 }
 
-function Kpi({ label, value, tiny }: { label: string; value: string; tiny?: boolean }) {
+function Kpi({ label, value }: { label: string; value: string }) {
   return (
     <Card>
       <CardContent className="p-4">
         <p className="text-xs text-muted-foreground font-medium">{label}</p>
-        <p className={tiny ? "text-sm font-mono mt-1 truncate" : "text-2xl font-semibold mt-1"}>
-          {value}
-        </p>
+        <p className="text-2xl font-semibold mt-1">{value}</p>
       </CardContent>
     </Card>
   );

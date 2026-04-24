@@ -31,14 +31,6 @@ import {
   type DateRangeKey,
 } from "./report-helpers";
 
-/**
- * MQL (Contacts) — contacts with MQL date, no SQL yet, marketable.
- * Columns match SF:
- *   First Name, Last Name, Title, Account Name, Phone, Mobile,
- *   Email, Account Owner, MQL
- *
- * API: /rest/v1/v_mql_contacts?select=*
- */
 interface MqlContactRow {
   contact_id: string;
   first_name: string | null;
@@ -59,13 +51,50 @@ export function MqlContacts() {
   const { data: rows, isLoading } = useQuery({
     queryKey: ["report", "mql-contacts", start, end],
     queryFn: async () => {
-      let q = supabase.from("v_mql_contacts").select("*");
+      let q = supabase
+        .from("contacts")
+        .select(
+          "id, first_name, last_name, title, email, phone, mobile_phone, " +
+          "mql_date, sql_date, do_not_contact, " +
+          "account:accounts!account_id(name, owner:user_profiles!owner_user_id(full_name))",
+        )
+        .not("mql_date", "is", null)
+        .is("sql_date", null)
+        .eq("do_not_contact", false)
+        .is("archived_at", null);
       if (start) q = q.gte("mql_date", start);
       if (end) q = q.lte("mql_date", end);
       q = q.order("mql_date", { ascending: false });
       const { data, error } = await q;
       if (error) throw error;
-      return ((data ?? []) as unknown) as MqlContactRow[];
+      type Raw = {
+        id: string;
+        first_name: string | null;
+        last_name: string | null;
+        title: string | null;
+        email: string | null;
+        phone: string | null;
+        mobile_phone: string | null;
+        mql_date: string | null;
+        account:
+          | {
+              name: string;
+              owner: { full_name: string | null } | null;
+            }
+          | null;
+      };
+      return ((data ?? []) as unknown as Raw[]).map((r) => ({
+        contact_id: r.id,
+        first_name: r.first_name,
+        last_name: r.last_name,
+        title: r.title,
+        account_name: r.account?.name ?? null,
+        phone: r.phone,
+        mobile: r.mobile_phone,
+        email: r.email,
+        account_owner: r.account?.owner?.full_name ?? "Unassigned",
+        mql_date: r.mql_date,
+      })) as MqlContactRow[];
     },
   });
 
@@ -136,37 +165,40 @@ export function MqlContacts() {
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <Kpi label="MQL Contacts" value={total.toLocaleString()} />
         <Kpi label="Range" value={DATE_RANGE_OPTIONS.find((o) => o.value === range)?.label ?? ""} />
-        <Kpi label="API" value="/rest/v1/v_mql_contacts" tiny />
       </div>
 
       <Card>
         <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-4">
-              <Skeleton className="h-64 w-full" />
-            </div>
-          ) : !rows?.length ? (
-            <p className="p-6 text-sm text-muted-foreground text-center">
-              No MQL contacts in the selected range.
-            </p>
-          ) : (
-            <div className="overflow-auto">
-              <Table>
-                <TableHeader>
+          <div className="overflow-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>First Name</TableHead>
+                  <TableHead>Last Name</TableHead>
+                  <TableHead>Title</TableHead>
+                  <TableHead>Account Name</TableHead>
+                  <TableHead>Phone</TableHead>
+                  <TableHead>Mobile</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Account Owner</TableHead>
+                  <TableHead>MQL</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
                   <TableRow>
-                    <TableHead>First Name</TableHead>
-                    <TableHead>Last Name</TableHead>
-                    <TableHead>Title</TableHead>
-                    <TableHead>Account Name</TableHead>
-                    <TableHead>Phone</TableHead>
-                    <TableHead>Mobile</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Account Owner</TableHead>
-                    <TableHead>MQL</TableHead>
+                    <TableCell colSpan={9} className="p-4">
+                      <Skeleton className="h-48 w-full" />
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.map((r) => (
+                ) : !rows?.length ? (
+                  <TableRow>
+                    <TableCell colSpan={9} className="p-6 text-sm text-muted-foreground text-center">
+                      No MQL contacts in the selected range.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  rows.map((r) => (
                     <TableRow key={r.contact_id}>
                       <TableCell>{r.first_name ?? ""}</TableCell>
                       <TableCell>{r.last_name ?? ""}</TableCell>
@@ -178,25 +210,23 @@ export function MqlContacts() {
                       <TableCell>{r.account_owner ?? ""}</TableCell>
                       <TableCell>{formatDate(r.mql_date)}</TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
     </div>
   );
 }
 
-function Kpi({ label, value, tiny }: { label: string; value: string; tiny?: boolean }) {
+function Kpi({ label, value }: { label: string; value: string }) {
   return (
     <Card>
       <CardContent className="p-4">
         <p className="text-xs text-muted-foreground font-medium">{label}</p>
-        <p className={tiny ? "text-sm font-mono mt-1 truncate" : "text-2xl font-semibold mt-1"}>
-          {value}
-        </p>
+        <p className="text-2xl font-semibold mt-1">{value}</p>
       </CardContent>
     </Card>
   );
