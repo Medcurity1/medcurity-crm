@@ -65,7 +65,16 @@ export function SqlAccounts() {
       const { data, error } = await q;
       if (error) throw error;
 
-      const contacts = data ?? [];
+      type ContactRaw = {
+        id: string;
+        first_name: string | null;
+        last_name: string | null;
+        title: string | null;
+        sql_date: string | null;
+        mql_date: string | null;
+        account_id: string | null;
+      };
+      const contacts = ((data ?? []) as unknown) as ContactRaw[];
       const accountIds = new Set<string>(
         contacts.map((c) => c.account_id as string).filter(Boolean),
       );

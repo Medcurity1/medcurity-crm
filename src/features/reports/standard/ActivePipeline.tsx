@@ -59,7 +59,18 @@ export function ActivePipeline() {
         .order("amount", { ascending: false, nullsFirst: false });
       if (error) throw error;
 
-      const opps = data ?? [];
+      type OppRaw = {
+        id: string;
+        name: string | null;
+        stage: string | null;
+        amount: number | null;
+        probability: number | null;
+        close_date: string | null;
+        kind: string | null;
+        account_id: string | null;
+        owner_user_id: string | null;
+      };
+      const opps = ((data ?? []) as unknown) as OppRaw[];
       const accountIds = new Set<string>(
         opps.map((o) => o.account_id as string).filter(Boolean),
       );
@@ -76,7 +87,7 @@ export function ActivePipeline() {
         const probability = r.probability as number | null;
         return {
           id: r.id as string,
-          stage: r.stage as OpportunityStage,
+          stage: (r.stage as OpportunityStage | null) ?? ("lead" as OpportunityStage),
           type:
             r.kind === "new_business"
               ? "New Business"

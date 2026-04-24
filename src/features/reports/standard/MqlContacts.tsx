@@ -67,7 +67,20 @@ export function MqlContacts() {
       const { data, error } = await q;
       if (error) throw error;
 
-      const contacts = data ?? [];
+      type ContactRaw = {
+        id: string;
+        first_name: string | null;
+        last_name: string | null;
+        title: string | null;
+        email: string | null;
+        phone: string | null;
+        mobile_phone: string | null;
+        mql_date: string | null;
+        sql_date: string | null;
+        do_not_contact: boolean | null;
+        account_id: string | null;
+      };
+      const contacts = ((data ?? []) as unknown) as ContactRaw[];
       const accountIds = new Set<string>(
         contacts.map((c) => c.account_id as string).filter(Boolean),
       );

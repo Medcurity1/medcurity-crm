@@ -92,7 +92,21 @@ export function ArrBaseDataset() {
       const { data, error } = await q;
       if (error) throw error;
 
-      const opps = data ?? [];
+      type OppRaw = {
+        id: string;
+        name: string | null;
+        amount: number | null;
+        close_date: string | null;
+        created_at: string | null;
+        payment_frequency: string | null;
+        one_time_project: boolean | null;
+        stage: string | null;
+        kind: string | null;
+        lead_source: string | null;
+        account_id: string | null;
+        owner_user_id: string | null;
+      };
+      const opps = ((data ?? []) as unknown) as OppRaw[];
       const accountIds = new Set<string>(
         opps.map((o) => o.account_id as string).filter(Boolean),
       );

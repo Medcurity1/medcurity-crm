@@ -83,7 +83,20 @@ export function LostCustomers() {
       const { data, error } = await q;
       if (error) throw error;
 
-      const opps = data ?? [];
+      type OppRaw = {
+        id: string;
+        name: string | null;
+        amount: number | null;
+        close_date: string | null;
+        created_at: string | null;
+        next_step: string | null;
+        lead_source: string | null;
+        probability: number | null;
+        stage: string | null;
+        kind: string | null;
+        account_id: string | null;
+      };
+      const opps = ((data ?? []) as unknown) as OppRaw[];
       const accountIds = new Set<string>(
         opps.map((o) => o.account_id as string).filter(Boolean),
       );
@@ -97,7 +110,7 @@ export function LostCustomers() {
           id: o.id as string,
           account_name: a?.name ?? "",
           opportunity_name: (o.name as string) ?? "",
-          stage: o.stage as OpportunityStage,
+          stage: (o.stage as OpportunityStage | null) ?? ("closed_lost" as OpportunityStage),
           account_status: a?.lifecycle_status ?? "",
           fiscal_period: fiscalPeriod(closeDate),
           amount: o.amount as number | null,

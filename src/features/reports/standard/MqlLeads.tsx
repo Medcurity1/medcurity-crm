@@ -66,7 +66,20 @@ export function MqlLeads() {
       const { data, error } = await q;
       if (error) throw error;
 
-      const leads = data ?? [];
+      type LeadRaw = {
+        id: string;
+        first_name: string | null;
+        last_name: string | null;
+        title: string | null;
+        email: string | null;
+        phone: string | null;
+        mobile_phone: string | null;
+        lead_source: string | null;
+        mql_date: string | null;
+        status: string | null;
+        owner_user_id: string | null;
+      };
+      const leads = ((data ?? []) as unknown) as LeadRaw[];
       const ownerIds = new Set<string>(
         leads.map((l) => l.owner_user_id as string).filter(Boolean),
       );

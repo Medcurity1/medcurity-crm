@@ -77,7 +77,21 @@ export function RenewalsQueue() {
       const { data, error } = await q;
       if (error) throw error;
 
-      const opps = data ?? [];
+      type OppRaw = {
+        id: string;
+        name: string | null;
+        amount: number | null;
+        close_date: string | null;
+        created_at: string | null;
+        next_step: string | null;
+        lead_source: string | null;
+        probability: number | null;
+        stage: string | null;
+        kind: string | null;
+        account_id: string | null;
+        owner_user_id: string | null;
+      };
+      const opps = ((data ?? []) as unknown) as OppRaw[];
       const accountIds = new Set<string>(
         opps.map((o) => o.account_id as string).filter(Boolean),
       );
@@ -99,7 +113,7 @@ export function RenewalsQueue() {
           opportunity_owner: owner?.full_name ?? "Unassigned",
           account_name: accounts.get(o.account_id as string)?.name ?? "",
           opportunity_name: (o.name as string) ?? "",
-          stage: o.stage as OpportunityStage,
+          stage: (o.stage as OpportunityStage | null) ?? ("closed_won" as OpportunityStage),
           fiscal_period: fiscalPeriod(closeDate),
           amount: o.amount as number | null,
           probability: o.probability as number | null,
