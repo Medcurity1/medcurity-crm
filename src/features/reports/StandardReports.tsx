@@ -7,19 +7,19 @@ import {
   Activity,
   RefreshCw,
   FileBarChart,
-  Percent,
+  UserCheck,
+  UserPlus,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
 /**
- * Standard Reports catalog — Medcurity-specific pre-built reports
- * that don't need custom SQL to run. Each card links to a dedicated
- * page (live query + chart + CSV export) under /reports/standard/:id.
+ * Standard Reports catalog — Medcurity's Salesforce-aligned reports.
  *
- * This is the "curated" counterpart to the Reports tab's custom
- * ReportBuilder. Brayden's old SF reports folder had 43 reports,
- * only 17 actively used; we rebuild those 17 here rather than
- * replicating the whole mess.
+ * Every card here maps to a dedicated page at /reports/standard/:id
+ * and a Postgres view v_* that external tools (e.g. the financial
+ * spreadsheet) can query directly via the Supabase REST API:
+ *
+ *   GET https://<ref>.supabase.co/rest/v1/<view_name>?select=*
  */
 
 interface ReportCard {
@@ -27,72 +27,90 @@ interface ReportCard {
   title: string;
   description: string;
   icon: React.ComponentType<{ className?: string }>;
+  apiView: string;
   status: "live" | "coming_soon";
 }
 
 const REPORTS: ReportCard[] = [
   {
-    id: "arr-rolling-365",
-    title: "ARR (Rolling 365 Days)",
+    id: "arr-base-dataset",
+    title: "ARR Base Dataset",
     description:
-      "Annual recurring revenue from closed-won opportunities in the trailing 365 days. Exports to match the financial spreadsheet format.",
+      "All ARR-relevant opportunities with the full SF column set. Drives the financial model export.",
     icon: DollarSign,
+    apiView: "v_arr_base_dataset",
     status: "live",
   },
   {
-    id: "mql-sql-counts",
-    title: "MQL & SQL Counts",
+    id: "new-customers",
+    title: "New Customers",
     description:
-      "Monthly MQL / SQL counts with dedup logic so a lead that converted to a contact doesn't get double-counted.",
-    icon: Target,
+      "New Business closed-won this fiscal quarter. SF columns: Owner, Account, Opp, Type, Amount, Close, Lead Source.",
+    icon: UserPlus,
+    apiView: "v_new_customers_qtd",
     status: "live",
   },
   {
-    id: "new-customers-by-period",
-    title: "New Customers by Period",
+    id: "lost-customers",
+    title: "Lost Customers",
     description:
-      "New customer count per month / quarter / year. Counts all 5 business_type values (new, expansion, existing, opportunity, new_service).",
-    icon: Users,
-    status: "coming_soon",
-  },
-  {
-    id: "lost-clients",
-    title: "Lost Clients",
-    description:
-      "Accounts that moved to inactive / churned in a given period, with last closed-won ARR and churn date.",
+      "Existing Business closed-lost this quarter on inactive accounts. Full SF column set including Next Step + Probability.",
     icon: TrendingUp,
-    status: "coming_soon",
+    apiView: "v_lost_customers_qtd",
+    status: "live",
   },
   {
     id: "active-pipeline",
     title: "Active Pipeline",
     description:
-      "Open opportunities by stage + owner, weighted by probability.",
+      "All open opportunities grouped by Stage → Type. SF columns: Opp, Account, Close Date, Amount, Owner.",
     icon: Activity,
+    apiView: "v_active_pipeline",
     status: "live",
   },
   {
-    id: "renewals-queue",
-    title: "Renewals Queue",
+    id: "renewals",
+    title: "Renewals",
     description:
-      "Upcoming renewals in the next 120 days, with ARR, owner, and last-contact activity.",
+      "Existing Business closed-won this fiscal quarter (excl. EHR Implementation). Grouped by Type with Owner Role + Fiscal Period.",
     icon: RefreshCw,
+    apiView: "v_renewals_qtd",
     status: "live",
   },
   {
-    id: "nrr",
-    title: "NRR (Net Revenue Retention)",
+    id: "sql",
+    title: "SQL (Accounts)",
     description:
-      "1 − churn % by period. Matches the legacy financial-spreadsheet formula.",
-    icon: Percent,
-    status: "coming_soon",
+      "Contacts qualified as SQL, grouped by account. Feeds the SQL running-total dashboard metric.",
+    icon: UserCheck,
+    apiView: "v_sql_accounts",
+    status: "live",
   },
   {
-    id: "4q-revenue",
-    title: "4Q Revenue",
+    id: "mql-contacts",
+    title: "MQL (Contacts)",
     description:
-      "Rolling 4-quarter revenue (closed-won sum per quarter) for trending charts.",
+      "Marketable contacts with MQL date but not yet SQL. Excludes do_not_contact.",
+    icon: Target,
+    apiView: "v_mql_contacts",
+    status: "live",
+  },
+  {
+    id: "mql-leads",
+    title: "MQL (Leads)",
+    description:
+      "Leads with MQL date this fiscal quarter, not yet converted. Grouped by Lead Source.",
+    icon: Users,
+    apiView: "v_mql_leads_qtd",
+    status: "live",
+  },
+  {
+    id: "dashboard-metrics",
+    title: "Dashboard Metrics",
+    description:
+      "Single-row scalar summary: ARR, New Customers QTD, NRR (legacy + true), pipeline, churn. Powers the Team Dashboard.",
     icon: FileBarChart,
+    apiView: "v_dashboard_metrics",
     status: "coming_soon",
   },
 ];
@@ -100,17 +118,19 @@ const REPORTS: ReportCard[] = [
 export function StandardReports() {
   return (
     <div className="space-y-4 pt-4">
-      <div className="text-sm text-muted-foreground">
-        Pre-built reports tuned for Medcurity's financial + pipeline workflows. Click into one to see live data with filters + CSV export.
+      <div className="rounded-md border bg-muted/30 p-4 text-sm">
+        <p className="font-medium mb-1">Standard Reports</p>
+        <p className="text-muted-foreground">
+          Pre-built reports aligned column-for-column with the legacy Salesforce reports.
+          Each report is also available as a Supabase REST view for the financial spreadsheet
+          (see API column on each card).
+        </p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {REPORTS.map((r) => {
           const Icon = r.icon;
           const isLive = r.status === "live";
-          // Non-live cards render as disabled placeholders with a
-          // "Coming soon" pill so the user knows the reports are
-          // on the roadmap without clicking into a 404.
           const inner = (
             <Card
               className={
@@ -134,6 +154,9 @@ export function StandardReports() {
                   <h3 className="font-semibold text-sm">{r.title}</h3>
                   <p className="text-xs text-muted-foreground mt-1">
                     {r.description}
+                  </p>
+                  <p className="text-[10px] font-mono text-muted-foreground/70 mt-2">
+                    /rest/v1/{r.apiView}
                   </p>
                 </div>
               </CardContent>

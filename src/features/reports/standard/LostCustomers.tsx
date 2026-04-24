@@ -16,27 +16,24 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCurrency, formatDate, stageLabel } from "@/lib/formatters";
-import type { OpportunityStage } from "@/types/crm";
-import { downloadCsv, todayStamp, csvCurrency, ownerRoleLabel } from "./report-helpers";
+import { downloadCsv, todayStamp, csvCurrency } from "./report-helpers";
 
 /**
- * Renewals — current fiscal quarter, closed_won, kind=renewal
- * (Existing Business). Opportunity Name ≠ 'EHR Implementation'.
- * Columns match SF "Renewals":
- *   Owner Role, Opportunity Owner, Account Name, Opportunity Name,
- *   Stage, Fiscal Period, Amount, Probability (%), Age, Close Date,
- *   Created Date, Next Step, Lead Source
- * Grouping: Type
+ * Lost Customers — current fiscal quarter, closed_lost,
+ * kind=renewal (Existing Business), account lifecycle_status=inactive.
+ * Columns match SF:
+ *   Account Name, Opportunity Name, Stage, Status, Fiscal Period,
+ *   Amount, Probability (%), Age, Close Date, Created Date, Next Step,
+ *   Lead Source, Type
  *
- * API: /rest/v1/v_renewals_qtd?select=*
+ * API: /rest/v1/v_lost_customers_qtd?select=*
  */
-interface RenewalRow {
+interface LostRow {
   id: string;
-  owner_role: string | null;
-  opportunity_owner: string | null;
   account_name: string | null;
   opportunity_name: string | null;
-  stage: OpportunityStage | null;
+  stage: string | null;
+  account_status: string | null;
   fiscal_period: string | null;
   amount: number | null;
   probability: number | null;
@@ -48,16 +45,16 @@ interface RenewalRow {
   type: string | null;
 }
 
-export function RenewalsQueue() {
+export function LostCustomers() {
   const { data: rows, isLoading } = useQuery({
-    queryKey: ["report", "renewals-qtd"],
+    queryKey: ["report", "lost-customers-qtd"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("v_renewals_qtd")
+        .from("v_lost_customers_qtd")
         .select("*")
         .order("close_date", { ascending: false });
       if (error) throw error;
-      return ((data ?? []) as unknown) as RenewalRow[];
+      return ((data ?? []) as unknown) as LostRow[];
     },
   });
 
@@ -69,11 +66,10 @@ export function RenewalsQueue() {
 
   function exportCsv() {
     const header = [
-      "Owner Role",
-      "Opportunity Owner",
       "Account Name",
       "Opportunity Name",
       "Stage",
+      "Status",
       "Fiscal Period",
       "Amount",
       "Probability (%)",
@@ -85,11 +81,10 @@ export function RenewalsQueue() {
       "Type",
     ];
     const data = (rows ?? []).map((r) => [
-      ownerRoleLabel(r.owner_role),
-      r.opportunity_owner ?? "",
       r.account_name ?? "",
       r.opportunity_name ?? "",
-      r.stage ? stageLabel(r.stage) : "",
+      r.stage ?? "",
+      r.account_status ?? "",
       r.fiscal_period ?? "",
       csvCurrency(r.amount),
       r.probability ?? "",
@@ -100,7 +95,7 @@ export function RenewalsQueue() {
       r.lead_source ?? "",
       r.type ?? "",
     ]);
-    downloadCsv(`renewals-${todayStamp()}.csv`, [header, ...data]);
+    downloadCsv(`lost-customers-${todayStamp()}.csv`, [header, ...data]);
   }
 
   return (
@@ -115,8 +110,8 @@ export function RenewalsQueue() {
       </div>
 
       <PageHeader
-        title="Renewals"
-        description="Existing Business closed-won this fiscal quarter. Excludes EHR Implementation."
+        title="Lost Customers"
+        description="Existing Business closed-lost this fiscal quarter on inactive accounts."
         actions={
           <Button variant="outline" size="sm" onClick={exportCsv} disabled={isLoading}>
             <Download className="h-4 w-4 mr-1" />
@@ -126,8 +121,8 @@ export function RenewalsQueue() {
       />
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-        <Kpi label="Renewals Closed" value={summary.count.toLocaleString()} />
-        <Kpi label="Amount" value={formatCurrency(summary.total)} />
+        <Kpi label="Count" value={summary.count.toLocaleString()} />
+        <Kpi label="Amount Lost" value={formatCurrency(summary.total)} />
         <Kpi label="Fiscal Period" value={rows?.[0]?.fiscal_period ?? ""} />
       </div>
 
@@ -139,18 +134,17 @@ export function RenewalsQueue() {
             </div>
           ) : !rows?.length ? (
             <p className="p-6 text-sm text-muted-foreground text-center">
-              No renewals closed this fiscal quarter yet.
+              No lost customers this fiscal quarter.
             </p>
           ) : (
             <div className="overflow-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Owner Role</TableHead>
-                    <TableHead>Opportunity Owner</TableHead>
                     <TableHead>Account Name</TableHead>
                     <TableHead>Opportunity Name</TableHead>
                     <TableHead>Stage</TableHead>
+                    <TableHead>Status</TableHead>
                     <TableHead>Fiscal Period</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
                     <TableHead className="text-right">Prob %</TableHead>
@@ -159,16 +153,16 @@ export function RenewalsQueue() {
                     <TableHead>Created</TableHead>
                     <TableHead>Next Step</TableHead>
                     <TableHead>Lead Source</TableHead>
+                    <TableHead>Type</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {rows.map((r) => (
                     <TableRow key={r.id}>
-                      <TableCell>{ownerRoleLabel(r.owner_role)}</TableCell>
-                      <TableCell>{r.opportunity_owner ?? ""}</TableCell>
                       <TableCell className="font-medium">{r.account_name ?? ""}</TableCell>
                       <TableCell>{r.opportunity_name ?? ""}</TableCell>
-                      <TableCell>{r.stage ? stageLabel(r.stage) : ""}</TableCell>
+                      <TableCell>{r.stage ? stageLabel(r.stage as never) : ""}</TableCell>
+                      <TableCell>{r.account_status ?? ""}</TableCell>
                       <TableCell>{r.fiscal_period ?? ""}</TableCell>
                       <TableCell className="text-right">
                         {formatCurrency(Number(r.amount ?? 0))}
@@ -179,6 +173,7 @@ export function RenewalsQueue() {
                       <TableCell>{formatDate(r.created_date)}</TableCell>
                       <TableCell>{r.next_step ?? ""}</TableCell>
                       <TableCell>{r.lead_source ?? ""}</TableCell>
+                      <TableCell>{r.type ?? ""}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
