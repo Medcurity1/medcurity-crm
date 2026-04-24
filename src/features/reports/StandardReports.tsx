@@ -118,13 +118,21 @@ const REPORTS: ReportCard[] = [
 export function StandardReports() {
   return (
     <div className="space-y-4 pt-4">
-      <div className="rounded-md border bg-muted/30 p-4 text-sm">
-        <p className="font-medium mb-1">Standard Reports</p>
-        <p className="text-muted-foreground">
-          Pre-built reports aligned column-for-column with the legacy Salesforce reports.
-          Each report is also available as a Supabase REST view for the financial spreadsheet
-          (see API column on each card).
-        </p>
+      <div className="rounded-md border bg-muted/30 p-4 text-sm flex items-start justify-between gap-4">
+        <div>
+          <p className="font-medium mb-1">Standard Reports</p>
+          <p className="text-muted-foreground">
+            Pre-built reports aligned column-for-column with the legacy Salesforce reports.
+            Each report is also available as a Supabase REST view for the financial spreadsheet
+            (see API column on each card).
+          </p>
+        </div>
+        <Link
+          to="/reports/standard/diagnostic"
+          className="shrink-0 text-xs font-medium text-primary hover:underline"
+        >
+          Diagnostic →
+        </Link>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
