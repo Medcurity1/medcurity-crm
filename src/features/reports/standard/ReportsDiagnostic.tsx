@@ -16,23 +16,26 @@ import { Skeleton } from "@/components/ui/skeleton";
  * Available at /reports/standard/diagnostic.
  */
 
-type Check = {
+type CheckResult = {
   label: string;
   desc: string;
   count: number | null;
   error: string | null;
 };
 
-async function runCheck(
-  table: string,
-  build: (
-    q: ReturnType<typeof supabase.from>,
-  ) => ReturnType<typeof supabase.from>,
-): Promise<{ count: number | null; error: string | null }> {
-  let q = supabase.from(table).select("*", { count: "exact", head: true });
-  q = build(q) as typeof q;
-  const { count, error } = await q;
-  return { count: count ?? null, error: error?.message ?? null };
+async function count(
+  label: string,
+  desc: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  query: any,
+): Promise<CheckResult> {
+  const { count: c, error } = await query;
+  return {
+    label,
+    desc,
+    count: c ?? null,
+    error: error?.message ?? null,
+  };
 }
 
 export function ReportsDiagnostic() {
@@ -48,158 +51,208 @@ export function ReportsDiagnostic() {
         .toISOString()
         .slice(0, 10);
 
-      const checks: Check[] = [];
+      const opts = { count: "exact" as const, head: true };
 
-      // ---------- OPPORTUNITIES ----------
-      const specs = [
-        {
-          label: "All opportunities",
-          desc: "total rows in public.opportunities",
-          table: "opportunities",
-          build: (x) => x,
-        },
-        {
-          label: "  ... archived_at IS NULL",
-          desc: "live (non-archived) opps",
-          table: "opportunities",
-          build: (x) => x.is("archived_at", null),
-        },
-        {
-          label: "  ... stage = closed_won",
-          desc: "closed-won opps (live only)",
-          table: "opportunities",
-          build: (x) => x.is("archived_at", null).eq("stage", "closed_won"),
-        },
-        {
-          label: "  ... stage = closed_lost",
-          desc: "closed-lost opps (live only)",
-          table: "opportunities",
-          build: (x) => x.is("archived_at", null).eq("stage", "closed_lost"),
-        },
-        {
-          label: "  ... kind = new_business",
-          desc: "opps flagged as New Business (live only)",
-          table: "opportunities",
-          build: (x) => x.is("archived_at", null).eq("kind", "new_business"),
-        },
-        {
-          label: "  ... kind = renewal",
-          desc: "opps flagged as Existing Business / Renewal (live only)",
-          table: "opportunities",
-          build: (x) => x.is("archived_at", null).eq("kind", "renewal"),
-        },
-        {
-          label: "  ... kind IS NULL",
-          desc: "opps with kind not set (hurts New/Lost/Renewals reports)",
-          table: "opportunities",
-          build: (x) => x.is("archived_at", null).is("kind", null),
-        },
-        {
-          label: `New Customers QTD (${qStart} → ${qEnd})`,
-          desc: "stage=closed_won AND kind=new_business AND close_date in current quarter",
-          table: "opportunities",
-          build: (x) =>
-            x
-              .is("archived_at", null)
-              .eq("stage", "closed_won")
-              .eq("kind", "new_business")
-              .gte("close_date", qStart)
-              .lte("close_date", qEnd),
-        },
-        {
-          label: `Lost Customers QTD (${qStart} → ${qEnd})`,
-          desc: "stage=closed_lost AND kind=renewal AND close_date in current quarter",
-          table: "opportunities",
-          build: (x) =>
-            x
-              .is("archived_at", null)
-              .eq("stage", "closed_lost")
-              .eq("kind", "renewal")
-              .gte("close_date", qStart)
-              .lte("close_date", qEnd),
-        },
-        {
-          label: `Renewals QTD (${qStart} → ${qEnd})`,
-          desc: "stage=closed_won AND kind=renewal AND close_date in current quarter",
-          table: "opportunities",
-          build: (x) =>
-            x
-              .is("archived_at", null)
-              .eq("stage", "closed_won")
-              .eq("kind", "renewal")
-              .gte("close_date", qStart)
-              .lte("close_date", qEnd),
-        },
+      const results = await Promise.all([
+        // ---------- OPPORTUNITIES ----------
+        count(
+          "All opportunities",
+          "total rows in public.opportunities",
+          supabase.from("opportunities").select("*", opts),
+        ),
+        count(
+          "  ... archived_at IS NULL",
+          "live (non-archived) opps",
+          supabase.from("opportunities").select("*", opts).is("archived_at", null),
+        ),
+        count(
+          "  ... stage = closed_won",
+          "closed-won opps (live only)",
+          supabase
+            .from("opportunities")
+            .select("*", opts)
+            .is("archived_at", null)
+            .eq("stage", "closed_won"),
+        ),
+        count(
+          "  ... stage = closed_lost",
+          "closed-lost opps (live only)",
+          supabase
+            .from("opportunities")
+            .select("*", opts)
+            .is("archived_at", null)
+            .eq("stage", "closed_lost"),
+        ),
+        count(
+          "  ... kind = new_business",
+          "opps flagged as New Business (live only)",
+          supabase
+            .from("opportunities")
+            .select("*", opts)
+            .is("archived_at", null)
+            .eq("kind", "new_business"),
+        ),
+        count(
+          "  ... kind = renewal",
+          "opps flagged as Existing Business / Renewal (live only)",
+          supabase
+            .from("opportunities")
+            .select("*", opts)
+            .is("archived_at", null)
+            .eq("kind", "renewal"),
+        ),
+        count(
+          "  ... kind IS NULL",
+          "opps with kind not set (hurts New/Lost/Renewals reports)",
+          supabase
+            .from("opportunities")
+            .select("*", opts)
+            .is("archived_at", null)
+            .is("kind", null),
+        ),
+        count(
+          `New Customers QTD (${qStart} → ${qEnd})`,
+          "stage=closed_won AND kind=new_business AND close_date in current quarter",
+          supabase
+            .from("opportunities")
+            .select("*", opts)
+            .is("archived_at", null)
+            .eq("stage", "closed_won")
+            .eq("kind", "new_business")
+            .gte("close_date", qStart)
+            .lte("close_date", qEnd),
+        ),
+        count(
+          `Lost Customers QTD (${qStart} → ${qEnd})`,
+          "stage=closed_lost AND kind=renewal AND close_date in current quarter",
+          supabase
+            .from("opportunities")
+            .select("*", opts)
+            .is("archived_at", null)
+            .eq("stage", "closed_lost")
+            .eq("kind", "renewal")
+            .gte("close_date", qStart)
+            .lte("close_date", qEnd),
+        ),
+        count(
+          `Renewals QTD (${qStart} → ${qEnd})`,
+          "stage=closed_won AND kind=renewal AND close_date in current quarter",
+          supabase
+            .from("opportunities")
+            .select("*", opts)
+            .is("archived_at", null)
+            .eq("stage", "closed_won")
+            .eq("kind", "renewal")
+            .gte("close_date", qStart)
+            .lte("close_date", qEnd),
+        ),
+        count(
+          "Closed Won (all-time)",
+          "stage=closed_won ignoring date range and kind",
+          supabase
+            .from("opportunities")
+            .select("*", opts)
+            .is("archived_at", null)
+            .eq("stage", "closed_won"),
+        ),
+        count(
+          "Closed Won (current year)",
+          `stage=closed_won AND close_date >= ${today.getUTCFullYear()}-01-01`,
+          supabase
+            .from("opportunities")
+            .select("*", opts)
+            .is("archived_at", null)
+            .eq("stage", "closed_won")
+            .gte("close_date", `${today.getUTCFullYear()}-01-01`),
+        ),
+
         // ---------- LEADS ----------
-        {
-          label: "All leads",
-          desc: "total rows in public.leads",
-          table: "leads",
-          build: (x) => x,
-        },
-        {
-          label: "  ... live (archived_at IS NULL)",
-          desc: "non-archived leads",
-          table: "leads",
-          build: (x) => x.is("archived_at", null),
-        },
-        {
-          label: "  ... mql_date IS NOT NULL",
-          desc: "leads that were ever MQL",
-          table: "leads",
-          build: (x) => x.is("archived_at", null).not("mql_date", "is", null),
-        },
-        {
-          label: `MQL Leads QTD (${qStart} → ${qEnd})`,
-          desc: "mql_date in current quarter AND not converted",
-          table: "leads",
-          build: (x) =>
-            x
-              .is("archived_at", null)
-              .not("mql_date", "is", null)
-              .neq("status", "converted")
-              .gte("mql_date", qStart)
-              .lte("mql_date", qEnd),
-        },
+        count(
+          "All leads",
+          "total rows in public.leads",
+          supabase.from("leads").select("*", opts),
+        ),
+        count(
+          "  ... live (archived_at IS NULL)",
+          "non-archived leads",
+          supabase.from("leads").select("*", opts).is("archived_at", null),
+        ),
+        count(
+          "  ... mql_date IS NOT NULL",
+          "leads that were ever MQL",
+          supabase
+            .from("leads")
+            .select("*", opts)
+            .is("archived_at", null)
+            .not("mql_date", "is", null),
+        ),
+        count(
+          `MQL Leads QTD (${qStart} → ${qEnd})`,
+          "mql_date in current quarter AND not converted",
+          supabase
+            .from("leads")
+            .select("*", opts)
+            .is("archived_at", null)
+            .not("mql_date", "is", null)
+            .neq("status", "converted")
+            .gte("mql_date", qStart)
+            .lte("mql_date", qEnd),
+        ),
+
         // ---------- CONTACTS ----------
-        {
-          label: "All contacts",
-          desc: "total rows in public.contacts",
-          table: "contacts",
-          build: (x) => x,
-        },
-        {
-          label: "  ... mql_date IS NOT NULL",
-          desc: "contacts that were ever MQL",
-          table: "contacts",
-          build: (x) => x.is("archived_at", null).not("mql_date", "is", null),
-        },
-        {
-          label: "  ... sql_date IS NOT NULL",
-          desc: "contacts that became SQL",
-          table: "contacts",
-          build: (x) => x.is("archived_at", null).not("sql_date", "is", null),
-        },
-        {
-          label: "MQL Contacts (marketable, not SQL)",
-          desc: "mql_date set AND sql_date null AND do_not_contact=false",
-          table: "contacts",
-          build: (x) =>
-            x
-              .is("archived_at", null)
-              .not("mql_date", "is", null)
-              .is("sql_date", null)
-              .eq("do_not_contact", false),
-        },
-      ] as const;
+        count(
+          "All contacts",
+          "total rows in public.contacts",
+          supabase.from("contacts").select("*", opts),
+        ),
+        count(
+          "  ... mql_date IS NOT NULL",
+          "contacts that were ever MQL",
+          supabase
+            .from("contacts")
+            .select("*", opts)
+            .is("archived_at", null)
+            .not("mql_date", "is", null),
+        ),
+        count(
+          "  ... sql_date IS NOT NULL",
+          "contacts that became SQL",
+          supabase
+            .from("contacts")
+            .select("*", opts)
+            .is("archived_at", null)
+            .not("sql_date", "is", null),
+        ),
+        count(
+          "MQL Contacts (marketable, not SQL)",
+          "mql_date set AND sql_date null AND do_not_contact=false",
+          supabase
+            .from("contacts")
+            .select("*", opts)
+            .is("archived_at", null)
+            .not("mql_date", "is", null)
+            .is("sql_date", null)
+            .eq("do_not_contact", false),
+        ),
 
-      for (const s of specs) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const res = await runCheck(s.table, s.build as any);
-        checks.push({ label: s.label, desc: s.desc, ...res });
-      }
+        // ---------- ACCOUNTS ----------
+        count(
+          "All accounts",
+          "total rows in public.accounts",
+          supabase.from("accounts").select("*", opts),
+        ),
+        count(
+          "  ... lifecycle_status = inactive",
+          "accounts currently marked churned",
+          supabase
+            .from("accounts")
+            .select("*", opts)
+            .is("archived_at", null)
+            .eq("lifecycle_status", "inactive"),
+        ),
+      ]);
 
-      return { checks, qStart, qEnd };
+      return { checks: results, qStart, qEnd };
     },
   });
 
@@ -279,8 +332,8 @@ export function ReportsDiagnostic() {
           <li>
             If <strong>kind IS NULL</strong> is high: most opps aren't flagged
             as New Business / Renewal, so the New Customers / Lost Customers /
-            Renewals reports will look empty. The fix is a backfill —
-            we can run SQL to infer kind from the opp name / account history.
+            Renewals reports will look empty. The fix is a backfill — we can
+            run SQL to infer kind from the opp name / account history.
           </li>
           <li>
             If <strong>QTD counts</strong> are 0 but underlying counts are
