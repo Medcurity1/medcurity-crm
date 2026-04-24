@@ -27,7 +27,6 @@ import type { OpportunityStage } from "@/types/crm";
 import {
   downloadCsv,
   todayStamp,
-  csvCurrency,
   DATE_RANGE_OPTIONS,
   resolveRange,
   type DateRangeKey,
