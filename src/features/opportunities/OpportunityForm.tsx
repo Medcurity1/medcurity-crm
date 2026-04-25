@@ -15,6 +15,7 @@ import {
   useRemoveOpportunityProduct,
 } from "./api";
 import { MultiProductPicker, type StagedOpportunityProduct } from "./MultiProductPicker";
+import { PicklistSelect } from "@/features/picklists/PicklistSelect";
 
 /**
  * Default win probability per stage. Mirrors the SF probability ladder
@@ -755,20 +756,17 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
 
                 <div className="space-y-2">
                   <Label>Payment Frequency</Label>
-                  <Select
-                    value={watch("payment_frequency") ?? "none"}
-                    onValueChange={(v) => setValue("payment_frequency", v === "none" ? null : v as OpportunityFormValues["payment_frequency"])}
-                  >
-                    <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="monthly">Monthly</SelectItem>
-                      <SelectItem value="quarterly">Quarterly</SelectItem>
-                      <SelectItem value="semi_annually">Semi-Annually</SelectItem>
-                      <SelectItem value="annually">Annually</SelectItem>
-                      <SelectItem value="one_time">One-Time</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <PicklistSelect
+                    fieldKey="opportunities.payment_frequency"
+                    value={watch("payment_frequency")}
+                    onChange={(v) =>
+                      setValue(
+                        "payment_frequency",
+                        (v ?? null) as OpportunityFormValues["payment_frequency"],
+                      )
+                    }
+                    allowClear
+                  />
                 </div>
               </div>
             </FormSection>
@@ -823,12 +821,36 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                   <p className="text-xs text-muted-foreground">Auto-set on Closed Won if blank</p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="contract_length_months">Contract Length (months)</Label>
-                  <Input id="contract_length_months" type="number" {...register("contract_length_months")} />
+                  <Label htmlFor="contract_length_months">Contract Length</Label>
+                  <PicklistSelect
+                    id="contract_length_months"
+                    fieldKey="opportunities.contract_length_months"
+                    value={watch("contract_length_months")}
+                    onChange={(v) =>
+                      setValue(
+                        "contract_length_months",
+                        v == null ? undefined : Number(v),
+                        { shouldDirty: true },
+                      )
+                    }
+                    allowClear
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="contract_year">Contract Year</Label>
-                  <Input id="contract_year" type="number" {...register("contract_year")} />
+                  <PicklistSelect
+                    id="contract_year"
+                    fieldKey="opportunities.contract_year"
+                    value={watch("contract_year")}
+                    onChange={(v) =>
+                      setValue(
+                        "contract_year",
+                        v == null ? undefined : Number(v),
+                        { shouldDirty: true },
+                      )
+                    }
+                    allowClear
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="cycle_count">Cycle Count</Label>

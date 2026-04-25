@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useAccount, useCreateAccount, useUpdateAccount, useUsers, useAccountsList } from "./api";
+import { PicklistSelect } from "@/features/picklists/PicklistSelect";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
@@ -385,27 +386,16 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                   <Label htmlFor="account_type">
                     Account Type<RequiredIndicator fieldKey="account_type" requiredFields={requiredKeys} />
                   </Label>
-                  <Select
-                    value={watch("account_type") || "none"}
-                    onValueChange={(v) =>
-                      setValue("account_type", v === "none" ? "" : v)
-                    }
-                  >
-                    <SelectTrigger id="account_type">
-                      <SelectValue placeholder="Select type..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="Customer">Customer — active paying account</SelectItem>
-                      <SelectItem value="Prospect">Prospect — not yet a customer</SelectItem>
-                      <SelectItem value="Partner">Partner — referring or reselling partner</SelectItem>
-                      <SelectItem value="Former Customer">Former Customer — churned</SelectItem>
-                      <SelectItem value="Vendor">Vendor — we buy from them</SelectItem>
-                      <SelectItem value="Other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <PicklistSelect
+                    id="account_type"
+                    fieldKey="accounts.account_type"
+                    value={watch("account_type")}
+                    onChange={(v) => setValue("account_type", v ?? "")}
+                    allowClear
+                    placeholder="Select type…"
+                  />
                   <p className="text-xs text-muted-foreground">
-                    High-level classification of the relationship.
+                    High-level classification. Manage values in Admin → Picklists.
                   </p>
                 </div>
 
@@ -732,23 +722,17 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                 </div>
                 <div className="space-y-2">
                   <Label>Renewal Type<RequiredIndicator fieldKey="renewal_type" requiredFields={requiredKeys} /></Label>
-                  <Select
-                    value={watch("renewal_type") ?? ""}
-                    onValueChange={(v) =>
-                      setValue("renewal_type", v as AccountFormValues["renewal_type"])
+                  <PicklistSelect
+                    fieldKey="accounts.renewal_type"
+                    value={watch("renewal_type")}
+                    onChange={(v) =>
+                      setValue(
+                        "renewal_type",
+                        (v ?? "") as AccountFormValues["renewal_type"],
+                      )
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="auto_renew">Auto Renew</SelectItem>
-                      <SelectItem value="full_auto_renew">Full Auto Renew</SelectItem>
-                      <SelectItem value="manual_renew">Manual Renew</SelectItem>
-                      <SelectItem value="no_auto_renew">No Auto Renew</SelectItem>
-                      <SelectItem value="platform_only_auto_renew">Platform Only Auto Renew</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    allowClear
+                  />
                 </div>
                 <div className="flex items-center gap-2 pt-6">
                   <Checkbox

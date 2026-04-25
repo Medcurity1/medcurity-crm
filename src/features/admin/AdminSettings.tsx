@@ -10,6 +10,7 @@ import { RequiredFieldsManager } from "./RequiredFieldsManager";
 import { IntegrationsManager } from "./IntegrationsManager";
 import { SalesforceImport } from "./SalesforceImport";
 import { PartnerRelationshipsImport } from "./PartnerRelationshipsImport";
+import { PicklistsManager } from "@/features/picklists/PicklistsManager";
 import { AuditLogViewer } from "./AuditLogViewer";
 import { AutomationsManager } from "./AutomationsManager";
 import { SystemInfo } from "./SystemInfo";
@@ -89,6 +90,7 @@ export function AdminSettings() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList>
           <TabsTrigger value="custom-fields">Custom Fields</TabsTrigger>
+          <TabsTrigger value="picklists">Picklists</TabsTrigger>
           <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="permissions">Permissions</TabsTrigger>
           <TabsTrigger value="required-fields">Required Fields</TabsTrigger>
@@ -111,6 +113,10 @@ export function AdminSettings() {
             </div>
             <CustomFieldsManager />
           </Card>
+        </TabsContent>
+
+        <TabsContent value="picklists">
+          <PicklistsManager />
         </TabsContent>
 
         <TabsContent value="users">
