@@ -14,7 +14,7 @@ import {
   useAddOpportunityProduct,
   useRemoveOpportunityProduct,
 } from "./api";
-import { AddProductDialog, type StagedOpportunityProduct } from "./AddProductDialog";
+import { MultiProductPicker, type StagedOpportunityProduct } from "./MultiProductPicker";
 import { useAccountsList, useAccount, useUsers } from "@/features/accounts/api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
@@ -109,6 +109,10 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   // Create mode: stage products locally and flush after the opp is created.
   // Edit mode: products come from the DB and are mutated directly.
   const [stagedProducts, setStagedProducts] = useState<StagedOpportunityProduct[]>([]);
+  // Tracks whether the user has manually typed in the Name field. Once
+  // they have, we stop auto-suggesting from product codes — their value
+  // wins.
+  const [nameUserOverridden, setNameUserOverridden] = useState(isEditing);
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [pendingRemoveIdx, setPendingRemoveIdx] = useState<number | null>(null);
   const [pendingRemoveProductId, setPendingRemoveProductId] = useState<string | null>(null);
@@ -264,6 +268,29 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     }
   }, [watchedSubtotal, watchedDiscount, setValue, watch]);
 
+  // ----- Auto-suggest opportunity name from staged product codes -----
+  // Format: "Code1 | Code2 | Code3" — joined with spaces and pipes,
+  // matching the SF naming convention (e.g. "SRA | Onsite Services | BNVA").
+  // Only fires in CREATE mode and only if the user hasn't manually
+  // typed a name. Edit mode preserves the existing name; users typing
+  // in the field flips nameUserOverridden = true and we back off.
+  useEffect(() => {
+    if (isEditing) return;
+    if (nameUserOverridden) return;
+    if (stagedProducts.length === 0) return;
+    const codes = stagedProducts
+      .map((p) => p.product_code)
+      .filter((c): c is string => !!c && c.trim() !== "");
+    if (codes.length === 0) return;
+    const suggested = codes.join(" | ");
+    if (suggested !== watch("name")) {
+      // shouldDirty=false so the auto-suggested value doesn't trip the
+      // "you have unsaved changes" prompt before the user has done anything.
+      setValue("name", suggested, { shouldDirty: false });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stagedProducts, isEditing, nameUserOverridden]);
+
   function emptyToNull(v: unknown): unknown {
     if (v === "" || v === undefined) return null;
     return v;
@@ -357,6 +384,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                 quantity: sp.quantity,
                 unit_price: sp.unit_price,
                 arr_amount: sp.arr_amount,
+                discount_percent: sp.discount_percent,
               });
             } catch (err) {
               productFailures += 1;
@@ -399,7 +427,20 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2 md:col-span-2">
                   <Label htmlFor="name">Opportunity Name *<RequiredIndicator fieldKey="name" requiredFields={requiredKeys} /></Label>
-                  <Input id="name" {...register("name")} />
+                  <Input
+                    id="name"
+                    {...register("name", {
+                      onChange: () => {
+                        // User typed — stop auto-suggesting from products.
+                        if (!nameUserOverridden) setNameUserOverridden(true);
+                      },
+                    })}
+                  />
+                  {!isEditing && !nameUserOverridden && stagedProducts.length > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      Auto-suggested from product codes. Type to override.
+                    </p>
+                  )}
                   {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}
                 </div>
 
@@ -979,19 +1020,19 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
 
       {/* ---- Add Product dialog: immediate in edit mode, staged in create mode ---- */}
       {isEditing && id ? (
-        <AddProductDialog
+        <MultiProductPicker
           mode="immediate"
           open={showAddProduct}
           onOpenChange={setShowAddProduct}
           opportunityId={id}
         />
       ) : (
-        <AddProductDialog
+        <MultiProductPicker
           mode="staged"
           open={showAddProduct}
           onOpenChange={setShowAddProduct}
           fteRange={(watch("fte_range") as string | undefined) || null}
-          onStage={(staged) => setStagedProducts((prev) => [...prev, staged])}
+          onStage={(rows) => setStagedProducts((prev) => [...prev, ...rows])}
         />
       )}
 

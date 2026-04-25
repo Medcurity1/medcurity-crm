@@ -241,7 +241,7 @@ export function useProducts() {
 export function useAddOpportunityProduct() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (values: { opportunity_id: string; product_id: string; quantity: number; unit_price: number; arr_amount: number }) => {
+    mutationFn: async (values: { opportunity_id: string; product_id: string; quantity: number; unit_price: number; arr_amount: number; discount_percent?: number }) => {
       const { data, error } = await supabase
         .from("opportunity_products")
         .insert(values)
@@ -252,6 +252,74 @@ export function useAddOpportunityProduct() {
     },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["opportunity_products", vars.opportunity_id] });
+      qc.invalidateQueries({ queryKey: ["opportunity", vars.opportunity_id] });
+    },
+  });
+}
+
+/** Bulk add many products to an opportunity in one round-trip. */
+export function useAddOpportunityProductsBulk() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (params: {
+      opportunity_id: string;
+      rows: Array<{
+        product_id: string;
+        quantity: number;
+        unit_price: number;
+        arr_amount: number;
+        discount_percent?: number;
+      }>;
+    }) => {
+      if (params.rows.length === 0) return [];
+      const payload = params.rows.map((r) => ({
+        opportunity_id: params.opportunity_id,
+        product_id: r.product_id,
+        quantity: r.quantity,
+        unit_price: r.unit_price,
+        arr_amount: r.arr_amount,
+        discount_percent: r.discount_percent ?? 0,
+      }));
+      const { data, error } = await supabase
+        .from("opportunity_products")
+        .upsert(payload, { onConflict: "opportunity_id,product_id" })
+        .select();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["opportunity_products", vars.opportunity_id] });
+      qc.invalidateQueries({ queryKey: ["opportunity", vars.opportunity_id] });
+    },
+  });
+}
+
+/** Update qty / price / discount on a single line. */
+export function useUpdateOpportunityProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (params: {
+      id: string;
+      opportunity_id: string;
+      patch: {
+        quantity?: number;
+        unit_price?: number;
+        arr_amount?: number;
+        discount_percent?: number;
+      };
+    }) => {
+      const { data, error } = await supabase
+        .from("opportunity_products")
+        .update(params.patch)
+        .eq("id", params.id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["opportunity_products", vars.opportunity_id] });
+      qc.invalidateQueries({ queryKey: ["opportunity", vars.opportunity_id] });
     },
   });
 }

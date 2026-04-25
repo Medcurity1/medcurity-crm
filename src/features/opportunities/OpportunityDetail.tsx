@@ -4,7 +4,7 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { Pencil, Archive, ChevronDown, UserRoundCog, Plus, Trash2, History } from "lucide-react";
 import { useOpportunity, useUpdateOpportunity, useArchiveOpportunity, useStageHistory, useOpportunityProducts, useRemoveOpportunityProduct } from "./api";
-import { AddProductDialog } from "./AddProductDialog";
+import { MultiProductPicker } from "./MultiProductPicker";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { StageProgressBar } from "./StageProgressBar";
 import { PageHeader } from "@/components/PageHeader";
@@ -676,7 +676,7 @@ export function OpportunityDetail() {
       />
 
       {id && (
-        <AddProductDialog
+        <MultiProductPicker
           open={showAddProduct}
           onOpenChange={setShowAddProduct}
           opportunityId={id}
