@@ -298,7 +298,6 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   // ladder UNLESS the user has explicitly set a value (we detect that
   // by comparing — if the current probability matches the OLD stage's
   // default, treat it as auto-managed and overwrite).
-  const watchedStage = watch("stage");
   const watchedProbability = watch("probability");
   const [probabilityUserOverridden, setProbabilityUserOverridden] = useState(
     () => {
