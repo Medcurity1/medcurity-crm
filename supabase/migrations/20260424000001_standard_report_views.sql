@@ -21,6 +21,37 @@
 begin;
 
 -- ---------------------------------------------------------------------
+-- Defensive column adds. Prod's migration history was repaired earlier
+-- (some 20260403/20260413 migrations marked applied without running),
+-- so columns we assume exist may be missing. Add them here as no-ops
+-- when present.
+-- ---------------------------------------------------------------------
+alter table public.accounts        add column if not exists account_number text;
+alter table public.accounts        add column if not exists account_type text;
+alter table public.accounts        add column if not exists notes text;
+alter table public.accounts        add column if not exists lead_source text;
+alter table public.accounts        add column if not exists lead_source_detail text;
+alter table public.opportunities   add column if not exists payment_frequency text;
+alter table public.opportunities   add column if not exists one_time_project boolean default false;
+alter table public.opportunities   add column if not exists lead_source text;
+alter table public.opportunities   add column if not exists lead_source_detail text;
+alter table public.opportunities   add column if not exists next_step text;
+alter table public.opportunities   add column if not exists probability integer;
+alter table public.opportunities   add column if not exists maturity_date date;
+alter table public.opportunities   add column if not exists kind text;
+alter table public.contacts        add column if not exists mql_date date;
+alter table public.contacts        add column if not exists sql_date date;
+alter table public.contacts        add column if not exists do_not_contact boolean default false;
+alter table public.contacts        add column if not exists mobile_phone text;
+alter table public.leads           add column if not exists mql_date date;
+alter table public.leads           add column if not exists mobile_phone text;
+alter table public.leads           add column if not exists do_not_market_to boolean default false;
+alter table public.accounts        add column if not exists archived_at timestamptz;
+alter table public.contacts        add column if not exists archived_at timestamptz;
+alter table public.leads           add column if not exists archived_at timestamptz;
+alter table public.opportunities   add column if not exists archived_at timestamptz;
+
+-- ---------------------------------------------------------------------
 -- Helper: fiscal period label ('Q2-2026')
 -- ---------------------------------------------------------------------
 create or replace function public.fiscal_period_label(d date)
