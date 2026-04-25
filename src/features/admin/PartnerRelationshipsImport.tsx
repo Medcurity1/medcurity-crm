@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 /**
@@ -258,14 +259,14 @@ export function PartnerRelationshipsImport() {
 
         <div>
           <Label htmlFor="partner-csv-file">CSV file</Label>
-          <input
+          <Input
             ref={fileInputRef}
             id="partner-csv-file"
             type="file"
             accept=".csv"
             onChange={onFileChange}
             disabled={running}
-            className="block mt-1 w-full text-sm file:mr-3 file:py-2 file:px-4 file:rounded file:border file:border-input file:bg-background file:text-sm file:font-medium hover:file:bg-accent"
+            className="mt-1 max-w-md"
           />
           {csvName && !running && (
             <p className="text-xs text-muted-foreground mt-1">
