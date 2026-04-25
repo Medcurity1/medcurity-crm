@@ -8,6 +8,7 @@ import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { leadSchema, type LeadFormValues } from "./schema";
+import { PicklistSelect } from "@/features/picklists/PicklistSelect";
 import { errorMessage } from "@/lib/errors";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -314,181 +315,64 @@ export function LeadForm() {
 
                 <div className="space-y-2">
                   <Label>Credential</Label>
-                  <Select
-                    value={(watch("credential") as string) || "none"}
-                    onValueChange={(v) => setValue("credential", v === "none" ? "" : (v as never))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select credential..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="md">MD</SelectItem>
-                      <SelectItem value="do">DO</SelectItem>
-                      <SelectItem value="rn">RN</SelectItem>
-                      <SelectItem value="np">NP</SelectItem>
-                      <SelectItem value="pa">PA</SelectItem>
-                      <SelectItem value="chc">CHC</SelectItem>
-                      <SelectItem value="chps">CHPS</SelectItem>
-                      <SelectItem value="ceo">CEO</SelectItem>
-                      <SelectItem value="cfo">CFO</SelectItem>
-                      <SelectItem value="coo">COO</SelectItem>
-                      <SelectItem value="cio">CIO</SelectItem>
-                      <SelectItem value="cto">CTO</SelectItem>
-                      <SelectItem value="ciso">CISO</SelectItem>
-                      <SelectItem value="cmo">CMO</SelectItem>
-                      <SelectItem value="practice_manager">Practice Manager</SelectItem>
-                      <SelectItem value="office_manager">Office Manager</SelectItem>
-                      <SelectItem value="compliance_officer">Compliance Officer</SelectItem>
-                      <SelectItem value="privacy_officer">Privacy Officer</SelectItem>
-                      <SelectItem value="security_officer">Security Officer</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <PicklistSelect
+                    fieldKey="leads.credential"
+                    value={watch("credential") as string | null | undefined}
+                    onChange={(v) => setValue("credential", (v ?? "") as never)}
+                    allowClear
+                  />
                 </div>
 
                 <div className="space-y-2">
                   <Label>Time Zone</Label>
-                  <Select
-                    value={(watch("time_zone") as string) || "none"}
-                    onValueChange={(v) => setValue("time_zone", v === "none" ? "" : (v as never))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select time zone..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="eastern">Eastern</SelectItem>
-                      <SelectItem value="central">Central</SelectItem>
-                      <SelectItem value="mountain">Mountain</SelectItem>
-                      <SelectItem value="pacific">Pacific</SelectItem>
-                      <SelectItem value="alaska">Alaska</SelectItem>
-                      <SelectItem value="hawaii">Hawaii</SelectItem>
-                      <SelectItem value="arizona_no_dst">Arizona (no DST)</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <PicklistSelect
+                    fieldKey="leads.time_zone"
+                    value={watch("time_zone") as string | null | undefined}
+                    onChange={(v) => setValue("time_zone", (v ?? "") as never)}
+                    allowClear
+                  />
                 </div>
 
                 <div className="space-y-2">
                   <Label>Lead Type</Label>
-                  <Select
-                    value={(watch("type") as string) || "none"}
-                    onValueChange={(v) => setValue("type", v === "none" ? "" : (v as never))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select type..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="inbound_website">Inbound (Website)</SelectItem>
-                      <SelectItem value="inbound_referral">Inbound (Referral)</SelectItem>
-                      <SelectItem value="outbound_cold">Outbound / Cold</SelectItem>
-                      <SelectItem value="purchased_list">Purchased List</SelectItem>
-                      <SelectItem value="conference">Conference</SelectItem>
-                      <SelectItem value="webinar">Webinar</SelectItem>
-                      <SelectItem value="partner">Partner</SelectItem>
-                      <SelectItem value="existing_customer_expansion">Existing Customer Expansion</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <PicklistSelect
+                    fieldKey="leads.type"
+                    value={watch("type") as string | null | undefined}
+                    onChange={(v) => setValue("type", (v ?? "") as never)}
+                    allowClear
+                  />
                 </div>
 
                 <div className="space-y-2">
                   <Label>Lead Segment</Label>
-                  <Select
-                    value={(watch("project_segment") as string) || "none"}
-                    onValueChange={(v) =>
-                      setValue("project_segment", v === "none" ? "" : (v as never))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select segment..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="rural_hospital">Rural Hospital</SelectItem>
-                      <SelectItem value="community_hospital">Community Hospital</SelectItem>
-                      <SelectItem value="enterprise">Enterprise</SelectItem>
-                      <SelectItem value="medium_sized">Medium Sized</SelectItem>
-                      <SelectItem value="small_sized">Small Sized</SelectItem>
-                      <SelectItem value="fqhc">FQHC</SelectItem>
-                      <SelectItem value="voa">VoA</SelectItem>
-                      <SelectItem value="franchise">Franchise</SelectItem>
-                      <SelectItem value="strategic_partner">Strategic Partner</SelectItem>
-                      <SelectItem value="it_vendor_third_party">IT Vendor / 3rd Party</SelectItem>
-                      <SelectItem value="independent_associations">Independent Associations</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <PicklistSelect
+                    fieldKey="leads.project_segment"
+                    value={watch("project_segment") as string | null | undefined}
+                    onChange={(v) => setValue("project_segment", (v ?? "") as never)}
+                    allowClear
+                  />
                 </div>
 
                 <div className="space-y-2">
                   <Label>Industry</Label>
-                  <Select
-                    value={(watch("industry_category") as string) || "none"}
-                    onValueChange={(v) =>
-                      setValue("industry_category", v === "none" ? "" : (v as never))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select industry..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="hospital">Hospital</SelectItem>
-                      <SelectItem value="medical_group">Medical Group</SelectItem>
-                      <SelectItem value="fqhc">FQHC</SelectItem>
-                      <SelectItem value="rural_health_clinic">Rural Health Clinic</SelectItem>
-                      <SelectItem value="skilled_nursing">Skilled Nursing</SelectItem>
-                      <SelectItem value="long_term_care">Long-Term Care</SelectItem>
-                      <SelectItem value="home_health">Home Health</SelectItem>
-                      <SelectItem value="hospice">Hospice</SelectItem>
-                      <SelectItem value="behavioral_health">Behavioral Health</SelectItem>
-                      <SelectItem value="dental">Dental</SelectItem>
-                      <SelectItem value="pediatrics">Pediatrics</SelectItem>
-                      <SelectItem value="specialty_clinic">Specialty Clinic</SelectItem>
-                      <SelectItem value="urgent_care">Urgent Care</SelectItem>
-                      <SelectItem value="imaging_center">Imaging Center</SelectItem>
-                      <SelectItem value="lab_services">Lab Services</SelectItem>
-                      <SelectItem value="pharmacy">Pharmacy</SelectItem>
-                      <SelectItem value="telemedicine">Telemedicine</SelectItem>
-                      <SelectItem value="tribal_health">Tribal Health</SelectItem>
-                      <SelectItem value="public_health_agency">Public Health Agency</SelectItem>
-                      <SelectItem value="healthcare_it_vendor">Healthcare IT Vendor</SelectItem>
-                      <SelectItem value="managed_service_provider">Managed Service Provider</SelectItem>
-                      <SelectItem value="healthcare_consulting">Healthcare Consulting</SelectItem>
-                      <SelectItem value="insurance_payer">Insurance / Payer</SelectItem>
-                      <SelectItem value="other_healthcare">Other Healthcare</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <PicklistSelect
+                    fieldKey="leads.industry_category"
+                    value={watch("industry_category") as string | null | undefined}
+                    onChange={(v) => setValue("industry_category", (v ?? "") as never)}
+                    allowClear
+                  />
                 </div>
 
                 <div className="space-y-2">
                   <Label>Relationship Tag</Label>
-                  <Select
-                    value={(watch("business_relationship_tag") as string) || "none"}
-                    onValueChange={(v) =>
-                      setValue("business_relationship_tag", v === "none" ? "" : (v as never))
+                  <PicklistSelect
+                    fieldKey="leads.business_relationship_tag"
+                    value={watch("business_relationship_tag") as string | null | undefined}
+                    onChange={(v) =>
+                      setValue("business_relationship_tag", (v ?? "") as never)
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select relationship..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="decision_maker">Decision Maker</SelectItem>
-                      <SelectItem value="influencer">Influencer</SelectItem>
-                      <SelectItem value="economic_buyer">Economic Buyer</SelectItem>
-                      <SelectItem value="technical_buyer">Technical Buyer</SelectItem>
-                      <SelectItem value="champion">Champion</SelectItem>
-                      <SelectItem value="detractor">Detractor</SelectItem>
-                      <SelectItem value="end_user">End User</SelectItem>
-                      <SelectItem value="gatekeeper">Gatekeeper</SelectItem>
-                      <SelectItem value="executive_sponsor">Executive Sponsor</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    allowClear
+                  />
                 </div>
 
                 <div className="space-y-2">
@@ -502,22 +386,13 @@ export function LeadForm() {
 
                 <div className="space-y-2">
                   <Label>Lead Rating</Label>
-                  <Select
-                    value={(watch("rating") as string) || "none"}
-                    onValueChange={(v) =>
-                      setValue("rating", v === "none" ? "" : (v as never))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Not rated" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Not rated</SelectItem>
-                      <SelectItem value="hot">Hot</SelectItem>
-                      <SelectItem value="warm">Warm</SelectItem>
-                      <SelectItem value="cold">Cold</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <PicklistSelect
+                    fieldKey="leads.rating"
+                    value={watch("rating") as string | null | undefined}
+                    onChange={(v) => setValue("rating", (v ?? "") as never)}
+                    allowClear
+                    placeholder="Not rated"
+                  />
                 </div>
 
                 <div className="md:col-span-2 flex flex-wrap gap-6">
@@ -571,74 +446,39 @@ export function LeadForm() {
 
                 <div className="space-y-2">
                   <Label>Status<RequiredIndicator fieldKey="status" requiredFields={requiredKeys} /></Label>
-                  <Select
-                    value={watch("status")}
-                    onValueChange={(v) =>
-                      setValue("status", v as LeadFormValues["status"])
+                  <PicklistSelect
+                    fieldKey="leads.status"
+                    value={watch("status") as string | null | undefined}
+                    onChange={(v) =>
+                      setValue("status", (v ?? "new") as LeadFormValues["status"])
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="new">New</SelectItem>
-                      <SelectItem value="contacted">Contacted</SelectItem>
-                      <SelectItem value="qualified">Qualified</SelectItem>
-                      <SelectItem value="unqualified">Unqualified</SelectItem>
-                      <SelectItem value="converted">Converted</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  />
                 </div>
 
                 <div className="space-y-2">
                   <Label>Source<RequiredIndicator fieldKey="source" requiredFields={requiredKeys} /></Label>
-                  <Select
-                    value={watch("source") ?? ""}
-                    onValueChange={(v) =>
-                      setValue("source", v as LeadFormValues["source"])
+                  <PicklistSelect
+                    fieldKey="leads.source"
+                    value={watch("source") as string | null | undefined}
+                    onChange={(v) =>
+                      setValue("source", (v ?? "") as LeadFormValues["source"])
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select source..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {/* Alphabetized per Summer/Anna feedback. "Other"
-                          stays at the bottom since it's a fallback. */}
-                      <SelectItem value="cold_call">Cold Call</SelectItem>
-                      <SelectItem value="conference">Conference</SelectItem>
-                      <SelectItem value="email_campaign">Email Campaign</SelectItem>
-                      <SelectItem value="mql">MQL</SelectItem>
-                      <SelectItem value="partner">Partner</SelectItem>
-                      <SelectItem value="podcast">Podcast</SelectItem>
-                      <SelectItem value="referral">Referral</SelectItem>
-                      <SelectItem value="social_media">Social Media</SelectItem>
-                      <SelectItem value="sql">SQL</SelectItem>
-                      <SelectItem value="trade_show">Trade Show</SelectItem>
-                      <SelectItem value="webinar">Webinar</SelectItem>
-                      <SelectItem value="website">Website</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    allowClear
+                  />
                 </div>
 
                 <div className="space-y-2">
                   <Label>Qualification<RequiredIndicator fieldKey="qualification" requiredFields={requiredKeys} /></Label>
-                  <Select
-                    value={watch("qualification") ?? "unqualified"}
-                    onValueChange={(v) =>
-                      setValue("qualification", v as LeadFormValues["qualification"])
+                  <PicklistSelect
+                    fieldKey="leads.qualification"
+                    value={watch("qualification") as string | null | undefined}
+                    onChange={(v) =>
+                      setValue(
+                        "qualification",
+                        (v ?? "unqualified") as LeadFormValues["qualification"],
+                      )
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="unqualified">Unqualified</SelectItem>
-                      <SelectItem value="mql">MQL</SelectItem>
-                      <SelectItem value="sql">SQL</SelectItem>
-                      <SelectItem value="sal">SAL</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  />
                 </div>
 
                 {/* Score field removed per Summer 2026-04-19. The

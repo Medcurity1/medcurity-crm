@@ -3,6 +3,7 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useContact, useCreateContact, useUpdateContact } from "./api";
+import { PicklistSelect } from "@/features/picklists/PicklistSelect";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { US_STATES } from "@/lib/us-states";
 import { PhoneInput } from "@/components/PhoneInput";
@@ -270,135 +271,54 @@ export function ContactForm() {
 
               <div className="space-y-2">
                 <Label>Credential</Label>
-                <Select
-                  value={(watch("credential") as string) || "none"}
-                  onValueChange={(v) => setValue("credential", v === "none" ? "" : (v as never))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select credential..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    <SelectItem value="md">MD</SelectItem>
-                    <SelectItem value="do">DO</SelectItem>
-                    <SelectItem value="rn">RN</SelectItem>
-                    <SelectItem value="lpn">LPN</SelectItem>
-                    <SelectItem value="np">NP</SelectItem>
-                    <SelectItem value="pa">PA</SelectItem>
-                    <SelectItem value="chc">CHC</SelectItem>
-                    <SelectItem value="chps">CHPS</SelectItem>
-                    <SelectItem value="chpc">CHPC</SelectItem>
-                    <SelectItem value="hipaa_certified">HIPAA Certified</SelectItem>
-                    <SelectItem value="ceo">CEO</SelectItem>
-                    <SelectItem value="cfo">CFO</SelectItem>
-                    <SelectItem value="coo">COO</SelectItem>
-                    <SelectItem value="cio">CIO</SelectItem>
-                    <SelectItem value="cto">CTO</SelectItem>
-                    <SelectItem value="ciso">CISO</SelectItem>
-                    <SelectItem value="cmo">CMO</SelectItem>
-                    <SelectItem value="it_director">IT Director</SelectItem>
-                    <SelectItem value="practice_manager">Practice Manager</SelectItem>
-                    <SelectItem value="office_manager">Office Manager</SelectItem>
-                    <SelectItem value="compliance_officer">Compliance Officer</SelectItem>
-                    <SelectItem value="privacy_officer">Privacy Officer</SelectItem>
-                    <SelectItem value="security_officer">Security Officer</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
+                <PicklistSelect
+                  fieldKey="contacts.credential"
+                  value={watch("credential") as string | null | undefined}
+                  onChange={(v) => setValue("credential", (v ?? "") as never)}
+                  allowClear
+                />
               </div>
 
               <div className="space-y-2">
                 <Label>Time Zone</Label>
-                <Select
-                  value={(watch("time_zone") as string) || "none"}
-                  onValueChange={(v) => setValue("time_zone", v === "none" ? "" : (v as never))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select time zone..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    <SelectItem value="eastern">Eastern</SelectItem>
-                    <SelectItem value="central">Central</SelectItem>
-                    <SelectItem value="mountain">Mountain</SelectItem>
-                    <SelectItem value="pacific">Pacific</SelectItem>
-                    <SelectItem value="alaska">Alaska</SelectItem>
-                    <SelectItem value="hawaii">Hawaii</SelectItem>
-                    <SelectItem value="arizona_no_dst">Arizona (no DST)</SelectItem>
-                  </SelectContent>
-                </Select>
+                <PicklistSelect
+                  fieldKey="contacts.time_zone"
+                  value={watch("time_zone") as string | null | undefined}
+                  onChange={(v) => setValue("time_zone", (v ?? "") as never)}
+                  allowClear
+                />
               </div>
 
               <div className="space-y-2">
                 <Label>Contact Type</Label>
-                <Select
-                  value={(watch("type") as string) || "none"}
-                  onValueChange={(v) => setValue("type", v === "none" ? "" : (v as never))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select type..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    <SelectItem value="prospect">Prospect</SelectItem>
-                    <SelectItem value="customer">Customer</SelectItem>
-                    <SelectItem value="partner">Partner</SelectItem>
-                    <SelectItem value="vendor">Vendor</SelectItem>
-                    <SelectItem value="referral_source">Referral Source</SelectItem>
-                    <SelectItem value="internal">Internal</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
+                <PicklistSelect
+                  fieldKey="contacts.type"
+                  value={watch("type") as string | null | undefined}
+                  onChange={(v) => setValue("type", (v ?? "") as never)}
+                  allowClear
+                />
               </div>
 
               <div className="space-y-2">
                 <Label>Relationship Tag</Label>
-                <Select
-                  value={(watch("business_relationship_tag") as string) || "none"}
-                  onValueChange={(v) =>
-                    setValue("business_relationship_tag", v === "none" ? "" : (v as never))
+                <PicklistSelect
+                  fieldKey="contacts.business_relationship_tag"
+                  value={watch("business_relationship_tag") as string | null | undefined}
+                  onChange={(v) =>
+                    setValue("business_relationship_tag", (v ?? "") as never)
                   }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select relationship..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    <SelectItem value="decision_maker">Decision Maker</SelectItem>
-                    <SelectItem value="influencer">Influencer</SelectItem>
-                    <SelectItem value="economic_buyer">Economic Buyer</SelectItem>
-                    <SelectItem value="technical_buyer">Technical Buyer</SelectItem>
-                    <SelectItem value="champion">Champion</SelectItem>
-                    <SelectItem value="detractor">Detractor</SelectItem>
-                    <SelectItem value="end_user">End User</SelectItem>
-                    <SelectItem value="gatekeeper">Gatekeeper</SelectItem>
-                    <SelectItem value="executive_sponsor">Executive Sponsor</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
+                  allowClear
+                />
               </div>
 
               <div className="space-y-2">
                 <Label>Lead Source</Label>
-                <Select
-                  value={watch("lead_source") ?? "none"}
-                  onValueChange={(v) => setValue("lead_source", v === "none" ? null : v)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select source..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    <SelectItem value="website">Website</SelectItem>
-                    <SelectItem value="referral">Referral</SelectItem>
-                    <SelectItem value="cold_call">Cold Call</SelectItem>
-                    <SelectItem value="trade_show">Trade Show</SelectItem>
-                    <SelectItem value="partner">Partner</SelectItem>
-                    <SelectItem value="social_media">Social Media</SelectItem>
-                    <SelectItem value="email_campaign">Email Campaign</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
+                <PicklistSelect
+                  fieldKey="contacts.lead_source"
+                  value={watch("lead_source") as string | null | undefined}
+                  onChange={(v) => setValue("lead_source", v ?? null)}
+                  allowClear
+                />
               </div>
 
               <div className="space-y-2">
