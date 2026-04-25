@@ -9,6 +9,7 @@ import { PermissionsManager } from "./PermissionsManager";
 import { RequiredFieldsManager } from "./RequiredFieldsManager";
 import { IntegrationsManager } from "./IntegrationsManager";
 import { SalesforceImport } from "./SalesforceImport";
+import { PartnerRelationshipsImport } from "./PartnerRelationshipsImport";
 import { AuditLogViewer } from "./AuditLogViewer";
 import { AutomationsManager } from "./AutomationsManager";
 import { SystemInfo } from "./SystemInfo";
@@ -158,8 +159,9 @@ export function AdminSettings() {
           <AutomationsManager />
         </TabsContent>
 
-        <TabsContent value="data-import">
+        <TabsContent value="data-import" className="space-y-6">
           <SalesforceImport />
+          <PartnerRelationshipsImport />
         </TabsContent>
 
         <TabsContent value="audit-log">
