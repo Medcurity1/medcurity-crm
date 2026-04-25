@@ -27,7 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { formatCurrencyDetailed } from "@/lib/formatters";
+import { formatCurrencyDetailed, employeesToFteRange } from "@/lib/formatters";
 
 /** A row staged for an opp that doesn't exist yet (create form). */
 export interface StagedOpportunityProduct {
@@ -97,10 +97,24 @@ export function MultiProductPicker(props: Props) {
 
   const { data: priceBookEntries } = usePriceBookEntries(priceBookId || undefined);
 
-  // Resolve FTE range — staged mode gets from caller, immediate from opp.
+  // Resolve FTE range. Priority order:
+  //   1. opp.fte_range          — explicitly set on the opp (preferred,
+  //      stays frozen at close so closed deals price the same as when
+  //      they were sold)
+  //   2. opp.account.fte_range  — current account-level snapshot
+  //   3. derive from fte_count or employees on either side
+  //
+  // The third bucket matters for accounts imported from SF where only
+  // the raw count came over (fte_range was a SF formula field that
+  // didn't survive the import).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const oppAcct = opp?.account as any;
   const oppFteRange = isStaged
     ? props.fteRange ?? null
-    : opp?.fte_range ?? opp?.account?.fte_range ?? null;
+    : opp?.fte_range
+      || oppAcct?.fte_range
+      || employeesToFteRange(opp?.fte_count ?? oppAcct?.fte_count ?? oppAcct?.employees ?? null)
+      || null;
 
   const activePriceBooks = useMemo(
     () => priceBooks?.filter((pb) => pb.is_active) ?? [],
