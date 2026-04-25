@@ -21,6 +21,13 @@
 begin;
 
 -- ---------------------------------------------------------------------
+-- Ensure columns referenced by views exist. The 20260420000002
+-- migration claimed mobile_phone "already exists on contacts" but
+-- that was wrong — it only added it to leads. Add it here.
+-- ---------------------------------------------------------------------
+alter table public.contacts add column if not exists mobile_phone text;
+
+-- ---------------------------------------------------------------------
 -- Helper: fiscal period label ('Q2-2026')
 -- ---------------------------------------------------------------------
 create or replace function public.fiscal_period_label(d date)
