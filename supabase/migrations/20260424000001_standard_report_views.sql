@@ -26,6 +26,7 @@ begin;
 -- that was wrong — it only added it to leads. Add it here.
 -- ---------------------------------------------------------------------
 alter table public.contacts add column if not exists mobile_phone text;
+alter table public.leads    add column if not exists lead_source text;
 
 -- ---------------------------------------------------------------------
 -- Helper: fiscal period label ('Q2-2026')
