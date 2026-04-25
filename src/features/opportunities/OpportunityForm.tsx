@@ -15,6 +15,25 @@ import {
   useRemoveOpportunityProduct,
 } from "./api";
 import { MultiProductPicker, type StagedOpportunityProduct } from "./MultiProductPicker";
+
+/**
+ * Default win probability per stage. Mirrors the SF probability ladder
+ * documented in docs/migration/salesforce-findings.md. Used to auto-fill
+ * the Probability field when the rep changes stage on a brand-new opp
+ * (or hasn't manually overridden it yet).
+ */
+const STAGE_PROBABILITY: Record<string, number> = {
+  lead: 10,
+  qualified: 25,
+  details_analysis: 40,
+  demo: 60,
+  proposal_and_price_quote: 75,
+  proposal: 75,
+  proposal_conversation: 90,
+  verbal_commit: 95,
+  closed_won: 100,
+  closed_lost: 0,
+};
 import { useAccountsList, useAccount, useUsers } from "@/features/accounts/api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
@@ -243,12 +262,18 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     if (acct.lead_source) {
       setValue("lead_source", acct.lead_source as OpportunityFormValues["lead_source"]);
     }
-    // Snapshot FTE from account for new opportunities
-    if (acct.fte_count != null) {
-      setValue("fte_count", acct.fte_count);
+    // Snapshot FTE from account for new opportunities. Imported accounts
+    // often have fte_count populated (from SF NumberOfEmployees) but
+    // fte_range null — derive the range from the count so the price-book
+    // auto-pick has something to match on.
+    const fteCount = acct.fte_count ?? acct.employees ?? null;
+    if (fteCount != null) {
+      setValue("fte_count", fteCount);
     }
-    if (acct.fte_range) {
-      setValue("fte_range", acct.fte_range as OpportunityFormValues["fte_range"]);
+    const fteRange =
+      acct.fte_range || (fteCount != null ? employeesToFteRange(fteCount) : null);
+    if (fteRange) {
+      setValue("fte_range", fteRange as OpportunityFormValues["fte_range"]);
     }
   }, [watchedAccountId, selectedAccount, isEditing, setValue]);
 
@@ -267,6 +292,32 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       setValue("amount", next, { shouldDirty: true });
     }
   }, [watchedSubtotal, watchedDiscount, setValue, watch]);
+
+  // ----- Auto-set probability from stage -----
+  // Whenever the stage changes, populate probability from the SF
+  // ladder UNLESS the user has explicitly set a value (we detect that
+  // by comparing — if the current probability matches the OLD stage's
+  // default, treat it as auto-managed and overwrite).
+  const watchedStage = watch("stage");
+  const watchedProbability = watch("probability");
+  const [probabilityUserOverridden, setProbabilityUserOverridden] = useState(
+    () => {
+      if (!isEditing || !opp) return false;
+      // If existing probability doesn't match the stage default, the user
+      // explicitly set it. Don't auto-overwrite on edit.
+      const stageDefault = STAGE_PROBABILITY[opp.stage as string];
+      return stageDefault !== undefined && opp.probability !== stageDefault;
+    },
+  );
+  useEffect(() => {
+    if (!watchedStage) return;
+    if (probabilityUserOverridden) return;
+    const next = STAGE_PROBABILITY[watchedStage as string];
+    if (next === undefined) return;
+    if (Number(watchedProbability) === next) return;
+    setValue("probability", next, { shouldDirty: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedStage, probabilityUserOverridden]);
 
   // ----- Auto-suggest opportunity name from staged product codes -----
   // Format: "Code1 | Code2 | Code3" — joined with spaces and pipes,
@@ -604,7 +655,18 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
 
                 <div className="space-y-2">
                   <Label htmlFor="probability">Probability (%)<RequiredIndicator fieldKey="probability" requiredFields={requiredKeys} /></Label>
-                  <Input id="probability" type="number" min={0} max={100} step={1} {...register("probability")} />
+                  <Input
+                    id="probability"
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    {...register("probability", {
+                      onChange: () => {
+                        if (!probabilityUserOverridden) setProbabilityUserOverridden(true);
+                      },
+                    })}
+                  />
                   {errors.probability && <p className="text-sm text-destructive">{errors.probability.message}</p>}
                 </div>
               </div>

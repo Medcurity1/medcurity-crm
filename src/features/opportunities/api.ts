@@ -285,6 +285,13 @@ export function useAddOpportunityProductsBulk() {
         .upsert(payload, { onConflict: "opportunity_id,product_id" })
         .select();
       if (error) throw error;
+
+      // Belt-and-suspenders: recompute opp totals client-side too. The
+      // DB trigger should handle this, but RLS / security-definer
+      // gotchas can swallow the trigger silently. Doing it from the
+      // client ensures the user sees correct totals immediately.
+      await recomputeOpportunityTotals(params.opportunity_id);
+
       return data;
     },
     onSuccess: (_data, vars) => {
@@ -292,6 +299,46 @@ export function useAddOpportunityProductsBulk() {
       qc.invalidateQueries({ queryKey: ["opportunity", vars.opportunity_id] });
     },
   });
+}
+
+/**
+ * Recompute opp.subtotal + opp.amount from the line items.
+ *   subtotal = sum(qty * unit_price * (1 - discount_percent/100))
+ *   amount   = subtotal * (1 - opp.discount/100)  (opp.discount is %)
+ */
+async function recomputeOpportunityTotals(opportunityId: string): Promise<void> {
+  const [linesRes, oppRes] = await Promise.all([
+    supabase
+      .from("opportunity_products")
+      .select("quantity, unit_price, discount_percent")
+      .eq("opportunity_id", opportunityId),
+    supabase
+      .from("opportunities")
+      .select("discount")
+      .eq("id", opportunityId)
+      .single(),
+  ]);
+  if (linesRes.error || oppRes.error) return;
+  const lines = (linesRes.data ?? []) as {
+    quantity: number;
+    unit_price: number | string;
+    discount_percent: number | string | null;
+  }[];
+  const subtotal = lines.reduce((s, l) => {
+    const qty = Number(l.quantity);
+    const up = Number(l.unit_price);
+    const disc = Number(l.discount_percent ?? 0);
+    return s + qty * up * (1 - disc / 100);
+  }, 0);
+  const oppDiscount = Math.max(0, Math.min(100, Number(oppRes.data?.discount ?? 0)));
+  const amount = subtotal * (1 - oppDiscount / 100);
+  await supabase
+    .from("opportunities")
+    .update({
+      subtotal: Math.round(subtotal * 100) / 100,
+      amount: Math.round(amount * 100) / 100,
+    })
+    .eq("id", opportunityId);
 }
 
 /** Update qty / price / discount on a single line. */
@@ -330,10 +377,13 @@ export function useRemoveOpportunityProduct() {
     mutationFn: async ({ id, opportunityId }: { id: string; opportunityId: string }) => {
       const { error } = await supabase.from("opportunity_products").delete().eq("id", id);
       if (error) throw error;
+      // Belt-and-suspenders: recompute totals client-side.
+      await recomputeOpportunityTotals(opportunityId);
       return opportunityId;
     },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["opportunity_products", vars.opportunityId] });
+      qc.invalidateQueries({ queryKey: ["opportunity", vars.opportunityId] });
     },
   });
 }

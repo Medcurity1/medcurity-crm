@@ -277,7 +277,7 @@ export function MultiProductPicker(props: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl max-h-[90vh] flex flex-col gap-0 p-0">
+      <DialogContent className="sm:max-w-4xl max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
         <DialogHeader className="px-6 pt-6 pb-2">
           <DialogTitle>Add Products</DialogTitle>
           <DialogDescription>
@@ -388,18 +388,18 @@ export function MultiProductPicker(props: Props) {
 
         {/* Picked staging table */}
         {picked.length > 0 && (
-          <div className="border-t bg-muted/20 px-6 py-3 max-h-64 overflow-auto">
+          <div className="border-t bg-muted/20 px-6 py-3 max-h-64 overflow-y-auto overflow-x-hidden">
             <p className="text-xs font-medium mb-2">
               {picked.length} product{picked.length === 1 ? "" : "s"} staged
             </p>
-            <table className="w-full text-xs">
+            <table className="w-full text-xs table-fixed">
               <thead className="text-muted-foreground">
                 <tr>
                   <th className="text-left pb-1">Product</th>
-                  <th className="text-right pb-1 w-16">Qty</th>
-                  <th className="text-right pb-1 w-24">Unit $</th>
-                  <th className="text-right pb-1 w-20">Disc %</th>
-                  <th className="text-right pb-1 w-28">Total</th>
+                  <th className="text-right pb-1 w-14">Qty</th>
+                  <th className="text-right pb-1 w-20">Unit $</th>
+                  <th className="text-right pb-1 w-16">Disc %</th>
+                  <th className="text-right pb-1 w-24">Total</th>
                 </tr>
               </thead>
               <tbody>
@@ -418,7 +418,7 @@ export function MultiProductPicker(props: Props) {
                         <Input
                           type="number"
                           min={1}
-                          className="h-7 text-xs text-right"
+                          className="h-7 text-xs text-right px-1"
                           value={String(row.quantity)}
                           onChange={(e) => {
                             const n = parseInt(e.target.value, 10);
@@ -432,7 +432,7 @@ export function MultiProductPicker(props: Props) {
                           type="number"
                           min={0}
                           step="0.01"
-                          className="h-7 text-xs text-right"
+                          className="h-7 text-xs text-right px-1"
                           value={String(row.unit_price)}
                           onChange={(e) => {
                             const n = parseFloat(e.target.value);
@@ -450,7 +450,7 @@ export function MultiProductPicker(props: Props) {
                           min={0}
                           max={100}
                           step="1"
-                          className="h-7 text-xs text-right"
+                          className="h-7 text-xs text-right px-1"
                           value={String(row.discount_percent)}
                           onChange={(e) => {
                             const n = parseFloat(e.target.value);
