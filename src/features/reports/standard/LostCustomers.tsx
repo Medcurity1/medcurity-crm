@@ -127,8 +127,15 @@ export function LostCustomers() {
           type: typeLabel(o.kind as string | null),
         };
       });
+      // The canonical CRM enum value for "churned" is 'former_customer'.
+      // 'inactive' was a legacy staging-only value; matching both for
+      // safety until any stragglers get backfilled.
       return inactiveOnly
-        ? mapped.filter((r) => r.account_status === "inactive")
+        ? mapped.filter(
+            (r) =>
+              r.account_status === "former_customer" ||
+              r.account_status === "inactive",
+          )
         : mapped;
     },
   });

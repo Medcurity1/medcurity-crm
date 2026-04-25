@@ -231,7 +231,7 @@ where o.archived_at is null
   and a.archived_at is null
   and o.stage = 'closed_lost'
   and o.kind = 'renewal'
-  and a.lifecycle_status = 'inactive'
+  and a.lifecycle_status = 'former_customer'
   and o.close_date between public.current_fiscal_quarter_start()
                        and public.current_fiscal_quarter_end();
 
@@ -535,7 +535,7 @@ churn as (
     coalesce(sum(a.churn_amount), 0) as churn_amount_qtd
   from public.accounts a
   where a.archived_at is null
-    and a.lifecycle_status = 'inactive'
+    and a.lifecycle_status = 'former_customer'
     and a.churn_date is not null
     and a.churn_date between public.current_fiscal_quarter_start()
                          and public.current_fiscal_quarter_end()
