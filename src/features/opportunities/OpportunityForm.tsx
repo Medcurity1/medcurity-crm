@@ -825,7 +825,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                   <PicklistSelect
                     id="contract_length_months"
                     fieldKey="opportunities.contract_length_months"
-                    value={watch("contract_length_months")}
+                    value={watch("contract_length_months") as number | null | undefined}
                     onChange={(v) =>
                       setValue(
                         "contract_length_months",
@@ -841,7 +841,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                   <PicklistSelect
                     id="contract_year"
                     fieldKey="opportunities.contract_year"
-                    value={watch("contract_year")}
+                    value={watch("contract_year") as number | null | undefined}
                     onChange={(v) =>
                       setValue(
                         "contract_year",
