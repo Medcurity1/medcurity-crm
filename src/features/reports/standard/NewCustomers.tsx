@@ -37,6 +37,7 @@ import { PreviewNote, PREVIEW_LIMIT } from "./PreviewNote";
 
 interface NewCustRow {
   id: string;
+  account_id: string | null;
   opportunity_owner: string;
   account_name: string;
   opportunity_name: string;
@@ -89,6 +90,7 @@ export function NewCustomers() {
 
       return opps.map((o) => ({
         id: o.id as string,
+        account_id: o.account_id as string | null,
         opportunity_owner:
           users.get(o.owner_user_id as string)?.full_name ?? "Unassigned",
         account_name: accounts.get(o.account_id as string)?.name ?? "",
@@ -210,8 +212,26 @@ export function NewCustomers() {
                 rows.slice(0, PREVIEW_LIMIT).map((r) => (
                   <TableRow key={r.id}>
                     <TableCell>{r.opportunity_owner}</TableCell>
-                    <TableCell className="font-medium">{r.account_name}</TableCell>
-                    <TableCell>{r.opportunity_name}</TableCell>
+                    <TableCell className="font-medium">
+                      {r.account_id ? (
+                        <Link
+                          to={`/accounts/${r.account_id}`}
+                          className="text-primary hover:underline"
+                        >
+                          {r.account_name}
+                        </Link>
+                      ) : (
+                        r.account_name
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Link
+                        to={`/opportunities/${r.id}`}
+                        className="text-primary hover:underline"
+                      >
+                        {r.opportunity_name}
+                      </Link>
+                    </TableCell>
                     <TableCell>{r.type}</TableCell>
                     <TableCell className="text-right">
                       {formatCurrency(Number(r.amount ?? 0))}

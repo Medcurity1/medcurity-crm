@@ -35,6 +35,7 @@ import { PreviewNote, PREVIEW_LIMIT } from "./PreviewNote";
 
 interface MqlContactRow {
   contact_id: string;
+  account_id: string | null;
   first_name: string;
   last_name: string;
   title: string;
@@ -96,6 +97,7 @@ export function MqlContacts() {
         const owner = a?.owner_user_id ? users.get(a.owner_user_id) : undefined;
         return {
           contact_id: c.id as string,
+          account_id: c.account_id as string | null,
           first_name: (c.first_name as string) ?? "",
           last_name: (c.last_name as string) ?? "",
           title: (c.title as string) ?? "",
@@ -220,10 +222,26 @@ export function MqlContacts() {
                 ) : (
                   rows.slice(0, PREVIEW_LIMIT).map((r) => (
                     <TableRow key={r.contact_id}>
-                      <TableCell>{r.first_name}</TableCell>
-                      <TableCell>{r.last_name}</TableCell>
+                      <TableCell>
+                        <Link to={`/contacts/${r.contact_id}`} className="text-primary hover:underline">
+                          {r.first_name}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        <Link to={`/contacts/${r.contact_id}`} className="text-primary hover:underline">
+                          {r.last_name}
+                        </Link>
+                      </TableCell>
                       <TableCell>{r.title}</TableCell>
-                      <TableCell>{r.account_name}</TableCell>
+                      <TableCell>
+                        {r.account_id ? (
+                          <Link to={`/accounts/${r.account_id}`} className="text-primary hover:underline">
+                            {r.account_name}
+                          </Link>
+                        ) : (
+                          r.account_name
+                        )}
+                      </TableCell>
                       <TableCell>{r.phone}</TableCell>
                       <TableCell>{r.mobile}</TableCell>
                       <TableCell>{r.email}</TableCell>

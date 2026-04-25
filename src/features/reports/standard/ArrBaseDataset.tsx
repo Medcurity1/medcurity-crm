@@ -51,6 +51,7 @@ import { PreviewNote, PREVIEW_LIMIT } from "./PreviewNote";
  */
 interface ArrRow {
   id: string;
+  account_id: string | null;
   account_name: string | null;
   account_number: string | null;
   opportunity_name: string | null;
@@ -159,6 +160,7 @@ export function ArrBaseDataset() {
               : (ls ?? "");
         return {
           id: o.id as string,
+          account_id: o.account_id as string | null,
           account_name: a?.name ?? null,
           account_number: a?.account_number ?? null,
           opportunity_name: (o.name as string) ?? null,
@@ -355,9 +357,21 @@ export function ArrBaseDataset() {
                 ) : (
                   rows.slice(0, PREVIEW_LIMIT).map((r) => (
                     <TableRow key={r.id}>
-                      <TableCell className="font-medium">{r.account_name ?? "—"}</TableCell>
+                      <TableCell className="font-medium">
+                        {r.account_id ? (
+                          <Link to={`/accounts/${r.account_id}`} className="text-primary hover:underline">
+                            {r.account_name ?? "—"}
+                          </Link>
+                        ) : (
+                          r.account_name ?? "—"
+                        )}
+                      </TableCell>
                       <TableCell>{r.account_number ?? ""}</TableCell>
-                      <TableCell>{r.opportunity_name ?? ""}</TableCell>
+                      <TableCell>
+                        <Link to={`/opportunities/${r.id}`} className="text-primary hover:underline">
+                          {r.opportunity_name ?? ""}
+                        </Link>
+                      </TableCell>
                       <TableCell>{r.opportunity_owner ?? ""}</TableCell>
                       <TableCell>{formatDate(r.created_date)}</TableCell>
                       <TableCell>{formatDate(r.close_date)}</TableCell>

@@ -47,6 +47,7 @@ import { PreviewNote, PREVIEW_LIMIT } from "./PreviewNote";
  */
 interface LostRow {
   id: string;
+  account_id: string | null;
   account_name: string;
   opportunity_name: string;
   stage: OpportunityStage | null;
@@ -107,10 +108,13 @@ export function LostCustomers() {
         const closeDate = o.close_date as string | null;
         return {
           id: o.id as string,
+          account_id: o.account_id as string | null,
           account_name: a?.name ?? "",
+          // Show the SF-aligned account.status (active/inactive/pending/discovery/churned)
+          // not the deprecated lifecycle_status (prospect/customer/former_customer)
           opportunity_name: (o.name as string) ?? "",
           stage: (o.stage as OpportunityStage | null) ?? ("closed_lost" as OpportunityStage),
-          account_status: a?.lifecycle_status ?? "",
+          account_status: a?.status ?? "",
           fiscal_period: fiscalPeriod(closeDate),
           amount: o.amount as number | null,
           probability: o.probability as number | null,
@@ -127,14 +131,14 @@ export function LostCustomers() {
           type: typeLabel(o.kind as string | null),
         };
       });
-      // The canonical CRM enum value for "churned" is 'former_customer'.
-      // 'inactive' was a legacy staging-only value; matching both for
-      // safety until any stragglers get backfilled.
+      // Match SF's "Lost Customers" report filter: account.status = Inactive.
+      // (We were previously matching the wrong field — lifecycle_status
+      // which uses prospect/customer/former_customer.)
       return inactiveOnly
         ? mapped.filter(
             (r) =>
-              r.account_status === "former_customer" ||
-              r.account_status === "inactive",
+              r.account_status === "inactive" ||
+              r.account_status === "churned",
           )
         : mapped;
     },
@@ -282,8 +286,20 @@ export function LostCustomers() {
                 ) : (
                   rows.slice(0, PREVIEW_LIMIT).map((r) => (
                     <TableRow key={r.id}>
-                      <TableCell className="font-medium">{r.account_name}</TableCell>
-                      <TableCell>{r.opportunity_name}</TableCell>
+                      <TableCell className="font-medium">
+                        {r.account_id ? (
+                          <Link to={`/accounts/${r.account_id}`} className="text-primary hover:underline">
+                            {r.account_name}
+                          </Link>
+                        ) : (
+                          r.account_name
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Link to={`/opportunities/${r.id}`} className="text-primary hover:underline">
+                          {r.opportunity_name}
+                        </Link>
+                      </TableCell>
                       <TableCell>{r.stage ? stageLabel(r.stage) : ""}</TableCell>
                       <TableCell>{r.account_status}</TableCell>
                       <TableCell>{r.fiscal_period}</TableCell>

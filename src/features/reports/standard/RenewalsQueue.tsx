@@ -40,6 +40,7 @@ import { PreviewNote, PREVIEW_LIMIT } from "./PreviewNote";
 
 interface RenewalRow {
   id: string;
+  account_id: string | null;
   owner_role: string;
   opportunity_owner: string;
   account_name: string;
@@ -108,6 +109,7 @@ export function RenewalsQueue() {
         const closeDate = o.close_date as string | null;
         return {
           id: o.id as string,
+          account_id: o.account_id as string | null,
           owner_role: ownerRoleLabel(owner?.role),
           opportunity_owner: owner?.full_name ?? "Unassigned",
           account_name: accounts.get(o.account_id as string)?.name ?? "",
@@ -266,8 +268,20 @@ export function RenewalsQueue() {
                     <TableRow key={r.id}>
                       <TableCell>{r.owner_role}</TableCell>
                       <TableCell>{r.opportunity_owner}</TableCell>
-                      <TableCell className="font-medium">{r.account_name}</TableCell>
-                      <TableCell>{r.opportunity_name}</TableCell>
+                      <TableCell className="font-medium">
+                        {r.account_id ? (
+                          <Link to={`/accounts/${r.account_id}`} className="text-primary hover:underline">
+                            {r.account_name}
+                          </Link>
+                        ) : (
+                          r.account_name
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Link to={`/opportunities/${r.id}`} className="text-primary hover:underline">
+                          {r.opportunity_name}
+                        </Link>
+                      </TableCell>
                       <TableCell>{r.stage ? stageLabel(r.stage) : ""}</TableCell>
                       <TableCell>{r.fiscal_period}</TableCell>
                       <TableCell className="text-right">

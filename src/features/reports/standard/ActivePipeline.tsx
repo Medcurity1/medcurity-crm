@@ -30,6 +30,7 @@ import { downloadCsv, todayStamp, csvCurrency } from "./report-helpers";
  */
 interface PipelineRow {
   id: string;
+  account_id: string | null;
   stage: OpportunityStage;
   type: string | null;
   opportunity_name: string | null;
@@ -94,6 +95,7 @@ export function ActivePipeline() {
                 ? "Existing Business"
                 : "",
           opportunity_name: (r.name as string) ?? "",
+          account_id: r.account_id as string | null,
           account_name: accounts.get(r.account_id as string)?.name ?? null,
           close_date: r.close_date as string | null,
           amount,
@@ -268,7 +270,15 @@ function TypeGroup({ type, list }: { type: string; list: PipelineRow[] }) {
                   {r.opportunity_name ?? "—"}
                 </Link>
               </TableCell>
-              <TableCell>{r.account_name ?? ""}</TableCell>
+              <TableCell>
+                {r.account_id ? (
+                  <Link to={`/accounts/${r.account_id}`} className="text-primary hover:underline">
+                    {r.account_name ?? ""}
+                  </Link>
+                ) : (
+                  r.account_name ?? ""
+                )}
+              </TableCell>
               <TableCell>{formatDate(r.close_date)}</TableCell>
               <TableCell className="text-right">
                 {formatCurrency(Number(r.amount ?? 0))}
