@@ -92,7 +92,7 @@ select
   a.account_type,
   (
     select ap2.name
-    from public.account_partnerships p
+    from public.account_partners p
     join public.accounts ap2 on ap2.id = p.partner_account_id
     where p.member_account_id = a.id
     order by p.created_at asc
