@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
 import { ChevronDown, ChevronRight, Search, Loader2 } from "lucide-react";
 import {
   useProducts,
@@ -28,6 +30,31 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { formatCurrencyDetailed, employeesToFteRange } from "@/lib/formatters";
+
+/** Fetch fresh FTE-relevant fields for an account when picker opens.
+ *  Used by the picker to avoid stale opp.account snapshots. */
+function useFreshAccount(accountId: string | null) {
+  return useQuery({
+    queryKey: ["picker-account-fte", accountId],
+    queryFn: async () => {
+      if (!accountId) return null;
+      const { data, error } = await supabase
+        .from("accounts")
+        .select("id, fte_range, fte_count, employees")
+        .eq("id", accountId)
+        .single();
+      if (error) throw error;
+      return data as {
+        id: string;
+        fte_range: string | null;
+        fte_count: number | null;
+        employees: number | null;
+      };
+    },
+    enabled: !!accountId,
+    staleTime: 30_000,
+  });
+}
 
 /** A row staged for an opp that doesn't exist yet (create form). */
 export interface StagedOpportunityProduct {
@@ -107,13 +134,28 @@ export function MultiProductPicker(props: Props) {
   // The third bucket matters for accounts imported from SF where only
   // the raw count came over (fte_range was a SF formula field that
   // didn't survive the import).
+  //
+  // For freshness on NEW opps that haven't snapshotted FTE yet, also
+  // re-fetch the account directly so we always have the latest FTE
+  // even if the opp record hasn't been refreshed in cache.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const oppAcct = opp?.account as any;
+  const accountIdForFresh = isStaged ? null : (opp?.account_id as string | undefined) ?? null;
+  const { data: freshAccount } = useFreshAccount(accountIdForFresh);
+
   const oppFteRange = isStaged
     ? props.fteRange ?? null
     : opp?.fte_range
       || oppAcct?.fte_range
-      || employeesToFteRange(opp?.fte_count ?? oppAcct?.fte_count ?? oppAcct?.employees ?? null)
+      || freshAccount?.fte_range
+      || employeesToFteRange(
+          opp?.fte_count
+            ?? oppAcct?.fte_count
+            ?? oppAcct?.employees
+            ?? freshAccount?.fte_count
+            ?? freshAccount?.employees
+            ?? null
+        )
       || null;
 
   const activePriceBooks = useMemo(
