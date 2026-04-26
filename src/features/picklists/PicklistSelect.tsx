@@ -25,11 +25,18 @@ interface PicklistSelectProps {
 
 /**
  * Renders a <Select> backed by the picklist_options table for the given
- * field_key. Drop-in replacement for hand-rolled <Select>s on every form
- * field that has admin-editable values.
+ * field_key.
  *
- * Stored values can be strings or numbers — we coerce both to string for
- * the select. The DB column type stays whatever it is.
+ * Legacy-value handling: if the record's stored value isn't in the
+ * current picklist (e.g. an SF-imported value like "Hospital & Health
+ * Care" that was deduped out of the canonical list), we still display
+ * it in the dropdown labeled "(legacy)" so:
+ *   1. The user sees what's currently saved (no blank field surprise)
+ *   2. They can intentionally pick a canonical value to migrate
+ *   3. Saving without changing keeps the legacy value untouched
+ *
+ * The legacy entry only appears for THIS record's value — it doesn't
+ * pollute the picklist for other records.
  */
 export function PicklistSelect({
   fieldKey,
@@ -45,6 +52,10 @@ export function PicklistSelect({
   const stringValue =
     value === null || value === undefined || value === "" ? "__none__" : String(value);
 
+  // Detect a legacy value: stored on the record but not in the picklist.
+  const isLegacy =
+    stringValue !== "__none__" && !options.some((o) => o.value === stringValue);
+
   return (
     <Select
       value={stringValue}
@@ -57,6 +68,11 @@ export function PicklistSelect({
       <SelectContent>
         {allowClear && (
           <SelectItem value="__none__">— None —</SelectItem>
+        )}
+        {isLegacy && (
+          <SelectItem value={stringValue}>
+            {stringValue} <span className="text-xs text-muted-foreground">(legacy)</span>
+          </SelectItem>
         )}
         {options.map((o) => (
           <SelectItem key={o.id} value={o.value}>
