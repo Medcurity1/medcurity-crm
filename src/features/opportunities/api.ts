@@ -333,6 +333,10 @@ async function recomputeOpportunityTotals(opportunityId: string): Promise<void> 
     unit_price: number | string;
     discount_percent: number | string | null;
   }[];
+  // Don't overwrite the imported amount when there are no line items.
+  // Many opps were imported with `amount` populated but NO product rows
+  // (line items are optional in SF). Zeroing them here destroys real data.
+  if (lines.length === 0) return;
   const subtotal = lines.reduce((s, l) => {
     const qty = Number(l.quantity);
     const up = Number(l.unit_price);
