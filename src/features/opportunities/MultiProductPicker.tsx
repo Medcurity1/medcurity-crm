@@ -164,6 +164,11 @@ export function MultiProductPicker(props: Props) {
   );
 
   // Auto-select the matching price book for the opp's FTE tier.
+  // Three-tier match (most-specific → most-permissive):
+  //   1. exact fte_range column match (e.g. "51-100" === "51-100")
+  //   2. price book name starts with the tier ("51-100 Price Book")
+  //   3. price book name CONTAINS the tier anywhere ("Medcurity 51-100 SKUs")
+  // If none match, fall back to default → first active.
   const autoSelectedPriceBookId = useMemo(() => {
     if (!activePriceBooks.length) return "";
     const norm = (s: string | null | undefined) =>
@@ -172,11 +177,17 @@ export function MultiProductPicker(props: Props) {
       const target = norm(oppFteRange);
       const colMatch = activePriceBooks.find((pb) => norm(pb.fte_range) === target);
       if (colMatch) return colMatch.id;
-      const nameMatch = activePriceBooks.find((pb) => {
+      const nameStartsMatch = activePriceBooks.find((pb) => {
         const t = norm(pb.name.split(/\s+/)[0]);
         return t === target;
       });
-      if (nameMatch) return nameMatch.id;
+      if (nameStartsMatch) return nameStartsMatch.id;
+      // Fuzzy contains-match on the name (handles "Medcurity 51-100 SKUs"
+      // or any variation that includes the tier somewhere)
+      const nameContainsMatch = activePriceBooks.find((pb) =>
+        norm(pb.name).includes(target),
+      );
+      if (nameContainsMatch) return nameContainsMatch.id;
     }
     const def = activePriceBooks.find((pb) => pb.is_default);
     return def?.id ?? activePriceBooks[0]?.id ?? "";
@@ -378,15 +389,23 @@ export function MultiProductPicker(props: Props) {
               </div>
             </div>
           </div>
-          {selectedPriceBook && oppFteRange && (
+          {selectedPriceBook && oppFteRange && selectedPriceBook.id === autoSelectedPriceBookId && !selectedPriceBook.is_default && (
             <p className="text-xs text-muted-foreground">
               Pricing from "{selectedPriceBook.name}" for FTE range:{" "}
               <span className="font-medium">{oppFteRange}</span>
             </p>
           )}
+          {oppFteRange && selectedPriceBook?.is_default && (
+            <p className="text-xs text-amber-600">
+              FTE range <span className="font-medium">{oppFteRange}</span> set,
+              but no matching price book found. Falling back to default. Check
+              that an active price book has fte_range or name matching the tier.
+            </p>
+          )}
           {!oppFteRange && (
             <p className="text-xs text-amber-600">
-              No FTE range on opportunity. Set one to enable tier-based pricing.
+              No FTE range on opportunity or account. Set FTE Count or FTE
+              Range to enable tier-based pricing.
             </p>
           )}
         </div>
