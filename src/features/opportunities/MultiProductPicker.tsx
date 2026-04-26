@@ -77,7 +77,14 @@ type Props = {
     }
   | {
       mode: "staged";
+      /** Best-effort FTE range from the form. May be null if the user
+       *  hasn't filled it in yet — picker will fall back to looking up
+       *  the account directly. */
       fteRange: string | null;
+      /** The account being created against. Lets the picker look up
+       *  fte_count / fte_range / employees directly, so a missing
+       *  FTE range on the form doesn't break price book auto-pick. */
+      accountId?: string | null;
       onStage: (rows: StagedOpportunityProduct[]) => void;
     }
 );
@@ -140,11 +147,22 @@ export function MultiProductPicker(props: Props) {
   // even if the opp record hasn't been refreshed in cache.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const oppAcct = opp?.account as any;
-  const accountIdForFresh = isStaged ? null : (opp?.account_id as string | undefined) ?? null;
+  const accountIdForFresh = isStaged
+    ? props.accountId ?? null
+    : (opp?.account_id as string | undefined) ?? null;
   const { data: freshAccount } = useFreshAccount(accountIdForFresh);
 
+  // Resolve FTE range. In STAGED mode (create form), prefer:
+  //   1. The FTE range the user typed in the form (props.fteRange)
+  //   2. The fresh account's fte_range
+  //   3. Derived from the fresh account's fte_count / employees
+  // In IMMEDIATE mode (existing opp), use the opp's own snapshot first
+  // (so closed deals price-book stays frozen), then fall back to account.
   const oppFteRange = isStaged
-    ? props.fteRange ?? null
+    ? props.fteRange
+      || freshAccount?.fte_range
+      || employeesToFteRange(freshAccount?.fte_count ?? freshAccount?.employees ?? null)
+      || null
     : opp?.fte_range
       || oppAcct?.fte_range
       || freshAccount?.fte_range

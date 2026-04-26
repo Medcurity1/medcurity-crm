@@ -1115,6 +1115,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           open={showAddProduct}
           onOpenChange={setShowAddProduct}
           fteRange={(watch("fte_range") as string | undefined) || null}
+          accountId={watchedAccountId || null}
           onStage={(rows) => setStagedProducts((prev) => [...prev, ...rows])}
         />
       )}
