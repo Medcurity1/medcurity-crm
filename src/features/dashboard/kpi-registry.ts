@@ -37,19 +37,24 @@ export interface KpiDefinition {
  * Pull a column from `opportunities` paginated past PostgREST's 1000-row
  * cap. Returns ALL matching rows. Used by KPI sums so totals don't
  * silently truncate when the result set exceeds 1000 records.
+ *
+ * Typed loosely (any) because Supabase's generic builder types are
+ * intentionally narrow and don't compose well with caller-supplied
+ * filter chains.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function fetchAllOppAmounts(
   supabase: SupabaseClient,
-  applyFilters: (q: ReturnType<typeof supabase.from>) => ReturnType<typeof supabase.from>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  applyFilters: (q: any) => any,
 ): Promise<number[]> {
   const all: number[] = [];
   let from = 0;
   const pageSize = 1000;
-  // Hard cap so a runaway loop can't melt
   while (all.length < 50_000) {
-    const { data, error } = await applyFilters(
-      supabase.from("opportunities").select("amount") as ReturnType<typeof supabase.from>,
-    ).range(from, from + pageSize - 1);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const base: any = supabase.from("opportunities").select("amount");
+    const { data, error } = await applyFilters(base).range(from, from + pageSize - 1);
     if (error) throw error;
     const rows = (data ?? []) as { amount: number | string | null }[];
     for (const r of rows) all.push(Number(r.amount ?? 0));
