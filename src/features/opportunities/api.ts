@@ -29,7 +29,16 @@ export function useOpportunities(filters?: OppFilters) {
       if (filters?.search) {
         query = query.ilike("name", `%${filters.search}%`);
       }
-      if (filters?.stage) query = query.eq("stage", filters.stage);
+      if (filters?.stage) {
+        // Meta-value 'open' = any stage that isn't closed_won / closed_lost.
+        // Lets dashboard cards link to /opportunities?stage=open without
+        // needing to know the full open-stage enum list.
+        if (filters.stage === "open") {
+          query = query.not("stage", "in", "(closed_won,closed_lost)");
+        } else {
+          query = query.eq("stage", filters.stage);
+        }
+      }
       if (filters?.team) query = query.eq("team", filters.team);
       if (filters?.kind) query = query.eq("kind", filters.kind);
       if (filters?.account_id) query = query.eq("account_id", filters.account_id);

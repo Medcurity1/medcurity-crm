@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -59,8 +60,11 @@ export function KpiCard({ kpi, userId }: { kpi: KpiDefinition; userId: string })
     );
   }
 
-  return (
-    <Card>
+  // Resolve link target — string or function returning a path.
+  const href = typeof kpi.link === "function" ? kpi.link(userId) : kpi.link;
+
+  const cardInner = (
+    <Card className={href ? "hover:shadow-md hover:border-primary/40 transition-all cursor-pointer" : ""}>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-sm text-muted-foreground font-medium">
           {kpi.label}
@@ -74,4 +78,6 @@ export function KpiCard({ kpi, userId }: { kpi: KpiDefinition; userId: string })
       </CardContent>
     </Card>
   );
+
+  return href ? <Link to={href}>{cardInner}</Link> : cardInner;
 }

@@ -28,6 +28,35 @@ export interface KpiDefinition {
   query: (supabase: SupabaseClient, userId: string) => Promise<string | number>;
   format: "number" | "currency" | "percent";
   requiredRole?: AppRole[];
+  /** Optional URL the KPI card links to. May be a function so the link
+   *  can include the current user's id (e.g. owner-filtered list views). */
+  link?: string | ((userId: string) => string);
+}
+
+/**
+ * Pull a column from `opportunities` paginated past PostgREST's 1000-row
+ * cap. Returns ALL matching rows. Used by KPI sums so totals don't
+ * silently truncate when the result set exceeds 1000 records.
+ */
+async function fetchAllOppAmounts(
+  supabase: SupabaseClient,
+  applyFilters: (q: ReturnType<typeof supabase.from>) => ReturnType<typeof supabase.from>,
+): Promise<number[]> {
+  const all: number[] = [];
+  let from = 0;
+  const pageSize = 1000;
+  // Hard cap so a runaway loop can't melt
+  while (all.length < 50_000) {
+    const { data, error } = await applyFilters(
+      supabase.from("opportunities").select("amount") as ReturnType<typeof supabase.from>,
+    ).range(from, from + pageSize - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as { amount: number | string | null }[];
+    for (const r of rows) all.push(Number(r.amount ?? 0));
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
 }
 
 // ---------------------------------------------------------------------------
@@ -56,14 +85,15 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "sales",
     icon: DollarSign,
     format: "currency",
+    link: () => "/opportunities?owner=mine&stage=open",
     query: async (supabase, userId) => {
-      const { data } = await supabase
-        .from("opportunities")
-        .select("amount")
-        .eq("owner_user_id", userId)
-        .not("stage", "in", '("closed_won","closed_lost")')
-        .is("archived_at", null);
-      return data?.reduce((sum, o) => sum + Number(o.amount), 0) ?? 0;
+      const amounts = await fetchAllOppAmounts(supabase, (q) =>
+        q
+          .eq("owner_user_id", userId)
+          .not("stage", "in", '("closed_won","closed_lost")')
+          .is("archived_at", null),
+      );
+      return amounts.reduce((s, n) => s + n, 0);
     },
   },
   {
@@ -72,6 +102,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "sales",
     icon: TrendingUp,
     format: "number",
+    link: () => "/opportunities?owner=mine&stage=open",
     query: async (supabase, userId) => {
       const { count } = await supabase
         .from("opportunities")
@@ -88,6 +119,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "sales",
     icon: Trophy,
     format: "number",
+    link: () => "/opportunities?owner=mine&stage=closed_won",
     query: async (supabase, userId) => {
       const quarterStart = getQuarterStart(new Date());
       const { count } = await supabase
@@ -106,6 +138,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "sales",
     icon: CalendarClock,
     format: "number",
+    link: () => "/opportunities?owner=mine&stage=open",
     query: async (supabase, userId) => {
       const now = new Date();
       const thirtyDaysOut = new Date(now);
@@ -177,6 +210,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "renewals",
     icon: RefreshCw,
     format: "number",
+    link: "/reports/standard/renewals?range=30",
     query: async (supabase) => {
       const { data } = await supabase
         .from("renewal_queue")
@@ -194,6 +228,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "renewals",
     icon: CalendarClock,
     format: "number",
+    link: "/reports/standard/renewals?range=60",
     query: async (supabase) => {
       const { data } = await supabase
         .from("renewal_queue")
@@ -211,6 +246,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "renewals",
     icon: AlertTriangle,
     format: "currency",
+    link: "/reports/standard/renewals",
     query: async (supabase) => {
       const { data } = await supabase
         .from("renewal_queue")
@@ -224,6 +260,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "renewals",
     icon: RefreshCw,
     format: "number",
+    link: () => "/opportunities?owner=mine&kind=renewal&stage=open",
     query: async (supabase, userId) => {
       const { count } = await supabase
         .from("opportunities")
@@ -244,13 +281,14 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     icon: DollarSign,
     format: "currency",
     requiredRole: ["admin"],
+    link: "/opportunities?stage=open",
     query: async (supabase) => {
-      const { data } = await supabase
-        .from("opportunities")
-        .select("amount")
-        .is("archived_at", null)
-        .not("stage", "in", '("closed_won","closed_lost")');
-      return data?.reduce((sum, o) => sum + Number(o.amount), 0) ?? 0;
+      const amounts = await fetchAllOppAmounts(supabase, (q) =>
+        q
+          .is("archived_at", null)
+          .not("stage", "in", '("closed_won","closed_lost")'),
+      );
+      return amounts.reduce((s, n) => s + n, 0);
     },
   },
   {
