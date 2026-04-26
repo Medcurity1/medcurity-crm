@@ -1,6 +1,23 @@
-import { useMemo, useState } from "react";
-import { Plus, Trash2, Pencil, Check, X } from "lucide-react";
+import { useMemo, useState, useEffect } from "react";
+import { Plus, Trash2, Pencil, Check, X, GripVertical } from "lucide-react";
 import { toast } from "sonner";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
   usePicklistOptions,
   useCreatePicklistOption,
@@ -20,82 +37,43 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
 /**
  * Friendly catalog of editable picklists. Each entry maps a stable
  * field_key to a human label + which entity / column it controls.
- * Adding a new admin-editable picklist is one line here PLUS a seed
- * row in the picklist_options migration.
  */
 const FIELDS: { key: string; label: string; entity: string; help?: string }[] = [
+  // Opportunity
   {
     key: "opportunities.contract_length_months",
     label: "Contract Length",
     entity: "Opportunity",
-    help: "Stored as months. Show 1 Year = 12, 2 Year = 24, 3 Year = 36.",
+    help: "Stored as months (12, 36). Display labels are admin-editable.",
   },
-  {
-    key: "opportunities.contract_year",
-    label: "Contract Year",
-    entity: "Opportunity",
-    help: "Year 1 / 2 / 3 within a multi-year contract.",
-  },
-  {
-    key: "opportunities.payment_frequency",
-    label: "Payment Frequency",
-    entity: "Opportunity",
-  },
-  {
-    key: "opportunities.lead_source",
-    label: "Lead Source",
-    entity: "Opportunity",
-  },
-  {
-    key: "leads.lead_source",
-    label: "Lead Source",
-    entity: "Lead",
-  },
-  {
-    key: "accounts.account_type",
-    label: "Account Type",
-    entity: "Account",
-    help: "Direct, Referral, Partner-Alliance, Self-Service, etc.",
-  },
-  {
-    key: "accounts.industry",
-    label: "Industry",
-    entity: "Account",
-  },
-  {
-    key: "accounts.renewal_type",
-    label: "Renewal Type",
-    entity: "Account",
-  },
-  // Contact picklists
-  { key: "contacts.credential",                 label: "Credential",          entity: "Contact" },
-  { key: "contacts.time_zone",                  label: "Time Zone",           entity: "Contact" },
-  { key: "contacts.type",                       label: "Contact Type",        entity: "Contact" },
-  { key: "contacts.business_relationship_tag",  label: "Relationship Tag",    entity: "Contact" },
-  { key: "contacts.lead_source",                label: "Lead Source",         entity: "Contact" },
-  // Lead picklists
-  { key: "leads.status",                        label: "Status",              entity: "Lead" },
-  { key: "leads.source",                        label: "Source",              entity: "Lead" },
-  { key: "leads.qualification",                 label: "Qualification",       entity: "Lead" },
-  { key: "leads.type",                          label: "Lead Type",           entity: "Lead" },
-  { key: "leads.project_segment",               label: "Lead Segment",        entity: "Lead" },
-  { key: "leads.industry_category",             label: "Industry",            entity: "Lead" },
-  { key: "leads.credential",                    label: "Credential",          entity: "Lead" },
-  { key: "leads.time_zone",                     label: "Time Zone",           entity: "Lead" },
-  { key: "leads.business_relationship_tag",     label: "Relationship Tag",    entity: "Lead" },
-  { key: "leads.rating",                        label: "Lead Rating",         entity: "Lead" },
+  { key: "opportunities.contract_year",     label: "Contract Year",     entity: "Opportunity" },
+  { key: "opportunities.payment_frequency", label: "Payment Frequency", entity: "Opportunity" },
+  { key: "opportunities.lead_source",       label: "Lead Source",       entity: "Opportunity" },
+  // Account
+  { key: "accounts.account_type",           label: "Account Type",      entity: "Account" },
+  { key: "accounts.industry",               label: "Industry",          entity: "Account" },
+  { key: "accounts.renewal_type",           label: "Renewal Type",      entity: "Account" },
+  // Contact
+  { key: "contacts.credential",             label: "Credential",        entity: "Contact" },
+  { key: "contacts.time_zone",              label: "Time Zone",         entity: "Contact" },
+  { key: "contacts.type",                   label: "Contact Type",      entity: "Contact" },
+  { key: "contacts.business_relationship_tag", label: "Relationship Tag", entity: "Contact" },
+  { key: "contacts.lead_source",            label: "Lead Source",       entity: "Contact" },
+  // Lead
+  { key: "leads.status",                    label: "Status",            entity: "Lead" },
+  { key: "leads.source",                    label: "Source",            entity: "Lead" },
+  { key: "leads.qualification",             label: "Qualification",     entity: "Lead" },
+  { key: "leads.type",                      label: "Lead Type",         entity: "Lead" },
+  { key: "leads.project_segment",           label: "Lead Segment",      entity: "Lead" },
+  { key: "leads.industry_category",         label: "Industry",          entity: "Lead" },
+  { key: "leads.credential",                label: "Credential",        entity: "Lead" },
+  { key: "leads.time_zone",                 label: "Time Zone",         entity: "Lead" },
+  { key: "leads.business_relationship_tag", label: "Relationship Tag",  entity: "Lead" },
+  { key: "leads.rating",                    label: "Lead Rating",       entity: "Lead" },
 ];
 
 export function PicklistsManager() {
@@ -108,21 +86,31 @@ export function PicklistsManager() {
   // Add-row state
   const [newValue, setNewValue] = useState("");
   const [newLabel, setNewLabel] = useState("");
-  const [newSort, setNewSort] = useState("100");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState("");
-  const [editSort, setEditSort] = useState("100");
 
-  const activeField = FIELDS.find((f) => f.key === activeKey);
-  const options = useMemo(
+  // Local copy of the row order so drag feels instant; synced from server
+  // whenever the server data changes (different field selected, mutations
+  // succeed, etc.)
+  const serverOptions = useMemo(
     () => (byField?.get(activeKey) ?? []).slice().sort((a, b) => a.sort_order - b.sort_order),
     [byField, activeKey],
   );
+  const [localOrder, setLocalOrder] = useState<PicklistOption[]>(serverOptions);
+  useEffect(() => {
+    setLocalOrder(serverOptions);
+  }, [serverOptions]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const activeField = FIELDS.find((f) => f.key === activeKey);
 
   function startEdit(o: PicklistOption) {
     setEditingId(o.id);
     setEditLabel(o.label);
-    setEditSort(String(o.sort_order));
   }
 
   function cancelEdit() {
@@ -133,10 +121,7 @@ export function PicklistsManager() {
     try {
       await update.mutateAsync({
         id,
-        patch: {
-          label: editLabel.trim(),
-          sort_order: Number(editSort) || 100,
-        },
+        patch: { label: editLabel.trim() },
       });
       toast.success("Saved");
       setEditingId(null);
@@ -162,15 +147,17 @@ export function PicklistsManager() {
       return;
     }
     try {
+      // Append at the bottom by giving the new row a sort_order higher
+      // than any existing row.
+      const maxSort = localOrder.reduce((m, o) => Math.max(m, o.sort_order), 0);
       await create.mutateAsync({
         field_key: activeKey,
         value: newValue.trim(),
         label: newLabel.trim(),
-        sort_order: Number(newSort) || 100,
+        sort_order: maxSort + 10,
       });
       setNewValue("");
       setNewLabel("");
-      setNewSort("100");
       toast.success("Added");
     } catch (err) {
       toast.error(`Add failed: ${(err as Error).message}`);
@@ -192,13 +179,42 @@ export function PicklistsManager() {
     }
   }
 
+  /** When the user drops a row, persist the new order. We renumber every
+   *  row in 10-step increments so future inserts have room without
+   *  reshuffling everyone. */
+  async function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = localOrder.findIndex((o) => o.id === active.id);
+    const newIndex = localOrder.findIndex((o) => o.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const next = arrayMove(localOrder, oldIndex, newIndex);
+    setLocalOrder(next); // optimistic
+
+    // Persist new sort_order for every row whose order changed.
+    const updates: Promise<unknown>[] = [];
+    next.forEach((row, i) => {
+      const newOrder = (i + 1) * 10;
+      if (row.sort_order !== newOrder) {
+        updates.push(
+          update.mutateAsync({ id: row.id, patch: { sort_order: newOrder } }),
+        );
+      }
+    });
+    try {
+      await Promise.all(updates);
+    } catch (err) {
+      toast.error(`Reorder failed: ${(err as Error).message}`);
+    }
+  }
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Picklists</CardTitle>
         <p className="text-sm text-muted-foreground">
-          Admin-editable dropdown values. Adding or hiding values takes effect immediately
-          across the whole CRM.
+          Admin-editable dropdown values. Drag rows to reorder, toggle active to
+          hide a value from new selections without breaking historical data.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -229,103 +245,44 @@ export function PicklistsManager() {
 
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : localOrder.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-6 text-center border rounded-lg">
+            No options yet — add the first one below.
+          </p>
         ) : (
-          <div className="border rounded-lg">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-32">Stored Value</TableHead>
-                  <TableHead>Display Label</TableHead>
-                  <TableHead className="w-24">Sort Order</TableHead>
-                  <TableHead className="w-24">Active</TableHead>
-                  <TableHead className="w-24" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {options.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center text-sm text-muted-foreground py-6">
-                      No options yet — add the first one below.
-                    </TableCell>
-                  </TableRow>
-                )}
-                {options.map((o) => (
-                  <TableRow key={o.id} className={o.is_active ? "" : "opacity-60"}>
-                    <TableCell className="font-mono text-xs">{o.value}</TableCell>
-                    <TableCell>
-                      {editingId === o.id ? (
-                        <Input
-                          value={editLabel}
-                          onChange={(e) => setEditLabel(e.target.value)}
-                          className="h-8"
-                        />
-                      ) : (
-                        o.label
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {editingId === o.id ? (
-                        <Input
-                          type="number"
-                          value={editSort}
-                          onChange={(e) => setEditSort(e.target.value)}
-                          className="h-8 w-20"
-                        />
-                      ) : (
-                        o.sort_order
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Switch
-                        checked={o.is_active}
-                        onCheckedChange={() => toggleActive(o)}
-                      />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {editingId === o.id ? (
-                        <div className="flex gap-1 justify-end">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => saveEdit(o.id)}
-                          >
-                            <Check className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={cancelEdit}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="flex gap-1 justify-end">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => startEdit(o)}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                            onClick={() => deleteOption(o)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      )}
-                    </TableCell>
-                  </TableRow>
+          <div className="border rounded-lg overflow-hidden">
+            <div className="grid grid-cols-[40px_140px_1fr_80px_80px] gap-3 px-4 py-2 bg-muted/40 text-xs font-semibold text-muted-foreground">
+              <div></div>
+              <div>Stored Value</div>
+              <div>Display Label</div>
+              <div>Active</div>
+              <div className="text-right">Actions</div>
+            </div>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={localOrder.map((o) => o.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                {localOrder.map((o) => (
+                  <SortableRow
+                    key={o.id}
+                    option={o}
+                    editing={editingId === o.id}
+                    editLabel={editLabel}
+                    setEditLabel={setEditLabel}
+                    onStartEdit={() => startEdit(o)}
+                    onCancelEdit={cancelEdit}
+                    onSaveEdit={() => saveEdit(o.id)}
+                    onToggleActive={() => toggleActive(o)}
+                    onDelete={() => deleteOption(o)}
+                  />
                 ))}
-              </TableBody>
-            </Table>
+              </SortableContext>
+            </DndContext>
           </div>
         )}
 
@@ -338,25 +295,16 @@ export function PicklistsManager() {
                 id="new-value"
                 value={newValue}
                 onChange={(e) => setNewValue(e.target.value)}
-                placeholder="e.g. 12"
+                placeholder="e.g. premium_partner"
               />
             </div>
-            <div className="col-span-5">
+            <div className="col-span-7">
               <Label htmlFor="new-label">Display Label</Label>
               <Input
                 id="new-label"
                 value={newLabel}
                 onChange={(e) => setNewLabel(e.target.value)}
-                placeholder="e.g. 1 Year"
-              />
-            </div>
-            <div className="col-span-2">
-              <Label htmlFor="new-sort">Sort Order</Label>
-              <Input
-                id="new-sort"
-                type="number"
-                value={newSort}
-                onChange={(e) => setNewSort(e.target.value)}
+                placeholder="e.g. Premium Partner"
               />
             </div>
             <div className="col-span-2">
@@ -369,5 +317,101 @@ export function PicklistsManager() {
         </Card>
       </CardContent>
     </Card>
+  );
+}
+
+interface SortableRowProps {
+  option: PicklistOption;
+  editing: boolean;
+  editLabel: string;
+  setEditLabel: (v: string) => void;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onSaveEdit: () => void;
+  onToggleActive: () => void;
+  onDelete: () => void;
+}
+
+function SortableRow({
+  option,
+  editing,
+  editLabel,
+  setEditLabel,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
+  onToggleActive,
+  onDelete,
+}: SortableRowProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: option.id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+    zIndex: isDragging ? 10 : "auto",
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`grid grid-cols-[40px_140px_1fr_80px_80px] gap-3 px-4 py-2 items-center border-t ${
+        option.is_active ? "" : "opacity-60"
+      } ${isDragging ? "bg-muted shadow-lg" : "hover:bg-muted/30"}`}
+    >
+      <button
+        type="button"
+        className="cursor-grab active:cursor-grabbing flex items-center justify-center text-muted-foreground hover:text-foreground"
+        {...attributes}
+        {...listeners}
+        aria-label="Drag to reorder"
+      >
+        <GripVertical className="h-4 w-4" />
+      </button>
+      <div className="font-mono text-xs truncate">{option.value}</div>
+      <div className="text-sm">
+        {editing ? (
+          <Input
+            value={editLabel}
+            onChange={(e) => setEditLabel(e.target.value)}
+            className="h-8"
+            autoFocus
+          />
+        ) : (
+          option.label
+        )}
+      </div>
+      <div>
+        <Switch checked={option.is_active} onCheckedChange={onToggleActive} />
+      </div>
+      <div className="flex gap-1 justify-end">
+        {editing ? (
+          <>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onSaveEdit}>
+              <Check className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onCancelEdit}>
+              <X className="h-4 w-4" />
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onStartEdit}>
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+              onClick={onDelete}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
