@@ -645,9 +645,14 @@ function UpcomingRenewalsWidget() {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center gap-2">
-        <GripVertical className="h-4 w-4 text-muted-foreground" />
-        <CardTitle className="text-base">Upcoming Renewals</CardTitle>
+      <CardHeader className="flex flex-row items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <GripVertical className="h-4 w-4 text-muted-foreground" />
+          <CardTitle className="text-base">Upcoming Renewals</CardTitle>
+        </div>
+        <Link to="/reports/standard/renewals" className="text-xs text-primary hover:underline">
+          View all →
+        </Link>
       </CardHeader>
       <CardContent>
         {isLoading ? (

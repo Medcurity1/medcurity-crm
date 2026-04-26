@@ -111,7 +111,7 @@ const REPORTS: ReportCard[] = [
       "Single-row scalar summary: ARR, New Customers QTD, NRR (legacy + true), pipeline, churn. Powers the Team Dashboard.",
     icon: FileBarChart,
     apiView: "v_dashboard_metrics",
-    status: "coming_soon",
+    status: "live",
   },
 ];
 

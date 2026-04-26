@@ -95,7 +95,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
       const amounts = await fetchAllOppAmounts(supabase, (q) =>
         q
           .eq("owner_user_id", userId)
-          .not("stage", "in", "(closed_won,closed_lost)")
+          .not("stage", "in", '("closed_won","closed_lost")')
           .is("archived_at", null),
       );
       return amounts.reduce((s, n) => s + n, 0);
@@ -113,7 +113,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
         .from("opportunities")
         .select("*", { count: "exact", head: true })
         .eq("owner_user_id", userId)
-        .not("stage", "in", "(closed_won,closed_lost)")
+        .not("stage", "in", '("closed_won","closed_lost")')
         .is("archived_at", null);
       return count ?? 0;
     },
@@ -152,7 +152,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
         .from("opportunities")
         .select("expected_close_date")
         .eq("owner_user_id", userId)
-        .not("stage", "in", "(closed_won,closed_lost)")
+        .not("stage", "in", '("closed_won","closed_lost")')
         .is("archived_at", null);
       return (
         data?.filter((o) => {
@@ -273,7 +273,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
         .eq("owner_user_id", userId)
         .eq("kind", "renewal")
         .is("archived_at", null)
-        .not("stage", "in", "(closed_won,closed_lost)");
+        .not("stage", "in", '("closed_won","closed_lost")');
       return count ?? 0;
     },
   },
@@ -291,7 +291,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
       const amounts = await fetchAllOppAmounts(supabase, (q) =>
         q
           .is("archived_at", null)
-          .not("stage", "in", "(closed_won,closed_lost)"),
+          .not("stage", "in", '("closed_won","closed_lost")'),
       );
       return amounts.reduce((s, n) => s + n, 0);
     },
