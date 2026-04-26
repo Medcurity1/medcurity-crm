@@ -216,6 +216,18 @@ export function PicklistsManager() {
           Admin-editable dropdown values. Drag rows to reorder, toggle active to
           hide a value from new selections without breaking historical data.
         </p>
+        <div className="rounded border bg-muted/30 p-3 mt-3 text-xs text-muted-foreground space-y-1">
+          <p>
+            <strong className="text-foreground">Stored Value</strong> — the raw
+            value saved to the database (e.g. <code>12</code> or <code>auto_renew</code>).
+            Don't change after rows have been created against it.
+          </p>
+          <p>
+            <strong className="text-foreground">Display Label</strong> — what
+            users see in the dropdown (e.g. "1 Year Contract" or "Auto Renew").
+            Safe to rename anytime.
+          </p>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex items-end gap-3">
