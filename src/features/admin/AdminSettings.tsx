@@ -19,6 +19,7 @@ import { Loader2 } from "lucide-react";
 
 const VALID_TABS = [
   "custom-fields",
+  "picklists",
   "users",
   "permissions",
   "required-fields",
