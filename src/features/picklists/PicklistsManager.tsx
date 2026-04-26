@@ -83,9 +83,14 @@ export function PicklistsManager() {
   const update = useUpdatePicklistOption();
   const remove = useDeletePicklistOption();
 
-  // Add-row state
-  const [newValue, setNewValue] = useState("");
+  // Add-row state. We only ask for a Display Label and auto-derive the
+  // Stored Value (slugified label, e.g. "Premium Partner" → "premium_partner").
+  // Users never need to think about the stored value — but admins can
+  // still expand an "Advanced" section to override if they need to match
+  // a specific value the backend expects.
   const [newLabel, setNewLabel] = useState("");
+  const [newValueOverride, setNewValueOverride] = useState("");
+  const [showValueOverride, setShowValueOverride] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState("");
 
@@ -141,23 +146,51 @@ export function PicklistsManager() {
     }
   }
 
+  /**
+   * Convert a human label into a slug suitable for the stored DB value.
+   *   "Premium Partner"          → "premium_partner"
+   *   "Trade Show / Conference"  → "trade_show_conference"
+   *   "MD"                        → "md"
+   * Lowercased, ASCII-only, non-alphanum runs collapsed to a single
+   * underscore, leading/trailing underscores trimmed.
+   */
+  function slugify(label: string): string {
+    return label
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "") // strip diacritics
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+  }
+
   async function addOption() {
-    if (!newValue.trim() || !newLabel.trim()) {
-      toast.error("Value and label required");
+    const label = newLabel.trim();
+    if (!label) {
+      toast.error("Display label required");
+      return;
+    }
+    // Use the override if provided, else derive from the label.
+    const value = (newValueOverride.trim() || slugify(label));
+    if (!value) {
+      toast.error("Could not derive a valid stored value from this label");
+      return;
+    }
+    // Reject if value already exists for this field.
+    if (localOrder.some((o) => o.value === value)) {
+      toast.error(`A value of "${value}" already exists for this picklist`);
       return;
     }
     try {
-      // Append at the bottom by giving the new row a sort_order higher
-      // than any existing row.
       const maxSort = localOrder.reduce((m, o) => Math.max(m, o.sort_order), 0);
       await create.mutateAsync({
         field_key: activeKey,
-        value: newValue.trim(),
-        label: newLabel.trim(),
+        value,
+        label,
         sort_order: maxSort + 10,
       });
-      setNewValue("");
       setNewLabel("");
+      setNewValueOverride("");
+      setShowValueOverride(false);
       toast.success("Added");
     } catch (err) {
       toast.error(`Add failed: ${(err as Error).message}`);
@@ -216,17 +249,11 @@ export function PicklistsManager() {
           Admin-editable dropdown values. Drag rows to reorder, toggle active to
           hide a value from new selections without breaking historical data.
         </p>
-        <div className="rounded border bg-muted/30 p-3 mt-3 text-xs text-muted-foreground space-y-1">
-          <p>
-            <strong className="text-foreground">Stored Value</strong> — the raw
-            value saved to the database (e.g. <code>12</code> or <code>auto_renew</code>).
-            Don't change after rows have been created against it.
-          </p>
-          <p>
-            <strong className="text-foreground">Display Label</strong> — what
-            users see in the dropdown (e.g. "1 Year Contract" or "Auto Renew").
-            Safe to rename anytime.
-          </p>
+        <div className="rounded border bg-muted/30 p-3 mt-3 text-xs text-muted-foreground">
+          Just type a Display Label when adding new options — the backend
+          stored value is auto-generated from it. The Stored Value column
+          shows what's saved to the database; you don't normally need to
+          touch it.
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -298,32 +325,52 @@ export function PicklistsManager() {
           </div>
         )}
 
-        {/* Add new option */}
+        {/* Add new option — label-only by default, with optional advanced override */}
         <Card className="border-dashed">
-          <CardContent className="pt-4 grid grid-cols-12 gap-3 items-end">
-            <div className="col-span-3">
-              <Label htmlFor="new-value">Stored Value</Label>
-              <Input
-                id="new-value"
-                value={newValue}
-                onChange={(e) => setNewValue(e.target.value)}
-                placeholder="e.g. premium_partner"
-              />
+          <CardContent className="pt-4 space-y-3">
+            <div className="grid grid-cols-12 gap-3 items-end">
+              <div className="col-span-10">
+                <Label htmlFor="new-label">Add new option</Label>
+                <Input
+                  id="new-label"
+                  value={newLabel}
+                  onChange={(e) => setNewLabel(e.target.value)}
+                  placeholder="e.g. Premium Partner"
+                />
+                {newLabel.trim() && !showValueOverride && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Will save as <code className="bg-muted px-1 py-0.5 rounded">{slugify(newLabel)}</code>
+                  </p>
+                )}
+              </div>
+              <div className="col-span-2">
+                <Button onClick={addOption} disabled={create.isPending || !newLabel.trim()} className="w-full">
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add
+                </Button>
+              </div>
             </div>
-            <div className="col-span-7">
-              <Label htmlFor="new-label">Display Label</Label>
-              <Input
-                id="new-label"
-                value={newLabel}
-                onChange={(e) => setNewLabel(e.target.value)}
-                placeholder="e.g. Premium Partner"
-              />
-            </div>
-            <div className="col-span-2">
-              <Button onClick={addOption} disabled={create.isPending} className="w-full">
-                <Plus className="h-4 w-4 mr-1" />
-                Add
-              </Button>
+
+            <div>
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:text-foreground underline"
+                onClick={() => setShowValueOverride((v) => !v)}
+              >
+                {showValueOverride ? "Hide advanced" : "Advanced: override stored value"}
+              </button>
+              {showValueOverride && (
+                <div className="mt-2">
+                  <Input
+                    placeholder={`Override (defaults to "${slugify(newLabel || "")}")`}
+                    value={newValueOverride}
+                    onChange={(e) => setNewValueOverride(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Only override if the backend expects a specific value (e.g. matching a DB enum). Most picklists don't need this.
+                  </p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
