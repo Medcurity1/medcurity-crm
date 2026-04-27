@@ -12,15 +12,12 @@ import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
 import { RecordId } from "@/components/RecordId";
-import { InlineEdit, type InlineEditProps } from "@/components/InlineEdit";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CollapsibleTabs } from "@/components/CollapsibleTabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatName, formatDateTime, leadSourceLabel } from "@/lib/formatters";
-import { StatusBadge } from "@/components/StatusBadge";
-import type { LeadSource } from "@/types/crm";
+import { formatName, formatDateTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { AccountOpportunities } from "@/features/accounts/AccountOpportunities";
@@ -28,6 +25,7 @@ import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
 import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
 import { TasksPanel } from "@/features/activities/TasksPanel";
 import { SequencesTab } from "@/features/sequences/SequencesTab";
+import { LayoutDrivenDetail } from "@/features/layouts/LayoutDrivenDetail";
 
 /* ---------- Collapsible section ---------- */
 
@@ -73,25 +71,6 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function EditableField({
-  label,
-  value,
-  onSave,
-  type,
-}: {
-  label: string;
-  value: unknown;
-  onSave: (newValue: string) => Promise<void>;
-  type?: InlineEditProps["type"];
-}) {
-  return (
-    <div className="flex flex-col">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <InlineEdit value={value as string | number | null} onSave={onSave} type={type} />
-    </div>
-  );
-}
-
 /* ---------- Main component ---------- */
 
 export function ContactDetail() {
@@ -129,9 +108,6 @@ export function ContactDetail() {
   }
 
   const contactId = contact.id;
-  const saveField = (field: string) => async (newValue: string) => {
-    await updateMutation.mutateAsync({ id: contactId, [field]: newValue === "" ? null : newValue } as Parameters<typeof updateMutation.mutateAsync>[0]);
-  };
 
   function handleArchive() {
     if (!id) return;
@@ -148,14 +124,6 @@ export function ContactDetail() {
       }
     );
   }
-
-  const hasMailingAddress = [
-    contact.mailing_street,
-    contact.mailing_city,
-    contact.mailing_state,
-    contact.mailing_zip,
-    contact.mailing_country,
-  ].some(Boolean);
 
   return (
     <div>
@@ -320,50 +288,42 @@ export function ContactDetail() {
         ]}
       />
 
-      {/* --------- Contact Details Section --------- */}
-      <CollapsibleSection title="Contact Details">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-          <Field label="Contact Number" value={contact.contact_number} />
-          <Field label="First Name" value={contact.first_name} />
-          <Field label="Last Name" value={contact.last_name} />
-          <EditableField label="Email" value={contact.email} onSave={saveField("email")} />
-          <EditableField label="Phone" value={contact.phone} onSave={saveField("phone")} />
-          <EditableField label="Title" value={contact.title} onSave={saveField("title")} />
-          <EditableField label="Department" value={contact.department} onSave={saveField("department")} />
-          <EditableField label="LinkedIn URL" value={contact.linkedin_url} onSave={saveField("linkedin_url")} />
-          <Field
-            label="Do Not Contact"
-            value={contact.do_not_contact ? "\u2713" : "\u2717"}
-          />
-          {contact.lead_source && (
-            <Field
-              label="Lead Source"
-              value={
-                <StatusBadge
-                  value={contact.lead_source}
-                  variant="leadSource"
-                  label={leadSourceLabel(contact.lead_source as LeadSource)}
-                />
-              }
-            />
-          )}
-          <Field label="MQL Date" value={contact.mql_date} />
-          <Field label="SQL Date" value={contact.sql_date} />
-        </div>
-      </CollapsibleSection>
+      {/* --------- Layout-driven sections (Contact Details, Mailing Address, ...) --------- */}
+      <LayoutDrivenDetail
+        entity="contacts"
+        record={contact as unknown as Record<string, unknown>}
+        onInlineSave={async (fieldKey, newValue) => {
+          await updateMutation.mutateAsync({
+            id: contactId,
+            [fieldKey]: newValue === "" ? null : newValue,
+          } as Parameters<typeof updateMutation.mutateAsync>[0]);
+        }}
+        inlineEditExcluded={[
+          "account_id",
+          "owner_user_id",
+          "first_name",
+          "last_name",
+          "contact_number",
+          "lead_source",
+          "mql_date",
+          "sql_date",
+          "do_not_contact",
+          "is_primary",
+          "credential",
+          "time_zone",
+          "type",
+          "business_relationship_tag",
+          "created_by",
+          "updated_by",
+          "created_at",
+          "updated_at",
+        ]}
+        inlineEditTypes={{
+          notes: "textarea",
+          next_steps: "textarea",
+        }}
+      />
 
-      {/* --------- Mailing Address --------- */}
-      {hasMailingAddress && (
-        <CollapsibleSection title="Mailing Address" defaultOpen={true}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-            <Field label="Street" value={contact.mailing_street} />
-            <Field label="City" value={contact.mailing_city} />
-            <Field label="State" value={contact.mailing_state} />
-            <Field label="Zip" value={contact.mailing_zip} />
-            <Field label="Country" value={contact.mailing_country} />
-          </div>
-        </CollapsibleSection>
-      )}
 
       {/* --------- Custom Fields --------- */}
       {customFieldDefs && customFieldDefs.length > 0 && contact.custom_fields && (

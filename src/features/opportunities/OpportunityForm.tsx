@@ -686,15 +686,15 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="amount">Amount ($) *<RequiredIndicator fieldKey="amount" requiredFields={requiredKeys} /></Label>
-                  <Input id="amount" type="number" step="0.01" disabled className="bg-muted" {...register("amount")} />
-                  <p className="text-xs text-muted-foreground">Total ARR — auto-calculated from line items (subtotal − discount).</p>
+                  <Input id="amount" type="number" step="0.01" {...register("amount")} />
+                  <p className="text-xs text-muted-foreground">Auto-calculated from line items (subtotal − discount). Editable for manual corrections.</p>
                   {errors.amount && <p className="text-sm text-destructive">{errors.amount.message}</p>}
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="subtotal">Subtotal ($)</Label>
-                  <Input id="subtotal" type="number" step="0.01" disabled className="bg-muted" {...register("subtotal")} />
-                  <p className="text-xs text-muted-foreground">Sum of all product line items before discount.</p>
+                  <Input id="subtotal" type="number" step="0.01" {...register("subtotal")} />
+                  <p className="text-xs text-muted-foreground">Sum of product line items before discount. Editable for manual corrections.</p>
                 </div>
 
                 <div className="space-y-2">

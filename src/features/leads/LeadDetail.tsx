@@ -13,7 +13,6 @@ import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
 import { RecordId } from "@/components/RecordId";
-import { InlineEdit, type InlineEditProps } from "@/components/InlineEdit";
 import { formatPhone } from "@/components/PhoneInput";
 import { ConvertLeadDialog } from "./ConvertLeadDialog";
 import { Button } from "@/components/ui/button";
@@ -26,7 +25,6 @@ import {
   qualificationLabel,
   formatDate,
   formatDateTime,
-  industryCategoryLabel,
 } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -35,6 +33,7 @@ import { TasksPanel } from "@/features/activities/TasksPanel";
 import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
 import { SequencesTab } from "@/features/sequences/SequencesTab";
 import type { LeadSource, LeadQualification } from "@/types/crm";
+import { LayoutDrivenDetail } from "@/features/layouts/LayoutDrivenDetail";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -86,25 +85,6 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function EditableField({
-  label,
-  value,
-  onSave,
-  type,
-}: {
-  label: string;
-  value: unknown;
-  onSave: (newValue: string) => Promise<void>;
-  type?: InlineEditProps["type"];
-}) {
-  return (
-    <div className="flex flex-col">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <InlineEdit value={value as string | number | null} onSave={onSave} type={type} />
-    </div>
-  );
-}
-
 /* ---------- Main component ---------- */
 
 export function LeadDetail() {
@@ -142,11 +122,6 @@ export function LeadDetail() {
     return <div className="text-muted-foreground">Lead not found.</div>;
   }
 
-  const leadId = lead.id;
-  const saveField = (field: string) => async (newValue: string) => {
-    await updateMutation.mutateAsync({ id: leadId, [field]: newValue === "" ? null : newValue } as Parameters<typeof updateMutation.mutateAsync>[0]);
-  };
-
   function handleArchive() {
     if (!id) return;
     archiveMutation.mutate(
@@ -164,7 +139,6 @@ export function LeadDetail() {
   }
 
   const isConverted = lead.status === "converted";
-  const hasAddress = [lead.street, lead.city, lead.state, lead.zip, lead.country].some(Boolean);
 
   return (
     <div>
@@ -406,102 +380,65 @@ export function LeadDetail() {
           Website is bumped to the top per Summer 2026-04-19. Do Not
           Contact + Do Not Market are side-by-side with clear yes/no
           indicators. */}
-      <CollapsibleSection title="Lead Details">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-          <EditableField label="Website" value={lead.website} onSave={saveField("website")} />
-          <EditableField label="LinkedIn" value={lead.linkedin_url} onSave={saveField("linkedin_url")} />
-          <Field label="First Name" value={lead.first_name} />
-          <Field label="Last Name" value={lead.last_name} />
-          <EditableField label="Email" value={lead.email} onSave={saveField("email")} />
-          <EditableField label="Phone" value={lead.phone} onSave={saveField("phone")} />
-          <EditableField label="Mobile / Direct" value={lead.mobile_phone} onSave={saveField("mobile_phone")} />
-          <EditableField label="Title" value={lead.title} onSave={saveField("title")} />
-          <Field label="Company" value={lead.company} />
-          {/* industry_category (enum) is the source of truth; lead.industry
-              (free text) is legacy and only surfaces if the enum is null
-              — matches the pattern on AccountDetail. */}
-          <Field
-            label="Industry"
-            value={
-              lead.industry_category
-                ? industryCategoryLabel(lead.industry_category)
-                : lead.industry ?? null
-            }
-          />
-          <Field
-            label="Time Zone"
-            value={
-              lead.time_zone
-                ? lead.time_zone.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
-                : null
-            }
-          />
-          <Field label="Credential" value={lead.credential ?? null} />
-          <Field
-            label="Rating"
-            value={
-              lead.rating
-                ? lead.rating === "hot"
-                  ? "🔥 Hot"
-                  : lead.rating === "warm"
-                  ? "Warm"
-                  : "❄️ Cold"
-                : null
-            }
-          />
-          <Field label="Lead Source" value={lead.source ? leadSourceLabel(lead.source) : null} />
-          <Field label="Source Detail" value={lead.lead_source_detail ?? null} />
-          <Field label="Lead Type" value={lead.type ?? null} />
-          <Field label="Segment" value={lead.project_segment ?? null} />
-          <Field label="Relationship Tag" value={lead.business_relationship_tag ?? null} />
-          <Field
-            label="Priority"
-            value={lead.priority_lead ? "\ud83c\udfaf Priority" : null}
-          />
-          <Field
-            label="Cold Lead"
-            value={lead.cold_lead ? "❄️ Yes" : null}
-          />
-          <Field label="MQL Date" value={lead.mql_date ? formatDate(lead.mql_date) : null} />
-          <Field
-            label="Do Not Market To"
-            value={lead.do_not_market_to ? "✓ Yes" : "No"}
-          />
-          <Field
-            label="Do Not Contact"
-            value={lead.do_not_contact ? "🚫 Yes" : "No"}
-          />
-          {lead.description && (
-            <div className="md:col-span-2">
-              <Field label="Description" value={lead.description} />
-            </div>
-          )}
-        </div>
-      </CollapsibleSection>
+      {/* --------- Layout-driven sections (Lead Details, Company Info, Address, Marketing & Pardot, Conversion Info) --------- */}
+      <LayoutDrivenDetail
+        entity="leads"
+        record={lead as unknown as Record<string, unknown>}
+        onInlineSave={async (fieldKey, newValue) => {
+          await updateMutation.mutateAsync({
+            id: lead.id,
+            [fieldKey]: newValue === "" ? null : newValue,
+          } as Parameters<typeof updateMutation.mutateAsync>[0]);
+        }}
+        inlineEditExcluded={[
+          "first_name",
+          "last_name",
+          "owner_user_id",
+          "industry_category",
+          "rating",
+          "source",
+          "type",
+          "project_segment",
+          "business_relationship_tag",
+          "credential",
+          "time_zone",
+          "status",
+          "qualification",
+          "mql_date",
+          "do_not_market_to",
+          "do_not_contact",
+          "priority_lead",
+          "cold_lead",
+          "score",
+          "first_activity_date",
+          "pardot_last_activity_date",
+          "conversion_date",
+          "pardot_campaign",
+          "pardot_grade",
+          "pardot_score",
+          "pardot_url",
+          "utm_source",
+          "utm_medium",
+          "utm_campaign",
+          "utm_content",
+          "utm_term",
+          "pardot_comments",
+          "converted_at",
+          "converted_account_id",
+          "converted_contact_id",
+          "converted_opportunity_id",
+          "created_by",
+          "updated_by",
+          "created_at",
+          "updated_at",
+        ]}
+        inlineEditTypes={{
+          description: "textarea",
+          employees: "number",
+          annual_revenue: "currency",
+        }}
+      />
 
-      {/* --------- Company Info Section --------- */}
-      <CollapsibleSection title="Company Info">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-          <EditableField label="Company" value={lead.company} onSave={saveField("company")} />
-          <Field
-            label="Employees"
-            value={lead.employees != null ? lead.employees.toLocaleString() : null}
-          />
-        </div>
-      </CollapsibleSection>
-
-      {/* --------- Address --------- */}
-      {hasAddress && (
-        <CollapsibleSection title="Address" defaultOpen={true}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-            <Field label="Street" value={lead.street} />
-            <Field label="City" value={lead.city} />
-            <Field label="State" value={lead.state} />
-            <Field label="Zip" value={lead.zip} />
-            <Field label="Country" value={lead.country} />
-          </div>
-        </CollapsibleSection>
-      )}
 
       {/* --------- Custom Fields --------- */}
       {customFieldDefs && customFieldDefs.length > 0 && lead.custom_fields && (
