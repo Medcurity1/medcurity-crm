@@ -396,7 +396,10 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       lead_source: values.lead_source ?? null,
       lead_source_detail: emptyToNull(values.lead_source_detail),
       payment_frequency: values.payment_frequency ?? null,
-      cycle_count: values.cycle_count ?? null,
+      // DB constraint: cycle_count must be NULL or > 0. Coerce 0/empty
+      // to null so old opps with no cycle_count can still be edited
+      // without tripping opportunities_cycle_count_check.
+      cycle_count: Number(values.cycle_count) > 0 ? Number(values.cycle_count) : null,
       auto_renewal: values.auto_renewal ?? false,
       description: emptyToNull(values.description),
       promo_code: emptyToNull(values.promo_code),
