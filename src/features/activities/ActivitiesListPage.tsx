@@ -41,6 +41,17 @@ const PAGE_SIZE = 25;
 
 type ListActivity = Activity & {
   owner: { id: string; full_name: string | null } | null;
+  // Embedded names for the "Related" column. Falls back to the
+  // generic entity label when the embed isn't loaded (shouldn't
+  // happen with the select below, but defensive).
+  account: { id: string; name: string } | null;
+  contact: { id: string; first_name: string | null; last_name: string | null } | null;
+  opportunity: {
+    id: string;
+    name: string;
+    account: { id: string; name: string } | null;
+  } | null;
+  lead: { id: string; first_name: string | null; last_name: string | null; company: string | null } | null;
 };
 
 const ACTIVITY_ICONS: Record<ActivityType, typeof Phone> = {
@@ -72,9 +83,19 @@ function useActivitiesList(filters: ListFilters) {
     queryFn: async () => {
       let query = supabase
         .from("activities")
-        .select("*, owner:user_profiles!owner_user_id(id, full_name)", {
-          count: "exact",
-        })
+        .select(
+          // Embed each related record so the Related column can show
+          // the actual name (not just the entity type). Opportunities
+          // also bring along their account so we can show "Opp · Account"
+          // for sales-context tasks.
+          "*, " +
+            "owner:user_profiles!owner_user_id(id, full_name), " +
+            "account:accounts!account_id(id, name), " +
+            "contact:contacts!contact_id(id, first_name, last_name), " +
+            "opportunity:opportunities!opportunity_id(id, name, account:accounts!account_id(id, name)), " +
+            "lead:leads!lead_id(id, first_name, last_name, company)",
+          { count: "exact" }
+        )
         .order("created_at", { ascending: false });
 
       if (filters.search) {
@@ -114,22 +135,47 @@ function useActivitiesList(filters: ListFilters) {
 
       const { data, error, count } = await query;
       if (error) throw error;
-      return { data: (data ?? []) as ListActivity[], count: count ?? 0 };
+      return { data: ((data ?? []) as unknown) as ListActivity[], count: count ?? 0 };
     },
   });
 }
 
 function getRecordLink(
   a: ListActivity
-): { to: string; label: string } | null {
+): { to: string; label: string; sublabel?: string } | null {
+  // Order matters: opp is most specific (it carries an account too),
+  // then contact, then account, then lead.
   if (a.opportunity_id) {
-    return { to: `/opportunities/${a.opportunity_id}`, label: "Opportunity" };
+    const oppName = a.opportunity?.name ?? "Opportunity";
+    const acctName = a.opportunity?.account?.name;
+    return {
+      to: `/opportunities/${a.opportunity_id}`,
+      label: oppName,
+      sublabel: acctName ? `Account: ${acctName}` : undefined,
+    };
   }
   if (a.contact_id) {
-    return { to: `/contacts/${a.contact_id}`, label: "Contact" };
+    const fn = a.contact?.first_name ?? "";
+    const ln = a.contact?.last_name ?? "";
+    const name = `${fn} ${ln}`.trim() || "Contact";
+    return { to: `/contacts/${a.contact_id}`, label: name };
   }
   if (a.account_id) {
-    return { to: `/accounts/${a.account_id}`, label: "Account" };
+    return {
+      to: `/accounts/${a.account_id}`,
+      label: a.account?.name ?? "Account",
+    };
+  }
+  if (a.lead_id) {
+    const fn = a.lead?.first_name ?? "";
+    const ln = a.lead?.last_name ?? "";
+    const personName = `${fn} ${ln}`.trim();
+    const label = personName || a.lead?.company || "Lead";
+    return {
+      to: `/leads/${a.lead_id}`,
+      label,
+      sublabel: personName && a.lead?.company ? a.lead.company : undefined,
+    };
   }
   return null;
 }
@@ -326,12 +372,19 @@ export function ActivitiesListPage() {
                       </TableCell>
                       <TableCell>
                         {link ? (
-                          <Link
-                            to={link.to}
-                            className="text-primary hover:underline text-sm"
-                          >
-                            {link.label}
-                          </Link>
+                          <div className="flex flex-col">
+                            <Link
+                              to={link.to}
+                              className="text-primary hover:underline text-sm truncate max-w-xs"
+                            >
+                              {link.label}
+                            </Link>
+                            {link.sublabel && (
+                              <span className="text-[11px] text-muted-foreground truncate max-w-xs">
+                                {link.sublabel}
+                              </span>
+                            )}
+                          </div>
                         ) : (
                           <span className="text-muted-foreground">
                             &mdash;

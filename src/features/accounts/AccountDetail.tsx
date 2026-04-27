@@ -32,6 +32,7 @@ import {
   formatDateTime,
   formatCurrency,
   industryCategoryLabel,
+  employeesToFteRange,
 } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -396,10 +397,29 @@ export function AccountDetail() {
           const parser = numberFields.has(fieldKey)
             ? (v: string) => (v === "" ? null : Number(v))
             : (v: string) => (v === "" ? null : v);
-          await updateMutation.mutateAsync({
+          const value = parser(newValue);
+          // Build the patch dict so we can attach an auto-derived
+          // fte_range when the user updates `employees` inline.
+          // Mirrors the form behavior: edit Employees → FTE Range
+          // updates automatically, no separate save.
+          const patch: Record<string, unknown> = {
             id: accountId,
-            [fieldKey]: parser(newValue),
-          } as Parameters<typeof updateMutation.mutateAsync>[0]);
+            [fieldKey]: value,
+          };
+          if (fieldKey === "employees") {
+            const n = typeof value === "number" ? value : Number(value);
+            const derived = Number.isFinite(n) ? employeesToFteRange(n) : "";
+            if (derived) {
+              patch.fte_range = derived;
+              // Also keep fte_count in sync since it's the same number
+              // post-import (per Brayden's feedback that they're
+              // effectively duplicates today).
+              patch.fte_count = n;
+            }
+          }
+          await updateMutation.mutateAsync(
+            patch as Parameters<typeof updateMutation.mutateAsync>[0]
+          );
         }}
         inlineEditExcluded={[
           // FK / lookup fields
@@ -419,6 +439,13 @@ export function AccountDetail() {
           "churn_amount",
           "churn_date",
           "lead_source",
+          // FTE Range is auto-derived from `employees` — locking
+          // inline edit avoids users typing "small" / "10ish" /
+          // anything outside the bucket enum that breaks downstream.
+          // Same for FTE Count — it's a duplicate of employees today,
+          // and users should edit `employees` (the canonical input).
+          "fte_range",
+          "fte_count",
           // SF-imported audit
           "sf_created_by",
           "sf_created_date",

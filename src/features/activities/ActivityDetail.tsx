@@ -14,8 +14,13 @@ import {
   Reply,
   ChevronDown,
   ChevronRight,
+  Trash2,
 } from "lucide-react";
+import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useArchiveActivity } from "./api";
+import { errorMessage } from "@/lib/errors";
 import type { Activity } from "@/types/crm";
 
 // Extended shape with joined related records — used only in this
@@ -47,6 +52,8 @@ export function ActivityDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [editOpen, setEditOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const archiveMutation = useArchiveActivity();
 
   const { data: activity, isLoading } = useQuery({
     queryKey: ["activities", id],
@@ -107,10 +114,21 @@ export function ActivityDetail() {
         title={activity.subject}
         description={activityLabel(activity.activity_type)}
         actions={
-          <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
-            <Pencil className="h-4 w-4 mr-1" />
-            Edit
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+              <Pencil className="h-4 w-4 mr-1" />
+              Edit
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setConfirmDelete(true)}
+              className="text-destructive hover:text-destructive"
+            >
+              <Trash2 className="h-4 w-4 mr-1" />
+              Delete
+            </Button>
+          </div>
         }
       />
 
@@ -246,6 +264,28 @@ export function ActivityDetail() {
           activity={activity}
         />
       )}
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={`Delete this ${activityLabel(activity.activity_type).toLowerCase()}?`}
+        description="This will hide it from active views. An admin can restore it from the Archive Manager later."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => {
+          archiveMutation.mutate(
+            { id: activity.id },
+            {
+              onSuccess: () => {
+                toast.success(`${activityLabel(activity.activity_type)} deleted`);
+                navigate(-1);
+              },
+              onError: (err) =>
+                toast.error("Failed to delete: " + errorMessage(err)),
+            }
+          );
+        }}
+      />
     </div>
   );
 }

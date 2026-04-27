@@ -52,7 +52,10 @@ export const opportunitySchema = z.object({
   auto_renewal: z.boolean().optional(),
   description: z.string().optional().or(z.literal("")),
   promo_code: z.string().optional().or(z.literal("")),
-  discount: z.coerce.number().min(0).optional().nullable(),
+  // Discount is a PERCENT (0–100) — matches the DB trigger's
+  // recalc_opportunity_amount which computes:
+  //   amount = subtotal * (1 - discount/100)
+  discount: z.coerce.number().min(0).max(100).optional().nullable(),
   subtotal: z.coerce.number().min(0).optional().nullable(),
   follow_up: z.boolean().optional(),
   service_amount: z.coerce.number().min(0).optional().nullable(),

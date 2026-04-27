@@ -99,6 +99,37 @@ export function useCompleteActivity() {
 }
 
 /**
+ * Soft-delete (archive) an activity. Mirrors the archive-vs-hard-delete
+ * pattern used across the app: the row stays in the DB for audit, just
+ * gets archived_at stamped so it's hidden from default queries. Admins
+ * can restore via Archive Manager.
+ */
+export function useArchiveActivity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason?: string }) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data, error } = await supabase
+        .from("activities")
+        .update({
+          archived_at: new Date().toISOString(),
+          archived_by: user?.id ?? null,
+          archive_reason: reason ?? "Deleted by user",
+        })
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["activities"] });
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+    },
+  });
+}
+
+/**
  * Re-attribute an activity to a different opportunity (or detach it to
  * account-only). Brayden's SRA/NVA case: an email auto-landed on the
  * wrong opp, user wants one-click move. Also handles un-linking.

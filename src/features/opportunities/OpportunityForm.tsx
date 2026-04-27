@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -278,21 +278,45 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     }
   }, [watchedAccountId, selectedAccount, isEditing, setValue]);
 
-  // Keep Amount = Subtotal − Discount so reps immediately see the impact
-  // of a discount on the deal total. Server-side we also recompute this
-  // whenever line items change, but recalculating here keeps the form
-  // feedback tight.
+  // Keep Amount = Subtotal × (1 − Discount/100) so reps see the impact
+  // of a discount on the deal total in real time. Discount is a PERCENT
+  // (0–100), matching the DB trigger recalc_opportunity_amount.
+  //
+  // We track which field the user last edited to avoid a feedback loop
+  // when they manually change Amount (which then back-solves Subtotal):
+  //   - Edit Subtotal or Discount → Amount auto-updates
+  //   - Edit Amount → Subtotal back-solves to amount / (1 − disc/100)
   const watchedSubtotal = watch("subtotal");
   const watchedDiscount = watch("discount");
+  const watchedAmount = watch("amount");
+  const lastEditedRef = useRef<"subtotal" | "discount" | "amount" | null>(null);
+
   useEffect(() => {
+    if (lastEditedRef.current === "amount") return; // skip — handled below
     const sub = Number(watchedSubtotal) || 0;
-    const disc = Number(watchedDiscount) || 0;
-    const next = Math.max(0, sub - disc);
-    // Only set if it actually changed (prevents dirty-form toggling).
-    if (next !== Number(watch("amount"))) {
+    const discPct = Math.max(0, Math.min(100, Number(watchedDiscount) || 0));
+    const next = Math.round(sub * (1 - discPct / 100) * 100) / 100;
+    if (next !== Number(watchedAmount)) {
       setValue("amount", next, { shouldDirty: true });
     }
-  }, [watchedSubtotal, watchedDiscount, setValue, watch]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedSubtotal, watchedDiscount]);
+
+  useEffect(() => {
+    if (lastEditedRef.current !== "amount") return;
+    // User typed in Amount directly → back-solve Subtotal.
+    const amt = Number(watchedAmount) || 0;
+    const discPct = Math.max(0, Math.min(99.99, Number(watchedDiscount) || 0));
+    const factor = 1 - discPct / 100;
+    if (factor <= 0) return;
+    const nextSub = Math.round((amt / factor) * 100) / 100;
+    if (nextSub !== Number(watchedSubtotal)) {
+      setValue("subtotal", nextSub, { shouldDirty: true });
+    }
+    // Reset the flag so the next subtotal/discount edit re-triggers.
+    lastEditedRef.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedAmount]);
 
   // ----- Auto-set probability from stage -----
   // Whenever the stage changes, populate probability from the SF
@@ -688,22 +712,49 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="amount">Amount ($) *<RequiredIndicator fieldKey="amount" requiredFields={requiredKeys} /></Label>
-                  <Input id="amount" type="number" step="0.01" {...register("amount")} />
-                  <p className="text-xs text-muted-foreground">Auto-calculated from line items (subtotal − discount). Editable for manual corrections.</p>
-                  {errors.amount && <p className="text-sm text-destructive">{errors.amount.message}</p>}
-                </div>
-
-                <div className="space-y-2">
                   <Label htmlFor="subtotal">Subtotal ($)</Label>
-                  <Input id="subtotal" type="number" step="0.01" {...register("subtotal")} />
-                  <p className="text-xs text-muted-foreground">Sum of product line items before discount. Editable for manual corrections.</p>
+                  <Input
+                    id="subtotal"
+                    type="number"
+                    step="0.01"
+                    {...register("subtotal", {
+                      onChange: () => { lastEditedRef.current = "subtotal"; },
+                    })}
+                  />
+                  <p className="text-xs text-muted-foreground">Sum of product line items BEFORE discount. Editable for manual corrections.</p>
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="discount">Discount ($)</Label>
-                  <Input id="discount" type="number" step="0.01" {...register("discount")} />
-                  <p className="text-xs text-muted-foreground">Dollar amount taken off the subtotal. Updates the Amount.</p>
+                  <Label htmlFor="discount">Discount (%)</Label>
+                  <div className="relative">
+                    <Input
+                      id="discount"
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      max={100}
+                      {...register("discount", {
+                        onChange: () => { lastEditedRef.current = "discount"; },
+                      })}
+                      className="pr-8"
+                    />
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">%</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Percent off the subtotal. 0–100. Updates the Amount automatically.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="amount">Amount ($) *<RequiredIndicator fieldKey="amount" requiredFields={requiredKeys} /></Label>
+                  <Input
+                    id="amount"
+                    type="number"
+                    step="0.01"
+                    {...register("amount", {
+                      onChange: () => { lastEditedRef.current = "amount"; },
+                    })}
+                  />
+                  <p className="text-xs text-muted-foreground">Final deal value AFTER the discount. Auto-calculated from Subtotal × (1 − Discount/100). Editable for manual corrections (will back-solve Subtotal).</p>
+                  {errors.amount && <p className="text-sm text-destructive">{errors.amount.message}</p>}
                 </div>
 
                 <div className="space-y-2">
