@@ -434,6 +434,28 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                   </Select>
                 </div>
 
+                {/* Customer Type (lifecycle_status) — moved here from Company
+                    Details so it sits next to Status, matching the detail
+                    page layout (page_layouts seed has it in Basic Info). */}
+                <div className="space-y-2">
+                  <Label>Customer Type<RequiredIndicator fieldKey="lifecycle_status" requiredFields={requiredKeys} /></Label>
+                  <Select
+                    value={watch("lifecycle_status")}
+                    onValueChange={(v) =>
+                      setValue("lifecycle_status", v as AccountFormValues["lifecycle_status"])
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="prospect">Prospect</SelectItem>
+                      <SelectItem value="customer">Customer</SelectItem>
+                      <SelectItem value="former_customer">Former Customer</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 <div className="space-y-2">
                   <Label>Industry<RequiredIndicator fieldKey="industry_category" requiredFields={requiredKeys} /></Label>
                   <Select
@@ -691,24 +713,6 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                 <div className="space-y-2">
                   <Label htmlFor="timezone">Timezone<RequiredIndicator fieldKey="timezone" requiredFields={requiredKeys} /></Label>
                   <Input id="timezone" placeholder="US/Eastern" {...register("timezone")} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Customer Type<RequiredIndicator fieldKey="lifecycle_status" requiredFields={requiredKeys} /></Label>
-                  <Select
-                    value={watch("lifecycle_status")}
-                    onValueChange={(v) =>
-                      setValue("lifecycle_status", v as AccountFormValues["lifecycle_status"])
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="prospect">Prospect</SelectItem>
-                      <SelectItem value="customer">Customer</SelectItem>
-                      <SelectItem value="former_customer">Former Customer</SelectItem>
-                    </SelectContent>
-                  </Select>
                 </div>
               </div>
             </CollapsibleFormSection>
