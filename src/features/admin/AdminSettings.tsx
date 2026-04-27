@@ -12,6 +12,7 @@ import { SalesforceImport } from "./SalesforceImport";
 import { PartnerRelationshipsImport } from "./PartnerRelationshipsImport";
 import { PicklistsManager } from "@/features/picklists/PicklistsManager";
 import { ObjectManager } from "./ObjectManager";
+import { LayoutsViewer } from "@/features/layouts/LayoutsViewer";
 import { AuditLogViewer } from "./AuditLogViewer";
 import { AutomationsManager } from "./AutomationsManager";
 import { SystemInfo } from "./SystemInfo";
@@ -20,6 +21,7 @@ import { Loader2 } from "lucide-react";
 
 const VALID_TABS = [
   "object-manager",
+  "layouts",
   "custom-fields",
   "picklists",
   "users",
@@ -93,6 +95,7 @@ export function AdminSettings() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList>
           <TabsTrigger value="object-manager">Object Manager</TabsTrigger>
+          <TabsTrigger value="layouts">Page Layouts</TabsTrigger>
           <TabsTrigger value="custom-fields">Custom Fields</TabsTrigger>
           <TabsTrigger value="picklists">Picklists</TabsTrigger>
           <TabsTrigger value="users">Users</TabsTrigger>
@@ -121,6 +124,10 @@ export function AdminSettings() {
 
         <TabsContent value="object-manager">
           <ObjectManager />
+        </TabsContent>
+
+        <TabsContent value="layouts">
+          <LayoutsViewer />
         </TabsContent>
 
         <TabsContent value="picklists">

@@ -27,10 +27,7 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  lifecycleLabel,
   statusLabel,
-  renewalTypeLabel,
-  leadSourceLabel,
   formatDate,
   formatDateTime,
   formatCurrency,
@@ -44,7 +41,8 @@ import { AccountPartners } from "./AccountPartners";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
 import { TasksPanel } from "@/features/activities/TasksPanel";
 import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
-import type { AccountContract, LeadSource } from "@/types/crm";
+import { LayoutDrivenDetail } from "@/features/layouts/LayoutDrivenDetail";
+import type { AccountContract } from "@/types/crm";
 
 /* ---------- Collapsible section ---------- */
 
@@ -176,7 +174,6 @@ export function AccountDetail() {
     async (newValue: string) => {
       await updateMutation.mutateAsync({ id: accountId, [field]: parser(newValue) } as Parameters<typeof updateMutation.mutateAsync>[0]);
     };
-  const parseNumber = (v: string) => (v === "" ? null : Number(v));
 
   function handleArchive() {
     if (!id) return;
@@ -193,20 +190,6 @@ export function AccountDetail() {
       }
     );
   }
-
-  const hasAddress = (prefix: "billing" | "shipping") => {
-    const a = account as unknown as Record<string, unknown>;
-    return [
-      a[`${prefix}_street`],
-      a[`${prefix}_city`],
-      a[`${prefix}_state`],
-      a[`${prefix}_zip`],
-      a[`${prefix}_country`],
-    ].some(Boolean);
-  };
-
-  const hasSfHistory =
-    account.sf_created_by || account.sf_created_date || account.sf_last_modified_by || account.sf_last_modified_date;
 
   return (
     <div>
@@ -393,233 +376,136 @@ export function AccountDetail() {
         ]}
       />
 
-      {/* --------- 1. Basic Information --------- */}
-      <CollapsibleSection title="Basic Information">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-          <EditableField label="Account Type" value={account.account_type} onSave={saveField("account_type")} />
-          <Field label="Account Number" value={account.account_number} />
-          <Field label="Customer Type" value={lifecycleLabel(account.lifecycle_status)} />
-          {/* Industry is driven by industry_category (enum). Editing
-              happens on the Edit page via the dropdown; inline edit
-              here would bring back the free-text bug the user hit. */}
-          <Field label="Industry" value={industryCategoryLabel(account.industry_category)} />
-          <EditableField label="Website" value={account.website} onSave={saveField("website")} />
-          <Field
-            label="Parent Account"
-            value={
-              account.parent_account ? (
-                <Link to={`/accounts/${account.parent_account.id}`} className="text-primary hover:underline">
-                  {account.parent_account.name}
-                </Link>
-              ) : null
-            }
-          />
-        </div>
-      </CollapsibleSection>
-
-      {/* --------- 2. Contact Information --------- */}
-      <CollapsibleSection title="Contact Information">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-          <EditableField label="Phone" value={account.phone} onSave={saveField("phone")} />
-          <EditableField label="Phone Extension" value={account.phone_extension} onSave={saveField("phone_extension")} />
-        </div>
-      </CollapsibleSection>
-
-      {/* --------- 3. Address Information --------- */}
-      <CollapsibleSection title="Address Information" defaultOpen={hasAddress("billing") || hasAddress("shipping")}>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
-          <div>
-            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Billing Address</h4>
-            <div className="space-y-3">
-              <EditableField label="Street" value={account.billing_street} onSave={saveField("billing_street")} />
-              <EditableField label="City" value={account.billing_city} onSave={saveField("billing_city")} />
-              <EditableField label="State" value={account.billing_state} onSave={saveField("billing_state")} />
-              <EditableField label="Zip" value={account.billing_zip} onSave={saveField("billing_zip")} />
-              <EditableField label="Country" value={account.billing_country} onSave={saveField("billing_country")} />
-              {(account.billing_street || account.billing_city) && (
+      {/* --------- Layout-driven sections (Basic → SF History) ---------
+          Order, fields, collapsed defaults, etc. are configured via
+          Admin → Page Layouts. Custom blocks below render the things
+          a flat layout can't (address blocks with map links, etc.).
+          Inline editing is preserved via onInlineSave. */}
+      <LayoutDrivenDetail
+        entity="accounts"
+        record={account as unknown as Record<string, unknown>}
+        onInlineSave={async (fieldKey, newValue) => {
+          const numberFields = new Set([
+            "fte_count",
+            "employees",
+            "number_of_providers",
+            "locations",
+            "annual_revenue",
+            "acv",
+          ]);
+          const parser = numberFields.has(fieldKey)
+            ? (v: string) => (v === "" ? null : Number(v))
+            : (v: string) => (v === "" ? null : v);
+          await updateMutation.mutateAsync({
+            id: accountId,
+            [fieldKey]: parser(newValue),
+          } as Parameters<typeof updateMutation.mutateAsync>[0]);
+        }}
+        inlineEditExcluded={[
+          // FK / lookup fields
+          "owner_user_id",
+          "parent_account_id",
+          // Auto-set / read-only on detail
+          "account_number",
+          "lifecycle_status",
+          "industry_category",
+          "status",
+          "renewal_type",
+          "active_since",
+          "current_contract_start_date",
+          "current_contract_end_date",
+          "current_contract_length_months",
+          "lifetime_value",
+          "churn_amount",
+          "churn_date",
+          "lead_source",
+          // SF-imported audit
+          "sf_created_by",
+          "sf_created_date",
+          "sf_last_modified_by",
+          "sf_last_modified_date",
+          // System
+          "created_by",
+          "updated_by",
+          "created_at",
+          "updated_at",
+          // Booleans handled as read-only display for now
+          "every_other_year",
+          "do_not_auto_renew",
+          "do_not_contact",
+          "partner_prospect",
+          "priority_account",
+        ]}
+        inlineEditTypes={{
+          fte_count: "number",
+          employees: "number",
+          number_of_providers: "number",
+          locations: "number",
+          annual_revenue: "currency",
+          acv: "currency",
+          description: "textarea",
+          notes: "textarea",
+          next_steps: "textarea",
+        }}
+        customBlocks={{
+          __billing_address: () => (
+            <div>
+              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                Billing Address
+              </h4>
+              <div className="space-y-3">
+                <EditableField label="Street" value={account.billing_street} onSave={saveField("billing_street")} />
+                <EditableField label="City" value={account.billing_city} onSave={saveField("billing_city")} />
+                <EditableField label="State" value={account.billing_state} onSave={saveField("billing_state")} />
+                <EditableField label="Zip" value={account.billing_zip} onSave={saveField("billing_zip")} />
+                <EditableField label="Country" value={account.billing_country} onSave={saveField("billing_country")} />
+                {(account.billing_street || account.billing_city) && (
+                  <a
+                    href={account.billing_latitude && account.billing_longitude
+                      ? `https://www.google.com/maps?q=${account.billing_latitude},${account.billing_longitude}`
+                      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                          [account.billing_street, account.billing_city, account.billing_state, account.billing_zip].filter(Boolean).join(", ")
+                        )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline text-sm flex items-center gap-1"
+                  >
+                    <MapPin className="h-3 w-3" /> View on Map
+                  </a>
+                )}
+              </div>
+            </div>
+          ),
+          __shipping_address: () => (
+            <div>
+              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                Shipping Address
+              </h4>
+              <AddressBlock
+                street={account.shipping_street}
+                city={account.shipping_city}
+                state={account.shipping_state}
+                zip={account.shipping_zip}
+                country={account.shipping_country}
+              />
+              {(account.shipping_street || account.shipping_city) && (
                 <a
-                  href={account.billing_latitude && account.billing_longitude
-                    ? `https://www.google.com/maps?q=${account.billing_latitude},${account.billing_longitude}`
+                  href={account.shipping_latitude && account.shipping_longitude
+                    ? `https://www.google.com/maps?q=${account.shipping_latitude},${account.shipping_longitude}`
                     : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                        [account.billing_street, account.billing_city, account.billing_state, account.billing_zip].filter(Boolean).join(', ')
+                        [account.shipping_street, account.shipping_city, account.shipping_state, account.shipping_zip].filter(Boolean).join(", ")
                       )}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-600 hover:underline text-sm flex items-center gap-1"
+                  className="text-blue-600 hover:underline text-sm flex items-center gap-1 mt-2"
                 >
                   <MapPin className="h-3 w-3" /> View on Map
                 </a>
               )}
             </div>
-          </div>
-          <div>
-            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Shipping Address</h4>
-            <AddressBlock
-              street={account.shipping_street}
-              city={account.shipping_city}
-              state={account.shipping_state}
-              zip={account.shipping_zip}
-              country={account.shipping_country}
-            />
-            {(account.shipping_street || account.shipping_city) && (
-              <a
-                href={account.shipping_latitude && account.shipping_longitude
-                  ? `https://www.google.com/maps?q=${account.shipping_latitude},${account.shipping_longitude}`
-                  : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                      [account.shipping_street, account.shipping_city, account.shipping_state, account.shipping_zip].filter(Boolean).join(', ')
-                    )}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-600 hover:underline text-sm flex items-center gap-1 mt-2"
-              >
-                <MapPin className="h-3 w-3" /> View on Map
-              </a>
-            )}
-          </div>
-        </div>
-      </CollapsibleSection>
-
-      {/* --------- 4. Company Details --------- */}
-      <CollapsibleSection title="Company Details">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-          <EditableField
-            label="FTE Count"
-            value={account.fte_count}
-            onSave={saveField("fte_count", parseNumber)}
-            type="number"
-          />
-          <EditableField label="FTE Range" value={account.fte_range} onSave={saveField("fte_range")} />
-          <EditableField
-            label="Number of Employees"
-            value={account.employees}
-            onSave={saveField("employees", parseNumber)}
-            type="number"
-          />
-          <EditableField
-            label="Number of Providers"
-            value={account.number_of_providers}
-            onSave={saveField("number_of_providers", parseNumber)}
-            type="number"
-          />
-          <EditableField
-            label="Number of Locations"
-            value={account.locations}
-            onSave={saveField("locations", parseNumber)}
-            type="number"
-          />
-          <EditableField
-            label="Annual Revenue"
-            value={account.annual_revenue}
-            onSave={saveField("annual_revenue", parseNumber)}
-            type="currency"
-          />
-          <EditableField label="Timezone" value={account.timezone} onSave={saveField("timezone")} />
-        </div>
-      </CollapsibleSection>
-
-      {/* --------- 5. Contract & Renewal --------- */}
-      <CollapsibleSection title="Contract & Renewal">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-          <Field label="Active Since" value={formatDate(account.active_since)} />
-          <Field
-            label="Renewal Type"
-            value={account.renewal_type ? renewalTypeLabel(account.renewal_type) : null}
-          />
-          <Field label="Every Other Year" value={account.every_other_year ? "Yes" : "No"} />
-          <EditableField label="Contracts (from SF)" value={account.contracts} onSave={saveField("contracts")} />
-          <Field label="Contract Start" value={formatDate(account.current_contract_start_date)} />
-          <Field label="Contract End" value={formatDate(account.current_contract_end_date)} />
-          <Field
-            label="Contract Length"
-            value={
-              account.current_contract_length_months != null
-                ? `${account.current_contract_length_months} months`
-                : null
-            }
-          />
-          <EditableField
-            label="ACV"
-            value={account.acv}
-            onSave={saveField("acv", parseNumber)}
-            type="currency"
-          />
-          <Field
-            label="Lifetime Value"
-            value={account.lifetime_value != null ? formatCurrency(account.lifetime_value) : null}
-          />
-          <Field
-            label="Churn Amount"
-            value={account.churn_amount != null ? formatCurrency(account.churn_amount) : null}
-          />
-          <Field label="Churn Date" value={formatDate(account.churn_date)} />
-        </div>
-      </CollapsibleSection>
-
-      {/* --------- 6. Partner Information --------- */}
-      <CollapsibleSection title="Partner Information">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-          <EditableField label="Partner Account" value={account.partner_account} onSave={saveField("partner_account")} />
-          <Field label="Partner Prospect" value={account.partner_prospect ? "Yes" : "No"} />
-          <Field
-            label="Lead Source"
-            value={account.lead_source ? leadSourceLabel(account.lead_source as LeadSource) : null}
-          />
-          <EditableField label="Lead Source Detail" value={account.lead_source_detail} onSave={saveField("lead_source_detail")} />
-        </div>
-      </CollapsibleSection>
-
-      {/* --------- 7. Additional Information --------- */}
-      <CollapsibleSection
-        title="Additional Information"
-        defaultOpen={!!(account.priority_account || account.project || account.description || account.notes || account.next_steps)}
-      >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-          <Field label="Priority Account" value={account.priority_account ? "Yes" : "No"} />
-          <EditableField label="Project" value={account.project} onSave={saveField("project")} />
-        </div>
-        <div className="mt-3 space-y-3">
-          <div>
-            <span className="text-xs text-muted-foreground">Description</span>
-            <InlineEdit
-              value={account.description}
-              onSave={saveField("description")}
-              type="textarea"
-              placeholder="Add description..."
-            />
-          </div>
-          <div>
-            <span className="text-xs text-muted-foreground">Notes</span>
-            <InlineEdit
-              value={account.notes}
-              onSave={saveField("notes")}
-              type="textarea"
-              placeholder="Add notes..."
-            />
-          </div>
-          <div>
-            <span className="text-xs text-muted-foreground">Next Steps</span>
-            <InlineEdit
-              value={account.next_steps}
-              onSave={saveField("next_steps")}
-              type="textarea"
-              placeholder="Add next steps..."
-            />
-          </div>
-        </div>
-      </CollapsibleSection>
-
-      {/* --------- 8. Salesforce History (only if data exists) --------- */}
-      {hasSfHistory && (
-        <CollapsibleSection title="Salesforce History" defaultOpen={false}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-            <Field label="SF Created By" value={account.sf_created_by} />
-            <Field label="SF Created Date" value={formatDateTime(account.sf_created_date)} />
-            <Field label="SF Last Modified By" value={account.sf_last_modified_by} />
-            <Field label="SF Last Modified Date" value={formatDateTime(account.sf_last_modified_date)} />
-            <Field label="SF ID" value={account.sf_id} />
-          </div>
-        </CollapsibleSection>
-      )}
+          ),
+        }}
+      />
 
       {/* --------- Custom Fields --------- */}
       {customFieldDefs && customFieldDefs.length > 0 && account.custom_fields && (
