@@ -57,10 +57,25 @@ export function AppLayout() {
   const { profile, markOnboarded } = useAuth();
   const [collapsed, setCollapsed] = useState(isMobile);
 
-  // Welcome wizard shows only on true first login (no onboarded_at). Before
-  // the server-side check ran, we used localStorage which popped the wizard
-  // again on every new browser or after clearing storage.
-  const showWizard = !!profile && !profile.onboarded_at;
+  // Welcome wizard DISABLED 2026-04-27.
+  //
+  // Background: the RLS policy that lets users self-stamp onboarded_at
+  // was missing for non-admin users, so the wizard re-popped on every
+  // refresh. We added the policy in migration 20260427000004 but
+  // existing users have already SEEN the wizard repeatedly — pushing
+  // it again now (even once) is annoying and at least one user got
+  // stuck where Skip/Close didn't work.
+  //
+  // Set the flag below to true to re-enable for genuine first-time
+  // logins ONLY, after we backfill onboarded_at for everyone who's
+  // already been in the app:
+  //
+  //   UPDATE public.user_profiles SET onboarded_at = now()
+  //   WHERE onboarded_at IS NULL;
+  //
+  // (run that in the Supabase SQL editor on prod first)
+  const WIZARD_ENABLED = false;
+  const showWizard = WIZARD_ENABLED && !!profile && !profile.onboarded_at;
 
   // Auto-logout on inactivity. Defaults to 60 min idle; shows a 60s warning
   // modal so the user can cancel before being booted.
