@@ -61,6 +61,8 @@ export interface StagedOpportunityProduct {
   product_id: string;
   product_name: string;
   product_code: string | null;
+  /** Short abbreviation used by opp auto-naming (e.g. "SRA", "Remote Services"). */
+  product_short_name?: string | null;
   quantity: number;
   unit_price: number;
   arr_amount: number;
@@ -93,6 +95,7 @@ interface PickedRow {
   product_id: string;
   product_name: string;
   product_code: string | null;
+  product_short_name: string | null;
   product_family: string | null;
   quantity: number;
   unit_price: number;
@@ -152,29 +155,51 @@ export function MultiProductPicker(props: Props) {
     : (opp?.account_id as string | undefined) ?? null;
   const { data: freshAccount } = useFreshAccount(accountIdForFresh);
 
-  // Resolve FTE range. In STAGED mode (create form), prefer:
-  //   1. The FTE range the user typed in the form (props.fteRange)
-  //   2. The fresh account's fte_range
-  //   3. Derived from the fresh account's fte_count / employees
-  // In IMMEDIATE mode (existing opp), use the opp's own snapshot first
-  // (so closed deals price-book stays frozen), then fall back to account.
+  // Resolve FTE range with three behaviors based on mode:
+  //
+  // 1. STAGED mode (create form): use what the user typed, then fall
+  //    back to current account.
+  // 2. IMMEDIATE mode + CLOSED opp: use the opp's frozen snapshot.
+  //    Closed deals stay priced at whatever they sold for, even if
+  //    account FTE has since changed.
+  // 3. IMMEDIATE mode + OPEN opp: use CURRENT account FTE so reps
+  //    see live pricing as they work the deal. Falls back to the
+  //    snapshot if account FTE is missing.
+  //
+  // This addresses the UTN scenario where the opp was created at
+  // 51-100 but the account's been corrected to 1-20 — open opps
+  // should follow the current account, not the stale snapshot.
+  const isClosedOpp =
+    !isStaged &&
+    (opp?.stage === "closed_won" || opp?.stage === "closed_lost");
+
   const oppFteRange = isStaged
     ? props.fteRange
       || freshAccount?.fte_range
       || employeesToFteRange(freshAccount?.fte_count ?? freshAccount?.employees ?? null)
       || null
-    : opp?.fte_range
-      || oppAcct?.fte_range
-      || freshAccount?.fte_range
-      || employeesToFteRange(
-          opp?.fte_count
-            ?? oppAcct?.fte_count
-            ?? oppAcct?.employees
-            ?? freshAccount?.fte_count
-            ?? freshAccount?.employees
-            ?? null
-        )
-      || null;
+    : isClosedOpp
+      ? // Closed: snapshot wins (price book frozen at close time).
+        opp?.fte_range
+        || oppAcct?.fte_range
+        || freshAccount?.fte_range
+        || employeesToFteRange(
+            opp?.fte_count
+              ?? oppAcct?.fte_count
+              ?? oppAcct?.employees
+              ?? freshAccount?.fte_count
+              ?? freshAccount?.employees
+              ?? null
+          )
+        || null
+      : // Open: current account FTE wins so live changes flow through.
+        freshAccount?.fte_range
+        || employeesToFteRange(freshAccount?.fte_count ?? freshAccount?.employees ?? null)
+        || oppAcct?.fte_range
+        || employeesToFteRange(oppAcct?.fte_count ?? oppAcct?.employees ?? null)
+        || opp?.fte_range
+        || employeesToFteRange(opp?.fte_count ?? null)
+        || null;
 
   const activePriceBooks = useMemo(
     () => priceBooks?.filter((pb) => pb.is_active) ?? [],
@@ -320,6 +345,9 @@ export function MultiProductPicker(props: Props) {
         product_id: product.id,
         product_name: product.name,
         product_code: product.code,
+        // short_name comes from products.short_name (added in
+        // migration 20260427000005). Used for opp auto-naming.
+        product_short_name: (product as { short_name?: string | null }).short_name ?? null,
         product_family: product.product_family,
         quantity: 1,
         unit_price: price,
@@ -358,6 +386,7 @@ export function MultiProductPicker(props: Props) {
       product_id: r.product_id,
       product_name: r.product_name,
       product_code: r.product_code,
+      product_short_name: r.product_short_name,
       quantity: r.quantity,
       unit_price: r.unit_price,
       arr_amount: r.quantity * r.unit_price * (1 - r.discount_percent / 100),

@@ -303,6 +303,8 @@ export interface Product {
   sf_id: string | null;
   code: string;
   name: string;
+  /** Short abbreviation used in opportunity auto-naming. */
+  short_name: string | null;
   product_family: string | null;
   description: string | null;
   is_active: boolean;

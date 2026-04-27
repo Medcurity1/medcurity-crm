@@ -478,7 +478,10 @@ export function OpportunityDetail() {
             label="Follow Up"
             value={opp.follow_up ? "\u2713 Yes" : "\u2717 No"}
           />
-          <EditableField label="Next Step" value={opp.next_step} onSave={saveField("next_step")} />
+          {/* Full-row span so the textarea has horizontal room. */}
+          <div className="md:col-span-2">
+            <EditableField label="Next Step" value={opp.next_step} onSave={saveField("next_step")} type="textarea" />
+          </div>
           <Field
             label="Service Amount"
             value={opp.service_amount != null ? formatCurrencyDetailed(opp.service_amount) : null}

@@ -407,6 +407,7 @@ function ProductEditDialog({
 
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
+  const [shortName, setShortName] = useState("");
   const [family, setFamily] = useState<string>("");
   const [pricingModel, setPricingModel] = useState("per_fte");
   const [hasFlatPrice, setHasFlatPrice] = useState(false);
@@ -417,6 +418,7 @@ function ProductEditDialog({
     if (!open || !product) return;
     setName(product.name ?? "");
     setCode(product.code ?? "");
+    setShortName((product as { short_name?: string | null }).short_name ?? "");
     setFamily(product.product_family ?? "");
     setPricingModel(product.pricing_model ?? "per_fte");
     setHasFlatPrice(product.has_flat_price ?? false);
@@ -436,6 +438,7 @@ function ProductEditDialog({
         id: product.id,
         name: name.trim(),
         code: code.trim(),
+        short_name: shortName.trim() || null,
         product_family: family || null,
         pricing_model: pricingModel,
         has_flat_price: hasFlatPrice,
@@ -467,6 +470,19 @@ function ProductEditDialog({
               <Label htmlFor="ed-code">Code *</Label>
               <Input id="ed-code" value={code} onChange={(e) => setCode(e.target.value)} />
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="ed-short">Short Name (abbreviation)</Label>
+            <Input
+              id="ed-short"
+              value={shortName}
+              onChange={(e) => setShortName(e.target.value)}
+              placeholder='e.g. "SRA", "CO Training", "Remote Services"'
+            />
+            <p className="text-xs text-muted-foreground">
+              Used when auto-naming opportunities. If blank, the product code is used.
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-4">

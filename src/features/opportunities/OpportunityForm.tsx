@@ -354,11 +354,21 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     if (isEditing) return;
     if (nameUserOverridden) return;
     if (stagedProducts.length === 0) return;
-    const codes = stagedProducts
-      .map((p) => p.product_code)
-      .filter((c): c is string => !!c && c.trim() !== "");
-    if (codes.length === 0) return;
-    const suggested = codes.join(" | ");
+    // Prefer product_short_name (e.g. "SRA"), fall back to product_code,
+    // then to product_name as last resort. Skips empty values entirely
+    // so a missing short_name doesn't blank out the whole name.
+    const labels = stagedProducts
+      .map((p) => {
+        const sn = p.product_short_name?.trim();
+        if (sn) return sn;
+        const code = p.product_code?.trim();
+        if (code) return code;
+        const nm = p.product_name?.trim();
+        return nm || null;
+      })
+      .filter((c): c is string => !!c);
+    if (labels.length === 0) return;
+    const suggested = labels.join(" | ");
     if (suggested !== watch("name")) {
       // shouldDirty=false so the auto-suggested value doesn't trip the
       // "you have unsaved changes" prompt before the user has done anything.
