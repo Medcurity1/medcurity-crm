@@ -65,6 +65,17 @@ export function DisplayValue({
     );
   }
 
+  // Discount on opportunities is a PERCENT (0-100), not currency.
+  // Render with % suffix to match the form input + DB trigger.
+  if (fieldKey === "discount" && entity === "opportunities") {
+    const n = Number(value);
+    return (
+      <span className="text-sm font-medium">
+        {Number.isFinite(n) ? `${n}%` : "—"}
+      </span>
+    );
+  }
+
   // Currency by name convention (any column ending in _amount, _value, acv,
   // amount, subtotal, discount when on opportunities)
   if (isCurrencyField(fieldKey)) {
@@ -175,7 +186,7 @@ export function PicklistAwareDisplay({
 const CURRENCY_FIELDS = new Set([
   "amount",
   "subtotal",
-  "discount",
+  // discount is a percent on opportunities — handled separately above
   "service_amount",
   "product_amount",
   "acv",

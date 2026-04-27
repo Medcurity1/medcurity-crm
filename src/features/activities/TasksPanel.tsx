@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { CheckCircle2, Circle, Clock, Plus, ChevronDown, RotateCcw, Pencil } from "lucide-react";
-import { useTasks, useCompleteActivity, useReopenActivity } from "./api";
+import { CheckCircle2, Circle, Clock, Plus, ChevronDown, RotateCcw, Pencil, Trash2 } from "lucide-react";
+import { useTasks, useCompleteActivity, useReopenActivity, useArchiveActivity } from "./api";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { QuickTaskDialog } from "./QuickTaskDialog";
 import { EditTaskDialog } from "./EditTaskDialog";
 import { Button } from "@/components/ui/button";
@@ -39,12 +40,14 @@ function TaskItem({
   onComplete,
   onReopen,
   onEdit,
+  onDelete,
   isBusy,
 }: {
   task: Activity;
   onComplete: (id: string) => void;
   onReopen: (id: string) => void;
   onEdit: (task: Activity) => void;
+  onDelete: (task: Activity) => void;
   isBusy: boolean;
 }) {
   const isCompleted = !!task.completed_at;
@@ -156,6 +159,17 @@ function TaskItem({
             <RotateCcw className="h-3.5 w-3.5" />
           </button>
         )}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(task);
+          }}
+          title="Delete task"
+          className="p-1 text-muted-foreground hover:text-destructive"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
       </div>
     </div>
   );
@@ -170,8 +184,10 @@ export function TasksPanel({
   const [showAddTask, setShowAddTask] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
   const [editingTask, setEditingTask] = useState<Activity | null>(null);
+  const [deletingTask, setDeletingTask] = useState<Activity | null>(null);
   const completeMutation = useCompleteActivity();
   const reopenMutation = useReopenActivity();
+  const archiveMutation = useArchiveActivity();
 
   const { data, isLoading } = useTasks({
     account_id: accountId,
@@ -271,6 +287,7 @@ export function TasksPanel({
               onComplete={handleComplete}
               onReopen={handleReopen}
               onEdit={setEditingTask}
+              onDelete={setDeletingTask}
               isBusy={completeMutation.isPending || reopenMutation.isPending}
             />
           ))}
@@ -309,6 +326,7 @@ export function TasksPanel({
                   onComplete={handleComplete}
                   onReopen={handleReopen}
                   onEdit={setEditingTask}
+                  onDelete={setDeletingTask}
                   isBusy={completeMutation.isPending || reopenMutation.isPending}
                 />
               ))}
@@ -324,6 +342,33 @@ export function TasksPanel({
         contactId={contactId}
         opportunityId={opportunityId}
         leadId={leadId}
+      />
+
+      <ConfirmDialog
+        open={!!deletingTask}
+        onOpenChange={(o) => !o && setDeletingTask(null)}
+        title="Delete this task?"
+        description={
+          deletingTask
+            ? `"${deletingTask.subject}" will be hidden from your task list. An admin can restore it from the Archive Manager.`
+            : ""
+        }
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => {
+          if (!deletingTask) return;
+          archiveMutation.mutate(
+            { id: deletingTask.id },
+            {
+              onSuccess: () => {
+                toast.success("Task deleted");
+                setDeletingTask(null);
+              },
+              onError: (err) =>
+                toast.error("Failed to delete: " + errorMessage(err)),
+            }
+          );
+        }}
       />
     </div>
   );
