@@ -13,6 +13,7 @@ import { PartnerRelationshipsImport } from "./PartnerRelationshipsImport";
 import { PicklistsManager } from "@/features/picklists/PicklistsManager";
 import { ObjectManager } from "./ObjectManager";
 import { LayoutsViewer } from "@/features/layouts/LayoutsViewer";
+import { LayoutEditor } from "@/features/layouts/LayoutEditor";
 import { AuditLogViewer } from "./AuditLogViewer";
 import { AutomationsManager } from "./AutomationsManager";
 import { SystemInfo } from "./SystemInfo";
@@ -182,7 +183,14 @@ export function AdminSettings() {
             </TabsContent>
 
             <TabsContent value="layouts">
-              <LayoutsViewer />
+              {/* Admin and super_admin see the drag-and-drop editor; the
+                  outer AdminSettings already gates this whole page to
+                  those roles, but the editor also enforces internally. */}
+              {profile?.role === "admin" || profile?.role === "super_admin" ? (
+                <LayoutEditor />
+              ) : (
+                <LayoutsViewer />
+              )}
             </TabsContent>
 
             <TabsContent value="custom-fields">
