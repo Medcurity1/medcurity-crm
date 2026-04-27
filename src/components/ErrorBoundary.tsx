@@ -43,13 +43,25 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error("ErrorBoundary caught:", error, info.componentStack);
 
-    // Auto-retry once for transient chunk-load / network errors. Reset
-    // state after a short tick so the boundary re-renders its children.
-    if (isTransientError(error) && !this.state.autoRetried) {
-      this.setState({ autoRetried: true });
-      setTimeout(() => {
-        this.setState({ hasError: false, error: null });
-      }, 250);
+    // For chunk-load failures (deploy happened mid-session, server no
+    // longer has the old chunk URLs), the only real fix is a hard
+    // reload to fetch the new index.html with current chunk hashes.
+    // Setting hasError=false just retries the same dead URL.
+    //
+    // Use a session-storage flag so we only auto-reload ONCE per
+    // session — if the reload itself fails, we render the fallback
+    // and let the user click Try Again / Go Home.
+    if (isTransientError(error)) {
+      const RELOAD_KEY = "errorBoundary.chunkReloadAt";
+      const lastReload = Number(sessionStorage.getItem(RELOAD_KEY) || "0");
+      const now = Date.now();
+      // Only reload if we haven't reloaded for this reason in the last
+      // 30 seconds — protects against a true broken deploy looping.
+      if (now - lastReload > 30_000) {
+        sessionStorage.setItem(RELOAD_KEY, String(now));
+        window.location.reload();
+        return;
+      }
     }
   }
 
