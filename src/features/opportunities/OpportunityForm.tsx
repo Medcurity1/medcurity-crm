@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Pencil } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
 import {
@@ -13,6 +13,7 @@ import {
   useOpportunityProducts,
   useAddOpportunityProduct,
   useRemoveOpportunityProduct,
+  useUpdateOpportunityProduct,
 } from "./api";
 import { MultiProductPicker, type StagedOpportunityProduct } from "./MultiProductPicker";
 import { PicklistSelect } from "@/features/picklists/PicklistSelect";
@@ -1115,6 +1116,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
             <FormSection title="Products">
               <OpportunityProductsEditor
                 isEditing={isEditing}
+                opportunityId={id ?? null}
                 stagedProducts={stagedProducts}
                 existingProducts={existingProducts ?? []}
                 onOpenAdd={() => setShowAddProduct(true)}
@@ -1224,6 +1226,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
 
 function OpportunityProductsEditor({
   isEditing,
+  opportunityId,
   stagedProducts,
   existingProducts,
   onOpenAdd,
@@ -1231,6 +1234,7 @@ function OpportunityProductsEditor({
   onRemoveExisting,
 }: {
   isEditing: boolean;
+  opportunityId: string | null;
   stagedProducts: StagedOpportunityProduct[];
   existingProducts: Array<{
     id: string;
@@ -1243,9 +1247,50 @@ function OpportunityProductsEditor({
   onRemoveStaged: (idx: number) => void;
   onRemoveExisting: (productRowId: string) => void;
 }) {
+  const updateProductMutation = useUpdateOpportunityProduct();
+
+  // Inline edit state — only one row in edit mode at a time. The user
+  // clicks Edit, types new qty/price, hits Save (or Cancel). Server
+  // recomputes arr_amount on save (qty * unit_price) and the parent
+  // opp's amount via the recalc trigger.
+  const [editingRowId, setEditingRowId] = useState<string | null>(null);
+  const [editQty, setEditQty] = useState<string>("");
+  const [editPrice, setEditPrice] = useState<string>("");
+
+  function startEdit(row: { id: string; quantity: number; unit_price: number }) {
+    setEditingRowId(row.id);
+    setEditQty(String(row.quantity ?? 1));
+    setEditPrice(String(row.unit_price ?? 0));
+  }
+
+  function cancelEdit() {
+    setEditingRowId(null);
+    setEditQty("");
+    setEditPrice("");
+  }
+
+  async function saveEdit(rowId: string) {
+    if (!opportunityId) return;
+    const qty = Math.max(0, Number(editQty) || 0);
+    const price = Math.max(0, Number(editPrice) || 0);
+    try {
+      await updateProductMutation.mutateAsync({
+        id: rowId,
+        opportunity_id: opportunityId,
+        patch: { quantity: qty, unit_price: price },
+      });
+      toast.success("Product updated");
+      cancelEdit();
+    } catch (err) {
+      toast.error("Failed to update: " + errorMessage(err));
+    }
+  }
+
   const rows = isEditing
     ? existingProducts.map((p) => ({
         key: p.id,
+        id: p.id,
+        editable: true,
         name: p.product?.name ?? "\u2014",
         code: p.product?.code ?? "\u2014",
         quantity: p.quantity,
@@ -1255,6 +1300,8 @@ function OpportunityProductsEditor({
       }))
     : stagedProducts.map((p, idx) => ({
         key: `staged-${idx}`,
+        id: `staged-${idx}`,
+        editable: false,
         name: p.product_name || "\u2014",
         code: p.product_code || "\u2014",
         quantity: p.quantity,
@@ -1291,33 +1338,111 @@ function OpportunityProductsEditor({
                 <TableHead className="text-right">Qty</TableHead>
                 <TableHead className="text-right">Unit Price</TableHead>
                 <TableHead className="text-right">ARR</TableHead>
-                <TableHead className="w-10" />
+                <TableHead className="w-32 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((r) => (
-                <TableRow key={r.key}>
-                  <TableCell className="font-medium">{r.name}</TableCell>
-                  <TableCell className="text-muted-foreground">{r.code}</TableCell>
-                  <TableCell className="text-right">{r.quantity}</TableCell>
-                  <TableCell className="text-right">{formatCurrencyDetailed(r.unitPrice)}</TableCell>
-                  <TableCell className="text-right font-medium">{formatCurrencyDetailed(r.arrAmount)}</TableCell>
-                  <TableCell>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                      onClick={r.onRemove}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {rows.map((r) => {
+                const isRowEditing = editingRowId === r.id;
+                const previewArr = isRowEditing
+                  ? (Number(editQty) || 0) * (Number(editPrice) || 0)
+                  : r.arrAmount;
+                return (
+                  <TableRow key={r.key}>
+                    <TableCell className="font-medium">{r.name}</TableCell>
+                    <TableCell className="text-muted-foreground">{r.code}</TableCell>
+                    <TableCell className="text-right">
+                      {isRowEditing ? (
+                        <Input
+                          type="number"
+                          min={0}
+                          step="1"
+                          value={editQty}
+                          onChange={(e) => setEditQty(e.target.value)}
+                          className="h-8 w-20 text-right ml-auto"
+                        />
+                      ) : (
+                        r.quantity
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {isRowEditing ? (
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={editPrice}
+                          onChange={(e) => setEditPrice(e.target.value)}
+                          className="h-8 w-28 text-right ml-auto"
+                        />
+                      ) : (
+                        formatCurrencyDetailed(r.unitPrice)
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right font-medium">
+                      {formatCurrencyDetailed(previewArr)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {r.editable && isRowEditing ? (
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            type="button"
+                            variant="default"
+                            size="sm"
+                            className="h-8"
+                            disabled={updateProductMutation.isPending}
+                            onClick={() => saveEdit(r.id)}
+                          >
+                            Save
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8"
+                            onClick={cancelEdit}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-end gap-1">
+                          {r.editable && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                              onClick={() => startEdit({
+                                id: r.id,
+                                quantity: r.quantity,
+                                unit_price: r.unitPrice,
+                              })}
+                              title="Edit qty / price"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          )}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                            onClick={r.onRemove}
+                            title="Remove product"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
               <TableRow className="bg-muted/50">
-                <TableCell colSpan={5} className="text-right font-semibold">Total ARR</TableCell>
+                <TableCell colSpan={4} className="text-right font-semibold">Total ARR</TableCell>
                 <TableCell className="text-right font-bold">{formatCurrencyDetailed(totalARR)}</TableCell>
+                <TableCell />
               </TableRow>
             </TableBody>
           </Table>

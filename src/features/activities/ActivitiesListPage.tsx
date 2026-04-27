@@ -96,6 +96,8 @@ function useActivitiesList(filters: ListFilters) {
             "lead:leads!lead_id(id, first_name, last_name, company)",
           { count: "exact" }
         )
+        // Hide soft-deleted activities so the list reflects deletes.
+        .is("archived_at", null)
         .order("created_at", { ascending: false });
 
       if (filters.search) {

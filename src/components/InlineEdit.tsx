@@ -139,18 +139,25 @@ export function InlineEdit({
     return (
       <div className={cn("relative", className)}>
         {type === "textarea" ? (
-          <Textarea
-            ref={(el) => {
-              inputRef.current = el;
-            }}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onBlur={handleBlur}
-            placeholder={placeholder}
-            disabled={saving}
-            className="text-sm"
-          />
+          <div className="space-y-1">
+            <Textarea
+              ref={(el) => {
+                inputRef.current = el;
+              }}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onBlur={handleBlur}
+              placeholder={placeholder}
+              disabled={saving}
+              rows={6}
+              className="text-sm resize-y min-h-[120px]"
+            />
+            <p className="text-[10px] text-muted-foreground">
+              <kbd className="px-1 py-0.5 rounded bg-muted text-[10px]">Esc</kbd> to cancel ·{" "}
+              <kbd className="px-1 py-0.5 rounded bg-muted text-[10px]">⌘ Enter</kbd> to save · click outside to save
+            </p>
+          </div>
         ) : (
           <Input
             ref={(el) => {
@@ -182,20 +189,23 @@ export function InlineEdit({
       type="button"
       onClick={startEdit}
       className={cn(
-        "group relative flex items-center gap-1 text-left w-full rounded px-1 -mx-1 py-0.5 hover:bg-muted/50 transition-colors cursor-pointer",
+        "group relative flex gap-1 text-left w-full rounded px-1 -mx-1 py-0.5 hover:bg-muted/50 transition-colors cursor-pointer",
+        type === "textarea" ? "items-start" : "items-center",
         className
       )}
     >
       <span
         className={cn(
-          "text-sm font-medium truncate",
+          "text-sm font-medium",
           isEmpty && "text-muted-foreground",
-          type === "textarea" && "whitespace-pre-wrap"
+          type === "textarea"
+            ? "whitespace-pre-wrap break-words flex-1"
+            : "truncate"
         )}
       >
         {display}
       </span>
-      <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-auto" />
+      <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-auto mt-0.5" />
     </button>
   );
 }

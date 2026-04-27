@@ -116,6 +116,7 @@ function useRecentActivity() {
       const { data, error } = await supabase
         .from("activities")
         .select("id, activity_type, subject, created_at, account:accounts(name)")
+        .is("archived_at", null)
         .order("created_at", { ascending: false })
         .limit(5);
       if (error) throw error;
@@ -133,6 +134,7 @@ function useMyTasks(userId: string) {
         .select("id, subject, due_at, completed_at")
         .eq("activity_type", "task")
         .eq("owner_user_id", userId)
+        .is("archived_at", null)
         .order("due_at", { ascending: true, nullsFirst: false });
       if (error) throw error;
       return (data ?? []) as TaskItem[];

@@ -226,17 +226,41 @@ export function MultiProductPicker(props: Props) {
     price: number;
     source: PickedRow["unit_price_source"];
   } {
+    // Normalize FTE range strings so "51-100", "51 - 100", "51_100" all
+    // match the same price book entry. The price book auto-select uses
+    // the same norm() — keep them consistent.
+    const norm = (s: string | null | undefined) =>
+      (s ?? "").replace(/\s+/g, "").replace(/_/g, "-").toLowerCase();
+    const targetFte = norm(oppFteRange);
+
     if (priceBookEntries) {
-      const entry = priceBookEntries.find(
+      // 1. Try exact (normalized) FTE-range match for this product
+      let entry = priceBookEntries.find(
         (e) =>
           e.product_id === productId &&
-          (oppFteRange ? e.fte_range === oppFteRange : e.fte_range === null),
+          targetFte &&
+          norm(e.fte_range) === targetFte,
       );
-      if (entry) return { price: Number(entry.unit_price), source: "price_book" };
+      // 2. Fall back to a price book entry with NO fte_range (flat
+      //    pricing for this product)
+      if (!entry) {
+        entry = priceBookEntries.find(
+          (e) => e.product_id === productId && (e.fte_range == null || e.fte_range === ""),
+        );
+      }
+      // 3. Last resort within the price book: any entry for this product
+      //    (handles books that have only one tier configured)
+      if (!entry) {
+        entry = priceBookEntries.find((e) => e.product_id === productId);
+      }
+      if (entry && Number(entry.unit_price) > 0) {
+        return { price: Number(entry.unit_price), source: "price_book" };
+      }
     }
     const product = products?.find((p) => p.id === productId);
-    if (product?.default_arr != null)
+    if (product?.default_arr != null && Number(product.default_arr) > 0) {
       return { price: Number(product.default_arr), source: "default" };
+    }
     return { price: 0, source: "manual" };
   }
 

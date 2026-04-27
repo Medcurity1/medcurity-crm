@@ -430,7 +430,7 @@ export function OpportunityDetail() {
           />
           <Field
             label="Discount"
-            value={opp.discount != null ? formatCurrencyDetailed(opp.discount) : null}
+            value={opp.discount != null ? `${opp.discount}%` : null}
           />
           <EditableField
             label="Amount"

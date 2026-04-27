@@ -16,6 +16,7 @@ export function useActivities(filters?: ActivityFilters) {
       let query = supabase
         .from("activities")
         .select("*, owner:user_profiles!owner_user_id(id, full_name)")
+        .is("archived_at", null)
         .order("created_at", { ascending: false });
 
       if (filters?.account_id) {
@@ -240,6 +241,9 @@ export function useTasks(filters: TaskFilters) {
         .from("activities")
         .select("*, owner:user_profiles!owner_user_id(id, full_name)")
         .eq("activity_type", "task")
+        // Hide soft-deleted tasks. Without this, deleting a task only
+        // archived it but the side panel still rendered the row.
+        .is("archived_at", null)
         .order("due_at", { ascending: true, nullsFirst: false });
 
       if (filters.account_id) query = query.eq("account_id", filters.account_id);

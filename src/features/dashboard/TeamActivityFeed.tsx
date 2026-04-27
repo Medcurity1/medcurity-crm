@@ -78,6 +78,7 @@ export function TeamActivityFeed() {
         .select(
           "id, activity_type, subject, created_at, account_id, contact_id, opportunity_id, owner:user_profiles!owner_user_id(full_name), account:accounts(name), contact:contacts(first_name, last_name), opportunity:opportunities(name)",
         )
+        .is("archived_at", null)
         .order("created_at", { ascending: false })
         .limit(15);
       if (error) throw error;
