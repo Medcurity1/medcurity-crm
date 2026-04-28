@@ -756,6 +756,30 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
               </div>
             </FormSection>
 
+            {/* ---- Products (CREATE mode only — sits high so picking
+                 products is the second thing the user does after Basic
+                 Info. EDIT mode keeps the original position lower in
+                 the form.) ---- */}
+            {!isEditing && (
+              <FormSection title="Products">
+                <p className="text-xs text-muted-foreground mb-3">
+                  Pick products first — this auto-fills the opportunity
+                  name, the Amount, and matches the right price book based
+                  on the account's FTE range. You can edit the name and
+                  amount manually below if needed.
+                </p>
+                <OpportunityProductsEditor
+                  isEditing={isEditing}
+                  opportunityId={id ?? null}
+                  stagedProducts={stagedProducts}
+                  existingProducts={existingProducts ?? []}
+                  onOpenAdd={() => setShowAddProduct(true)}
+                  onRemoveStaged={(idx) => setPendingRemoveIdx(idx)}
+                  onRemoveExisting={(productRowId) => setPendingRemoveProductId(productRowId)}
+                />
+              </FormSection>
+            )}
+
             {/* ---- Financial ---- */}
             <FormSection title="Financial">
               <p className="text-xs text-muted-foreground mb-3">
@@ -1168,18 +1192,27 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
               </div>
             </FormSection>
 
-            {/* ---- Products ---- */}
-            <FormSection title="Products">
-              <OpportunityProductsEditor
-                isEditing={isEditing}
-                opportunityId={id ?? null}
-                stagedProducts={stagedProducts}
-                existingProducts={existingProducts ?? []}
-                onOpenAdd={() => setShowAddProduct(true)}
-                onRemoveStaged={(idx) => setPendingRemoveIdx(idx)}
-                onRemoveExisting={(productRowId) => setPendingRemoveProductId(productRowId)}
-              />
-            </FormSection>
+            {/* ---- Products ----
+                On EDIT, this stays at the bottom (under Notes) so reps
+                can scroll through the deal-shape fields first. On
+                CREATE, it's moved to the top right after Basic Info
+                (rendered above) so picking products is the second
+                thing the user does — which auto-fills the opp name,
+                amount, subtotal, FTE pricing in one step.
+            */}
+            {isEditing && (
+              <FormSection title="Products">
+                <OpportunityProductsEditor
+                  isEditing={isEditing}
+                  opportunityId={id ?? null}
+                  stagedProducts={stagedProducts}
+                  existingProducts={existingProducts ?? []}
+                  onOpenAdd={() => setShowAddProduct(true)}
+                  onRemoveStaged={(idx) => setPendingRemoveIdx(idx)}
+                  onRemoveExisting={(productRowId) => setPendingRemoveProductId(productRowId)}
+                />
+              </FormSection>
+            )}
 
             {/* ---- Custom Fields ---- */}
             {customFieldDefs && customFieldDefs.length > 0 && (
