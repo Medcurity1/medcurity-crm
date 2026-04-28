@@ -38,6 +38,34 @@ export function useUrlState(key: string, defaultValue: string): [string, (value:
 }
 
 /**
+ * Like useUrlState but for an array of strings, encoded as a single
+ * comma-separated value (e.g. ?status=active,pending). Empty array =
+ * key removed from URL. Used by multi-select filters.
+ */
+export function useUrlArrayState(
+  key: string
+): [string[], (value: string[]) => void] {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const raw = searchParams.get(key);
+  const value = raw ? raw.split(",").filter(Boolean) : [];
+
+  const setValue = useCallback(
+    (newValue: string[]) => {
+      const live = new URLSearchParams(window.location.search);
+      if (!newValue.length) {
+        live.delete(key);
+      } else {
+        live.set(key, newValue.join(","));
+      }
+      setSearchParams(live, { replace: true });
+    },
+    [key, setSearchParams]
+  );
+
+  return [value, setValue];
+}
+
+/**
  * Like useState for a number, but persists in URL search params.
  */
 export function useUrlNumberState(key: string, defaultValue: number): [number, (value: number) => void] {

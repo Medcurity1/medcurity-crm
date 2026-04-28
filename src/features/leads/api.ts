@@ -4,12 +4,12 @@ import type { Lead } from "@/types/crm";
 
 interface LeadFilters {
   search?: string;
-  status?: string;
-  source?: string;
-  qualification?: string;
+  status?: string | string[];
+  source?: string | string[];
+  qualification?: string | string[];
   ownerId?: string | "mine";
-  rating?: string;
-  industryCategory?: string;
+  rating?: string | string[];
+  industryCategory?: string | string[];
   verified?: "true" | "false";
   /** Include converted leads (default: false — they're hidden Salesforce-style). */
   includeConverted?: boolean;
@@ -44,13 +44,25 @@ export function useLeads(filters?: LeadFilters) {
         );
       }
       if (filters?.status) {
-        query = query.eq("status", filters.status);
+        if (Array.isArray(filters.status)) {
+          if (filters.status.length > 0) query = query.in("status", filters.status);
+        } else {
+          query = query.eq("status", filters.status);
+        }
       }
       if (filters?.source) {
-        query = query.eq("source", filters.source);
+        if (Array.isArray(filters.source)) {
+          if (filters.source.length > 0) query = query.in("source", filters.source);
+        } else {
+          query = query.eq("source", filters.source);
+        }
       }
       if (filters?.qualification) {
-        query = query.eq("qualification", filters.qualification);
+        if (Array.isArray(filters.qualification)) {
+          if (filters.qualification.length > 0) query = query.in("qualification", filters.qualification);
+        } else {
+          query = query.eq("qualification", filters.qualification);
+        }
       }
       if (filters?.ownerId && filters.ownerId !== "mine") {
         query = query.eq("owner_user_id", filters.ownerId);
@@ -59,10 +71,19 @@ export function useLeads(filters?: LeadFilters) {
         if (userData.user?.id) query = query.eq("owner_user_id", userData.user.id);
       }
       if (filters?.rating) {
-        query = query.eq("rating", filters.rating);
+        if (Array.isArray(filters.rating)) {
+          if (filters.rating.length > 0) query = query.in("rating", filters.rating);
+        } else {
+          query = query.eq("rating", filters.rating);
+        }
       }
       if (filters?.industryCategory) {
-        query = query.eq("industry_category", filters.industryCategory);
+        if (Array.isArray(filters.industryCategory)) {
+          if (filters.industryCategory.length > 0)
+            query = query.in("industry_category", filters.industryCategory);
+        } else {
+          query = query.eq("industry_category", filters.industryCategory);
+        }
       }
       if (filters?.verified === "true") query = query.eq("verified", true);
       else if (filters?.verified === "false") query = query.eq("verified", false);

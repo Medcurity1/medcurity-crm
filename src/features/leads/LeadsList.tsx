@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
+import { useUrlState, useUrlNumberState, useUrlArrayState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { UserPlus, Plus, Search, X } from "lucide-react";
@@ -37,6 +37,7 @@ import { toast } from "sonner";
 import { leadStatusLabel, leadSourceLabel, qualificationLabel } from "@/lib/formatters";
 import type { LeadSource } from "@/types/crm";
 import { SortableHeader, type SortState } from "@/components/SortableHeader";
+import { MultiSelect } from "@/components/MultiSelect";
 import { formatPhone } from "@/components/PhoneInput";
 
 const PAGE_SIZE = 25;
@@ -118,12 +119,12 @@ export function LeadsList() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const [search, setSearch] = useDebouncedUrlState("q", "");
-  const [statusFilter, setStatusFilter] = useUrlState("status", "all");
-  const [sourceFilter, setSourceFilter] = useUrlState("source", "all");
-  const [qualificationFilter, setQualificationFilter] = useUrlState("qual", "all");
+  const [statusFilter, setStatusFilter] = useUrlArrayState("status");
+  const [sourceFilter, setSourceFilter] = useUrlArrayState("source");
+  const [qualificationFilter, setQualificationFilter] = useUrlArrayState("qual");
   const [ownerFilter, setOwnerFilter] = useUrlState("owner", "all");
-  const [ratingFilter, setRatingFilter] = useUrlState("rating", "all");
-  const [industryFilter, setIndustryFilter] = useUrlState("industry", "all");
+  const [ratingFilter, setRatingFilter] = useUrlArrayState("rating");
+  const [industryFilter, setIndustryFilter] = useUrlArrayState("industry");
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
   // Hide converted leads by default. Toggle to show them when a rep
   // wants to dig into history. URL-state so a "show converted" view
@@ -142,13 +143,13 @@ export function LeadsList() {
 
   const { data: result, isLoading } = useLeads({
     search: search || undefined,
-    status: statusFilter !== "all" ? statusFilter : undefined,
-    source: sourceFilter !== "all" ? sourceFilter : undefined,
-    qualification: qualificationFilter !== "all" ? qualificationFilter : undefined,
+    status: statusFilter.length ? statusFilter : undefined,
+    source: sourceFilter.length ? sourceFilter : undefined,
+    qualification: qualificationFilter.length ? qualificationFilter : undefined,
     ownerId:
       ownerFilter === "all" ? undefined : ownerFilter === "mine" ? "mine" : ownerFilter,
-    rating: ratingFilter !== "all" ? ratingFilter : undefined,
-    industryCategory: industryFilter !== "all" ? industryFilter : undefined,
+    rating: ratingFilter.length ? ratingFilter : undefined,
+    industryCategory: industryFilter.length ? industryFilter : undefined,
     verified:
       verifiedFilter === "verified"
         ? "true"
@@ -174,16 +175,24 @@ export function LeadsList() {
     setSearch(value);
     setPage(0);
   };
-  const handleStatusChange = (value: string) => {
+  const handleStatusChange = (value: string[]) => {
     setStatusFilter(value);
     setPage(0);
   };
-  const handleSourceChange = (value: string) => {
+  const handleSourceChange = (value: string[]) => {
     setSourceFilter(value);
     setPage(0);
   };
-  const handleQualificationChange = (value: string) => {
+  const handleQualificationChange = (value: string[]) => {
     setQualificationFilter(value);
+    setPage(0);
+  };
+  const handleRatingChange = (value: string[]) => {
+    setRatingFilter(value);
+    setPage(0);
+  };
+  const handleIndustryChange = (value: string[]) => {
+    setIndustryFilter(value);
     setPage(0);
   };
 
@@ -265,54 +274,52 @@ export function LeadsList() {
             className="pl-9"
           />
         </div>
-        <Select value={statusFilter} onValueChange={handleStatusChange}>
-          <SelectTrigger className="w-44">
-            <SelectValue placeholder="All statuses" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="new">New</SelectItem>
-            <SelectItem value="contacted">Contacted</SelectItem>
-            <SelectItem value="qualified">Qualified</SelectItem>
-            <SelectItem value="unqualified">Unqualified</SelectItem>
-            <SelectItem value="converted">Converted</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={sourceFilter} onValueChange={handleSourceChange}>
-          <SelectTrigger className="w-44">
-            <SelectValue placeholder="All sources" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Sources</SelectItem>
-            <SelectItem value="cold_call">Cold Call</SelectItem>
-            <SelectItem value="conference">Conference</SelectItem>
-            <SelectItem value="email_campaign">Email Campaign</SelectItem>
-            <SelectItem value="mql">MQL</SelectItem>
-            <SelectItem value="partner">Partner</SelectItem>
-            <SelectItem value="podcast">Podcast</SelectItem>
-            <SelectItem value="referral">Referral</SelectItem>
-            <SelectItem value="social_media">Social Media</SelectItem>
-            <SelectItem value="sql">SQL</SelectItem>
-            <SelectItem value="trade_show">Trade Show</SelectItem>
-            <SelectItem value="webinar">Webinar</SelectItem>
-            <SelectItem value="website">Website</SelectItem>
-            <SelectItem value="other">Other</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={qualificationFilter} onValueChange={handleQualificationChange}>
-          <SelectTrigger className="w-44">
-            <SelectValue placeholder="All qualifications" />
-          </SelectTrigger>
-          <SelectContent>
-            {/* SQL/SAL intentionally omitted: per project workflow,
-                a lead becoming SQL = it converts to a contact, so
-                a lead's qualification only ever takes 'unqualified'
-                or 'mql'. */}
-            <SelectItem value="all">All Qualifications</SelectItem>
-            <SelectItem value="unqualified">Unqualified</SelectItem>
-            <SelectItem value="mql">MQL</SelectItem>
-          </SelectContent>
-        </Select>
+        <MultiSelect
+          value={statusFilter}
+          onChange={handleStatusChange}
+          placeholder="All Statuses"
+          triggerClassName="w-44"
+          options={[
+            { value: "new", label: "New" },
+            { value: "contacted", label: "Contacted" },
+            { value: "qualified", label: "Qualified" },
+            { value: "unqualified", label: "Unqualified" },
+            { value: "converted", label: "Converted" },
+          ]}
+        />
+        <MultiSelect
+          value={sourceFilter}
+          onChange={handleSourceChange}
+          placeholder="All Sources"
+          triggerClassName="w-44"
+          options={[
+            { value: "cold_call", label: "Cold Call" },
+            { value: "conference", label: "Conference" },
+            { value: "email_campaign", label: "Email Campaign" },
+            { value: "mql", label: "MQL" },
+            { value: "partner", label: "Partner" },
+            { value: "podcast", label: "Podcast" },
+            { value: "referral", label: "Referral" },
+            { value: "social_media", label: "Social Media" },
+            { value: "sql", label: "SQL" },
+            { value: "trade_show", label: "Trade Show" },
+            { value: "webinar", label: "Webinar" },
+            { value: "website", label: "Website" },
+            { value: "other", label: "Other" },
+          ]}
+        />
+        {/* SQL/SAL omitted per project workflow — a lead becoming SQL =
+            converts to a contact, so leads only ever take unqualified/mql. */}
+        <MultiSelect
+          value={qualificationFilter}
+          onChange={handleQualificationChange}
+          placeholder="All Qualifications"
+          triggerClassName="w-44"
+          options={[
+            { value: "unqualified", label: "Unqualified" },
+            { value: "mql", label: "MQL" },
+          ]}
+        />
         <Select value={ownerFilter} onValueChange={(v) => { setOwnerFilter(v); setPage(0); }}>
           <SelectTrigger className="w-40">
             <SelectValue placeholder="All owners" />
@@ -327,50 +334,50 @@ export function LeadsList() {
             ))}
           </SelectContent>
         </Select>
-        <Select value={ratingFilter} onValueChange={(v) => { setRatingFilter(v); setPage(0); }}>
-          <SelectTrigger className="w-36">
-            <SelectValue placeholder="All ratings" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Ratings</SelectItem>
-            <SelectItem value="hot">🔥 Hot</SelectItem>
-            <SelectItem value="warm">Warm</SelectItem>
-            <SelectItem value="cold">❄️ Cold</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={industryFilter} onValueChange={(v) => { setIndustryFilter(v); setPage(0); }}>
-          <SelectTrigger className="w-44">
-            <SelectValue placeholder="All industries" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Industries</SelectItem>
-            <SelectItem value="behavioral_health">Behavioral Health</SelectItem>
-            <SelectItem value="dental">Dental</SelectItem>
-            <SelectItem value="fqhc">FQHC</SelectItem>
-            <SelectItem value="healthcare_consulting">Healthcare Consulting</SelectItem>
-            <SelectItem value="healthcare_it_vendor">Healthcare IT Vendor</SelectItem>
-            <SelectItem value="home_health">Home Health</SelectItem>
-            <SelectItem value="hospice">Hospice</SelectItem>
-            <SelectItem value="hospital">Hospital</SelectItem>
-            <SelectItem value="imaging_center">Imaging Center</SelectItem>
-            <SelectItem value="insurance_payer">Insurance / Payer</SelectItem>
-            <SelectItem value="lab_services">Lab Services</SelectItem>
-            <SelectItem value="long_term_care">Long-Term Care</SelectItem>
-            <SelectItem value="managed_service_provider">Managed Service Provider</SelectItem>
-            <SelectItem value="medical_group">Medical Group</SelectItem>
-            <SelectItem value="pediatrics">Pediatrics</SelectItem>
-            <SelectItem value="pharmacy">Pharmacy</SelectItem>
-            <SelectItem value="public_health_agency">Public Health Agency</SelectItem>
-            <SelectItem value="rural_health_clinic">Rural Health Clinic</SelectItem>
-            <SelectItem value="skilled_nursing">Skilled Nursing</SelectItem>
-            <SelectItem value="specialty_clinic">Specialty Clinic</SelectItem>
-            <SelectItem value="telemedicine">Telemedicine</SelectItem>
-            <SelectItem value="tribal_health">Tribal Health</SelectItem>
-            <SelectItem value="urgent_care">Urgent Care</SelectItem>
-            <SelectItem value="other_healthcare">Other Healthcare</SelectItem>
-            <SelectItem value="other">Other</SelectItem>
-          </SelectContent>
-        </Select>
+        <MultiSelect
+          value={ratingFilter}
+          onChange={handleRatingChange}
+          placeholder="All Ratings"
+          triggerClassName="w-36"
+          options={[
+            { value: "hot", label: "🔥 Hot" },
+            { value: "warm", label: "Warm" },
+            { value: "cold", label: "❄️ Cold" },
+          ]}
+        />
+        <MultiSelect
+          value={industryFilter}
+          onChange={handleIndustryChange}
+          placeholder="All Industries"
+          triggerClassName="w-44"
+          options={[
+            { value: "behavioral_health", label: "Behavioral Health" },
+            { value: "dental", label: "Dental" },
+            { value: "fqhc", label: "FQHC" },
+            { value: "healthcare_consulting", label: "Healthcare Consulting" },
+            { value: "healthcare_it_vendor", label: "Healthcare IT Vendor" },
+            { value: "home_health", label: "Home Health" },
+            { value: "hospice", label: "Hospice" },
+            { value: "hospital", label: "Hospital" },
+            { value: "imaging_center", label: "Imaging Center" },
+            { value: "insurance_payer", label: "Insurance / Payer" },
+            { value: "lab_services", label: "Lab Services" },
+            { value: "long_term_care", label: "Long-Term Care" },
+            { value: "managed_service_provider", label: "Managed Service Provider" },
+            { value: "medical_group", label: "Medical Group" },
+            { value: "pediatrics", label: "Pediatrics" },
+            { value: "pharmacy", label: "Pharmacy" },
+            { value: "public_health_agency", label: "Public Health Agency" },
+            { value: "rural_health_clinic", label: "Rural Health Clinic" },
+            { value: "skilled_nursing", label: "Skilled Nursing" },
+            { value: "specialty_clinic", label: "Specialty Clinic" },
+            { value: "telemedicine", label: "Telemedicine" },
+            { value: "tribal_health", label: "Tribal Health" },
+            { value: "urgent_care", label: "Urgent Care" },
+            { value: "other_healthcare", label: "Other Healthcare" },
+            { value: "other", label: "Other" },
+          ]}
+        />
         <Select value={verifiedFilter} onValueChange={(v) => { setVerifiedFilter(v); setPage(0); }}>
           <SelectTrigger className="w-36">
             <SelectValue placeholder="Verified" />
@@ -398,36 +405,33 @@ export function LeadsList() {
         </Select>
       </div>
 
-      {/* Applied-filter chip row. Surfacing this is partly for UX
-          (clear what's filtering the table) and partly debug — when
-          filters "look like they aren't applying" the user can now
-          see whether the URL state actually updated. */}
-      {(statusFilter !== "all" ||
-        sourceFilter !== "all" ||
-        qualificationFilter !== "all" ||
+      {/* Applied-filter chip row. */}
+      {(statusFilter.length > 0 ||
+        sourceFilter.length > 0 ||
+        qualificationFilter.length > 0 ||
         ownerFilter !== "all" ||
-        ratingFilter !== "all" ||
-        industryFilter !== "all" ||
+        ratingFilter.length > 0 ||
+        industryFilter.length > 0 ||
         verifiedFilter !== "all") && (
         <div className="flex flex-wrap items-center gap-2 mb-4 text-xs">
           <span className="text-muted-foreground font-medium">Active filters:</span>
-          {statusFilter !== "all" && (
-            <FilterChip label={`Status: ${statusFilter}`} onClear={() => { setStatusFilter("all"); setPage(0); }} />
+          {statusFilter.length > 0 && (
+            <FilterChip label={`Status: ${statusFilter.join(", ")}`} onClear={() => { setStatusFilter([]); setPage(0); }} />
           )}
-          {sourceFilter !== "all" && (
-            <FilterChip label={`Source: ${sourceFilter}`} onClear={() => { setSourceFilter("all"); setPage(0); }} />
+          {sourceFilter.length > 0 && (
+            <FilterChip label={`Source: ${sourceFilter.join(", ")}`} onClear={() => { setSourceFilter([]); setPage(0); }} />
           )}
-          {qualificationFilter !== "all" && (
-            <FilterChip label={`Qual: ${qualificationFilter.toUpperCase()}`} onClear={() => { setQualificationFilter("all"); setPage(0); }} />
+          {qualificationFilter.length > 0 && (
+            <FilterChip label={`Qual: ${qualificationFilter.map((q) => q.toUpperCase()).join(", ")}`} onClear={() => { setQualificationFilter([]); setPage(0); }} />
           )}
           {ownerFilter !== "all" && (
             <FilterChip label={`Owner: ${ownerFilter === "mine" ? "Me" : (users ?? []).find((u) => u.id === ownerFilter)?.full_name ?? "Other"}`} onClear={() => { setOwnerFilter("all"); setPage(0); }} />
           )}
-          {ratingFilter !== "all" && (
-            <FilterChip label={`Rating: ${ratingFilter}`} onClear={() => { setRatingFilter("all"); setPage(0); }} />
+          {ratingFilter.length > 0 && (
+            <FilterChip label={`Rating: ${ratingFilter.join(", ")}`} onClear={() => { setRatingFilter([]); setPage(0); }} />
           )}
-          {industryFilter !== "all" && (
-            <FilterChip label={`Industry: ${industryFilter.replace(/_/g, " ")}`} onClear={() => { setIndustryFilter("all"); setPage(0); }} />
+          {industryFilter.length > 0 && (
+            <FilterChip label={`Industry: ${industryFilter.map((i) => i.replace(/_/g, " ")).join(", ")}`} onClear={() => { setIndustryFilter([]); setPage(0); }} />
           )}
           {verifiedFilter !== "all" && (
             <FilterChip label={`Verified: ${verifiedFilter}`} onClear={() => { setVerifiedFilter("all"); setPage(0); }} />
@@ -446,12 +450,12 @@ export function LeadsList() {
           icon={UserPlus}
           title="No leads found"
           description={
-            search || statusFilter !== "all" || sourceFilter !== "all" || qualificationFilter !== "all"
+            search || statusFilter.length > 0 || sourceFilter.length > 0 || qualificationFilter.length > 0
               ? "Try adjusting your search or filters"
               : "Create your first lead to get started"
           }
           action={
-            !search && statusFilter === "all" && sourceFilter === "all" && qualificationFilter === "all"
+            !search && !statusFilter.length && !sourceFilter.length && !qualificationFilter.length
               ? {
                   label: "New Lead",
                   onClick: () => navigate("/leads/new"),

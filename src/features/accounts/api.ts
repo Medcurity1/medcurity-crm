@@ -5,11 +5,12 @@ import type { Account, AccountContract } from "@/types/crm";
 interface AccountFilters {
   search?: string;
   lifecycle_status?: string;
-  status?: string;
+  /** Single status (legacy) or array of statuses (multi-select). */
+  status?: string | string[];
   /** Filter to a specific owner's accounts. "mine" = current user. */
   ownerId?: string | "mine";
-  /** Filter to a specific industry_category enum value. */
-  industryCategory?: string;
+  /** Single industry (legacy) or array of industries (multi-select). */
+  industryCategory?: string | string[];
   /** Filter to only verified or only unverified accounts. */
   verified?: "true" | "false";
   page?: number;
@@ -44,7 +45,11 @@ export function useAccounts(filters?: AccountFilters) {
         query = query.eq("lifecycle_status", filters.lifecycle_status);
       }
       if (filters?.status) {
-        query = query.eq("status", filters.status);
+        if (Array.isArray(filters.status)) {
+          if (filters.status.length > 0) query = query.in("status", filters.status);
+        } else {
+          query = query.eq("status", filters.status);
+        }
       }
       if (filters?.ownerId && filters.ownerId !== "mine") {
         query = query.eq("owner_user_id", filters.ownerId);
@@ -56,7 +61,12 @@ export function useAccounts(filters?: AccountFilters) {
         }
       }
       if (filters?.industryCategory) {
-        query = query.eq("industry_category", filters.industryCategory);
+        if (Array.isArray(filters.industryCategory)) {
+          if (filters.industryCategory.length > 0)
+            query = query.in("industry_category", filters.industryCategory);
+        } else {
+          query = query.eq("industry_category", filters.industryCategory);
+        }
       }
       if (filters?.verified === "true") {
         query = query.eq("verified", true);

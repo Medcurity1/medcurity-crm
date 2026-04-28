@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
+import { useUrlState, useUrlNumberState, useUrlArrayState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Building2, Plus, Search } from "lucide-react";
@@ -12,6 +12,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Pagination } from "@/components/Pagination";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { SortableHeader, type SortState } from "@/components/SortableHeader";
+import { MultiSelect } from "@/components/MultiSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -44,9 +45,9 @@ export function AccountsList() {
   // setPage(0) / setSearch (users on slow networks were losing
   // keystrokes on the list page).
   const [search, setSearch] = useDebouncedUrlState("q", "");
-  const [statusFilter, setStatusFilter] = useUrlState("status", "all");
+  const [statusFilter, setStatusFilter] = useUrlArrayState("status");
   const [ownerFilter, setOwnerFilter] = useUrlState("owner", "all");
-  const [industryFilter, setIndustryFilter] = useUrlState("industry", "all");
+  const [industryFilter, setIndustryFilter] = useUrlArrayState("industry");
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
   const [page, setPage] = useUrlNumberState("page", 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -54,14 +55,14 @@ export function AccountsList() {
 
   const { data: result, isLoading } = useAccounts({
     search: search || undefined,
-    status: statusFilter !== "all" ? statusFilter : undefined,
+    status: statusFilter.length > 0 ? statusFilter : undefined,
     ownerId:
       ownerFilter === "all"
         ? undefined
         : ownerFilter === "mine"
         ? "mine"
         : ownerFilter,
-    industryCategory: industryFilter !== "all" ? industryFilter : undefined,
+    industryCategory: industryFilter.length > 0 ? industryFilter : undefined,
     verified:
       verifiedFilter === "verified"
         ? "true"
@@ -88,8 +89,12 @@ export function AccountsList() {
     // own writes so there's no race with this one.
     if (page !== 0) setPage(0);
   };
-  const handleStatusChange = (value: string) => {
+  const handleStatusChange = (value: string[]) => {
     setStatusFilter(value);
+    setPage(0);
+  };
+  const handleIndustryChange = (value: string[]) => {
+    setIndustryFilter(value);
     setPage(0);
   };
 
@@ -165,19 +170,19 @@ export function AccountsList() {
             className="pl-9"
           />
         </div>
-        <Select value={statusFilter} onValueChange={handleStatusChange}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="All statuses" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="discovery">Discovery</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
-            <SelectItem value="churned">Churned</SelectItem>
-          </SelectContent>
-        </Select>
+        <MultiSelect
+          value={statusFilter}
+          onChange={handleStatusChange}
+          placeholder="All Statuses"
+          triggerClassName="w-40"
+          options={[
+            { value: "discovery", label: "Discovery" },
+            { value: "pending", label: "Pending" },
+            { value: "active", label: "Active" },
+            { value: "inactive", label: "Inactive" },
+            { value: "churned", label: "Churned" },
+          ]}
+        />
 
         <Select
           value={ownerFilter}
@@ -200,45 +205,39 @@ export function AccountsList() {
           </SelectContent>
         </Select>
 
-        <Select
+        <MultiSelect
           value={industryFilter}
-          onValueChange={(v) => {
-            setIndustryFilter(v);
-            setPage(0);
-          }}
-        >
-          <SelectTrigger className="w-44">
-            <SelectValue placeholder="All industries" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Industries</SelectItem>
-            <SelectItem value="hospital">Hospital</SelectItem>
-            <SelectItem value="medical_group">Medical Group</SelectItem>
-            <SelectItem value="fqhc">FQHC</SelectItem>
-            <SelectItem value="rural_health_clinic">Rural Health Clinic</SelectItem>
-            <SelectItem value="skilled_nursing">Skilled Nursing</SelectItem>
-            <SelectItem value="long_term_care">Long-Term Care</SelectItem>
-            <SelectItem value="home_health">Home Health</SelectItem>
-            <SelectItem value="hospice">Hospice</SelectItem>
-            <SelectItem value="behavioral_health">Behavioral Health</SelectItem>
-            <SelectItem value="dental">Dental</SelectItem>
-            <SelectItem value="pediatrics">Pediatrics</SelectItem>
-            <SelectItem value="specialty_clinic">Specialty Clinic</SelectItem>
-            <SelectItem value="urgent_care">Urgent Care</SelectItem>
-            <SelectItem value="imaging_center">Imaging Center</SelectItem>
-            <SelectItem value="lab_services">Lab Services</SelectItem>
-            <SelectItem value="pharmacy">Pharmacy</SelectItem>
-            <SelectItem value="telemedicine">Telemedicine</SelectItem>
-            <SelectItem value="tribal_health">Tribal Health</SelectItem>
-            <SelectItem value="public_health_agency">Public Health Agency</SelectItem>
-            <SelectItem value="healthcare_it_vendor">Healthcare IT Vendor</SelectItem>
-            <SelectItem value="managed_service_provider">Managed Service Provider</SelectItem>
-            <SelectItem value="healthcare_consulting">Healthcare Consulting</SelectItem>
-            <SelectItem value="insurance_payer">Insurance / Payer</SelectItem>
-            <SelectItem value="other_healthcare">Other Healthcare</SelectItem>
-            <SelectItem value="other">Other</SelectItem>
-          </SelectContent>
-        </Select>
+          onChange={handleIndustryChange}
+          placeholder="All Industries"
+          triggerClassName="w-44"
+          options={[
+            { value: "hospital", label: "Hospital" },
+            { value: "medical_group", label: "Medical Group" },
+            { value: "fqhc", label: "FQHC" },
+            { value: "rural_health_clinic", label: "Rural Health Clinic" },
+            { value: "skilled_nursing", label: "Skilled Nursing" },
+            { value: "long_term_care", label: "Long-Term Care" },
+            { value: "home_health", label: "Home Health" },
+            { value: "hospice", label: "Hospice" },
+            { value: "behavioral_health", label: "Behavioral Health" },
+            { value: "dental", label: "Dental" },
+            { value: "pediatrics", label: "Pediatrics" },
+            { value: "specialty_clinic", label: "Specialty Clinic" },
+            { value: "urgent_care", label: "Urgent Care" },
+            { value: "imaging_center", label: "Imaging Center" },
+            { value: "lab_services", label: "Lab Services" },
+            { value: "pharmacy", label: "Pharmacy" },
+            { value: "telemedicine", label: "Telemedicine" },
+            { value: "tribal_health", label: "Tribal Health" },
+            { value: "public_health_agency", label: "Public Health Agency" },
+            { value: "healthcare_it_vendor", label: "Healthcare IT Vendor" },
+            { value: "managed_service_provider", label: "Managed Service Provider" },
+            { value: "healthcare_consulting", label: "Healthcare Consulting" },
+            { value: "insurance_payer", label: "Insurance / Payer" },
+            { value: "other_healthcare", label: "Other Healthcare" },
+            { value: "other", label: "Other" },
+          ]}
+        />
 
         <Select
           value={verifiedFilter}
@@ -268,10 +267,10 @@ export function AccountsList() {
         <EmptyState
           icon={Building2}
           title="No accounts found"
-          description={search || statusFilter !== "all"
+          description={search || statusFilter.length > 0
             ? "Try adjusting your search or filter"
             : "Create your first account to get started"}
-          action={!search && statusFilter === "all" ? {
+          action={!search && statusFilter.length === 0 ? {
             label: "New Account",
             onClick: () => navigate("/accounts/new"),
           } : undefined}
