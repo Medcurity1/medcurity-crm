@@ -401,11 +401,51 @@ export function useAddOpportunityProductsBulk() {
 }
 
 /**
+ * Self-healing hook: when the opportunity detail page mounts and the
+ * displayed amount looks stale relative to the line items, fire the
+ * recompute RPC silently. Brayden flagged that some opps still showed
+ * $0 amount despite having products attached — this is the safety net
+ * that catches drift without requiring an explicit user action.
+ */
+export function useEnsureOpportunityAmountFresh(opportunityId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      if (!opportunityId) return;
+      await recomputeOpportunityTotals(opportunityId);
+      await resyncOpportunityName(opportunityId);
+    },
+    onSuccess: () => {
+      if (!opportunityId) return;
+      qc.invalidateQueries({ queryKey: ["opportunity", opportunityId] });
+      qc.invalidateQueries({ queryKey: ["opportunities", opportunityId] });
+    },
+  });
+}
+
+/**
  * Recompute opp.subtotal + opp.amount from the line items.
- *   subtotal = sum(qty * unit_price * (1 - discount_percent/100))
+ * Calls the security-definer RPC `recalc_opportunity_amount` so it
+ * works regardless of the rep's row-level update permissions on the
+ * opportunities table. Falls back to client-side math if the RPC isn't
+ * available (e.g. migration not yet applied on this env).
+ *
+ *   subtotal = sum(qty * unit_price * (1 - line_discount_percent/100))
  *   amount   = subtotal * (1 - opp.discount/100)  (opp.discount is %)
  */
 async function recomputeOpportunityTotals(opportunityId: string): Promise<void> {
+  // Preferred path: server-side RPC. Has `security definer` + RLS-aware,
+  // and it's the same code path the trigger uses, so the result matches
+  // exactly what every other surface sees.
+  const { error: rpcErr } = await supabase.rpc("recalc_opportunity_amount", {
+    p_opp_id: opportunityId,
+  });
+  if (!rpcErr) return;
+
+  // Fallback: do the math client-side.
+  if (import.meta.env.DEV) {
+    console.warn("recalc_opportunity_amount RPC failed, falling back to client recompute:", rpcErr);
+  }
   const [linesRes, oppRes] = await Promise.all([
     supabase
       .from("opportunity_products")
@@ -423,9 +463,6 @@ async function recomputeOpportunityTotals(opportunityId: string): Promise<void> 
     unit_price: number | string;
     discount_percent: number | string | null;
   }[];
-  // Don't overwrite the imported amount when there are no line items.
-  // Many opps were imported with `amount` populated but NO product rows
-  // (line items are optional in SF). Zeroing them here destroys real data.
   if (lines.length === 0) return;
   const subtotal = lines.reduce((s, l) => {
     const qty = Number(l.quantity);
@@ -503,6 +540,7 @@ export function useUpdateOpportunityProduct() {
         unit_price?: number;
         arr_amount?: number;
         discount_percent?: number;
+        discount_type?: "percent" | "amount";
       };
     }) => {
       const { data, error } = await supabase

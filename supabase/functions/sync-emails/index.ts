@@ -213,10 +213,11 @@ async function fetchGmailEmails(
   const sinceEpoch = Math.floor(new Date(sinceDate).getTime() / 1000);
   const query = `after:${sinceEpoch}`;
 
-  // Step 1 -- list message IDs, following pageToken across up to 30 pages
-  // (~3000 emails). First-ever sync does a 90-day backfill so we need this
-  // for any rep with decent email volume.
-  const MAX_PAGES = 30;
+  // Step 1 -- list message IDs, following pageToken across many pages.
+  // High-volume reps (Summer hit the old 30-page ceiling = ~3000 emails)
+  // were silently dropping older messages. Bumped to 200 pages =
+  // ~20,000 emails, plenty for a 90-day backfill on a busy mailbox.
+  const MAX_PAGES = 200;
   const messageIds: string[] = [];
   let pageToken: string | undefined;
   let pageCount = 0;
@@ -305,10 +306,10 @@ async function fetchOutlookEmails(
   const isoSince = new Date(sinceDate).toISOString();
   const filter = `receivedDateTime ge ${isoSince}`;
 
-  // Walk @odata.nextLink until no more pages. Capped at 30 pages (≈3000 emails)
-  // as a safety ceiling — a rep with more than that in 90 days is a one-off
-  // that can be run multiple times if needed.
-  const MAX_PAGES = 30;
+  // Walk @odata.nextLink until no more pages. Bumped from 30 → 200
+  // (≈20,000 emails) to handle high-volume reps doing the 90-day
+  // backfill (Brayden 2026-04-28: Summer was hitting the ceiling).
+  const MAX_PAGES = 200;
   const emails: ParsedEmail[] = [];
   let url: string | null =
     `https://graph.microsoft.com/v1.0/me/messages?$filter=${encodeURIComponent(filter)}&$top=100&$select=id,subject,bodyPreview,body,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,conversationId&$orderby=receivedDateTime desc`;
@@ -381,25 +382,40 @@ async function matchContactsByEmail(
 
   const lower = emailAddresses.map((e) => e.toLowerCase());
 
-  const { data, error } = await supabase
-    .from("contacts")
-    .select("id, account_id, email, is_primary")
-    .in("email", lower)
-    .is("archived_at", null);
-
-  if (error) {
-    console.error("Contact lookup error:", error.message);
-    return new Map();
-  }
-
+  // Critical bug fix (Brayden 2026-04-28): the previous lookup used
+  // `.in("email", lower)` which is a CASE-SENSITIVE equality match in
+  // Postgres. Contacts whose email was stored as "Bob@Foo.com" never
+  // matched a normalized lowercase address. Brayden saw 3000 emails
+  // fetched for Summer with 0 contact matches because of this.
+  // Workaround: build an OR of `ilike` clauses (PostgREST `or` syntax).
+  // 200-address ceiling per query keeps the URL under PostgREST limits;
+  // batching handles larger inboxes.
   const map = new Map<string, ContactMatch>();
-  for (const contact of data ?? []) {
-    if (contact.email) {
-      map.set(contact.email.toLowerCase(), {
-        contact_id: contact.id,
-        account_id: contact.account_id,
-        is_primary: contact.is_primary,
-      });
+  const BATCH = 100;
+  for (let i = 0; i < lower.length; i += BATCH) {
+    const batch = lower.slice(i, i + BATCH);
+    // Escape any commas/parens that would break PostgREST `or` parsing.
+    const orFilter = batch
+      .map((e) => `email.ilike.${e.replace(/[(),]/g, "")}`)
+      .join(",");
+    const { data, error } = await supabase
+      .from("contacts")
+      .select("id, account_id, email, is_primary")
+      .or(orFilter)
+      .is("archived_at", null);
+
+    if (error) {
+      console.error("Contact lookup error:", error.message);
+      continue;
+    }
+    for (const contact of data ?? []) {
+      if (contact.email) {
+        map.set(contact.email.toLowerCase(), {
+          contact_id: contact.id,
+          account_id: contact.account_id,
+          is_primary: contact.is_primary,
+        });
+      }
     }
   }
   return map;

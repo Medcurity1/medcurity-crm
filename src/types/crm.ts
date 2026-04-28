@@ -372,6 +372,8 @@ export interface Opportunity {
   description: string | null;
   promo_code: string | null;
   discount: number | null;
+  /** 'percent' = discount field is %; 'amount' = discount field is $. */
+  discount_type?: "percent" | "amount";
   subtotal: number | null;
   follow_up: boolean;
   one_time_project?: boolean;
@@ -512,6 +514,10 @@ export interface OpportunityProduct {
   quantity: number;
   unit_price: number;
   arr_amount: number;
+  /** Either a percent (0-100) or a flat dollar amount, per `discount_type`. */
+  discount_percent?: number | null;
+  /** 'percent' = discount_percent is %; 'amount' = discount_percent is $. */
+  discount_type?: "percent" | "amount";
   created_at: string;
   updated_at: string;
   // joined fields

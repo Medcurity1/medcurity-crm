@@ -1,9 +1,9 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { Pencil, Archive, ChevronDown, UserRoundCog, Plus, Trash2, History } from "lucide-react";
-import { useOpportunity, useUpdateOpportunity, useArchiveOpportunity, useDeleteOpportunity, useStageHistory, useOpportunityProducts, useRemoveOpportunityProduct, useUpdateOpportunityProduct } from "./api";
+import { useOpportunity, useUpdateOpportunity, useArchiveOpportunity, useDeleteOpportunity, useStageHistory, useOpportunityProducts, useRemoveOpportunityProduct, useUpdateOpportunityProduct, useEnsureOpportunityAmountFresh } from "./api";
 import { MultiProductPicker } from "./MultiProductPicker";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { StageProgressBar } from "./StageProgressBar";
@@ -141,6 +141,36 @@ export function OpportunityDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opp?.id]);
 
+  // Self-healing: when products + opp are loaded, check whether the
+  // displayed amount matches what the line items would compute. If
+  // not, fire the recompute RPC (it's a no-op for opps without lines).
+  // This catches drift from missing migrations or trigger silently
+  // failing under RLS so users never see $0 on opps that have products.
+  const ensureAmountFresh = useEnsureOpportunityAmountFresh(id);
+  const ensureFiredForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!id || !opp || !products) return;
+    if (ensureFiredForRef.current === id) return; // run once per opp visit
+    if (products.length === 0) return; // nothing to recompute against
+    const expected = products.reduce((sum, p) => {
+      const qty = Number(p.quantity);
+      const up = Number(p.unit_price);
+      const disc = Number((p as { discount_percent?: number | string | null }).discount_percent ?? 0);
+      return sum + qty * up * (1 - disc / 100);
+    }, 0);
+    const oppDisc = Math.max(0, Math.min(100, Number(opp.discount ?? 0)));
+    const expectedAmount = Math.round(expected * (1 - oppDisc / 100) * 100) / 100;
+    const currentAmount = Math.round(Number(opp.amount ?? 0) * 100) / 100;
+    // Allow 1¢ rounding tolerance.
+    if (Math.abs(expectedAmount - currentAmount) > 0.01) {
+      ensureFiredForRef.current = id;
+      ensureAmountFresh.mutate();
+    } else {
+      ensureFiredForRef.current = id;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, opp?.id, products?.length]);
+
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -177,8 +207,6 @@ export function OpportunityDetail() {
       }
     );
   }
-
-  const totalARR = products?.reduce((sum, p) => sum + Number(p.arr_amount), 0) ?? 0;
 
   return (
     <div>
@@ -363,7 +391,6 @@ export function OpportunityDetail() {
               <ProductsTabContent
                 opportunityId={id!}
                 products={products ?? []}
-                totalARR={totalARR}
                 onAddProduct={() => setShowAddProduct(true)}
                 onRemoveProduct={(rowId, name) => setPendingRemoveProduct({ id: rowId, name })}
               />
@@ -776,7 +803,6 @@ interface ProductsTabContentProps {
     discount_percent?: number | string | null;
     product?: { id?: string | null; name?: string | null; code?: string | null } | null;
   }>;
-  totalARR: number;
   onAddProduct: () => void;
   onRemoveProduct: (rowId: string, name: string) => void;
 }
@@ -784,7 +810,6 @@ interface ProductsTabContentProps {
 function ProductsTabContent({
   opportunityId,
   products,
-  totalARR,
   onAddProduct,
   onRemoveProduct,
 }: ProductsTabContentProps) {
@@ -793,16 +818,18 @@ function ProductsTabContent({
   // the MultiProductPicker UX so the detail page feels consistent with
   // the create flow (Brayden's request: "follow the same type of ui as
   // the adding product screen").
-  type RowDraft = { quantity: string; unit_price: string; discount_percent: string };
+  type DiscType = "percent" | "amount";
+  type RowDraft = { quantity: string; unit_price: string; discount_percent: string; discount_type: DiscType };
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
   const updateMutation = useUpdateOpportunityProduct();
 
-  function getDraft(p: { id: string; quantity: number; unit_price: number | string; discount_percent?: number | string | null }): RowDraft {
+  function getDraft(p: { id: string; quantity: number; unit_price: number | string; discount_percent?: number | string | null; discount_type?: DiscType }): RowDraft {
     return (
       drafts[p.id] ?? {
         quantity: String(p.quantity ?? 1),
         unit_price: String(p.unit_price ?? 0),
         discount_percent: String(p.discount_percent ?? 0),
+        discount_type: (p.discount_type ?? "percent") as DiscType,
       }
     );
   }
@@ -811,26 +838,32 @@ function ProductsTabContent({
       const current =
         prev[rowId] ??
         (() => {
-          const row = products.find((r) => r.id === rowId);
+          const row = products.find((r) => r.id === rowId) as
+            | { quantity?: number; unit_price?: number | string; discount_percent?: number | string | null; discount_type?: DiscType }
+            | undefined;
           return {
             quantity: String(row?.quantity ?? 1),
             unit_price: String(row?.unit_price ?? 0),
             discount_percent: String(row?.discount_percent ?? 0),
+            discount_type: (row?.discount_type ?? "percent") as DiscType,
           };
         })();
       return { ...prev, [rowId]: { ...current, ...patch } };
     });
   }
-  async function commitDraft(p: { id: string; quantity: number; unit_price: number | string; discount_percent?: number | string | null }) {
+  async function commitDraft(p: { id: string; quantity: number; unit_price: number | string; discount_percent?: number | string | null; discount_type?: DiscType }) {
     const draft = drafts[p.id];
     if (!draft) return;
     const qty = Math.max(0, Number(draft.quantity) || 0);
     const price = Math.max(0, Number(draft.unit_price) || 0);
-    const disc = Math.min(100, Math.max(0, Number(draft.discount_percent) || 0));
+    let disc = Math.max(0, Number(draft.discount_percent) || 0);
+    if (draft.discount_type === "percent") disc = Math.min(100, disc);
+    const currentType = (p.discount_type ?? "percent") as DiscType;
     const noChange =
       qty === Number(p.quantity ?? 0) &&
       price === Number(p.unit_price ?? 0) &&
-      disc === Number(p.discount_percent ?? 0);
+      disc === Number(p.discount_percent ?? 0) &&
+      draft.discount_type === currentType;
     if (noChange) {
       setDrafts((prev) => {
         const out = { ...prev };
@@ -843,7 +876,12 @@ function ProductsTabContent({
       await updateMutation.mutateAsync({
         id: p.id,
         opportunity_id: opportunityId,
-        patch: { quantity: qty, unit_price: price, discount_percent: disc },
+        patch: {
+          quantity: qty,
+          unit_price: price,
+          discount_percent: disc,
+          discount_type: draft.discount_type,
+        },
       });
       setDrafts((prev) => {
         const out = { ...prev };
@@ -851,10 +889,27 @@ function ProductsTabContent({
         return out;
       });
     } catch (err) {
-      // Don't drop the draft so the user can retry.
       console.error("Failed to update product line:", err);
     }
   }
+
+  // Live total reflects the user's in-progress drafts so the footer
+  // doesn't show stale data while they're editing. Falls back to the
+  // persisted arr_amount once the draft is committed/cleared.
+  const liveTotalARR = products.reduce((sum, p) => {
+    const draft = drafts[p.id];
+    if (draft) {
+      const qty = Number(draft.quantity) || 0;
+      const price = Number(draft.unit_price) || 0;
+      const disc = Number(draft.discount_percent) || 0;
+      const lineTotal =
+        draft.discount_type === "amount"
+          ? Math.max(0, qty * price - disc)
+          : qty * price * (1 - disc / 100);
+      return sum + lineTotal;
+    }
+    return sum + Number(p.arr_amount);
+  }, 0);
 
   return (
     <>
@@ -878,7 +933,7 @@ function ProductsTabContent({
                 <TableHead>Code</TableHead>
                 <TableHead className="text-right w-20">Qty</TableHead>
                 <TableHead className="text-right w-28">Unit $</TableHead>
-                <TableHead className="text-right w-20">Disc %</TableHead>
+                <TableHead className="text-right w-32">Discount</TableHead>
                 <TableHead className="text-right">Total</TableHead>
                 <TableHead className="w-10" />
               </TableRow>
@@ -889,7 +944,10 @@ function ProductsTabContent({
                 const previewQty = Number(draft.quantity) || 0;
                 const previewPrice = Number(draft.unit_price) || 0;
                 const previewDisc = Number(draft.discount_percent) || 0;
-                const previewArr = previewQty * previewPrice * (1 - previewDisc / 100);
+                const previewArr =
+                  draft.discount_type === "amount"
+                    ? Math.max(0, previewQty * previewPrice - previewDisc)
+                    : previewQty * previewPrice * (1 - previewDisc / 100);
                 const dirty = !!drafts[p.id];
                 return (
                   <TableRow key={p.id} className={dirty ? "bg-amber-50/40" : ""}>
@@ -924,16 +982,30 @@ function ProductsTabContent({
                       />
                     </TableCell>
                     <TableCell className="text-right">
-                      <input
-                        type="number"
-                        min={0}
-                        max={100}
-                        step="1"
-                        value={draft.discount_percent}
-                        onChange={(e) => setDraftField(p.id, { discount_percent: e.target.value })}
-                        onBlur={() => commitDraft(p)}
-                        className="h-8 w-20 text-right ml-auto border rounded-md px-2 bg-background"
-                      />
+                      <div className="flex items-center justify-end gap-1">
+                        <select
+                          value={draft.discount_type}
+                          onChange={(e) => {
+                            setDraftField(p.id, { discount_type: e.target.value as "percent" | "amount" });
+                          }}
+                          onBlur={() => commitDraft(p)}
+                          className="h-8 border rounded-md bg-background text-xs px-1"
+                          title="Discount type: % of unit price or flat $ amount"
+                        >
+                          <option value="percent">%</option>
+                          <option value="amount">$</option>
+                        </select>
+                        <input
+                          type="number"
+                          min={0}
+                          max={draft.discount_type === "percent" ? 100 : undefined}
+                          step="0.01"
+                          value={draft.discount_percent}
+                          onChange={(e) => setDraftField(p.id, { discount_percent: e.target.value })}
+                          onBlur={() => commitDraft(p)}
+                          className="h-8 w-20 text-right border rounded-md px-2 bg-background"
+                        />
+                      </div>
                     </TableCell>
                     <TableCell className="text-right font-medium">
                       {formatCurrencyDetailed(previewArr)}
@@ -954,7 +1026,7 @@ function ProductsTabContent({
               })}
               <TableRow className="bg-muted/50">
                 <TableCell colSpan={5} className="text-right font-semibold">Total ARR</TableCell>
-                <TableCell className="text-right font-bold">{formatCurrencyDetailed(totalARR)}</TableCell>
+                <TableCell className="text-right font-bold">{formatCurrencyDetailed(liveTotalARR)}</TableCell>
                 <TableCell />
               </TableRow>
             </TableBody>
