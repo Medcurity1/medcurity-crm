@@ -251,7 +251,7 @@ export function OpportunitiesList() {
                     />
                   </TableHead>
                   <SortableHeader column="name" sort={sort} onSort={handleSort}>Name</SortableHeader>
-                  <TableHead>Account</TableHead>
+                  <SortableHeader column="account.name" sort={sort} onSort={handleSort}>Account</SortableHeader>
                   <SortableHeader column="stage" sort={sort} onSort={handleSort}>Stage</SortableHeader>
                   <SortableHeader column="kind" sort={sort} onSort={handleSort}>Kind</SortableHeader>
                   <SortableHeader column="amount" sort={sort} onSort={handleSort} className="text-right">Amount</SortableHeader>

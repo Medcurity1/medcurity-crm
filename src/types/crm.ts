@@ -380,6 +380,8 @@ export interface Opportunity {
   fte_count: number | null;
   fte_range: string | null;
   created_by_automation: boolean;
+  /** True = trigger keeps opp.name in sync with attached products. */
+  name_auto_sync: boolean;
   // Assignment tracking
   assigned_assessor_id: string | null;
   original_sales_rep_id: string | null;

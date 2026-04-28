@@ -543,6 +543,12 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       assigned_assessor_id: values.assigned_assessor_id ?? null,
       original_sales_rep_id: values.original_sales_rep_id ?? null,
       custom_fields: values.custom_fields ?? {},
+      // Persist the rep's auto-sync intent so the server-side trigger
+      // honors it on every product change (not just edits made in this
+      // form). nameUserOverridden = the user typed a custom name, so
+      // name_auto_sync flips false; otherwise leave the trigger free
+      // to keep the name in sync with attached products.
+      name_auto_sync: !nameUserOverridden,
     };
 
     try {

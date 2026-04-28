@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { Pencil, Archive, ChevronDown, UserRoundCog, Plus, Trash2, History } from "lucide-react";
-import { useOpportunity, useUpdateOpportunity, useArchiveOpportunity, useStageHistory, useOpportunityProducts, useRemoveOpportunityProduct } from "./api";
+import { useOpportunity, useUpdateOpportunity, useArchiveOpportunity, useStageHistory, useOpportunityProducts, useRemoveOpportunityProduct, useUpdateOpportunityProduct } from "./api";
 import { MultiProductPicker } from "./MultiProductPicker";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { StageProgressBar } from "./StageProgressBar";
@@ -335,10 +335,11 @@ export function OpportunityDetail() {
             label: `Products (${products?.length ?? 0})`,
             content: (
               <ProductsTabContent
+                opportunityId={id!}
                 products={products ?? []}
                 totalARR={totalARR}
                 onAddProduct={() => setShowAddProduct(true)}
-                onRemoveProduct={(id, name) => setPendingRemoveProduct({ id, name })}
+                onRemoveProduct={(rowId, name) => setPendingRemoveProduct({ id: rowId, name })}
               />
             ),
           },
@@ -740,30 +741,101 @@ export function OpportunityDetail() {
 /* ---------- Tab content extracted for the CollapsibleTabs items ---------- */
 
 interface ProductsTabContentProps {
+  opportunityId: string;
   products: Array<{
     id: string;
     quantity: number;
     unit_price: number | string;
     arr_amount: number | string;
+    discount_percent?: number | string | null;
     product?: { id?: string | null; name?: string | null; code?: string | null } | null;
   }>;
   totalARR: number;
   onAddProduct: () => void;
-  onRemoveProduct: (id: string, name: string) => void;
+  onRemoveProduct: (rowId: string, name: string) => void;
 }
 
 function ProductsTabContent({
+  opportunityId,
   products,
   totalARR,
   onAddProduct,
   onRemoveProduct,
 }: ProductsTabContentProps) {
+  // Live-edit drafts per row, keyed by line item id. Buffered locally
+  // so we don't fire a mutation per keystroke; commit on blur. Mirrors
+  // the MultiProductPicker UX so the detail page feels consistent with
+  // the create flow (Brayden's request: "follow the same type of ui as
+  // the adding product screen").
+  type RowDraft = { quantity: string; unit_price: string; discount_percent: string };
+  const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
+  const updateMutation = useUpdateOpportunityProduct();
+
+  function getDraft(p: { id: string; quantity: number; unit_price: number | string; discount_percent?: number | string | null }): RowDraft {
+    return (
+      drafts[p.id] ?? {
+        quantity: String(p.quantity ?? 1),
+        unit_price: String(p.unit_price ?? 0),
+        discount_percent: String(p.discount_percent ?? 0),
+      }
+    );
+  }
+  function setDraftField(rowId: string, patch: Partial<RowDraft>) {
+    setDrafts((prev) => {
+      const current =
+        prev[rowId] ??
+        (() => {
+          const row = products.find((r) => r.id === rowId);
+          return {
+            quantity: String(row?.quantity ?? 1),
+            unit_price: String(row?.unit_price ?? 0),
+            discount_percent: String(row?.discount_percent ?? 0),
+          };
+        })();
+      return { ...prev, [rowId]: { ...current, ...patch } };
+    });
+  }
+  async function commitDraft(p: { id: string; quantity: number; unit_price: number | string; discount_percent?: number | string | null }) {
+    const draft = drafts[p.id];
+    if (!draft) return;
+    const qty = Math.max(0, Number(draft.quantity) || 0);
+    const price = Math.max(0, Number(draft.unit_price) || 0);
+    const disc = Math.min(100, Math.max(0, Number(draft.discount_percent) || 0));
+    const noChange =
+      qty === Number(p.quantity ?? 0) &&
+      price === Number(p.unit_price ?? 0) &&
+      disc === Number(p.discount_percent ?? 0);
+    if (noChange) {
+      setDrafts((prev) => {
+        const out = { ...prev };
+        delete out[p.id];
+        return out;
+      });
+      return;
+    }
+    try {
+      await updateMutation.mutateAsync({
+        id: p.id,
+        opportunity_id: opportunityId,
+        patch: { quantity: qty, unit_price: price, discount_percent: disc },
+      });
+      setDrafts((prev) => {
+        const out = { ...prev };
+        delete out[p.id];
+        return out;
+      });
+    } catch (err) {
+      // Don't drop the draft so the user can retry.
+      console.error("Failed to update product line:", err);
+    }
+  }
+
   return (
     <>
       <div className="flex items-center justify-between mb-3">
         <span className="text-sm text-muted-foreground">
           {products.length
-            ? `${products.length} product${products.length !== 1 ? "s" : ""}`
+            ? `${products.length} product${products.length !== 1 ? "s" : ""} — edits save when you click out of a field`
             : "No products added yet"}
         </span>
         <Button size="sm" onClick={onAddProduct}>
@@ -778,46 +850,86 @@ function ProductsTabContent({
               <TableRow>
                 <TableHead>Product</TableHead>
                 <TableHead>Code</TableHead>
-                <TableHead className="text-right">Qty</TableHead>
-                <TableHead className="text-right">Unit Price</TableHead>
-                <TableHead className="text-right">ARR</TableHead>
+                <TableHead className="text-right w-20">Qty</TableHead>
+                <TableHead className="text-right w-28">Unit $</TableHead>
+                <TableHead className="text-right w-20">Disc %</TableHead>
+                <TableHead className="text-right">Total</TableHead>
                 <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {products.map((p) => (
-                <TableRow key={p.id}>
-                  <TableCell className="font-medium">
-                    {p.product?.id ? (
-                      <Link
-                        to={`/products/${p.product.id}`}
-                        className="text-primary hover:underline"
+              {products.map((p) => {
+                const draft = getDraft(p);
+                const previewQty = Number(draft.quantity) || 0;
+                const previewPrice = Number(draft.unit_price) || 0;
+                const previewDisc = Number(draft.discount_percent) || 0;
+                const previewArr = previewQty * previewPrice * (1 - previewDisc / 100);
+                const dirty = !!drafts[p.id];
+                return (
+                  <TableRow key={p.id} className={dirty ? "bg-amber-50/40" : ""}>
+                    <TableCell className="font-medium">
+                      {/* Plain text — used to be a Link to /products/:id
+                          which routed users away from the opp. The line
+                          item is editable here; click "Catalog" if you
+                          want to view the master product. */}
+                      {p.product?.name ?? "\u2014"}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{p.product?.code ?? "\u2014"}</TableCell>
+                    <TableCell className="text-right">
+                      <input
+                        type="number"
+                        min={1}
+                        step="1"
+                        value={draft.quantity}
+                        onChange={(e) => setDraftField(p.id, { quantity: e.target.value })}
+                        onBlur={() => commitDraft(p)}
+                        className="h-8 w-20 text-right ml-auto border rounded-md px-2 bg-background"
+                      />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={draft.unit_price}
+                        onChange={(e) => setDraftField(p.id, { unit_price: e.target.value })}
+                        onBlur={() => commitDraft(p)}
+                        className="h-8 w-28 text-right ml-auto border rounded-md px-2 bg-background"
+                      />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step="1"
+                        value={draft.discount_percent}
+                        onChange={(e) => setDraftField(p.id, { discount_percent: e.target.value })}
+                        onBlur={() => commitDraft(p)}
+                        className="h-8 w-20 text-right ml-auto border rounded-md px-2 bg-background"
+                      />
+                    </TableCell>
+                    <TableCell className="text-right font-medium">
+                      {formatCurrencyDetailed(previewArr)}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        onClick={() => onRemoveProduct(p.id, p.product?.name ?? "this product")}
+                        disabled={updateMutation.isPending}
                       >
-                        {p.product.name ?? "\u2014"}
-                      </Link>
-                    ) : (
-                      p.product?.name ?? "\u2014"
-                    )}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{p.product?.code ?? "\u2014"}</TableCell>
-                  <TableCell className="text-right">{p.quantity}</TableCell>
-                  <TableCell className="text-right">{formatCurrencyDetailed(Number(p.unit_price))}</TableCell>
-                  <TableCell className="text-right font-medium">{formatCurrencyDetailed(Number(p.arr_amount))}</TableCell>
-                  <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                      onClick={() => onRemoveProduct(p.id, p.product?.name ?? "this product")}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
               <TableRow className="bg-muted/50">
                 <TableCell colSpan={5} className="text-right font-semibold">Total ARR</TableCell>
                 <TableCell className="text-right font-bold">{formatCurrencyDetailed(totalARR)}</TableCell>
+                <TableCell />
               </TableRow>
             </TableBody>
           </Table>

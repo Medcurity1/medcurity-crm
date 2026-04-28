@@ -27,8 +27,20 @@ export function useOpportunities(filters?: OppFilters) {
       let query = supabase
         .from("opportunities")
         .select("*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
-        .order(sortCol, { ascending: sortAsc, nullsFirst: false })
         .range(page * pageSize, (page + 1) * pageSize - 1);
+
+      // Sort: support sorting by columns on the embedded account
+      // (e.g. "account.name") via PostgREST's referencedTable option.
+      if (sortCol.startsWith("account.")) {
+        const innerCol = sortCol.slice("account.".length);
+        query = query.order(innerCol, {
+          ascending: sortAsc,
+          nullsFirst: false,
+          referencedTable: "account",
+        });
+      } else {
+        query = query.order(sortCol, { ascending: sortAsc, nullsFirst: false });
+      }
 
       if (filters?.search) {
         query = query.ilike("name", `%${filters.search}%`);

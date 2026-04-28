@@ -24,8 +24,18 @@ export function useContacts(filters?: ContactFilters) {
       let query = supabase
         .from("contacts")
         .select("*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
-        .order(sortCol, { ascending: sortAsc, nullsFirst: false })
         .range(page * pageSize, (page + 1) * pageSize - 1);
+
+      if (sortCol.startsWith("account.")) {
+        const innerCol = sortCol.slice("account.".length);
+        query = query.order(innerCol, {
+          ascending: sortAsc,
+          nullsFirst: false,
+          referencedTable: "account",
+        });
+      } else {
+        query = query.order(sortCol, { ascending: sortAsc, nullsFirst: false });
+      }
 
       if (filters?.search) {
         query = query.or(`first_name.ilike.%${filters.search}%,last_name.ilike.%${filters.search}%,email.ilike.%${filters.search}%,title.ilike.%${filters.search}%`);

@@ -65,7 +65,6 @@ export function ProductDetail() {
 
   const { data: product, isLoading } = useProduct(id);
   const { data: families } = useProductFamilies();
-  const { data: entries } = useEntriesForProduct(id);
   const updateMutation = useUpdateProduct();
   const deleteMutation = useDeleteProduct();
   const archiveMutation = useArchiveProduct();
@@ -217,12 +216,10 @@ export function ProductDetail() {
       <Tabs defaultValue="details">
         <TabsList>
           <TabsTrigger value="details">Details</TabsTrigger>
-          <TabsTrigger value="related">
-            Related {entries?.length ? `(${entries.length})` : ""}
-          </TabsTrigger>
+          <TabsTrigger value="related">Related</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="details" className="mt-4">
+        <TabsContent value="details" className="mt-4 space-y-4">
           <Card>
             <CardContent className="pt-6 space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
@@ -235,24 +232,16 @@ export function ProductDetail() {
                     "Per FTE"
                   }
                 />
-                <Field
-                  label="Flat Price"
-                  value={
-                    product.has_flat_price
-                      ? product.default_arr != null
+                {product.has_flat_price && (
+                  <Field
+                    label="Flat Price"
+                    value={
+                      product.default_arr != null
                         ? formatCurrencyDetailed(product.default_arr)
                         : "Enabled (no price set)"
-                      : "Off (priced via price books)"
-                  }
-                />
-                <Field
-                  label="Salesforce ID"
-                  value={
-                    <span className="font-mono text-xs">
-                      {product.sf_id ?? "\u2014 (created in CRM)"}
-                    </span>
-                  }
-                />
+                    }
+                  />
+                )}
               </div>
 
               {product.description && (
@@ -263,86 +252,55 @@ export function ProductDetail() {
                   <p className="text-sm whitespace-pre-wrap">{product.description}</p>
                 </div>
               )}
-
-              <hr />
-
-              <div>
-                <h4 className="text-sm font-semibold mb-3">System Information</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
-                  <Field
-                    label="Created By"
-                    value={product.creator?.full_name ?? (product.created_by ? "Unknown user" : "System / Import")}
-                  />
-                  <Field label="Created Date" value={formatDateTime(product.created_at)} />
-                  <Field
-                    label="Last Modified By"
-                    value={product.updater?.full_name ?? (product.updated_by ? "Unknown user" : "—")}
-                  />
-                  <Field label="Last Modified Date" value={formatDateTime(product.updated_at)} />
-                </div>
-              </div>
             </CardContent>
           </Card>
+
+          {/* Pricing — now front and center on the Details tab so admins
+              don't have to dig into Related to find prices, and can edit
+              them inline. */}
+          {!product.has_flat_price && isAdmin && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Pricing</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Per-tier prices. Empty cell = product hidden from the
+                  picker for that tier. Saves on blur.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <ProductPricingMatrix productId={product.id} />
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="related" className="mt-4 space-y-4">
           <ProductOpportunitiesCard productId={product.id} />
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Price Books</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Books where this product has a defined price. Set prices from the Price Books tab on the main Products page.
-              </p>
+              <CardTitle className="text-base">System Information</CardTitle>
             </CardHeader>
             <CardContent>
-              {!entries?.length ? (
-                <p className="text-sm text-muted-foreground py-2">
-                  This product isn't in any price book yet.
-                </p>
-              ) : (
-                <div className="border rounded-lg overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Price Book</TableHead>
-                        <TableHead>FTE Range</TableHead>
-                        <TableHead className="text-right">Unit Price</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {entries.map((e) => (
-                        <TableRow key={e.id}>
-                          <TableCell className="font-medium">
-                            {e.price_book?.name ?? e.price_book_id}
-                            {e.price_book?.is_default && (
-                              <Badge
-                                variant="secondary"
-                                className="ml-2 bg-blue-100 text-blue-700 text-xs"
-                              >
-                                Default
-                              </Badge>
-                            )}
-                            {e.price_book && !e.price_book.is_active && (
-                              <Badge
-                                variant="secondary"
-                                className="ml-2 bg-slate-100 text-slate-700 text-xs"
-                              >
-                                Inactive
-                              </Badge>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {e.fte_range ?? "All"}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {formatCurrencyDetailed(e.unit_price)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
+                <Field
+                  label="Salesforce ID"
+                  value={
+                    <span className="font-mono text-xs">
+                      {product.sf_id ?? "\u2014 (created in CRM)"}
+                    </span>
+                  }
+                />
+                <Field
+                  label="Created By"
+                  value={product.creator?.full_name ?? (product.created_by ? "Unknown user" : "System / Import")}
+                />
+                <Field label="Created Date" value={formatDateTime(product.created_at)} />
+                <Field
+                  label="Last Modified By"
+                  value={product.updater?.full_name ?? (product.updated_by ? "Unknown user" : "—")}
+                />
+                <Field label="Last Modified Date" value={formatDateTime(product.updated_at)} />
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -456,10 +414,12 @@ function ProductEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Edit Product</DialogTitle>
-          <DialogDescription>Update product details and per-FTE pricing.</DialogDescription>
+          <DialogDescription>
+            Update product details. Per-FTE prices are edited directly on the product detail page below.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
@@ -564,14 +524,6 @@ function ProductEditDialog({
               placeholder="What is this product? Reps will see this when adding to opportunities."
             />
           </div>
-
-          {/* Per-FTE Pricing matrix — only visible when not using flat
-              price. Prevents the confusion Brayden flagged: editing a
-              product gave no way to set prices, because prices live in
-              price_book_entries, not on the product. */}
-          {!hasFlatPrice && (
-            <ProductPricingMatrix productId={product.id} />
-          )}
         </div>
 
         <DialogFooter>

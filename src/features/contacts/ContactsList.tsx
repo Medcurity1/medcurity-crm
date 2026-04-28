@@ -216,7 +216,7 @@ export function ContactsList() {
                     />
                   </TableHead>
                   <SortableHeader column="last_name" sort={sort} onSort={setSort}>Name</SortableHeader>
-                  <TableHead>Account</TableHead>
+                  <SortableHeader column="account.name" sort={sort} onSort={setSort}>Account</SortableHeader>
                   <SortableHeader column="title" sort={sort} onSort={setSort}>Title</SortableHeader>
                   <SortableHeader column="email" sort={sort} onSort={setSort}>Email</SortableHeader>
                   <TableHead>Phone</TableHead>
