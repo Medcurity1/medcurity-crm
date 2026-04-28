@@ -11,6 +11,8 @@ interface LeadFilters {
   rating?: string;
   industryCategory?: string;
   verified?: "true" | "false";
+  /** Include converted leads (default: false — they're hidden Salesforce-style). */
+  includeConverted?: boolean;
   sortColumn?: string | null;
   sortDirection?: "asc" | "desc";
   page?: number;
@@ -64,6 +66,13 @@ export function useLeads(filters?: LeadFilters) {
       }
       if (filters?.verified === "true") query = query.eq("verified", true);
       else if (filters?.verified === "false") query = query.eq("verified", false);
+
+      // Hide converted leads by default — they're tombstones with
+      // pointers to the contact/account that took over. Reps still
+      // need them findable, just not in the working list.
+      if (!filters?.includeConverted) {
+        query = query.is("converted_at", null);
+      }
 
       const { data, error, count } = await query;
       if (error) throw error;

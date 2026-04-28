@@ -125,6 +125,10 @@ export function LeadsList() {
   const [ratingFilter, setRatingFilter] = useUrlState("rating", "all");
   const [industryFilter, setIndustryFilter] = useUrlState("industry", "all");
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
+  // Hide converted leads by default. Toggle to show them when a rep
+  // wants to dig into history. URL-state so a "show converted" view
+  // is bookmarkable.
+  const [showConverted, setShowConverted] = useUrlState("show_converted", "false");
   const [page, setPage] = useUrlNumberState("page", 0);
   const [sort, setSort] = useState<SortState>({ column: null, direction: "desc" });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -151,6 +155,7 @@ export function LeadsList() {
         : verifiedFilter === "unverified"
         ? "false"
         : undefined,
+    includeConverted: showConverted === "true",
     sortColumn: sort.column,
     sortDirection: sort.direction,
     page,
@@ -374,6 +379,21 @@ export function LeadsList() {
             <SelectItem value="all">All</SelectItem>
             <SelectItem value="verified">Verified only</SelectItem>
             <SelectItem value="unverified">Unverified only</SelectItem>
+          </SelectContent>
+        </Select>
+        {/* Show converted toggle — defaults OFF so the working list
+            stays clean. Flip on to dig into history without losing the
+            tombstone leads. */}
+        <Select
+          value={showConverted}
+          onValueChange={(v) => { setShowConverted(v); setPage(0); }}
+        >
+          <SelectTrigger className="w-44" title="Converted leads are hidden by default">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="false">Hide converted</SelectItem>
+            <SelectItem value="true">Show converted</SelectItem>
           </SelectContent>
         </Select>
       </div>
