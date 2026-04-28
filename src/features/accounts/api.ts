@@ -191,13 +191,31 @@ export function useAccountsList() {
   return useQuery({
     queryKey: ["accounts_list"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("accounts")
-        .select("id, name")
-        .is("archived_at", null)
-        .order("name");
-      if (error) throw error;
-      return data as { id: string; name: string }[];
+      // Page through ALL non-archived accounts. PostgREST caps a
+      // single response at 1000 rows by default, so without explicit
+      // pagination the dropdown only shows ~A through (somewhere
+      // before the rest of the alphabet). Loop until we've fetched
+      // every page.
+      const PAGE = 1000;
+      const all: { id: string; name: string }[] = [];
+      let page = 0;
+      // Hard cap to avoid runaway loops (10k accounts = 10 round trips).
+      while (page < 20) {
+        const from = page * PAGE;
+        const to = from + PAGE - 1;
+        const { data, error } = await supabase
+          .from("accounts")
+          .select("id, name")
+          .is("archived_at", null)
+          .order("name")
+          .range(from, to);
+        if (error) throw error;
+        const rows = (data ?? []) as { id: string; name: string }[];
+        all.push(...rows);
+        if (rows.length < PAGE) break;
+        page += 1;
+      }
+      return all;
     },
   });
 }

@@ -7,7 +7,7 @@ import { PicklistSelect } from "@/features/picklists/PicklistSelect";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { US_STATES } from "@/lib/us-states";
 import { PhoneInput } from "@/components/PhoneInput";
-import { useAccounts } from "@/features/accounts/api";
+import { useAccountsList } from "@/features/accounts/api";
 import { useUsers } from "@/features/accounts/api";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
@@ -38,8 +38,10 @@ export function ContactForm() {
   const isEditing = !!id;
   const { user } = useAuth();
   const { data: contact, isLoading: loadingContact } = useContact(id);
-  const { data: accountsResult } = useAccounts();
-  const accounts = accountsResult?.data;
+  // Pulls EVERY non-archived account (paged through all pages so the
+  // dropdown isn't capped at 25 / 1000). Was using useAccounts() which
+  // page-defaulted to 25 — users couldn't scroll past the A's.
+  const { data: accounts } = useAccountsList();
   const { data: users } = useUsers();
   const { data: requiredFieldsData } = useRequiredFields("contacts");
   const requiredKeys = requiredFieldsData?.map((f) => f.field_key) ?? [];
