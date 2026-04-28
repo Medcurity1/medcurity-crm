@@ -52,47 +52,13 @@ export function usePartners(filters?: PartnerFilters) {
         );
       }
 
-      // ALSO include legacy partner_account text relationships. Many
-      // SF-imported accounts didn't get a row in account_partners; they
-      // just have `partner_account = '<umbrella name>'` as a free-text
-      // field. Build a name → id map so we can attribute those member
-      // counts to the right umbrella account.
-      //
-      // We page through ALL accounts (not just ones with partner_account
-      // set) once so we can resolve names → ids. The result is cached
-      // by react-query so this is a single fetch per session.
-      const { data: legacyRows, error: legacyErr } = await supabase
-        .from("accounts")
-        .select("id, name, partner_account")
-        .not("partner_account", "is", null);
-      if (legacyErr) throw legacyErr;
-
-      // umbrella name (lowercased) → set of umbrella account IDs that
-      // share that name. Most names will map to exactly 1 id.
-      const nameToUmbrellaIds = new Map<string, Set<string>>();
-      for (const r of legacyRows ?? []) {
-        const nm = (r.name ?? "").trim().toLowerCase();
-        if (!nm) continue;
-        if (!nameToUmbrellaIds.has(nm)) nameToUmbrellaIds.set(nm, new Set());
-        nameToUmbrellaIds.get(nm)!.add(r.id);
-      }
-      // For accounts that have `partner_account` text set, increment
-      // the matching umbrella's member count.
-      for (const r of legacyRows ?? []) {
-        const partnerName = (r.partner_account ?? "").trim().toLowerCase();
-        if (!partnerName) continue;
-        const umbrellaIdSet = nameToUmbrellaIds.get(partnerName);
-        if (!umbrellaIdSet) continue;
-        for (const umbrellaId of umbrellaIdSet) {
-          if (umbrellaId === r.id) continue; // can't be its own member
-          umbrellaIds.add(umbrellaId);
-          memberIds.add(r.id);
-          memberCount.set(
-            umbrellaId,
-            (memberCount.get(umbrellaId) ?? 0) + 1
-          );
-        }
-      }
+      // Skip legacy partner_account text aggregation for now — it's
+      // ~5600-row scan that was making the page take >10s and
+      // sometimes timing out. The members count is approximate without
+      // it; we'll wire a Postgres view for legacy partner counts in a
+      // follow-up so we don't have to fetch every account row.
+      // Keeping the variables defined so the rest of the function
+      // doesn't break.
       const topLevelIds = new Set(
         Array.from(umbrellaIds).filter((id) => !memberIds.has(id))
       );

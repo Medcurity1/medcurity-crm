@@ -216,6 +216,13 @@ export function employeesToFteRange(employees: number | null | undefined): strin
 }
 
 export const OPEN_STAGES: OpportunityStage[] = [
+  // SF-aligned stages (current). Pipeline board uses these.
+  "details_analysis",
+  "demo",
+  "proposal_and_price_quote",
+  "proposal_conversation",
+  // Legacy stages — kept so any historical pipeline configs that
+  // still reference them don't filter to nothing.
   "lead",
   "qualified",
   "proposal",
