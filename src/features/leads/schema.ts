@@ -3,14 +3,21 @@ import { z } from "zod";
 export const leadSchema = z.object({
   first_name: z.string().min(1, "First name is required"),
   last_name: z.string().min(1, "Last name is required"),
-  email: z.string().email("Must be a valid email").optional().or(z.literal("")),
+  // Loose validation: many leads have garbage emails from imported lists
+  // (typos, missing @, etc.). Don't block saves on it — just store what
+  // they have. Empty string is fine. The zod email validator was hard
+  // blocking edit-save when the user hadn't even touched the email field.
+  email: z.string().optional().or(z.literal("")),
   phone: z.string().optional().or(z.literal("")),
   mobile_phone: z.string().optional().or(z.literal("")),
   do_not_contact: z.boolean().optional(),
   company: z.string().optional().or(z.literal("")),
   title: z.string().optional().or(z.literal("")),
   industry: z.string().optional().or(z.literal("")),
-  website: z.string().url("Must be a valid URL").optional().or(z.literal("")),
+  // Loose: imported websites often missing protocol (e.g. "example.com")
+  // and we don't want to block lead-edit saves on a field the user
+  // didn't touch.
+  website: z.string().optional().or(z.literal("")),
   status: z.enum(["new", "contacted", "qualified", "unqualified", "converted"]),
   source: z
     .enum([
@@ -88,7 +95,8 @@ export const leadSchema = z.object({
     .optional()
     .nullable()
     .or(z.literal("")),
-  linkedin_url: z.string().url("Must be a valid URL").optional().or(z.literal("")),
+  // Loose: same reason as website.
+  linkedin_url: z.string().optional().or(z.literal("")),
   cold_lead: z.boolean().optional(),
   cold_lead_source: z.string().optional().or(z.literal("")),
   rating: z.enum(["hot", "warm", "cold"]).optional().nullable().or(z.literal("")),
