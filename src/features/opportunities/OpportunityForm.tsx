@@ -134,6 +134,13 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   // they have, we stop auto-suggesting from product codes — their value
   // wins.
   const [nameUserOverridden, setNameUserOverridden] = useState(isEditing);
+  // Two-step wizard for CREATE mode:
+  //   "products" — slim view with Account + Products picker only
+  //   "details"  — full form with all fields, name pre-filled
+  // Edit mode skips the wizard entirely.
+  const [createStep, setCreateStep] = useState<"products" | "details">(
+    isEditing ? "details" : "products"
+  );
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [pendingRemoveIdx, setPendingRemoveIdx] = useState<number | null>(null);
   const [pendingRemoveProductId, setPendingRemoveProductId] = useState<string | null>(null);
@@ -523,9 +530,156 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   // When creating from an account page, lock the account selection
   const accountLocked = isEditing || !!preselectedAccountId;
 
+  // ----- Step 1 of CREATE wizard: Account + Products only -----
+  // Forces the user to make those two decisions first, which auto-fills
+  // the opp name + amount + price book on Step 2. Edit mode skips this
+  // entirely. Account-preselected create (from /accounts/<id>/opps/new)
+  // also skips since the account is already locked.
+  if (!isEditing && createStep === "products") {
+    const watchedAccountId = watch("account_id");
+    const canContinue =
+      !!watchedAccountId && (stagedProducts.length > 0 || nameUserOverridden);
+    return (
+      <div>
+        <PageHeader
+          title="New Opportunity"
+          description="Step 1 of 2 — pick the account and the products you're selling. We'll auto-fill the rest on the next step."
+        />
+        <Card>
+          <CardContent className="pt-6 space-y-6">
+            {/* Account picker */}
+            <div className="space-y-2">
+              <Label>
+                Account *
+              </Label>
+              <Select
+                value={watchedAccountId ?? ""}
+                onValueChange={(v) => setValue("account_id", v, { shouldDirty: true })}
+                disabled={!!preselectedAccountId}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Pick an account..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {accountsList?.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Products picker — same component as Step 2, just isolated here */}
+            <div className="space-y-2">
+              <Label>Products</Label>
+              <p className="text-xs text-muted-foreground">
+                Pick products. Their unit prices come from the account's FTE
+                price book. The opp name will be auto-built from the product
+                short names ("SRA | CO Training | Remote Services").
+              </p>
+              {watchedAccountId ? (
+                <OpportunityProductsEditor
+                  isEditing={false}
+                  opportunityId={null}
+                  stagedProducts={stagedProducts}
+                  existingProducts={[]}
+                  onOpenAdd={() => setShowAddProduct(true)}
+                  onRemoveStaged={(idx) => setPendingRemoveIdx(idx)}
+                  onRemoveExisting={() => {}}
+                />
+              ) : (
+                <div className="border border-dashed rounded-md p-4 text-sm text-muted-foreground text-center">
+                  Pick an account first, then add products.
+                </div>
+              )}
+            </div>
+
+            {/* Skip option for projects without products yet */}
+            {watchedAccountId && stagedProducts.length === 0 && (
+              <button
+                type="button"
+                className="text-xs text-muted-foreground underline hover:text-foreground"
+                onClick={() => {
+                  setNameUserOverridden(true); // signal "I'll name it manually"
+                  setCreateStep("details");
+                }}
+              >
+                Skip — I'll add products later
+              </button>
+            )}
+
+            {/* Step navigation */}
+            <div className="flex items-center justify-between pt-4 border-t">
+              <Button type="button" variant="ghost" onClick={() => navigate(-1)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => setCreateStep("details")}
+                disabled={!canContinue}
+              >
+                Continue →
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* The picker dialog is the same one used on Step 2; reuse it here */}
+        <MultiProductPicker
+          mode="staged"
+          open={showAddProduct}
+          onOpenChange={setShowAddProduct}
+          accountId={watchedAccountId ?? null}
+          fteRange={null}
+          onStage={(rows) => setStagedProducts((prev) => [...prev, ...rows])}
+        />
+
+        {/* Confirm-remove dialog (in case user picks then removes) */}
+        <ConfirmDialog
+          open={pendingRemoveIdx !== null}
+          onOpenChange={(o) => !o && setPendingRemoveIdx(null)}
+          title="Remove product?"
+          description={
+            pendingRemoveIdx !== null && stagedProducts[pendingRemoveIdx]
+              ? `Remove ${stagedProducts[pendingRemoveIdx].product_name} from this opportunity?`
+              : ""
+          }
+          confirmLabel="Remove"
+          destructive
+          onConfirm={() => {
+            if (pendingRemoveIdx !== null) {
+              setStagedProducts((prev) => prev.filter((_, i) => i !== pendingRemoveIdx));
+              setPendingRemoveIdx(null);
+            }
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div>
-      <PageHeader title={isEditing ? "Edit Opportunity" : "New Opportunity"} />
+      <PageHeader
+        title={isEditing ? "Edit Opportunity" : "New Opportunity — Details"}
+        description={
+          isEditing
+            ? undefined
+            : "Step 2 of 2 — review the auto-filled name + amount, fill in the rest."
+        }
+      />
+      {!isEditing && (
+        <div className="mb-3">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setCreateStep("products")}
+          >
+            ← Back to products
+          </Button>
+        </div>
+      )}
 
       <Card>
         <CardContent className="pt-6">

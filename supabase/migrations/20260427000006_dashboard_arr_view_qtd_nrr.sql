@@ -21,7 +21,12 @@
 
 begin;
 
-create or replace view public.v_dashboard_arr_financial as
+-- DROP first because CREATE OR REPLACE VIEW can't reorder/rename columns.
+-- The dashboard's adapter only reads named columns (arr, nrr_*_pct,
+-- lost_count_rolling_365, etc.), so it's safe to drop and recreate.
+drop view if exists public.v_dashboard_arr_financial;
+
+create view public.v_dashboard_arr_financial as
 with bounds as (
   select
     (current_date - interval '365 days')::date     as cutoff_365,
