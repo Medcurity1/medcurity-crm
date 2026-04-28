@@ -175,7 +175,12 @@ export function ContactForm() {
     }
   }
 
-  if (isEditing && loadingContact) {
+  // Wait for BOTH the contact AND the accounts list before rendering.
+  // If we render with the dropdown options not yet loaded, the Select's
+  // controlled `value` resolves to no matching SelectItem and shows the
+  // placeholder instead of the contact's actual account — making it
+  // look like account isn't auto-selected.
+  if ((isEditing && loadingContact) || !accounts) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-10 w-48" />
