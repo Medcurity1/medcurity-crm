@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Trash2, Pencil } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
 import {
@@ -11,7 +11,7 @@ import {
   useCreateOpportunity,
   useUpdateOpportunity,
   useOpportunityProducts,
-  useAddOpportunityProduct,
+  useAddOpportunityProductsBulk,
   useRemoveOpportunityProduct,
   useUpdateOpportunityProduct,
 } from "./api";
@@ -133,7 +133,16 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   // Tracks whether the user has manually typed in the Name field. Once
   // they have, we stop auto-suggesting from product codes — their value
   // wins.
-  const [nameUserOverridden, setNameUserOverridden] = useState(isEditing);
+  // In EDIT mode we DON'T default to overridden: we wait for the
+  // existingProducts to load and decide based on whether the saved name
+  // already matches the auto-suggestion. If it does, the user never
+  // customized it and we'll keep auto-syncing it as products change.
+  // If the saved name differs, they typed something custom and we
+  // back off (until they click "Use suggested").
+  const [nameUserOverridden, setNameUserOverridden] = useState(false);
+  // Once we've decided override-vs-auto for an existing opp's name,
+  // don't second-guess it on later renders.
+  const [editNameOverrideInitialized, setEditNameOverrideInitialized] = useState(false);
   // Two-step wizard for CREATE mode:
   //   "products" — slim view with Account + Products picker only
   //   "details"  — full form with all fields, name pre-filled
@@ -146,7 +155,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   const [pendingRemoveProductId, setPendingRemoveProductId] = useState<string | null>(null);
 
   const { data: existingProducts } = useOpportunityProducts(isEditing ? id : undefined);
-  const addProductMutation = useAddOpportunityProduct();
+  const addProductsBulkMutation = useAddOpportunityProductsBulk();
   const removeProductMutation = useRemoveOpportunityProduct();
 
   const {
@@ -388,20 +397,55 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     return labels.length ? labels.join(" | ") : "";
   })();
 
-  // Auto-suggest name in CREATE mode only (until the user types).
-  // EDIT mode shows a "Reset to suggested" button next to the field
-  // so we don't overwrite a user's manual name on every render.
+  // EDIT mode: once existingProducts load, decide whether the saved
+  // name was auto-generated (matches suggestion from existing products)
+  // or hand-typed. If hand-typed, lock auto-suggest off so we don't
+  // clobber the user's intent. If it matches, leave auto-suggest on so
+  // the name stays in sync as products are added/removed.
   useEffect(() => {
-    if (isEditing) return;
+    if (!isEditing) return;
+    if (editNameOverrideInitialized) return;
+    if (existingProducts === undefined) return; // wait for fetch
+    const currentName = (watch("name") ?? "").trim();
+    if (currentName) {
+      const initialSuggestion = (existingProducts ?? [])
+        .map((ep) => {
+          const sn = ep.product?.short_name?.trim();
+          if (sn) return sn;
+          const code = ep.product?.code?.trim();
+          if (code) return code;
+          const nm = ep.product?.name?.trim();
+          return nm || null;
+        })
+        .filter((c): c is string => !!c)
+        .join(" | ");
+      if (!initialSuggestion || initialSuggestion !== currentName) {
+        setNameUserOverridden(true);
+      }
+    }
+    setEditNameOverrideInitialized(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditing, existingProducts, editNameOverrideInitialized]);
+
+  // Auto-suggest name when staged or attached products change.
+  // Runs in BOTH modes — EDIT mode used to be gated off, which broke
+  // the "name should reflect attached products" guarantee whenever a
+  // user added or removed a product on an existing opp.
+  // nameUserOverridden gates this off once the user customizes.
+  useEffect(() => {
     if (nameUserOverridden) return;
     if (!suggestedName) return;
+    // In EDIT mode, wait for the override-detection effect above to
+    // run first so we don't briefly clobber a custom name with the
+    // computed one before deciding it was custom.
+    if (isEditing && !editNameOverrideInitialized) return;
     if (suggestedName !== watch("name")) {
-      // shouldDirty=false so the auto-suggested value doesn't trip the
-      // "you have unsaved changes" prompt before the user has done anything.
-      setValue("name", suggestedName, { shouldDirty: false });
+      // shouldDirty=true in EDIT so the user sees the "save" prompt and
+      // the change actually persists when they hit Save Opportunity.
+      setValue("name", suggestedName, { shouldDirty: isEditing });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [suggestedName, isEditing, nameUserOverridden]);
+  }, [suggestedName, isEditing, nameUserOverridden, editNameOverrideInitialized]);
 
   function emptyToNull(v: unknown): unknown {
     if (v === "" || v === undefined) return null;
@@ -487,32 +531,32 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       } else {
         const result = await createMutation.mutateAsync(payload as Parameters<typeof createMutation.mutateAsync>[0]);
 
-        // Flush any products the user staged before the opp existed. We do
-        // these sequentially so one bad line doesn't silently skip others.
+        // Flush any products the user staged before the opp existed.
+        // Use the BULK insert so the client-side recompute fires after
+        // all rows land. The previous per-row loop only relied on the
+        // DB trigger for amount/subtotal, which racy under invalidation
+        // caused the detail page to flash the pre-trigger amount=0
+        // before resettling. Bulk insert + client-side recompute keeps
+        // the displayed total in sync immediately.
         if (stagedProducts.length > 0) {
-          let productFailures = 0;
-          for (const sp of stagedProducts) {
-            try {
-              await addProductMutation.mutateAsync({
-                opportunity_id: result.id,
+          try {
+            await addProductsBulkMutation.mutateAsync({
+              opportunity_id: result.id,
+              rows: stagedProducts.map((sp) => ({
                 product_id: sp.product_id,
                 quantity: sp.quantity,
                 unit_price: sp.unit_price,
                 arr_amount: sp.arr_amount,
                 discount_percent: sp.discount_percent,
-              });
-            } catch (err) {
-              productFailures += 1;
-              console.error("Failed to attach staged product:", sp, err);
-            }
-          }
-          if (productFailures > 0) {
-            toast.error(
-              `Opportunity created, but ${productFailures} of ${stagedProducts.length} products failed to attach. You can retry from the opportunity page.`
-            );
-          } else {
+              })),
+            });
             toast.success(
               `Opportunity created with ${stagedProducts.length} product${stagedProducts.length !== 1 ? "s" : ""}`
+            );
+          } catch (err) {
+            console.error("Failed to attach staged products:", err);
+            toast.error(
+              "Opportunity created, but products failed to attach. Open it and add them from the products section."
             );
           }
         } else {
@@ -1484,6 +1528,7 @@ function OpportunityProductsEditor({
     quantity: number;
     unit_price: number;
     arr_amount: number;
+    discount_percent?: number | null;
     product?: { name?: string | null; code?: string | null } | null;
   }>;
   onOpenAdd: () => void;
@@ -1492,75 +1537,128 @@ function OpportunityProductsEditor({
 }) {
   const updateProductMutation = useUpdateOpportunityProduct();
 
-  // Inline edit state — only one row in edit mode at a time. The user
-  // clicks Edit, types new qty/price, hits Save (or Cancel). Server
-  // recomputes arr_amount on save (qty * unit_price) and the parent
-  // opp's amount via the recalc trigger.
-  const [editingRowId, setEditingRowId] = useState<string | null>(null);
-  const [editQty, setEditQty] = useState<string>("");
-  const [editPrice, setEditPrice] = useState<string>("");
+  // Live-edit state per row, mirroring the MultiProductPicker UX:
+  // each row has Qty / Unit$ / Disc% / Total inputs you can edit
+  // freely. Changes are buffered locally and persisted on blur (so we
+  // don't fire a mutation per keystroke). Total previews live as you
+  // type, matching the "pretty" add-products dialog.
+  type RowDraft = { quantity: string; unit_price: string; discount_percent: string };
+  const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
 
-  function startEdit(row: { id: string; quantity: number; unit_price: number }) {
-    setEditingRowId(row.id);
-    setEditQty(String(row.quantity ?? 1));
-    setEditPrice(String(row.unit_price ?? 0));
+  function getDraft(p: {
+    id: string;
+    quantity: number;
+    unit_price: number;
+    discount_percent?: number | null;
+  }): RowDraft {
+    return (
+      drafts[p.id] ?? {
+        quantity: String(p.quantity ?? 1),
+        unit_price: String(p.unit_price ?? 0),
+        discount_percent: String(p.discount_percent ?? 0),
+      }
+    );
   }
 
-  function cancelEdit() {
-    setEditingRowId(null);
-    setEditQty("");
-    setEditPrice("");
+  function setDraft(rowId: string, patch: Partial<RowDraft>) {
+    setDrafts((prev) => ({
+      ...prev,
+      [rowId]: { ...getDraft({ id: rowId, quantity: 0, unit_price: 0, discount_percent: 0 }), ...prev[rowId], ...patch },
+    }));
   }
 
-  async function saveEdit(rowId: string) {
+  async function commitDraft(p: {
+    id: string;
+    quantity: number;
+    unit_price: number;
+    discount_percent?: number | null;
+  }) {
     if (!opportunityId) return;
-    const qty = Math.max(0, Number(editQty) || 0);
-    const price = Math.max(0, Number(editPrice) || 0);
+    const draft = drafts[p.id];
+    if (!draft) return; // never edited
+    const qty = Math.max(0, Number(draft.quantity) || 0);
+    const price = Math.max(0, Number(draft.unit_price) || 0);
+    const disc = Math.min(100, Math.max(0, Number(draft.discount_percent) || 0));
+    const noChange =
+      qty === Number(p.quantity ?? 0) &&
+      price === Number(p.unit_price ?? 0) &&
+      disc === Number(p.discount_percent ?? 0);
+    if (noChange) {
+      // Discard untouched draft so it doesn't keep showing a "modified"
+      // tint forever.
+      setDrafts((prev) => {
+        const next = { ...prev };
+        delete next[p.id];
+        return next;
+      });
+      return;
+    }
     try {
       await updateProductMutation.mutateAsync({
-        id: rowId,
+        id: p.id,
         opportunity_id: opportunityId,
-        patch: { quantity: qty, unit_price: price },
+        patch: { quantity: qty, unit_price: price, discount_percent: disc },
       });
-      toast.success("Product updated");
-      cancelEdit();
+      // Drop the draft once persisted; next render reads from the
+      // refreshed query.
+      setDrafts((prev) => {
+        const next = { ...prev };
+        delete next[p.id];
+        return next;
+      });
+      toast.success("Saved");
     } catch (err) {
       toast.error("Failed to update: " + errorMessage(err));
     }
   }
 
-  const rows = isEditing
-    ? existingProducts.map((p) => ({
-        key: p.id,
-        id: p.id,
-        editable: true,
-        name: p.product?.name ?? "\u2014",
-        code: p.product?.code ?? "\u2014",
-        quantity: p.quantity,
-        unitPrice: Number(p.unit_price),
-        arrAmount: Number(p.arr_amount),
-        onRemove: () => onRemoveExisting(p.id),
-      }))
-    : stagedProducts.map((p, idx) => ({
+  // EDIT mode rows render as live-editable inputs (matching the "pretty"
+  // add-products picker). CREATE mode rows are read-only previews of
+  // staged products that will be flushed on Create.
+  const editRows = isEditing
+    ? existingProducts.map((p) => {
+        const draft = getDraft(p);
+        const previewQty = Number(draft.quantity) || 0;
+        const previewPrice = Number(draft.unit_price) || 0;
+        const previewDisc = Number(draft.discount_percent) || 0;
+        const previewArr = previewQty * previewPrice * (1 - previewDisc / 100);
+        const dirty = !!drafts[p.id];
+        return {
+          key: p.id,
+          rowId: p.id,
+          name: p.product?.name ?? "\u2014",
+          code: p.product?.code ?? "\u2014",
+          draft,
+          dirty,
+          previewArr,
+          onRemove: () => onRemoveExisting(p.id),
+          original: p,
+        };
+      })
+    : [];
+  const stagedRows = !isEditing
+    ? stagedProducts.map((p, idx) => ({
         key: `staged-${idx}`,
-        id: `staged-${idx}`,
-        editable: false,
         name: p.product_name || "\u2014",
         code: p.product_code || "\u2014",
         quantity: p.quantity,
         unitPrice: p.unit_price,
         arrAmount: p.arr_amount,
         onRemove: () => onRemoveStaged(idx),
-      }));
+      }))
+    : [];
 
-  const totalARR = rows.reduce((sum, r) => sum + (r.arrAmount || 0), 0);
+  const rowsCount = isEditing ? editRows.length : stagedRows.length;
+  const totalARR = isEditing
+    ? editRows.reduce((sum, r) => sum + (r.previewArr || 0), 0)
+    : stagedRows.reduce((sum, r) => sum + (r.arrAmount || 0), 0);
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <span className="text-sm text-muted-foreground">
-          {rows.length
-            ? `${rows.length} product${rows.length !== 1 ? "s" : ""}${!isEditing ? " (will be attached on create)" : ""}`
+          {rowsCount
+            ? `${rowsCount} product${rowsCount !== 1 ? "s" : ""}${!isEditing ? " (will be attached on create)" : ""}`
             : isEditing
             ? "No products added yet"
             : "Add products to include on the opportunity. They'll be attached when you click Create."}
@@ -1571,124 +1669,114 @@ function OpportunityProductsEditor({
         </Button>
       </div>
 
-      {rows.length > 0 && (
+      {rowsCount > 0 && (
         <div className="border rounded-lg">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Product</TableHead>
                 <TableHead>Code</TableHead>
-                <TableHead className="text-right">Qty</TableHead>
-                <TableHead className="text-right">Unit Price</TableHead>
-                <TableHead className="text-right">ARR</TableHead>
-                <TableHead className="w-32 text-right">Actions</TableHead>
+                <TableHead className="text-right w-20">Qty</TableHead>
+                <TableHead className="text-right w-28">Unit $</TableHead>
+                <TableHead className="text-right w-20">Disc %</TableHead>
+                <TableHead className="text-right">Total</TableHead>
+                <TableHead className="w-16 text-right">{isEditing ? "" : ""}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((r) => {
-                const isRowEditing = editingRowId === r.id;
-                const previewArr = isRowEditing
-                  ? (Number(editQty) || 0) * (Number(editPrice) || 0)
-                  : r.arrAmount;
-                return (
-                  <TableRow key={r.key}>
-                    <TableCell className="font-medium">{r.name}</TableCell>
-                    <TableCell className="text-muted-foreground">{r.code}</TableCell>
-                    <TableCell className="text-right">
-                      {isRowEditing ? (
+              {isEditing
+                ? editRows.map((r) => (
+                    <TableRow key={r.key} className={r.dirty ? "bg-amber-50/40" : ""}>
+                      <TableCell className="font-medium">{r.name}</TableCell>
+                      <TableCell className="text-muted-foreground">{r.code}</TableCell>
+                      <TableCell className="text-right">
                         <Input
                           type="number"
-                          min={0}
+                          min={1}
                           step="1"
-                          value={editQty}
-                          onChange={(e) => setEditQty(e.target.value)}
+                          value={r.draft.quantity}
+                          onChange={(e) => setDraft(r.rowId, { quantity: e.target.value })}
+                          onBlur={() => commitDraft(r.original)}
                           className="h-8 w-20 text-right ml-auto"
                         />
-                      ) : (
-                        r.quantity
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {isRowEditing ? (
+                      </TableCell>
+                      <TableCell className="text-right">
                         <Input
                           type="number"
                           min={0}
                           step="0.01"
-                          value={editPrice}
-                          onChange={(e) => setEditPrice(e.target.value)}
+                          value={r.draft.unit_price}
+                          onChange={(e) => setDraft(r.rowId, { unit_price: e.target.value })}
+                          onBlur={() => commitDraft(r.original)}
                           className="h-8 w-28 text-right ml-auto"
                         />
-                      ) : (
-                        formatCurrencyDetailed(r.unitPrice)
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right font-medium">
-                      {formatCurrencyDetailed(previewArr)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {r.editable && isRowEditing ? (
-                        <div className="flex items-center justify-end gap-1">
-                          <Button
-                            type="button"
-                            variant="default"
-                            size="sm"
-                            className="h-8"
-                            disabled={updateProductMutation.isPending}
-                            onClick={() => saveEdit(r.id)}
-                          >
-                            Save
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-8"
-                            onClick={cancelEdit}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-end gap-1">
-                          {r.editable && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                              onClick={() => startEdit({
-                                id: r.id,
-                                quantity: r.quantity,
-                                unit_price: r.unitPrice,
-                              })}
-                              title="Edit qty / price"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                          )}
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                            onClick={r.onRemove}
-                            title="Remove product"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step="1"
+                          value={r.draft.discount_percent}
+                          onChange={(e) => setDraft(r.rowId, { discount_percent: e.target.value })}
+                          onBlur={() => commitDraft(r.original)}
+                          className="h-8 w-20 text-right ml-auto"
+                        />
+                      </TableCell>
+                      <TableCell className="text-right font-medium">
+                        {formatCurrencyDetailed(r.previewArr)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={r.onRemove}
+                          title="Remove product"
+                          disabled={updateProductMutation.isPending}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                : stagedRows.map((r) => (
+                    <TableRow key={r.key}>
+                      <TableCell className="font-medium">{r.name}</TableCell>
+                      <TableCell className="text-muted-foreground">{r.code}</TableCell>
+                      <TableCell className="text-right">{r.quantity}</TableCell>
+                      <TableCell className="text-right">{formatCurrencyDetailed(r.unitPrice)}</TableCell>
+                      <TableCell className="text-right text-muted-foreground">—</TableCell>
+                      <TableCell className="text-right font-medium">
+                        {formatCurrencyDetailed(r.arrAmount)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={r.onRemove}
+                          title="Remove product"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
               <TableRow className="bg-muted/50">
-                <TableCell colSpan={4} className="text-right font-semibold">Total ARR</TableCell>
+                <TableCell colSpan={5} className="text-right font-semibold">Total ARR</TableCell>
                 <TableCell className="text-right font-bold">{formatCurrencyDetailed(totalARR)}</TableCell>
                 <TableCell />
               </TableRow>
             </TableBody>
           </Table>
+          {isEditing && (
+            <p className="px-3 py-2 text-xs text-muted-foreground border-t bg-muted/20">
+              Edits save automatically when you tab away or click out of a field.
+            </p>
+          )}
         </div>
       )}
     </div>
