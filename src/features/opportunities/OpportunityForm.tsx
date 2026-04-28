@@ -350,32 +350,51 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   // Only fires in CREATE mode and only if the user hasn't manually
   // typed a name. Edit mode preserves the existing name; users typing
   // in the field flips nameUserOverridden = true and we back off.
-  useEffect(() => {
-    if (isEditing) return;
-    if (nameUserOverridden) return;
-    if (stagedProducts.length === 0) return;
-    // Prefer product_short_name (e.g. "SRA"), fall back to product_code,
-    // then to product_name as last resort. Skips empty values entirely
-    // so a missing short_name doesn't blank out the whole name.
-    const labels = stagedProducts
-      .map((p) => {
-        const sn = p.product_short_name?.trim();
+  /**
+   * Compute the suggested opp name from currently-attached products.
+   * Works in both CREATE (stagedProducts) and EDIT (existingProducts) mode.
+   * Format: "SHORT1 | SHORT2 | SHORT3" — pipe-separated, consistent.
+   * Falls back through short_name → code → name per product.
+   */
+  const suggestedName = (() => {
+    const sources = isEditing
+      ? (existingProducts ?? []).map((ep) => ({
+          short: ep.product?.short_name ?? null,
+          code: ep.product?.code ?? null,
+          name: ep.product?.name ?? null,
+        }))
+      : stagedProducts.map((p) => ({
+          short: p.product_short_name ?? null,
+          code: p.product_code ?? null,
+          name: p.product_name ?? null,
+        }));
+    const labels = sources
+      .map((s) => {
+        const sn = s.short?.trim();
         if (sn) return sn;
-        const code = p.product_code?.trim();
+        const code = s.code?.trim();
         if (code) return code;
-        const nm = p.product_name?.trim();
+        const nm = s.name?.trim();
         return nm || null;
       })
       .filter((c): c is string => !!c);
-    if (labels.length === 0) return;
-    const suggested = labels.join(" | ");
-    if (suggested !== watch("name")) {
+    return labels.length ? labels.join(" | ") : "";
+  })();
+
+  // Auto-suggest name in CREATE mode only (until the user types).
+  // EDIT mode shows a "Reset to suggested" button next to the field
+  // so we don't overwrite a user's manual name on every render.
+  useEffect(() => {
+    if (isEditing) return;
+    if (nameUserOverridden) return;
+    if (!suggestedName) return;
+    if (suggestedName !== watch("name")) {
       // shouldDirty=false so the auto-suggested value doesn't trip the
       // "you have unsaved changes" prompt before the user has done anything.
-      setValue("name", suggested, { shouldDirty: false });
+      setValue("name", suggestedName, { shouldDirty: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stagedProducts, isEditing, nameUserOverridden]);
+  }, [suggestedName, isEditing, nameUserOverridden]);
 
   function emptyToNull(v: unknown): unknown {
     if (v === "" || v === undefined) return null;
@@ -516,18 +535,45 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2 md:col-span-2">
                   <Label htmlFor="name">Opportunity Name *<RequiredIndicator fieldKey="name" requiredFields={requiredKeys} /></Label>
-                  <Input
-                    id="name"
-                    {...register("name", {
-                      onChange: () => {
-                        // User typed — stop auto-suggesting from products.
-                        if (!nameUserOverridden) setNameUserOverridden(true);
-                      },
-                    })}
-                  />
+                  <div className="flex items-start gap-2">
+                    <Input
+                      id="name"
+                      className="flex-1"
+                      {...register("name", {
+                        onChange: () => {
+                          // User typed — stop auto-suggesting from products.
+                          if (!nameUserOverridden) setNameUserOverridden(true);
+                        },
+                      })}
+                    />
+                    {/* Reset-to-suggested affordance. Visible whenever
+                        we have a usable suggestion AND it differs from
+                        the current name. Works in both create + edit
+                        modes — covers the case where products were
+                        added/removed AFTER the name was set. */}
+                    {suggestedName && suggestedName !== watch("name") && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setValue("name", suggestedName, { shouldDirty: true });
+                          setNameUserOverridden(false);
+                        }}
+                        title={`Reset to: ${suggestedName}`}
+                      >
+                        Use suggested
+                      </Button>
+                    )}
+                  </div>
                   {!isEditing && !nameUserOverridden && stagedProducts.length > 0 && (
                     <p className="text-xs text-muted-foreground">
-                      Auto-suggested from product codes. Type to override.
+                      Auto-suggested from product short names. Type to override.
+                    </p>
+                  )}
+                  {isEditing && suggestedName && suggestedName !== watch("name") && (
+                    <p className="text-xs text-muted-foreground">
+                      Suggested name based on attached products: <span className="font-mono">{suggestedName}</span>
                     </p>
                   )}
                   {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}

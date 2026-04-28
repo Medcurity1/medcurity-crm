@@ -266,6 +266,9 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
                 <TableHead className="w-8" />
                 <TableHead>Name</TableHead>
                 <TableHead>Code</TableHead>
+                <TableHead title="Used when auto-naming opportunities">
+                  Short Name
+                </TableHead>
                 <TableHead>Family</TableHead>
                 <TableHead>Source</TableHead>
                 <TableHead>Pricing Model</TableHead>
@@ -295,6 +298,20 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
                         </Link>
                       </TableCell>
                       <TableCell className="text-muted-foreground">{product.code}</TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        {isAdmin ? (
+                          <ProductShortNameInline
+                            productId={product.id}
+                            value={product.short_name ?? null}
+                          />
+                        ) : (
+                          <span className="text-sm">
+                            {product.short_name ?? (
+                              <span className="text-muted-foreground italic">—</span>
+                            )}
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-muted-foreground">{product.product_family ?? "\u2014"}</TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
@@ -1518,5 +1535,85 @@ function PriceBookDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Inline editor for products.short_name on the products list page.
+ * Click the placeholder text → text input → blur or Enter to save.
+ * Surfaces the "missing — add me" affordance for products that have
+ * no abbreviation set yet (so opportunity auto-naming gets readable
+ * labels instead of slugs).
+ */
+function ProductShortNameInline({
+  productId,
+  value,
+}: {
+  productId: string;
+  value: string | null;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value ?? "");
+  const updateMutation = useUpdateProduct();
+
+  useEffect(() => {
+    if (!editing) setDraft(value ?? "");
+  }, [editing, value]);
+
+  async function commit() {
+    const trimmed = draft.trim();
+    const next = trimmed === "" ? null : trimmed;
+    if (next === (value ?? null)) {
+      setEditing(false);
+      return;
+    }
+    try {
+      await updateMutation.mutateAsync({ id: productId, short_name: next });
+      toast.success("Short name saved");
+      setEditing(false);
+    } catch (err) {
+      toast.error("Failed to save: " + errorMessage(err));
+      setDraft(value ?? "");
+      setEditing(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <Input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            void commit();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            setDraft(value ?? "");
+            setEditing(false);
+          }
+        }}
+        placeholder='e.g. "SRA"'
+        className="h-7 text-sm w-32"
+        disabled={updateMutation.isPending}
+      />
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      className="text-sm text-left hover:bg-muted/50 rounded px-1 -mx-1 py-0.5 transition-colors min-w-[40px] inline-block"
+      title="Click to edit"
+    >
+      {value ? (
+        <span className="font-medium">{value}</span>
+      ) : (
+        <span className="text-muted-foreground italic">— add</span>
+      )}
+    </button>
   );
 }
