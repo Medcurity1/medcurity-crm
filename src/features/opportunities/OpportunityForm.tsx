@@ -609,8 +609,10 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   // also skips since the account is already locked.
   if (!isEditing && createStep === "products") {
     const watchedAccountId = watch("account_id");
-    const canContinue =
-      !!watchedAccountId && (stagedProducts.length > 0 || nameUserOverridden);
+    // Force at least one product before continuing. We removed the
+    // "Skip — I'll add products later" escape hatch (Brayden 2026-04-28)
+    // because too many opps were getting created empty.
+    const canContinue = !!watchedAccountId && stagedProducts.length > 0;
     return (
       <div>
         <PageHeader
@@ -666,20 +668,6 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                 </div>
               )}
             </div>
-
-            {/* Skip option for projects without products yet */}
-            {watchedAccountId && stagedProducts.length === 0 && (
-              <button
-                type="button"
-                className="text-xs text-muted-foreground underline hover:text-foreground"
-                onClick={() => {
-                  setNameUserOverridden(true); // signal "I'll name it manually"
-                  setCreateStep("details");
-                }}
-              >
-                Skip — I'll add products later
-              </button>
-            )}
 
             {/* Step navigation */}
             <div className="flex items-center justify-between pt-4 border-t">

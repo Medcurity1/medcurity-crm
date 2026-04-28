@@ -46,7 +46,7 @@ export function AccountsList() {
   // keystrokes on the list page).
   const [search, setSearch] = useDebouncedUrlState("q", "");
   const [statusFilter, setStatusFilter] = useUrlArrayState("status");
-  const [ownerFilter, setOwnerFilter] = useUrlState("owner", "all");
+  const [ownerFilter, setOwnerFilter] = useUrlArrayState("owner");
   const [industryFilter, setIndustryFilter] = useUrlArrayState("industry");
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
   const [page, setPage] = useUrlNumberState("page", 0);
@@ -56,12 +56,7 @@ export function AccountsList() {
   const { data: result, isLoading } = useAccounts({
     search: search || undefined,
     status: statusFilter.length > 0 ? statusFilter : undefined,
-    ownerId:
-      ownerFilter === "all"
-        ? undefined
-        : ownerFilter === "mine"
-        ? "mine"
-        : ownerFilter,
+    ownerId: ownerFilter.length > 0 ? ownerFilter : undefined,
     industryCategory: industryFilter.length > 0 ? industryFilter : undefined,
     verified:
       verifiedFilter === "verified"
@@ -184,26 +179,22 @@ export function AccountsList() {
           ]}
         />
 
-        <Select
+        <MultiSelect
           value={ownerFilter}
-          onValueChange={(v) => {
+          onChange={(v) => {
             setOwnerFilter(v);
             setPage(0);
           }}
-        >
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="All owners" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Owners</SelectItem>
-            <SelectItem value="mine">My Accounts</SelectItem>
-            {(users ?? []).map((u) => (
-              <SelectItem key={u.id} value={u.id}>
-                {u.full_name ?? "Unknown"}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          placeholder="All Owners"
+          triggerClassName="w-40"
+          options={[
+            { value: "mine", label: "My Accounts" },
+            ...(users ?? []).map((u) => ({
+              value: u.id,
+              label: u.full_name ?? "Unknown",
+            })),
+          ]}
+        />
 
         <MultiSelect
           value={industryFilter}

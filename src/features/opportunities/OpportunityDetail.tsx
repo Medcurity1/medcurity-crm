@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { Pencil, Archive, ChevronDown, UserRoundCog, Plus, Trash2, History } from "lucide-react";
-import { useOpportunity, useUpdateOpportunity, useArchiveOpportunity, useStageHistory, useOpportunityProducts, useRemoveOpportunityProduct, useUpdateOpportunityProduct } from "./api";
+import { useOpportunity, useUpdateOpportunity, useArchiveOpportunity, useDeleteOpportunity, useStageHistory, useOpportunityProducts, useRemoveOpportunityProduct, useUpdateOpportunityProduct } from "./api";
 import { MultiProductPicker } from "./MultiProductPicker";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { StageProgressBar } from "./StageProgressBar";
@@ -122,6 +122,7 @@ export function OpportunityDetail() {
   const { data: customFieldDefs } = useCustomFieldDefinitions("opportunities");
   const updateMutation = useUpdateOpportunity();
   const archiveMutation = useArchiveOpportunity();
+  const deleteMutation = useDeleteOpportunity();
   const removeProdMutation = useRemoveOpportunityProduct();
   const [showArchive, setShowArchive] = useState(false);
   const [showChangeOwner, setShowChangeOwner] = useState(false);
@@ -208,6 +209,31 @@ export function OpportunityDetail() {
               <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>
                 <Archive className="h-4 w-4 mr-1" />
                 Archive
+              </Button>
+            )}
+            {isAdmin && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                onClick={async () => {
+                  if (
+                    !window.confirm(
+                      `Permanently delete "${opp.name}"? This cannot be undone. Use Archive if you might need to restore it later.`,
+                    )
+                  ) return;
+                  try {
+                    await deleteMutation.mutateAsync({ id: opp.id });
+                    toast.success("Opportunity deleted");
+                    navigate("/opportunities");
+                  } catch (err) {
+                    toast.error("Failed to delete: " + (err as Error).message);
+                  }
+                }}
+                disabled={deleteMutation.isPending}
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                Delete
               </Button>
             )}
           </div>

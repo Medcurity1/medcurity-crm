@@ -7,8 +7,8 @@ interface AccountFilters {
   lifecycle_status?: string;
   /** Single status (legacy) or array of statuses (multi-select). */
   status?: string | string[];
-  /** Filter to a specific owner's accounts. "mine" = current user. */
-  ownerId?: string | "mine";
+  /** Filter to one or many owners. "mine" = current user. Arrays do an IN. */
+  ownerId?: string | "mine" | string[];
   /** Single industry (legacy) or array of industries (multi-select). */
   industryCategory?: string | string[];
   /** Filter to only verified or only unverified accounts. */
@@ -51,10 +51,26 @@ export function useAccounts(filters?: AccountFilters) {
           query = query.eq("status", filters.status);
         }
       }
-      if (filters?.ownerId && filters.ownerId !== "mine") {
+      if (Array.isArray(filters?.ownerId)) {
+        // Multi-owner filter. Resolve any "mine" tokens to the user id.
+        const ids = filters!.ownerId;
+        if (ids.includes("mine")) {
+          const { data: userData } = await supabase.auth.getUser();
+          if (userData.user?.id) {
+            const resolved = Array.from(
+              new Set(ids.map((v) => (v === "mine" ? userData.user!.id : v))),
+            );
+            if (resolved.length > 0) query = query.in("owner_user_id", resolved);
+          } else if (ids.length > 1) {
+            const noMine = ids.filter((v) => v !== "mine");
+            if (noMine.length > 0) query = query.in("owner_user_id", noMine);
+          }
+        } else if (ids.length > 0) {
+          query = query.in("owner_user_id", ids);
+        }
+      } else if (filters?.ownerId && filters.ownerId !== "mine") {
         query = query.eq("owner_user_id", filters.ownerId);
       } else if (filters?.ownerId === "mine") {
-        // Resolve "mine" to current auth user id at query time.
         const { data: userData } = await supabase.auth.getUser();
         if (userData.user?.id) {
           query = query.eq("owner_user_id", userData.user.id);

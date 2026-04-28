@@ -8,7 +8,7 @@ interface OppFilters {
   team?: string | string[];
   kind?: string | string[];
   account_id?: string;
-  ownerId?: string | "mine";
+  ownerId?: string | "mine" | string[];
   verified?: "true" | "false";
   page?: number;
   pageSize?: number;
@@ -43,7 +43,22 @@ export function useOpportunities(filters?: OppFilters) {
       }
 
       if (filters?.search) {
-        query = query.ilike("name", `%${filters.search}%`);
+        // Search across opp name AND account name. PostgREST can't filter
+        // a parent by columns on an embedded resource, so we resolve
+        // matching account ids first and OR them in.
+        const term = filters.search;
+        const { data: matchedAccounts } = await supabase
+          .from("accounts")
+          .select("id")
+          .ilike("name", `%${term}%`)
+          .limit(200);
+        const acctIds = (matchedAccounts ?? []).map((a) => a.id as string);
+        const safe = term.replace(/[(),]/g, " ");
+        const orParts = [`name.ilike.%${safe}%`];
+        if (acctIds.length > 0) {
+          orParts.push(`account_id.in.(${acctIds.join(",")})`);
+        }
+        query = query.or(orParts.join(","));
       }
       if (filters?.stage) {
         if (Array.isArray(filters.stage)) {
@@ -72,7 +87,23 @@ export function useOpportunities(filters?: OppFilters) {
         }
       }
       if (filters?.account_id) query = query.eq("account_id", filters.account_id);
-      if (filters?.ownerId && filters.ownerId !== "mine") {
+      if (Array.isArray(filters?.ownerId)) {
+        const ids = filters!.ownerId;
+        if (ids.includes("mine")) {
+          const { data: userData } = await supabase.auth.getUser();
+          if (userData.user?.id) {
+            const resolved = Array.from(
+              new Set(ids.map((v) => (v === "mine" ? userData.user!.id : v))),
+            );
+            if (resolved.length > 0) query = query.in("owner_user_id", resolved);
+          } else if (ids.length > 1) {
+            const noMine = ids.filter((v) => v !== "mine");
+            if (noMine.length > 0) query = query.in("owner_user_id", noMine);
+          }
+        } else if (ids.length > 0) {
+          query = query.in("owner_user_id", ids);
+        }
+      } else if (filters?.ownerId && filters.ownerId !== "mine") {
         query = query.eq("owner_user_id", filters.ownerId);
       } else if (filters?.ownerId === "mine") {
         const { data: userData } = await supabase.auth.getUser();
@@ -157,6 +188,20 @@ export function useBulkUpdateOwner() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["opportunities"] });
       qc.invalidateQueries({ queryKey: ["pipeline"] });
+    },
+  });
+}
+
+export function useDeleteOpportunity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id }: { id: string }) => {
+      const { error } = await supabase.from("opportunities").delete().eq("id", id);
+      if (error) throw error;
+      return id;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
     },
   });
 }
@@ -341,12 +386,16 @@ export function useAddOpportunityProductsBulk() {
       // gotchas can swallow the trigger silently. Doing it from the
       // client ensures the user sees correct totals immediately.
       await recomputeOpportunityTotals(params.opportunity_id);
+      // Same idea for the auto-name: hit it client-side so the rename
+      // happens whether or not migration 20260428000008 is applied.
+      await resyncOpportunityName(params.opportunity_id);
 
       return data;
     },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["opportunity_products", vars.opportunity_id] });
       qc.invalidateQueries({ queryKey: ["opportunity", vars.opportunity_id] });
+      qc.invalidateQueries({ queryKey: ["opportunities", vars.opportunity_id] });
     },
   });
 }
@@ -395,6 +444,53 @@ async function recomputeOpportunityTotals(opportunityId: string): Promise<void> 
     .eq("id", opportunityId);
 }
 
+/**
+ * Resync the opportunity's `name` from current product short_names.
+ * Mirrors the server-side trigger (migration 20260428000008) so
+ * environments where the migration hasn't been applied yet still get
+ * the auto-rename behavior, and so the UI feels instant on add/remove.
+ *
+ * Honors the `name_auto_sync` flag — if the user customized the name,
+ * the form sets `name_auto_sync=false` and this function bails.
+ */
+async function resyncOpportunityName(opportunityId: string): Promise<void> {
+  const { data: opp } = await supabase
+    .from("opportunities")
+    .select("name, name_auto_sync")
+    .eq("id", opportunityId)
+    .single();
+  if (!opp) return;
+  // If the column doesn't exist yet (migration unapplied), opp.name_auto_sync
+  // is undefined — assume true so legacy DBs still benefit from the
+  // client-side resync.
+  const autoSync = (opp as { name_auto_sync?: boolean }).name_auto_sync ?? true;
+  if (!autoSync) return;
+
+  const { data: lines } = await supabase
+    .from("opportunity_products")
+    .select("created_at, id, product:products!product_id(short_name, code, name)")
+    .eq("opportunity_id", opportunityId)
+    .order("created_at", { ascending: true });
+  if (!lines || lines.length === 0) return;
+
+  const newName = lines
+    .map((l) => {
+      const p = (l as unknown as { product: { short_name?: string | null; code?: string | null; name?: string | null } | null }).product;
+      const sn = p?.short_name?.trim();
+      if (sn) return sn;
+      const code = p?.code?.trim();
+      if (code) return code;
+      return p?.name?.trim() || null;
+    })
+    .filter((s): s is string => !!s)
+    .join(" | ");
+  if (!newName || newName === opp.name) return;
+  await supabase
+    .from("opportunities")
+    .update({ name: newName })
+    .eq("id", opportunityId);
+}
+
 /** Update qty / price / discount on a single line. */
 export function useUpdateOpportunityProduct() {
   const qc = useQueryClient();
@@ -416,11 +512,14 @@ export function useUpdateOpportunityProduct() {
         .select()
         .single();
       if (error) throw error;
+      // Recompute totals on every line update (qty/price/discount changed).
+      await recomputeOpportunityTotals(params.opportunity_id);
       return data;
     },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["opportunity_products", vars.opportunity_id] });
       qc.invalidateQueries({ queryKey: ["opportunity", vars.opportunity_id] });
+      qc.invalidateQueries({ queryKey: ["opportunities", vars.opportunity_id] });
     },
   });
 }
@@ -431,13 +530,15 @@ export function useRemoveOpportunityProduct() {
     mutationFn: async ({ id, opportunityId }: { id: string; opportunityId: string }) => {
       const { error } = await supabase.from("opportunity_products").delete().eq("id", id);
       if (error) throw error;
-      // Belt-and-suspenders: recompute totals client-side.
+      // Belt-and-suspenders: recompute totals AND resync opp name.
       await recomputeOpportunityTotals(opportunityId);
+      await resyncOpportunityName(opportunityId);
       return opportunityId;
     },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["opportunity_products", vars.opportunityId] });
       qc.invalidateQueries({ queryKey: ["opportunity", vars.opportunityId] });
+      qc.invalidateQueries({ queryKey: ["opportunities", vars.opportunityId] });
     },
   });
 }

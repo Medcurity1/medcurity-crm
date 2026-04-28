@@ -7,7 +7,7 @@ interface LeadFilters {
   status?: string | string[];
   source?: string | string[];
   qualification?: string | string[];
-  ownerId?: string | "mine";
+  ownerId?: string | "mine" | string[];
   rating?: string | string[];
   industryCategory?: string | string[];
   verified?: "true" | "false";
@@ -64,7 +64,23 @@ export function useLeads(filters?: LeadFilters) {
           query = query.eq("qualification", filters.qualification);
         }
       }
-      if (filters?.ownerId && filters.ownerId !== "mine") {
+      if (Array.isArray(filters?.ownerId)) {
+        const ids = filters!.ownerId;
+        if (ids.includes("mine")) {
+          const { data: userData } = await supabase.auth.getUser();
+          if (userData.user?.id) {
+            const resolved = Array.from(
+              new Set(ids.map((v) => (v === "mine" ? userData.user!.id : v))),
+            );
+            if (resolved.length > 0) query = query.in("owner_user_id", resolved);
+          } else if (ids.length > 1) {
+            const noMine = ids.filter((v) => v !== "mine");
+            if (noMine.length > 0) query = query.in("owner_user_id", noMine);
+          }
+        } else if (ids.length > 0) {
+          query = query.in("owner_user_id", ids);
+        }
+      } else if (filters?.ownerId && filters.ownerId !== "mine") {
         query = query.eq("owner_user_id", filters.ownerId);
       } else if (filters?.ownerId === "mine") {
         const { data: userData } = await supabase.auth.getUser();

@@ -122,7 +122,7 @@ export function LeadsList() {
   const [statusFilter, setStatusFilter] = useUrlArrayState("status");
   const [sourceFilter, setSourceFilter] = useUrlArrayState("source");
   const [qualificationFilter, setQualificationFilter] = useUrlArrayState("qual");
-  const [ownerFilter, setOwnerFilter] = useUrlState("owner", "all");
+  const [ownerFilter, setOwnerFilter] = useUrlArrayState("owner");
   const [ratingFilter, setRatingFilter] = useUrlArrayState("rating");
   const [industryFilter, setIndustryFilter] = useUrlArrayState("industry");
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
@@ -146,8 +146,7 @@ export function LeadsList() {
     status: statusFilter.length ? statusFilter : undefined,
     source: sourceFilter.length ? sourceFilter : undefined,
     qualification: qualificationFilter.length ? qualificationFilter : undefined,
-    ownerId:
-      ownerFilter === "all" ? undefined : ownerFilter === "mine" ? "mine" : ownerFilter,
+    ownerId: ownerFilter.length > 0 ? ownerFilter : undefined,
     rating: ratingFilter.length ? ratingFilter : undefined,
     industryCategory: industryFilter.length ? industryFilter : undefined,
     verified:
@@ -320,20 +319,19 @@ export function LeadsList() {
             { value: "mql", label: "MQL" },
           ]}
         />
-        <Select value={ownerFilter} onValueChange={(v) => { setOwnerFilter(v); setPage(0); }}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="All owners" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Owners</SelectItem>
-            <SelectItem value="mine">My Leads</SelectItem>
-            {(users ?? []).map((u) => (
-              <SelectItem key={u.id} value={u.id}>
-                {u.full_name ?? "Unknown"}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <MultiSelect
+          value={ownerFilter}
+          onChange={(v) => { setOwnerFilter(v); setPage(0); }}
+          placeholder="All Owners"
+          triggerClassName="w-40"
+          options={[
+            { value: "mine", label: "My Leads" },
+            ...(users ?? []).map((u) => ({
+              value: u.id,
+              label: u.full_name ?? "Unknown",
+            })),
+          ]}
+        />
         <MultiSelect
           value={ratingFilter}
           onChange={handleRatingChange}
@@ -409,7 +407,7 @@ export function LeadsList() {
       {(statusFilter.length > 0 ||
         sourceFilter.length > 0 ||
         qualificationFilter.length > 0 ||
-        ownerFilter !== "all" ||
+        ownerFilter.length > 0 ||
         ratingFilter.length > 0 ||
         industryFilter.length > 0 ||
         verifiedFilter !== "all") && (
@@ -424,8 +422,20 @@ export function LeadsList() {
           {qualificationFilter.length > 0 && (
             <FilterChip label={`Qual: ${qualificationFilter.map((q) => q.toUpperCase()).join(", ")}`} onClear={() => { setQualificationFilter([]); setPage(0); }} />
           )}
-          {ownerFilter !== "all" && (
-            <FilterChip label={`Owner: ${ownerFilter === "mine" ? "Me" : (users ?? []).find((u) => u.id === ownerFilter)?.full_name ?? "Other"}`} onClear={() => { setOwnerFilter("all"); setPage(0); }} />
+          {ownerFilter.length > 0 && (
+            <FilterChip
+              label={`Owner: ${ownerFilter
+                .map((id) =>
+                  id === "mine"
+                    ? "Me"
+                    : (users ?? []).find((u) => u.id === id)?.full_name ?? "Other",
+                )
+                .join(", ")}`}
+              onClear={() => {
+                setOwnerFilter([]);
+                setPage(0);
+              }}
+            />
           )}
           {ratingFilter.length > 0 && (
             <FilterChip label={`Rating: ${ratingFilter.join(", ")}`} onClear={() => { setRatingFilter([]); setPage(0); }} />

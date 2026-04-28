@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
+import { useUrlNumberState, useUrlArrayState, useUrlState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Users, Plus, Search } from "lucide-react";
@@ -13,6 +13,7 @@ import { Pagination } from "@/components/Pagination";
 import { formatPhone } from "@/components/PhoneInput";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { SortableHeader, type SortState } from "@/components/SortableHeader";
+import { MultiSelect } from "@/components/MultiSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -42,7 +43,7 @@ export function ContactsList() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const [search, setSearch] = useDebouncedUrlState("q", "");
-  const [ownerFilter, setOwnerFilter] = useUrlState("owner", "all");
+  const [ownerFilter, setOwnerFilter] = useUrlArrayState("owner");
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
   const [page, setPage] = useUrlNumberState("page", 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -50,8 +51,7 @@ export function ContactsList() {
 
   const { data: result, isLoading } = useContacts({
     search: search || undefined,
-    ownerId:
-      ownerFilter === "all" ? undefined : ownerFilter === "mine" ? "mine" : ownerFilter,
+    ownerId: ownerFilter.length > 0 ? ownerFilter : undefined,
     verified:
       verifiedFilter === "verified"
         ? "true"
@@ -148,26 +148,22 @@ export function ContactsList() {
             className="pl-9"
           />
         </div>
-        <Select
+        <MultiSelect
           value={ownerFilter}
-          onValueChange={(v) => {
+          onChange={(v) => {
             setOwnerFilter(v);
             setPage(0);
           }}
-        >
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="All owners" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Owners</SelectItem>
-            <SelectItem value="mine">My Contacts</SelectItem>
-            {(users ?? []).map((u) => (
-              <SelectItem key={u.id} value={u.id}>
-                {u.full_name ?? "Unknown"}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          placeholder="All Owners"
+          triggerClassName="w-40"
+          options={[
+            { value: "mine", label: "My Contacts" },
+            ...(users ?? []).map((u) => ({
+              value: u.id,
+              label: u.full_name ?? "Unknown",
+            })),
+          ]}
+        />
         <Select
           value={verifiedFilter}
           onValueChange={(v) => {

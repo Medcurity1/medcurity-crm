@@ -5,7 +5,7 @@ import type { Contact } from "@/types/crm";
 interface ContactFilters {
   search?: string;
   account_id?: string;
-  ownerId?: string | "mine";
+  ownerId?: string | "mine" | string[];
   verified?: "true" | "false";
   page?: number;
   pageSize?: number;
@@ -38,12 +38,46 @@ export function useContacts(filters?: ContactFilters) {
       }
 
       if (filters?.search) {
-        query = query.or(`first_name.ilike.%${filters.search}%,last_name.ilike.%${filters.search}%,email.ilike.%${filters.search}%,title.ilike.%${filters.search}%`);
+        // Search contact fields AND parent account name.
+        const term = filters.search;
+        const { data: matchedAccounts } = await supabase
+          .from("accounts")
+          .select("id")
+          .ilike("name", `%${term}%`)
+          .limit(200);
+        const acctIds = (matchedAccounts ?? []).map((a) => a.id as string);
+        const safe = term.replace(/[(),]/g, " ");
+        const orParts = [
+          `first_name.ilike.%${safe}%`,
+          `last_name.ilike.%${safe}%`,
+          `email.ilike.%${safe}%`,
+          `title.ilike.%${safe}%`,
+        ];
+        if (acctIds.length > 0) {
+          orParts.push(`account_id.in.(${acctIds.join(",")})`);
+        }
+        query = query.or(orParts.join(","));
       }
       if (filters?.account_id) {
         query = query.eq("account_id", filters.account_id);
       }
-      if (filters?.ownerId && filters.ownerId !== "mine") {
+      if (Array.isArray(filters?.ownerId)) {
+        const ids = filters!.ownerId;
+        if (ids.includes("mine")) {
+          const { data: userData } = await supabase.auth.getUser();
+          if (userData.user?.id) {
+            const resolved = Array.from(
+              new Set(ids.map((v) => (v === "mine" ? userData.user!.id : v))),
+            );
+            if (resolved.length > 0) query = query.in("owner_user_id", resolved);
+          } else if (ids.length > 1) {
+            const noMine = ids.filter((v) => v !== "mine");
+            if (noMine.length > 0) query = query.in("owner_user_id", noMine);
+          }
+        } else if (ids.length > 0) {
+          query = query.in("owner_user_id", ids);
+        }
+      } else if (filters?.ownerId && filters.ownerId !== "mine") {
         query = query.eq("owner_user_id", filters.ownerId);
       } else if (filters?.ownerId === "mine") {
         const { data: userData } = await supabase.auth.getUser();

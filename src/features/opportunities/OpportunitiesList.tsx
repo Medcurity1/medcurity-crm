@@ -45,7 +45,7 @@ export function OpportunitiesList() {
   const [stageFilter, setStageFilter] = useUrlArrayState("stage");
   const [teamFilter, setTeamFilter] = useUrlArrayState("team");
   const [kindFilter, setKindFilter] = useUrlArrayState("kind");
-  const [ownerFilter, setOwnerFilter] = useUrlState("owner", "all");
+  const [ownerFilter, setOwnerFilter] = useUrlArrayState("owner");
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
   const [page, setPage] = useUrlNumberState("page", 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -56,8 +56,7 @@ export function OpportunitiesList() {
     stage: stageFilter.length ? stageFilter : undefined,
     team: teamFilter.length ? teamFilter : undefined,
     kind: kindFilter.length ? kindFilter : undefined,
-    ownerId:
-      ownerFilter === "all" ? undefined : ownerFilter === "mine" ? "mine" : ownerFilter,
+    ownerId: ownerFilter.length > 0 ? ownerFilter : undefined,
     verified:
       verifiedFilter === "verified"
         ? "true"
@@ -193,20 +192,19 @@ export function OpportunitiesList() {
             { value: "renewals", label: "Renewals" },
           ]}
         />
-        <Select value={ownerFilter} onValueChange={(v) => { setOwnerFilter(v); setPage(0); }}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="All owners" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Owners</SelectItem>
-            <SelectItem value="mine">My Opps</SelectItem>
-            {(users ?? []).map((u) => (
-              <SelectItem key={u.id} value={u.id}>
-                {u.full_name ?? "Unknown"}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <MultiSelect
+          value={ownerFilter}
+          onChange={(v) => { setOwnerFilter(v); setPage(0); }}
+          placeholder="All Owners"
+          triggerClassName="w-40"
+          options={[
+            { value: "mine", label: "My Opps" },
+            ...(users ?? []).map((u) => ({
+              value: u.id,
+              label: u.full_name ?? "Unknown",
+            })),
+          ]}
+        />
         <Select value={verifiedFilter} onValueChange={(v) => { setVerifiedFilter(v); setPage(0); }}>
           <SelectTrigger className="w-36">
             <SelectValue placeholder="Verified" />
