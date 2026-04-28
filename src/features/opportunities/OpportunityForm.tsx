@@ -255,6 +255,28 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
 
   const watchedAccountId = watch("account_id");
   const watchedStage = watch("stage");
+  const watchedBusinessType = watch("business_type");
+
+  // Derive kind + team from business_type so reps only have to set
+  // ONE field. Mapping (per Brayden 2026-04-28):
+  //   new_business / opportunity / null  → kind=new_business, team=sales
+  //   existing_business*                 → kind=renewal,      team=renewals
+  // Driving from business_type means there's a single source of
+  // truth for "is this a renewal or a new sale" — which the pipeline
+  // and KPI views can rely on.
+  useEffect(() => {
+    const bt = (watchedBusinessType ?? null) as string | null;
+    const isExisting = !!bt && bt.startsWith("existing_business");
+    const targetKind = isExisting ? "renewal" : "new_business";
+    const targetTeam = isExisting ? "renewals" : "sales";
+    if (watch("kind") !== targetKind) {
+      setValue("kind", targetKind as "new_business" | "renewal", { shouldDirty: true });
+    }
+    if (watch("team") !== targetTeam) {
+      setValue("team", targetTeam as "sales" | "renewals", { shouldDirty: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedBusinessType]);
 
   const { data: contacts } = useQuery({
     queryKey: ["contacts", { account_id: watchedAccountId }],
@@ -758,9 +780,9 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                           setValue("name", suggestedName, { shouldDirty: true });
                           setNameUserOverridden(false);
                         }}
-                        title={`Reset to: ${suggestedName}`}
+                        title={`Sync name to: ${suggestedName}`}
                       >
-                        Use suggested
+                        Sync from products
                       </Button>
                     )}
                   </div>
@@ -769,10 +791,25 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                       Auto-suggested from product short names. Type to override.
                     </p>
                   )}
-                  {isEditing && suggestedName && suggestedName !== watch("name") && (
-                    <p className="text-xs text-muted-foreground">
-                      Suggested name based on attached products: <span className="font-mono">{suggestedName}</span>
-                    </p>
+                  {isEditing && (
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5"
+                          checked={!nameUserOverridden}
+                          onChange={(e) => setNameUserOverridden(!e.target.checked)}
+                        />
+                        <span>
+                          Auto-sync name from attached products
+                        </span>
+                      </label>
+                      {suggestedName && suggestedName !== watch("name") && (
+                        <span>
+                          Suggested: <span className="font-mono">{suggestedName}</span>
+                        </span>
+                      )}
+                    </div>
                   )}
                   {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}
                 </div>
@@ -870,46 +907,10 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                   <p className="text-xs text-muted-foreground">Preserved when renewals takes ownership</p>
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Team<RequiredIndicator fieldKey="team" requiredFields={requiredKeys} /></Label>
-                  <Select value={watch("team")} onValueChange={(v) => setValue("team", v as "sales" | "renewals")}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="sales">Sales</SelectItem>
-                      <SelectItem value="renewals">Renewals</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Kind<RequiredIndicator fieldKey="kind" requiredFields={requiredKeys} /></Label>
-                  <Select
-                    value={watch("kind")}
-                    onValueChange={(v) => {
-                      const next = v as "new_business" | "renewal";
-                      setValue("kind", next, { shouldDirty: true });
-                      // Auto-route to the matching pipeline bucket. Users
-                      // can still override the team manually after — we
-                      // only flip it from the OTHER default, not from a
-                      // value the user already picked off-default.
-                      const currentTeam = watch("team");
-                      if (next === "renewal" && currentTeam === "sales") {
-                        setValue("team", "renewals", { shouldDirty: true });
-                      } else if (next === "new_business" && currentTeam === "renewals") {
-                        setValue("team", "sales", { shouldDirty: true });
-                      }
-                    }}
-                  >
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="new_business">New Business</SelectItem>
-                      <SelectItem value="renewal">Renewal</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Drives which pipeline bucket the opp lands in (Sales vs Renewals). For revenue-reporting categorization, use Business Type below.
-                  </p>
-                </div>
+                {/* Kind + Team are now derived from Business Type
+                    (see effect below). Reps were confused by having
+                    three overlapping fields. Single source of truth =
+                    Business Type. */}
 
                 <div className="space-y-2">
                   <Label>Business Type</Label>

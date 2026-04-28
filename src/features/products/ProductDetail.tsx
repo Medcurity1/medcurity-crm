@@ -10,6 +10,8 @@ import {
   useProductReferences,
   useEntriesForProduct,
   useProductFamilies,
+  usePriceBooks,
+  useSetPriceBookEntryPrice,
 } from "./api";
 import { DeleteProductDialog } from "./DeleteProductDialog";
 import { useAuth } from "@/features/auth/AuthProvider";
@@ -454,10 +456,10 @@ function ProductEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit Product</DialogTitle>
-          <DialogDescription>Update product details.</DialogDescription>
+          <DialogDescription>Update product details and per-FTE pricing.</DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
@@ -562,6 +564,14 @@ function ProductEditDialog({
               placeholder="What is this product? Reps will see this when adding to opportunities."
             />
           </div>
+
+          {/* Per-FTE Pricing matrix — only visible when not using flat
+              price. Prevents the confusion Brayden flagged: editing a
+              product gave no way to set prices, because prices live in
+              price_book_entries, not on the product. */}
+          {!hasFlatPrice && (
+            <ProductPricingMatrix productId={product.id} />
+          )}
         </div>
 
         <DialogFooter>
@@ -574,6 +584,177 @@ function ProductEditDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/* ──────────────────────────────────────────────
+   Pricing matrix: rows = price books, cols = FTE
+   tier (or "flat" when no tier), cells = unit
+   prices. Empty cell = no entry (won't show up in
+   the picker). Saves on blur. Idempotent — uses
+   the upsert/delete behavior of useSetPriceBookEntryPrice.
+   ────────────────────────────────────────────── */
+
+const FTE_TIERS = [
+  "1-20",
+  "21-50",
+  "51-100",
+  "101-250",
+  "251-500",
+  "501-750",
+  "751-1000",
+  "1001-1500",
+  "1501-2000",
+  "2001-5000",
+  "5001-10000",
+];
+
+function ProductPricingMatrix({ productId }: { productId: string }) {
+  const { data: priceBooks, isLoading: booksLoading } = usePriceBooks();
+  const { data: entries, isLoading: entriesLoading } = useEntriesForProduct(productId);
+  const setPriceMutation = useSetPriceBookEntryPrice();
+
+  // Local edit buffer so each cell can be typed in without firing a
+  // mutation per keystroke. Keyed by `${book_id}::${fte_range_or_null}`.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+
+  function cellKey(bookId: string, fte: string | null) {
+    return `${bookId}::${fte ?? ""}`;
+  }
+
+  function existingEntry(bookId: string, fte: string | null) {
+    return (entries ?? []).find(
+      (e) => e.price_book_id === bookId && (e.fte_range ?? null) === fte,
+    );
+  }
+
+  function getCellValue(bookId: string, fte: string | null): string {
+    const k = cellKey(bookId, fte);
+    if (k in drafts) return drafts[k];
+    const e = existingEntry(bookId, fte);
+    return e ? String(e.unit_price) : "";
+  }
+
+  async function commitCell(bookId: string, fte: string | null) {
+    const k = cellKey(bookId, fte);
+    if (!(k in drafts)) return;
+    const raw = drafts[k].trim();
+    const e = existingEntry(bookId, fte);
+    // Empty → delete row (clear the price); also matches Brayden's
+    // Small Practice request: deleting an entry removes the product
+    // from that tier in the picker.
+    const next = raw === "" ? null : Number(raw);
+    if (raw !== "" && (next === null || Number.isNaN(next as number) || (next as number) < 0)) {
+      // Bad input — bail without firing the mutation. The cell still
+      // shows the draft value so the user can correct.
+      return;
+    }
+    if ((next ?? null) === (e ? Number(e.unit_price) : null)) {
+      // No-op — drop the draft.
+      setDrafts((prev) => {
+        const out = { ...prev };
+        delete out[k];
+        return out;
+      });
+      return;
+    }
+    try {
+      await setPriceMutation.mutateAsync({
+        price_book_id: bookId,
+        product_id: productId,
+        fte_range: fte,
+        unit_price: next,
+        existing_entry_id: e?.id ?? null,
+      });
+      setDrafts((prev) => {
+        const out = { ...prev };
+        delete out[k];
+        return out;
+      });
+    } catch (err) {
+      toast.error("Failed to save price: " + errorMessage(err));
+    }
+  }
+
+  if (booksLoading || entriesLoading) {
+    return (
+      <div className="space-y-2">
+        <Label>Pricing by Price Book and FTE Tier</Label>
+        <Skeleton className="h-48 w-full" />
+      </div>
+    );
+  }
+
+  const activeBooks = (priceBooks ?? []).filter((b) => b.is_active);
+  if (activeBooks.length === 0) {
+    return (
+      <div className="space-y-2">
+        <Label>Pricing by Price Book and FTE Tier</Label>
+        <p className="text-xs text-muted-foreground">
+          No active price books. Create one in the Price Books admin section first.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <Label>Pricing by Price Book and FTE Tier</Label>
+        <span className="text-xs text-muted-foreground">
+          Empty cell = product hidden from picker for that tier. Saves on blur.
+        </span>
+      </div>
+      <div className="border rounded-lg overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="bg-muted/40 text-muted-foreground">
+            <tr>
+              <th className="text-left p-2 sticky left-0 bg-muted/40 z-10 min-w-[160px]">
+                Price Book
+              </th>
+              <th className="text-right p-2 min-w-[90px]">Flat</th>
+              {FTE_TIERS.map((t) => (
+                <th key={t} className="text-right p-2 min-w-[90px]">{t}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {activeBooks.map((book) => (
+              <tr key={book.id} className="border-t">
+                <td className="p-2 font-medium sticky left-0 bg-background z-10">
+                  {book.name}
+                  {book.is_default && (
+                    <Badge variant="secondary" className="ml-2 text-[9px]">
+                      default
+                    </Badge>
+                  )}
+                </td>
+                {[null, ...FTE_TIERS].map((fte) => (
+                  <td key={fte ?? "flat"} className="p-1">
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      placeholder="—"
+                      className="h-7 text-xs text-right px-1"
+                      value={getCellValue(book.id, fte)}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setDrafts((prev) => ({
+                          ...prev,
+                          [cellKey(book.id, fte)]: v,
+                        }));
+                      }}
+                      onBlur={() => commitCell(book.id, fte)}
+                    />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

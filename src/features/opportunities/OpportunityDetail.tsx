@@ -395,7 +395,21 @@ export function OpportunityDetail() {
               ) : null
             }
           />
-          <Field label="Type / Kind" value={kindLabel(opp.kind)} />
+          <Field
+            label="Business Type"
+            value={(() => {
+              const bt = opp.business_type;
+              if (!bt) return kindLabel(opp.kind);
+              const labels: Record<string, string> = {
+                new_business: "New Business",
+                existing_business: "Existing Business",
+                existing_business_new_product: "Existing Business — New Product",
+                existing_business_new_service: "Existing Business — New Service",
+                opportunity: "Opportunity",
+              };
+              return labels[bt] ?? bt;
+            })()}
+          />
           <Field label="Stage" value={stageLabel(opp.stage)} />
           <EditableField
             label="Probability (%)"

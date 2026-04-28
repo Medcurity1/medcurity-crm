@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
+import { useUrlState, useUrlNumberState, useUrlArrayState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Target, Plus, Search } from "lucide-react";
@@ -12,6 +12,8 @@ import { EmptyState } from "@/components/EmptyState";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Pagination } from "@/components/Pagination";
 import { BulkActionBar } from "@/components/BulkActionBar";
+import { SortableHeader, type SortState } from "@/components/SortableHeader";
+import { MultiSelect } from "@/components/MultiSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -40,17 +42,20 @@ export function OpportunitiesList() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const [search, setSearch] = useDebouncedUrlState("q", "");
-  const [stageFilter, setStageFilter] = useUrlState("stage", "all");
-  const [teamFilter, setTeamFilter] = useUrlState("team", "all");
+  const [stageFilter, setStageFilter] = useUrlArrayState("stage");
+  const [teamFilter, setTeamFilter] = useUrlArrayState("team");
+  const [kindFilter, setKindFilter] = useUrlArrayState("kind");
   const [ownerFilter, setOwnerFilter] = useUrlState("owner", "all");
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
   const [page, setPage] = useUrlNumberState("page", 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [sort, setSort] = useState<SortState>({ column: null, direction: "desc" });
 
   const { data: result, isLoading } = useOpportunities({
     search: search || undefined,
-    stage: stageFilter !== "all" ? stageFilter : undefined,
-    team: teamFilter !== "all" ? teamFilter : undefined,
+    stage: stageFilter.length ? stageFilter : undefined,
+    team: teamFilter.length ? teamFilter : undefined,
+    kind: kindFilter.length ? kindFilter : undefined,
     ownerId:
       ownerFilter === "all" ? undefined : ownerFilter === "mine" ? "mine" : ownerFilter,
     verified:
@@ -61,6 +66,8 @@ export function OpportunitiesList() {
         : undefined,
     page,
     pageSize: PAGE_SIZE,
+    sortColumn: sort.column,
+    sortDirection: sort.direction,
   });
   const { data: users } = useUsers();
   const archiveMutation = useArchiveOpportunity();
@@ -74,14 +81,11 @@ export function OpportunitiesList() {
     setSearch(value);
     setPage(0);
   };
-  const handleStageChange = (value: string) => {
-    setStageFilter(value);
+
+  function handleSort(next: SortState) {
+    setSort(next);
     setPage(0);
-  };
-  const handleTeamChange = (value: string) => {
-    setTeamFilter(value);
-    setPage(0);
-  };
+  }
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -155,30 +159,40 @@ export function OpportunitiesList() {
             className="pl-9"
           />
         </div>
-        <Select value={stageFilter} onValueChange={handleStageChange}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="All stages" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Stages</SelectItem>
-            <SelectItem value="details_analysis">Details Analysis</SelectItem>
-            <SelectItem value="demo">Demo</SelectItem>
-            <SelectItem value="proposal_and_price_quote">Proposal and Price Quote</SelectItem>
-            <SelectItem value="proposal_conversation">Proposal Conversation</SelectItem>
-            <SelectItem value="closed_won">Closed Won</SelectItem>
-            <SelectItem value="closed_lost">Closed Lost</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={teamFilter} onValueChange={handleTeamChange}>
-          <SelectTrigger className="w-36">
-            <SelectValue placeholder="All teams" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Teams</SelectItem>
-            <SelectItem value="sales">Sales</SelectItem>
-            <SelectItem value="renewals">Renewals</SelectItem>
-          </SelectContent>
-        </Select>
+        <MultiSelect
+          value={stageFilter}
+          onChange={(v) => { setStageFilter(v); setPage(0); }}
+          placeholder="All Stages"
+          triggerClassName="w-44"
+          options={[
+            { value: "details_analysis", label: "Details Analysis" },
+            { value: "demo", label: "Demo" },
+            { value: "proposal_and_price_quote", label: "Proposal and Price Quote" },
+            { value: "proposal_conversation", label: "Proposal Conversation" },
+            { value: "closed_won", label: "Closed Won" },
+            { value: "closed_lost", label: "Closed Lost" },
+          ]}
+        />
+        <MultiSelect
+          value={kindFilter}
+          onChange={(v) => { setKindFilter(v); setPage(0); }}
+          placeholder="All Types"
+          triggerClassName="w-36"
+          options={[
+            { value: "new_business", label: "New Business" },
+            { value: "renewal", label: "Renewal" },
+          ]}
+        />
+        <MultiSelect
+          value={teamFilter}
+          onChange={(v) => { setTeamFilter(v); setPage(0); }}
+          placeholder="All Teams"
+          triggerClassName="w-36"
+          options={[
+            { value: "sales", label: "Sales" },
+            { value: "renewals", label: "Renewals" },
+          ]}
+        />
         <Select value={ownerFilter} onValueChange={(v) => { setOwnerFilter(v); setPage(0); }}>
           <SelectTrigger className="w-40">
             <SelectValue placeholder="All owners" />
@@ -215,10 +229,10 @@ export function OpportunitiesList() {
         <EmptyState
           icon={Target}
           title="No opportunities found"
-          description={search || stageFilter !== "all" || teamFilter !== "all"
+          description={search || stageFilter.length || teamFilter.length || kindFilter.length
             ? "Try adjusting your filters"
             : "Create your first opportunity"}
-          action={!search && stageFilter === "all" && teamFilter === "all" ? {
+          action={!search && !stageFilter.length && !teamFilter.length && !kindFilter.length ? {
             label: "New Opportunity",
             onClick: () => navigate("/opportunities/new"),
           } : undefined}
@@ -236,13 +250,13 @@ export function OpportunitiesList() {
                       aria-label="Select all"
                     />
                   </TableHead>
-                  <TableHead>Name</TableHead>
+                  <SortableHeader column="name" sort={sort} onSort={handleSort}>Name</SortableHeader>
                   <TableHead>Account</TableHead>
-                  <TableHead>Stage</TableHead>
-                  <TableHead>Kind</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead>Expected Close</TableHead>
-                  <TableHead>Close Date</TableHead>
+                  <SortableHeader column="stage" sort={sort} onSort={handleSort}>Stage</SortableHeader>
+                  <SortableHeader column="kind" sort={sort} onSort={handleSort}>Kind</SortableHeader>
+                  <SortableHeader column="amount" sort={sort} onSort={handleSort} className="text-right">Amount</SortableHeader>
+                  <SortableHeader column="expected_close_date" sort={sort} onSort={handleSort}>Expected Close</SortableHeader>
+                  <SortableHeader column="close_date" sort={sort} onSort={handleSort}>Close Date</SortableHeader>
                   <TableHead>Owner</TableHead>
                 </TableRow>
               </TableHeader>

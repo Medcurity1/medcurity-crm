@@ -227,14 +227,18 @@ export function PipelineBoard() {
       ? ownerFilter
       : undefined;
 
+  // Bucket by `kind` (new_business vs renewal) — this is the true
+  // intent, set by the renewal automation and the form. `team` was
+  // drifting (all SF-imported renewals had team='sales'), which made
+  // every renewal show up in the Sales tab.
   const { data: salesPipeline, isLoading: salesLoading } = useActivePipeline({
-    team: "sales",
+    kind: "new_business",
     owner_user_id: ownerUserId,
   });
 
   const { data: renewalsPipeline, isLoading: renewalsLoading } =
     useActivePipeline({
-      team: "renewals",
+      kind: "renewal",
       owner_user_id: ownerUserId,
     });
 

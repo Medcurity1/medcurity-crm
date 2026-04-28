@@ -4,14 +4,16 @@ import type { Opportunity, ActivePipelineRow, OpportunityStageHistory, Opportuni
 
 interface OppFilters {
   search?: string;
-  stage?: string;
-  team?: string;
-  kind?: string;
+  stage?: string | string[];
+  team?: string | string[];
+  kind?: string | string[];
   account_id?: string;
   ownerId?: string | "mine";
   verified?: "true" | "false";
   page?: number;
   pageSize?: number;
+  sortColumn?: string | null;
+  sortDirection?: "asc" | "desc";
 }
 
 export function useOpportunities(filters?: OppFilters) {
@@ -20,27 +22,43 @@ export function useOpportunities(filters?: OppFilters) {
     queryFn: async () => {
       const page = filters?.page ?? 0;
       const pageSize = filters?.pageSize ?? 25;
+      const sortCol = filters?.sortColumn ?? "created_at";
+      const sortAsc = (filters?.sortDirection ?? (filters?.sortColumn ? "asc" : "desc")) === "asc";
       let query = supabase
         .from("opportunities")
         .select("*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
-        .order("created_at", { ascending: false })
+        .order(sortCol, { ascending: sortAsc, nullsFirst: false })
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (filters?.search) {
         query = query.ilike("name", `%${filters.search}%`);
       }
       if (filters?.stage) {
-        // Meta-value 'open' = any stage that isn't closed_won / closed_lost.
-        // Lets dashboard cards link to /opportunities?stage=open without
-        // needing to know the full open-stage enum list.
-        if (filters.stage === "open") {
+        if (Array.isArray(filters.stage)) {
+          if (filters.stage.length > 0) query = query.in("stage", filters.stage);
+        } else if (filters.stage === "open") {
+          // Meta-value 'open' = any stage that isn't closed_won / closed_lost.
+          // Lets dashboard cards link to /opportunities?stage=open without
+          // needing to know the full open-stage enum list.
           query = query.not("stage", "in", "(closed_won,closed_lost)");
         } else {
           query = query.eq("stage", filters.stage);
         }
       }
-      if (filters?.team) query = query.eq("team", filters.team);
-      if (filters?.kind) query = query.eq("kind", filters.kind);
+      if (filters?.team) {
+        if (Array.isArray(filters.team)) {
+          if (filters.team.length > 0) query = query.in("team", filters.team);
+        } else {
+          query = query.eq("team", filters.team);
+        }
+      }
+      if (filters?.kind) {
+        if (Array.isArray(filters.kind)) {
+          if (filters.kind.length > 0) query = query.in("kind", filters.kind);
+        } else {
+          query = query.eq("kind", filters.kind);
+        }
+      }
       if (filters?.account_id) query = query.eq("account_id", filters.account_id);
       if (filters?.ownerId && filters.ownerId !== "mine") {
         query = query.eq("owner_user_id", filters.ownerId);
@@ -165,12 +183,23 @@ export function useArchiveOpportunity() {
   });
 }
 
-export function useActivePipeline(filters?: { team?: string; owner_user_id?: string }) {
+export function useActivePipeline(filters?: {
+  team?: string;
+  kind?: string;
+  owner_user_id?: string;
+}) {
   return useQuery({
     queryKey: ["pipeline", filters],
     queryFn: async () => {
       let query = supabase.from("active_pipeline").select("*");
-      if (filters?.team) query = query.eq("team", filters.team);
+      // Bucket by `kind` when provided (renewal vs new_business). This
+      // is the source of truth — `team` is a soft routing field that
+      // can drift (SF-imported renewals all came in with team='sales',
+      // and the kind→team backfill migration may not be applied yet on
+      // every deployment). Filtering by kind keeps the buckets right
+      // regardless.
+      if (filters?.kind) query = query.eq("kind", filters.kind);
+      else if (filters?.team) query = query.eq("team", filters.team);
       if (filters?.owner_user_id) query = query.eq("owner_user_id", filters.owner_user_id);
       const { data, error } = await query.order("amount", { ascending: false });
       if (error) throw error;

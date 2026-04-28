@@ -4,7 +4,7 @@ import type { Account } from "@/types/crm";
 
 interface PartnerFilters {
   search?: string;
-  status?: string;
+  status?: string | string[];
   // "umbrella" = partners that have members under them
   // "member"   = accounts that are a member of someone
   // "top_level"= umbrella AND not a member of anyone else
@@ -12,6 +12,8 @@ interface PartnerFilters {
   partnerRole?: "umbrella" | "member" | "top_level" | "all";
   page?: number;
   pageSize?: number;
+  sortColumn?: string | null;
+  sortDirection?: "asc" | "desc";
 }
 
 export function usePartners(filters?: PartnerFilters) {
@@ -88,10 +90,12 @@ export function usePartners(filters?: PartnerFilters) {
         orParts.push(`id.in.(${Array.from(umbrellaIds).join(",")})`);
       }
 
+      const sortCol = filters?.sortColumn ?? "name";
+      const sortAsc = (filters?.sortDirection ?? "asc") === "asc";
       let query = supabase
         .from("accounts")
         .select("*, owner:user_profiles!owner_user_id(id, full_name)", { count: "exact" })
-        .order("name")
+        .order(sortCol, { ascending: sortAsc, nullsFirst: false })
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (constrainIds) {
@@ -110,7 +114,11 @@ export function usePartners(filters?: PartnerFilters) {
         query = query.ilike("name", `%${filters.search}%`);
       }
       if (filters?.status) {
-        query = query.eq("status", filters.status);
+        if (Array.isArray(filters.status)) {
+          if (filters.status.length > 0) query = query.in("status", filters.status);
+        } else {
+          query = query.eq("status", filters.status);
+        }
       }
 
       const { data, error, count } = await query;

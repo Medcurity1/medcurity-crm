@@ -6,6 +6,8 @@ import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Pagination } from "@/components/Pagination";
+import { SortableHeader, type SortState } from "@/components/SortableHeader";
+import { MultiSelect } from "@/components/MultiSelect";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -30,16 +32,19 @@ const PAGE_SIZE = 25;
 export function PartnersPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [roleFilter, setRoleFilter] = useState<"all" | "umbrella" | "member" | "top_level">("all");
   const [page, setPage] = useState(0);
+  const [sort, setSort] = useState<SortState>({ column: "name", direction: "asc" });
 
   const { data: result, isLoading } = usePartners({
     search: search || undefined,
-    status: statusFilter !== "all" ? statusFilter : undefined,
+    status: statusFilter.length ? statusFilter : undefined,
     partnerRole: roleFilter,
     page,
     pageSize: PAGE_SIZE,
+    sortColumn: sort.column,
+    sortDirection: sort.direction,
   });
 
   const partners = result?.data;
@@ -50,10 +55,14 @@ export function PartnersPage() {
     setSearch(value);
     setPage(0);
   };
-  const handleStatusChange = (value: string) => {
+  const handleStatusChange = (value: string[]) => {
     setStatusFilter(value);
     setPage(0);
   };
+  function handleSort(next: SortState) {
+    setSort(next);
+    setPage(0);
+  }
 
   return (
     <div>
@@ -72,22 +81,20 @@ export function PartnersPage() {
             className="pl-9"
           />
         </div>
-        <Select value={statusFilter} onValueChange={handleStatusChange}>
-          <SelectTrigger className="w-44">
-            <SelectValue placeholder="All statuses" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="discovery">Discovery</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
-            <SelectItem value="churned">Churned</SelectItem>
-          </SelectContent>
-        </Select>
-        {/* Role filter — lets the user distinguish umbrella partners
-            (like UTN) from accounts that are members under someone
-            else, or see strictly top-of-the-chain partners. */}
+        <MultiSelect
+          value={statusFilter}
+          onChange={handleStatusChange}
+          placeholder="All Statuses"
+          triggerClassName="w-44"
+          options={[
+            { value: "discovery", label: "Discovery" },
+            { value: "pending", label: "Pending" },
+            { value: "active", label: "Active" },
+            { value: "inactive", label: "Inactive" },
+            { value: "churned", label: "Churned" },
+          ]}
+        />
+        {/* Role filter — single-select; the buckets are mutually exclusive */}
         <Select
           value={roleFilter}
           onValueChange={(v) => {
@@ -118,7 +125,7 @@ export function PartnersPage() {
           icon={Handshake}
           title="No partners found"
           description={
-            search || statusFilter !== "all"
+            search || statusFilter.length > 0
               ? "Try adjusting your search or filter"
               : "No partner accounts exist yet"
           }
@@ -129,11 +136,11 @@ export function PartnersPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
+                  <SortableHeader column="name" sort={sort} onSort={handleSort}>Name</SortableHeader>
                   <TableHead className="text-right w-24">Members</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Lead Source</TableHead>
-                  <TableHead>Active Since</TableHead>
+                  <SortableHeader column="status" sort={sort} onSort={handleSort}>Status</SortableHeader>
+                  <SortableHeader column="lead_source" sort={sort} onSort={handleSort}>Lead Source</SortableHeader>
+                  <SortableHeader column="active_since" sort={sort} onSort={handleSort}>Active Since</SortableHeader>
                   <TableHead>Account Owner</TableHead>
                 </TableRow>
               </TableHeader>
