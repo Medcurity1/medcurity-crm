@@ -62,6 +62,41 @@ export function useContact(id: string | undefined) {
   });
 }
 
+/**
+ * Find the lead (if any) that converted INTO this contact. Returns the
+ * tombstone row from `leads` where leads.converted_contact_id = contact.id.
+ *
+ * Used on the ContactDetail page so reps can click back to the
+ * original lead's history (UTM source, MQL date, original sales notes).
+ * Mirrors Salesforce's "Converted from Lead" affordance.
+ */
+export function useOriginatingLead(contactId: string | undefined) {
+  return useQuery({
+    queryKey: ["contacts", contactId, "originating_lead"],
+    queryFn: async () => {
+      if (!contactId) return null;
+      const { data, error } = await supabase
+        .from("leads")
+        .select("id, first_name, last_name, company, source, converted_at, created_at")
+        .eq("converted_contact_id", contactId)
+        .maybeSingle();
+      if (error) throw error;
+      return data as
+        | {
+            id: string;
+            first_name: string | null;
+            last_name: string | null;
+            company: string | null;
+            source: string | null;
+            converted_at: string | null;
+            created_at: string;
+          }
+        | null;
+    },
+    enabled: !!contactId,
+  });
+}
+
 export function useCreateContact() {
   const qc = useQueryClient();
   return useMutation({

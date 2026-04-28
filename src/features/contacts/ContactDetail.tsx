@@ -4,7 +4,7 @@ import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Pencil, Archive, ChevronDown, Phone, Mail, UserRoundCog, History } from "lucide-react";
 import { formatPhone } from "@/components/PhoneInput";
-import { useContact, useUpdateContact, useArchiveContact } from "./api";
+import { useContact, useUpdateContact, useArchiveContact, useOriginatingLead } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
 import { VerifiedBadge } from "@/components/VerifiedBadge";
@@ -79,6 +79,7 @@ export function ContactDetail() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { data: contact, isLoading } = useContact(id);
+  const { data: originatingLead } = useOriginatingLead(id);
   const { data: customFieldDefs } = useCustomFieldDefinitions("contacts");
   const updateMutation = useUpdateContact();
   const archiveMutation = useArchiveContact();
@@ -168,6 +169,36 @@ export function ContactDetail() {
       />
 
       <RecordId id={contact.id} sfId={contact.sf_id} />
+
+      {/* --------- Converted-from-Lead callout ---------
+          Mirrors Salesforce's affordance: this contact came from a
+          lead, so give a one-click way to see the original lead's
+          history (UTM source, MQL date, original sales notes).
+          Only renders when a `leads.converted_contact_id = contact.id`
+          row exists. */}
+      {originatingLead && (
+        <div className="mb-4 rounded-md border bg-muted/30 px-3 py-2 text-sm flex items-center gap-2">
+          <span className="text-muted-foreground">Converted from lead:</span>
+          <Link
+            to={`/leads/${originatingLead.id}`}
+            className="text-primary hover:underline font-medium"
+          >
+            {[originatingLead.first_name, originatingLead.last_name]
+              .filter(Boolean)
+              .join(" ") || originatingLead.company || "View lead"}
+          </Link>
+          {originatingLead.source && (
+            <span className="text-xs text-muted-foreground">
+              · source: {originatingLead.source}
+            </span>
+          )}
+          {originatingLead.converted_at && (
+            <span className="text-xs text-muted-foreground">
+              · converted {formatDateTime(originatingLead.converted_at)}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* --------- Key Info Bar --------- */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">

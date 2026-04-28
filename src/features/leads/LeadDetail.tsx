@@ -215,10 +215,15 @@ export function LeadDetail() {
               <UserRoundCog className="h-4 w-4 mr-1" />
               Change Owner
             </Button>
-            <Button variant="outline" size="sm" onClick={() => navigate(`/leads/${id}/edit`)}>
-              <Pencil className="h-4 w-4 mr-1" />
-              Edit
-            </Button>
+            {/* Converted leads are tombstones — read-only. Hide Edit
+                so reps can't accidentally rewrite history. The contact
+                that took over is the working record. */}
+            {!isConverted && (
+              <Button variant="outline" size="sm" onClick={() => navigate(`/leads/${id}/edit`)}>
+                <Pencil className="h-4 w-4 mr-1" />
+                Edit
+              </Button>
+            )}
             {!isConverted && (
               <Button variant="default" size="sm" onClick={() => setShowConvert(true)}>
                 <ArrowRightLeft className="h-4 w-4 mr-1" />
@@ -384,7 +389,10 @@ export function LeadDetail() {
       <LayoutDrivenDetail
         entity="leads"
         record={lead as unknown as Record<string, unknown>}
-        onInlineSave={async (fieldKey, newValue) => {
+        // Converted leads are tombstones — disable inline edit by
+        // omitting onInlineSave. Reps can still see all fields but
+        // can't modify them.
+        onInlineSave={isConverted ? undefined : async (fieldKey, newValue) => {
           await updateMutation.mutateAsync({
             id: lead.id,
             [fieldKey]: newValue === "" ? null : newValue,
