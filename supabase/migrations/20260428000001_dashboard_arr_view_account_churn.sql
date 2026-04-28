@@ -47,12 +47,12 @@ won_365 as (
     and coalesce(o.one_time_project, false) = false
     and o.stage = 'closed_won'
 ),
--- Per-account latest opp by product (we use opportunity_products to
--- get the per-product picture). For each (account, product) pair, the
--- most recent opp wins.
+-- Per-account latest opp by product. opportunity_products has no
+-- account_id of its own — the account lives on the parent opportunity.
+-- For each (account, product) pair, the most recent opp wins.
 latest_per_account_product as (
-  select distinct on (op.account_id, op.product_id)
-    op.account_id,
+  select distinct on (o.account_id, op.product_id)
+    o.account_id,
     op.product_id,
     op.opportunity_id,
     o.stage,
@@ -64,7 +64,7 @@ latest_per_account_product as (
   where o.archived_at is null
     and o.close_date is not null
     and coalesce(o.one_time_project, false) = false
-  order by op.account_id, op.product_id, o.close_date desc, o.id desc
+  order by o.account_id, op.product_id, o.close_date desc, o.id desc
 ),
 -- An account is currently active if at least one of its products
 -- has a most-recent opp that is closed_won. This is the lifecycle

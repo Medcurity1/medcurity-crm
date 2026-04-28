@@ -36,8 +36,7 @@ with computed as (
     ) as suggested_name
   from public.opportunity_products op
   join public.products p on p.id = op.product_id
-  where op.archived_at is null
-    and p.archived_at is null
+  where p.archived_at is null
   group by op.opportunity_id
   having string_agg(
     coalesce(
@@ -89,7 +88,7 @@ from (
   from public.opportunities o
   join public.opportunity_products op on op.opportunity_id = o.id
   join public.products p on p.id = op.product_id
-  where o.archived_at is null and op.archived_at is null and p.archived_at is null
+  where o.archived_at is null and p.archived_at is null
   group by o.id, o.name
 ) sub
 where current_name is distinct from suggested_name
@@ -117,8 +116,7 @@ with computed as (
     ) as suggested_name
   from public.opportunity_products op
   join public.products p on p.id = op.product_id
-  where op.archived_at is null
-    and p.archived_at is null
+  where p.archived_at is null
   group by op.opportunity_id
 )
 update public.opportunities o
