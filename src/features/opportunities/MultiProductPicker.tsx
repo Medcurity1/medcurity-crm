@@ -339,6 +339,20 @@ export function MultiProductPicker(props: Props) {
       return;
     }
     const { price, source } = lookupUnitPrice(product.id);
+    // Guardrail: if the product has no price for the current FTE tier
+    // (source === "manual" means lookupUnitPrice fell through every
+    // pricebook fallback), the user is probably adding a tier-specific
+    // SKU to the wrong-sized opportunity. Prompt before staging.
+    // Example case Brayden flagged: "Small Practice" is 1-20 FTE only;
+    // adding it to a 51-100 opp should pop a confirm.
+    if (source === "manual" && oppFteRange) {
+      const ok = window.confirm(
+        `"${product.name}" has no price configured for the ${oppFteRange} FTE tier. ` +
+          `Check the FTE Range / Employees on the account and try again — ` +
+          `or click OK to add it at $0 and price it manually.`,
+      );
+      if (!ok) return;
+    }
     setPicked((prev) => [
       ...prev,
       {

@@ -883,7 +883,23 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
 
                 <div className="space-y-2">
                   <Label>Kind<RequiredIndicator fieldKey="kind" requiredFields={requiredKeys} /></Label>
-                  <Select value={watch("kind")} onValueChange={(v) => setValue("kind", v as "new_business" | "renewal")}>
+                  <Select
+                    value={watch("kind")}
+                    onValueChange={(v) => {
+                      const next = v as "new_business" | "renewal";
+                      setValue("kind", next, { shouldDirty: true });
+                      // Auto-route to the matching pipeline bucket. Users
+                      // can still override the team manually after — we
+                      // only flip it from the OTHER default, not from a
+                      // value the user already picked off-default.
+                      const currentTeam = watch("team");
+                      if (next === "renewal" && currentTeam === "sales") {
+                        setValue("team", "renewals", { shouldDirty: true });
+                      } else if (next === "new_business" && currentTeam === "renewals") {
+                        setValue("team", "sales", { shouldDirty: true });
+                      }
+                    }}
+                  >
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="new_business">New Business</SelectItem>
@@ -891,7 +907,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Sales-team workflow: new_business or renewal. For revenue-reporting categorization, use Business Type below.
+                    Drives which pipeline bucket the opp lands in (Sales vs Renewals). For revenue-reporting categorization, use Business Type below.
                   </p>
                 </div>
 
