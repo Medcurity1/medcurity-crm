@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Pagination } from "@/components/Pagination";
 import { BulkActionBar } from "@/components/BulkActionBar";
+import { SortableHeader, type SortState } from "@/components/SortableHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -49,6 +50,7 @@ export function AccountsList() {
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
   const [page, setPage] = useUrlNumberState("page", 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [sort, setSort] = useState<SortState>({ column: "name", direction: "asc" });
 
   const { data: result, isLoading } = useAccounts({
     search: search || undefined,
@@ -68,6 +70,8 @@ export function AccountsList() {
         : undefined,
     page,
     pageSize: PAGE_SIZE,
+    sortColumn: sort.column,
+    sortDirection: sort.direction,
   });
   const { data: users } = useUsers();
   const archiveMutation = useArchiveAccount();
@@ -285,11 +289,11 @@ export function AccountsList() {
                       aria-label="Select all"
                     />
                   </TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Status</TableHead>
+                  <SortableHeader column="name" sort={sort} onSort={setSort}>Name</SortableHeader>
+                  <SortableHeader column="status" sort={sort} onSort={setSort}>Status</SortableHeader>
                   <TableHead>Owner</TableHead>
-                  <TableHead>Industry</TableHead>
-                  <TableHead>Contract End</TableHead>
+                  <SortableHeader column="industry" sort={sort} onSort={setSort}>Industry</SortableHeader>
+                  <SortableHeader column="current_contract_end_date" sort={sort} onSort={setSort}>Contract End</SortableHeader>
                 </TableRow>
               </TableHeader>
               <TableBody>

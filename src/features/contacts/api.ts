@@ -9,6 +9,8 @@ interface ContactFilters {
   verified?: "true" | "false";
   page?: number;
   pageSize?: number;
+  sortColumn?: string | null;
+  sortDirection?: "asc" | "desc";
 }
 
 export function useContacts(filters?: ContactFilters) {
@@ -17,10 +19,12 @@ export function useContacts(filters?: ContactFilters) {
     queryFn: async () => {
       const page = filters?.page ?? 0;
       const pageSize = filters?.pageSize ?? 25;
+      const sortCol = filters?.sortColumn ?? "last_name";
+      const sortAsc = (filters?.sortDirection ?? "asc") === "asc";
       let query = supabase
         .from("contacts")
         .select("*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
-        .order("last_name")
+        .order(sortCol, { ascending: sortAsc, nullsFirst: false })
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (filters?.search) {

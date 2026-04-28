@@ -215,7 +215,10 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "renewals",
     icon: RefreshCw,
     format: "number",
-    link: "/reports/standard/renewals?range=30",
+    // Forward-looking renewals queue. The /reports/standard/renewals
+    // path showed PAST closed_won renewals — wrong target for this
+    // KPI which is "upcoming renewals due within X days".
+    link: "/renewals?within=30",
     query: async (supabase) => {
       const { data } = await supabase
         .from("renewal_queue")
@@ -233,7 +236,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "renewals",
     icon: CalendarClock,
     format: "number",
-    link: "/reports/standard/renewals?range=60",
+    link: "/renewals?within=60",
     query: async (supabase) => {
       const { data } = await supabase
         .from("renewal_queue")
@@ -251,7 +254,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "renewals",
     icon: AlertTriangle,
     format: "currency",
-    link: "/reports/standard/renewals",
+    link: "/renewals",
     query: async (supabase) => {
       const { data } = await supabase
         .from("renewal_queue")

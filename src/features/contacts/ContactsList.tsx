@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { Pagination } from "@/components/Pagination";
 import { formatPhone } from "@/components/PhoneInput";
 import { BulkActionBar } from "@/components/BulkActionBar";
+import { SortableHeader, type SortState } from "@/components/SortableHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -45,6 +46,7 @@ export function ContactsList() {
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
   const [page, setPage] = useUrlNumberState("page", 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [sort, setSort] = useState<SortState>({ column: "last_name", direction: "asc" });
 
   const { data: result, isLoading } = useContacts({
     search: search || undefined,
@@ -58,6 +60,8 @@ export function ContactsList() {
         : undefined,
     page,
     pageSize: PAGE_SIZE,
+    sortColumn: sort.column,
+    sortDirection: sort.direction,
   });
   const { data: users } = useUsers();
   const archiveMutation = useArchiveContact();
@@ -211,10 +215,10 @@ export function ContactsList() {
                       aria-label="Select all"
                     />
                   </TableHead>
-                  <TableHead>Name</TableHead>
+                  <SortableHeader column="last_name" sort={sort} onSort={setSort}>Name</SortableHeader>
                   <TableHead>Account</TableHead>
-                  <TableHead>Title</TableHead>
-                  <TableHead>Email</TableHead>
+                  <SortableHeader column="title" sort={sort} onSort={setSort}>Title</SortableHeader>
+                  <SortableHeader column="email" sort={sort} onSort={setSort}>Email</SortableHeader>
                   <TableHead>Phone</TableHead>
                   <TableHead></TableHead>
                 </TableRow>

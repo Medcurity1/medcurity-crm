@@ -14,6 +14,8 @@ interface AccountFilters {
   verified?: "true" | "false";
   page?: number;
   pageSize?: number;
+  sortColumn?: string | null;
+  sortDirection?: "asc" | "desc";
 }
 
 export function useAccounts(filters?: AccountFilters) {
@@ -22,10 +24,12 @@ export function useAccounts(filters?: AccountFilters) {
     queryFn: async () => {
       const page = filters?.page ?? 0;
       const pageSize = filters?.pageSize ?? 25;
+      const sortCol = filters?.sortColumn ?? "name";
+      const sortAsc = (filters?.sortDirection ?? "asc") === "asc";
       let query = supabase
         .from("accounts")
         .select("*, owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
-        .order("name")
+        .order(sortCol, { ascending: sortAsc, nullsFirst: false })
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (filters?.search) {

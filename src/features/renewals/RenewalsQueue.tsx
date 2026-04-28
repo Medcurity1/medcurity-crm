@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -6,6 +6,13 @@ import type { RenewalQueueRow } from "@/types/crm";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -40,7 +47,31 @@ function urgencyColor(days: number | null): string {
 }
 
 export function RenewalsQueue() {
-  const { data: renewals, isLoading } = useRenewalQueue();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // ?within=30 / 60 / 90 / all — comes from KPI tile clicks. Defaults
+  // to the view's intrinsic 120-day cap so the page matches what
+  // /renewals always showed.
+  const within = searchParams.get("within") ?? "all";
+
+  const { data: allRenewals, isLoading } = useRenewalQueue();
+  const renewals = (() => {
+    if (!allRenewals) return undefined;
+    if (within === "all") return allRenewals;
+    const cap = Number(within);
+    if (!Number.isFinite(cap)) return allRenewals;
+    return allRenewals.filter(
+      (r) => r.days_until_renewal !== null && r.days_until_renewal <= cap
+    );
+  })();
+
+  function setWithin(v: string) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (v === "all") next.delete("within");
+      else next.set("within", v);
+      return next;
+    });
+  }
 
   const totalARR = renewals?.reduce((sum, r) => sum + Number(r.current_arr), 0) ?? 0;
 
@@ -50,6 +81,23 @@ export function RenewalsQueue() {
         title="Renewals Queue"
         description="Contracts expiring within 120 days"
       />
+
+      {/* Window filter — driven by ?within= URL param so the home-page
+          KPI tiles can deep-link straight to the right slice. */}
+      <div className="flex items-center gap-2 mb-4">
+        <span className="text-sm text-muted-foreground">Show renewals due within:</span>
+        <Select value={within} onValueChange={setWithin}>
+          <SelectTrigger className="w-44">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="30">30 days</SelectItem>
+            <SelectItem value="60">60 days</SelectItem>
+            <SelectItem value="90">90 days</SelectItem>
+            <SelectItem value="all">All (up to 120 days)</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <Card>
