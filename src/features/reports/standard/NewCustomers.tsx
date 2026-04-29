@@ -52,8 +52,44 @@ export function NewCustomers() {
   const { start, end } = resolveRange(range);
 
   const { data: rows, isLoading, error } = useQuery({
-    queryKey: ["report", "new-customers-v2", start, end],
+    queryKey: ["report", "new-customers-v2", range, start, end],
     queryFn: async (): Promise<NewCustRow[]> => {
+      // For current_quarter, read directly from the same view the KPI tile uses
+      // so the report count always matches the dashboard number exactly.
+      if (range === "current_quarter") {
+        type ViewRow = {
+          id: string;
+          opportunity_owner: string | null;
+          account_name: string | null;
+          opportunity_name: string | null;
+          type: string | null;
+          amount: number | null;
+          close_date: string | null;
+          lead_source: string | null;
+          account_id: string | null;
+          owner_user_id: string | null;
+        };
+        const { data, error: viewError } = await supabase
+          .from("v_new_customers_qtd")
+          .select(
+            "id, opportunity_owner, account_name, opportunity_name, type, amount, close_date, lead_source, account_id, owner_user_id",
+          )
+          .order("close_date", { ascending: false, nullsFirst: false });
+        if (viewError) throw viewError;
+        return (data as ViewRow[]).map((r) => ({
+          id: r.id,
+          account_id: r.account_id,
+          opportunity_owner: r.opportunity_owner ?? "Unassigned",
+          account_name: r.account_name ?? "",
+          opportunity_name: r.opportunity_name ?? "",
+          type: r.type ?? "",
+          amount: r.amount,
+          close_date: r.close_date,
+          lead_source: r.lead_source,
+        }));
+      }
+
+      // All other date ranges: query raw opportunities table
       type OppRaw = {
         id: string;
         name: string | null;
