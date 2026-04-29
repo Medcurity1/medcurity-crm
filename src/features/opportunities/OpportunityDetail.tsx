@@ -152,21 +152,14 @@ export function OpportunityDetail() {
     if (!id || !opp || !products) return;
     if (ensureFiredForRef.current === id) return; // run once per opp visit
     if (products.length === 0) return; // nothing to recompute against
-    const expected = products.reduce((sum, p) => {
-      const qty = Number(p.quantity);
-      const up = Number(p.unit_price);
-      const disc = Number((p as { discount_percent?: number | string | null }).discount_percent ?? 0);
-      return sum + qty * up * (1 - disc / 100);
-    }, 0);
-    const oppDisc = Math.max(0, Math.min(100, Number(opp.discount ?? 0)));
-    const expectedAmount = Math.round(expected * (1 - oppDisc / 100) * 100) / 100;
-    const currentAmount = Math.round(Number(opp.amount ?? 0) * 100) / 100;
-    // Allow 1¢ rounding tolerance.
-    if (Math.abs(expectedAmount - currentAmount) > 0.01) {
-      ensureFiredForRef.current = id;
+    // Only self-heal when amount is clearly unset/zero, not on every
+    // discrepancy. Discrepancies are expected when the user has set a
+    // custom amount or when discount_type='amount' lines differ from
+    // %-math. Firing on every visit would overwrite those manual values.
+    const amountIsUnset = !opp.amount || Number(opp.amount) === 0;
+    ensureFiredForRef.current = id;
+    if (amountIsUnset) {
       ensureAmountFresh.mutate();
-    } else {
-      ensureFiredForRef.current = id;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, opp?.id, products?.length]);
@@ -493,19 +486,33 @@ export function OpportunityDetail() {
           <Field label="Close Date" value={formatDate(opp.close_date)} />
           <Field label="Promo Code" value={opp.promo_code} />
           <Field
-            label="Subtotal"
+            label="Gross Subtotal"
             value={opp.subtotal != null ? formatCurrencyDetailed(opp.subtotal) : null}
           />
           <Field
             label="Discount"
-            value={opp.discount != null ? `${opp.discount}%` : null}
+            value={opp.discount != null ? (
+              (opp as { discount_type?: string | null }).discount_type === "amount"
+                ? `$${opp.discount}`
+                : `${opp.discount}%`
+            ) : null}
           />
-          <EditableField
-            label="Amount"
-            value={opp.amount}
-            onSave={saveField("amount", (v) => (v === "" ? 0 : Number(v)))}
-            type="currency"
-          />
+          {products && products.length > 0 ? (
+            <div className="flex flex-col">
+              <span className="text-xs text-muted-foreground">Amount</span>
+              <span className="text-sm font-medium">
+                {opp.amount != null ? formatCurrencyDetailed(opp.amount) : "\u2014"}
+                <span className="text-xs text-muted-foreground ml-1">(auto-calculated from line items)</span>
+              </span>
+            </div>
+          ) : (
+            <EditableField
+              label="Amount"
+              value={opp.amount}
+              onSave={saveField("amount", (v) => (v === "" ? 0 : Number(v)))}
+              type="currency"
+            />
+          )}
           <Field label="FTE Range (at time of opp)" value={opp.fte_range ?? opp.account?.fte_range} />
           <Field
             label="FTEs (at time of opp)"
@@ -893,22 +900,20 @@ function ProductsTabContent({
     }
   }
 
-  // Live total reflects the user's in-progress drafts so the footer
-  // doesn't show stale data while they're editing. Falls back to the
-  // persisted arr_amount once the draft is committed/cleared.
+  // Live total always computed from current values (draft or persisted)
+  // so the footer is never stale. We never fall back to stored arr_amount
+  // because it may be stale (set on insert, not updated on subsequent edits).
   const liveTotalARR = products.reduce((sum, p) => {
     const draft = drafts[p.id];
-    if (draft) {
-      const qty = Number(draft.quantity) || 0;
-      const price = Number(draft.unit_price) || 0;
-      const disc = Number(draft.discount_percent) || 0;
-      const lineTotal =
-        draft.discount_type === "amount"
-          ? Math.max(0, qty * price - disc)
-          : qty * price * (1 - disc / 100);
-      return sum + lineTotal;
-    }
-    return sum + Number(p.arr_amount);
+    const qty = Number(draft?.quantity ?? p.quantity) || 0;
+    const price = Number(draft?.unit_price ?? p.unit_price) || 0;
+    const disc = Number(draft?.discount_percent ?? (p as { discount_percent?: number | string | null }).discount_percent ?? 0) || 0;
+    const discType = (draft?.discount_type ?? (p as { discount_type?: string | null }).discount_type ?? "percent") as "percent" | "amount";
+    const lineTotal =
+      discType === "amount"
+        ? Math.max(0, qty * price - disc)
+        : qty * price * (1 - disc / 100);
+    return sum + lineTotal;
   }, 0);
 
   return (
@@ -1025,7 +1030,7 @@ function ProductsTabContent({
                 );
               })}
               <TableRow className="bg-muted/50">
-                <TableCell colSpan={5} className="text-right font-semibold">Total ARR</TableCell>
+                <TableCell colSpan={5} className="text-right font-semibold">Line Items Total</TableCell>
                 <TableCell className="text-right font-bold">{formatCurrencyDetailed(liveTotalARR)}</TableCell>
                 <TableCell />
               </TableRow>

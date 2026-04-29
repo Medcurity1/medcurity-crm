@@ -449,11 +449,11 @@ async function recomputeOpportunityTotals(opportunityId: string): Promise<void> 
   const [linesRes, oppRes] = await Promise.all([
     supabase
       .from("opportunity_products")
-      .select("quantity, unit_price, discount_percent")
+      .select("quantity, unit_price, discount_percent, discount_type")
       .eq("opportunity_id", opportunityId),
     supabase
       .from("opportunities")
-      .select("discount")
+      .select("discount, discount_type")
       .eq("id", opportunityId)
       .single(),
   ]);
@@ -462,16 +462,32 @@ async function recomputeOpportunityTotals(opportunityId: string): Promise<void> 
     quantity: number;
     unit_price: number | string;
     discount_percent: number | string | null;
+    discount_type?: string | null;
   }[];
   if (lines.length === 0) return;
+
+  // Gross subtotal (pre-discount) — matches new DB function behaviour
   const subtotal = lines.reduce((s, l) => {
+    return s + Number(l.quantity) * Number(l.unit_price);
+  }, 0);
+
+  // Net after line-level discounts
+  const lineNet = lines.reduce((s, l) => {
     const qty = Number(l.quantity);
     const up = Number(l.unit_price);
     const disc = Number(l.discount_percent ?? 0);
-    return s + qty * up * (1 - disc / 100);
+    const dtype = (l.discount_type ?? "percent") as string;
+    return s + (dtype === "amount"
+      ? Math.max(0, qty * up - disc)
+      : qty * up * (1 - disc / 100));
   }, 0);
-  const oppDiscount = Math.max(0, Math.min(100, Number(oppRes.data?.discount ?? 0)));
-  const amount = subtotal * (1 - oppDiscount / 100);
+
+  const oppDiscountType = ((oppRes.data as { discount_type?: string | null })?.discount_type ?? "percent") as string;
+  const oppDiscount = Number(oppRes.data?.discount ?? 0);
+  const amount = oppDiscountType === "amount"
+    ? Math.max(0, lineNet - oppDiscount)
+    : lineNet * (1 - Math.max(0, Math.min(100, oppDiscount)) / 100);
+
   await supabase
     .from("opportunities")
     .update({
@@ -543,16 +559,46 @@ export function useUpdateOpportunityProduct() {
         discount_type?: "percent" | "amount";
       };
     }) => {
+      const { quantity, unit_price, discount_percent, discount_type } = params.patch;
+
+      // Compute arr_amount so the stored value stays fresh on every edit.
+      const qty = Number(quantity ?? 0);
+      const price = Number(unit_price ?? 0);
+      const disc = Number(discount_percent ?? 0);
+      const dtype = discount_type ?? "percent";
+      const arr_amount =
+        dtype === "amount"
+          ? Math.max(0, qty * price - disc)
+          : qty * price * (1 - disc / 100);
+
+      const fullPatch = { ...params.patch, arr_amount };
+
       const { data, error } = await supabase
         .from("opportunity_products")
-        .update(params.patch)
+        .update(fullPatch)
         .eq("id", params.id)
         .select()
         .single();
-      if (error) throw error;
-      // Recompute totals on every line update (qty/price/discount changed).
+
+      if (!error) {
+        // Recompute totals on every line update (qty/price/discount changed).
+        await recomputeOpportunityTotals(params.opportunity_id);
+        return data;
+      }
+
+      // Graceful fallback: migration 20260428000010 (discount_type column) may
+      // not be applied yet in this environment. Retry without discount_type so
+      // the save doesn't fail silently and revert the discount.
+      const { discount_type: _dt, ...patchWithout } = fullPatch;
+      const { data: data2, error: error2 } = await supabase
+        .from("opportunity_products")
+        .update(patchWithout)
+        .eq("id", params.id)
+        .select()
+        .single();
+      if (error2) throw error2;
       await recomputeOpportunityTotals(params.opportunity_id);
-      return data;
+      return data2;
     },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["opportunity_products", vars.opportunity_id] });
