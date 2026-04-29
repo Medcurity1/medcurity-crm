@@ -67,6 +67,7 @@ export interface StagedOpportunityProduct {
   unit_price: number;
   arr_amount: number;
   discount_percent: number;
+  discount_type?: "percent" | "amount";
 }
 
 type Props = {
@@ -101,6 +102,7 @@ interface PickedRow {
   unit_price: number;
   unit_price_source: "price_book" | "default" | "manual";
   discount_percent: number;
+  discount_type: "percent" | "amount";
 }
 
 /**
@@ -367,6 +369,7 @@ export function MultiProductPicker(props: Props) {
         unit_price: price,
         unit_price_source: source,
         discount_percent: 0,
+        discount_type: "percent",
       },
     ]);
   }
@@ -386,10 +389,12 @@ export function MultiProductPicker(props: Props) {
     });
   }
 
-  const subtotal = picked.reduce(
-    (s, r) => s + r.quantity * r.unit_price * (1 - r.discount_percent / 100),
-    0,
-  );
+  const subtotal = picked.reduce((s, r) => {
+    const lineTotal = r.discount_type === "amount"
+      ? Math.max(0, r.quantity * r.unit_price - r.discount_percent)
+      : r.quantity * r.unit_price * (1 - r.discount_percent / 100);
+    return s + lineTotal;
+  }, 0);
 
   async function handleAdd() {
     if (picked.length === 0) {
@@ -403,8 +408,11 @@ export function MultiProductPicker(props: Props) {
       product_short_name: r.product_short_name,
       quantity: r.quantity,
       unit_price: r.unit_price,
-      arr_amount: r.quantity * r.unit_price * (1 - r.discount_percent / 100),
+      arr_amount: r.discount_type === "amount"
+        ? Math.max(0, r.quantity * r.unit_price - r.discount_percent)
+        : r.quantity * r.unit_price * (1 - r.discount_percent / 100),
       discount_percent: r.discount_percent,
+      discount_type: r.discount_type,
     }));
 
     if (isStaged) {
@@ -558,14 +566,15 @@ export function MultiProductPicker(props: Props) {
                   <th className="text-left pb-1">Product</th>
                   <th className="text-right pb-1 w-14">Qty</th>
                   <th className="text-right pb-1 w-20">Unit $</th>
-                  <th className="text-right pb-1 w-16">Disc %</th>
+                  <th className="text-right pb-1 w-28">Discount</th>
                   <th className="text-right pb-1 w-24">Total</th>
                 </tr>
               </thead>
               <tbody>
                 {picked.map((row) => {
-                  const total =
-                    row.quantity * row.unit_price * (1 - row.discount_percent / 100);
+                  const total = row.discount_type === "amount"
+                    ? Math.max(0, row.quantity * row.unit_price - row.discount_percent)
+                    : row.quantity * row.unit_price * (1 - row.discount_percent / 100);
                   return (
                     <tr key={row.product_id} className="border-t border-border/50">
                       <td className="py-1 pr-2">
@@ -605,19 +614,29 @@ export function MultiProductPicker(props: Props) {
                         />
                       </td>
                       <td className="py-1 text-right">
-                        <Input
-                          type="number"
-                          min={0}
-                          max={100}
-                          step="1"
-                          className="h-7 text-xs text-right px-1"
-                          value={String(row.discount_percent)}
-                          onChange={(e) => {
-                            const n = parseFloat(e.target.value);
-                            if (!Number.isNaN(n) && n >= 0 && n <= 100)
-                              updatePicked(row.product_id, { discount_percent: n });
-                          }}
-                        />
+                        <div className="flex items-center justify-end gap-1">
+                          <select
+                            value={row.discount_type}
+                            onChange={(e) => updatePicked(row.product_id, { discount_type: e.target.value as "percent" | "amount" })}
+                            className="h-7 border rounded text-xs px-1 bg-background"
+                          >
+                            <option value="percent">%</option>
+                            <option value="amount">$</option>
+                          </select>
+                          <Input
+                            type="number"
+                            min={0}
+                            max={row.discount_type === "percent" ? 100 : undefined}
+                            step={row.discount_type === "percent" ? "1" : "0.01"}
+                            className="h-7 text-xs text-right px-1 w-16"
+                            value={String(row.discount_percent)}
+                            onChange={(e) => {
+                              const n = parseFloat(e.target.value);
+                              if (!Number.isNaN(n) && n >= 0)
+                                updatePicked(row.product_id, { discount_percent: n });
+                            }}
+                          />
+                        </div>
                       </td>
                       <td className="py-1 text-right font-medium">
                         {formatCurrencyDetailed(total)}

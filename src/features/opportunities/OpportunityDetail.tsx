@@ -111,6 +111,85 @@ function EditableField({
   );
 }
 
+function DiscountField({
+  discount,
+  discountType,
+  onSave,
+}: {
+  discount: number | null | undefined;
+  discountType: string;
+  onSave: (value: number | null, type: "percent" | "amount") => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draftValue, setDraftValue] = useState("");
+  const [draftType, setDraftType] = useState<"percent" | "amount">(
+    discountType === "amount" ? "amount" : "percent"
+  );
+
+  function startEdit() {
+    setDraftValue(discount != null ? String(discount) : "");
+    setDraftType(discountType === "amount" ? "amount" : "percent");
+    setEditing(true);
+  }
+
+  async function commit() {
+    setEditing(false);
+    const parsed = draftValue === "" ? null : Number(draftValue);
+    if (parsed === discount && draftType === (discountType === "amount" ? "amount" : "percent")) return;
+    try {
+      await onSave(parsed, draftType);
+    } catch {
+      // error handled by mutation
+    }
+  }
+
+  const displayValue = discount != null
+    ? (discountType === "amount" ? `$${discount}` : `${discount}%`)
+    : "\u2014";
+
+  return (
+    <div className="flex flex-col">
+      <span className="text-xs text-muted-foreground">Discount</span>
+      {editing ? (
+        <div className="flex items-center gap-1 mt-0.5">
+          <select
+            value={draftType}
+            onChange={(e) => setDraftType(e.target.value as "percent" | "amount")}
+            className="h-7 border rounded text-xs px-1 bg-background"
+          >
+            <option value="percent">%</option>
+            <option value="amount">$</option>
+          </select>
+          <input
+            autoFocus
+            type="number"
+            min={0}
+            max={draftType === "percent" ? 100 : undefined}
+            step="0.01"
+            value={draftValue}
+            onChange={(e) => setDraftValue(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commit();
+              if (e.key === "Escape") setEditing(false);
+            }}
+            className="h-7 w-24 border rounded text-sm px-2 bg-background"
+          />
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={startEdit}
+          className="text-sm font-medium text-left hover:text-primary transition-colors cursor-text"
+          title="Click to edit discount"
+        >
+          {displayValue}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /* ---------- Main component ---------- */
 
 export function OpportunityDetail() {
@@ -489,13 +568,16 @@ export function OpportunityDetail() {
             label="Gross Subtotal"
             value={opp.subtotal != null ? formatCurrencyDetailed(opp.subtotal) : null}
           />
-          <Field
-            label="Discount"
-            value={opp.discount != null ? (
-              (opp as { discount_type?: string | null }).discount_type === "amount"
-                ? `$${opp.discount}`
-                : `${opp.discount}%`
-            ) : null}
+          <DiscountField
+            discount={opp.discount}
+            discountType={(opp as { discount_type?: string | null }).discount_type ?? "percent"}
+            onSave={async (value, type) => {
+              await updateMutation.mutateAsync({
+                id: oppId,
+                discount: value,
+                discount_type: type,
+              } as Parameters<typeof updateMutation.mutateAsync>[0]);
+            }}
           />
           {products && products.length > 0 ? (
             <div className="flex flex-col">

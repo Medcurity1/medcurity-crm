@@ -330,7 +330,14 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   const watchedAmount = watch("amount");
   const lastEditedRef = useRef<"subtotal" | "discount" | "amount" | null>(null);
 
+  // hasProducts is true in edit mode when the opp already has line items.
+  // In that case, amount is auto-calculated by the DB trigger and should
+  // NOT be recomputed from subtotal here — that would overwrite the real
+  // post-discount value with gross-subtotal math.
+  const hasProducts = isEditing && existingProducts != null && existingProducts.length > 0;
+
   useEffect(() => {
+    if (hasProducts) return; // DB trigger owns amount when products exist
     if (lastEditedRef.current === "amount") return; // skip — handled below
     const sub = Number(watchedSubtotal) || 0;
     const discPct = Math.max(0, Math.min(100, Number(watchedDiscount) || 0));
@@ -339,9 +346,10 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       setValue("amount", next, { shouldDirty: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watchedSubtotal, watchedDiscount]);
+  }, [watchedSubtotal, watchedDiscount, hasProducts]);
 
   useEffect(() => {
+    if (hasProducts) return;
     if (lastEditedRef.current !== "amount") return;
     // User typed in Amount directly → back-solve Subtotal.
     const amt = Number(watchedAmount) || 0;
@@ -355,7 +363,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     // Reset the flag so the next subtotal/discount edit re-triggers.
     lastEditedRef.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watchedAmount]);
+  }, [watchedAmount, hasProducts]);
 
   // ----- Auto-set probability from stage -----
   // Whenever the stage changes, populate probability from the SF
@@ -1035,15 +1043,31 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
 
                 <div className="space-y-2">
                   <Label htmlFor="amount">Amount ($) *<RequiredIndicator fieldKey="amount" requiredFields={requiredKeys} /></Label>
-                  <Input
-                    id="amount"
-                    type="number"
-                    step="0.01"
-                    {...register("amount", {
-                      onChange: () => { lastEditedRef.current = "amount"; },
-                    })}
-                  />
-                  <p className="text-xs text-muted-foreground">Final deal value AFTER the discount. Auto-calculated from Subtotal × (1 − Discount/100). Editable for manual corrections (will back-solve Subtotal).</p>
+                  {isEditing && existingProducts != null && existingProducts.length > 0 ? (
+                    <>
+                      <Input
+                        id="amount"
+                        type="number"
+                        step="0.01"
+                        readOnly
+                        className="bg-muted cursor-not-allowed"
+                        {...register("amount")}
+                      />
+                      <p className="text-xs text-muted-foreground">Auto-calculated from line items. Edit products to change this value.</p>
+                    </>
+                  ) : (
+                    <>
+                      <Input
+                        id="amount"
+                        type="number"
+                        step="0.01"
+                        {...register("amount", {
+                          onChange: () => { lastEditedRef.current = "amount"; },
+                        })}
+                      />
+                      <p className="text-xs text-muted-foreground">Final deal value AFTER the discount. Auto-calculated from Subtotal × (1 − Discount/100). Editable for manual corrections (will back-solve Subtotal).</p>
+                    </>
+                  )}
                   {errors.amount && <p className="text-sm text-destructive">{errors.amount.message}</p>}
                 </div>
 

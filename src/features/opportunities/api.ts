@@ -364,22 +364,38 @@ export function useAddOpportunityProductsBulk() {
         unit_price: number;
         arr_amount: number;
         discount_percent?: number;
+        discount_type?: "percent" | "amount";
       }>;
     }) => {
       if (params.rows.length === 0) return [];
-      const payload = params.rows.map((r) => ({
+      const fullPayload = params.rows.map((r) => ({
         opportunity_id: params.opportunity_id,
         product_id: r.product_id,
         quantity: r.quantity,
         unit_price: r.unit_price,
         arr_amount: r.arr_amount,
         discount_percent: r.discount_percent ?? 0,
+        discount_type: (r as { discount_type?: string }).discount_type ?? "percent",
       }));
-      const { data, error } = await supabase
+
+      let data: unknown;
+      const { data: d1, error: e1 } = await supabase
         .from("opportunity_products")
-        .upsert(payload, { onConflict: "opportunity_id,product_id" })
+        .upsert(fullPayload, { onConflict: "opportunity_id,product_id" })
         .select();
-      if (error) throw error;
+
+      if (!e1) {
+        data = d1;
+      } else {
+        // Retry without discount_type (migration 20260428000010 may not be applied)
+        const fallbackPayload = fullPayload.map(({ discount_type: _dt, ...rest }) => rest);
+        const { data: d2, error: e2 } = await supabase
+          .from("opportunity_products")
+          .upsert(fallbackPayload, { onConflict: "opportunity_id,product_id" })
+          .select();
+        if (e2) throw e2;
+        data = d2;
+      }
 
       // Belt-and-suspenders: recompute opp totals client-side too. The
       // DB trigger should handle this, but RLS / security-definer
