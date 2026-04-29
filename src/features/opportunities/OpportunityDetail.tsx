@@ -151,7 +151,16 @@ function DiscountField({
     <div className="flex flex-col">
       <span className="text-xs text-muted-foreground">Discount</span>
       {editing ? (
-        <div className="flex items-center gap-1 mt-0.5">
+        <div
+          className="flex items-center gap-1 mt-0.5"
+          onBlur={(e) => {
+            // Only commit when focus leaves the entire container (not when
+            // moving between the select and the input within it).
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+              commit();
+            }
+          }}
+        >
           <select
             value={draftType}
             onChange={(e) => setDraftType(e.target.value as "percent" | "amount")}
@@ -168,7 +177,6 @@ function DiscountField({
             step="0.01"
             value={draftValue}
             onChange={(e) => setDraftValue(e.target.value)}
-            onBlur={commit}
             onKeyDown={(e) => {
               if (e.key === "Enter") commit();
               if (e.key === "Escape") setEditing(false);
@@ -565,7 +573,7 @@ export function OpportunityDetail() {
           <Field label="Close Date" value={formatDate(opp.close_date)} />
           <Field label="Promo Code" value={opp.promo_code} />
           <Field
-            label="Gross Subtotal"
+            label="Subtotal"
             value={opp.subtotal != null ? formatCurrencyDetailed(opp.subtotal) : null}
           />
           <DiscountField
