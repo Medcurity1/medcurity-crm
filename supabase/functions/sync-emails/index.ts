@@ -559,13 +559,19 @@ async function syncConnection(
     const userEmail = conn.email_address ?? "";
 
     // 2. Determine the starting point for this sync.
-    //    First-ever sync (last_sync_at is null) backfills the last 90 days
-    //    so newly-connected users get their recent email history logged
-    //    against matching contacts. Every subsequent sync picks up from
-    //    last_sync_at.
+    //    First-ever sync (last_sync_at is null) backfills the last 7 days
+    //    so newly-connected users get a useful slice of recent email history
+    //    without blowing past the Edge Function gateway's 150s wall-clock
+    //    timeout. A 90-day backfill on a busy mailbox can fetch 10k+ emails
+    //    via Graph/Gmail pagination and exceed the timeout, causing the
+    //    worker to be SIGKILL'd mid-sync (which left zombie email_sync_runs
+    //    rows on prod 2026-04-30). Every subsequent sync picks up from
+    //    last_sync_at, so reps still see ongoing email logged in real time.
+    //    Future enhancement: optional one-time deep backfill via a separate
+    //    background-task pattern that doesn't share the cron's wall budget.
     //    We subtract a 2-minute overlap to ride over clock drift, and rely
     //    on the activities.external_message_id dedup to prevent duplicates.
-    const INITIAL_BACKFILL_DAYS = 90;
+    const INITIAL_BACKFILL_DAYS = 7;
     const baseSince =
       conn.last_sync_at ??
       new Date(Date.now() - INITIAL_BACKFILL_DAYS * 24 * 60 * 60 * 1000).toISOString();
