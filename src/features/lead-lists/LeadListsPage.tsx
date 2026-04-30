@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import {
   ListChecks,
   Plus,
-  Search,
   Trash2,
   UserPlus,
   PlayCircle,
@@ -11,6 +11,7 @@ import {
   Sparkles,
   Pencil,
 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,9 +43,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { MultiSelect } from "@/components/MultiSelect";
+import { SortableHeader, type SortState } from "@/components/SortableHeader";
 import {
   useLeadLists,
   useCreateLeadList,
@@ -52,10 +55,10 @@ import {
   useDeleteLeadList,
   useLeadListMembers,
   useLeadListMemberCount,
-  useAddToList,
   useRemoveFromList,
-  useSearchLeadsForList,
   useSmartListLeads,
+  useLeadsByFilter,
+  useBulkAddToList,
   type LeadListFilterConfig,
 } from "./lead-lists-api";
 import { useUpdateLead } from "@/features/leads/api";
@@ -450,7 +453,10 @@ function EditFiltersDialog({
 }
 
 // ---------------------------------------------------------------------------
-// Add leads dialog (static lists only)
+// Add leads dialog (static lists only). Filter-driven bulk picker — uses
+// the same FilterForm facets as smart lists, plus a free-text search,
+// plus checkboxes so the user can add many at once. Replaces the prior
+// 1-at-a-time search-only flow that the sales team couldn't actually use.
 // ---------------------------------------------------------------------------
 
 function AddLeadsDialog({
@@ -462,92 +468,162 @@ function AddLeadsDialog({
   onOpenChange: (o: boolean) => void;
   listId: string;
 }) {
-  const [search, setSearch] = useState("");
-  const { data: results, isLoading } = useSearchLeadsForList(search);
-  const addMutation = useAddToList();
+  const [filters, setFilters] = useState<LeadListFilterConfig>({});
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const bulkAdd = useBulkAddToList();
+
+  // Run the query whenever the dialog is open so users get immediate
+  // results — no need to type before seeing leads. The 200-row cap on
+  // the API hook keeps this safe for the full table.
+  const { data: leads, isLoading } = useLeadsByFilter(filters, open);
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    if (!leads) return;
+    if (selected.size === leads.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(leads.map((l) => l.id)));
+    }
+  }
+
+  async function handleAdd() {
+    if (!selected.size) return;
+    try {
+      const res = await bulkAdd.mutateAsync({
+        list_id: listId,
+        lead_ids: Array.from(selected),
+      });
+      toast.success(
+        res.added > 0
+          ? `Added ${res.added} lead${res.added === 1 ? "" : "s"}`
+          : "No new leads to add (all already in list)",
+      );
+      setSelected(new Set());
+      setFilters({});
+      onOpenChange(false);
+    } catch {
+      toast.error("Failed to add leads");
+    }
+  }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) {
+          setSelected(new Set());
+          setFilters({});
+        }
+        onOpenChange(o);
+      }}
+    >
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add Leads to List</DialogTitle>
           <DialogDescription>
-            Search for leads by name, email, or company.
+            Filter the leads database, then check the rows you want to add.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              className="pl-9"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search leads..."
-            />
-          </div>
-          {isLoading ? (
-            <div className="space-y-2">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-10 w-full" />
-              ))}
-            </div>
-          ) : results && results.length > 0 ? (
-            <div className="max-h-64 overflow-y-auto border rounded-lg">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Company</TableHead>
-                    <TableHead className="w-[80px]" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {results.map((lead) => (
-                    <TableRow key={lead.id}>
-                      <TableCell className="font-medium">
-                        {lead.first_name} {lead.last_name}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {lead.email ?? "---"}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {lead.company ?? "---"}
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            addMutation.mutate(
-                              { list_id: listId, lead_id: lead.id },
-                              {
-                                onSuccess: () => toast.success("Lead added"),
-                                onError: () =>
-                                  toast.error("Already in list or error"),
-                              }
-                            );
-                          }}
-                          disabled={addMutation.isPending}
-                        >
-                          <Plus className="h-3 w-3" />
-                        </Button>
-                      </TableCell>
+          <FilterForm value={filters} onChange={setFilters} />
+
+          <div className="border rounded-lg overflow-hidden">
+            {isLoading ? (
+              <div className="p-3 space-y-2">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <Skeleton key={i} className="h-10 w-full" />
+                ))}
+              </div>
+            ) : !leads || !leads.length ? (
+              <p className="text-sm text-muted-foreground text-center py-6">
+                No leads match the current filters.
+              </p>
+            ) : (
+              <div className="max-h-[40vh] overflow-y-auto">
+                <Table>
+                  <TableHeader className="sticky top-0 bg-background z-10">
+                    <TableRow>
+                      <TableHead className="w-[40px]">
+                        <Checkbox
+                          checked={
+                            leads.length > 0 && selected.size === leads.length
+                          }
+                          onCheckedChange={toggleAll}
+                          aria-label="Select all"
+                        />
+                      </TableHead>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Company</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Status</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          ) : search.length >= 2 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">
-              No leads found.
-            </p>
-          ) : (
-            <p className="text-sm text-muted-foreground text-center py-4">
-              Type at least 2 characters to search.
-            </p>
-          )}
+                  </TableHeader>
+                  <TableBody>
+                    {leads.map((lead) => (
+                      <TableRow
+                        key={lead.id}
+                        className="cursor-pointer"
+                        onClick={() => toggle(lead.id)}
+                      >
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            checked={selected.has(lead.id)}
+                            onCheckedChange={() => toggle(lead.id)}
+                            aria-label={`Select ${lead.first_name} ${lead.last_name}`}
+                          />
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {lead.first_name} {lead.last_name}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {lead.company ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {lead.email ?? "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-xs">
+                            {lead.status ?? "—"}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between text-sm text-muted-foreground">
+            <span>
+              {leads?.length ?? 0} matching · {selected.size} selected
+            </span>
+          </div>
         </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleAdd}
+            disabled={!selected.size || bulkAdd.isPending}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            {bulkAdd.isPending
+              ? "Adding..."
+              : `Add ${selected.size || ""} Lead${selected.size === 1 ? "" : "s"}`.trim()}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -644,6 +720,7 @@ function InlineSelectCell({
   options: { value: string; label: string }[];
   placeholder?: string;
 }) {
+  const qc = useQueryClient();
   const updateMutation = useUpdateLead();
   return (
     <Select
@@ -653,7 +730,15 @@ function InlineSelectCell({
         updateMutation.mutate(
           { id: leadId, ...patch },
           {
-            onSuccess: () => toast.success("Updated"),
+            onSuccess: () => {
+              toast.success("Updated");
+              // useUpdateLead only invalidates ["leads"]; the lead-lists
+              // detail view reads from ["smart-list-leads"] or
+              // ["lead-list-members"], so refresh those too — otherwise
+              // the row keeps showing the old value until a remount.
+              qc.invalidateQueries({ queryKey: ["smart-list-leads"] });
+              qc.invalidateQueries({ queryKey: ["lead-list-members"] });
+            },
             onError: () => toast.error("Update failed"),
           },
         );
@@ -689,6 +774,7 @@ function ListDetailView({
   list: LeadList;
   onBack: () => void;
 }) {
+  const navigate = useNavigate();
   const { data: staticMembers, isLoading: staticLoading } = useLeadListMembers(
     list.is_dynamic ? undefined : list.id,
   );
@@ -701,6 +787,7 @@ function ListDetailView({
   const [showAddLeads, setShowAddLeads] = useState(false);
   const [showEnroll, setShowEnroll] = useState(false);
   const [showEditFilters, setShowEditFilters] = useState(false);
+  const [sort, setSort] = useState<SortState>({ column: null, direction: "asc" });
 
   // Normalize both branches into a unified Lead-like row so the table
   // body is one code path. Static rows go through .lead (or .contact),
@@ -716,7 +803,7 @@ function ListDetailView({
     memberId?: string; // for static row removal
   };
 
-  const rows: Row[] = list.is_dynamic
+  const baseRows: Row[] = list.is_dynamic
     ? (smartLeads ?? []).map((l) => ({
         rowKey: l.id,
         lead: l,
@@ -743,6 +830,55 @@ function ListDetailView({
           memberId: m.id,
         };
       });
+
+  // Resolve a row's sort field. Pulled into a helper so the comparator
+  // can stay flat. `name` synthesizes "first last" so the sort matches
+  // what the user sees in the cell.
+  function rowField(r: Row, col: string): string {
+    if (r.isContact) {
+      switch (col) {
+        case "name": return (r.contactName ?? "").toLowerCase();
+        case "company": return (r.contactCompany ?? "").toLowerCase();
+        case "email": return (r.contactEmail ?? "").toLowerCase();
+        case "phone": return r.contactPhone ?? "";
+        default: return "";
+      }
+    }
+    const l = r.lead;
+    if (!l) return "";
+    switch (col) {
+      case "name":
+        return `${l.last_name ?? ""} ${l.first_name ?? ""}`.toLowerCase();
+      case "company": return (l.company ?? "").toLowerCase();
+      case "status": return l.status ?? "";
+      case "qualification": return l.qualification ?? "";
+      case "rating": return l.rating ?? "";
+      case "owner": {
+        const u = (users ?? []).find((u) => u.id === l.owner_user_id);
+        return (u?.full_name ?? "").toLowerCase();
+      }
+      case "email": return (l.email ?? "").toLowerCase();
+      case "phone": return l.phone ?? "";
+      default: return "";
+    }
+  }
+
+  const rows = useMemo(() => {
+    if (!sort.column) return baseRows;
+    const col = sort.column;
+    const dir = sort.direction === "asc" ? 1 : -1;
+    // Stable sort via slice + localeCompare; empty strings sort last on asc
+    // by collation, which is acceptable here.
+    return [...baseRows].sort((a, b) => {
+      const av = rowField(a, col);
+      const bv = rowField(b, col);
+      if (av === bv) return 0;
+      if (av === "") return 1;
+      if (bv === "") return -1;
+      return av.localeCompare(bv) * dir;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseRows, sort, users]);
 
   const isLoading = list.is_dynamic ? smartLoading : staticLoading;
   const leadIds = rows.map((r) => r.lead?.id).filter((v): v is string => !!v);
@@ -819,24 +955,38 @@ function ListDetailView({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Company</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Qualification</TableHead>
-                <TableHead>Rating</TableHead>
-                <TableHead>Owner</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Phone</TableHead>
+                <SortableHeader column="name" sort={sort} onSort={setSort}>Name</SortableHeader>
+                <SortableHeader column="company" sort={sort} onSort={setSort}>Company</SortableHeader>
+                <SortableHeader column="status" sort={sort} onSort={setSort}>Status</SortableHeader>
+                <SortableHeader column="qualification" sort={sort} onSort={setSort}>Qualification</SortableHeader>
+                <SortableHeader column="rating" sort={sort} onSort={setSort}>Rating</SortableHeader>
+                <SortableHeader column="owner" sort={sort} onSort={setSort}>Owner</SortableHeader>
+                <SortableHeader column="email" sort={sort} onSort={setSort}>Email</SortableHeader>
+                <SortableHeader column="phone" sort={sort} onSort={setSort}>Phone</SortableHeader>
                 <TableHead className="w-[80px]" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {rows.map((r) => (
-                <TableRow key={r.rowKey}>
+                <TableRow
+                  key={r.rowKey}
+                  className={r.lead ? "cursor-pointer" : undefined}
+                  onClick={() => {
+                    if (r.lead) navigate(`/leads/${r.lead.id}`);
+                  }}
+                >
                   <TableCell className="font-medium">
-                    {r.isContact
-                      ? r.contactName || "Unknown"
-                      : `${r.lead?.first_name ?? ""} ${r.lead?.last_name ?? ""}`.trim()}
+                    {r.lead ? (
+                      <Link
+                        to={`/leads/${r.lead.id}`}
+                        className="text-primary hover:underline"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {`${r.lead.first_name ?? ""} ${r.lead.last_name ?? ""}`.trim() || "Unnamed"}
+                      </Link>
+                    ) : (
+                      r.contactName || "Unknown"
+                    )}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {(r.isContact ? r.contactCompany : r.lead?.company) || "—"}

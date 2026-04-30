@@ -279,3 +279,87 @@ export function useSearchLeadsForList(search: string) {
     enabled: search.length >= 2,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Filtered leads for bulk-add into a static list. Mirrors the smart-list
+// query shape but doesn't require a list id, so the static-list "Add Leads"
+// dialog can let users pick by criteria the same way smart lists do.
+// ---------------------------------------------------------------------------
+
+export function useLeadsByFilter(
+  filterConfig: LeadListFilterConfig,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: ["leads-by-filter", filterConfig],
+    queryFn: async () => {
+      let q = supabase
+        .from("leads")
+        .select(
+          "id, first_name, last_name, email, phone, company, status, qualification, rating, source, industry_category, owner_user_id, do_not_market_to",
+        )
+        .is("archived_at", null)
+        .order("last_name", { ascending: true, nullsFirst: false })
+        .limit(200);
+
+      if (filterConfig.status?.length) q = q.in("status", filterConfig.status);
+      if (filterConfig.source?.length) q = q.in("source", filterConfig.source);
+      if (filterConfig.qualification?.length)
+        q = q.in("qualification", filterConfig.qualification);
+      if (filterConfig.rating?.length) q = q.in("rating", filterConfig.rating);
+      if (filterConfig.industry_category?.length)
+        q = q.in("industry_category", filterConfig.industry_category);
+      if (filterConfig.owner_user_id?.length)
+        q = q.in("owner_user_id", filterConfig.owner_user_id);
+      if (typeof filterConfig.do_not_market_to === "boolean")
+        q = q.eq("do_not_market_to", filterConfig.do_not_market_to);
+      if (filterConfig.search) {
+        const safe = filterConfig.search.replace(/[(),]/g, " ");
+        q = q.or(
+          `first_name.ilike.%${safe}%,last_name.ilike.%${safe}%,company.ilike.%${safe}%,email.ilike.%${safe}%`,
+        );
+      }
+
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []) as unknown as Lead[];
+    },
+    enabled,
+  });
+}
+
+// Bulk add many leads to a static list in one call. Skips duplicates
+// silently (unique constraint on (list_id, lead_id)) so the dialog can
+// re-add a result set without erroring on already-included leads.
+export function useBulkAddToList() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      list_id,
+      lead_ids,
+    }: {
+      list_id: string;
+      lead_ids: string[];
+    }) => {
+      if (!lead_ids.length) return { added: 0 };
+      const rows = lead_ids.map((lead_id) => ({ list_id, lead_id }));
+      // upsert on (list_id, lead_id) so duplicates no-op cleanly. The
+      // membership table has a unique index on this pair.
+      const { error, count } = await supabase
+        .from("lead_list_members")
+        .upsert(rows, {
+          onConflict: "list_id,lead_id",
+          ignoreDuplicates: true,
+          count: "exact",
+        });
+      if (error) throw error;
+      return { added: count ?? 0 };
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({
+        queryKey: ["lead-list-members", vars.list_id],
+      });
+      qc.invalidateQueries({ queryKey: ["lead-list-member-counts"] });
+    },
+  });
+}
