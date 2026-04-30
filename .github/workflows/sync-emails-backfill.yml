@@ -1,0 +1,65 @@
+name: Sync Emails Backfill (manual)
+
+# One-shot deeper-history backfill for all active email_sync_connections.
+#
+# When to run this:
+#   - After a new user connects Outlook/Gmail and you want >7 days of
+#     historical email logged against contacts (the regular cron only
+#     pulls 7 days on first connect to fit the gateway timeout).
+#   - After a fresh deploy where you want to backfill anyone whose
+#     incremental sync started shallow.
+#
+# This is intentionally manual. It uses Supabase's `EdgeRuntime.waitUntil`
+# background pattern so the function returns immediately while the actual
+# Graph/Gmail fetches run in the background up to the function instance's
+# wall-clock limit (well above the 150s synchronous response timeout).
+#
+# To roll back: simply don't run the workflow. The regular sync-emails
+# cron continues normally — it doesn't depend on this.
+
+on:
+  workflow_dispatch:
+    inputs:
+      days_back:
+        description: "How many days of history to fetch (max 365)"
+        required: true
+        default: "90"
+        type: string
+
+# Don't let two backfills run at the same time — they'd hammer the same
+# Graph/Gmail rate limits. Cancel any in-progress backfill if a new one
+# is dispatched (the new one's parameters take priority).
+concurrency:
+  group: sync-emails-backfill
+  cancel-in-progress: true
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger backfill on sync-emails Edge Function
+        env:
+          SUPABASE_SYNC_URL: ${{ secrets.SUPABASE_SYNC_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DAYS_BACK: ${{ inputs.days_back }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_SYNC_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "::error::SUPABASE_SYNC_URL and SUPABASE_SERVICE_ROLE_KEY repository secrets must be set."
+            exit 1
+          fi
+          echo "Kicking off backfill for ${DAYS_BACK} days..."
+          # The function returns 202 immediately; the actual sync work runs
+          # in the background via EdgeRuntime.waitUntil. Curl just confirms
+          # the function accepted the request.
+          curl -fsS --max-time 30 \
+            -X POST \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{\"mode\":\"backfill\",\"days\":${DAYS_BACK}}" \
+            "${SUPABASE_SYNC_URL}"
+          echo
+          echo "Backfill dispatched. Watch progress in email_sync_runs:"
+          echo "  SELECT id, connection_id, started_at, finished_at, emails_fetched, activities_created, error_message"
+          echo "  FROM email_sync_runs ORDER BY id DESC LIMIT 20;"

@@ -740,16 +740,108 @@ serve(async (req) => {
       auth: { persistSession: false },
     });
 
-    // Optional scoping: if the caller passes { user_id } in the body, only
-    // sync that user's connections. Otherwise sync everyone (the cron path).
+    // Optional scoping + modes (read once from body):
+    //   { user_id }            -> sync only that user's connections
+    //   { mode: "backfill",
+    //     days: 90 }           -> one-shot deeper history pull. Runs in
+    //                            the background via EdgeRuntime.waitUntil
+    //                            so it isn't bound by the 150s gateway
+    //                            response timeout. Overrides last_sync_at
+    //                            with (now - days). Per-connection
+    //                            sync runs to completion (no wall budget)
+    //                            so a busy mailbox finishes its backfill.
+    //                            Triggered manually by the
+    //                            sync-emails-backfill workflow.
     let scopedUserId: string | null = null;
+    let modeBackfill = false;
+    let backfillDays = 90;
     try {
       const body = await req.json();
       if (body && typeof body.user_id === "string") {
         scopedUserId = body.user_id;
       }
+      if (body && body.mode === "backfill") {
+        modeBackfill = true;
+      }
+      if (body && typeof body.days === "number" && body.days > 0) {
+        backfillDays = Math.min(body.days, 365); // hard ceiling 1y
+      }
     } catch {
-      // No body (cron path) — sync all connections.
+      // No body (cron path) — sync all connections incrementally.
+    }
+
+    // Backfill mode: kick off a background task and return 202 right away.
+    // The cron's incremental path keeps running as usual.
+    if (modeBackfill) {
+      const overrideSince = new Date(
+        Date.now() - backfillDays * 24 * 60 * 60 * 1000
+      ).toISOString();
+
+      let bq = supabase
+        .from("email_sync_connections")
+        .select("*")
+        .eq("is_active", true)
+        .order("last_sync_at", { ascending: true, nullsFirst: true });
+      if (scopedUserId) bq = bq.eq("user_id", scopedUserId);
+      const { data: bConnections, error: bErr } = await bq;
+      if (bErr) throw new Error(`Backfill connection query failed: ${bErr.message}`);
+
+      const connList = (bConnections ?? []) as EmailSyncConnection[];
+
+      // Capture references in closure-safe variables for the background task.
+      const sb = supabase;
+      const days = backfillDays;
+      const since = overrideSince;
+
+      const backgroundWork = (async () => {
+        console.log(
+          `Backfill starting: ${connList.length} connection(s), ${days} days back`
+        );
+        for (const conn of connList) {
+          try {
+            // Override last_sync_at so syncConnection's start-date math
+            // resolves to (now - days). Dedup via external_message_id
+            // keeps re-runs idempotent so we never double-create
+            // activities the cron has already logged.
+            const overrideConn: EmailSyncConnection = {
+              ...conn,
+              last_sync_at: since,
+            };
+            await syncConnection(sb, overrideConn);
+          } catch (e) {
+            console.error(
+              `Backfill failed for connection ${conn.id}:`,
+              (e as Error).message
+            );
+          }
+        }
+        console.log("Backfill complete");
+      })();
+
+      // EdgeRuntime is a Supabase-runtime global. Guard for environments
+      // (local dev) where it isn't available — fall back to awaiting
+      // inline so behavior is still correct, just slower.
+      // deno-lint-ignore no-explicit-any
+      const er = (globalThis as any).EdgeRuntime;
+      if (er && typeof er.waitUntil === "function") {
+        er.waitUntil(backgroundWork);
+      } else {
+        // Local fallback: do it inline (will share the request budget).
+        await backgroundWork;
+      }
+
+      return new Response(
+        JSON.stringify({
+          message: "Backfill started",
+          mode: "backfill",
+          days: backfillDays,
+          connections_queued: connList.length,
+        }),
+        {
+          status: 202,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
     // Fetch all active email sync connections, oldest-stale first so the
