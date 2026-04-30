@@ -746,11 +746,15 @@ serve(async (req) => {
       // No body (cron path) — sync all connections.
     }
 
-    // Fetch all active email sync connections
+    // Fetch all active email sync connections, oldest-stale first so the
+    // ones overdue for a sync get serviced before fresh ones.
+    // `nullsFirst: true` puts never-synced connections (initial 90-day
+    // backfill) at the head of the queue.
     let q = supabase
       .from("email_sync_connections")
       .select("*")
-      .eq("is_active", true);
+      .eq("is_active", true)
+      .order("last_sync_at", { ascending: true, nullsFirst: true });
     if (scopedUserId) q = q.eq("user_id", scopedUserId);
 
     const { data: connections, error: connError } = await q;
@@ -774,22 +778,48 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Processing ${connections.length} active connection(s)`);
+    console.log(`Processing up to ${connections.length} active connection(s)`);
 
     let totalCreated = 0;
     let totalErrors = 0;
+    let processed = 0;
 
-    // Process each connection sequentially to avoid rate-limit issues
+    // Wall-clock budget: stop the loop before the Edge gateway's request
+    // timeout kills us mid-connection. Anything left over gets picked up
+    // by the next cron tick (cron orders by oldest last_sync_at, so the
+    // unprocessed ones move to the head of the queue automatically).
+    //
+    // Why this matters: a 90-day initial backfill across 7 connections
+    // can fetch tens of thousands of emails and exceed the gateway's
+    // wall-clock timeout. When that happens, the worker is SIGKILL'd
+    // mid-loop; in-flight connections leave their email_sync_runs row
+    // with finished_at=null because the catch block never gets to run.
+    //
+    // 90 seconds leaves ~60s of safety headroom under the typical 150s
+    // gateway timeout to finish whatever connection is in-flight.
+    const BUDGET_MS = 90_000;
+    const startedAt = Date.now();
+
     for (const conn of connections as EmailSyncConnection[]) {
+      if (Date.now() - startedAt > BUDGET_MS) {
+        console.log(
+          `Budget exceeded after ${processed}/${connections.length} ` +
+            `connection(s); deferring rest to next tick.`
+        );
+        break;
+      }
       const result = await syncConnection(supabase, conn);
       totalCreated += result.created;
       totalErrors += result.errors;
+      processed++;
     }
 
     return new Response(
       JSON.stringify({
         message: "Sync complete",
-        connections_processed: connections.length,
+        connections_processed: processed,
+        connections_total: connections.length,
+        connections_deferred: connections.length - processed,
         activities_created: totalCreated,
         errors: totalErrors,
       }),
