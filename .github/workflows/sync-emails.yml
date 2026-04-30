@@ -1,0 +1,53 @@
+name: Sync Emails (cron)
+
+# Triggers the sync-emails Supabase Edge Function every 10 minutes.
+#
+# This replaces the pg_cron + pg_net schedule documented in
+# supabase/functions/sync-emails/README.md (Option A) with the README's
+# Option B (external scheduler) because pg_net 0.20 has a worker-level
+# regression on hosted Supabase that throws "Quote command returned error"
+# on every net.http_post call.
+#
+# To roll back to pg_cron: delete this file and run the SQL in
+# sync-emails/README.md under "Schedule (cron trigger) — Option A".
+
+on:
+  schedule:
+    # Every 10 minutes. GitHub's minimum granularity is 5 minutes; */10 is fine.
+    # GitHub may delay or skip runs under heavy load — see workflow_dispatch
+    # below for the manual recovery path.
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+# Only one sync should run at a time. If a 10-minute interval slips,
+# skip the queued run rather than stacking up — the next tick will catch up.
+concurrency:
+  group: sync-emails
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: POST to sync-emails Edge Function
+        env:
+          SUPABASE_SYNC_URL: ${{ secrets.SUPABASE_SYNC_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_SYNC_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "::error::SUPABASE_SYNC_URL and SUPABASE_SERVICE_ROLE_KEY repository secrets must be set."
+            exit 1
+          fi
+          # -f makes curl exit non-zero on HTTP >=400 so the Action fails loudly.
+          # -sS keeps the body suppressed but surfaces errors.
+          # --max-time 240 caps total wall time (function itself runs longer than 5s in some cases).
+          curl -fsS --max-time 240 \
+            -X POST \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            "${SUPABASE_SYNC_URL}"
+          echo
+          echo "Sync triggered successfully."
