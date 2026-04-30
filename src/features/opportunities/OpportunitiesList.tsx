@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useUrlState, useUrlNumberState, useUrlArrayState } from "@/hooks/useUrlState";
+import { useUrlState, useUrlNumberState, useUrlArrayState, useUrlSortState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Target, Plus, Search } from "lucide-react";
@@ -13,6 +13,9 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Pagination } from "@/components/Pagination";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { SortableHeader, type SortState } from "@/components/SortableHeader";
+// Sort state is URL-backed (useUrlSortState) so a rep can sort by Amount,
+// drill into a deal, then hit Back and find the list still sorted — the
+// previous useState-only version reset on every remount.
 import { MultiSelect } from "@/components/MultiSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,7 +52,7 @@ export function OpportunitiesList() {
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
   const [page, setPage] = useUrlNumberState("page", 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [sort, setSort] = useState<SortState>({ column: null, direction: "desc" });
+  const [sort, setSortState] = useUrlSortState("sort");
 
   const { data: result, isLoading } = useOpportunities({
     search: search || undefined,
@@ -82,7 +85,7 @@ export function OpportunitiesList() {
   };
 
   function handleSort(next: SortState) {
-    setSort(next);
+    setSortState(next);
     setPage(0);
   }
 
@@ -255,7 +258,7 @@ export function OpportunitiesList() {
                   <SortableHeader column="amount" sort={sort} onSort={handleSort} className="text-right">Amount</SortableHeader>
                   <SortableHeader column="expected_close_date" sort={sort} onSort={handleSort}>Expected Close</SortableHeader>
                   <SortableHeader column="close_date" sort={sort} onSort={handleSort}>Close Date</SortableHeader>
-                  <TableHead>Owner</TableHead>
+                  <SortableHeader column="owner.full_name" sort={sort} onSort={handleSort}>Owner</SortableHeader>
                 </TableRow>
               </TableHeader>
               <TableBody>

@@ -66,6 +66,42 @@ export function useUrlArrayState(
 }
 
 /**
+ * Persists a SortState (column + direction) in the URL as two params,
+ * `${prefix}` (column) and `${prefix}_dir` (asc|desc). Empty column =
+ * both keys removed. Lets a user pick a sort, navigate to a detail
+ * page, and come back to the list with the sort intact (vs. plain
+ * useState which resets on remount).
+ */
+export function useUrlSortState(
+  prefix: string = "sort",
+): [
+  { column: string | null; direction: "asc" | "desc" },
+  (next: { column: string | null; direction: "asc" | "desc" }) => void,
+] {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const column = searchParams.get(prefix);
+  const dirRaw = searchParams.get(`${prefix}_dir`);
+  const direction: "asc" | "desc" = dirRaw === "asc" ? "asc" : "desc";
+
+  const setValue = useCallback(
+    (next: { column: string | null; direction: "asc" | "desc" }) => {
+      const live = new URLSearchParams(window.location.search);
+      if (!next.column) {
+        live.delete(prefix);
+        live.delete(`${prefix}_dir`);
+      } else {
+        live.set(prefix, next.column);
+        live.set(`${prefix}_dir`, next.direction);
+      }
+      setSearchParams(live, { replace: true });
+    },
+    [prefix, setSearchParams],
+  );
+
+  return [{ column, direction }, setValue];
+}
+
+/**
  * Like useState for a number, but persists in URL search params.
  */
 export function useUrlNumberState(key: string, defaultValue: number): [number, (value: number) => void] {

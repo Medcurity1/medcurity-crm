@@ -29,14 +29,24 @@ export function useOpportunities(filters?: OppFilters) {
         .select("*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
-      // Sort: support sorting by columns on the embedded account
-      // (e.g. "account.name") via PostgREST's referencedTable option.
+      // Sort: support sorting by columns on embedded relations
+      // (e.g. "account.name", "owner.full_name") via PostgREST's
+      // referencedTable option. Without this, clicking the Owner
+      // header was a no-op because owner is a joined table, not a
+      // column on opportunities.
       if (sortCol.startsWith("account.")) {
         const innerCol = sortCol.slice("account.".length);
         query = query.order(innerCol, {
           ascending: sortAsc,
           nullsFirst: false,
           referencedTable: "account",
+        });
+      } else if (sortCol.startsWith("owner.")) {
+        const innerCol = sortCol.slice("owner.".length);
+        query = query.order(innerCol, {
+          ascending: sortAsc,
+          nullsFirst: false,
+          referencedTable: "owner",
         });
       } else {
         query = query.order(sortCol, { ascending: sortAsc, nullsFirst: false });
