@@ -15,6 +15,8 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
 import { RecordId } from "@/components/RecordId";
 import { InlineEdit, type InlineEditProps } from "@/components/InlineEdit";
+import { HelpTooltip } from "@/components/ui/help-tooltip";
+import { useFieldHelpMap } from "@/features/layouts/api";
 import { AccountContacts } from "@/features/accounts/AccountContacts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -83,10 +85,13 @@ function CollapsibleSection({
 
 /* ---------- Detail field ---------- */
 
-function Field({ label, value }: { label: string; value: React.ReactNode }) {
+function Field({ label, value, helpText }: { label: string; value: React.ReactNode; helpText?: string }) {
   return (
     <div className="flex flex-col">
-      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+        {label}
+        <HelpTooltip text={helpText} />
+      </span>
       <span className="text-sm font-medium">{value ?? "\u2014"}</span>
     </div>
   );
@@ -97,15 +102,20 @@ function EditableField({
   value,
   onSave,
   type,
+  helpText,
 }: {
   label: string;
   value: unknown;
   onSave: (newValue: string) => Promise<void>;
   type?: InlineEditProps["type"];
+  helpText?: string;
 }) {
   return (
     <div className="flex flex-col">
-      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+        {label}
+        <HelpTooltip text={helpText} />
+      </span>
       <InlineEdit value={value as string | number | null} onSave={onSave} type={type} />
     </div>
   );
@@ -115,10 +125,12 @@ function DiscountField({
   discount,
   discountType,
   onSave,
+  helpText,
 }: {
   discount: number | null | undefined;
   discountType: string;
   onSave: (value: number | null, type: "percent" | "amount") => Promise<void>;
+  helpText?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [draftValue, setDraftValue] = useState("");
@@ -149,7 +161,10 @@ function DiscountField({
 
   return (
     <div className="flex flex-col">
-      <span className="text-xs text-muted-foreground">Discount</span>
+      <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+        Overall Adjustment Discount
+        <HelpTooltip text={helpText} />
+      </span>
       {editing ? (
         <div
           className="flex items-center gap-1 mt-0.5"
@@ -220,6 +235,7 @@ export function OpportunityDetail() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { addRecent } = useRecentRecords();
+  const helpMap = useFieldHelpMap("opportunities");
 
   useEffect(() => {
     if (opp) {
@@ -575,10 +591,12 @@ export function OpportunityDetail() {
           <Field
             label="Subtotal"
             value={opp.subtotal != null ? formatCurrencyDetailed(opp.subtotal) : null}
+            helpText={helpMap.get("subtotal")}
           />
           <DiscountField
             discount={opp.discount}
             discountType={(opp as { discount_type?: string | null }).discount_type ?? "percent"}
+            helpText={helpMap.get("discount")}
             onSave={async (value, type) => {
               await updateMutation.mutateAsync({
                 id: oppId,
@@ -589,7 +607,10 @@ export function OpportunityDetail() {
           />
           {products && products.length > 0 ? (
             <div className="flex flex-col">
-              <span className="text-xs text-muted-foreground">Amount</span>
+              <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+                Amount
+                <HelpTooltip text={helpMap.get("amount")} />
+              </span>
               <span className="text-sm font-medium">
                 {opp.amount != null ? formatCurrencyDetailed(opp.amount) : "\u2014"}
                 <span className="text-xs text-muted-foreground ml-1">(auto-calculated from line items)</span>
@@ -601,6 +622,7 @@ export function OpportunityDetail() {
               value={opp.amount}
               onSave={saveField("amount", (v) => (v === "" ? 0 : Number(v)))}
               type="currency"
+              helpText={helpMap.get("amount")}
             />
           )}
           <Field label="FTE Range (at time of opp)" value={opp.fte_range ?? opp.account?.fte_range} />

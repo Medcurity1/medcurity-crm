@@ -3,6 +3,7 @@ import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { InlineEdit, type InlineEditProps } from "@/components/InlineEdit";
+import { HelpTooltip } from "@/components/ui/help-tooltip";
 import { usePageLayout } from "./api";
 import type { LayoutEntity, PageLayoutField } from "./types";
 import {
@@ -151,17 +152,15 @@ function FieldCell<T extends Record<string, unknown>>({
     const inputType = inlineEditTypes?.[field.field_key] ?? "text";
     return (
       <div className={cn(colSpan, "flex flex-col")}>
-        <span className="text-xs text-muted-foreground">{label}</span>
+        <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+          {label}
+          <HelpTooltip text={field.help_text} />
+        </span>
         <InlineEdit
           value={value as string | number | null}
           onSave={(v) => onInlineSave!(field.field_key, v)}
           type={inputType}
         />
-        {field.help_text && (
-          <span className="text-[10px] text-muted-foreground italic mt-0.5">
-            {field.help_text}
-          </span>
-        )}
       </div>
     );
   }
@@ -172,7 +171,10 @@ function FieldCell<T extends Record<string, unknown>>({
 
   return (
     <div className={cn(colSpan, "flex flex-col")}>
-      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+        {label}
+        <HelpTooltip text={field.help_text} />
+      </span>
       {fkLink ?? (
         <PicklistAwareDisplay
           fieldKey={field.field_key}
@@ -180,11 +182,6 @@ function FieldCell<T extends Record<string, unknown>>({
           value={value}
           record={record as Record<string, unknown>}
         />
-      )}
-      {field.help_text && (
-        <span className="text-[10px] text-muted-foreground italic mt-0.5">
-          {field.help_text}
-        </span>
       )}
     </div>
   );

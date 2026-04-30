@@ -61,6 +61,29 @@ export function usePageLayout(entity: LayoutEntity, name: string = "standard") {
   });
 }
 
+/**
+ * Convenience hook for non-layout-driven forms: returns a Map of field_key →
+ * help_text for an entity's standard layout, so a hand-coded form can wire
+ * `<HelpTooltip text={helpMap.get('discount')} />` next to its labels and
+ * pick up any admin-edited help text without becoming fully layout-driven.
+ *
+ * Returns an empty map until the layout loads (so labels render immediately).
+ */
+export function useFieldHelpMap(entity: LayoutEntity, name: string = "standard") {
+  const { data } = usePageLayout(entity, name);
+  const map = new Map<string, string>();
+  if (data) {
+    for (const section of data.sections) {
+      for (const field of section.fields) {
+        if (field.help_text && field.help_text.trim()) {
+          map.set(field.field_key, field.help_text.trim());
+        }
+      }
+    }
+  }
+  return map;
+}
+
 /** List all layouts (for the admin Object Manager → Layouts tab). */
 export function usePageLayouts() {
   return useQuery({

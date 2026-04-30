@@ -17,6 +17,8 @@ import {
 } from "./api";
 import { MultiProductPicker, type StagedOpportunityProduct } from "./MultiProductPicker";
 import { PicklistSelect } from "@/features/picklists/PicklistSelect";
+import { useFieldHelpMap } from "@/features/layouts/api";
+import { HelpTooltip } from "@/components/ui/help-tooltip";
 
 /**
  * Default win probability per stage. Mirrors the SF probability ladder
@@ -116,6 +118,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   const navigate = useNavigate();
   const isEditing = !!id;
   const { data: accountsList } = useAccountsList();
+  const helpMap = useFieldHelpMap("opportunities");
   const { data: customFieldDefs } = useCustomFieldDefinitions("opportunities");
   const { data: requiredFieldsData } = useRequiredFields("opportunities");
   const requiredKeys = requiredFieldsData?.map((f) => f.field_key) ?? [];
@@ -1004,13 +1007,17 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                 <span className="font-medium text-foreground">Subtotal</span> are
                 auto-calculated from the products on the opportunity. To change the
                 total, add or remove products or adjust their unit prices. Use{" "}
-                <span className="font-medium text-foreground">Discount</span> for
-                any blanket price reductions and <span className="font-medium text-foreground">Promo Code</span> if
-                the discount is tied to a marketing campaign.
+                <span className="font-medium text-foreground">Overall Adjustment Discount</span> for
+                a deal-level reduction on top of any product-level discounts, and{" "}
+                <span className="font-medium text-foreground">Promo Code</span> if
+                the adjustment is tied to a marketing campaign.
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="subtotal">Subtotal ($)</Label>
+                  <Label htmlFor="subtotal" className="inline-flex items-center gap-1">
+                    Subtotal ($)
+                    <HelpTooltip text={helpMap.get("subtotal")} />
+                  </Label>
                   <Input
                     id="subtotal"
                     type="number"
@@ -1019,11 +1026,14 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                       onChange: () => { lastEditedRef.current = "subtotal"; },
                     })}
                   />
-                  <p className="text-xs text-muted-foreground">Sum of product line items BEFORE discount. Editable for manual corrections.</p>
+                  <p className="text-xs text-muted-foreground">{helpMap.get("subtotal") ?? "Sum of product line items BEFORE the overall adjustment discount. Editable for manual corrections."}</p>
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="discount">Discount (%)</Label>
+                  <Label htmlFor="discount" className="inline-flex items-center gap-1">
+                    Overall Adjustment Discount (%)
+                    <HelpTooltip text={helpMap.get("discount")} />
+                  </Label>
                   <div className="relative">
                     <Input
                       id="discount"
@@ -1038,11 +1048,14 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                     />
                     <span className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">%</span>
                   </div>
-                  <p className="text-xs text-muted-foreground">Percent off the subtotal. 0–100. Updates the Amount automatically.</p>
+                  <p className="text-xs text-muted-foreground">{helpMap.get("discount") ?? "Deal-level percent reduction applied on top of any product-level discounts. 0–100. Updates the Amount automatically."}</p>
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="amount">Amount ($) *<RequiredIndicator fieldKey="amount" requiredFields={requiredKeys} /></Label>
+                  <Label htmlFor="amount" className="inline-flex items-center gap-1">
+                    Amount ($) *<RequiredIndicator fieldKey="amount" requiredFields={requiredKeys} />
+                    <HelpTooltip text={helpMap.get("amount")} />
+                  </Label>
                   {isEditing && existingProducts != null && existingProducts.length > 0 ? (
                     <>
                       <Input
@@ -1053,7 +1066,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                         className="bg-muted cursor-not-allowed"
                         {...register("amount")}
                       />
-                      <p className="text-xs text-muted-foreground">Auto-calculated from line items. Edit products to change this value.</p>
+                      <p className="text-xs text-muted-foreground">{helpMap.get("amount") ?? "Auto-calculated from line items. Edit products to change this value."}</p>
                     </>
                   ) : (
                     <>
@@ -1065,7 +1078,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                           onChange: () => { lastEditedRef.current = "amount"; },
                         })}
                       />
-                      <p className="text-xs text-muted-foreground">Final deal value AFTER the discount. Auto-calculated from Subtotal × (1 − Discount/100). Editable for manual corrections (will back-solve Subtotal).</p>
+                      <p className="text-xs text-muted-foreground">{helpMap.get("amount") ?? "Final deal value AFTER the overall adjustment discount. Auto-calculated as Subtotal × (1 − Discount/100). Editable for manual corrections (will back-solve Subtotal)."}</p>
                     </>
                   )}
                   {errors.amount && <p className="text-sm text-destructive">{errors.amount.message}</p>}
