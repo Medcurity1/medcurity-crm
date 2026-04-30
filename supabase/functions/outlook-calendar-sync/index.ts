@@ -16,7 +16,7 @@
 // Deploy: supabase functions deploy outlook-calendar-sync --no-verify-jwt
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 // ---------------------------------------------------------------------------
 // Types
