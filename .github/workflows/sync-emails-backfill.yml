@@ -1,34 +1,46 @@
 name: Sync Emails Backfill (manual)
 
-# One-shot deeper-history backfill for all active email_sync_connections.
+# One-shot deeper-history backfill, driven as 7-day chunks per connection.
 #
-# When to run this:
-#   - After a new user connects Outlook/Gmail and you want >7 days of
-#     historical email logged against contacts (the regular cron only
-#     pulls 7 days on first connect to fit the gateway timeout).
-#   - After a fresh deploy where you want to backfill anyone whose
-#     incremental sync started shallow.
+# Why chunked: a single connection's 90-day pull on a busy mailbox can
+# fetch thousands of messages and exceed the Edge Function gateway's
+# wall-clock timeout (≈150s). The earlier "background task via
+# EdgeRuntime.waitUntil" approach turned out to also be bounded by the
+# function instance's internal wall clock and got killed mid-loop. The
+# chunk-driver pattern is bullet-proof: each call is small, returns a
+# clear count, and the runner re-tries individual chunks on failure
+# without affecting the rest.
 #
-# This is intentionally manual. It uses Supabase's `EdgeRuntime.waitUntil`
-# background pattern so the function returns immediately while the actual
-# Graph/Gmail fetches run in the background up to the function instance's
-# wall-clock limit (well above the 150s synchronous response timeout).
+# When to run:
+#   - After a fresh user connects Outlook/Gmail and you want >7 days
+#     of history (regular cron only does 7 days on first connect).
+#   - One-time, after deploying a fix that should reach back further.
 #
-# To roll back: simply don't run the workflow. The regular sync-emails
-# cron continues normally — it doesn't depend on this.
+# Idempotent: the dedup index on (owner_user_id, external_message_id,
+# contact_id) prevents re-creating activities the cron already logged.
+#
+# Watch progress in:
+#   SELECT id, connection_id, started_at, finished_at,
+#          emails_fetched, activities_created, error_message
+#   FROM email_sync_runs ORDER BY id DESC LIMIT 50;
 
 on:
   workflow_dispatch:
     inputs:
       days_back:
-        description: "How many days of history to fetch (max 365)"
+        description: "Total days of history (will be split into 7-day chunks)"
         required: true
         default: "90"
         type: string
+      chunk_days:
+        description: "Days per chunk (smaller = safer, slower)"
+        required: true
+        default: "7"
+        type: string
 
-# Don't let two backfills run at the same time — they'd hammer the same
-# Graph/Gmail rate limits. Cancel any in-progress backfill if a new one
-# is dispatched (the new one's parameters take priority).
+# A second backfill while one is running would just hammer the same
+# rate limits without giving us anything new. Cancel any in-progress
+# backfill so the latest input always wins.
 concurrency:
   group: sync-emails-backfill
   cancel-in-progress: true
@@ -36,30 +48,87 @@ concurrency:
 jobs:
   backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Allow generous time for a 90-day pull across all connections.
+    # 91 chunks × ~30s avg ≈ 45 min worst-case.
+    timeout-minutes: 90
     steps:
-      - name: Trigger backfill on sync-emails Edge Function
+      - name: Drive chunked backfill
         env:
           SUPABASE_SYNC_URL: ${{ secrets.SUPABASE_SYNC_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           DAYS_BACK: ${{ inputs.days_back }}
+          CHUNK_DAYS: ${{ inputs.chunk_days }}
         run: |
           set -euo pipefail
           if [ -z "${SUPABASE_SYNC_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
-            echo "::error::SUPABASE_SYNC_URL and SUPABASE_SERVICE_ROLE_KEY repository secrets must be set."
+            echo "::error::SUPABASE_SYNC_URL and SUPABASE_SERVICE_ROLE_KEY must be set."
             exit 1
           fi
-          echo "Kicking off backfill for ${DAYS_BACK} days..."
-          # The function returns 202 immediately; the actual sync work runs
-          # in the background via EdgeRuntime.waitUntil. Curl just confirms
-          # the function accepted the request.
-          curl -fsS --max-time 30 \
+
+          echo "Listing active connections..."
+          conns_json="$(curl -fsS --max-time 30 \
             -X POST \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
             -H "Content-Type: application/json" \
-            -d "{\"mode\":\"backfill\",\"days\":${DAYS_BACK}}" \
-            "${SUPABASE_SYNC_URL}"
+            -d '{"mode":"list_connections"}' \
+            "${SUPABASE_SYNC_URL}")"
+
+          # Pull connection IDs out of the JSON without depending on jq
+          # being preinstalled — python3 is on every ubuntu-latest runner.
+          conn_ids=$(python3 -c '
+          import json, sys
+          payload = json.loads(sys.stdin.read())
+          for c in payload.get("connections", []):
+              print(c["id"])
+          ' <<< "$conns_json")
+
+          conn_count=$(echo "$conn_ids" | grep -c . || true)
+          echo "Found ${conn_count} active connection(s)"
+
+          # Build chunk windows: walk backwards from today in CHUNK_DAYS
+          # increments until we cover DAYS_BACK total.
+          # Each chunk is [since, until); fetchers use ge/lt so adjacent
+          # chunks don't double-count an email at the boundary.
+          chunks=$(python3 -c '
+          import sys, datetime
+          days_back = int(sys.argv[1])
+          chunk = int(sys.argv[2])
+          now = datetime.datetime.utcnow()
+          offset = 0
+          while offset < days_back:
+              until = now - datetime.timedelta(days=offset)
+              since = now - datetime.timedelta(days=min(offset + chunk, days_back))
+              print(f"{since.isoformat()}Z {until.isoformat()}Z")
+              offset += chunk
+          ' "$DAYS_BACK" "$CHUNK_DAYS")
+
+          chunk_count=$(echo "$chunks" | grep -c . || true)
+          echo "Will run ${chunk_count} chunk(s) per connection"
+
+          total=0
+          failed=0
+          while IFS= read -r conn_id; do
+              [ -z "$conn_id" ] && continue
+              echo "=== connection ${conn_id} ==="
+              while IFS=' ' read -r since until; do
+                  [ -z "$since" ] && continue
+                  total=$((total + 1))
+                  resp=$(curl -fsS --max-time 200 \
+                      -X POST \
+                      -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+                      -H "Content-Type: application/json" \
+                      -d "{\"mode\":\"backfill_chunk\",\"connection_id\":\"${conn_id}\",\"since_iso\":\"${since}\",\"until_iso\":\"${until}\"}" \
+                      "${SUPABASE_SYNC_URL}" 2>&1) || {
+                      echo "  CHUNK FAILED [${since} -> ${until}]: $resp"
+                      failed=$((failed + 1))
+                      continue
+                  }
+                  echo "  ${since} -> ${until} :: $resp"
+              done <<< "$chunks"
+          done <<< "$conn_ids"
+
           echo
-          echo "Backfill dispatched. Watch progress in email_sync_runs:"
-          echo "  SELECT id, connection_id, started_at, finished_at, emails_fetched, activities_created, error_message"
-          echo "  FROM email_sync_runs ORDER BY id DESC LIMIT 20;"
+          echo "Done. ${total} chunks attempted, ${failed} failed."
+          if [ "$failed" -gt 0 ]; then
+            echo "::warning::${failed} chunk(s) failed — re-run the workflow to retry (idempotent)."
+          fi

@@ -208,10 +208,16 @@ async function ensureValidToken(
 async function fetchGmailEmails(
   accessToken: string,
   userEmail: string,
-  sinceDate: string
+  sinceDate: string,
+  untilDate?: string
 ): Promise<ParsedEmail[]> {
   const sinceEpoch = Math.floor(new Date(sinceDate).getTime() / 1000);
-  const query = `after:${sinceEpoch}`;
+  // When `untilDate` is set we bound the upper end too, which is what the
+  // chunked-backfill driver uses to slice 90 days into ~7-day pieces.
+  // Each chunk fits comfortably under the 150s Edge gateway timeout.
+  const query = untilDate
+    ? `after:${sinceEpoch} before:${Math.floor(new Date(untilDate).getTime() / 1000)}`
+    : `after:${sinceEpoch}`;
 
   // Step 1 -- list message IDs, following pageToken across many pages.
   // High-volume reps (Summer hit the old 30-page ceiling = ~3000 emails)
@@ -301,10 +307,15 @@ async function fetchGmailEmails(
 async function fetchOutlookEmails(
   accessToken: string,
   userEmail: string,
-  sinceDate: string
+  sinceDate: string,
+  untilDate?: string
 ): Promise<ParsedEmail[]> {
   const isoSince = new Date(sinceDate).toISOString();
-  const filter = `receivedDateTime ge ${isoSince}`;
+  // Graph supports compound $filter on receivedDateTime; the chunked-backfill
+  // driver passes both bounds so each call only pulls a ~7-day slice.
+  const filter = untilDate
+    ? `receivedDateTime ge ${isoSince} and receivedDateTime lt ${new Date(untilDate).toISOString()}`
+    : `receivedDateTime ge ${isoSince}`;
 
   // Walk @odata.nextLink until no more pages. Bumped from 30 → 200
   // (≈20,000 emails) to handle high-volume reps doing the 90-day
@@ -539,7 +550,12 @@ async function createEmailActivity(
 
 async function syncConnection(
   supabase: SupabaseClient,
-  conn: EmailSyncConnection
+  conn: EmailSyncConnection,
+  // Backfill chunk override. When provided, bypasses the normal
+  // last_sync_at math entirely: the fetchers pull only emails between
+  // `since` and `until`. The connection's last_sync_at is NOT advanced
+  // (chunks walk historical ranges, not the live cursor).
+  override?: { since: string; until: string; skipCursorUpdate?: boolean }
 ): Promise<{ created: number; errors: number }> {
   let created = 0;
   let errors = 0;
@@ -573,17 +589,19 @@ async function syncConnection(
     //    on the activities.external_message_id dedup to prevent duplicates.
     const INITIAL_BACKFILL_DAYS = 7;
     const baseSince =
+      override?.since ??
       conn.last_sync_at ??
       new Date(Date.now() - INITIAL_BACKFILL_DAYS * 24 * 60 * 60 * 1000).toISOString();
     const sinceDate = new Date(
       new Date(baseSince).getTime() - 2 * 60 * 1000
     ).toISOString();
+    const untilDate = override?.until;
 
     // 3. Fetch emails from the appropriate provider
     const emails =
       conn.provider === "gmail"
-        ? await fetchGmailEmails(accessToken, userEmail, sinceDate)
-        : await fetchOutlookEmails(accessToken, userEmail, sinceDate);
+        ? await fetchGmailEmails(accessToken, userEmail, sinceDate, untilDate)
+        : await fetchOutlookEmails(accessToken, userEmail, sinceDate, untilDate);
 
     fetched = emails.length;
     console.log(
@@ -665,11 +683,15 @@ async function syncConnection(
       }
     }
 
-    // 8. Update last_sync_at
-    await supabase
-      .from("email_sync_connections")
-      .update({ last_sync_at: new Date().toISOString() })
-      .eq("id", conn.id);
+    // 8. Update last_sync_at — but only for the live cursor, not for
+    //    historical chunked-backfill calls (those would clobber the
+    //    incremental cron's high-water mark).
+    if (!override?.skipCursorUpdate) {
+      await supabase
+        .from("email_sync_connections")
+        .update({ last_sync_at: new Date().toISOString() })
+        .eq("id", conn.id);
+    }
 
     if (runId) {
       await supabase
@@ -741,104 +763,109 @@ serve(async (req) => {
     });
 
     // Optional scoping + modes (read once from body):
-    //   { user_id }            -> sync only that user's connections
-    //   { mode: "backfill",
-    //     days: 90 }           -> one-shot deeper history pull. Runs in
-    //                            the background via EdgeRuntime.waitUntil
-    //                            so it isn't bound by the 150s gateway
-    //                            response timeout. Overrides last_sync_at
-    //                            with (now - days). Per-connection
-    //                            sync runs to completion (no wall budget)
-    //                            so a busy mailbox finishes its backfill.
-    //                            Triggered manually by the
-    //                            sync-emails-backfill workflow.
+    //   { user_id }                                -> sync only that user
+    //   { mode: "list_connections" }               -> return active conn IDs
+    //                                                 (drives the chunked
+    //                                                 backfill workflow)
+    //   { mode: "backfill_chunk",
+    //     connection_id, since_iso, until_iso }    -> process ONE connection
+    //                                                 across ONE date window.
+    //                                                 Synchronous; returns
+    //                                                 fetched/created counts.
+    //                                                 The workflow loops
+    //                                                 chunks for the full
+    //                                                 90-day backfill.
     let scopedUserId: string | null = null;
-    let modeBackfill = false;
-    let backfillDays = 90;
+    let modeList = false;
+    let modeChunk = false;
+    let chunkConnectionId: string | null = null;
+    let chunkSinceIso: string | null = null;
+    let chunkUntilIso: string | null = null;
     try {
       const body = await req.json();
       if (body && typeof body.user_id === "string") {
         scopedUserId = body.user_id;
       }
-      if (body && body.mode === "backfill") {
-        modeBackfill = true;
-      }
-      if (body && typeof body.days === "number" && body.days > 0) {
-        backfillDays = Math.min(body.days, 365); // hard ceiling 1y
+      if (body && body.mode === "list_connections") modeList = true;
+      if (body && body.mode === "backfill_chunk") {
+        modeChunk = true;
+        chunkConnectionId = body.connection_id ?? null;
+        chunkSinceIso = body.since_iso ?? null;
+        chunkUntilIso = body.until_iso ?? null;
       }
     } catch {
       // No body (cron path) — sync all connections incrementally.
     }
 
-    // Backfill mode: kick off a background task and return 202 right away.
-    // The cron's incremental path keeps running as usual.
-    if (modeBackfill) {
-      const overrideSince = new Date(
-        Date.now() - backfillDays * 24 * 60 * 60 * 1000
-      ).toISOString();
-
-      let bq = supabase
+    // List-connections mode: cheap query the workflow uses to know what
+    // to loop over. Returns minimal fields only.
+    if (modeList) {
+      const { data, error } = await supabase
         .from("email_sync_connections")
-        .select("*")
+        .select("id, user_id, provider, email_address")
         .eq("is_active", true)
         .order("last_sync_at", { ascending: true, nullsFirst: true });
-      if (scopedUserId) bq = bq.eq("user_id", scopedUserId);
-      const { data: bConnections, error: bErr } = await bq;
-      if (bErr) throw new Error(`Backfill connection query failed: ${bErr.message}`);
-
-      const connList = (bConnections ?? []) as EmailSyncConnection[];
-
-      // Capture references in closure-safe variables for the background task.
-      const sb = supabase;
-      const days = backfillDays;
-      const since = overrideSince;
-
-      const backgroundWork = (async () => {
-        console.log(
-          `Backfill starting: ${connList.length} connection(s), ${days} days back`
-        );
-        for (const conn of connList) {
-          try {
-            // Override last_sync_at so syncConnection's start-date math
-            // resolves to (now - days). Dedup via external_message_id
-            // keeps re-runs idempotent so we never double-create
-            // activities the cron has already logged.
-            const overrideConn: EmailSyncConnection = {
-              ...conn,
-              last_sync_at: since,
-            };
-            await syncConnection(sb, overrideConn);
-          } catch (e) {
-            console.error(
-              `Backfill failed for connection ${conn.id}:`,
-              (e as Error).message
-            );
-          }
+      if (error) throw new Error(`List failed: ${error.message}`);
+      return new Response(
+        JSON.stringify({ connections: data ?? [] }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
-        console.log("Backfill complete");
-      })();
+      );
+    }
 
-      // EdgeRuntime is a Supabase-runtime global. Guard for environments
-      // (local dev) where it isn't available — fall back to awaiting
-      // inline so behavior is still correct, just slower.
-      // deno-lint-ignore no-explicit-any
-      const er = (globalThis as any).EdgeRuntime;
-      if (er && typeof er.waitUntil === "function") {
-        er.waitUntil(backgroundWork);
-      } else {
-        // Local fallback: do it inline (will share the request budget).
-        await backgroundWork;
+    // Single-chunk backfill mode: one connection, one date range.
+    // Each call ~10-30s, well under the gateway timeout. The workflow
+    // drives 13 chunks per connection (7 days × 13 = 91 days back).
+    if (modeChunk) {
+      if (!chunkConnectionId || !chunkSinceIso || !chunkUntilIso) {
+        return new Response(
+          JSON.stringify({
+            error:
+              "backfill_chunk requires connection_id, since_iso, until_iso",
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
       }
-
+      const { data: conn, error: cErr } = await supabase
+        .from("email_sync_connections")
+        .select("*")
+        .eq("id", chunkConnectionId)
+        .eq("is_active", true)
+        .single();
+      if (cErr || !conn) {
+        return new Response(
+          JSON.stringify({ error: `Connection not found: ${chunkConnectionId}` }),
+          {
+            status: 404,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+      const result = await syncConnection(
+        supabase,
+        conn as EmailSyncConnection,
+        {
+          since: chunkSinceIso,
+          until: chunkUntilIso,
+          skipCursorUpdate: true,
+        }
+      );
       return new Response(
         JSON.stringify({
-          message: "Backfill started",
-          mode: "backfill",
-          days: backfillDays,
-          connections_queued: connList.length,
+          message: "Chunk complete",
+          connection_id: chunkConnectionId,
+          since_iso: chunkSinceIso,
+          until_iso: chunkUntilIso,
+          activities_created: result.created,
+          errors: result.errors,
         }),
         {
-          status: 202,
+          status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
