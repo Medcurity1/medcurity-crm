@@ -10,6 +10,7 @@ import { RequiredFieldsManager } from "./RequiredFieldsManager";
 import { IntegrationsManager } from "./IntegrationsManager";
 import { SalesforceImport } from "./SalesforceImport";
 import { PartnerRelationshipsImport } from "./PartnerRelationshipsImport";
+import { DataExport } from "./DataExport";
 import { PicklistsManager } from "@/features/picklists/PicklistsManager";
 import { ObjectManager } from "./ObjectManager";
 import { LayoutsViewer } from "@/features/layouts/LayoutsViewer";
@@ -261,6 +262,7 @@ export function AdminSettings() {
         </TabsContent>
 
         <TabsContent value="data-import" className="space-y-6">
+          <DataExport />
           <SalesforceImport />
           <PartnerRelationshipsImport />
         </TabsContent>
