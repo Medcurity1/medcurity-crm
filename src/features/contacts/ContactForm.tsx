@@ -82,6 +82,8 @@ export function ContactForm() {
       sql_date: "",
       credential: "",
       phone_ext: "",
+      mobile_phone: "",
+      events_attended: null,
       time_zone: "",
       type: "",
       business_relationship_tag: "",
@@ -114,6 +116,8 @@ export function ContactForm() {
         sql_date: contact.sql_date ?? "",
         credential: contact.credential ?? "",
         phone_ext: contact.phone_ext ?? "",
+        mobile_phone: contact.mobile_phone ?? "",
+        events_attended: contact.events_attended ?? null,
         time_zone: contact.time_zone ?? "",
         type: contact.type ?? "",
         business_relationship_tag: contact.business_relationship_tag ?? "",
@@ -152,6 +156,11 @@ export function ContactForm() {
       sql_date: values.sql_date || null,
       credential: values.credential || null,
       phone_ext: values.phone_ext || null,
+      mobile_phone: values.mobile_phone || null,
+      events_attended:
+        values.events_attended && values.events_attended.length > 0
+          ? values.events_attended
+          : null,
       time_zone: values.time_zone || null,
       type: values.type || null,
       business_relationship_tag: values.business_relationship_tag || null,
@@ -265,9 +274,29 @@ export function ContactForm() {
                   value={watch("phone") ?? ""}
                   onChange={(v) => setValue("phone", v)}
                 />
-                <p className="text-xs text-muted-foreground">
-                  Include extension after the number: "(208) 555-1234 x567"
-                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="phone_ext">
+                  Phone Ext<RequiredIndicator fieldKey="phone_ext" requiredFields={requiredKeys} />
+                </Label>
+                <Input
+                  id="phone_ext"
+                  inputMode="numeric"
+                  placeholder="567"
+                  {...register("phone_ext")}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="mobile_phone">
+                  Mobile Phone<RequiredIndicator fieldKey="mobile_phone" requiredFields={requiredKeys} />
+                </Label>
+                <PhoneInput
+                  id="mobile_phone"
+                  value={watch("mobile_phone") ?? ""}
+                  onChange={(v) => setValue("mobile_phone", v)}
+                />
               </div>
 
               <div className="space-y-2">
@@ -420,6 +449,25 @@ export function ContactForm() {
                 />
                 <Label htmlFor="do_not_contact" className="cursor-pointer">Do not contact</Label>
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="events_attended">Events Attended</Label>
+              <Input
+                id="events_attended"
+                placeholder="HIMSS 2026, RSA 2025, ..."
+                value={(watch("events_attended") ?? []).join(", ")}
+                onChange={(e) => {
+                  const parts = e.target.value
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean);
+                  setValue("events_attended", parts.length > 0 ? parts : null);
+                }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Comma-separated list of conferences or events this contact has attended.
+              </p>
             </div>
 
             <div className="space-y-2">

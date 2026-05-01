@@ -56,6 +56,18 @@ export function DisplayValue({
     return <span className="text-sm font-medium">—</span>;
   }
 
+  // Arrays (text[] columns like events_attended) → comma-joined or em-dash
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return <span className="text-sm font-medium">—</span>;
+    }
+    return (
+      <span className="text-sm font-medium">
+        {value.map((v) => String(v)).join(", ")}
+      </span>
+    );
+  }
+
   // Booleans
   if (typeof value === "boolean") {
     return value ? (

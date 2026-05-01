@@ -262,6 +262,7 @@ export interface Contact {
   title: string | null;
   phone: string | null;
   phone_ext: string | null;
+  mobile_phone: string | null;
   is_primary: boolean;
   department: string | null;
   linkedin_url: string | null;

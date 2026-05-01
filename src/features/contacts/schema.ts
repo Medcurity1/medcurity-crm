@@ -38,6 +38,8 @@ export const contactSchema = z.object({
     .nullable()
     .or(z.literal("")),
   phone_ext: z.string().optional().or(z.literal("")),
+  mobile_phone: z.string().optional().or(z.literal("")),
+  events_attended: z.array(z.string()).optional().nullable(),
   time_zone: z
     .enum(["eastern", "central", "mountain", "pacific", "alaska", "hawaii", "arizona_no_dst"])
     .optional()
