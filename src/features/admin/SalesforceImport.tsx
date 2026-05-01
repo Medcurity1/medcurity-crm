@@ -3758,11 +3758,21 @@ export function SalesforceImport() {
           }
 
           // Move non-DB fields into custom_fields JSONB
+          // IMPORTANT — keep this in sync with the contacts table schema.
+          // Anything missing from this set gets silently diverted into
+          // custom_fields by the loop below, which is the bug that
+          // hid 977 mobile_phone values in the JSONB junk drawer
+          // instead of the real mobile_phone column. If you add a
+          // contacts column in a migration, ADD IT HERE TOO.
           const CONTACT_DB_COLS = new Set([
             "id", "sf_id", "account_id", "owner_user_id", "first_name", "last_name",
-            "email", "title", "phone", "is_primary", "department", "linkedin_url",
+            "email", "title", "phone", "mobile_phone", "phone_ext",
+            "is_primary", "department", "linkedin_url", "notes",
             "mailing_street", "mailing_city", "mailing_state", "mailing_zip", "mailing_country",
-            "do_not_contact", "lead_source", "original_lead_id", "mql_date", "sql_date",
+            "do_not_contact", "lead_source", "lead_source_detail", "original_lead_id",
+            "mql_date", "sql_date",
+            "credential", "time_zone", "type", "business_relationship_tag",
+            "events_attended", "next_steps",
             "custom_fields", "created_by", "updated_by", "created_at", "updated_at", "archived_at",
           ]);
           const OPP_DB_COLS = new Set([
@@ -3777,11 +3787,29 @@ export function SalesforceImport() {
             "created_by_automation",
             "custom_fields", "created_by", "updated_by", "created_at", "updated_at", "archived_at",
           ]);
+          // IMPORTANT — keep this in sync with the leads table schema.
+          // Same gotcha as CONTACT_DB_COLS above — anything missing gets
+          // silently diverted into custom_fields. Pardot/UTM and the
+          // priority/business_relationship_tag/credential/etc columns
+          // are real DB columns and belong here, not in the JSONB junk
+          // drawer.
           const LEAD_DB_COLS = new Set([
-            "id", "sf_id", "owner_user_id", "first_name", "last_name", "email", "phone",
-            "company", "title", "industry", "website", "status", "source", "description",
+            "id", "sf_id", "owner_user_id", "first_name", "last_name", "email",
+            "phone", "mobile_phone", "phone_ext",
+            "company", "title", "industry", "industry_category", "website",
+            "status", "source", "description", "linkedin_url",
             "employees", "annual_revenue", "street", "city", "state", "zip", "country",
-            "converted_at", "converted_account_id", "converted_contact_id", "converted_opportunity_id",
+            "do_not_contact", "do_not_market_to",
+            "converted_at", "converted_account_id", "converted_contact_id",
+            "converted_opportunity_id", "conversion_date",
+            "lead_source", "lead_source_detail",
+            "credential", "time_zone", "type", "business_relationship_tag",
+            "events_attended", "priority_lead", "project", "project_segment",
+            "rating", "cold_lead", "cold_lead_source",
+            "first_activity_date", "last_transfer_date",
+            "pardot_campaign", "pardot_comments", "pardot_grade",
+            "pardot_last_activity_date", "pardot_score", "pardot_url",
+            "utm_campaign", "utm_content", "utm_medium", "utm_source", "utm_term",
             "custom_fields", "qualification", "qualification_date", "mql_date", "score", "score_factors",
             "created_by", "updated_by", "created_at", "updated_at", "archived_at",
           ]);
@@ -3852,14 +3880,35 @@ export function SalesforceImport() {
           .filter((id): id is string => typeof id === "string" && id !== "");
 
         let existingSfIds = new Set<string>();
+        // Keep the existing custom_fields per row so we can MERGE on
+        // update instead of replacing. PostgREST .update(data) writes
+        // every column in `data` wholesale — for JSONB that means a
+        // re-import would clobber any keys already in custom_fields
+        // that aren't in this run's diverted set. That's how the
+        // earlier-run `phone` values vanished: a later import rebuilt
+        // custom_fields without `phone` and overwrote the row,
+        // wiping the diverted phone values entirely.
+        const existingCustomFieldsBySfId = new Map<string, Record<string, unknown>>();
+        const hasCustomFieldsCol =
+          entity !== "products" && entity !== "price_books" && entity !== "price_book_entries";
         if (sfIds.length > 0) {
+          const selectCols = hasCustomFieldsCol ? "id, sf_id, custom_fields" : "id, sf_id";
           const { data: existing } = await supabase
             .from(tableName)
-            .select("id, sf_id")
+            .select(selectCols)
             .in("sf_id", sfIds);
           existingSfIds = new Set(
-            (existing ?? []).map((e) => e.sf_id as string)
+            (existing ?? []).map((e) => (e as { sf_id: string }).sf_id)
           );
+          if (hasCustomFieldsCol) {
+            for (const e of existing ?? []) {
+              const row = e as { sf_id: string; custom_fields: unknown };
+              const cf = (row.custom_fields && typeof row.custom_fields === "object")
+                ? (row.custom_fields as Record<string, unknown>)
+                : {};
+              existingCustomFieldsBySfId.set(row.sf_id, cf);
+            }
+          }
         }
 
         const toInsert: Record<string, unknown>[] = [];
@@ -3880,6 +3929,29 @@ export function SalesforceImport() {
                 .single();
               if (existing) {
                 const { sf_id: _removed, ...updateData } = record;
+                // Merge JSONB instead of replacing. Existing keys we're
+                // not overwriting in this run survive; new keys from
+                // this run land alongside them. Without this the
+                // .update() below would replace custom_fields wholesale
+                // and silently wipe any pre-existing diverted values.
+                if (
+                  hasCustomFieldsCol &&
+                  sfId &&
+                  existingCustomFieldsBySfId.has(sfId)
+                ) {
+                  const existingCf = existingCustomFieldsBySfId.get(sfId) ?? {};
+                  const incomingCf =
+                    (updateData.custom_fields &&
+                      typeof updateData.custom_fields === "object")
+                      ? (updateData.custom_fields as Record<string, unknown>)
+                      : {};
+                  const merged = { ...existingCf, ...incomingCf };
+                  if (Object.keys(merged).length > 0) {
+                    updateData.custom_fields = merged;
+                  } else {
+                    delete updateData.custom_fields;
+                  }
+                }
                 toUpdate.push({ id: existing.id, data: updateData });
               }
             }
