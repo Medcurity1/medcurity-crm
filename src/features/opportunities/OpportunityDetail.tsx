@@ -954,17 +954,31 @@ function ProductsTabContent({
   // the create flow (Brayden's request: "follow the same type of ui as
   // the adding product screen").
   type DiscType = "percent" | "amount";
-  type RowDraft = { quantity: string; unit_price: string; discount_percent: string; discount_type: DiscType };
+  type RowDraft = {
+    quantity: string;
+    unit_price: string;
+    discount_percent: string;
+    discount_type: DiscType;
+    is_bundle_adjustment: boolean;
+  };
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
   const updateMutation = useUpdateOpportunityProduct();
 
-  function getDraft(p: { id: string; quantity: number; unit_price: number | string; discount_percent?: number | string | null; discount_type?: DiscType }): RowDraft {
+  function getDraft(p: {
+    id: string;
+    quantity: number;
+    unit_price: number | string;
+    discount_percent?: number | string | null;
+    discount_type?: DiscType;
+    is_bundle_adjustment?: boolean | null;
+  }): RowDraft {
     return (
       drafts[p.id] ?? {
         quantity: String(p.quantity ?? 1),
         unit_price: String(p.unit_price ?? 0),
         discount_percent: String(p.discount_percent ?? 0),
         discount_type: (p.discount_type ?? "percent") as DiscType,
+        is_bundle_adjustment: !!p.is_bundle_adjustment,
       }
     );
   }
@@ -974,19 +988,33 @@ function ProductsTabContent({
         prev[rowId] ??
         (() => {
           const row = products.find((r) => r.id === rowId) as
-            | { quantity?: number; unit_price?: number | string; discount_percent?: number | string | null; discount_type?: DiscType }
+            | {
+                quantity?: number;
+                unit_price?: number | string;
+                discount_percent?: number | string | null;
+                discount_type?: DiscType;
+                is_bundle_adjustment?: boolean | null;
+              }
             | undefined;
           return {
             quantity: String(row?.quantity ?? 1),
             unit_price: String(row?.unit_price ?? 0),
             discount_percent: String(row?.discount_percent ?? 0),
             discount_type: (row?.discount_type ?? "percent") as DiscType,
+            is_bundle_adjustment: !!row?.is_bundle_adjustment,
           };
         })();
       return { ...prev, [rowId]: { ...current, ...patch } };
     });
   }
-  async function commitDraft(p: { id: string; quantity: number; unit_price: number | string; discount_percent?: number | string | null; discount_type?: DiscType }) {
+  async function commitDraft(p: {
+    id: string;
+    quantity: number;
+    unit_price: number | string;
+    discount_percent?: number | string | null;
+    discount_type?: DiscType;
+    is_bundle_adjustment?: boolean | null;
+  }) {
     const draft = drafts[p.id];
     if (!draft) return;
     const qty = Math.max(0, Number(draft.quantity) || 0);
@@ -994,11 +1022,13 @@ function ProductsTabContent({
     let disc = Math.max(0, Number(draft.discount_percent) || 0);
     if (draft.discount_type === "percent") disc = Math.min(100, disc);
     const currentType = (p.discount_type ?? "percent") as DiscType;
+    const currentBundle = !!p.is_bundle_adjustment;
     const noChange =
       qty === Number(p.quantity ?? 0) &&
       price === Number(p.unit_price ?? 0) &&
       disc === Number(p.discount_percent ?? 0) &&
-      draft.discount_type === currentType;
+      draft.discount_type === currentType &&
+      draft.is_bundle_adjustment === currentBundle;
     if (noChange) {
       setDrafts((prev) => {
         const out = { ...prev };
@@ -1016,6 +1046,7 @@ function ProductsTabContent({
           unit_price: price,
           discount_percent: disc,
           discount_type: draft.discount_type,
+          is_bundle_adjustment: draft.is_bundle_adjustment,
         },
       });
       setDrafts((prev) => {
@@ -1146,6 +1177,29 @@ function ProductsTabContent({
                           className="h-8 w-20 text-right border rounded-md px-2 bg-background"
                         />
                       </div>
+                      {/* Bundle-adjustment flag — only relevant when there's
+                          a discount applied. Tagging a line as "bundle" tells
+                          future reports this isn't a promo discount, it's a
+                          flat-rate-target adjustment (e.g. SRA module priced
+                          down to hit a "$X for SRA done" bundle target).
+                          Default off; rep ticks it when applicable. */}
+                      {Number(draft.discount_percent) > 0 && (
+                        <label
+                          className="mt-1 flex items-center justify-end gap-1 text-[11px] text-muted-foreground cursor-pointer select-none"
+                          title="Tag this discount as a bundle/flat-rate adjustment so it doesn't get counted as a promo discount in reports."
+                        >
+                          <input
+                            type="checkbox"
+                            checked={draft.is_bundle_adjustment}
+                            onChange={(e) => {
+                              setDraftField(p.id, { is_bundle_adjustment: e.target.checked });
+                            }}
+                            onBlur={() => commitDraft(p)}
+                            className="h-3 w-3"
+                          />
+                          Bundle deal
+                        </label>
+                      )}
                     </TableCell>
                     <TableCell className="text-right font-medium">
                       {formatCurrencyDetailed(previewArr)}

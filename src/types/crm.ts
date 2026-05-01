@@ -518,6 +518,12 @@ export interface OpportunityProduct {
   discount_percent?: number | null;
   /** 'percent' = discount_percent is %; 'amount' = discount_percent is $. */
   discount_type?: "percent" | "amount";
+  /**
+   * True when this line's discount is a bundle/flat-rate adjustment
+   * rather than a promotional discount. Tagged at save time so future
+   * reports can split bundle adjustments out from real promo discounts.
+   */
+  is_bundle_adjustment?: boolean;
   created_at: string;
   updated_at: string;
   // joined fields
