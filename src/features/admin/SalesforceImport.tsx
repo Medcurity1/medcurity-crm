@@ -1353,6 +1353,7 @@ function getCRMFields(entity: EntityType): string[] {
         "email",
         "title",
         "phone",
+        "phone_ext",
         "mobile_phone",
         "home_phone",
         "other_phone",
@@ -2257,6 +2258,26 @@ export function SalesforceImport() {
         mapped[mapping.crmField] = val;
       }
     });
+    // Fold a mapped Phone Extension into the main phone string so the
+    // single `phone` column carries both (e.g. "(206) 783-3004 x4321").
+    // The PhoneInput formatter already handles inline " x###" / " ext ###"
+    // syntax for display + edit, so we don't keep phone_ext as a
+    // separate column. SF exports phone and ext in two columns; we
+    // combine them here so users only have to map both columns and
+    // get a single clean phone value out.
+    if (mapped.phone && mapped.phone_ext && mapped.phone_ext.trim() !== "") {
+      const ext = mapped.phone_ext.trim();
+      // Don't double-append if the phone already carries an x/ext suffix
+      if (!/(?:x|ext\.?)\s*\d/i.test(mapped.phone)) {
+        mapped.phone = `${mapped.phone.trim()} x${ext}`;
+      }
+      delete mapped.phone_ext;
+    } else if (!mapped.phone && mapped.phone_ext) {
+      // Edge case: no phone but an extension — drop the orphan ext.
+      // Storing "x123" alone would be meaningless and break the
+      // formatter's parser.
+      delete mapped.phone_ext;
+    }
     return mapped;
   }
 

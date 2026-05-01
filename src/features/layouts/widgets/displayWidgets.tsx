@@ -105,8 +105,17 @@ export function DisplayValue({
     return <span className="text-sm font-medium">{formatDateTime(String(value))}</span>;
   }
 
-  // Phone
-  if (fieldKey === "phone" || fieldKey === "mobile_phone") {
+  // Phone — for records imported before phone_ext was folded into the
+  // phone column at import time, combine the two for display so the
+  // extension shows up regardless of where it ended up in the DB.
+  if (fieldKey === "phone") {
+    const base = formatPhone(String(value));
+    const ext = record.phone_ext ? String(record.phone_ext).trim() : "";
+    const hasInline = /(?:x|ext\.?)\s*\d/i.test(base);
+    const display = ext && !hasInline ? `${base} x${ext}` : base;
+    return <span className="text-sm font-medium">{display}</span>;
+  }
+  if (fieldKey === "mobile_phone") {
     return <span className="text-sm font-medium">{formatPhone(String(value))}</span>;
   }
 
