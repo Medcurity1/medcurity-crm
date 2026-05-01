@@ -1,5 +1,13 @@
 import { useState, useCallback, useRef } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
+import {
+  createImportRun,
+  recordImportChanges,
+  completeImportRun,
+  type PendingChange,
+  type ImportRunMode,
+} from "./importRunsApi";
 import { employeesToFteRange } from "@/lib/formatters";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -97,6 +105,19 @@ interface ColumnMapping {
   csvColumn: string;
   crmField: string;
   confidence: MappingConfidence;
+  /**
+   * "Update specific fields" mode: when false, skip this column entirely
+   * on update — the importer won't even snapshot or touch the field.
+   * Defaults to true so the standard upsert path is unchanged.
+   */
+  writeEnabled?: boolean;
+  /**
+   * "Update specific fields" mode: when true, only fill the field if
+   * the existing value is null/empty. Lets the user re-run the same
+   * file as a backfill without clobbering edits made in the new CRM
+   * since the original import.
+   */
+  onlyIfEmpty?: boolean;
 }
 
 interface FailedRow {
@@ -115,6 +136,8 @@ interface ImportResult {
   importedIds: string[];
   entity: EntityType;
   timestamp: string;
+  /** Persistent run id — links to /admin/imports/:runId for revert. */
+  runId?: string | null;
 }
 
 interface ValidationIssue {
@@ -1935,6 +1958,22 @@ export function SalesforceImport() {
   const [duplicateAction, setDuplicateAction] = useState<"skip" | "update">(
     "skip"
   );
+  /**
+   * Import mode:
+   *   "upsert"                  — original behaviour: insert new + (if
+   *                              duplicateAction='update') overwrite
+   *                              every mapped column on existing rows.
+   *   "update_specific_fields"  — Data-Loader-style: only the fields you
+   *                              tick "Write" are touched on existing
+   *                              rows. New rows are NOT inserted in this
+   *                              mode (it's strictly an in-place patch).
+   *
+   * The mode also forces duplicateAction=update so the top dropdown
+   * doesn't have to be set separately — selecting the new mode means
+   * "patch existing records" by definition.
+   */
+  const [importMode, setImportMode] = useState<ImportRunMode>("upsert");
+  const [csvFilename, setCsvFilename] = useState<string | null>(null);
   // Task-import filters: by default we only import historical completed
   // activity (calls, meetings, notes). Emails are skipped because the
   // Outlook integration will backfill those — re-importing SF email logs
@@ -2112,6 +2151,7 @@ export function SalesforceImport() {
 
       setResult(null);
       setValidation(null);
+      setCsvFilename(file.name);
 
       const reader = new FileReader();
       reader.onload = (evt) => {
@@ -2341,6 +2381,16 @@ export function SalesforceImport() {
       return;
     }
 
+    // In "Update specific fields" mode, the user must have at least one
+    // column with Write enabled. Otherwise the import is a no-op.
+    const writeEnabledMappings = activeMappings.filter(
+      (m) => m.writeEnabled !== false
+    );
+    if (importMode === "update_specific_fields" && writeEnabledMappings.length === 0) {
+      toast.error("Tick at least one Write box to choose which fields to update.");
+      return;
+    }
+
     setImporting(true);
     setResult(null);
     importStartTimeRef.current = Date.now();
@@ -2354,6 +2404,173 @@ export function SalesforceImport() {
 
     // Track unmatched SF owner IDs to warn user
     const unmatchedOwners = new Map<string, string[]>();
+
+    // ---------------- Import-run bookkeeping ----------------
+    // Snapshot infrastructure for revert. We accumulate per-field
+    // changes during the import and flush in batches via
+    // recordImportChanges. The run id we get back here is later passed
+    // to completeImportRun in the finally-style block below.
+    const fieldsTouched = (
+      importMode === "update_specific_fields" ? writeEnabledMappings : activeMappings
+    )
+      .map((m) => m.crmField)
+      .filter((f): f is string => typeof f === "string" && f !== "");
+    const onlyIfEmptyFields = activeMappings
+      .filter((m) => m.onlyIfEmpty === true && m.writeEnabled !== false)
+      .map((m) => m.crmField)
+      .filter((f): f is string => typeof f === "string" && f !== "");
+    const writeEnabledSet = new Set(
+      writeEnabledMappings
+        .map((m) => m.crmField)
+        .filter((f): f is string => typeof f === "string" && f !== "")
+    );
+    const onlyIfEmptySet = new Set(onlyIfEmptyFields);
+
+    let importRunId: string | null = null;
+    try {
+      importRunId = await createImportRun({
+        mode: importMode,
+        entity,
+        filename: csvFilename,
+        total_rows: csvRows.length,
+        fields_touched: fieldsTouched,
+        only_if_empty_fields: onlyIfEmptyFields,
+      });
+    } catch (e) {
+      // Don't block the import if the run record fails to write — but
+      // surface the issue so the user knows revert won't be available.
+      errors.push(
+        `Could not create import run record (revert won't be available): ${(e as Error).message}`
+      );
+    }
+    const pendingChanges: PendingChange[] = [];
+    async function flushPendingChanges() {
+      if (!importRunId || pendingChanges.length === 0) return;
+      try {
+        await recordImportChanges(importRunId, pendingChanges.splice(0, pendingChanges.length));
+      } catch (e) {
+        errors.push(`Snapshot write failed: ${(e as Error).message}`);
+      }
+    }
+    // Helper used by the update branch below to compute the final
+    // payload for "update_specific_fields" mode and emit per-field
+    // snapshot rows. Kept here so the closure has access to the
+    // run-level state.
+    function applyUpdateSpecificFields(
+      existingRow: Record<string, unknown>,
+      incomingPayload: Record<string, unknown>,
+      tableName: string
+    ): Record<string, unknown> {
+      // Filter to write-enabled fields only.
+      const filtered: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(incomingPayload)) {
+        if (k === "custom_fields") {
+          // custom_fields handled below — keep all sub-keys whose
+          // dotted path is in writeEnabledSet, drop the rest.
+          if (!v || typeof v !== "object") continue;
+          const subset: Record<string, unknown> = {};
+          for (const [subKey, subVal] of Object.entries(v as Record<string, unknown>)) {
+            const dotted = `custom_fields.${subKey}`;
+            if (!writeEnabledSet.has(dotted) && !writeEnabledSet.has(subKey)) continue;
+            // only-if-empty handling at the sub-key level
+            const existingCf =
+              (existingRow.custom_fields && typeof existingRow.custom_fields === "object")
+                ? (existingRow.custom_fields as Record<string, unknown>)
+                : {};
+            const existingSub = existingCf[subKey];
+            if (
+              (onlyIfEmptySet.has(dotted) || onlyIfEmptySet.has(subKey)) &&
+              existingSub !== undefined &&
+              existingSub !== null &&
+              existingSub !== ""
+            ) {
+              continue;
+            }
+            subset[subKey] = subVal;
+          }
+          if (Object.keys(subset).length > 0) {
+            // Merge into existing custom_fields so siblings survive.
+            const existingCf =
+              (existingRow.custom_fields && typeof existingRow.custom_fields === "object")
+                ? (existingRow.custom_fields as Record<string, unknown>)
+                : {};
+            filtered.custom_fields = { ...existingCf, ...subset };
+            // Snapshot per-sub-key
+            for (const [subKey, subVal] of Object.entries(subset)) {
+              pendingChanges.push({
+                table_name: tableName,
+                record_id: existingRow.id as string,
+                field_name: `custom_fields.${subKey}`,
+                old_value: existingCf[subKey] ?? null,
+                new_value: subVal,
+              });
+            }
+          }
+          continue;
+        }
+        if (!writeEnabledSet.has(k)) continue;
+        const existingVal = existingRow[k];
+        if (
+          onlyIfEmptySet.has(k) &&
+          existingVal !== undefined &&
+          existingVal !== null &&
+          existingVal !== ""
+        ) {
+          continue;
+        }
+        // Skip writes that wouldn't change anything (avoid noisy
+        // change rows).
+        if (existingVal === v) continue;
+        filtered[k] = v;
+        pendingChanges.push({
+          table_name: tableName,
+          record_id: existingRow.id as string,
+          field_name: k,
+          old_value: existingVal === undefined ? null : existingVal,
+          new_value: v,
+        });
+      }
+      return filtered;
+    }
+    // Snapshot helper for the standard upsert update branch — captures
+    // before/after for every column we're about to write so revert
+    // works on standard imports too.
+    function snapshotStandardUpdate(
+      existingRow: Record<string, unknown>,
+      payload: Record<string, unknown>,
+      tableName: string
+    ) {
+      if (!importRunId) return;
+      for (const [k, v] of Object.entries(payload)) {
+        if (k === "sf_id") continue;
+        if (k === "custom_fields") {
+          if (!v || typeof v !== "object") continue;
+          const existingCf =
+            (existingRow.custom_fields && typeof existingRow.custom_fields === "object")
+              ? (existingRow.custom_fields as Record<string, unknown>)
+              : {};
+          for (const [subKey, subVal] of Object.entries(v as Record<string, unknown>)) {
+            if (existingCf[subKey] === subVal) continue;
+            pendingChanges.push({
+              table_name: tableName,
+              record_id: existingRow.id as string,
+              field_name: `custom_fields.${subKey}`,
+              old_value: existingCf[subKey] ?? null,
+              new_value: subVal,
+            });
+          }
+          continue;
+        }
+        if (existingRow[k] === v) continue;
+        pendingChanges.push({
+          table_name: tableName,
+          record_id: existingRow.id as string,
+          field_name: k,
+          old_value: existingRow[k] === undefined ? null : existingRow[k],
+          new_value: v,
+        });
+      }
+    }
 
     try {
       // Pre-fetch lookup data — user_profiles doesn't have email,
@@ -3889,43 +4106,35 @@ export function SalesforceImport() {
         // custom_fields without `phone` and overwrote the row,
         // wiping the diverted phone values entirely.
         const existingCustomFieldsBySfId = new Map<string, Record<string, unknown>>();
+        // Full existing rows by sf_id — needed for snapshot writes
+        // (revert) and onlyIfEmpty checks. Pulled with select('*') so
+        // the per-record id-only fetch later in the update branch
+        // becomes a hash lookup instead of another round-trip.
+        const existingRowBySfId = new Map<string, Record<string, unknown>>();
         const hasCustomFieldsCol =
           entity !== "products" && entity !== "price_books" && entity !== "price_book_entries";
         if (sfIds.length > 0) {
-          // supabase-js's type parser can't narrow a dynamic `select`
-          // arg (it tries to literal-parse the string and errors out
-          // when we conditionally append `, custom_fields`). So we
-          // branch on the literal here, run two distinct queries, and
-          // funnel the rows through `unknown` to a uniform shape.
-          // Two branches because products/price_books/price_book_entries
-          // have no custom_fields column and a literal SELECT of it
-          // would error at runtime.
-          if (hasCustomFieldsCol) {
-            const { data: existing } = await supabase
-              .from(tableName)
-              .select("id, sf_id, custom_fields")
-              .in("sf_id", sfIds);
-            const existingRows = (existing ?? []) as unknown as Array<{
-              sf_id: string;
-              custom_fields: unknown;
-            }>;
-            existingSfIds = new Set(existingRows.map((e) => e.sf_id));
-            for (const row of existingRows) {
+          const { data: existing } = await supabase
+            .from(tableName)
+            .select("*")
+            .in("sf_id", sfIds);
+          const existingRows = (existing ?? []) as unknown as Array<Record<string, unknown>>;
+          existingSfIds = new Set(
+            existingRows
+              .map((e) => e.sf_id as string | undefined)
+              .filter((s): s is string => typeof s === "string")
+          );
+          for (const row of existingRows) {
+            const sfId = row.sf_id as string | undefined;
+            if (!sfId) continue;
+            existingRowBySfId.set(sfId, row);
+            if (hasCustomFieldsCol) {
               const cf =
                 row.custom_fields && typeof row.custom_fields === "object"
                   ? (row.custom_fields as Record<string, unknown>)
                   : {};
-              existingCustomFieldsBySfId.set(row.sf_id, cf);
+              existingCustomFieldsBySfId.set(sfId, cf);
             }
-          } else {
-            const { data: existing } = await supabase
-              .from(tableName)
-              .select("id, sf_id")
-              .in("sf_id", sfIds);
-            const existingRows = (existing ?? []) as unknown as Array<{
-              sf_id: string;
-            }>;
-            existingSfIds = new Set(existingRows.map((e) => e.sf_id));
           }
         }
 
@@ -3935,44 +4144,68 @@ export function SalesforceImport() {
         for (const record of records) {
           const sfId = record.sf_id as string | undefined;
           if (sfId && existingSfIds.has(sfId)) {
-            if (duplicateAction === "skip") {
+            // In "Update specific fields" mode, treat existing rows as
+            // updates regardless of the duplicateAction dropdown — the
+            // mode itself implies update.
+            const effectiveAction =
+              importMode === "update_specific_fields" ? "update" : duplicateAction;
+            if (effectiveAction === "skip") {
               skippedArr[0]++;
             } else {
-              // Find existing record id
-              const { data: existing } = await supabase
-                .from(tableName)
-                .select("id")
-                .eq("sf_id", sfId)
-                .limit(1)
-                .single();
-              if (existing) {
+              const existingRow = existingRowBySfId.get(sfId);
+              if (existingRow && existingRow.id) {
                 const { sf_id: _removed, ...updateData } = record;
-                // Merge JSONB instead of replacing. Existing keys we're
-                // not overwriting in this run survive; new keys from
-                // this run land alongside them. Without this the
-                // .update() below would replace custom_fields wholesale
-                // and silently wipe any pre-existing diverted values.
-                if (
-                  hasCustomFieldsCol &&
-                  sfId &&
-                  existingCustomFieldsBySfId.has(sfId)
-                ) {
-                  const existingCf = existingCustomFieldsBySfId.get(sfId) ?? {};
-                  const incomingCf =
-                    (updateData.custom_fields &&
-                      typeof updateData.custom_fields === "object")
-                      ? (updateData.custom_fields as Record<string, unknown>)
-                      : {};
-                  const merged = { ...existingCf, ...incomingCf };
-                  if (Object.keys(merged).length > 0) {
-                    updateData.custom_fields = merged;
+                if (importMode === "update_specific_fields") {
+                  // Filter the payload down to write-enabled fields and
+                  // skip onlyIfEmpty fields where existing isn't empty.
+                  // Snapshot writes happen inside the helper.
+                  const filtered = applyUpdateSpecificFields(
+                    existingRow,
+                    updateData as Record<string, unknown>,
+                    tableName
+                  );
+                  if (Object.keys(filtered).length > 0) {
+                    toUpdate.push({ id: existingRow.id as string, data: filtered });
                   } else {
-                    delete updateData.custom_fields;
+                    // Nothing to write for this row — count as skip so
+                    // the user sees what happened.
+                    skippedArr[0]++;
                   }
+                } else {
+                  // Standard upsert path: merge custom_fields and
+                  // snapshot every field we're about to overwrite so
+                  // revert works on this mode too.
+                  if (
+                    hasCustomFieldsCol &&
+                    sfId &&
+                    existingCustomFieldsBySfId.has(sfId)
+                  ) {
+                    const existingCf = existingCustomFieldsBySfId.get(sfId) ?? {};
+                    const incomingCf =
+                      (updateData.custom_fields &&
+                        typeof updateData.custom_fields === "object")
+                        ? (updateData.custom_fields as Record<string, unknown>)
+                        : {};
+                    const merged = { ...existingCf, ...incomingCf };
+                    if (Object.keys(merged).length > 0) {
+                      updateData.custom_fields = merged;
+                    } else {
+                      delete updateData.custom_fields;
+                    }
+                  }
+                  snapshotStandardUpdate(
+                    existingRow,
+                    updateData as Record<string, unknown>,
+                    tableName
+                  );
+                  toUpdate.push({ id: existingRow.id as string, data: updateData });
                 }
-                toUpdate.push({ id: existing.id, data: updateData });
               }
             }
+          } else if (importMode === "update_specific_fields") {
+            // No existing match — in "Update specific fields" mode we
+            // never insert, so skip with a note.
+            skippedArr[0]++;
           } else {
             toInsert.push(record);
           }
@@ -4032,6 +4265,11 @@ export function SalesforceImport() {
           }
         }
 
+        // Flush snapshot rows accumulated during this batch — keeps
+        // memory bounded on large imports and gives the imports detail
+        // page partial visibility while a long run is still going.
+        await flushPendingChanges();
+
         setProgress({ current: Math.min(i + batchSize, total), total });
         updateETA(Math.min(i + batchSize, total), total);
       }
@@ -4039,12 +4277,30 @@ export function SalesforceImport() {
       errors.push(`Unexpected error: ${(err as Error).message}`);
     }
 
+    // Final flush in case the last batch added changes after the loop
+    // exited (or a thrown error short-circuited the per-batch flush).
+    await flushPendingChanges();
+
     // Warn about unmatched owners (only if records were actually imported/updated, not just skipped)
     if (unmatchedOwners.size > 0 && (imported[0] > 0 || failedCount[0] > 0)) {
       const ownerWarnings = Array.from(unmatchedOwners.entries()).map(
         ([owner, rows]) => `Owner "${owner}" not found in CRM — records imported without owner (${rows.length} rows: ${rows.slice(0, 3).join(", ")}${rows.length > 3 ? "..." : ""})`
       );
       errors.push(...ownerWarnings);
+    }
+
+    // Mark the run as completed so it shows up in /admin/imports.
+    if (importRunId) {
+      try {
+        await completeImportRun(importRunId, {
+          status: failedCount[0] > 0 && imported[0] === 0 ? "failed" : "completed",
+          succeeded_count: imported[0],
+          failed_count: failedCount[0],
+          error_message: errors.length > 0 ? errors.slice(0, 5).join(" | ") : null,
+        });
+      } catch (e) {
+        errors.push(`Could not finalize import run record: ${(e as Error).message}`);
+      }
     }
 
     setImporting(false);
@@ -4058,6 +4314,7 @@ export function SalesforceImport() {
       importedIds,
       entity,
       timestamp: new Date().toISOString(),
+      runId: importRunId,
     });
 
     if (unmatchedOwners.size > 0) {
@@ -4108,6 +4365,8 @@ export function SalesforceImport() {
     setEstimatedTimeRemaining(null);
     setRetryEdits({});
     setRetryingRows(false);
+    setCsvFilename(null);
+    setImportMode("upsert");
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -4280,6 +4539,16 @@ export function SalesforceImport() {
 
   return (
     <div className="space-y-6">
+      {/* Quick nav to persistent import history */}
+      <div className="flex justify-end">
+        <Button variant="outline" size="sm" asChild>
+          <Link to="/admin/imports">
+            <FileSpreadsheet className="h-4 w-4 mr-1.5" />
+            Recent Imports
+          </Link>
+        </Button>
+      </div>
+
       {/* Instructions */}
       <Card>
         <CardHeader className="pb-3">
@@ -4522,6 +4791,12 @@ export function SalesforceImport() {
                     <TableHead className="w-10">Match</TableHead>
                     <TableHead>CSV Column</TableHead>
                     <TableHead>CRM Field</TableHead>
+                    {importMode === "update_specific_fields" && (
+                      <>
+                        <TableHead className="w-20 text-center">Write</TableHead>
+                        <TableHead className="w-32 text-center">Only if empty</TableHead>
+                      </>
+                    )}
                     <TableHead>Sample Value</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -4574,6 +4849,44 @@ export function SalesforceImport() {
                           </SelectContent>
                         </Select>
                       </TableCell>
+                      {importMode === "update_specific_fields" && (
+                        <>
+                          <TableCell className="text-center">
+                            <input
+                              type="checkbox"
+                              disabled={!m.crmField}
+                              checked={m.writeEnabled !== false && !!m.crmField}
+                              onChange={(e) => {
+                                const next = e.target.checked;
+                                setMappings((prev) =>
+                                  prev.map((p) =>
+                                    p.csvColumn === m.csvColumn
+                                      ? { ...p, writeEnabled: next }
+                                      : p
+                                  )
+                                );
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <input
+                              type="checkbox"
+                              disabled={!m.crmField || m.writeEnabled === false}
+                              checked={m.onlyIfEmpty === true}
+                              onChange={(e) => {
+                                const next = e.target.checked;
+                                setMappings((prev) =>
+                                  prev.map((p) =>
+                                    p.csvColumn === m.csvColumn
+                                      ? { ...p, onlyIfEmpty: next }
+                                      : p
+                                  )
+                                );
+                              }}
+                            />
+                          </TableCell>
+                        </>
+                      )}
                       <TableCell className="text-sm text-muted-foreground truncate max-w-[200px]">
                         {csvRows[0]?.[idx] ?? ""}
                       </TableCell>
@@ -4582,6 +4895,62 @@ export function SalesforceImport() {
                 </TableBody>
               </Table>
             </div>
+            {importMode === "update_specific_fields" && (
+              <div className="mt-3 flex items-center gap-2 text-xs">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setMappings((prev) =>
+                      prev.map((p) => (p.crmField ? { ...p, writeEnabled: true } : p))
+                    )
+                  }
+                >
+                  Write all
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setMappings((prev) =>
+                      prev.map((p) => ({ ...p, writeEnabled: false }))
+                    )
+                  }
+                >
+                  Write none
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setMappings((prev) =>
+                      prev.map((p) =>
+                        p.crmField && p.writeEnabled !== false
+                          ? { ...p, onlyIfEmpty: true }
+                          : p
+                      )
+                    )
+                  }
+                >
+                  Only-if-empty all written
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setMappings((prev) =>
+                      prev.map((p) => ({ ...p, onlyIfEmpty: false }))
+                    )
+                  }
+                >
+                  Only-if-empty none
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -4728,7 +5097,30 @@ export function SalesforceImport() {
             )}
 
             {/* Import controls */}
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-end gap-4">
+              <div className="space-y-1">
+                <Label>Import Mode</Label>
+                <Select
+                  value={importMode}
+                  onValueChange={(v) => setImportMode(v as ImportRunMode)}
+                >
+                  <SelectTrigger className="w-[260px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="upsert">Standard upsert</SelectItem>
+                    <SelectItem value="update_specific_fields">
+                      Update specific fields only
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground max-w-[260px]">
+                  {importMode === "update_specific_fields"
+                    ? "Only fields you tick in the mapping table get written. All other columns are left untouched."
+                    : "Inserts new records and updates all mapped fields on existing records."}
+                </p>
+              </div>
+
               <div className="space-y-1">
                 <Label>Duplicate Handling (by SF ID)</Label>
                 <Select
@@ -4736,6 +5128,7 @@ export function SalesforceImport() {
                   onValueChange={(v) =>
                     setDuplicateAction(v as "skip" | "update")
                   }
+                  disabled={importMode === "update_specific_fields"}
                 >
                   <SelectTrigger className="w-[200px]">
                     <SelectValue />
@@ -4747,9 +5140,14 @@ export function SalesforceImport() {
                     </SelectItem>
                   </SelectContent>
                 </Select>
+                {importMode === "update_specific_fields" && (
+                  <p className="text-xs text-muted-foreground max-w-[200px]">
+                    Forced to "update" in specific-fields mode (no inserts).
+                  </p>
+                )}
               </div>
 
-              <div className="flex items-center gap-2 pt-5">
+              <div className="flex items-center gap-2">
                 <Button
                   onClick={handleImport}
                   disabled={importing}
@@ -4843,6 +5241,16 @@ export function SalesforceImport() {
                 <div className="flex items-center gap-2 text-sm text-destructive">
                   <XCircle className="h-4 w-4" />
                   {result.failed} records failed (details below)
+                </div>
+              )}
+              {result.runId && (
+                <div className="pt-1">
+                  <Button variant="outline" size="sm" asChild>
+                    <Link to={`/admin/imports/${result.runId}`}>
+                      <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" />
+                      View import details / revert
+                    </Link>
+                  </Button>
                 </div>
               )}
             </div>
