@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -49,6 +49,20 @@ export function ContactForm() {
   const updateMutation = useUpdateContact();
 
   const preselectedAccountId = searchParams.get("account_id");
+
+  // Merge the contact's current account into the dropdown even if it's
+  // archived (and therefore filtered out by useAccountsList). Without
+  // this, opening Edit on a contact whose account was later archived
+  // shows an empty Select (placeholder), which then fails the
+  // "Account is required" zod check on save.
+  const accountOptions = useMemo(() => {
+    const list = accounts ? [...accounts] : [];
+    const contactAcc = contact?.account;
+    if (contactAcc && !list.some((a) => a.id === contactAcc.id)) {
+      list.unshift({ id: contactAcc.id, name: `${contactAcc.name} (archived)` });
+    }
+    return list;
+  }, [accounts, contact?.account]);
 
   const {
     register,
@@ -216,7 +230,7 @@ export function ContactForm() {
                     <SelectValue placeholder="Select account" />
                   </SelectTrigger>
                   <SelectContent>
-                    {accounts?.map((a) => (
+                    {accountOptions.map((a) => (
                       <SelectItem key={a.id} value={a.id}>
                         {a.name}
                       </SelectItem>
