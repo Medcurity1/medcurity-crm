@@ -3892,22 +3892,40 @@ export function SalesforceImport() {
         const hasCustomFieldsCol =
           entity !== "products" && entity !== "price_books" && entity !== "price_book_entries";
         if (sfIds.length > 0) {
-          const selectCols = hasCustomFieldsCol ? "id, sf_id, custom_fields" : "id, sf_id";
-          const { data: existing } = await supabase
-            .from(tableName)
-            .select(selectCols)
-            .in("sf_id", sfIds);
-          existingSfIds = new Set(
-            (existing ?? []).map((e) => (e as { sf_id: string }).sf_id)
-          );
+          // supabase-js's type parser can't narrow a dynamic `select`
+          // arg (it tries to literal-parse the string and errors out
+          // when we conditionally append `, custom_fields`). So we
+          // branch on the literal here, run two distinct queries, and
+          // funnel the rows through `unknown` to a uniform shape.
+          // Two branches because products/price_books/price_book_entries
+          // have no custom_fields column and a literal SELECT of it
+          // would error at runtime.
           if (hasCustomFieldsCol) {
-            for (const e of existing ?? []) {
-              const row = e as { sf_id: string; custom_fields: unknown };
-              const cf = (row.custom_fields && typeof row.custom_fields === "object")
-                ? (row.custom_fields as Record<string, unknown>)
-                : {};
+            const { data: existing } = await supabase
+              .from(tableName)
+              .select("id, sf_id, custom_fields")
+              .in("sf_id", sfIds);
+            const existingRows = (existing ?? []) as unknown as Array<{
+              sf_id: string;
+              custom_fields: unknown;
+            }>;
+            existingSfIds = new Set(existingRows.map((e) => e.sf_id));
+            for (const row of existingRows) {
+              const cf =
+                row.custom_fields && typeof row.custom_fields === "object"
+                  ? (row.custom_fields as Record<string, unknown>)
+                  : {};
               existingCustomFieldsBySfId.set(row.sf_id, cf);
             }
+          } else {
+            const { data: existing } = await supabase
+              .from(tableName)
+              .select("id, sf_id")
+              .in("sf_id", sfIds);
+            const existingRows = (existing ?? []) as unknown as Array<{
+              sf_id: string;
+            }>;
+            existingSfIds = new Set(existingRows.map((e) => e.sf_id));
           }
         }
 
