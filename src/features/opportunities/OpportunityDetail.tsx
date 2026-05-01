@@ -678,14 +678,30 @@ export function OpportunityDetail() {
           <div className="md:col-span-2">
             <EditableField label="Next Step" value={opp.next_step} onSave={saveField("next_step")} type="textarea" />
           </div>
-          <Field
-            label="Service Amount"
-            value={opp.service_amount != null ? formatCurrencyDetailed(opp.service_amount) : null}
-          />
-          <Field
-            label="Product Amount"
-            value={opp.product_amount != null ? formatCurrencyDetailed(opp.product_amount) : null}
-          />
+          {/* Service / Product split — auto-derived inside
+              recalc_opportunity_amount from products.product_family.
+              A line is "service" if its product's family ILIKE 'service%';
+              everything else (or null family) goes into product_amount.
+              Both buckets get the opp-level discount applied proportionally
+              so they always add up to amount. */}
+          <div className="flex flex-col">
+            <span className="text-xs text-muted-foreground">Service Amount</span>
+            <span className="text-sm font-medium">
+              {opp.service_amount != null ? formatCurrencyDetailed(opp.service_amount) : "\u2014"}
+              {products && products.length > 0 && (
+                <span className="text-xs text-muted-foreground ml-1">(auto-calculated)</span>
+              )}
+            </span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-xs text-muted-foreground">Product Amount</span>
+            <span className="text-sm font-medium">
+              {opp.product_amount != null ? formatCurrencyDetailed(opp.product_amount) : "\u2014"}
+              {products && products.length > 0 && (
+                <span className="text-xs text-muted-foreground ml-1">(auto-calculated)</span>
+              )}
+            </span>
+          </div>
           <Field
             label="Services Included"
             value={opp.services_included ? "\u2713 Yes" : "\u2717 No"}
@@ -1008,7 +1024,14 @@ function ProductsTabContent({
         return out;
       });
     } catch (err) {
+      // Surface the failure so the user knows the edit didn't persist
+      // (previously this only logged to console, leaving the row stuck
+      // in its highlighted "dirty" state with no explanation — see the
+      // 4300-flat-discount issue where the DB rejects the value until
+      // migration 20260430000003 is applied).
       console.error("Failed to update product line:", err);
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      toast.error(`Couldn't save line: ${msg}`);
     }
   }
 
