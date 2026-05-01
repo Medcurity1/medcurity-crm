@@ -374,6 +374,13 @@ export interface Opportunity {
   discount: number | null;
   /** 'percent' = discount field is %; 'amount' = discount field is $. */
   discount_type?: "percent" | "amount";
+  /**
+   * True when this opp was sold as a bundle/flat-rate deal. Any
+   * per-line discounts on it are bundle adjustments (back into a
+   * target total) rather than promo markdowns. Used by reporting to
+   * split bundle adjustments from promo discounts.
+   */
+  is_bundle_deal?: boolean;
   subtotal: number | null;
   follow_up: boolean;
   one_time_project?: boolean;
@@ -518,12 +525,6 @@ export interface OpportunityProduct {
   discount_percent?: number | null;
   /** 'percent' = discount_percent is %; 'amount' = discount_percent is $. */
   discount_type?: "percent" | "amount";
-  /**
-   * True when this line's discount is a bundle/flat-rate adjustment
-   * rather than a promotional discount. Tagged at save time so future
-   * reports can split bundle adjustments out from real promo discounts.
-   */
-  is_bundle_adjustment?: boolean;
   created_at: string;
   updated_at: string;
   // joined fields

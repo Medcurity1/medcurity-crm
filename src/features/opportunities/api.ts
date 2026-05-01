@@ -375,7 +375,6 @@ export function useAddOpportunityProductsBulk() {
         arr_amount: number;
         discount_percent?: number;
         discount_type?: "percent" | "amount";
-        is_bundle_adjustment?: boolean;
       }>;
     }) => {
       if (params.rows.length === 0) return [];
@@ -387,7 +386,6 @@ export function useAddOpportunityProductsBulk() {
         arr_amount: r.arr_amount,
         discount_percent: r.discount_percent ?? 0,
         discount_type: (r as { discount_type?: string }).discount_type ?? "percent",
-        is_bundle_adjustment: r.is_bundle_adjustment ?? false,
       }));
 
       let data: unknown;
@@ -399,12 +397,8 @@ export function useAddOpportunityProductsBulk() {
       if (!e1) {
         data = d1;
       } else {
-        // Retry without optional newer columns (discount_type from
-        // 20260428000010, is_bundle_adjustment from 20260501000001) since
-        // they may not be applied yet in this environment.
-        const fallbackPayload = fullPayload.map(
-          ({ discount_type: _dt, is_bundle_adjustment: _ib, ...rest }) => rest,
-        );
+        // Retry without discount_type (migration 20260428000010 may not be applied)
+        const fallbackPayload = fullPayload.map(({ discount_type: _dt, ...rest }) => rest);
         const { data: d2, error: e2 } = await supabase
           .from("opportunity_products")
           .upsert(fallbackPayload, { onConflict: "opportunity_id,product_id" })
@@ -589,7 +583,6 @@ export function useUpdateOpportunityProduct() {
         arr_amount?: number;
         discount_percent?: number;
         discount_type?: "percent" | "amount";
-        is_bundle_adjustment?: boolean;
       };
     }) => {
       const { quantity, unit_price, discount_percent, discount_type } = params.patch;
@@ -619,15 +612,10 @@ export function useUpdateOpportunityProduct() {
         return data;
       }
 
-      // Graceful fallback: optional newer columns (discount_type from
-      // 20260428000010, is_bundle_adjustment from 20260501000001) may not
-      // be applied yet in this environment. Retry without them so the save
-      // doesn't fail silently and revert the line edit.
-      const {
-        discount_type: _dt,
-        is_bundle_adjustment: _ib,
-        ...patchWithout
-      } = fullPatch;
+      // Graceful fallback: migration 20260428000010 (discount_type column) may
+      // not be applied yet in this environment. Retry without discount_type so
+      // the save doesn't fail silently and revert the discount.
+      const { discount_type: _dt, ...patchWithout } = fullPatch;
       const { data: data2, error: error2 } = await supabase
         .from("opportunity_products")
         .update(patchWithout)

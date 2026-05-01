@@ -588,6 +588,31 @@ export function OpportunityDetail() {
           />
           <Field label="Close Date" value={formatDate(opp.close_date)} />
           <Field label="Promo Code" value={opp.promo_code} />
+          {/* Bundle-deal flag — when true, any per-line discount on this
+              opp is a bundle/flat-rate adjustment (rep discounted one
+              line to back into a target total) rather than a real promo
+              markdown. Reports filter on this so bundle pricing doesn't
+              inflate promo-discount totals. */}
+          <div className="flex flex-col">
+            <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+              Bundle Deal
+              <HelpTooltip text="Tick this if the deal was sold as a bundle/flat-rate. Any per-line discount on this opp will be treated as a bundle adjustment, not a promo discount, in reports." />
+            </span>
+            <label className="text-sm font-medium inline-flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={!!(opp as { is_bundle_deal?: boolean | null }).is_bundle_deal}
+                onChange={async (e) => {
+                  await updateMutation.mutateAsync({
+                    id: oppId,
+                    is_bundle_deal: e.target.checked,
+                  } as Parameters<typeof updateMutation.mutateAsync>[0]);
+                }}
+                className="h-4 w-4"
+              />
+              {(opp as { is_bundle_deal?: boolean | null }).is_bundle_deal ? "Yes" : "No"}
+            </label>
+          </div>
           <Field
             label="Subtotal"
             value={opp.subtotal != null ? formatCurrencyDetailed(opp.subtotal) : null}
@@ -959,7 +984,6 @@ function ProductsTabContent({
     unit_price: string;
     discount_percent: string;
     discount_type: DiscType;
-    is_bundle_adjustment: boolean;
   };
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
   const updateMutation = useUpdateOpportunityProduct();
@@ -970,7 +994,6 @@ function ProductsTabContent({
     unit_price: number | string;
     discount_percent?: number | string | null;
     discount_type?: DiscType;
-    is_bundle_adjustment?: boolean | null;
   }): RowDraft {
     return (
       drafts[p.id] ?? {
@@ -978,7 +1001,6 @@ function ProductsTabContent({
         unit_price: String(p.unit_price ?? 0),
         discount_percent: String(p.discount_percent ?? 0),
         discount_type: (p.discount_type ?? "percent") as DiscType,
-        is_bundle_adjustment: !!p.is_bundle_adjustment,
       }
     );
   }
@@ -993,7 +1015,6 @@ function ProductsTabContent({
                 unit_price?: number | string;
                 discount_percent?: number | string | null;
                 discount_type?: DiscType;
-                is_bundle_adjustment?: boolean | null;
               }
             | undefined;
           return {
@@ -1001,7 +1022,6 @@ function ProductsTabContent({
             unit_price: String(row?.unit_price ?? 0),
             discount_percent: String(row?.discount_percent ?? 0),
             discount_type: (row?.discount_type ?? "percent") as DiscType,
-            is_bundle_adjustment: !!row?.is_bundle_adjustment,
           };
         })();
       return { ...prev, [rowId]: { ...current, ...patch } };
@@ -1013,7 +1033,6 @@ function ProductsTabContent({
     unit_price: number | string;
     discount_percent?: number | string | null;
     discount_type?: DiscType;
-    is_bundle_adjustment?: boolean | null;
   }) {
     const draft = drafts[p.id];
     if (!draft) return;
@@ -1022,13 +1041,11 @@ function ProductsTabContent({
     let disc = Math.max(0, Number(draft.discount_percent) || 0);
     if (draft.discount_type === "percent") disc = Math.min(100, disc);
     const currentType = (p.discount_type ?? "percent") as DiscType;
-    const currentBundle = !!p.is_bundle_adjustment;
     const noChange =
       qty === Number(p.quantity ?? 0) &&
       price === Number(p.unit_price ?? 0) &&
       disc === Number(p.discount_percent ?? 0) &&
-      draft.discount_type === currentType &&
-      draft.is_bundle_adjustment === currentBundle;
+      draft.discount_type === currentType;
     if (noChange) {
       setDrafts((prev) => {
         const out = { ...prev };
@@ -1046,7 +1063,6 @@ function ProductsTabContent({
           unit_price: price,
           discount_percent: disc,
           discount_type: draft.discount_type,
-          is_bundle_adjustment: draft.is_bundle_adjustment,
         },
       });
       setDrafts((prev) => {
@@ -1177,29 +1193,6 @@ function ProductsTabContent({
                           className="h-8 w-20 text-right border rounded-md px-2 bg-background"
                         />
                       </div>
-                      {/* Bundle-adjustment flag — only relevant when there's
-                          a discount applied. Tagging a line as "bundle" tells
-                          future reports this isn't a promo discount, it's a
-                          flat-rate-target adjustment (e.g. SRA module priced
-                          down to hit a "$X for SRA done" bundle target).
-                          Default off; rep ticks it when applicable. */}
-                      {Number(draft.discount_percent) > 0 && (
-                        <label
-                          className="mt-1 flex items-center justify-end gap-1 text-[11px] text-muted-foreground cursor-pointer select-none"
-                          title="Tag this discount as a bundle/flat-rate adjustment so it doesn't get counted as a promo discount in reports."
-                        >
-                          <input
-                            type="checkbox"
-                            checked={draft.is_bundle_adjustment}
-                            onChange={(e) => {
-                              setDraftField(p.id, { is_bundle_adjustment: e.target.checked });
-                            }}
-                            onBlur={() => commitDraft(p)}
-                            className="h-3 w-3"
-                          />
-                          Bundle deal
-                        </label>
-                      )}
                     </TableCell>
                     <TableCell className="text-right font-medium">
                       {formatCurrencyDetailed(previewArr)}

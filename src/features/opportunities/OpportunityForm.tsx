@@ -588,7 +588,6 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                 arr_amount: sp.arr_amount,
                 discount_percent: sp.discount_percent,
                 discount_type: sp.discount_type,
-                is_bundle_adjustment: sp.is_bundle_adjustment,
               })),
             });
             toast.success(

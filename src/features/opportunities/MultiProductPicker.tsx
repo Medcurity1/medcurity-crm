@@ -68,8 +68,6 @@ export interface StagedOpportunityProduct {
   arr_amount: number;
   discount_percent: number;
   discount_type?: "percent" | "amount";
-  /** Marks the discount as a bundle/flat-rate adjustment (not a promo). */
-  is_bundle_adjustment?: boolean;
 }
 
 type Props = {
@@ -105,7 +103,6 @@ interface PickedRow {
   unit_price_source: "price_book" | "default" | "manual";
   discount_percent: number;
   discount_type: "percent" | "amount";
-  is_bundle_adjustment: boolean;
 }
 
 /**
@@ -373,7 +370,6 @@ export function MultiProductPicker(props: Props) {
         unit_price_source: source,
         discount_percent: 0,
         discount_type: "percent",
-        is_bundle_adjustment: false,
       },
     ]);
   }
@@ -417,7 +413,6 @@ export function MultiProductPicker(props: Props) {
         : r.quantity * r.unit_price * (1 - r.discount_percent / 100),
       discount_percent: r.discount_percent,
       discount_type: r.discount_type,
-      is_bundle_adjustment: r.is_bundle_adjustment,
     }));
 
     if (isStaged) {
@@ -642,25 +637,6 @@ export function MultiProductPicker(props: Props) {
                             }}
                           />
                         </div>
-                        {/* Tag this discount as a bundle/flat-rate adjustment
-                            so future reports can split it from real promo
-                            discounts. Only relevant once a discount is set. */}
-                        {row.discount_percent > 0 && (
-                          <label
-                            className="mt-1 flex items-center justify-end gap-1 text-[11px] text-muted-foreground cursor-pointer select-none"
-                            title="Tag this discount as a bundle/flat-rate adjustment so it doesn't get counted as a promo discount in reports."
-                          >
-                            <input
-                              type="checkbox"
-                              checked={row.is_bundle_adjustment}
-                              onChange={(e) =>
-                                updatePicked(row.product_id, { is_bundle_adjustment: e.target.checked })
-                              }
-                              className="h-3 w-3"
-                            />
-                            Bundle deal
-                          </label>
-                        )}
                       </td>
                       <td className="py-1 text-right font-medium">
                         {formatCurrencyDetailed(total)}
