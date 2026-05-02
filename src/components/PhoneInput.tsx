@@ -33,9 +33,15 @@ function formatPhone(input: string): string {
   const digits = core.replace(/\D/g, "");
 
   // If no explicit x/ext marker but there are >10 digits, take the tail
-  // as the extension.
+  // as the extension. EXCEPT when the input is exactly 11 digits and
+  // starts with "1" — that's a US number with the +1 country code, so
+  // strip the leading 1 instead of mis-classifying the trailing digit
+  // as an extension. Without this, "+1 208-239-1000" would become
+  // "(120) 823-9100 x0" instead of "(208) 239-1000".
   let mainDigits = digits;
-  if (!extension && digits.length > 10) {
+  if (!extension && digits.length === 11 && digits.startsWith("1")) {
+    mainDigits = digits.slice(1);
+  } else if (!extension && digits.length > 10) {
     mainDigits = digits.slice(0, 10);
     extension = digits.slice(10);
   }

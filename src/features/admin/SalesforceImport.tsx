@@ -9,6 +9,7 @@ import {
   type ImportRunMode,
 } from "./importRunsApi";
 import { employeesToFteRange } from "@/lib/formatters";
+import { formatPhone } from "@/components/PhoneInput";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -2277,6 +2278,20 @@ export function SalesforceImport() {
       // Storing "x123" alone would be meaningless and break the
       // formatter's parser.
       delete mapped.phone_ext;
+    }
+    // Normalize phone + mobile_phone to canonical "(XXX) XXX-XXXX [x###]"
+    // form. SF exports come in with all kinds of garbage — "+1 ", " HQ",
+    // " (Direct)", inconsistent dashes/parens — and we want one clean
+    // shape in the DB so display, edit, and dedupe all line up. Skip if
+    // the value has fewer than 10 digits (likely not a real number);
+    // keeping the original is safer than wiping it.
+    for (const key of ["phone", "mobile_phone"] as const) {
+      const v = mapped[key];
+      if (!v) continue;
+      const digitCount = v.replace(/\D/g, "").length;
+      if (digitCount < 10) continue;
+      const normalized = formatPhone(v);
+      if (normalized) mapped[key] = normalized;
     }
     return mapped;
   }
