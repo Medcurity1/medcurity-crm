@@ -2240,7 +2240,8 @@ export function SalesforceImport() {
   function buildMappedRow(
     rowValues: string[],
     headers: string[],
-    columnMappings: ColumnMapping[]
+    columnMappings: ColumnMapping[],
+    warnings?: string[]
   ): Record<string, string> {
     const mapped: Record<string, string> = {};
     headers.forEach((header, idx) => {
@@ -2259,25 +2260,57 @@ export function SalesforceImport() {
         mapped[mapping.crmField] = val;
       }
     });
-    // Fold a mapped Phone Extension into the main phone string so the
-    // single `phone` column carries both (e.g. "(206) 783-3004 x4321").
-    // The PhoneInput formatter already handles inline " x###" / " ext ###"
-    // syntax for display + edit, so we don't keep phone_ext as a
-    // separate column. SF exports phone and ext in two columns; we
-    // combine them here so users only have to map both columns and
-    // get a single clean phone value out.
-    if (mapped.phone && mapped.phone_ext && mapped.phone_ext.trim() !== "") {
-      const ext = mapped.phone_ext.trim();
-      // Don't double-append if the phone already carries an x/ext suffix
-      if (!/(?:x|ext\.?)\s*\d/i.test(mapped.phone)) {
-        mapped.phone = `${mapped.phone.trim()} x${ext}`;
+    // Reconcile phone extension across two possible sources: the
+    // explicit Phone Extension column (mapped.phone_ext) and an
+    // inline "x###"/"ext ###" inside mapped.phone. After this block:
+    //   - mapped.phone always carries the ext inline (so display +
+    //     edit paths see the full value as one string)
+    //   - mapped.phone_ext column is also populated with the digits
+    //     (so anyone querying that column gets the same answer)
+    //   - on a mismatch we keep the explicit phone_ext column value
+    //     (it was intentionally mapped) and push a warning so the
+    //     user can reconcile in the admin UI
+    {
+      const inlineMatch = mapped.phone?.match(/(?:x|ext\.?)\s*(\d+)/i);
+      const inlineExt = inlineMatch ? inlineMatch[1] : "";
+      const explicitExt = (mapped.phone_ext ?? "").trim();
+      let canonicalExt = "";
+      if (inlineExt && explicitExt && inlineExt !== explicitExt) {
+        canonicalExt = explicitExt;
+        if (warnings) {
+          const who = [
+            mapped.first_name,
+            mapped.last_name,
+            mapped.email,
+            mapped.sf_id,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .trim() || "(unidentified row)";
+          warnings.push(
+            `Phone ext mismatch for ${who}: phone column has "x${inlineExt}", phone_ext column has "${explicitExt}". Kept "${explicitExt}" — please reconcile.`
+          );
+        }
+      } else {
+        canonicalExt = inlineExt || explicitExt;
       }
-      delete mapped.phone_ext;
-    } else if (!mapped.phone && mapped.phone_ext) {
-      // Edge case: no phone but an extension — drop the orphan ext.
-      // Storing "x123" alone would be meaningless and break the
-      // formatter's parser.
-      delete mapped.phone_ext;
+      if (mapped.phone) {
+        // Strip any inline ext, then re-append the canonical one so
+        // both representations end up consistent.
+        const phoneCore = mapped.phone
+          .replace(/\s*(?:x|ext\.?)\s*\d+\s*$/i, "")
+          .trim();
+        mapped.phone = canonicalExt
+          ? `${phoneCore} x${canonicalExt}`
+          : phoneCore;
+      }
+      if (canonicalExt && mapped.phone) {
+        mapped.phone_ext = canonicalExt;
+      } else {
+        // No phone, no ext, or orphan ext with no phone — don't write
+        // a useless "x123" alone or leave a stale empty value behind.
+        delete mapped.phone_ext;
+      }
     }
     // Normalize phone + mobile_phone to canonical "(XXX) XXX-XXXX [x###]"
     // form. SF exports come in with all kinds of garbage — "+1 ", " HQ",
@@ -2927,7 +2960,7 @@ export function SalesforceImport() {
         for (let j = 0; j < batch.length; j++) {
           const rowIndex = i + j;
           const row = batch[j];
-          const mapped = buildMappedRow(row, csvHeaders, mappings);
+          const mapped = buildMappedRow(row, csvHeaders, mappings, errors);
           const csvData = buildCsvDataRow(row, csvHeaders);
 
           // Soft-deleted SF rows (IsDeleted=1) — in the SF recycle bin, not
