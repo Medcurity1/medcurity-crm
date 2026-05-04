@@ -26,6 +26,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
@@ -46,20 +47,23 @@ import { formatCurrency, formatDate } from "@/lib/formatters";
  * Renewals view, Salesforce "Open Renewal Opportunities" report style.
  *
  * Two tabs share the same filter rail:
- * - Upcoming: closed-won deals whose contract_end_date is between today
- *   and today + 120 days. This is where renewal-prep work happens.
- * - Closed-Won Renewals: renewal-kind opps that have already been won.
- *   Useful for retro / "how did we do last quarter" review.
+ * - Upcoming: closed-won deals whose contract_end_date is in the
+ *   selected date window. This is where renewal-prep work happens.
+ * - Closed-Won Renewals: renewal-kind opps that have already been won
+ *   in the selected date window (filtered by close_date).
  *
- * Owner filter is persisted both to the URL (?owners=id1,id2) so links
- * can be shared, and to localStorage so the rep's last filter survives
- * navigating away. URL wins on first paint when both are present.
+ * All filters (date window, owner, account-name exclusion) apply to
+ * both tabs. Owner filter is persisted to URL (?owners=…) AND to
+ * localStorage so the rep's last filter survives reloads. URL wins on
+ * first paint when both are present.
  */
 
 const OWNER_LS_KEY = "renewals_owner_filter_v1";
+const EXCLUDE_LS_KEY = "renewals_exclude_account_v1";
+const RANGE_LS_KEY = "renewals_date_range_v1";
 
 type RenewalRow = {
-  id: string; // opportunity id
+  id: string;
   account_id: string;
   account_name: string;
   owner_user_id: string | null;
@@ -70,27 +74,28 @@ type RenewalRow = {
   stage: string;
   kind: string;
   name: string;
-  days_until_renewal: number | null;
+  next_step: string | null;
+  lead_source: string | null;
+  description: string | null;
 };
 
 function useUpcomingRenewals() {
   return useQuery({
     queryKey: ["renewal_queue", "upcoming"],
     queryFn: async () => {
-      // Direct join — old code used the renewal_queue view but it didn't
-      // include owner names, and the view's 120-day window is already
-      // hard-coded so re-implementing here lets us add the owner without
-      // a schema migration.
+      // Pull a generous 18-month forward window. The UI then narrows
+      // by the date-filter chip — this lets "All time" still feel
+      // bounded while supporting custom ranges out into the future.
       const today = new Date();
       const todayIso = today.toISOString().slice(0, 10);
       const cap = new Date(today);
-      cap.setDate(cap.getDate() + 120);
+      cap.setMonth(cap.getMonth() + 18);
       const capIso = cap.toISOString().slice(0, 10);
 
       const { data, error } = await supabase
         .from("opportunities")
         .select(
-          "id, account_id, owner_user_id, contract_end_date, close_date, amount, stage, kind, name, account:accounts!inner(id, name, archived_at), owner:user_profiles!owner_user_id(id, full_name)",
+          "id, account_id, owner_user_id, contract_end_date, close_date, amount, stage, kind, name, next_step, lead_source, description, account:accounts!inner(id, name, archived_at), owner:user_profiles!owner_user_id(id, full_name)",
         )
         .is("archived_at", null)
         .eq("stage", "closed_won")
@@ -100,23 +105,10 @@ function useUpcomingRenewals() {
         .order("contract_end_date", { ascending: true });
       if (error) throw error;
 
-      const rows: RenewalRow[] = (data ?? [])
-        // The accounts!inner join already filters to non-archived accounts,
-        // but keep a defensive client-side check in case the join shape
-        // changes. Cheap and prevents tombstoned accounts from appearing.
+      return (data ?? [])
         .filter((o: any) => o.account && o.account.archived_at === null)
-        .map((o: any) => {
-          const end = o.contract_end_date
-            ? new Date(o.contract_end_date)
-            : null;
-          const days =
-            end !== null
-              ? Math.round(
-                  (end.getTime() - new Date(todayIso).getTime()) /
-                    (1000 * 60 * 60 * 24),
-                )
-              : null;
-          return {
+        .map(
+          (o: any): RenewalRow => ({
             id: o.id,
             account_id: o.account_id,
             account_name: o.account?.name ?? "—",
@@ -128,10 +120,11 @@ function useUpcomingRenewals() {
             stage: o.stage,
             kind: o.kind,
             name: o.name,
-            days_until_renewal: days,
-          };
-        });
-      return rows;
+            next_step: o.next_step,
+            lead_source: o.lead_source,
+            description: o.description,
+          }),
+        );
     },
   });
 }
@@ -140,16 +133,16 @@ function useClosedWonRenewals() {
   return useQuery({
     queryKey: ["renewal_queue", "closed_won"],
     queryFn: async () => {
-      // Last 18 months of won renewals — far enough back to cover an
-      // annual planning cycle without dragging in ancient history.
+      // Last 24 months by default; UI filter narrows further. Pulling
+      // wider gives custom-range users runway to look back.
       const since = new Date();
-      since.setMonth(since.getMonth() - 18);
+      since.setMonth(since.getMonth() - 24);
       const sinceIso = since.toISOString().slice(0, 10);
 
       const { data, error } = await supabase
         .from("opportunities")
         .select(
-          "id, account_id, owner_user_id, contract_end_date, close_date, amount, stage, kind, name, account:accounts!inner(id, name, archived_at), owner:user_profiles!owner_user_id(id, full_name)",
+          "id, account_id, owner_user_id, contract_end_date, close_date, amount, stage, kind, name, next_step, lead_source, description, account:accounts!inner(id, name, archived_at), owner:user_profiles!owner_user_id(id, full_name)",
         )
         .is("archived_at", null)
         .eq("stage", "closed_won")
@@ -158,23 +151,26 @@ function useClosedWonRenewals() {
         .order("close_date", { ascending: false });
       if (error) throw error;
 
-      const rows: RenewalRow[] = (data ?? [])
+      return (data ?? [])
         .filter((o: any) => o.account && o.account.archived_at === null)
-        .map((o: any) => ({
-          id: o.id,
-          account_id: o.account_id,
-          account_name: o.account?.name ?? "—",
-          owner_user_id: o.owner_user_id,
-          owner_name: o.owner?.full_name ?? null,
-          contract_end_date: o.contract_end_date,
-          close_date: o.close_date,
-          amount: Number(o.amount) || 0,
-          stage: o.stage,
-          kind: o.kind,
-          name: o.name,
-          days_until_renewal: null,
-        }));
-      return rows;
+        .map(
+          (o: any): RenewalRow => ({
+            id: o.id,
+            account_id: o.account_id,
+            account_name: o.account?.name ?? "—",
+            owner_user_id: o.owner_user_id,
+            owner_name: o.owner?.full_name ?? null,
+            contract_end_date: o.contract_end_date,
+            close_date: o.close_date,
+            amount: Number(o.amount) || 0,
+            stage: o.stage,
+            kind: o.kind,
+            name: o.name,
+            next_step: o.next_step,
+            lead_source: o.lead_source,
+            description: o.description,
+          }),
+        );
     },
   });
 }
@@ -196,22 +192,38 @@ function startOfQuarter(d: Date): Date {
   const q = Math.floor(d.getMonth() / 3);
   return new Date(d.getFullYear(), q * 3, 1);
 }
-function endOfQuarter(d: Date): Date {
-  const q = Math.floor(d.getMonth() / 3);
-  return new Date(d.getFullYear(), q * 3 + 3, 0);
-}
-function inRange(dateStr: string | null, start: Date, end: Date): boolean {
+function inDateRange(
+  dateStr: string | null,
+  start: Date | null,
+  end: Date | null,
+): boolean {
   if (!dateStr) return false;
   const d = new Date(dateStr);
-  return d >= start && d <= end;
+  if (start && d < start) return false;
+  if (end && d > end) return false;
+  return true;
+}
+function daysBetween(today: Date, dateStr: string | null): number | null {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  return Math.round((d.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 }
 function quarterLabel(d: Date): string {
   const q = Math.floor(d.getMonth() / 3) + 1;
   return `Q${q} ${d.getFullYear()}`;
 }
 function monthLabel(d: Date): string {
-  return d.toLocaleString("en-US", { month: "long", year: "numeric" });
+  return d.toLocaleString("en-US", { month: "short", year: "numeric" });
 }
+function truncate(s: string | null | undefined, n = 60): string {
+  if (!s) return "—";
+  return s.length > n ? s.slice(0, n) + "…" : s;
+}
+function isoDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+type DatePreset = "all" | "30" | "60" | "90" | "120" | "this-quarter" | "this-year" | "custom";
 
 function OwnerFilter({
   selected,
@@ -299,39 +311,146 @@ function OwnerFilter({
   );
 }
 
+/** Compute the [start, end] window for a date preset relative to today. */
+function rangeFromPreset(
+  preset: DatePreset,
+  custom: { start: string; end: string },
+  forTab: "upcoming" | "closed-won",
+): { start: Date | null; end: Date | null; label: string } {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  switch (preset) {
+    case "all":
+      // Upcoming has an inherent forward bound (18 months in the data
+      // hook); closed-won has an inherent 24-month backward bound.
+      // 'all' just means no UI-side narrowing.
+      return { start: null, end: null, label: "All dates" };
+    case "30":
+    case "60":
+    case "90":
+    case "120": {
+      const cap = new Date(today);
+      const days = Number(preset);
+      if (forTab === "upcoming") {
+        cap.setDate(cap.getDate() + days);
+        return { start: today, end: cap, label: `Next ${days} days` };
+      }
+      // For closed-won, "Next 30" makes no sense — interpret as "last 30"
+      cap.setDate(cap.getDate() - days);
+      return { start: cap, end: today, label: `Last ${days} days` };
+    }
+    case "this-quarter": {
+      const start = startOfQuarter(today);
+      const end = new Date(start.getFullYear(), start.getMonth() + 3, 0);
+      return { start, end, label: `This quarter (${quarterLabel(today)})` };
+    }
+    case "this-year": {
+      return {
+        start: new Date(today.getFullYear(), 0, 1),
+        end: new Date(today.getFullYear(), 11, 31),
+        label: `This year (${today.getFullYear()})`,
+      };
+    }
+    case "custom": {
+      const s = custom.start ? new Date(custom.start) : null;
+      const e = custom.end ? new Date(custom.end) : null;
+      if (e) e.setHours(23, 59, 59, 999);
+      const label =
+        s && e
+          ? `${formatDate(custom.start)} – ${formatDate(custom.end)}`
+          : "Custom range";
+      return { start: s, end: e, label };
+    }
+  }
+}
+
 export function RenewalsQueue() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const within = searchParams.get("within") ?? "all";
-  const tab = searchParams.get("tab") === "closed-won" ? "closed-won" : "upcoming";
 
-  // Hydrate owner filter: URL takes precedence, falls back to
-  // localStorage so the rep's last filter sticks across visits.
+  const tab =
+    searchParams.get("tab") === "closed-won" ? "closed-won" : "upcoming";
+
+  // Date preset: default to a 120-day forward window so the page
+  // matches what /renewals always showed for upcoming renewals.
+  const preset = (searchParams.get("preset") as DatePreset | null) ?? "120";
+
+  // Owner filter: URL wins on first paint, falls back to localStorage.
   const [owners, setOwnersState] = useState<string[]>(() => {
     const fromUrl = searchParams.get("owners");
-    if (fromUrl !== null) {
-      return fromUrl.split(",").filter(Boolean);
-    }
+    if (fromUrl !== null) return fromUrl.split(",").filter(Boolean);
     if (typeof window !== "undefined") {
       try {
         const raw = window.localStorage.getItem(OWNER_LS_KEY);
         if (raw) {
           const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) return parsed.filter((x) => typeof x === "string");
+          if (Array.isArray(parsed))
+            return parsed.filter((x) => typeof x === "string");
         }
       } catch {
-        // ignore corrupt JSON — fall through to default
+        /* ignore */
       }
     }
     return [];
   });
 
-  // Keep URL + localStorage in sync with state.
+  // Account-name exclusion: same hydration pattern. Default Test Account
+  // is what SF reports usually carry, so save the rep a click on first
+  // visit by initialising it empty and letting them type once.
+  const [excludeAccount, setExcludeAccount] = useState<string>(() => {
+    const fromUrl = searchParams.get("exclude");
+    if (fromUrl !== null) return fromUrl;
+    if (typeof window !== "undefined") {
+      try {
+        const raw = window.localStorage.getItem(EXCLUDE_LS_KEY);
+        if (raw !== null) return raw;
+      } catch {
+        /* ignore */
+      }
+    }
+    return "";
+  });
+
+  // Custom-range start/end. Persisted so a custom range survives reloads.
+  const [customRange, setCustomRange] = useState<{ start: string; end: string }>(
+    () => {
+      const fromUrl = {
+        start: searchParams.get("from") ?? "",
+        end: searchParams.get("to") ?? "",
+      };
+      if (fromUrl.start || fromUrl.end) return fromUrl;
+      if (typeof window !== "undefined") {
+        try {
+          const raw = window.localStorage.getItem(RANGE_LS_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === "object") {
+              return {
+                start: typeof parsed.start === "string" ? parsed.start : "",
+                end: typeof parsed.end === "string" ? parsed.end : "",
+              };
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      return { start: "", end: "" };
+    },
+  );
+
+  // Persist filters back to URL + localStorage on every change.
   useEffect(() => {
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
         if (owners.length === 0) next.delete("owners");
         else next.set("owners", owners.join(","));
+        if (!excludeAccount) next.delete("exclude");
+        else next.set("exclude", excludeAccount);
+        if (preset === "custom" && customRange.start) next.set("from", customRange.start);
+        else next.delete("from");
+        if (preset === "custom" && customRange.end) next.set("to", customRange.end);
+        else next.delete("to");
         return next;
       },
       { replace: true },
@@ -339,21 +458,22 @@ export function RenewalsQueue() {
     try {
       if (typeof window !== "undefined") {
         window.localStorage.setItem(OWNER_LS_KEY, JSON.stringify(owners));
+        window.localStorage.setItem(EXCLUDE_LS_KEY, excludeAccount);
+        window.localStorage.setItem(RANGE_LS_KEY, JSON.stringify(customRange));
       }
     } catch {
-      // localStorage may be disabled (private mode) — non-fatal
+      /* localStorage may be disabled */
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [owners.join(",")]);
+  }, [owners.join(","), excludeAccount, customRange.start, customRange.end, preset]);
 
   const { data: upcoming, isLoading: upcomingLoading } = useUpcomingRenewals();
   const { data: closedWon, isLoading: closedLoading } = useClosedWonRenewals();
 
-  function setWithin(v: string) {
+  function setPreset(v: DatePreset) {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
-      if (v === "all") next.delete("within");
-      else next.set("within", v);
+      next.set("preset", v);
       return next;
     });
   }
@@ -366,63 +486,69 @@ export function RenewalsQueue() {
     });
   }
 
-  // Apply owner + window filters to upcoming.
-  const upcomingFiltered = useMemo(() => {
-    if (!upcoming) return undefined;
-    return upcoming.filter((r) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const upcomingRange = rangeFromPreset(preset, customRange, "upcoming");
+  const closedRange = rangeFromPreset(preset, customRange, "closed-won");
+
+  // Common filter helper applied to both lists.
+  function applyCommonFilters(rows: RenewalRow[], dateField: "contract_end_date" | "close_date", range: { start: Date | null; end: Date | null }) {
+    const exclude = excludeAccount.trim().toLowerCase();
+    return rows.filter((r) => {
       if (owners.length > 0 && (!r.owner_user_id || !owners.includes(r.owner_user_id))) {
         return false;
       }
-      if (within !== "all") {
-        const cap = Number(within);
-        if (
-          Number.isFinite(cap) &&
-          (r.days_until_renewal === null || r.days_until_renewal > cap)
-        ) {
-          return false;
-        }
+      if (exclude && r.account_name.toLowerCase().includes(exclude)) {
+        return false;
+      }
+      if (range.start || range.end) {
+        const dateStr =
+          dateField === "contract_end_date" ? r.contract_end_date : r.close_date;
+        if (!inDateRange(dateStr, range.start, range.end)) return false;
       }
       return true;
     });
-  }, [upcoming, owners, within]);
+  }
+
+  const upcomingFiltered = useMemo(() => {
+    if (!upcoming) return undefined;
+    return applyCommonFilters(upcoming, "contract_end_date", upcomingRange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [upcoming, owners.join(","), excludeAccount, preset, customRange.start, customRange.end]);
 
   const closedWonFiltered = useMemo(() => {
     if (!closedWon) return undefined;
-    return closedWon.filter(
-      (r) =>
-        owners.length === 0 ||
-        (r.owner_user_id && owners.includes(r.owner_user_id)),
-    );
-  }, [closedWon, owners]);
+    return applyCommonFilters(closedWon, "close_date", closedRange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closedWon, owners.join(","), excludeAccount, preset, customRange.start, customRange.end]);
 
-  const today = new Date();
-  const monthStart = startOfMonth(today);
-  const monthEnd = endOfMonth(today);
-  const quarterStart = startOfQuarter(today);
-  const quarterEnd = endOfQuarter(today);
+  // Three-month-of-quarter breakdown — show every month in the current
+  // calendar quarter so the services meeting can plan ahead easily,
+  // not just the current month.
+  const quarterMonths = useMemo(() => {
+    const qStart = startOfQuarter(today);
+    return [0, 1, 2].map((i) => {
+      const m = new Date(qStart.getFullYear(), qStart.getMonth() + i, 1);
+      const mEnd = endOfMonth(m);
+      return { start: m, end: mEnd, label: monthLabel(m) };
+    });
+  }, [today.getMonth(), today.getFullYear()]);
 
-  const totals = useMemo(() => {
+  const upcomingTotals = useMemo(() => {
     const list = upcomingFiltered ?? [];
     const total = list.reduce((s, r) => s + r.amount, 0);
-    const month = list
-      .filter((r) => inRange(r.contract_end_date, monthStart, monthEnd))
-      .reduce((s, r) => s + r.amount, 0);
-    const quarter = list
-      .filter((r) => inRange(r.contract_end_date, quarterStart, quarterEnd))
-      .reduce((s, r) => s + r.amount, 0);
-    return {
-      count: list.length,
-      total,
-      month,
-      quarter,
-      monthCount: list.filter((r) =>
-        inRange(r.contract_end_date, monthStart, monthEnd),
-      ).length,
-      quarterCount: list.filter((r) =>
-        inRange(r.contract_end_date, quarterStart, quarterEnd),
-      ).length,
-    };
-  }, [upcomingFiltered, monthStart, monthEnd, quarterStart, quarterEnd]);
+    const monthly = quarterMonths.map(({ start, end, label }) => {
+      const inWindow = list.filter((r) =>
+        inDateRange(r.contract_end_date, start, end),
+      );
+      return {
+        label,
+        count: inWindow.length,
+        total: inWindow.reduce((s, r) => s + r.amount, 0),
+      };
+    });
+    return { count: list.length, total, monthly };
+  }, [upcomingFiltered, quarterMonths]);
 
   const closedTotals = useMemo(() => {
     const list = closedWonFiltered ?? [];
@@ -439,25 +565,98 @@ export function RenewalsQueue() {
         description="Contracts coming up for renewal and the renewals you've already won"
       />
 
-      {/* Filter rail — persists across both tabs */}
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">Window:</span>
-          <Select value={within} onValueChange={setWithin}>
-            <SelectTrigger className="w-44">
+      {/* Filter rail — persists across both tabs. */}
+      <div className="flex flex-wrap items-end gap-3 mb-4">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-muted-foreground">
+            Date window
+          </label>
+          <Select value={preset} onValueChange={(v) => setPreset(v as DatePreset)}>
+            <SelectTrigger className="w-52">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="30">Next 30 days</SelectItem>
-              <SelectItem value="60">Next 60 days</SelectItem>
-              <SelectItem value="90">Next 90 days</SelectItem>
-              <SelectItem value="all">All (up to 120 days)</SelectItem>
+              <SelectItem value="all">All time</SelectItem>
+              <SelectItem value="30">30 days</SelectItem>
+              <SelectItem value="60">60 days</SelectItem>
+              <SelectItem value="90">90 days</SelectItem>
+              <SelectItem value="120">120 days</SelectItem>
+              <SelectItem value="this-quarter">This quarter</SelectItem>
+              <SelectItem value="this-year">This year</SelectItem>
+              <SelectItem value="custom">Custom range…</SelectItem>
             </SelectContent>
           </Select>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">Owner:</span>
+
+        {preset === "custom" && (
+          <div className="flex items-end gap-2">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">From</label>
+              <Input
+                type="date"
+                className="w-40"
+                value={customRange.start}
+                onChange={(e) =>
+                  setCustomRange((r) => ({ ...r, start: e.target.value }))
+                }
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">To</label>
+              <Input
+                type="date"
+                className="w-40"
+                value={customRange.end}
+                onChange={(e) =>
+                  setCustomRange((r) => ({ ...r, end: e.target.value }))
+                }
+              />
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9"
+              onClick={() => {
+                const t = new Date();
+                setCustomRange({
+                  start: isoDate(startOfQuarter(t)),
+                  end: isoDate(new Date(t.getFullYear(), startOfQuarter(t).getMonth() + 3, 0)),
+                });
+              }}
+            >
+              This quarter
+            </Button>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-muted-foreground">Owner</label>
           <OwnerFilter selected={owners} onChange={setOwnersState} />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-muted-foreground">
+            Hide accounts containing
+          </label>
+          <div className="flex items-center gap-2">
+            <Input
+              type="text"
+              placeholder="e.g. Test"
+              className="w-48"
+              value={excludeAccount}
+              onChange={(e) => setExcludeAccount(e.target.value)}
+            />
+            {excludeAccount && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setExcludeAccount("")}
+                className="h-9 px-2 text-muted-foreground"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -482,58 +681,50 @@ export function RenewalsQueue() {
         </TabsList>
 
         <TabsContent value="upcoming" className="mt-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm text-muted-foreground font-medium">
-                  Upcoming
+                <CardTitle className="text-xs text-muted-foreground font-medium">
+                  Renewals in window
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-3xl font-bold">{totals.count}</p>
-                <p className="text-xs text-muted-foreground mt-1">renewals in window</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm text-muted-foreground font-medium">
-                  Total ARR
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-bold text-primary">
-                  {formatCurrency(totals.total)}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">at risk in window</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm text-muted-foreground font-medium">
-                  {monthLabel(today)}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-bold">{formatCurrency(totals.month)}</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {totals.monthCount} renewal{totals.monthCount === 1 ? "" : "s"} this month
+                <p className="text-2xl font-bold">{upcomingTotals.count}</p>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  {upcomingRange.label}
                 </p>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm text-muted-foreground font-medium">
-                  {quarterLabel(today)}
+                <CardTitle className="text-xs text-muted-foreground font-medium">
+                  Total ARR at risk
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-3xl font-bold">{formatCurrency(totals.quarter)}</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {totals.quarterCount} renewal
-                  {totals.quarterCount === 1 ? "" : "s"} this quarter
+                <p className="text-2xl font-bold text-primary">
+                  {formatCurrency(upcomingTotals.total)}
+                </p>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Sum of filtered renewals
                 </p>
               </CardContent>
             </Card>
+            {upcomingTotals.monthly.map((m) => (
+              <Card key={m.label}>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs text-muted-foreground font-medium">
+                    {m.label}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold">{formatCurrency(m.total)}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    {m.count} renewal{m.count === 1 ? "" : "s"}
+                  </p>
+                </CardContent>
+              </Card>
+            ))}
           </div>
 
           {upcomingLoading ? (
@@ -546,77 +737,97 @@ export function RenewalsQueue() {
             <EmptyState
               icon={RefreshCw}
               title="No upcoming renewals"
-              description={
-                owners.length > 0
-                  ? "No renewals match the current owner filter. Try clearing it."
-                  : "No contracts are expiring within the next 120 days."
-              }
+              description="No contracts match the current filters."
             />
           ) : (
-            <div className="border rounded-lg overflow-hidden">
+            <div className="border rounded-lg overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Owner</TableHead>
                     <TableHead>Account</TableHead>
                     <TableHead>Opportunity</TableHead>
-                    <TableHead>Owner</TableHead>
                     <TableHead>Contract End</TableHead>
-                    <TableHead className="text-right">ARR</TableHead>
+                    <TableHead>Close Date</TableHead>
+                    <TableHead>Next Step</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead>Lead Source</TableHead>
+                    <TableHead>Description</TableHead>
                     <TableHead>Days</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {upcomingFiltered.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell>
-                        <Link
-                          to={`/accounts/${r.account_id}`}
-                          className="font-medium text-primary hover:underline"
+                  {upcomingFiltered.map((r) => {
+                    const days = daysBetween(today, r.contract_end_date);
+                    return (
+                      <TableRow key={r.id}>
+                        <TableCell className="text-muted-foreground whitespace-nowrap">
+                          {r.owner_name ?? "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Link
+                            to={`/accounts/${r.account_id}`}
+                            className="font-medium text-primary hover:underline"
+                          >
+                            {r.account_name}
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          <Link
+                            to={`/opportunities/${r.id}`}
+                            className="text-sm hover:underline"
+                          >
+                            {r.name}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground whitespace-nowrap">
+                          {formatDate(r.contract_end_date)}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground whitespace-nowrap">
+                          {formatDate(r.close_date)}
+                        </TableCell>
+                        <TableCell
+                          className="text-muted-foreground max-w-[12rem]"
+                          title={r.next_step ?? ""}
                         >
-                          {r.account_name}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Link
-                          to={`/opportunities/${r.id}`}
-                          className="text-sm hover:underline"
+                          {truncate(r.next_step, 40)}
+                        </TableCell>
+                        <TableCell className="text-right font-medium">
+                          {formatCurrency(r.amount)}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground whitespace-nowrap">
+                          {r.lead_source ?? "—"}
+                        </TableCell>
+                        <TableCell
+                          className="text-muted-foreground max-w-[16rem]"
+                          title={r.description ?? ""}
                         >
-                          {r.name}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {r.owner_name ?? "—"}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground whitespace-nowrap">
-                        {formatDate(r.contract_end_date)}
-                      </TableCell>
-                      <TableCell className="text-right font-medium">
-                        {formatCurrency(r.amount)}
-                      </TableCell>
-                      <TableCell>
-                        <span
-                          className={cn(
-                            "inline-flex items-center rounded-md px-2 py-1 text-xs font-medium",
-                            urgencyClass(r.days_until_renewal),
-                          )}
-                        >
-                          {r.days_until_renewal !== null
-                            ? `${r.days_until_renewal} days`
-                            : "—"}
-                        </span>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                          {truncate(r.description, 60)}
+                        </TableCell>
+                        <TableCell>
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-md px-2 py-1 text-xs font-medium",
+                              urgencyClass(days),
+                            )}
+                          >
+                            {days !== null ? `${days}d` : "—"}
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
                 <tfoot>
                   <tr className="border-t bg-muted/40">
-                    <td className="px-4 py-2 text-sm font-medium" colSpan={4}>
-                      Total ({totals.count} renewal{totals.count === 1 ? "" : "s"})
+                    <td className="px-4 py-2 text-sm font-medium" colSpan={6}>
+                      Total ({upcomingTotals.count} renewal
+                      {upcomingTotals.count === 1 ? "" : "s"})
                     </td>
                     <td className="px-4 py-2 text-right font-semibold">
-                      {formatCurrency(totals.total)}
+                      {formatCurrency(upcomingTotals.total)}
                     </td>
-                    <td />
+                    <td colSpan={3} />
                   </tr>
                 </tfoot>
               </Table>
@@ -628,23 +839,29 @@ export function RenewalsQueue() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm text-muted-foreground font-medium">
-                  Closed-Won Renewals (last 18 months)
+                <CardTitle className="text-xs text-muted-foreground font-medium">
+                  Closed-Won renewals
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-3xl font-bold">{closedTotals.count}</p>
+                <p className="text-2xl font-bold">{closedTotals.count}</p>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  {closedRange.label}
+                </p>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm text-muted-foreground font-medium">
-                  Total ARR Renewed
+                <CardTitle className="text-xs text-muted-foreground font-medium">
+                  Total ARR renewed
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-3xl font-bold text-primary">
+                <p className="text-2xl font-bold text-primary">
                   {formatCurrency(closedTotals.total)}
+                </p>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Sum of filtered renewals
                 </p>
               </CardContent>
             </Card>
@@ -660,28 +877,30 @@ export function RenewalsQueue() {
             <EmptyState
               icon={RefreshCw}
               title="No closed-won renewals"
-              description={
-                owners.length > 0
-                  ? "No closed-won renewals match the current owner filter."
-                  : "No renewal-kind opportunities have been won in the last 18 months."
-              }
+              description="No renewal-kind opportunities match the current filters."
             />
           ) : (
-            <div className="border rounded-lg overflow-hidden">
+            <div className="border rounded-lg overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Owner</TableHead>
                     <TableHead>Account</TableHead>
                     <TableHead>Opportunity</TableHead>
-                    <TableHead>Owner</TableHead>
-                    <TableHead>Closed</TableHead>
+                    <TableHead>Close Date</TableHead>
                     <TableHead>Contract End</TableHead>
-                    <TableHead className="text-right">ARR</TableHead>
+                    <TableHead>Next Step</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead>Lead Source</TableHead>
+                    <TableHead>Description</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {closedWonFiltered.map((r) => (
                     <TableRow key={r.id}>
+                      <TableCell className="text-muted-foreground whitespace-nowrap">
+                        {r.owner_name ?? "—"}
+                      </TableCell>
                       <TableCell>
                         <Link
                           to={`/accounts/${r.account_id}`}
@@ -698,30 +917,43 @@ export function RenewalsQueue() {
                           {r.name}
                         </Link>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {r.owner_name ?? "—"}
-                      </TableCell>
                       <TableCell className="text-muted-foreground whitespace-nowrap">
                         {formatDate(r.close_date)}
                       </TableCell>
                       <TableCell className="text-muted-foreground whitespace-nowrap">
                         {formatDate(r.contract_end_date)}
                       </TableCell>
+                      <TableCell
+                        className="text-muted-foreground max-w-[12rem]"
+                        title={r.next_step ?? ""}
+                      >
+                        {truncate(r.next_step, 40)}
+                      </TableCell>
                       <TableCell className="text-right font-medium">
                         {formatCurrency(r.amount)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground whitespace-nowrap">
+                        {r.lead_source ?? "—"}
+                      </TableCell>
+                      <TableCell
+                        className="text-muted-foreground max-w-[16rem]"
+                        title={r.description ?? ""}
+                      >
+                        {truncate(r.description, 60)}
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
                 <tfoot>
                   <tr className="border-t bg-muted/40">
-                    <td className="px-4 py-2 text-sm font-medium" colSpan={5}>
+                    <td className="px-4 py-2 text-sm font-medium" colSpan={6}>
                       Total ({closedTotals.count} renewal
                       {closedTotals.count === 1 ? "" : "s"})
                     </td>
                     <td className="px-4 py-2 text-right font-semibold">
                       {formatCurrency(closedTotals.total)}
                     </td>
+                    <td colSpan={2} />
                   </tr>
                 </tfoot>
               </Table>
