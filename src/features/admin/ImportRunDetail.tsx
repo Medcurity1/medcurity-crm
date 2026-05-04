@@ -139,9 +139,20 @@ export function ImportRunDetail() {
     if (!runId) return;
     try {
       const summary = await revertMutation.mutateAsync(runId);
-      toast.success(
-        `Reverted ${summary.reverted} change${summary.reverted === 1 ? "" : "s"}; ${summary.skipped} skipped.`
-      );
+      const noun = (n: number) => `${n} change${n === 1 ? "" : "s"}`;
+      if (summary.reverted > 0 && summary.skipped === 0) {
+        toast.success(`Revert successful — ${noun(summary.reverted)} rolled back.`);
+      } else if (summary.reverted > 0 && summary.skipped > 0) {
+        toast.success(
+          `Revert partially successful — ${noun(summary.reverted)} rolled back, ${summary.skipped} skipped (record edited after import).`
+        );
+      } else if (summary.skipped > 0) {
+        toast.warning(
+          `Nothing was reverted — all ${noun(summary.skipped)} were skipped (records edited after the import). The run is now marked as Partially reverted on the history tab so you have a record of the attempt.`
+        );
+      } else {
+        toast.info("This run had no recorded changes to revert.");
+      }
     } catch (e) {
       toast.error(`Revert failed: ${(e as Error).message}`);
     }

@@ -136,6 +136,21 @@ export function ImportRunsList() {
                           <span className={`inline-block px-2 py-0.5 rounded text-xs ${badge.tone}`}>
                             {badge.label}
                           </span>
+                          {r.reverted_at && (
+                            <div className="text-[10px] text-muted-foreground mt-0.5">
+                              {(() => {
+                                const summary = r.revert_summary;
+                                const counts = summary
+                                  ? `${summary.reverted ?? 0} reverted${
+                                      (summary.skipped ?? 0) > 0
+                                        ? `, ${summary.skipped} skipped`
+                                        : ""
+                                    } · `
+                                  : "";
+                                return `${counts}${formatDate(r.reverted_at)}`;
+                              })()}
+                            </div>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-right">
                           <Button

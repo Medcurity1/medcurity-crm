@@ -433,11 +433,28 @@ async function revertImportRun(runId: string): Promise<RevertSummary> {
     }
   }
 
-  // Update the run itself
+  // Update the run itself. We always stamp reverted_at + revert_summary
+  // when revert is invoked, even if `reverted === 0` (e.g. every record
+  // was touched after the import so nothing could be safely reverted).
+  // Otherwise the history list would still say "Completed" and the user
+  // would have no record that revert was even attempted. Status:
+  //   - 'reverted'           — every change came back (clean revert)
+  //   - 'partially_reverted' — some came back, some didn't (mixed)
+  //                           OR none came back but at least one was
+  //                           attempted-and-skipped (still a revert
+  //                           attempt the user should see)
+  //   - else                 — no changes existed to revert in the first
+  //                           place; leave status alone
   const { data: userData } = await supabase.auth.getUser();
-  const finalStatus: ImportRunStatus =
-    skipped === 0 ? "reverted" : reverted === 0 ? run.status : "partially_reverted";
-  await supabase
+  let finalStatus: ImportRunStatus;
+  if (reverted > 0 && skipped === 0) {
+    finalStatus = "reverted";
+  } else if (reverted > 0 || skipped > 0) {
+    finalStatus = "partially_reverted";
+  } else {
+    finalStatus = run.status;
+  }
+  const { error: runUpdateErr } = await supabase
     .from("import_runs")
     .update({
       status: finalStatus,
@@ -446,6 +463,14 @@ async function revertImportRun(runId: string): Promise<RevertSummary> {
       revert_summary: { reverted, skipped, by_reason: byReason },
     })
     .eq("id", runId);
+  if (runUpdateErr) {
+    // Don't silently lose this — the per-record revert may have run
+    // fine, but if we can't stamp the run row the history list will
+    // keep saying "Completed" and the user won't know a revert ran.
+    throw new Error(
+      `Revert applied but failed to update run status: ${runUpdateErr.message}`
+    );
+  }
 
   return { reverted, skipped, by_reason: byReason };
 }
