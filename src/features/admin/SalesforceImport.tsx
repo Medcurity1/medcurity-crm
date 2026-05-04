@@ -2262,21 +2262,23 @@ export function SalesforceImport() {
     });
     // Reconcile phone extension across two possible sources: the
     // explicit Phone Extension column (mapped.phone_ext) and an
-    // inline "x###"/"ext ###" inside mapped.phone. After this block:
-    //   - mapped.phone always carries the ext inline (so display +
-    //     edit paths see the full value as one string)
-    //   - mapped.phone_ext column is also populated with the digits
-    //     (so anyone querying that column gets the same answer)
-    //   - on a mismatch we keep the explicit phone_ext column value
-    //     (it was intentionally mapped) and push a warning so the
-    //     user can reconcile in the admin UI
+    // inline "x###"/"ext ###" inside mapped.phone.
+    //
+    // When the two sources AGREE (or only one is present): canonicalize
+    // — phone carries the ext inline AND phone_ext column gets the
+    // same digits. So display/edit and column queries see the same value.
+    //
+    // When the two sources DISAGREE: leave both as-is (don't pick a
+    // "winner" since either could be the right one) and push a warning
+    // identifying the row so the user can investigate manually.
     {
       const inlineMatch = mapped.phone?.match(/(?:x|ext\.?)\s*(\d+)/i);
       const inlineExt = inlineMatch ? inlineMatch[1] : "";
       const explicitExt = (mapped.phone_ext ?? "").trim();
-      let canonicalExt = "";
-      if (inlineExt && explicitExt && inlineExt !== explicitExt) {
-        canonicalExt = explicitExt;
+      const isMismatch =
+        !!inlineExt && !!explicitExt && inlineExt !== explicitExt;
+
+      if (isMismatch) {
         if (warnings) {
           const who = [
             mapped.first_name,
@@ -2288,28 +2290,29 @@ export function SalesforceImport() {
             .join(" ")
             .trim() || "(unidentified row)";
           warnings.push(
-            `Phone ext mismatch for ${who}: phone column has "x${inlineExt}", phone_ext column has "${explicitExt}". Kept "${explicitExt}" — please reconcile.`
+            `Phone ext mismatch for ${who}: phone column has "x${inlineExt}", phone_ext column has "${explicitExt}". Left both as-is — please investigate.`
           );
         }
+        // Don't touch mapped.phone or mapped.phone_ext — both stay.
       } else {
-        canonicalExt = inlineExt || explicitExt;
-      }
-      if (mapped.phone) {
-        // Strip any inline ext, then re-append the canonical one so
-        // both representations end up consistent.
-        const phoneCore = mapped.phone
-          .replace(/\s*(?:x|ext\.?)\s*\d+\s*$/i, "")
-          .trim();
-        mapped.phone = canonicalExt
-          ? `${phoneCore} x${canonicalExt}`
-          : phoneCore;
-      }
-      if (canonicalExt && mapped.phone) {
-        mapped.phone_ext = canonicalExt;
-      } else {
-        // No phone, no ext, or orphan ext with no phone — don't write
-        // a useless "x123" alone or leave a stale empty value behind.
-        delete mapped.phone_ext;
+        const canonicalExt = inlineExt || explicitExt;
+        if (mapped.phone) {
+          // Strip any inline ext, then re-append the canonical one so
+          // both representations end up consistent.
+          const phoneCore = mapped.phone
+            .replace(/\s*(?:x|ext\.?)\s*\d+\s*$/i, "")
+            .trim();
+          mapped.phone = canonicalExt
+            ? `${phoneCore} x${canonicalExt}`
+            : phoneCore;
+        }
+        if (canonicalExt && mapped.phone) {
+          mapped.phone_ext = canonicalExt;
+        } else {
+          // No phone, no ext, or orphan ext with no phone — don't write
+          // a useless "x123" alone or leave a stale empty value behind.
+          delete mapped.phone_ext;
+        }
       }
     }
     // Normalize phone + mobile_phone to canonical "(XXX) XXX-XXXX [x###]"
