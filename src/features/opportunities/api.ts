@@ -161,6 +161,7 @@ export function useCreateOpportunity() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["opportunities"] });
       qc.invalidateQueries({ queryKey: ["pipeline"] });
+      qc.invalidateQueries({ queryKey: ["renewal_queue"] });
     },
   });
 }
@@ -182,6 +183,7 @@ export function useUpdateOpportunity() {
       qc.invalidateQueries({ queryKey: ["opportunities"] });
       qc.invalidateQueries({ queryKey: ["opportunities", vars.id] });
       qc.invalidateQueries({ queryKey: ["pipeline"] });
+      qc.invalidateQueries({ queryKey: ["renewal_queue"] });
     },
   });
 }
@@ -198,6 +200,7 @@ export function useBulkUpdateOwner() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["opportunities"] });
       qc.invalidateQueries({ queryKey: ["pipeline"] });
+      qc.invalidateQueries({ queryKey: ["renewal_queue"] });
     },
   });
 }
@@ -212,6 +215,8 @@ export function useDeleteOpportunity() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["pipeline"] });
+      qc.invalidateQueries({ queryKey: ["renewal_queue"] });
     },
   });
 }
@@ -228,6 +233,8 @@ export function useBulkDeleteOpportunities() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["pipeline"] });
+      qc.invalidateQueries({ queryKey: ["renewal_queue"] });
     },
   });
 }
@@ -246,6 +253,7 @@ export function useArchiveOpportunity() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["opportunities"] });
       qc.invalidateQueries({ queryKey: ["pipeline"] });
+      qc.invalidateQueries({ queryKey: ["renewal_queue"] });
     },
   });
 }
