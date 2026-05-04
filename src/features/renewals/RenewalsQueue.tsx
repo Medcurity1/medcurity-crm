@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Check, ChevronsUpDown, RefreshCw, X } from "lucide-react";
+import { Check, ChevronsUpDown, Download, RefreshCw, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useUsers } from "@/features/leads/api";
 import { PageHeader } from "@/components/PageHeader";
@@ -70,6 +70,7 @@ type RenewalRow = {
   owner_name: string | null;
   contract_end_date: string | null;
   close_date: string;
+  expected_close_date: string | null;
   amount: number;
   stage: string;
   kind: string;
@@ -95,7 +96,7 @@ function useUpcomingRenewals() {
       const { data, error } = await supabase
         .from("opportunities")
         .select(
-          "id, account_id, owner_user_id, contract_end_date, close_date, amount, stage, kind, name, next_step, lead_source, description, account:accounts!inner(id, name, archived_at), owner:user_profiles!owner_user_id(id, full_name)",
+          "id, account_id, owner_user_id, contract_end_date, close_date, expected_close_date, amount, stage, kind, name, next_step, lead_source, description, account:accounts!inner(id, name, archived_at), owner:user_profiles!owner_user_id(id, full_name)",
         )
         .is("archived_at", null)
         .eq("stage", "closed_won")
@@ -116,6 +117,7 @@ function useUpcomingRenewals() {
             owner_name: o.owner?.full_name ?? null,
             contract_end_date: o.contract_end_date,
             close_date: o.close_date,
+            expected_close_date: o.expected_close_date,
             amount: Number(o.amount) || 0,
             stage: o.stage,
             kind: o.kind,
@@ -142,7 +144,7 @@ function useClosedWonRenewals() {
       const { data, error } = await supabase
         .from("opportunities")
         .select(
-          "id, account_id, owner_user_id, contract_end_date, close_date, amount, stage, kind, name, next_step, lead_source, description, account:accounts!inner(id, name, archived_at), owner:user_profiles!owner_user_id(id, full_name)",
+          "id, account_id, owner_user_id, contract_end_date, close_date, expected_close_date, amount, stage, kind, name, next_step, lead_source, description, account:accounts!inner(id, name, archived_at), owner:user_profiles!owner_user_id(id, full_name)",
         )
         .is("archived_at", null)
         .eq("stage", "closed_won")
@@ -162,6 +164,7 @@ function useClosedWonRenewals() {
             owner_name: o.owner?.full_name ?? null,
             contract_end_date: o.contract_end_date,
             close_date: o.close_date,
+            expected_close_date: o.expected_close_date,
             amount: Number(o.amount) || 0,
             stage: o.stage,
             kind: o.kind,
@@ -212,12 +215,86 @@ function quarterLabel(d: Date): string {
 function monthLabel(d: Date): string {
   return d.toLocaleString("en-US", { month: "short", year: "numeric" });
 }
-function truncate(s: string | null | undefined, n = 60): string {
-  if (!s) return "—";
-  return s.length > n ? s.slice(0, n) + "…" : s;
-}
 function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
+}
+
+/** Build month buckets covering the filter window. Falls back to the
+ * current calendar quarter if no bounds are set. Capped so that very
+ * wide ranges don't render dozens of cards. */
+function monthsInRange(
+  start: Date | null,
+  end: Date | null,
+  fallbackAround: Date,
+  cap = 6,
+): { start: Date; end: Date; label: string }[] {
+  const s = start ?? startOfQuarter(fallbackAround);
+  const e =
+    end ??
+    new Date(
+      startOfQuarter(fallbackAround).getFullYear(),
+      startOfQuarter(fallbackAround).getMonth() + 3,
+      0,
+    );
+  const months: { start: Date; end: Date; label: string }[] = [];
+  const cursor = new Date(s.getFullYear(), s.getMonth(), 1);
+  while (cursor <= e && months.length < cap) {
+    const mStart = new Date(cursor);
+    const mEnd = endOfMonth(cursor);
+    months.push({ start: mStart, end: mEnd, label: monthLabel(mStart) });
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return months;
+}
+
+function csvEscape(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  const s = String(v);
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function downloadCsv(filename: string, rows: RenewalRow[], tab: "upcoming" | "closed-won") {
+  const header = [
+    "Owner",
+    "Account",
+    "Opportunity",
+    tab === "upcoming" ? "Contract End" : "Close Date",
+    tab === "upcoming" ? "Close Date" : "Contract End",
+    "Expected Close",
+    "Next Step",
+    "Amount",
+    "Lead Source",
+    "Description",
+  ];
+  const lines = [header.map(csvEscape).join(",")];
+  for (const r of rows) {
+    lines.push(
+      [
+        r.owner_name ?? "",
+        r.account_name,
+        r.name,
+        tab === "upcoming" ? (r.contract_end_date ?? "") : r.close_date,
+        tab === "upcoming" ? r.close_date : (r.contract_end_date ?? ""),
+        r.expected_close_date ?? "",
+        r.next_step ?? "",
+        r.amount,
+        r.lead_source ?? "",
+        r.description ?? "",
+      ]
+        .map(csvEscape)
+        .join(","),
+    );
+  }
+  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 type DatePreset = "all" | "30" | "60" | "90" | "120" | "this-quarter" | "this-year" | "custom";
@@ -519,22 +596,22 @@ export function RenewalsQueue() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [closedWon, owners.join(","), excludeAccount, preset, customRange.start, customRange.end]);
 
-  // Three-month-of-quarter breakdown — show every month in the current
-  // calendar quarter so the services meeting can plan ahead easily,
-  // not just the current month.
-  const quarterMonths = useMemo(() => {
-    const qStart = startOfQuarter(today);
-    return [0, 1, 2].map((i) => {
-      const m = new Date(qStart.getFullYear(), qStart.getMonth() + i, 1);
-      const mEnd = endOfMonth(m);
-      return { start: m, end: mEnd, label: monthLabel(m) };
-    });
-  }, [today.getMonth(), today.getFullYear()]);
+  // Month buckets reflect whatever filter window is active, so reps can
+  // see the breakdown change as they switch between "Next 30 days",
+  // "This quarter", a custom range, etc.
+  const upcomingMonthBuckets = useMemo(
+    () => monthsInRange(upcomingRange.start, upcomingRange.end, today),
+    [upcomingRange.start, upcomingRange.end, today.getMonth(), today.getFullYear()],
+  );
+  const closedMonthBuckets = useMemo(
+    () => monthsInRange(closedRange.start, closedRange.end, today),
+    [closedRange.start, closedRange.end, today.getMonth(), today.getFullYear()],
+  );
 
   const upcomingTotals = useMemo(() => {
     const list = upcomingFiltered ?? [];
     const total = list.reduce((s, r) => s + r.amount, 0);
-    const monthly = quarterMonths.map(({ start, end, label }) => {
+    const monthly = upcomingMonthBuckets.map(({ start, end, label }) => {
       const inWindow = list.filter((r) =>
         inDateRange(r.contract_end_date, start, end),
       );
@@ -545,15 +622,26 @@ export function RenewalsQueue() {
       };
     });
     return { count: list.length, total, monthly };
-  }, [upcomingFiltered, quarterMonths]);
+  }, [upcomingFiltered, upcomingMonthBuckets]);
 
   const closedTotals = useMemo(() => {
     const list = closedWonFiltered ?? [];
+    const monthly = closedMonthBuckets.map(({ start, end, label }) => {
+      const inWindow = list.filter((r) =>
+        inDateRange(r.close_date, start, end),
+      );
+      return {
+        label,
+        count: inWindow.length,
+        total: inWindow.reduce((s, r) => s + r.amount, 0),
+      };
+    });
     return {
       count: list.length,
       total: list.reduce((s, r) => s + r.amount, 0),
+      monthly,
     };
-  }, [closedWonFiltered]);
+  }, [closedWonFiltered, closedMonthBuckets]);
 
   return (
     <div>
@@ -678,7 +766,27 @@ export function RenewalsQueue() {
         </TabsList>
 
         <TabsContent value="upcoming" className="mt-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs text-muted-foreground">
+              {upcomingRange.label} • monthly breakdown follows the filter window
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                downloadCsv(
+                  `renewals-upcoming-${isoDate(today)}.csv`,
+                  upcomingFiltered ?? [],
+                  "upcoming",
+                )
+              }
+              disabled={!upcomingFiltered?.length}
+            >
+              <Download className="h-4 w-4 mr-1.5" />
+              Export CSV
+            </Button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-xs text-muted-foreground font-medium">
@@ -707,22 +815,26 @@ export function RenewalsQueue() {
                 </p>
               </CardContent>
             </Card>
-            {upcomingTotals.monthly.map((m) => (
-              <Card key={m.label}>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-xs text-muted-foreground font-medium">
-                    {m.label}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-2xl font-bold">{formatCurrency(m.total)}</p>
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    {m.count} renewal{m.count === 1 ? "" : "s"}
-                  </p>
-                </CardContent>
-              </Card>
-            ))}
           </div>
+          {upcomingTotals.monthly.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+              {upcomingTotals.monthly.map((m) => (
+                <Card key={m.label}>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-xs text-muted-foreground font-medium">
+                      {m.label}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-lg font-semibold">{formatCurrency(m.total)}</p>
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      {m.count} renewal{m.count === 1 ? "" : "s"}
+                    </p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
 
           {upcomingLoading ? (
             <div className="space-y-2">
@@ -746,18 +858,27 @@ export function RenewalsQueue() {
                     <TableHead>Opportunity</TableHead>
                     <TableHead>Contract End</TableHead>
                     <TableHead>Close Date</TableHead>
-                    <TableHead>Next Step</TableHead>
+                    <TableHead>Expected Close</TableHead>
+                    <TableHead className="min-w-[12rem]">Next Step</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
                     <TableHead>Lead Source</TableHead>
-                    <TableHead>Description</TableHead>
+                    <TableHead className="min-w-[16rem]">Description</TableHead>
                     <TableHead>Days</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {upcomingFiltered.map((r) => {
                     const days = daysBetween(today, r.contract_end_date);
+                    const slip =
+                      r.expected_close_date && r.close_date
+                        ? Math.round(
+                            (new Date(r.expected_close_date).getTime() -
+                              new Date(r.close_date).getTime()) /
+                              (1000 * 60 * 60 * 24),
+                          )
+                        : null;
                     return (
-                      <TableRow key={r.id}>
+                      <TableRow key={r.id} className="align-top">
                         <TableCell className="text-muted-foreground whitespace-nowrap">
                           {r.owner_name ?? "—"}
                         </TableCell>
@@ -783,28 +904,37 @@ export function RenewalsQueue() {
                         <TableCell className="text-muted-foreground whitespace-nowrap">
                           {formatDate(r.close_date)}
                         </TableCell>
-                        <TableCell
-                          className="text-muted-foreground max-w-[12rem]"
-                          title={r.next_step ?? ""}
-                        >
-                          {truncate(r.next_step, 40)}
+                        <TableCell className="whitespace-nowrap">
+                          <div className="text-muted-foreground">
+                            {formatDate(r.expected_close_date)}
+                          </div>
+                          {slip !== null && slip !== 0 && (
+                            <div
+                              className={cn(
+                                "text-[10px] mt-0.5",
+                                slip > 0 ? "text-amber-600" : "text-emerald-600",
+                              )}
+                            >
+                              {slip > 0 ? `+${slip}d slip` : `${slip}d early`}
+                            </div>
+                          )}
                         </TableCell>
-                        <TableCell className="text-right font-medium">
+                        <TableCell className="text-muted-foreground max-w-[16rem] whitespace-pre-wrap break-words">
+                          {r.next_step ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-right font-medium whitespace-nowrap">
                           {formatCurrency(r.amount)}
                         </TableCell>
                         <TableCell className="text-muted-foreground whitespace-nowrap">
                           {r.lead_source ?? "—"}
                         </TableCell>
-                        <TableCell
-                          className="text-muted-foreground max-w-[16rem]"
-                          title={r.description ?? ""}
-                        >
-                          {truncate(r.description, 60)}
+                        <TableCell className="text-muted-foreground max-w-[20rem] whitespace-pre-wrap break-words">
+                          {r.description ?? "—"}
                         </TableCell>
                         <TableCell>
                           <span
                             className={cn(
-                              "inline-flex items-center rounded-md px-2 py-1 text-xs font-medium",
+                              "inline-flex items-center rounded-md px-2 py-1 text-xs font-medium whitespace-nowrap",
                               urgencyClass(days),
                             )}
                           >
@@ -817,7 +947,7 @@ export function RenewalsQueue() {
                 </TableBody>
                 <tfoot>
                   <tr className="border-t bg-muted/40">
-                    <td className="px-4 py-2 text-sm font-medium" colSpan={6}>
+                    <td className="px-4 py-2 text-sm font-medium" colSpan={7}>
                       Total ({upcomingTotals.count} renewal
                       {upcomingTotals.count === 1 ? "" : "s"})
                     </td>
@@ -833,7 +963,27 @@ export function RenewalsQueue() {
         </TabsContent>
 
         <TabsContent value="closed-won" className="mt-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs text-muted-foreground">
+              {closedRange.label} • monthly breakdown follows the filter window
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                downloadCsv(
+                  `renewals-closed-won-${isoDate(today)}.csv`,
+                  closedWonFiltered ?? [],
+                  "closed-won",
+                )
+              }
+              disabled={!closedWonFiltered?.length}
+            >
+              <Download className="h-4 w-4 mr-1.5" />
+              Export CSV
+            </Button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-xs text-muted-foreground font-medium">
@@ -863,6 +1013,25 @@ export function RenewalsQueue() {
               </CardContent>
             </Card>
           </div>
+          {closedTotals.monthly.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+              {closedTotals.monthly.map((m) => (
+                <Card key={m.label}>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-xs text-muted-foreground font-medium">
+                      {m.label}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-lg font-semibold">{formatCurrency(m.total)}</p>
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      {m.count} renewal{m.count === 1 ? "" : "s"}
+                    </p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
 
           {closedLoading ? (
             <div className="space-y-2">
@@ -885,65 +1054,87 @@ export function RenewalsQueue() {
                     <TableHead>Account</TableHead>
                     <TableHead>Opportunity</TableHead>
                     <TableHead>Close Date</TableHead>
+                    <TableHead>Expected Close</TableHead>
                     <TableHead>Contract End</TableHead>
-                    <TableHead>Next Step</TableHead>
+                    <TableHead className="min-w-[12rem]">Next Step</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
                     <TableHead>Lead Source</TableHead>
-                    <TableHead>Description</TableHead>
+                    <TableHead className="min-w-[16rem]">Description</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {closedWonFiltered.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell className="text-muted-foreground whitespace-nowrap">
-                        {r.owner_name ?? "—"}
-                      </TableCell>
-                      <TableCell>
-                        <Link
-                          to={`/accounts/${r.account_id}`}
-                          className="font-medium text-primary hover:underline"
-                        >
-                          {r.account_name}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Link
-                          to={`/opportunities/${r.id}`}
-                          className="text-sm hover:underline"
-                        >
-                          {r.name}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground whitespace-nowrap">
-                        {formatDate(r.close_date)}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground whitespace-nowrap">
-                        {formatDate(r.contract_end_date)}
-                      </TableCell>
-                      <TableCell
-                        className="text-muted-foreground max-w-[12rem]"
-                        title={r.next_step ?? ""}
-                      >
-                        {truncate(r.next_step, 40)}
-                      </TableCell>
-                      <TableCell className="text-right font-medium">
-                        {formatCurrency(r.amount)}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground whitespace-nowrap">
-                        {r.lead_source ?? "—"}
-                      </TableCell>
-                      <TableCell
-                        className="text-muted-foreground max-w-[16rem]"
-                        title={r.description ?? ""}
-                      >
-                        {truncate(r.description, 60)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {closedWonFiltered.map((r) => {
+                    const slip =
+                      r.expected_close_date && r.close_date
+                        ? Math.round(
+                            (new Date(r.close_date).getTime() -
+                              new Date(r.expected_close_date).getTime()) /
+                              (1000 * 60 * 60 * 24),
+                          )
+                        : null;
+                    return (
+                      <TableRow key={r.id} className="align-top">
+                        <TableCell className="text-muted-foreground whitespace-nowrap">
+                          {r.owner_name ?? "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Link
+                            to={`/accounts/${r.account_id}`}
+                            className="font-medium text-primary hover:underline"
+                          >
+                            {r.account_name}
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          <Link
+                            to={`/opportunities/${r.id}`}
+                            className="text-sm hover:underline"
+                          >
+                            {r.name}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground whitespace-nowrap">
+                          {formatDate(r.close_date)}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          <div className="text-muted-foreground">
+                            {formatDate(r.expected_close_date)}
+                          </div>
+                          {slip !== null && slip !== 0 && (
+                            <div
+                              className={cn(
+                                "text-[10px] mt-0.5",
+                                slip > 0 ? "text-amber-600" : "text-emerald-600",
+                              )}
+                            >
+                              {slip > 0
+                                ? `closed ${slip}d late`
+                                : `closed ${-slip}d early`}
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground whitespace-nowrap">
+                          {formatDate(r.contract_end_date)}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground max-w-[16rem] whitespace-pre-wrap break-words">
+                          {r.next_step ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-right font-medium whitespace-nowrap">
+                          {formatCurrency(r.amount)}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground whitespace-nowrap">
+                          {r.lead_source ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground max-w-[20rem] whitespace-pre-wrap break-words">
+                          {r.description ?? "—"}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
                 <tfoot>
                   <tr className="border-t bg-muted/40">
-                    <td className="px-4 py-2 text-sm font-medium" colSpan={6}>
+                    <td className="px-4 py-2 text-sm font-medium" colSpan={7}>
                       Total ({closedTotals.count} renewal
                       {closedTotals.count === 1 ? "" : "s"})
                     </td>
