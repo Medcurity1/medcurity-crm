@@ -20,6 +20,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/formatters";
+import {
+  loadGoals,
+  saveGoals,
+  goalStatus,
+  STATUS_HEX,
+  STATUS_BG,
+  type Goals,
+  type GoalStatus,
+} from "@/features/reports/dashboardGoals";
 
 /**
  * Team Dashboard — CRM-native port of the Python /Team Dashboard
@@ -29,61 +38,14 @@ import { formatCurrency } from "@/lib/formatters";
  *
  * Each KPI:
  *  - shows current value vs goal with a progress bar
+ *  - has a status dot (red < 50%, yellow 50-89%, green ≥ 90% of goal)
  *  - has a Why-this-number hint so the user can validate the metric
  *  - links to a drill-down (filtered list / underlying view) so the
  *    raw data is one click away
  *
- * Goals are editable inline by admins (persisted to localStorage for
- * now — DB-backed goals/history can come next).
+ * Goals are editable inline OR centrally via Admin → Dashboard Goals.
+ * Both write to the same localStorage key (`team_dashboard_goals_v1`).
  */
-
-const GOALS_LS_KEY = "team_dashboard_goals_v1";
-
-interface Goals {
-  arr: number;
-  new_customers: number;
-  new_sales: number;
-  total_active_pipeline: number;
-  sql: number;
-  mql: number;
-  renewals_amount: number;
-  nrr_customer_pct: number;
-  nrr_dollar_pct: number;
-  qtd_billing: number;
-}
-
-const DEFAULT_GOALS: Goals = {
-  arr: 1_100_000,
-  new_customers: 24,
-  new_sales: 36_000,
-  total_active_pipeline: 800_000,
-  sql: 15,
-  mql: 75,
-  renewals_amount: 150_000,
-  nrr_customer_pct: 90,
-  nrr_dollar_pct: 90,
-  qtd_billing: 350_000,
-};
-
-function loadGoals(): Goals {
-  if (typeof window === "undefined") return DEFAULT_GOALS;
-  try {
-    const raw = window.localStorage.getItem(GOALS_LS_KEY);
-    if (!raw) return DEFAULT_GOALS;
-    const parsed = JSON.parse(raw);
-    return { ...DEFAULT_GOALS, ...parsed };
-  } catch {
-    return DEFAULT_GOALS;
-  }
-}
-
-function saveGoals(g: Goals) {
-  try {
-    window.localStorage.setItem(GOALS_LS_KEY, JSON.stringify(g));
-  } catch {
-    /* ignore */
-  }
-}
 
 interface MetricsRow {
   fiscal_period: string;
@@ -212,6 +174,19 @@ export function TeamDashboard() {
   useEffect(() => {
     saveGoals(goals);
   }, [goals]);
+
+  // Pick up goals saved from Admin → Dashboard Goals (cross-tab + same-tab).
+  useEffect(() => {
+    function refresh() {
+      setGoals(loadGoals());
+    }
+    window.addEventListener("storage", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.removeEventListener("storage", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, []);
 
   const { data: m, isLoading, error } = useDashboardMetrics();
   const { data: lost } = useLostCustomers();
@@ -353,6 +328,15 @@ export function TeamDashboard() {
 
       {arrTrend && arrTrend.length > 0 && (
         <ChartCard title="ARR Trend (rolling 365)">
+          <p className="text-[11px] text-muted-foreground mb-2">
+            Each dot is colored vs the ARR goal:{" "}
+            <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 align-middle mr-1" />
+            ≥ 90%{" "}
+            <span className="inline-block h-2 w-2 rounded-full bg-amber-500 align-middle ml-2 mr-1" />
+            50–89%{" "}
+            <span className="inline-block h-2 w-2 rounded-full bg-red-500 align-middle ml-2 mr-1" />
+            &lt; 50%
+          </p>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={arrTrend.slice(-18)}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -366,9 +350,28 @@ export function TeamDashboard() {
                 type="monotone"
                 dataKey="trailing_365_arr"
                 stroke="#2563eb"
-                dot={false}
                 strokeWidth={2}
                 name="Trailing 365 ARR"
+                dot={(props: any) => {
+                  const { cx, cy, payload, index } = props;
+                  if (cx == null || cy == null) {
+                    return <g key={`dot-${index ?? 0}`} />;
+                  }
+                  const v = Number(payload?.trailing_365_arr ?? 0);
+                  const fill = STATUS_HEX[goalStatus(v, goals.arr)];
+                  return (
+                    <circle
+                      key={`dot-${index ?? 0}`}
+                      cx={cx}
+                      cy={cy}
+                      r={4}
+                      fill={fill}
+                      stroke="#fff"
+                      strokeWidth={1}
+                    />
+                  );
+                }}
+                activeDot={{ r: 6 }}
               />
             </LineChart>
           </ResponsiveContainer>
@@ -444,6 +447,19 @@ export function TeamDashboard() {
           onGoalChange={(v) => setGoals((g) => ({ ...g, nrr_dollar_pct: v }))}
           editable={isAdmin}
           hint="(starting ARR − churn $ QTD) / starting ARR."
+        />
+        <KpiCard
+          label="QTD Billing Goal"
+          value={formatCurrency(num(m.new_customer_amount_qtd) + renewalsClosedAmt)}
+          progress={pct(
+            num(m.new_customer_amount_qtd) + renewalsClosedAmt,
+            goals.qtd_billing,
+          )}
+          goal={goals.qtd_billing}
+          formatGoal={formatCurrency}
+          onGoalChange={(v) => setGoals((g) => ({ ...g, qtd_billing: v }))}
+          editable={isAdmin}
+          hint="New Sales $ QTD + Renewals Closed $ QTD. Replace with billing system data when wired."
         />
       </Section>
 
@@ -565,18 +581,10 @@ export function TeamDashboard() {
 
       {/* ----- Development ----- */}
       <Section title="Development" tone="bg-rose-50 dark:bg-rose-950/30">
-        <KpiCard
-          label="QTD Billing Goal"
-          value={formatCurrency(num(m.new_customer_amount_qtd) + renewalsClosedAmt)}
-          progress={pct(
-            num(m.new_customer_amount_qtd) + renewalsClosedAmt,
-            goals.qtd_billing,
-          )}
-          goal={goals.qtd_billing}
-          formatGoal={formatCurrency}
-          onGoalChange={(v) => setGoals((g) => ({ ...g, qtd_billing: v }))}
-          editable={isAdmin}
-          hint="New Sales $ QTD + Renewals Closed $ QTD. Replace with billing system data when wired."
+        <PlaceholderCard
+          label="Roadmap Items"
+          message="Line-item view (date, status, checkbox) lands once a project tracker is wired (ClickUp/Linear/etc.)."
+          cta="Tracker connector pending"
         />
         <PlaceholderCard
           label="Production Health"
@@ -683,12 +691,49 @@ function KpiCard({
     setEditing(false);
   }
 
+  // Approximate "actual" from progress so we can color the dot. progress
+  // is clamped to 100 by the caller, so for >100% of goal we show green.
+  const status: GoalStatus =
+    goal > 0 && progress >= 90
+      ? "green"
+      : goal > 0 && progress >= 50
+      ? "yellow"
+      : goal > 0
+      ? "red"
+      : "neutral";
+  const dotClass = STATUS_BG[status];
+  const barClass =
+    status === "green"
+      ? "bg-emerald-500"
+      : status === "yellow"
+      ? "bg-amber-500"
+      : status === "red"
+      ? "bg-red-500"
+      : "bg-primary";
+
   return (
     <Card>
       <CardContent className="p-3 space-y-2">
         <div>
           <div className="flex items-center justify-between gap-1">
-            <p className="text-xs text-muted-foreground font-medium">{label}</p>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span
+                aria-hidden="true"
+                title={
+                  status === "green"
+                    ? "≥ 90% of goal"
+                    : status === "yellow"
+                    ? "50–89% of goal"
+                    : status === "red"
+                    ? "< 50% of goal"
+                    : "No goal set"
+                }
+                className={`inline-block h-2 w-2 rounded-full ${dotClass} shrink-0`}
+              />
+              <p className="text-xs text-muted-foreground font-medium truncate">
+                {label}
+              </p>
+            </div>
             {to && (
               <Link
                 to={to}
@@ -703,7 +748,7 @@ function KpiCard({
         </div>
         <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
           <div
-            className="h-full bg-primary transition-all"
+            className={`h-full transition-all ${barClass}`}
             style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
           />
         </div>

@@ -19,6 +19,7 @@ import { AuditLogViewer } from "./AuditLogViewer";
 import { AutomationsManager } from "./AutomationsManager";
 import { SystemInfo } from "./SystemInfo";
 import { DataHealthDashboard } from "./DataHealthDashboard";
+import { DashboardGoalsManager } from "./DashboardGoalsManager";
 import { Loader2 } from "lucide-react";
 
 /**
@@ -36,6 +37,7 @@ const TOP_TABS = [
   "permissions",
   "integrations",
   "automations",
+  "dashboard-goals",
   "data-import",
   "audit-log",
   "data-health",
@@ -158,6 +160,7 @@ export function AdminSettings() {
           <TabsTrigger value="permissions">Permissions</TabsTrigger>
           <TabsTrigger value="integrations">Integrations</TabsTrigger>
           <TabsTrigger value="automations">Automations</TabsTrigger>
+          <TabsTrigger value="dashboard-goals">Dashboard Goals</TabsTrigger>
           <TabsTrigger value="data-import">Data Import</TabsTrigger>
           <TabsTrigger value="audit-log">Audit Log</TabsTrigger>
           <TabsTrigger value="data-health">Data Health</TabsTrigger>
@@ -259,6 +262,10 @@ export function AdminSettings() {
 
         <TabsContent value="automations">
           <AutomationsManager />
+        </TabsContent>
+
+        <TabsContent value="dashboard-goals">
+          <DashboardGoalsManager />
         </TabsContent>
 
         <TabsContent value="data-import" className="space-y-6">
