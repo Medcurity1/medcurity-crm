@@ -51,6 +51,47 @@ function entityDetailUrl(table: string, recordId: string): string | null {
   return `${base}/${recordId}`;
 }
 
+/**
+ * Short label for the skip-reason badge — keeps the badge readable
+ * without truncating. The full explanation lives in the `title` tooltip
+ * (and in the revert-confirmation dialog).
+ */
+function skipReasonLabel(reason: string): string {
+  if (reason.startsWith("update_failed")) return "DB error";
+  switch (reason) {
+    case "edited_after_import":
+      return "edited or already reverted";
+    case "record_deleted":
+      return "record deleted";
+    case "fetch_failed":
+      return "fetch failed";
+    default:
+      return reason.replace(/_/g, " ");
+  }
+}
+
+function skipReasonExplanation(reason: string): string {
+  if (reason.startsWith("update_failed")) {
+    return `The DB rejected the revert update. Full message: ${reason}`;
+  }
+  switch (reason) {
+    case "edited_after_import":
+      return (
+        "The record's updated_at is newer than the import. This means " +
+        "either a human edited it after the import, OR a previous revert " +
+        "on this run already wrote to it (a revert bumps updated_at, so " +
+        "re-reverting an already-reverted run will skip everything that " +
+        "came back the first time)."
+      );
+    case "record_deleted":
+      return "The record was deleted since the import — there's nothing to revert.";
+    case "fetch_failed":
+      return "Could not fetch the current row state from the DB to compare against. Retry the revert.";
+    default:
+      return reason;
+  }
+}
+
 function fmt(value: unknown): string {
   if (value === null || value === undefined) return "—";
   if (typeof value === "string") return value === "" ? "—" : value;
@@ -272,11 +313,49 @@ export function ImportRunDetail() {
                 <AlertDialogContent>
                   <AlertDialogHeader>
                     <AlertDialogTitle>Revert this import?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This will write the previous values back to every record this import
-                      changed, except where you've edited the record since the import ran —
-                      those edits are preserved. This cannot be undone (re-import the
-                      original CSV if you change your mind).
+                    <AlertDialogDescription asChild>
+                      <div className="space-y-3">
+                        <p>
+                          This will write the previous values back to every record this
+                          import changed. Some changes may be skipped — they'll show up as
+                          "Skipped" in the Changes table below with one of these reasons:
+                        </p>
+                        <ul className="list-disc pl-5 space-y-1.5 text-sm">
+                          <li>
+                            <strong>edited after import</strong> — the record's{" "}
+                            <code className="text-xs">updated_at</code> is newer than the
+                            import. Could be a human edit OR a previous revert on this run
+                            (a revert itself bumps <code className="text-xs">updated_at</code>,
+                            so re-reverting an already-reverted run will skip everything
+                            that came back the first time — that's expected, not a bug).
+                          </li>
+                          <li>
+                            <strong>record deleted</strong> — the record was removed since
+                            the import; nothing to revert.
+                          </li>
+                          <li>
+                            <strong>fetch failed / update failed</strong> — a transient
+                            DB error. Retry the revert; check the run's revert summary.
+                          </li>
+                        </ul>
+                        <p className="text-sm">
+                          This action cannot be undone. If you change your mind, re-import
+                          the original CSV.
+                        </p>
+                        {(run.status === "reverted" ||
+                          run.status === "partially_reverted") && (
+                          <p className="text-sm bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md p-2">
+                            <strong>Heads up:</strong> this run was already reverted
+                            {run.reverted_at
+                              ? ` on ${new Date(run.reverted_at).toLocaleString()}`
+                              : ""}
+                            . Running revert again will skip everything that came back
+                            then (those records now look "edited after import" because
+                            the prior revert wrote to them). Only changes that were
+                            skipped the first time stand a chance of coming back now.
+                          </p>
+                        )}
+                      </div>
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
@@ -369,8 +448,11 @@ export function ImportRunDetail() {
                           {c.reverted_at ? (
                             <Badge variant="secondary">Reverted</Badge>
                           ) : c.revert_skipped_reason ? (
-                            <Badge variant="outline" title={c.revert_skipped_reason}>
-                              Skipped
+                            <Badge
+                              variant="outline"
+                              title={skipReasonExplanation(c.revert_skipped_reason)}
+                            >
+                              Skipped: {skipReasonLabel(c.revert_skipped_reason)}
                             </Badge>
                           ) : (
                             <Badge variant="outline">Pending</Badge>
