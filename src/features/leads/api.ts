@@ -224,7 +224,17 @@ export function useArchiveLead() {
 
 interface ConvertLeadInput {
   leadId: string;
-  accountName: string;
+  /**
+   * Either pick an existing account by id, OR create a new one with
+   * accountName. Exactly one of these should be set. We require this
+   * shape (rather than letting the caller free-type a name and silently
+   * auto-create) because the old behavior was creating a new account
+   * on every conversion — even when the same company already existed —
+   * leading to duplicate accounts. Forcing the caller to be explicit
+   * about new-vs-existing prevents that.
+   */
+  existingAccountId?: string;
+  accountName?: string;
   firstName: string;
   lastName: string;
   email: string | null;
@@ -248,22 +258,43 @@ export function useConvertLead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: ConvertLeadInput) => {
-      // 1. Create account
-      const { data: account, error: accountError } = await supabase
-        .from("accounts")
-        .insert({
-          name: input.accountName,
-          industry: input.industry,
-          website: input.website,
-          billing_street: input.street,
-          billing_city: input.city,
-          billing_state: input.state,
-          billing_zip: input.zip,
-          billing_country: input.country,
-        })
-        .select()
-        .single();
-      if (accountError) throw accountError;
+      if (!input.existingAccountId && !input.accountName) {
+        throw new Error("Pick an existing account or provide a new account name.");
+      }
+      if (input.existingAccountId && input.accountName) {
+        throw new Error("Convert lead got both existingAccountId and accountName — pick one.");
+      }
+
+      // 1. Account: pick existing OR create new. The existing-account
+      // path leaves the account untouched (we don't overwrite address /
+      // industry from a lead — the account is the system of record).
+      let account: { id: string; name: string } | null = null;
+      if (input.existingAccountId) {
+        const { data, error } = await supabase
+          .from("accounts")
+          .select("id, name")
+          .eq("id", input.existingAccountId)
+          .single();
+        if (error) throw error;
+        account = data as { id: string; name: string };
+      } else {
+        const { data, error: accountError } = await supabase
+          .from("accounts")
+          .insert({
+            name: input.accountName!,
+            industry: input.industry,
+            website: input.website,
+            billing_street: input.street,
+            billing_city: input.city,
+            billing_state: input.state,
+            billing_zip: input.zip,
+            billing_country: input.country,
+          })
+          .select()
+          .single();
+        if (accountError) throw accountError;
+        account = data as { id: string; name: string };
+      }
 
       // 2. Create contact
       const { data: contact, error: contactError } = await supabase
