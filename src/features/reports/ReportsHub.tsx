@@ -25,8 +25,18 @@ const DashboardsTab = lazy(() =>
 const StandardReports = lazy(() =>
   import("./StandardReports").then((m) => ({ default: m.StandardReports }))
 );
+const TeamDashboard = lazy(() =>
+  import("./TeamDashboard").then((m) => ({ default: m.TeamDashboard }))
+);
 
-const VALID_TABS = ["standard", "reports", "dashboards", "forecasting", "analytics"] as const;
+const VALID_TABS = [
+  "standard",
+  "team-dashboard",
+  "reports",
+  "dashboards",
+  "forecasting",
+  "analytics",
+] as const;
 type TabValue = (typeof VALID_TABS)[number];
 
 function LazyPanel({ children }: { children: React.ReactNode }) {
@@ -79,6 +89,7 @@ export function ReportsHub() {
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="standard">Standard</TabsTrigger>
+          <TabsTrigger value="team-dashboard">Team Dashboard</TabsTrigger>
           <TabsTrigger value="reports">Custom Builder</TabsTrigger>
           <TabsTrigger value="dashboards">Dashboards</TabsTrigger>
           <TabsTrigger value="forecasting">Forecasting</TabsTrigger>
@@ -88,6 +99,12 @@ export function ReportsHub() {
         <TabsContent value="standard" className="mt-4">
           <LazyPanel>
             <StandardReports />
+          </LazyPanel>
+        </TabsContent>
+
+        <TabsContent value="team-dashboard" className="mt-4">
+          <LazyPanel>
+            <TeamDashboard />
           </LazyPanel>
         </TabsContent>
 
