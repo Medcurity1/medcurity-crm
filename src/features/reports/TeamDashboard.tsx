@@ -1,7 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Pencil, Check, X, ExternalLink, Info, Plus, Trash2 } from "lucide-react";
+import {
+  Pencil,
+  Check,
+  X,
+  ExternalLink,
+  Info,
+  Plus,
+  Trash2,
+  Eye,
+  EyeOff,
+  Save,
+  RotateCcw,
+  Lock,
+  LockOpen,
+} from "lucide-react";
 import {
   ResponsiveContainer,
   XAxis,
@@ -17,7 +31,15 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatCurrency } from "@/lib/formatters";
 import {
   STATUS_BG,
@@ -38,19 +60,35 @@ import {
   type Milestone,
 } from "@/features/reports/dashboardMilestones";
 import {
+  METRICS,
+  METRIC_KEYS,
+  DEFAULT_GOALS,
   getQuarterGoals,
   saveQuarterGoals,
+  resetQuarterToDefaults,
+  isQuarterLocked,
+  setQuarterLocked,
+  listSavedQuarters,
   quarterLabelFromDate,
   quarterMonths,
+  parseQuarterLabel,
   currentMonthIndex,
   fillMonthGoals,
   type QuarterGoals,
   type MetricKey,
+  type MetricMeta,
 } from "@/features/reports/dashboardGoalsByQuarter";
 import {
   SegmentedLineChart,
   type SegmentPoint,
 } from "@/features/reports/SegmentedLineChart";
+import {
+  captureWeeklySnapshotIfNeeded,
+  loadSnapshots,
+  deleteSnapshot,
+  SNAPSHOT_METRIC_LABELS,
+  type DashboardSnapshot,
+} from "@/features/reports/dashboardSnapshots";
 
 /**
  * Team Dashboard — CRM-native port of the Python /Team Dashboard
@@ -110,12 +148,6 @@ interface ArrPoint {
   fiscal_period: string;
   closed_won_amount: number;
   trailing_365_arr: number;
-}
-
-interface RenewalDueRow {
-  id: string;
-  amount: number;
-  contract_end_date: string;
 }
 
 function useDashboardMetrics() {
@@ -248,33 +280,6 @@ function useMqlRowsQtd(quarterStart: string, quarterEnd: string) {
   });
 }
 
-/** Renewals "due this quarter" — closed-won opps whose contract_end_date
- * sits inside the current calendar quarter. Different from the metrics
- * view's `renewals_amount_qtd`, which is closed-won renewals ALREADY
- * won this quarter. Both numbers matter to the team. */
-function useRenewalsDueThisQuarter(quarterStart: string, quarterEnd: string) {
-  return useQuery({
-    queryKey: ["team-dashboard", "renewals-due", quarterStart, quarterEnd],
-    enabled: !!quarterStart && !!quarterEnd,
-    queryFn: async (): Promise<RenewalDueRow[]> => {
-      const { data, error } = await supabase
-        .from("opportunities")
-        .select("id, amount, contract_end_date")
-        .is("archived_at", null)
-        .eq("stage", "closed_won")
-        .not("contract_end_date", "is", null)
-        .gte("contract_end_date", quarterStart)
-        .lte("contract_end_date", quarterEnd);
-      if (error) throw error;
-      return (data ?? []).map((r: any) => ({
-        id: r.id,
-        amount: Number(r.amount) || 0,
-        contract_end_date: r.contract_end_date,
-      }));
-    },
-  });
-}
-
 /**
  * Dashboard "owner" = the one user allowed to edit goals, the manual
  * widgets (quote, QTD billing override), and the dev milestones. Other
@@ -286,11 +291,27 @@ function useRenewalsDueThisQuarter(quarterStart: string, quarterEnd: string) {
  */
 const DASHBOARD_OWNER_EMAIL = "braydenf@medcurity.com";
 
+type DashboardView = "dashboard" | "goals" | "historical";
+
 export function TeamDashboard() {
   const { profile, user } = useAuth();
-  const isOwner =
+  /** Raw owner status (drives tab/toggle visibility — always honored). */
+  const isOwnerAccount =
     (profile?.role === "admin" || profile?.role === "super_admin") &&
     user?.email === DASHBOARD_OWNER_EMAIL;
+
+  /** Owner-only sub-view selector (Dashboard / Goals / Historical). */
+  const [view, setView] = useState<DashboardView>("dashboard");
+
+  /**
+   * Owner can preview the dashboard the way other users see it (no
+   * inline goal pencils, no quote/widget editors, no milestone Edit
+   * button). When `viewAsTeam` is true we suppress edit affordances by
+   * collapsing the effective owner flag, but the tabs/toggle stay
+   * visible so the owner can flip back.
+   */
+  const [viewAsTeam, setViewAsTeam] = useState(false);
+  const isOwner = isOwnerAccount && !viewAsTeam;
 
   // Per-quarter goals — Codex-parity store. The dashboard always reads
   // the *current* quarter; the Goals admin page can edit any quarter.
@@ -374,10 +395,6 @@ export function TeamDashboard() {
   const { data: m, isLoading, error } = useDashboardMetrics();
   const { data: lost } = useLostCustomers();
   const { data: arrTrend } = useArrTrend();
-  const { data: renewalsDue } = useRenewalsDueThisQuarter(
-    m?.fiscal_quarter_start ?? "",
-    m?.fiscal_quarter_end ?? "",
-  );
   const { data: newCustomerRows } = useNewCustomersRows(
     m?.fiscal_quarter_start ?? "",
     m?.fiscal_quarter_end ?? "",
@@ -394,32 +411,6 @@ export function TeamDashboard() {
     m?.fiscal_quarter_start ?? "",
     m?.fiscal_quarter_end ?? "",
   );
-
-  // Per-month breakdown of renewals due in the current quarter.
-  const renewalsDueByMonth = useMemo(() => {
-    if (!m || !renewalsDue) return [] as { label: string; total: number; count: number }[];
-    const start = new Date(m.fiscal_quarter_start);
-    const months = [0, 1, 2].map((i) => {
-      const ms = new Date(start.getFullYear(), start.getMonth() + i, 1);
-      const me = new Date(start.getFullYear(), start.getMonth() + i + 1, 0);
-      return {
-        label: ms.toLocaleString("en-US", { month: "short", year: "numeric" }),
-        start: ms,
-        end: me,
-      };
-    });
-    return months.map(({ label, start: ms, end }) => {
-      const inWindow = renewalsDue.filter((r) => {
-        const d = new Date(r.contract_end_date);
-        return d >= ms && d <= end;
-      });
-      return {
-        label,
-        count: inWindow.length,
-        total: inWindow.reduce((s, r) => s + r.amount, 0),
-      };
-    });
-  }, [m, renewalsDue]);
 
   // Running-total point arrays for the segmented line charts.
   const qStart = m?.fiscal_quarter_start ?? "";
@@ -523,9 +514,71 @@ export function TeamDashboard() {
       }));
   }, [arrTrend, goals.arr]);
 
+  // Capture a weekly snapshot once per ISO week the first time the
+  // dashboard renders with real metrics that week. Idempotent — safe
+  // to call on every render. Owner-only: writing snapshots from the
+  // team-view session would pollute history with the wrong author.
+  useEffect(() => {
+    if (!isOwnerAccount || !m) return;
+    captureWeeklySnapshotIfNeeded({
+      metrics: {
+        arr: num(m.current_arr),
+        new_customers_qtd: num(m.new_customers_qtd),
+        new_customer_amount_qtd: num(m.new_customer_amount_qtd),
+        pipeline_amount: num(m.pipeline_amount),
+        renewals_amount_qtd: num(m.renewals_amount_qtd),
+        nrr_by_customer_pct: num(
+          m.nrr_by_customer_true_pct ?? m.nrr_by_customer_legacy_pct,
+        ),
+        nrr_by_dollar_pct: num(
+          m.nrr_by_dollar_true_pct ?? m.nrr_by_dollar_legacy_pct,
+        ),
+        sql_qtd: num(m.sql_qtd),
+        mql_unique_qtd: num(m.mql_unique_qtd),
+        qtd_billing:
+          widgets.qtd_billing_actual ??
+          num(m.new_customer_amount_qtd) + num(m.renewals_amount_qtd),
+      },
+      milestones,
+      quote_text: widgets.quote_text,
+      quote_author: widgets.quote_author,
+    });
+  }, [isOwnerAccount, m, milestones, widgets]);
+
+  // ---- Owner sub-views (Goals, Historical) ----
+  // Both gated to the raw owner account so a "team view" preview still
+  // shows them in the tab bar.
+  const tabBar = isOwnerAccount ? (
+    <DashboardTabBar
+      view={view}
+      onView={setView}
+      viewAsTeam={viewAsTeam}
+      onViewAsTeam={setViewAsTeam}
+    />
+  ) : null;
+
+  if (isOwnerAccount && view === "goals") {
+    return (
+      <div className="space-y-4">
+        {tabBar}
+        <GoalsView />
+      </div>
+    );
+  }
+
+  if (isOwnerAccount && view === "historical") {
+    return (
+      <div className="space-y-4">
+        {tabBar}
+        <HistoricalView />
+      </div>
+    );
+  }
+
   if (isLoading) {
     return (
       <div className="space-y-4">
+        {tabBar}
         <Skeleton className="h-8 w-64" />
         <Skeleton className="h-48 w-full" />
         <Skeleton className="h-48 w-full" />
@@ -535,19 +588,25 @@ export function TeamDashboard() {
 
   if (error) {
     return (
-      <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-        Couldn't load dashboard metrics: {(error as Error).message}
+      <div className="space-y-4">
+        {tabBar}
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+          Couldn't load dashboard metrics: {(error as Error).message}
+        </div>
       </div>
     );
   }
 
   if (!m) {
     return (
-      <Card>
-        <CardContent className="p-6 text-sm text-muted-foreground text-center">
-          No metrics available yet for the current quarter.
-        </CardContent>
-      </Card>
+      <div className="space-y-4">
+        {tabBar}
+        <Card>
+          <CardContent className="p-6 text-sm text-muted-foreground text-center">
+            No metrics available yet for the current quarter.
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
@@ -555,16 +614,13 @@ export function TeamDashboard() {
   const newCustomers = num(m.new_customers_qtd);
   const newSales = num(m.new_customer_amount_qtd);
   const pipeline = num(m.pipeline_amount);
-  const sqlCount = num(m.sql_qtd);
-  const mql = num(m.mql_unique_qtd);
   const renewalsClosedAmt = num(m.renewals_amount_qtd);
-  const renewalsDueAmt = (renewalsDue ?? []).reduce((s, r) => s + r.amount, 0);
-  const renewalsDueCount = (renewalsDue ?? []).length;
   const nrrCust = num(m.nrr_by_customer_true_pct ?? m.nrr_by_customer_legacy_pct);
   const nrrDollar = num(m.nrr_by_dollar_true_pct ?? m.nrr_by_dollar_legacy_pct);
 
   return (
     <div className="space-y-6">
+      {tabBar}
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
           <h2 className="text-xl font-bold tracking-tight">Team Dashboard</h2>
@@ -680,33 +736,10 @@ export function TeamDashboard() {
         )}
       </div>
 
-      {/* ----- Marketing ----- */}
-      <Section title="Marketing" tone="bg-violet-50 dark:bg-violet-950/30">
-        <KpiCard
-          label="SQL QTD"
-          value={String(sqlCount)}
-          progress={pct(sqlCount, goals.sql)}
-          goal={goals.sql}
-          formatGoal={(v) => String(v)}
-          onGoalChange={(v) => setGoalQuarter("sql", v)}
-          editable={isOwner}
-          hint="Accounts with a contact whose sql_date falls in current quarter (v_sql_accounts)."
-          to="/contacts?qualification=sql"
-        />
-        <KpiCard
-          label="MQL QTD (unique)"
-          value={String(mql)}
-          progress={pct(mql, goals.mql)}
-          goal={goals.mql}
-          formatGoal={(v) => String(v)}
-          onGoalChange={(v) => setGoalQuarter("mql", v)}
-          editable={isOwner}
-          hint="Deduped MQL across leads + contacts in current quarter."
-          to="/leads?qualification=mql"
-        />
-      </Section>
-
-      {/* Marketing running totals */}
+      {/* ----- Marketing (graphs-only per Codex parity) ----- */}
+      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+        Marketing
+      </h3>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         {sqlRunning.length > 1 && (
           <ChartCard
@@ -758,17 +791,6 @@ export function TeamDashboard() {
           editable={isOwner}
           hint={`${m.renewals_qtd ?? 0} renewal-kind closed-won w/ close_date this quarter (v_renewals_qtd, excludes EHR Implementation).`}
           to="/renewals?tab=closed-won&preset=this-quarter"
-        />
-        <KpiCard
-          label="Renewals Due This Q"
-          value={formatCurrency(renewalsDueAmt)}
-          progress={pct(renewalsDueAmt, goals.renewals_amount)}
-          goal={goals.renewals_amount}
-          formatGoal={formatCurrency}
-          onGoalChange={(v) => setGoalQuarter("renewals_number", v)}
-          editable={isOwner}
-          hint={`${renewalsDueCount} closed-won opps with contract_end_date in this quarter — at-risk ARR.`}
-          to="/renewals?preset=this-quarter"
         />
         <KpiCard
           label="NRR by Customer"
@@ -944,28 +966,6 @@ export function TeamDashboard() {
         </ChartCard>
       )}
 
-      {/* Per-month breakdown of renewals due in current quarter */}
-      {renewalsDueByMonth.length > 0 && (
-        <div>
-          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-            Renewals due — by month of current quarter
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {renewalsDueByMonth.map((mb) => (
-              <Card key={mb.label}>
-                <CardContent className="p-3">
-                  <p className="text-xs text-muted-foreground font-medium">{mb.label}</p>
-                  <p className="text-xl font-semibold mt-0.5">{formatCurrency(mb.total)}</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                    {mb.count} renewal{mb.count === 1 ? "" : "s"}
-                  </p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Lost customers list */}
       <div>
         <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
@@ -1069,8 +1069,8 @@ export function TeamDashboard() {
           <CardContent className="p-3 space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs text-muted-foreground">
-                Manually-tracked milestones. Status auto-derives from
-                completion date + checkbox; type a status to override.
+                Manually-tracked milestones. Status auto-derives from the
+                completion date + complete checkbox.
               </p>
               {isOwner && (
                 <div className="flex items-center gap-1.5">
@@ -1251,28 +1251,11 @@ export function TeamDashboard() {
                             />
                           </td>
                           <td className="px-2 py-1.5">
-                            {canEdit ? (
-                              <Input
-                                value={item.status}
-                                onChange={(e) =>
-                                  setMilestones((items) =>
-                                    items.map((d) =>
-                                      d.id === item.id
-                                        ? { ...d, status: e.target.value }
-                                        : d,
-                                    ),
-                                  )
-                                }
-                                className="h-7 text-sm"
-                                placeholder={status}
-                              />
-                            ) : (
-                              <span
-                                className={`inline-flex px-2 py-0.5 rounded text-[11px] font-medium ${tone}`}
-                              >
-                                {status}
-                              </span>
-                            )}
+                            <span
+                              className={`inline-flex px-2 py-0.5 rounded text-[11px] font-medium ${tone}`}
+                            >
+                              {status}
+                            </span>
                           </td>
                         </tr>
                       );
@@ -1615,4 +1598,615 @@ function PlaceholderCard({
       </CardContent>
     </Card>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Owner-only sub-views: tab bar, Goals, Historical
+// ---------------------------------------------------------------------------
+
+/**
+ * Top-of-page tab bar for the dashboard owner. Always rendered for
+ * isOwnerAccount (even in team-view mode) so the owner can flip back.
+ */
+function DashboardTabBar({
+  view,
+  onView,
+  viewAsTeam,
+  onViewAsTeam,
+}: {
+  view: DashboardView;
+  onView: (v: DashboardView) => void;
+  viewAsTeam: boolean;
+  onViewAsTeam: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b">
+      <div className="flex items-center gap-1">
+        <TabBarButton
+          label="Dashboard"
+          active={view === "dashboard"}
+          onClick={() => onView("dashboard")}
+        />
+        <TabBarButton
+          label="Goals"
+          active={view === "goals"}
+          onClick={() => onView("goals")}
+        />
+        <TabBarButton
+          label="Historical"
+          active={view === "historical"}
+          onClick={() => onView("historical")}
+        />
+      </div>
+      {view === "dashboard" && (
+        <Button
+          variant={viewAsTeam ? "default" : "outline"}
+          size="sm"
+          onClick={() => onViewAsTeam(!viewAsTeam)}
+          title={
+            viewAsTeam
+              ? "Currently previewing as team — click to return to owner view"
+              : "Preview the dashboard the way other users see it"
+          }
+          className="mb-1"
+        >
+          {viewAsTeam ? (
+            <>
+              <EyeOff className="h-3.5 w-3.5 mr-1.5" />
+              Previewing Team View
+            </>
+          ) : (
+            <>
+              <Eye className="h-3.5 w-3.5 mr-1.5" />
+              View as Team
+            </>
+          )}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function TabBarButton({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-3 py-1.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+        active
+          ? "border-primary text-foreground"
+          : "border-transparent text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+// ----- Goals view (per-quarter goal editor) ----------------------------------
+
+function GoalsView() {
+  const currentQuarter = useMemo(() => quarterLabelFromDate(new Date()), []);
+
+  // Available quarters in dropdown: saved + current + a few future quarters.
+  const quarterOptions = useMemo(() => {
+    const set = new Set<string>(listSavedQuarters());
+    set.add(currentQuarter);
+    const parsed = parseQuarterLabel(currentQuarter);
+    if (parsed) {
+      let q = parsed.quarter;
+      let y = parsed.year;
+      for (let i = 0; i < 4; i++) {
+        if (q === 4) {
+          q = 1;
+          y += 1;
+        } else {
+          q = (q + 1) as 1 | 2 | 3 | 4;
+        }
+        set.add(`Q${q}-${y}`);
+      }
+    }
+    return Array.from(set).sort();
+  }, [currentQuarter]);
+
+  const [quarter, setQuarter] = useState<string>(currentQuarter);
+  const [draft, setDraft] = useState<QuarterGoals>(() =>
+    getQuarterGoals(quarter),
+  );
+  const [saved, setSaved] = useState<QuarterGoals>(() =>
+    getQuarterGoals(quarter),
+  );
+  const [locked, setLockedState] = useState<boolean>(() =>
+    isQuarterLocked(quarter),
+  );
+  const [editing, setEditing] = useState<boolean>(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loaded = getQuarterGoals(quarter);
+    setDraft(loaded);
+    setSaved(loaded);
+    setLockedState(isQuarterLocked(quarter));
+    setEditing(false);
+  }, [quarter]);
+
+  useEffect(() => {
+    if (!feedback) return;
+    const id = window.setTimeout(() => setFeedback(null), 2500);
+    return () => window.clearTimeout(id);
+  }, [feedback]);
+
+  const dirty = useMemo(() => {
+    return METRIC_KEYS.some((k) => {
+      const a = draft[k];
+      const b = saved[k];
+      return (
+        a.quarter_goal !== b.quarter_goal ||
+        a.month_goals[0] !== b.month_goals[0] ||
+        a.month_goals[1] !== b.month_goals[1] ||
+        a.month_goals[2] !== b.month_goals[2]
+      );
+    });
+  }, [draft, saved]);
+
+  const months = useMemo(() => quarterMonths(quarter), [quarter]);
+  const canEdit = editing && !locked;
+
+  function handleQuarterGoalChange(key: MetricKey, raw: string) {
+    const meta = METRICS.find((m) => m.key === key)!;
+    const parsed = Number(raw);
+    setDraft((d) => {
+      const q = Number.isFinite(parsed) ? parsed : 0;
+      const next = { ...d };
+      if (meta.locked) {
+        next[key] = { quarter_goal: q, month_goals: [q, q, q] };
+      } else {
+        next[key] = {
+          quarter_goal: q,
+          month_goals: [d[key].month_goals[0], d[key].month_goals[1], q],
+        };
+      }
+      return next;
+    });
+  }
+
+  function handleMonthChange(key: MetricKey, idx: 0 | 1, raw: string) {
+    const parsed = Number(raw);
+    setDraft((d) => {
+      const next = { ...d };
+      const goals = [...d[key].month_goals] as [
+        number | null,
+        number | null,
+        number | null,
+      ];
+      goals[idx] = raw === "" || !Number.isFinite(parsed) ? null : parsed;
+      next[key] = { ...d[key], month_goals: goals };
+      return next;
+    });
+  }
+
+  function handleSave() {
+    saveQuarterGoals(quarter, draft);
+    setSaved(draft);
+    setEditing(false);
+    setFeedback(`Saved goals for ${quarter}.`);
+  }
+
+  function handleResetQuarterDefaults() {
+    resetQuarterToDefaults(quarter);
+    const fresh = getQuarterGoals(quarter);
+    setDraft(fresh);
+    setSaved(fresh);
+    setFeedback(`Reset ${quarter} to defaults.`);
+  }
+
+  function handleResetField(key: MetricKey) {
+    setDraft((d) => ({ ...d, [key]: DEFAULT_GOALS[key] }));
+  }
+
+  function toggleLock() {
+    const next = !locked;
+    setQuarterLocked(quarter, next);
+    setLockedState(next);
+    if (next) setEditing(false);
+    setFeedback(next ? `Locked ${quarter}.` : `Unlocked ${quarter}.`);
+  }
+
+  const groups: Array<MetricMeta["group"]> = [
+    "Sales",
+    "Marketing",
+    "Customer Success",
+  ];
+
+  return (
+    <Card>
+      <CardContent className="p-6 space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold">Dashboard Goals</h2>
+            <p className="text-sm text-muted-foreground max-w-2xl">
+              Set per-quarter targets. Each metric has a quarter goal plus
+              cumulative end-of-month targets (M1, M2, M3). M3 is always the
+              quarter goal; M1/M2 default to even thirds if blank. Locked
+              metrics (NRR %, Active Pipeline) are flat across the quarter.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5">
+              <Label className="text-xs text-muted-foreground">Quarter</Label>
+              <Select value={quarter} onValueChange={setQuarter}>
+                <SelectTrigger className="h-8 w-32 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {quarterOptions.map((q) => (
+                    <SelectItem key={q} value={q}>
+                      {q}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleLock}
+              title={locked ? "Unlock to edit" : "Lock so no edits can happen"}
+            >
+              {locked ? (
+                <>
+                  <Lock className="h-3.5 w-3.5 mr-1.5" />
+                  Locked
+                </>
+              ) : (
+                <>
+                  <LockOpen className="h-3.5 w-3.5 mr-1.5" />
+                  Unlocked
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            {!locked && !editing && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setEditing(true)}
+              >
+                <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                Edit
+              </Button>
+            )}
+            {editing && (
+              <>
+                <Button size="sm" onClick={handleSave} disabled={!dirty}>
+                  <Save className="h-3.5 w-3.5 mr-1.5" />
+                  Save
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setDraft(saved);
+                    setEditing(false);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </>
+            )}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleResetQuarterDefaults}
+            disabled={locked}
+            title="Restore default goals for this quarter"
+          >
+            <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+            Reset Quarter to Defaults
+          </Button>
+        </div>
+
+        {feedback && (
+          <div className="text-xs rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 px-3 py-2">
+            {feedback}
+          </div>
+        )}
+
+        <div className="space-y-5">
+          {groups.map((g) => {
+            const fields = METRICS.filter((m) => m.group === g);
+            if (fields.length === 0) return null;
+            return (
+              <div key={g} className="space-y-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {g}
+                </h3>
+                <div className="overflow-x-auto rounded-md border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr className="text-left">
+                        <th className="px-3 py-2 font-medium w-1/3">Metric</th>
+                        <th className="px-3 py-2 font-medium">Quarter Goal</th>
+                        <th className="px-3 py-2 font-medium">{months[0]}</th>
+                        <th className="px-3 py-2 font-medium">{months[1]}</th>
+                        <th className="px-3 py-2 font-medium">{months[2]}</th>
+                        <th className="px-3 py-2 w-10" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fields.map((meta) => (
+                        <GoalRow
+                          key={meta.key}
+                          meta={meta}
+                          value={draft[meta.key]}
+                          canEdit={canEdit}
+                          onQuarterChange={(raw) =>
+                            handleQuarterGoalChange(meta.key, raw)
+                          }
+                          onMonthChange={(idx, raw) =>
+                            handleMonthChange(meta.key, idx, raw)
+                          }
+                          onReset={() => handleResetField(meta.key)}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function GoalRow({
+  meta,
+  value,
+  canEdit,
+  onQuarterChange,
+  onMonthChange,
+  onReset,
+}: {
+  meta: MetricMeta;
+  value: QuarterGoals[MetricKey];
+  canEdit: boolean;
+  onQuarterChange: (raw: string) => void;
+  onMonthChange: (idx: 0 | 1, raw: string) => void;
+  onReset: () => void;
+}) {
+  function display(v: number | null | undefined): string {
+    if (v == null || !Number.isFinite(v)) return "—";
+    if (meta.format === "currency") return formatCurrency(v);
+    if (meta.format === "percent") return `${v}%`;
+    return String(v);
+  }
+
+  const m1Filled = value.month_goals[0] ?? value.quarter_goal / 3;
+  const m2Filled = value.month_goals[1] ?? (2 * value.quarter_goal) / 3;
+  const m3Filled = value.quarter_goal;
+
+  return (
+    <tr className="border-t">
+      <td className="px-3 py-2 align-top">
+        <div className="font-medium">{meta.label}</div>
+        <div className="text-[11px] text-muted-foreground">{meta.hint}</div>
+      </td>
+      <td className="px-3 py-2 align-top">
+        {canEdit ? (
+          <Input
+            type="number"
+            value={value.quarter_goal}
+            onChange={(e) => onQuarterChange(e.target.value)}
+            className="h-8 text-sm w-32"
+          />
+        ) : (
+          <span className="text-sm">{display(value.quarter_goal)}</span>
+        )}
+      </td>
+      {[0, 1].map((i) => (
+        <td key={i} className="px-3 py-2 align-top">
+          {meta.locked ? (
+            <span className="text-xs text-muted-foreground italic">
+              {display(value.quarter_goal)} (locked)
+            </span>
+          ) : canEdit ? (
+            <Input
+              type="number"
+              value={value.month_goals[i] ?? ""}
+              onChange={(e) => onMonthChange(i as 0 | 1, e.target.value)}
+              placeholder={String(
+                Math.round(((i + 1) * value.quarter_goal) / 3),
+              )}
+              className="h-8 text-sm w-28"
+            />
+          ) : (
+            <span className="text-sm">
+              {value.month_goals[i] == null ? (
+                <span className="text-muted-foreground italic">
+                  {display(i === 0 ? m1Filled : m2Filled)} (auto)
+                </span>
+              ) : (
+                display(value.month_goals[i])
+              )}
+            </span>
+          )}
+        </td>
+      ))}
+      <td className="px-3 py-2 align-top">
+        <span className="text-xs text-muted-foreground italic">
+          {display(m3Filled)} (= Q goal)
+        </span>
+      </td>
+      <td className="px-3 py-2 align-top text-right">
+        {canEdit && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-[11px]"
+            onClick={onReset}
+            title="Reset this metric to default"
+          >
+            Reset
+          </Button>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+// ----- Historical view (weekly snapshots) ------------------------------------
+
+function HistoricalView() {
+  const [snapshots, setSnapshots] = useState<DashboardSnapshot[]>(() =>
+    loadSnapshots(),
+  );
+
+  function refresh() {
+    setSnapshots(loadSnapshots());
+  }
+
+  function handleDelete(weekStart: string) {
+    if (!window.confirm(`Delete snapshot for week of ${weekStart}?`)) return;
+    deleteSnapshot(weekStart);
+    refresh();
+  }
+
+  return (
+    <Card>
+      <CardContent className="p-6 space-y-4">
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold">Historical Snapshots</h2>
+          <p className="text-sm text-muted-foreground max-w-2xl">
+            One snapshot per ISO week, captured automatically the first time
+            you load the dashboard each week. Each row shows the week's KPI
+            values and the delta vs the previous week so you can see
+            week-over-week movement at a glance.
+          </p>
+        </div>
+
+        {snapshots.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No snapshots yet — one will be captured the next time you load
+            the dashboard with metrics available.
+          </p>
+        ) : (
+          <div className="overflow-x-auto rounded-md border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr className="text-left">
+                  <th className="px-3 py-2 font-medium">Week of</th>
+                  <th className="px-3 py-2 font-medium">Quarter</th>
+                  {SNAPSHOT_METRIC_LABELS.map((c) => (
+                    <th
+                      key={c.key}
+                      className="px-3 py-2 font-medium text-right whitespace-nowrap"
+                    >
+                      {c.label}
+                    </th>
+                  ))}
+                  <th className="px-3 py-2 w-10" />
+                </tr>
+              </thead>
+              <tbody>
+                {snapshots.map((snap, idx) => {
+                  // Snapshots are newest-first → previous = next index.
+                  const prev = snapshots[idx + 1];
+                  return (
+                    <tr key={snap.week_start} className="border-t">
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {snap.week_start}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {snap.quarter}
+                      </td>
+                      {SNAPSHOT_METRIC_LABELS.map((c) => (
+                        <td
+                          key={c.key}
+                          className="px-3 py-2 text-right tabular-nums whitespace-nowrap"
+                        >
+                          <div>{formatSnap(snap.metrics[c.key], c.format)}</div>
+                          {prev && (
+                            <DeltaPill
+                              current={snap.metrics[c.key]}
+                              previous={prev.metrics[c.key]}
+                              format={c.format}
+                            />
+                          )}
+                        </td>
+                      ))}
+                      <td className="px-3 py-2 text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0"
+                          onClick={() => handleDelete(snap.week_start)}
+                          title="Delete this snapshot"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function formatSnap(
+  v: number,
+  format: "currency" | "count" | "percent",
+): string {
+  if (!Number.isFinite(v)) return "—";
+  if (format === "currency") return formatCurrency(v);
+  if (format === "percent") return `${v.toFixed(1)}%`;
+  return String(Math.round(v));
+}
+
+function DeltaPill({
+  current,
+  previous,
+  format,
+}: {
+  current: number;
+  previous: number;
+  format: "currency" | "count" | "percent";
+}) {
+  const delta = current - previous;
+  if (!Number.isFinite(delta) || delta === 0) {
+    return (
+      <div className="text-[10px] text-muted-foreground">±0</div>
+    );
+  }
+  const positive = delta > 0;
+  const tone = positive
+    ? "text-emerald-600 dark:text-emerald-400"
+    : "text-red-600 dark:text-red-400";
+  const sign = positive ? "+" : "−";
+  const abs = Math.abs(delta);
+  let body: string;
+  if (format === "currency") body = formatCurrency(abs);
+  else if (format === "percent") body = `${abs.toFixed(1)}%`;
+  else body = String(Math.round(abs));
+  return <div className={`text-[10px] ${tone}`}>{sign}{body}</div>;
 }

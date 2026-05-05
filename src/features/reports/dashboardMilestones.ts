@@ -17,8 +17,13 @@ export interface Milestone {
   project: string;
   completion_date: string; // YYYY-MM-DD
   complete: boolean;
-  /** Free-text override; empty string means "auto". */
-  status: string;
+  /**
+   * Legacy free-text override field. Kept on the type for backwards
+   * compat with existing localStorage records, but the UI no longer
+   * exposes it — status is now purely auto-derived from the date +
+   * complete checkbox per Codex's logic.
+   */
+  status?: string;
 }
 
 export function newMilestone(): Milestone {
@@ -30,7 +35,6 @@ export function newMilestone(): Milestone {
     project: "",
     completion_date: new Date().toISOString().slice(0, 10),
     complete: false,
-    status: "",
   };
 }
 
@@ -47,7 +51,6 @@ function migrateFromLegacy(): Milestone[] {
         project: String(it?.project ?? ""),
         completion_date: String(it?.completion_date ?? ""),
         complete: Boolean(it?.complete),
-        status: typeof it?.status === "string" ? it.status : "",
       }),
     );
   } catch {
@@ -82,9 +85,14 @@ export function saveMilestones(items: Milestone[]) {
   }
 }
 
-/** Auto-derive status from date + complete; user-entered status wins. */
+/**
+ * Auto-derive status from date + complete (Codex parity, no manual
+ * override): Complete (checked) → Complete; due in the past and not
+ * complete → Past Due; due within the next 7 days → Due Soon; further
+ * out → On Track. Status is rendered as a colored badge using
+ * STATUS_TONES below.
+ */
 export function deriveStatus(item: Milestone): string {
-  if (item.status && item.status.trim()) return item.status;
   if (item.complete) return "Complete";
   const due = new Date(item.completion_date);
   if (Number.isNaN(due.getTime())) return "—";
