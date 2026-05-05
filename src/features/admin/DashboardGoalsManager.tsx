@@ -3,78 +3,55 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { formatCurrency } from "@/lib/formatters";
 import {
-  GOAL_FIELDS,
-  loadGoals,
-  saveGoals,
+  METRICS,
+  METRIC_KEYS,
   DEFAULT_GOALS,
-  type Goals,
-  type GoalFieldMeta,
-} from "@/features/reports/dashboardGoals";
-import { Save, RotateCcw } from "lucide-react";
+  getQuarterGoals,
+  saveQuarterGoals,
+  resetQuarterToDefaults,
+  isQuarterLocked,
+  setQuarterLocked,
+  listSavedQuarters,
+  quarterLabelFromDate,
+  quarterMonths,
+  parseQuarterLabel,
+  type QuarterGoals,
+  type MetricKey,
+  type MetricMeta,
+} from "@/features/reports/dashboardGoalsByQuarter";
+import { Save, RotateCcw, Lock, LockOpen, Pencil } from "lucide-react";
 
 /**
- * Admin → Dashboard Goals. Lets admins edit every Team Dashboard goal in
- * one form rather than chasing pencil icons across the dashboard.
+ * Admin → Dashboard Goals. Two tabs:
+ *   - Goals — pick a quarter, edit M1/M2/M3 + quarter goal per metric
+ *   - Historical — placeholder list of past quarters (snapshots)
  *
- * Storage is currently localStorage (per-browser). DB-backed goals with
- * per-quarter history can replace `loadGoals/saveGoals` without changing
- * this component.
- */
-/**
- * Dashboard owner — only this user can edit goals. Other admins see a
- * read-only message. Brayden's call-out: regular admins shouldn't be
- * able to mutate dashboard goals, only the dashboard owner.
+ * Per-quarter store mirrors Codex's Python dashboard so both UIs see
+ * the same data. Only the dashboard owner can edit.
  */
 const DASHBOARD_OWNER_EMAIL = "braydenf@medcurity.com";
 
+type TabKey = "goals" | "historical";
+
 export function DashboardGoalsManager() {
   const { profile, user } = useAuth();
-  const isAdmin =
+  const isOwner =
     (profile?.role === "admin" || profile?.role === "super_admin") &&
     user?.email === DASHBOARD_OWNER_EMAIL;
 
-  const [draft, setDraft] = useState<Goals>(() => loadGoals());
-  const [saved, setSaved] = useState<Goals>(() => loadGoals());
-  const [feedback, setFeedback] = useState<string | null>(null);
+  const [tab, setTab] = useState<TabKey>("goals");
 
-  const dirty = useMemo(
-    () => GOAL_FIELDS.some((f) => draft[f.key] !== saved[f.key]),
-    [draft, saved],
-  );
-
-  useEffect(() => {
-    if (!feedback) return;
-    const id = window.setTimeout(() => setFeedback(null), 2500);
-    return () => window.clearTimeout(id);
-  }, [feedback]);
-
-  function handleChange(key: keyof Goals, raw: string) {
-    const parsed = Number(raw);
-    setDraft((d) => ({
-      ...d,
-      [key]: Number.isFinite(parsed) ? parsed : 0,
-    }));
-  }
-
-  function handleSave() {
-    saveGoals(draft);
-    setSaved(draft);
-    setFeedback("Goals saved.");
-  }
-
-  function handleResetField(key: keyof Goals) {
-    setDraft((d) => ({ ...d, [key]: DEFAULT_GOALS[key] }));
-  }
-
-  function handleResetAll() {
-    setDraft(DEFAULT_GOALS);
-    setFeedback("Restored defaults — click Save to persist.");
-  }
-
-  if (!isAdmin) {
+  if (!isOwner) {
     return (
       <Card>
         <CardContent className="p-6 text-sm text-muted-foreground">
@@ -84,36 +61,279 @@ export function DashboardGoalsManager() {
     );
   }
 
-  const groups = ["Sales", "Marketing", "Customer Success", "Development"] as const;
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-1 border-b">
+        <TabButton
+          label="Goals"
+          active={tab === "goals"}
+          onClick={() => setTab("goals")}
+        />
+        <TabButton
+          label="Historical"
+          active={tab === "historical"}
+          onClick={() => setTab("historical")}
+        />
+      </div>
+      {tab === "goals" ? <GoalsTab /> : <HistoricalTab />}
+    </div>
+  );
+}
+
+function TabButton({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-3 py-1.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+        active
+          ? "border-primary text-foreground"
+          : "border-transparent text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+// --- Goals tab -----------------------------------------------------------
+
+function GoalsTab() {
+  const currentQuarter = useMemo(() => quarterLabelFromDate(new Date()), []);
+
+  // Available quarters in dropdown: saved ones + current + a few future.
+  const quarterOptions = useMemo(() => {
+    const set = new Set<string>(listSavedQuarters());
+    set.add(currentQuarter);
+    // include the next 4 quarters so admin can plan ahead
+    const parsed = parseQuarterLabel(currentQuarter);
+    if (parsed) {
+      let q = parsed.quarter;
+      let y = parsed.year;
+      for (let i = 0; i < 4; i++) {
+        if (q === 4) {
+          q = 1;
+          y += 1;
+        } else {
+          q = (q + 1) as 1 | 2 | 3 | 4;
+        }
+        set.add(`Q${q}-${y}`);
+      }
+    }
+    return Array.from(set).sort();
+  }, [currentQuarter]);
+
+  const [quarter, setQuarter] = useState<string>(currentQuarter);
+  const [draft, setDraft] = useState<QuarterGoals>(() =>
+    getQuarterGoals(quarter),
+  );
+  const [saved, setSaved] = useState<QuarterGoals>(() =>
+    getQuarterGoals(quarter),
+  );
+  const [locked, setLockedState] = useState<boolean>(() =>
+    isQuarterLocked(quarter),
+  );
+  const [editing, setEditing] = useState<boolean>(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  // When the quarter changes, reload draft + saved + lock state.
+  useEffect(() => {
+    const loaded = getQuarterGoals(quarter);
+    setDraft(loaded);
+    setSaved(loaded);
+    setLockedState(isQuarterLocked(quarter));
+    setEditing(false);
+  }, [quarter]);
+
+  useEffect(() => {
+    if (!feedback) return;
+    const id = window.setTimeout(() => setFeedback(null), 2500);
+    return () => window.clearTimeout(id);
+  }, [feedback]);
+
+  const dirty = useMemo(() => {
+    return METRIC_KEYS.some((k) => {
+      const a = draft[k];
+      const b = saved[k];
+      return (
+        a.quarter_goal !== b.quarter_goal ||
+        a.month_goals[0] !== b.month_goals[0] ||
+        a.month_goals[1] !== b.month_goals[1] ||
+        a.month_goals[2] !== b.month_goals[2]
+      );
+    });
+  }, [draft, saved]);
+
+  const months = useMemo(() => quarterMonths(quarter), [quarter]);
+  const canEdit = editing && !locked;
+
+  function handleQuarterGoalChange(key: MetricKey, raw: string) {
+    const meta = METRICS.find((m) => m.key === key)!;
+    const parsed = Number(raw);
+    setDraft((d) => {
+      const q = Number.isFinite(parsed) ? parsed : 0;
+      const next = { ...d };
+      if (meta.locked) {
+        // Locked metric: M1/M2/M3 mirror quarter_goal.
+        next[key] = { quarter_goal: q, month_goals: [q, q, q] };
+      } else {
+        // M3 always tracks quarter_goal; preserve M1/M2.
+        next[key] = {
+          quarter_goal: q,
+          month_goals: [d[key].month_goals[0], d[key].month_goals[1], q],
+        };
+      }
+      return next;
+    });
+  }
+
+  function handleMonthChange(key: MetricKey, idx: 0 | 1, raw: string) {
+    const parsed = Number(raw);
+    setDraft((d) => {
+      const next = { ...d };
+      const goals = [...d[key].month_goals] as [
+        number | null,
+        number | null,
+        number | null,
+      ];
+      goals[idx] = raw === "" || !Number.isFinite(parsed) ? null : parsed;
+      next[key] = { ...d[key], month_goals: goals };
+      return next;
+    });
+  }
+
+  function handleSave() {
+    saveQuarterGoals(quarter, draft);
+    setSaved(draft);
+    setEditing(false);
+    setFeedback(`Saved goals for ${quarter}.`);
+  }
+
+  function handleResetQuarterDefaults() {
+    resetQuarterToDefaults(quarter);
+    const fresh = getQuarterGoals(quarter);
+    setDraft(fresh);
+    setSaved(fresh);
+    setFeedback(`Reset ${quarter} to defaults.`);
+  }
+
+  function handleResetField(key: MetricKey) {
+    setDraft((d) => ({ ...d, [key]: DEFAULT_GOALS[key] }));
+  }
+
+  function toggleLock() {
+    const next = !locked;
+    setQuarterLocked(quarter, next);
+    setLockedState(next);
+    if (next) setEditing(false);
+    setFeedback(next ? `Locked ${quarter}.` : `Unlocked ${quarter}.`);
+  }
+
+  const groups: Array<MetricMeta["group"]> = [
+    "Sales",
+    "Marketing",
+    "Customer Success",
+  ];
 
   return (
     <Card>
-      <CardContent className="p-6 space-y-6">
-        <div className="flex items-start justify-between gap-3">
-          <div>
+      <CardContent className="p-6 space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1">
             <h2 className="text-lg font-semibold">Dashboard Goals</h2>
             <p className="text-sm text-muted-foreground max-w-2xl">
-              Set quarterly targets for every Team Dashboard KPI. Goals power
-              the progress bar, the red / yellow / green status dot on each
-              tile, and the colored points on the ARR trend chart. Stored
-              per-browser for now.
+              Set per-quarter targets. Each metric has a quarter goal plus
+              cumulative end-of-month targets (M1, M2, M3). M3 is always the
+              quarter goal; M1/M2 default to even thirds if blank. Locked
+              metrics (NRR %, Active Pipeline) are flat across the quarter.
             </p>
           </div>
-          <div className="flex gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5">
+              <Label className="text-xs text-muted-foreground">Quarter</Label>
+              <Select value={quarter} onValueChange={setQuarter}>
+                <SelectTrigger className="h-8 w-32 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {quarterOptions.map((q) => (
+                    <SelectItem key={q} value={q}>
+                      {q}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <Button
               variant="outline"
               size="sm"
-              onClick={handleResetAll}
-              title="Restore default goals"
+              onClick={toggleLock}
+              title={locked ? "Unlock to edit" : "Lock so no edits can happen"}
             >
-              <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
-              Restore defaults
-            </Button>
-            <Button size="sm" onClick={handleSave} disabled={!dirty}>
-              <Save className="h-3.5 w-3.5 mr-1.5" />
-              Save
+              {locked ? (
+                <>
+                  <Lock className="h-3.5 w-3.5 mr-1.5" />
+                  Locked
+                </>
+              ) : (
+                <>
+                  <LockOpen className="h-3.5 w-3.5 mr-1.5" />
+                  Unlocked
+                </>
+              )}
             </Button>
           </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            {!locked && !editing && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setEditing(true)}
+              >
+                <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                Edit
+              </Button>
+            )}
+            {editing && (
+              <>
+                <Button size="sm" onClick={handleSave} disabled={!dirty}>
+                  <Save className="h-3.5 w-3.5 mr-1.5" />
+                  Save
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setDraft(saved);
+                    setEditing(false);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </>
+            )}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleResetQuarterDefaults}
+            disabled={locked}
+            title="Restore default goals for this quarter"
+          >
+            <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+            Reset Quarter to Defaults
+          </Button>
         </div>
 
         {feedback && (
@@ -122,26 +342,45 @@ export function DashboardGoalsManager() {
           </div>
         )}
 
-        <div className="space-y-6">
+        <div className="space-y-5">
           {groups.map((g) => {
-            const fields = GOAL_FIELDS.filter((f) => f.group === g);
+            const fields = METRICS.filter((m) => m.group === g);
             if (fields.length === 0) return null;
             return (
               <div key={g} className="space-y-2">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   {g}
                 </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {fields.map((f) => (
-                    <GoalRow
-                      key={f.key}
-                      meta={f}
-                      value={draft[f.key]}
-                      onChange={(raw) => handleChange(f.key, raw)}
-                      onReset={() => handleResetField(f.key)}
-                      isDirty={draft[f.key] !== saved[f.key]}
-                    />
-                  ))}
+                <div className="overflow-x-auto rounded-md border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr className="text-left">
+                        <th className="px-3 py-2 font-medium w-1/3">Metric</th>
+                        <th className="px-3 py-2 font-medium">Quarter Goal</th>
+                        <th className="px-3 py-2 font-medium">{months[0]}</th>
+                        <th className="px-3 py-2 font-medium">{months[1]}</th>
+                        <th className="px-3 py-2 font-medium">{months[2]}</th>
+                        <th className="px-3 py-2 w-10" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fields.map((meta) => (
+                        <MetricRow
+                          key={meta.key}
+                          meta={meta}
+                          value={draft[meta.key]}
+                          canEdit={canEdit}
+                          onQuarterChange={(raw) =>
+                            handleQuarterGoalChange(meta.key, raw)
+                          }
+                          onMonthChange={(idx, raw) =>
+                            handleMonthChange(meta.key, idx, raw)
+                          }
+                          onReset={() => handleResetField(meta.key)}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             );
@@ -152,57 +391,136 @@ export function DashboardGoalsManager() {
   );
 }
 
-function GoalRow({
+function MetricRow({
   meta,
   value,
-  onChange,
+  canEdit,
+  onQuarterChange,
+  onMonthChange,
   onReset,
-  isDirty,
 }: {
-  meta: GoalFieldMeta;
-  value: number;
-  onChange: (raw: string) => void;
+  meta: MetricMeta;
+  value: QuarterGoals[MetricKey];
+  canEdit: boolean;
+  onQuarterChange: (raw: string) => void;
+  onMonthChange: (idx: 0 | 1, raw: string) => void;
   onReset: () => void;
-  isDirty: boolean;
 }) {
-  const display =
-    meta.format === "currency"
-      ? formatCurrency(value)
-      : meta.format === "percent"
-      ? `${value}%`
-      : String(value);
+  function display(v: number | null | undefined): string {
+    if (v == null || !Number.isFinite(v)) return "—";
+    if (meta.format === "currency") return formatCurrency(v);
+    if (meta.format === "percent") return `${v}%`;
+    return String(v);
+  }
+
+  // Display-only values for M1/M2 — when null, show even-thirds preview.
+  const m1Filled = value.month_goals[0] ?? value.quarter_goal / 3;
+  const m2Filled = value.month_goals[1] ?? (2 * value.quarter_goal) / 3;
+  const m3Filled = value.quarter_goal;
 
   return (
-    <div
-      className={`rounded-md border p-3 space-y-1.5 transition-colors ${
-        isDirty
-          ? "border-amber-500/60 bg-amber-50 dark:bg-amber-950/20"
-          : "border-border"
-      }`}
-    >
-      <div className="flex items-baseline justify-between gap-2">
-        <Label className="text-sm font-medium">{meta.label}</Label>
-        <span className="text-[11px] text-muted-foreground">{display}</span>
-      </div>
-      <div className="flex items-center gap-1">
-        <Input
-          type="number"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="h-8 text-sm"
-        />
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-8 px-2 text-[11px]"
-          onClick={onReset}
-          title="Reset to default"
-        >
-          Reset
-        </Button>
-      </div>
-      <p className="text-[11px] text-muted-foreground">{meta.hint}</p>
-    </div>
+    <tr className="border-t">
+      <td className="px-3 py-2 align-top">
+        <div className="font-medium">{meta.label}</div>
+        <div className="text-[11px] text-muted-foreground">{meta.hint}</div>
+      </td>
+      <td className="px-3 py-2 align-top">
+        {canEdit ? (
+          <Input
+            type="number"
+            value={value.quarter_goal}
+            onChange={(e) => onQuarterChange(e.target.value)}
+            className="h-8 text-sm w-32"
+          />
+        ) : (
+          <span className="text-sm">{display(value.quarter_goal)}</span>
+        )}
+      </td>
+      {[0, 1].map((i) => (
+        <td key={i} className="px-3 py-2 align-top">
+          {meta.locked ? (
+            <span className="text-xs text-muted-foreground italic">
+              {display(value.quarter_goal)} (locked)
+            </span>
+          ) : canEdit ? (
+            <Input
+              type="number"
+              value={value.month_goals[i] ?? ""}
+              onChange={(e) => onMonthChange(i as 0 | 1, e.target.value)}
+              placeholder={String(
+                Math.round(((i + 1) * value.quarter_goal) / 3),
+              )}
+              className="h-8 text-sm w-28"
+            />
+          ) : (
+            <span className="text-sm">
+              {value.month_goals[i] == null ? (
+                <span className="text-muted-foreground italic">
+                  {display(i === 0 ? m1Filled : m2Filled)} (auto)
+                </span>
+              ) : (
+                display(value.month_goals[i])
+              )}
+            </span>
+          )}
+        </td>
+      ))}
+      <td className="px-3 py-2 align-top">
+        <span className="text-xs text-muted-foreground italic">
+          {display(m3Filled)} (= Q goal)
+        </span>
+      </td>
+      <td className="px-3 py-2 align-top text-right">
+        {canEdit && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-[11px]"
+            onClick={onReset}
+            title="Reset this metric to default"
+          >
+            Reset
+          </Button>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+// --- Historical tab ------------------------------------------------------
+
+function HistoricalTab() {
+  const saved = useMemo(() => listSavedQuarters(), []);
+  return (
+    <Card>
+      <CardContent className="p-6 space-y-3">
+        <h2 className="text-lg font-semibold">Historical Snapshots</h2>
+        <p className="text-sm text-muted-foreground max-w-2xl">
+          Past-quarter goals and dashboard snapshots. Snapshot capture (a
+          weekly server-side cron writing to a Supabase table) is on the
+          roadmap; for now this lists every quarter that has saved goals.
+        </p>
+        {saved.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No saved quarters yet.
+          </p>
+        ) : (
+          <ul className="text-sm divide-y rounded-md border">
+            {saved.map((q) => (
+              <li
+                key={q}
+                className="px-3 py-2 flex items-center justify-between"
+              >
+                <span className="font-medium">{q}</span>
+                <span className="text-xs text-muted-foreground">
+                  {isQuarterLocked(q) ? "Locked" : "Editable"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   );
 }

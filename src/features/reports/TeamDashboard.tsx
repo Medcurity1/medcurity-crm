@@ -20,8 +20,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency } from "@/lib/formatters";
 import {
-  loadGoals,
-  saveGoals,
   STATUS_BG,
   type Goals,
   type GoalStatus,
@@ -29,11 +27,26 @@ import {
 import {
   loadWidgets,
   saveWidgets,
-  newDevItem,
-  autoStatus,
-  STATUS_TONES,
   type DashboardWidgets,
 } from "@/features/reports/dashboardWidgets";
+import {
+  loadMilestones,
+  saveMilestones,
+  newMilestone,
+  deriveStatus,
+  STATUS_TONES,
+  type Milestone,
+} from "@/features/reports/dashboardMilestones";
+import {
+  getQuarterGoals,
+  saveQuarterGoals,
+  quarterLabelFromDate,
+  quarterMonths,
+  currentMonthIndex,
+  fillMonthGoals,
+  type QuarterGoals,
+  type MetricKey,
+} from "@/features/reports/dashboardGoalsByQuarter";
 import {
   SegmentedLineChart,
   type SegmentPoint,
@@ -279,15 +292,20 @@ export function TeamDashboard() {
     (profile?.role === "admin" || profile?.role === "super_admin") &&
     user?.email === DASHBOARD_OWNER_EMAIL;
 
-  const [goals, setGoals] = useState<Goals>(() => loadGoals());
+  // Per-quarter goals — Codex-parity store. The dashboard always reads
+  // the *current* quarter; the Goals admin page can edit any quarter.
+  const currentQuarter = useMemo(() => quarterLabelFromDate(new Date()), []);
+  const [qgoals, setQgoals] = useState<QuarterGoals>(() =>
+    getQuarterGoals(currentQuarter),
+  );
   useEffect(() => {
-    saveGoals(goals);
-  }, [goals]);
+    saveQuarterGoals(currentQuarter, qgoals);
+  }, [currentQuarter, qgoals]);
 
-  // Pick up goals saved from Admin → Dashboard Goals (cross-tab + same-tab).
+  // Pick up goal edits made on the admin page (cross-tab + same-tab).
   useEffect(() => {
     function refresh() {
-      setGoals(loadGoals());
+      setQgoals(getQuarterGoals(currentQuarter));
     }
     window.addEventListener("storage", refresh);
     window.addEventListener("focus", refresh);
@@ -295,13 +313,63 @@ export function TeamDashboard() {
       window.removeEventListener("storage", refresh);
       window.removeEventListener("focus", refresh);
     };
-  }, []);
+  }, [currentQuarter]);
 
-  // Manual widgets (Most Recent Quote, QTD Billing override, Dev items)
+  // Adapter: legacy `Goals` shape for the unchanged KpiCard / chart code.
+  // All edits flow through to the per-quarter store via `setGoalQuarter`.
+  const goals: Goals = useMemo(
+    () => ({
+      arr: qgoals.arr.quarter_goal,
+      new_customers: qgoals.new_customers.quarter_goal,
+      new_sales: qgoals.new_sales.quarter_goal,
+      total_active_pipeline: qgoals.total_active_pipeline.quarter_goal,
+      sql: qgoals.sql.quarter_goal,
+      mql: qgoals.mql.quarter_goal,
+      renewals_amount: qgoals.renewals_number.quarter_goal,
+      nrr_customer_pct: qgoals.nrr_customer_pct.quarter_goal,
+      nrr_dollar_pct: qgoals.nrr_dollar_pct.quarter_goal,
+      qtd_billing: qgoals.qtd_billing_progress.quarter_goal,
+    }),
+    [qgoals],
+  );
+
+  /** Update a metric's quarter_goal (used by the inline pencil edits). */
+  function setGoalQuarter(key: MetricKey, quarter_goal: number) {
+    setQgoals((q) => ({
+      ...q,
+      [key]: { ...q[key], quarter_goal },
+    }));
+  }
+
+  // Which of the 3 quarter months is "today"? Drives the
+  // "current month goal" subtitle on running-total charts.
+  const monthIdx = useMemo(
+    () => currentMonthIndex(currentQuarter, new Date()),
+    [currentQuarter],
+  );
+  const monthShort = useMemo(() => {
+    const names = quarterMonths(currentQuarter);
+    return monthIdx == null ? names[2] : names[monthIdx];
+  }, [currentQuarter, monthIdx]);
+
+  // Manual widgets (Most Recent Quote, QTD Billing override).
+  // Milestones moved to their own store (`dashboardMilestones`).
   const [widgets, setWidgets] = useState<DashboardWidgets>(() => loadWidgets());
   useEffect(() => {
     saveWidgets(widgets);
   }, [widgets]);
+
+  // Milestones (Development section) — Codex-parity storage.
+  const [milestones, setMilestones] = useState<Milestone[]>(() =>
+    loadMilestones(),
+  );
+  useEffect(() => {
+    saveMilestones(milestones);
+  }, [milestones]);
+  const [milestoneEditMode, setMilestoneEditMode] = useState(false);
+  const [milestoneSelected, setMilestoneSelected] = useState<Set<string>>(
+    new Set(),
+  );
 
   const { data: m, isLoading, error } = useDashboardMetrics();
   const { data: lost } = useLostCustomers();
@@ -357,15 +425,33 @@ export function TeamDashboard() {
   const qStart = m?.fiscal_quarter_start ?? "";
   const qEnd = m?.fiscal_quarter_end ?? "";
 
+  // Per-month cumulative goals (M1, M2, M3) for each charted KPI.
+  // Pulled from the per-quarter Goals admin page; null months auto-fill
+  // to even thirds. Locked metrics (NRR, pipeline) are flat.
+  const newCustomersMonthGoals = useMemo(
+    () => fillMonthGoals(qgoals.new_customers),
+    [qgoals.new_customers],
+  );
+  const newSalesMonthGoals = useMemo(
+    () => fillMonthGoals(qgoals.new_sales),
+    [qgoals.new_sales],
+  );
+  const renewalsMonthGoals = useMemo(
+    () => fillMonthGoals(qgoals.renewals_number),
+    [qgoals.renewals_number],
+  );
+  const sqlMonthGoals = useMemo(() => fillMonthGoals(qgoals.sql), [qgoals.sql]);
+  const mqlMonthGoals = useMemo(() => fillMonthGoals(qgoals.mql), [qgoals.mql]);
+
   const newCustomersRunning = useMemo<SegmentPoint[]>(
     () =>
       buildRunningTotal(
         (newCustomerRows ?? []).map((r) => ({ date: r.close_date, value: 1 })),
         qStart,
         qEnd,
-        goals.new_customers,
+        newCustomersMonthGoals,
       ),
-    [newCustomerRows, qStart, qEnd, goals.new_customers],
+    [newCustomerRows, qStart, qEnd, newCustomersMonthGoals],
   );
 
   const newSalesRunning = useMemo<SegmentPoint[]>(
@@ -374,9 +460,9 @@ export function TeamDashboard() {
         (newCustomerRows ?? []).map((r) => ({ date: r.close_date, value: r.amount })),
         qStart,
         qEnd,
-        goals.new_sales,
+        newSalesMonthGoals,
       ),
-    [newCustomerRows, qStart, qEnd, goals.new_sales],
+    [newCustomerRows, qStart, qEnd, newSalesMonthGoals],
   );
 
   const renewalsClosedRunning = useMemo<SegmentPoint[]>(
@@ -385,9 +471,9 @@ export function TeamDashboard() {
         (renewalsClosedRows ?? []).map((r) => ({ date: r.close_date, value: r.amount })),
         qStart,
         qEnd,
-        goals.renewals_amount,
+        renewalsMonthGoals,
       ),
-    [renewalsClosedRows, qStart, qEnd, goals.renewals_amount],
+    [renewalsClosedRows, qStart, qEnd, renewalsMonthGoals],
   );
 
   const sqlRunning = useMemo<SegmentPoint[]>(
@@ -396,9 +482,9 @@ export function TeamDashboard() {
         (sqlRows ?? []).map((r) => ({ date: r.event_date, value: 1 })),
         qStart,
         qEnd,
-        goals.sql,
+        sqlMonthGoals,
       ),
-    [sqlRows, qStart, qEnd, goals.sql],
+    [sqlRows, qStart, qEnd, sqlMonthGoals],
   );
 
   const mqlRunning = useMemo<SegmentPoint[]>(
@@ -407,21 +493,34 @@ export function TeamDashboard() {
         (mqlRows ?? []).map((r) => ({ date: r.event_date, value: 1 })),
         qStart,
         qEnd,
-        goals.mql,
+        mqlMonthGoals,
       ),
-    [mqlRows, qStart, qEnd, goals.mql],
+    [mqlRows, qStart, qEnd, mqlMonthGoals],
   );
 
-  // ARR trend → SegmentPoint format. Goal is constant across the trend
-  // (one ARR target for the year), so each segment gets colored vs
-  // that single threshold and the dashed reference line is flat.
+  // ARR trend → SegmentPoint format. Quarter-aligned 12-month window:
+  // start at the same quarter exactly one year ago (e.g., in Q2-2026
+  // the chart begins April 2025) and runs through the current month.
+  // When the dashboard rolls into a new quarter, the entire oldest
+  // quarter (3 month-points) drops off so the chart keeps a tight,
+  // readable span instead of growing unbounded.
   const arrPoints = useMemo<SegmentPoint[]>(() => {
     if (!arrTrend) return [];
-    return arrTrend.slice(-12).map((p) => ({
-      label: p.fiscal_period,
-      actual: Number(p.trailing_365_arr) || 0,
-      goal: goals.arr,
-    }));
+    const today = new Date();
+    const currentQuarterStartMonth = Math.floor(today.getMonth() / 3) * 3;
+    const windowStart = new Date(
+      today.getFullYear() - 1,
+      currentQuarterStartMonth,
+      1,
+    );
+    const windowStartStr = windowStart.toISOString().slice(0, 10);
+    return arrTrend
+      .filter((p) => p.month_start >= windowStartStr)
+      .map((p) => ({
+        label: p.fiscal_period,
+        actual: Number(p.trailing_365_arr) || 0,
+        goal: goals.arr,
+      }));
   }, [arrTrend, goals.arr]);
 
   if (isLoading) {
@@ -488,7 +587,7 @@ export function TeamDashboard() {
           progress={pct(arr, goals.arr)}
           goal={goals.arr}
           formatGoal={formatCurrency}
-          onGoalChange={(v) => setGoals((g) => ({ ...g, arr: v }))}
+          onGoalChange={(v) => setGoalQuarter("arr", v)}
           editable={isOwner}
           hint="Sum of closed-won amount in the trailing 365 days (v_arr_rolling_365)."
           to="/reports?tab=standard"
@@ -499,7 +598,7 @@ export function TeamDashboard() {
           progress={pct(newCustomers, goals.new_customers)}
           goal={goals.new_customers}
           formatGoal={(v) => String(v)}
-          onGoalChange={(v) => setGoals((g) => ({ ...g, new_customers: v }))}
+          onGoalChange={(v) => setGoalQuarter("new_customers", v)}
           editable={isOwner}
           hint="Closed-won opps with kind='new_business' & close_date in current fiscal quarter (v_new_customers_qtd)."
           to="/reports?tab=standard"
@@ -510,7 +609,7 @@ export function TeamDashboard() {
           progress={pct(newSales, goals.new_sales)}
           goal={goals.new_sales}
           formatGoal={formatCurrency}
-          onGoalChange={(v) => setGoals((g) => ({ ...g, new_sales: v }))}
+          onGoalChange={(v) => setGoalQuarter("new_sales", v)}
           editable={isOwner}
           hint="Sum of amount on rows in v_new_customers_qtd."
           to="/reports?tab=standard"
@@ -521,7 +620,7 @@ export function TeamDashboard() {
           progress={pct(pipeline, goals.total_active_pipeline)}
           goal={goals.total_active_pipeline}
           formatGoal={formatCurrency}
-          onGoalChange={(v) => setGoals((g) => ({ ...g, total_active_pipeline: v }))}
+          onGoalChange={(v) => setGoalQuarter("total_active_pipeline", v)}
           editable={isOwner}
           hint={`${m.pipeline_count ?? 0} open • weighted ${formatCurrency(num(m.pipeline_weighted_amount))} (v_active_pipeline)`}
           to="/opportunities"
@@ -544,7 +643,14 @@ export function TeamDashboard() {
       {/* Sales running totals (bottom of Sales section) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         {newCustomersRunning.length > 1 && (
-          <ChartCard title={`New Customers — running total (goal ${goals.new_customers})`}>
+          <ChartCard
+            title={`New Customers — running total (Q goal ${goals.new_customers})`}
+            subtitle={
+              monthIdx != null
+                ? `${monthShort} pace goal: ${Math.round(newCustomersMonthGoals[monthIdx])}`
+                : undefined
+            }
+          >
             <ChartLegend />
             <SegmentedLineChart
               data={newCustomersRunning}
@@ -555,7 +661,14 @@ export function TeamDashboard() {
           </ChartCard>
         )}
         {newSalesRunning.length > 1 && (
-          <ChartCard title={`New Sales $ — running total (goal ${formatCurrency(goals.new_sales)})`}>
+          <ChartCard
+            title={`New Sales $ — running total (Q goal ${formatCurrency(goals.new_sales)})`}
+            subtitle={
+              monthIdx != null
+                ? `${monthShort} pace goal: ${formatCurrency(newSalesMonthGoals[monthIdx])}`
+                : undefined
+            }
+          >
             <ChartLegend />
             <SegmentedLineChart
               data={newSalesRunning}
@@ -575,7 +688,7 @@ export function TeamDashboard() {
           progress={pct(sqlCount, goals.sql)}
           goal={goals.sql}
           formatGoal={(v) => String(v)}
-          onGoalChange={(v) => setGoals((g) => ({ ...g, sql: v }))}
+          onGoalChange={(v) => setGoalQuarter("sql", v)}
           editable={isOwner}
           hint="Accounts with a contact whose sql_date falls in current quarter (v_sql_accounts)."
           to="/contacts?qualification=sql"
@@ -586,7 +699,7 @@ export function TeamDashboard() {
           progress={pct(mql, goals.mql)}
           goal={goals.mql}
           formatGoal={(v) => String(v)}
-          onGoalChange={(v) => setGoals((g) => ({ ...g, mql: v }))}
+          onGoalChange={(v) => setGoalQuarter("mql", v)}
           editable={isOwner}
           hint="Deduped MQL across leads + contacts in current quarter."
           to="/leads?qualification=mql"
@@ -596,7 +709,14 @@ export function TeamDashboard() {
       {/* Marketing running totals */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         {sqlRunning.length > 1 && (
-          <ChartCard title={`SQL — running total (goal ${goals.sql})`}>
+          <ChartCard
+            title={`SQL — running total (Q goal ${goals.sql})`}
+            subtitle={
+              monthIdx != null
+                ? `${monthShort} pace goal: ${Math.round(sqlMonthGoals[monthIdx])}`
+                : undefined
+            }
+          >
             <ChartLegend />
             <SegmentedLineChart
               data={sqlRunning}
@@ -607,7 +727,14 @@ export function TeamDashboard() {
           </ChartCard>
         )}
         {mqlRunning.length > 1 && (
-          <ChartCard title={`MQL — running total (goal ${goals.mql})`}>
+          <ChartCard
+            title={`MQL — running total (Q goal ${goals.mql})`}
+            subtitle={
+              monthIdx != null
+                ? `${monthShort} pace goal: ${Math.round(mqlMonthGoals[monthIdx])}`
+                : undefined
+            }
+          >
             <ChartLegend />
             <SegmentedLineChart
               data={mqlRunning}
@@ -627,7 +754,7 @@ export function TeamDashboard() {
           progress={pct(renewalsClosedAmt, goals.renewals_amount)}
           goal={goals.renewals_amount}
           formatGoal={formatCurrency}
-          onGoalChange={(v) => setGoals((g) => ({ ...g, renewals_amount: v }))}
+          onGoalChange={(v) => setGoalQuarter("renewals_number", v)}
           editable={isOwner}
           hint={`${m.renewals_qtd ?? 0} renewal-kind closed-won w/ close_date this quarter (v_renewals_qtd, excludes EHR Implementation).`}
           to="/renewals?tab=closed-won&preset=this-quarter"
@@ -638,7 +765,7 @@ export function TeamDashboard() {
           progress={pct(renewalsDueAmt, goals.renewals_amount)}
           goal={goals.renewals_amount}
           formatGoal={formatCurrency}
-          onGoalChange={(v) => setGoals((g) => ({ ...g, renewals_amount: v }))}
+          onGoalChange={(v) => setGoalQuarter("renewals_number", v)}
           editable={isOwner}
           hint={`${renewalsDueCount} closed-won opps with contract_end_date in this quarter — at-risk ARR.`}
           to="/renewals?preset=this-quarter"
@@ -649,7 +776,7 @@ export function TeamDashboard() {
           progress={Math.min(100, (nrrCust / goals.nrr_customer_pct) * 100)}
           goal={goals.nrr_customer_pct}
           formatGoal={(v) => `${v}%`}
-          onGoalChange={(v) => setGoals((g) => ({ ...g, nrr_customer_pct: v }))}
+          onGoalChange={(v) => setGoalQuarter("nrr_customer_pct", v)}
           editable={isOwner}
           hint="(starting customers − churn QTD) / starting customers. 100% means zero churn this quarter so far."
         />
@@ -659,7 +786,7 @@ export function TeamDashboard() {
           progress={Math.min(100, (nrrDollar / goals.nrr_dollar_pct) * 100)}
           goal={goals.nrr_dollar_pct}
           formatGoal={(v) => `${v}%`}
-          onGoalChange={(v) => setGoals((g) => ({ ...g, nrr_dollar_pct: v }))}
+          onGoalChange={(v) => setGoalQuarter("nrr_dollar_pct", v)}
           editable={isOwner}
           hint="(starting ARR − churn $ QTD) / starting ARR."
         />
@@ -680,7 +807,7 @@ export function TeamDashboard() {
           )}
           goal={goals.qtd_billing}
           formatGoal={formatCurrency}
-          onGoalChange={(v) => setGoals((g) => ({ ...g, qtd_billing: v }))}
+          onGoalChange={(v) => setGoalQuarter("qtd_billing_progress", v)}
           editable={isOwner}
           hint={
             widgets.qtd_billing_actual != null
@@ -799,7 +926,14 @@ export function TeamDashboard() {
 
       {/* Renewals closed running-total */}
       {renewalsClosedRunning.length > 1 && (
-        <ChartCard title={`Renewals Closed $ — running total (goal ${formatCurrency(goals.renewals_amount)})`}>
+        <ChartCard
+          title={`Renewals Closed $ — running total (Q goal ${formatCurrency(goals.renewals_amount)})`}
+          subtitle={
+            monthIdx != null
+              ? `${monthShort} pace goal: ${formatCurrency(renewalsMonthGoals[monthIdx])}`
+              : undefined
+          }
+        >
           <ChartLegend />
           <SegmentedLineChart
             data={renewalsClosedRunning}
@@ -926,71 +1060,148 @@ export function TeamDashboard() {
         />
       </Section>
 
-      {/* ----- Development (manual line items) ----- */}
+      {/* ----- Development (manual milestones) ----- */}
       <div>
         <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
           Development
         </h3>
         <Card>
           <CardContent className="p-3 space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs text-muted-foreground">
-                Manually-tracked dev projects. Status auto-derives from completion
-                date + checkbox.
+                Manually-tracked milestones. Status auto-derives from
+                completion date + checkbox; type a status to override.
               </p>
               {isOwner && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    setWidgets((w) => ({
-                      ...w,
-                      dev_items: [...w.dev_items, newDevItem()],
-                    }))
-                  }
-                >
-                  <Plus className="h-3.5 w-3.5 mr-1" />
-                  Add row
-                </Button>
+                <div className="flex items-center gap-1.5">
+                  {milestoneEditMode ? (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setMilestones((items) =>
+                            items.filter((it) => !milestoneSelected.has(it.id)),
+                          );
+                          setMilestoneSelected(new Set());
+                        }}
+                        disabled={milestoneSelected.size === 0}
+                        title="Remove the selected milestones"
+                      >
+                        <Trash2 className="h-3.5 w-3.5 mr-1" />
+                        Remove Selected
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          setMilestoneEditMode(false);
+                          setMilestoneSelected(new Set());
+                        }}
+                      >
+                        Done
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setMilestoneEditMode(true)}
+                    >
+                      <Pencil className="h-3.5 w-3.5 mr-1" />
+                      Edit
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      setMilestones((items) => [...items, newMilestone()])
+                    }
+                  >
+                    <Plus className="h-3.5 w-3.5 mr-1" />
+                    Add Milestone
+                  </Button>
+                </div>
               )}
             </div>
-            {widgets.dev_items.length === 0 ? (
+            {milestones.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-6">
-                No dev items yet. {isOwner ? "Click 'Add row' to track one." : ""}
+                No milestones yet.{" "}
+                {isOwner ? "Click 'Add Milestone' to track one." : ""}
               </p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50">
                     <tr className="text-left">
+                      {milestoneEditMode && isOwner && (
+                        <th className="px-2 py-2 font-medium w-10 text-center">
+                          <input
+                            type="checkbox"
+                            checked={
+                              milestones.length > 0 &&
+                              milestoneSelected.size === milestones.length
+                            }
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setMilestoneSelected(
+                                  new Set(milestones.map((it) => it.id)),
+                                );
+                              } else {
+                                setMilestoneSelected(new Set());
+                              }
+                            }}
+                            className="h-4 w-4 cursor-pointer"
+                            aria-label="Select all"
+                          />
+                        </th>
+                      )}
                       <th className="px-2 py-2 font-medium">Project</th>
                       <th className="px-2 py-2 font-medium">Completion Date</th>
-                      <th className="px-2 py-2 font-medium text-center">Complete</th>
+                      <th className="px-2 py-2 font-medium text-center">
+                        Complete
+                      </th>
                       <th className="px-2 py-2 font-medium">Status</th>
-                      {isOwner && <th className="px-2 py-2 w-10" />}
                     </tr>
                   </thead>
                   <tbody>
-                    {widgets.dev_items.map((item) => {
-                      const status = autoStatus(item);
+                    {milestones.map((item) => {
+                      const status = deriveStatus(item);
                       const tone =
                         STATUS_TONES[status] ??
                         "bg-muted text-muted-foreground";
+                      const canEdit = isOwner && milestoneEditMode;
                       return (
                         <tr key={item.id} className="border-t">
+                          {milestoneEditMode && isOwner && (
+                            <td className="px-2 py-1.5 text-center">
+                              <input
+                                type="checkbox"
+                                checked={milestoneSelected.has(item.id)}
+                                onChange={(e) => {
+                                  setMilestoneSelected((prev) => {
+                                    const next = new Set(prev);
+                                    if (e.target.checked) next.add(item.id);
+                                    else next.delete(item.id);
+                                    return next;
+                                  });
+                                }}
+                                className="h-4 w-4 cursor-pointer"
+                              />
+                            </td>
+                          )}
                           <td className="px-2 py-1.5">
-                            {isOwner ? (
+                            {canEdit ? (
                               <Input
                                 value={item.project}
                                 onChange={(e) =>
-                                  setWidgets((w) => ({
-                                    ...w,
-                                    dev_items: w.dev_items.map((d) =>
+                                  setMilestones((items) =>
+                                    items.map((d) =>
                                       d.id === item.id
                                         ? { ...d, project: e.target.value }
                                         : d,
                                     ),
-                                  }))
+                                  )
                                 }
                                 className="h-7 text-sm"
                                 placeholder="Project name"
@@ -1000,71 +1211,69 @@ export function TeamDashboard() {
                             )}
                           </td>
                           <td className="px-2 py-1.5">
-                            {isOwner ? (
+                            {canEdit ? (
                               <Input
                                 type="date"
                                 value={item.completion_date}
                                 onChange={(e) =>
-                                  setWidgets((w) => ({
-                                    ...w,
-                                    dev_items: w.dev_items.map((d) =>
+                                  setMilestones((items) =>
+                                    items.map((d) =>
                                       d.id === item.id
-                                        ? { ...d, completion_date: e.target.value }
+                                        ? {
+                                            ...d,
+                                            completion_date: e.target.value,
+                                          }
                                         : d,
                                     ),
-                                  }))
+                                  )
                                 }
                                 className="h-7 text-sm"
                               />
                             ) : (
-                              <span>{item.completion_date}</span>
+                              <span>{item.completion_date || "—"}</span>
                             )}
                           </td>
                           <td className="px-2 py-1.5 text-center">
                             <input
                               type="checkbox"
                               checked={item.complete}
-                              disabled={!isOwner}
+                              disabled={!canEdit}
                               onChange={(e) =>
-                                setWidgets((w) => ({
-                                  ...w,
-                                  dev_items: w.dev_items.map((d) =>
+                                setMilestones((items) =>
+                                  items.map((d) =>
                                     d.id === item.id
                                       ? { ...d, complete: e.target.checked }
                                       : d,
                                   ),
-                                }))
+                                )
                               }
-                              className="h-4 w-4 cursor-pointer"
+                              className="h-4 w-4 cursor-pointer disabled:cursor-default"
                             />
                           </td>
                           <td className="px-2 py-1.5">
-                            <span
-                              className={`inline-flex px-2 py-0.5 rounded text-[11px] font-medium ${tone}`}
-                            >
-                              {status}
-                            </span>
-                          </td>
-                          {isOwner && (
-                            <td className="px-2 py-1.5 text-right">
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-7 w-7 p-0"
-                                onClick={() =>
-                                  setWidgets((w) => ({
-                                    ...w,
-                                    dev_items: w.dev_items.filter(
-                                      (d) => d.id !== item.id,
+                            {canEdit ? (
+                              <Input
+                                value={item.status}
+                                onChange={(e) =>
+                                  setMilestones((items) =>
+                                    items.map((d) =>
+                                      d.id === item.id
+                                        ? { ...d, status: e.target.value }
+                                        : d,
                                     ),
-                                  }))
+                                  )
                                 }
-                                title="Delete row"
+                                className="h-7 text-sm"
+                                placeholder={status}
+                              />
+                            ) : (
+                              <span
+                                className={`inline-flex px-2 py-0.5 rounded text-[11px] font-medium ${tone}`}
                               >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </td>
-                          )}
+                                {status}
+                              </span>
+                            )}
+                          </td>
                         </tr>
                       );
                     })}
@@ -1118,7 +1327,7 @@ function buildRunningTotal(
   events: { date: string; value: number }[],
   quarterStart: string,
   quarterEnd: string,
-  totalGoal: number,
+  monthGoals: [number, number, number],
 ): SegmentPoint[] {
   if (!quarterStart || !quarterEnd) return [];
   const start = new Date(quarterStart);
@@ -1133,6 +1342,8 @@ function buildRunningTotal(
 
   // The 3 calendar months of the current fiscal quarter. Use the start
   // month as M1 — this matches Codex's labels (e.g., Q1 → Jan/Feb/Mar).
+  // monthGoals are cumulative end-of-month-N targets — admin can set
+  // per-month targets in Goals page (else default to even thirds).
   const points: SegmentPoint[] = [];
   for (let i = 0; i < 3; i++) {
     const monthStart = new Date(start.getFullYear(), start.getMonth() + i, 1);
@@ -1148,7 +1359,7 @@ function buildRunningTotal(
     points.push({
       label: monthStart.toLocaleString("en-US", { month: "short" }),
       actual: cumulative,
-      goal: totalGoal * ((i + 1) / 3),
+      goal: monthGoals[i],
     });
   }
   return points;
@@ -1200,11 +1411,26 @@ function ChartLegend() {
   );
 }
 
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
+function ChartCard({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
   return (
     <Card>
       <CardContent className="p-4">
-        <h4 className="text-sm font-medium text-muted-foreground mb-2">{title}</h4>
+        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+          <h4 className="text-sm font-medium text-muted-foreground">{title}</h4>
+          {subtitle && (
+            <span className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded px-2 py-0.5">
+              {subtitle}
+            </span>
+          )}
+        </div>
         {children}
       </CardContent>
     </Card>
