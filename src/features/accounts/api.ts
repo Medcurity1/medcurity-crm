@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import type { Account, AccountContract } from "@/types/crm";
+import { buildPersonSearchClause } from "@/lib/search-clause";
 
 interface AccountFilters {
   search?: string;
@@ -34,12 +35,46 @@ export function useAccounts(filters?: AccountFilters) {
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (filters?.search) {
-        // Search covers name + free-text industry column. Note:
-        // industry_category is an enum which PostgREST can't ilike; to
-        // search by industry use the Industry dropdown filter instead.
-        query = query.or(
-          `name.ilike.%${filters.search}%,industry.ilike.%${filters.search}%`
-        );
+        // Search covers account name + free-text industry column AND any
+        // account whose primary/associated contact matches the query.
+        // SF behavior: typing a contact's name in the accounts list
+        // surfaces their parent account (e.g. "Mari Harris" → Healthline
+        // Medical Group). Without this, reps have to remember the
+        // company name when they only know the person.
+        // Note: industry_category is an enum which PostgREST can't
+        // ilike; to filter by category use the Industry dropdown.
+        const term = filters.search;
+        const safe = term.replace(/[(),%]/g, " ");
+        const contactClause = buildPersonSearchClause(term, [
+          "first_name",
+          "last_name",
+          "email",
+        ]);
+        let contactAccountIds: string[] = [];
+        if (contactClause) {
+          const { data: matchedContacts } = await supabase
+            .from("contacts")
+            .select("account_id")
+            .is("archived_at", null)
+            .not("account_id", "is", null)
+            .or(contactClause)
+            .limit(500);
+          contactAccountIds = Array.from(
+            new Set(
+              (matchedContacts ?? [])
+                .map((c) => c.account_id as string | null)
+                .filter((v): v is string => !!v),
+            ),
+          );
+        }
+        const orParts = [
+          `name.ilike.%${safe}%`,
+          `industry.ilike.%${safe}%`,
+        ];
+        if (contactAccountIds.length > 0) {
+          orParts.push(`id.in.(${contactAccountIds.join(",")})`);
+        }
+        query = query.or(orParts.join(","));
       }
       if (filters?.lifecycle_status) {
         query = query.eq("lifecycle_status", filters.lifecycle_status);
