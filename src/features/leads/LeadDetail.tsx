@@ -1,9 +1,10 @@
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Pencil, Archive, ChevronDown, Phone, Mail, ArrowRightLeft, UserRoundCog, History } from "lucide-react";
+import { Pencil, Archive, ChevronDown, ChevronLeft, Phone, Mail, ArrowRightLeft, UserRoundCog, History } from "lucide-react";
 import { useLead, useUpdateLead, useArchiveLead } from "./api";
+import { useLeadLists } from "@/features/lead-lists/lead-lists-api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
 import { VerifiedBadge } from "@/components/VerifiedBadge";
@@ -90,6 +91,7 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 export function LeadDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { data: lead, isLoading } = useLead(id);
@@ -100,6 +102,19 @@ export function LeadDetail() {
   const [showConvert, setShowConvert] = useState(false);
   const [showChangeOwner, setShowChangeOwner] = useState(false);
   const { addRecent } = useRecentRecords();
+
+  // Breadcrumb back to a lead list when arriving via ?from=list:<id>.
+  // We thread this through navigation in LeadListsPage so reps can click
+  // a lead from a list, edit it, then return to the same list with sort
+  // / filters / scroll preserved (URL state on the list page handles it).
+  const fromParam = searchParams.get("from");
+  const fromListId = fromParam?.startsWith("list:")
+    ? fromParam.slice("list:".length)
+    : null;
+  const { data: leadLists } = useLeadLists();
+  const fromList = fromListId
+    ? leadLists?.find((l) => l.id === fromListId)
+    : undefined;
 
   useEffect(() => {
     if (lead) {
@@ -142,6 +157,18 @@ export function LeadDetail() {
 
   return (
     <div>
+      {/* --------- Back-to-list breadcrumb --------- */}
+      {fromListId && (
+        <button
+          type="button"
+          onClick={() => navigate(`/lead-lists?list=${fromListId}`)}
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-3"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Back to {fromList?.name ?? "lead list"}
+        </button>
+      )}
+
       {/* --------- Header --------- */}
       <PageHeader
         title={`${lead.first_name} ${lead.last_name}`}

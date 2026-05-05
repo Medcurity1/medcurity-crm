@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ListChecks,
   Plus,
@@ -10,6 +10,14 @@ import {
   Filter,
   Sparkles,
   Pencil,
+  ChevronDown,
+  ChevronRight,
+  Download,
+  Columns3,
+  Mail,
+  Phone,
+  Send,
+  X,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -44,10 +52,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { MultiSelect } from "@/components/MultiSelect";
 import { SortableHeader, type SortState } from "@/components/SortableHeader";
+import { US_STATES } from "@/lib/us-states";
 import {
   useLeadLists,
   useCreateLeadList,
@@ -61,11 +75,12 @@ import {
   useBulkAddToList,
   type LeadListFilterConfig,
 } from "./lead-lists-api";
-import { useUpdateLead } from "@/features/leads/api";
+import { useUpdateLead, useBulkUpdateOwner } from "@/features/leads/api";
 import { useSequences, useEnrollInSequence } from "@/features/sequences/sequences-api";
 import { useUsers } from "@/features/accounts/api";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { formatDate } from "@/lib/formatters";
+import { cn } from "@/lib/utils";
 import type { LeadList, LeadListMember, Lead } from "@/types/crm";
 
 // ---------------------------------------------------------------------------
@@ -135,9 +150,150 @@ const INDUSTRY_OPTIONS = [
   { value: "other", label: "Other" },
 ];
 
+const TIME_ZONE_OPTIONS = [
+  { value: "eastern", label: "Eastern" },
+  { value: "central", label: "Central" },
+  { value: "mountain", label: "Mountain" },
+  { value: "pacific", label: "Pacific" },
+  { value: "alaska", label: "Alaska" },
+  { value: "hawaii", label: "Hawaii" },
+  { value: "arizona_no_dst", label: "Arizona (no DST)" },
+];
+
+const BUSINESS_TAG_OPTIONS = [
+  { value: "decision_maker", label: "Decision Maker" },
+  { value: "influencer", label: "Influencer" },
+  { value: "economic_buyer", label: "Economic Buyer" },
+  { value: "technical_buyer", label: "Technical Buyer" },
+  { value: "champion", label: "Champion" },
+  { value: "detractor", label: "Detractor" },
+  { value: "end_user", label: "End User" },
+  { value: "gatekeeper", label: "Gatekeeper" },
+  { value: "executive_sponsor", label: "Executive Sponsor" },
+  { value: "other", label: "Other" },
+];
+
+const CREDENTIAL_OPTIONS = [
+  { value: "md", label: "MD" }, { value: "do", label: "DO" },
+  { value: "rn", label: "RN" }, { value: "lpn", label: "LPN" },
+  { value: "np", label: "NP" }, { value: "pa", label: "PA" },
+  { value: "chc", label: "CHC" }, { value: "chps", label: "CHPS" },
+  { value: "chpc", label: "CHPC" }, { value: "hipaa_certified", label: "HIPAA Certified" },
+  { value: "ceo", label: "CEO" }, { value: "cfo", label: "CFO" },
+  { value: "coo", label: "COO" }, { value: "cio", label: "CIO" },
+  { value: "cto", label: "CTO" }, { value: "ciso", label: "CISO" },
+  { value: "cmo", label: "CMO" },
+  { value: "it_director", label: "IT Director" },
+  { value: "practice_manager", label: "Practice Manager" },
+  { value: "office_manager", label: "Office Manager" },
+  { value: "compliance_officer", label: "Compliance Officer" },
+  { value: "privacy_officer", label: "Privacy Officer" },
+  { value: "security_officer", label: "Security Officer" },
+  { value: "other", label: "Other" },
+];
+
+const LEAD_TYPE_OPTIONS = [
+  { value: "inbound_website", label: "Inbound — Website" },
+  { value: "inbound_referral", label: "Inbound — Referral" },
+  { value: "outbound_cold", label: "Outbound — Cold" },
+  { value: "purchased_list", label: "Purchased List" },
+  { value: "conference", label: "Conference" },
+  { value: "webinar", label: "Webinar" },
+  { value: "partner", label: "Partner" },
+  { value: "existing_customer_expansion", label: "Existing Customer Expansion" },
+  { value: "other", label: "Other" },
+];
+
+const COUNTRY_OPTIONS = [
+  { value: "United States", label: "United States" },
+  { value: "Canada", label: "Canada" },
+  { value: "Other", label: "Other" },
+];
+
+const STATE_OPTIONS = US_STATES.map((s) => ({ value: s.code, label: s.name }));
+
+// All sortable / displayable columns. Used by the column chooser, the
+// CSV exporter, and the SortableHeader bindings. Ordering here is the
+// default left-to-right column order in the table.
+type ColumnKey =
+  | "name" | "company" | "title" | "email" | "phone" | "status"
+  | "qualification" | "rating" | "owner" | "source" | "industry"
+  | "state" | "city" | "employees" | "score" | "last_activity"
+  | "in_sequence" | "created_at";
+
+const ALL_COLUMNS: { key: ColumnKey; label: string; sortable?: boolean }[] = [
+  { key: "name", label: "Name", sortable: true },
+  { key: "company", label: "Company", sortable: true },
+  { key: "title", label: "Title", sortable: true },
+  { key: "email", label: "Email", sortable: true },
+  { key: "phone", label: "Phone", sortable: true },
+  { key: "status", label: "Status", sortable: true },
+  { key: "qualification", label: "Qualification", sortable: true },
+  { key: "rating", label: "Rating", sortable: true },
+  { key: "owner", label: "Owner", sortable: true },
+  { key: "source", label: "Source", sortable: true },
+  { key: "industry", label: "Industry", sortable: true },
+  { key: "state", label: "State", sortable: true },
+  { key: "city", label: "City", sortable: true },
+  { key: "employees", label: "Employees", sortable: true },
+  { key: "score", label: "Score", sortable: true },
+  { key: "last_activity", label: "Last Contacted", sortable: true },
+  { key: "in_sequence", label: "In Sequence" },
+  { key: "created_at", label: "Created", sortable: true },
+];
+
+const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = [
+  "name", "company", "title", "status", "qualification", "rating",
+  "owner", "email", "phone", "state", "last_activity", "in_sequence",
+];
+
+const COLUMNS_LS_KEY = "lead_list_visible_columns_v1";
+
+function loadVisibleColumns(): ColumnKey[] {
+  try {
+    const raw = localStorage.getItem(COLUMNS_LS_KEY);
+    if (!raw) return DEFAULT_VISIBLE_COLUMNS;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return DEFAULT_VISIBLE_COLUMNS;
+    const known = new Set(ALL_COLUMNS.map((c) => c.key));
+    const filtered = parsed.filter((k): k is ColumnKey =>
+      typeof k === "string" && known.has(k as ColumnKey),
+    );
+    return filtered.length ? filtered : DEFAULT_VISIBLE_COLUMNS;
+  } catch {
+    return DEFAULT_VISIBLE_COLUMNS;
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Filter form — used in both Create and Edit dialogs for smart lists.
+// Filter form — used in Create / Edit / AddLeads dialogs. Sections are
+// collapsible so the surface area stays manageable.
 // ---------------------------------------------------------------------------
+
+function FilterSection({
+  title,
+  defaultOpen,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return (
+    <div className="border rounded-md">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold hover:bg-muted/50"
+      >
+        {title}
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+      </button>
+      {open && <div className="px-3 pb-3 pt-1">{children}</div>}
+    </div>
+  );
+}
 
 function FilterForm({
   value,
@@ -153,9 +309,15 @@ function FilterForm({
     v: LeadListFilterConfig[K],
   ) {
     const next = { ...value };
-    // Drop empty arrays / falsy keys so filter_config stays compact and
+    // Drop empty/falsy/undefined keys so filter_config stays compact and
     // the smart-list query short-circuits cleanly.
-    if (Array.isArray(v) ? v.length === 0 : v === undefined || v === "") {
+    const isEmpty =
+      v === undefined ||
+      v === "" ||
+      v === null ||
+      (Array.isArray(v) && v.length === 0) ||
+      (typeof v === "number" && Number.isNaN(v));
+    if (isEmpty) {
       delete next[key];
     } else {
       next[key] = v;
@@ -163,105 +325,328 @@ function FilterForm({
     onChange(next);
   }
 
+  // Helper to render a "Yes / No / Any" tri-state selector.
+  function triState(
+    key: keyof LeadListFilterConfig,
+    label: string,
+  ) {
+    const current = value[key];
+    return (
+      <div>
+        <Label className="text-xs">{label}</Label>
+        <Select
+          value={
+            typeof current === "boolean" ? (current ? "true" : "false") : "any"
+          }
+          onValueChange={(v) =>
+            update(
+              key,
+              v === "any" ? undefined : (v === "true" as unknown as LeadListFilterConfig[typeof key]),
+            )
+          }
+        >
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="any">Any</SelectItem>
+            <SelectItem value="true">Yes</SelectItem>
+            <SelectItem value="false">No</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <p className="text-xs text-muted-foreground">
         Leads matching ALL of these criteria will appear in the list.
       </p>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <Label className="text-xs">Status</Label>
-          <MultiSelect
-            value={value.status ?? []}
-            onChange={(v) => update("status", v)}
-            placeholder="Any status"
-            options={STATUS_OPTIONS}
-          />
+
+      <FilterSection title="Categorical" defaultOpen>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label className="text-xs">Status</Label>
+            <MultiSelect
+              value={value.status ?? []}
+              onChange={(v) => update("status", v)}
+              placeholder="Any status"
+              options={STATUS_OPTIONS}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Qualification</Label>
+            <MultiSelect
+              value={value.qualification ?? []}
+              onChange={(v) => update("qualification", v)}
+              placeholder="Any qualification"
+              options={QUALIFICATION_OPTIONS}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Source</Label>
+            <MultiSelect
+              value={value.source ?? []}
+              onChange={(v) => update("source", v)}
+              placeholder="Any source"
+              options={SOURCE_OPTIONS}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Rating</Label>
+            <MultiSelect
+              value={value.rating ?? []}
+              onChange={(v) => update("rating", v)}
+              placeholder="Any rating"
+              options={RATING_OPTIONS}
+            />
+          </div>
+          <div className="col-span-2">
+            <Label className="text-xs">Industry</Label>
+            <MultiSelect
+              value={value.industry_category ?? []}
+              onChange={(v) => update("industry_category", v)}
+              placeholder="Any industry"
+              options={INDUSTRY_OPTIONS}
+            />
+          </div>
+          <div className="col-span-2">
+            <Label className="text-xs">Owner</Label>
+            <MultiSelect
+              value={value.owner_user_id ?? []}
+              onChange={(v) => update("owner_user_id", v)}
+              placeholder="Any owner"
+              options={(users ?? []).map((u) => ({
+                value: u.id,
+                label: u.full_name ?? "Unknown",
+              }))}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Lead type</Label>
+            <MultiSelect
+              value={value.type ?? []}
+              onChange={(v) => update("type", v)}
+              placeholder="Any type"
+              options={LEAD_TYPE_OPTIONS}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Business tag</Label>
+            <MultiSelect
+              value={value.business_relationship_tag ?? []}
+              onChange={(v) => update("business_relationship_tag", v)}
+              placeholder="Any tag"
+              options={BUSINESS_TAG_OPTIONS}
+            />
+          </div>
         </div>
-        <div>
-          <Label className="text-xs">Qualification</Label>
-          <MultiSelect
-            value={value.qualification ?? []}
-            onChange={(v) => update("qualification", v)}
-            placeholder="Any qualification"
-            options={QUALIFICATION_OPTIONS}
-          />
+      </FilterSection>
+
+      <FilterSection title="Geographic">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2">
+            <Label className="text-xs">State</Label>
+            <MultiSelect
+              value={value.state ?? []}
+              onChange={(v) => update("state", v)}
+              placeholder="Any state"
+              options={STATE_OPTIONS}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">City contains</Label>
+            <Input
+              value={value.city ?? ""}
+              onChange={(e) => update("city", e.target.value || undefined)}
+              placeholder="e.g. Seattle"
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Zip starts with</Label>
+            <Input
+              value={value.zip_prefix ?? ""}
+              onChange={(e) => update("zip_prefix", e.target.value || undefined)}
+              placeholder="e.g. 981"
+            />
+          </div>
+          <div className="col-span-2">
+            <Label className="text-xs">Country</Label>
+            <MultiSelect
+              value={value.country ?? []}
+              onChange={(v) => update("country", v)}
+              placeholder="Any country"
+              options={COUNTRY_OPTIONS}
+            />
+          </div>
         </div>
-        <div>
-          <Label className="text-xs">Source</Label>
-          <MultiSelect
-            value={value.source ?? []}
-            onChange={(v) => update("source", v)}
-            placeholder="Any source"
-            options={SOURCE_OPTIONS}
-          />
+      </FilterSection>
+
+      <FilterSection title="Firmographic">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label className="text-xs">Employees min</Label>
+            <Input
+              type="number"
+              min={0}
+              value={value.employees_min ?? ""}
+              onChange={(e) =>
+                update("employees_min", e.target.value === "" ? undefined : Number(e.target.value))
+              }
+              placeholder="0"
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Employees max</Label>
+            <Input
+              type="number"
+              min={0}
+              value={value.employees_max ?? ""}
+              onChange={(e) =>
+                update("employees_max", e.target.value === "" ? undefined : Number(e.target.value))
+              }
+              placeholder="∞"
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Annual revenue min ($)</Label>
+            <Input
+              type="number"
+              min={0}
+              value={value.annual_revenue_min ?? ""}
+              onChange={(e) =>
+                update("annual_revenue_min", e.target.value === "" ? undefined : Number(e.target.value))
+              }
+              placeholder="0"
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Annual revenue max ($)</Label>
+            <Input
+              type="number"
+              min={0}
+              value={value.annual_revenue_max ?? ""}
+              onChange={(e) =>
+                update("annual_revenue_max", e.target.value === "" ? undefined : Number(e.target.value))
+              }
+              placeholder="∞"
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Score min</Label>
+            <Input
+              type="number"
+              value={value.score_min ?? ""}
+              onChange={(e) =>
+                update("score_min", e.target.value === "" ? undefined : Number(e.target.value))
+              }
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Score max</Label>
+            <Input
+              type="number"
+              value={value.score_max ?? ""}
+              onChange={(e) =>
+                update("score_max", e.target.value === "" ? undefined : Number(e.target.value))
+              }
+            />
+          </div>
         </div>
-        <div>
-          <Label className="text-xs">Rating</Label>
-          <MultiSelect
-            value={value.rating ?? []}
-            onChange={(v) => update("rating", v)}
-            placeholder="Any rating"
-            options={RATING_OPTIONS}
-          />
+      </FilterSection>
+
+      <FilterSection title="Engagement">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label className="text-xs">Created on/after</Label>
+            <Input
+              type="date"
+              value={value.created_after ?? ""}
+              onChange={(e) => update("created_after", e.target.value || undefined)}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Created on/before</Label>
+            <Input
+              type="date"
+              value={value.created_before ?? ""}
+              onChange={(e) => update("created_before", e.target.value || undefined)}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">MQL'd on/after</Label>
+            <Input
+              type="date"
+              value={value.mql_after ?? ""}
+              onChange={(e) => update("mql_after", e.target.value || undefined)}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">MQL'd on/before</Label>
+            <Input
+              type="date"
+              value={value.mql_before ?? ""}
+              onChange={(e) => update("mql_before", e.target.value || undefined)}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Last contacted on/after</Label>
+            <Input
+              type="date"
+              value={value.last_activity_after ?? ""}
+              onChange={(e) => update("last_activity_after", e.target.value || undefined)}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Last contacted on/before</Label>
+            <Input
+              type="date"
+              value={value.last_activity_before ?? ""}
+              onChange={(e) => update("last_activity_before", e.target.value || undefined)}
+            />
+          </div>
+          {triState("in_sequence", "Currently in sequence")}
+          {triState("exclude_in_other_lists", "Exclude leads already on other lists")}
         </div>
-        <div className="col-span-2">
-          <Label className="text-xs">Industry</Label>
-          <MultiSelect
-            value={value.industry_category ?? []}
-            onChange={(v) => update("industry_category", v)}
-            placeholder="Any industry"
-            options={INDUSTRY_OPTIONS}
-          />
+      </FilterSection>
+
+      <FilterSection title="Identity & flags">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label className="text-xs">Time zone</Label>
+            <MultiSelect
+              value={value.time_zone ?? []}
+              onChange={(v) => update("time_zone", v)}
+              placeholder="Any time zone"
+              options={TIME_ZONE_OPTIONS}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Credential</Label>
+            <MultiSelect
+              value={value.credential ?? []}
+              onChange={(v) => update("credential", v)}
+              placeholder="Any credential"
+              options={CREDENTIAL_OPTIONS}
+            />
+          </div>
+          {triState("has_email", "Has email")}
+          {triState("has_phone", "Has phone")}
+          {triState("has_linkedin", "Has LinkedIn")}
+          {triState("priority_lead", "Priority lead")}
+          {triState("cold_lead", "Cold lead")}
+          {triState("do_not_market_to", "Marketing opt-out")}
+          {triState("do_not_contact", "Do not contact")}
         </div>
-        <div className="col-span-2">
-          <Label className="text-xs">Owner</Label>
-          <MultiSelect
-            value={value.owner_user_id ?? []}
-            onChange={(v) => update("owner_user_id", v)}
-            placeholder="Any owner"
-            options={(users ?? []).map((u) => ({
-              value: u.id,
-              label: u.full_name ?? "Unknown",
-            }))}
-          />
-        </div>
-        <div className="col-span-2">
-          <Label className="text-xs">Search (name / email / company)</Label>
-          <Input
-            value={value.search ?? ""}
-            onChange={(e) => update("search", e.target.value)}
-            placeholder="Optional keyword"
-          />
-        </div>
-        <div className="col-span-2">
-          <Label className="text-xs">Marketing opt-out</Label>
-          <Select
-            value={
-              typeof value.do_not_market_to === "boolean"
-                ? value.do_not_market_to
-                  ? "true"
-                  : "false"
-                : "any"
-            }
-            onValueChange={(v) =>
-              update(
-                "do_not_market_to",
-                v === "any" ? undefined : v === "true",
-              )
-            }
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="any">Any</SelectItem>
-              <SelectItem value="false">Marketable only</SelectItem>
-              <SelectItem value="true">Opted out only</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+      </FilterSection>
+
+      <FilterSection title="Search">
+        <Label className="text-xs">Free-text (name / email / company / title / phone)</Label>
+        <Input
+          value={value.search ?? ""}
+          onChange={(e) => update("search", e.target.value)}
+          placeholder="Optional keyword"
+        />
+      </FilterSection>
     </div>
   );
 }
@@ -270,19 +655,39 @@ function FilterForm({
 // Create list dialog — supports static and smart lists.
 // ---------------------------------------------------------------------------
 
-function CreateListDialog({
+export function CreateListDialog({
   open,
   onOpenChange,
+  initialFilters,
+  initialName,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
+  /** When opened from "Save filter as smart list", pre-populates filters. */
+  initialFilters?: LeadListFilterConfig | null;
+  initialName?: string;
 }) {
   const { profile } = useAuth();
   const createMutation = useCreateLeadList();
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initialName ?? "");
   const [description, setDescription] = useState("");
-  const [type, setType] = useState<"static" | "smart">("static");
-  const [filters, setFilters] = useState<LeadListFilterConfig>({});
+  const [type, setType] = useState<"static" | "smart">(
+    initialFilters ? "smart" : "static",
+  );
+  const [filters, setFilters] = useState<LeadListFilterConfig>(initialFilters ?? {});
+
+  // Re-sync internal state when the dialog re-opens with different
+  // seed values (e.g. user opens via "Save filter" twice with different
+  // /leads filters).
+  useEffect(() => {
+    if (open) {
+      setName(initialName ?? "");
+      setDescription("");
+      setType(initialFilters ? "smart" : "static");
+      setFilters(initialFilters ?? {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   function reset() {
     setName("");
@@ -316,7 +721,7 @@ function CreateListDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) reset(); onOpenChange(o); }}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Create Lead List</DialogTitle>
           <DialogDescription>
@@ -431,7 +836,7 @@ function EditFiltersDialog({
         onOpenChange(o);
       }}
     >
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit Smart List Filters</DialogTitle>
           <DialogDescription>
@@ -453,10 +858,7 @@ function EditFiltersDialog({
 }
 
 // ---------------------------------------------------------------------------
-// Add leads dialog (static lists only). Filter-driven bulk picker — uses
-// the same FilterForm facets as smart lists, plus a free-text search,
-// plus checkboxes so the user can add many at once. Replaces the prior
-// 1-at-a-time search-only flow that the sales team couldn't actually use.
+// Add leads dialog (static lists only). Filter-driven bulk picker.
 // ---------------------------------------------------------------------------
 
 function AddLeadsDialog({
@@ -472,10 +874,7 @@ function AddLeadsDialog({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const bulkAdd = useBulkAddToList();
 
-  // Run the query whenever the dialog is open so users get immediate
-  // results — no need to type before seeing leads. The 200-row cap on
-  // the API hook keeps this safe for the full table.
-  const { data: leads, isLoading } = useLeadsByFilter(filters, open);
+  const { data: leads, isLoading } = useLeadsByFilter(filters, open, listId);
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -526,7 +925,7 @@ function AddLeadsDialog({
         onOpenChange(o);
       }}
     >
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add Leads to List</DialogTitle>
           <DialogDescription>
@@ -563,6 +962,7 @@ function AddLeadsDialog({
                       </TableHead>
                       <TableHead>Name</TableHead>
                       <TableHead>Company</TableHead>
+                      <TableHead>State</TableHead>
                       <TableHead>Email</TableHead>
                       <TableHead>Status</TableHead>
                     </TableRow>
@@ -586,6 +986,9 @@ function AddLeadsDialog({
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           {lead.company ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {lead.state ?? "—"}
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           {lead.email ?? "—"}
@@ -702,9 +1105,79 @@ function EnrollSequenceDialog({
 }
 
 // ---------------------------------------------------------------------------
+// Choose-list dialog — used by /leads bulk action ("Add to list…") and by
+// the in-list bulk action ("Copy to another list…"). Static lists only.
+// ---------------------------------------------------------------------------
+
+export function ChooseListDialog({
+  open,
+  onOpenChange,
+  leadIds,
+  excludeListId,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  leadIds: string[];
+  excludeListId?: string;
+}) {
+  const { data: lists } = useLeadLists();
+  const bulkAdd = useBulkAddToList();
+  const staticLists = (lists ?? []).filter(
+    (l) => !l.is_dynamic && l.id !== excludeListId,
+  );
+
+  async function handlePick(listId: string) {
+    if (!leadIds.length) return;
+    try {
+      const res = await bulkAdd.mutateAsync({ list_id: listId, lead_ids: leadIds });
+      toast.success(
+        res.added > 0
+          ? `Added ${res.added} lead${res.added === 1 ? "" : "s"}`
+          : "No new leads to add (all already in list)",
+      );
+      onOpenChange(false);
+    } catch {
+      toast.error("Failed to add to list");
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add {leadIds.length} lead(s) to a list</DialogTitle>
+          <DialogDescription>
+            Pick a static list. Smart lists update automatically and can't be
+            added to manually.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+          {!staticLists.length ? (
+            <p className="text-sm text-muted-foreground">
+              No static lists yet. Create one from the Lead Lists page first.
+            </p>
+          ) : (
+            staticLists.map((l) => (
+              <Button
+                key={l.id}
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => handlePick(l.id)}
+                disabled={bulkAdd.isPending}
+              >
+                <ListChecks className="h-4 w-4 mr-2" />
+                {l.name}
+              </Button>
+            ))
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Inline-editable cell — wraps a Select that fires a lead update on change.
-// Mirrors the inline-edit pattern used in EditableField on detail pages,
-// scaled down for table cells where there's no room for a save/cancel UI.
 // ---------------------------------------------------------------------------
 
 function InlineSelectCell({
@@ -732,10 +1205,6 @@ function InlineSelectCell({
           {
             onSuccess: () => {
               toast.success("Updated");
-              // useUpdateLead only invalidates ["leads"]; the lead-lists
-              // detail view reads from ["smart-list-leads"] or
-              // ["lead-list-members"], so refresh those too — otherwise
-              // the row keeps showing the old value until a remount.
               qc.invalidateQueries({ queryKey: ["smart-list-leads"] });
               qc.invalidateQueries({ queryKey: ["lead-list-members"] });
             },
@@ -764,8 +1233,98 @@ function InlineSelectCell({
 }
 
 // ---------------------------------------------------------------------------
+// Column-chooser popover
+// ---------------------------------------------------------------------------
+
+function ColumnChooser({
+  visible,
+  onChange,
+}: {
+  visible: ColumnKey[];
+  onChange: (next: ColumnKey[]) => void;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm">
+          <Columns3 className="h-4 w-4 mr-2" />
+          Columns
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-56 p-2">
+        <div className="space-y-1 max-h-[60vh] overflow-y-auto">
+          {ALL_COLUMNS.map((c) => {
+            const isOn = visible.includes(c.key);
+            return (
+              <label
+                key={c.key}
+                className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/50 px-2 py-1 rounded"
+              >
+                <Checkbox
+                  checked={isOn}
+                  onCheckedChange={() => {
+                    if (isOn) {
+                      onChange(visible.filter((k) => k !== c.key));
+                    } else {
+                      // Preserve the canonical ALL_COLUMNS order so re-enabling
+                      // a column doesn't shuffle it to the end.
+                      const next = ALL_COLUMNS.map((x) => x.key).filter(
+                        (k) => visible.includes(k) || k === c.key,
+                      );
+                      onChange(next);
+                    }
+                  }}
+                />
+                {c.label}
+              </label>
+            );
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CSV exporter — purely client-side. Quotes every field, RFC-4180-ish.
+// ---------------------------------------------------------------------------
+
+function csvEscape(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  const s = String(v);
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function exportRowsToCSV(rows: Array<Record<string, unknown>>, filename: string) {
+  if (!rows.length) {
+    toast.error("Nothing to export");
+    return;
+  }
+  const header = Object.keys(rows[0]);
+  const lines = [
+    header.map(csvEscape).join(","),
+    ...rows.map((r) => header.map((h) => csvEscape(r[h])).join(",")),
+  ];
+  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// ---------------------------------------------------------------------------
 // List detail view — branches on is_dynamic.
 // ---------------------------------------------------------------------------
+
+type EnrichedLead = Lead & {
+  last_activity_at?: string | null;
+  in_active_sequence?: boolean;
+};
 
 function ListDetailView({
   list,
@@ -775,6 +1334,8 @@ function ListDetailView({
   onBack: () => void;
 }) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
   const { data: staticMembers, isLoading: staticLoading } = useLeadListMembers(
     list.is_dynamic ? undefined : list.id,
   );
@@ -784,41 +1345,88 @@ function ListDetailView({
   );
   const { data: users } = useUsers();
   const removeMutation = useRemoveFromList();
+  const bulkOwner = useBulkUpdateOwner();
+  const updateLead = useUpdateLead();
+
   const [showAddLeads, setShowAddLeads] = useState(false);
   const [showEnroll, setShowEnroll] = useState(false);
   const [showEditFilters, setShowEditFilters] = useState(false);
-  const [sort, setSort] = useState<SortState>({ column: null, direction: "asc" });
+  const [showCopyToList, setShowCopyToList] = useState(false);
 
-  // Normalize both branches into a unified Lead-like row so the table
-  // body is one code path. Static rows go through .lead (or .contact),
-  // smart rows are leads directly.
+  // Sort + quick-filter live in the URL so that a Back-to-list breadcrumb
+  // from a lead detail page restores them exactly.
+  const sortColumn = searchParams.get("sort");
+  const sortDir =
+    (searchParams.get("dir") === "asc" ? "asc" : "desc") as "asc" | "desc";
+  const sort: SortState = { column: sortColumn, direction: sortDir };
+  function setSort(next: SortState) {
+    const live = new URLSearchParams(window.location.search);
+    if (!next.column) {
+      live.delete("sort");
+      live.delete("dir");
+    } else {
+      live.set("sort", next.column);
+      live.set("dir", next.direction);
+    }
+    setSearchParams(live, { replace: true });
+  }
+
+  const quickQuery = searchParams.get("q") ?? "";
+  function setQuickQuery(v: string) {
+    const live = new URLSearchParams(window.location.search);
+    if (v) live.set("q", v);
+    else live.delete("q");
+    setSearchParams(live, { replace: true });
+  }
+
+  const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(loadVisibleColumns);
+  useEffect(() => {
+    localStorage.setItem(COLUMNS_LS_KEY, JSON.stringify(visibleColumns));
+  }, [visibleColumns]);
+
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // Restore scroll position when returning from a detail page. Keyed by
+  // list id so switching lists doesn't carry stale scroll.
+  useEffect(() => {
+    const key = `lead_list_scroll_${list.id}`;
+    const saved = sessionStorage.getItem(key);
+    if (saved) {
+      const y = parseInt(saved, 10);
+      if (!isNaN(y)) window.scrollTo(0, y);
+    }
+    return () => {
+      sessionStorage.setItem(key, String(window.scrollY));
+    };
+  }, [list.id]);
+
+  // Normalize both branches into a unified row shape.
   type Row = {
     rowKey: string;
-    lead: Lead | null;
+    lead: EnrichedLead | null;
     isContact: boolean;
     contactName?: string;
     contactEmail?: string;
     contactPhone?: string;
     contactCompany?: string;
-    memberId?: string; // for static row removal
+    memberId?: string;
   };
 
   const baseRows: Row[] = list.is_dynamic
     ? (smartLeads ?? []).map((l) => ({
         rowKey: l.id,
-        lead: l,
+        lead: l as EnrichedLead,
         isContact: false,
       }))
     : (staticMembers ?? []).map((m: LeadListMember) => {
         if (m.lead) {
           return {
             rowKey: m.id,
-            lead: m.lead as Lead,
+            lead: m.lead as EnrichedLead,
             isContact: false,
             memberId: m.id,
           };
         }
-        // Contact members — keep showing them, no inline edit.
         return {
           rowKey: m.id,
           lead: null,
@@ -831,10 +1439,23 @@ function ListDetailView({
         };
       });
 
-  // Resolve a row's sort field. Pulled into a helper so the comparator
-  // can stay flat. `name` synthesizes "first last" so the sort matches
-  // what the user sees in the cell.
-  function rowField(r: Row, col: string): string {
+  // Quick-filter (in-detail search box) — applies on top of the smart-list
+  // filter or the static membership.
+  const filteredRows = useMemo(() => {
+    if (!quickQuery.trim()) return baseRows;
+    const q = quickQuery.trim().toLowerCase();
+    return baseRows.filter((r) => {
+      const fields = r.isContact
+        ? [r.contactName, r.contactCompany, r.contactEmail]
+        : [
+            r.lead?.first_name, r.lead?.last_name, r.lead?.company,
+            r.lead?.email, r.lead?.title, r.lead?.phone,
+          ];
+      return fields.some((f) => (f ?? "").toLowerCase().includes(q));
+    });
+  }, [baseRows, quickQuery]);
+
+  function rowField(r: Row, col: string): string | number {
     if (r.isContact) {
       switch (col) {
         case "name": return (r.contactName ?? "").toLowerCase();
@@ -850,6 +1471,7 @@ function ListDetailView({
       case "name":
         return `${l.last_name ?? ""} ${l.first_name ?? ""}`.toLowerCase();
       case "company": return (l.company ?? "").toLowerCase();
+      case "title": return (l.title ?? "").toLowerCase();
       case "status": return l.status ?? "";
       case "qualification": return l.qualification ?? "";
       case "rating": return l.rating ?? "";
@@ -857,6 +1479,14 @@ function ListDetailView({
         const u = (users ?? []).find((u) => u.id === l.owner_user_id);
         return (u?.full_name ?? "").toLowerCase();
       }
+      case "source": return l.source ?? "";
+      case "industry": return l.industry_category ?? "";
+      case "state": return l.state ?? "";
+      case "city": return (l.city ?? "").toLowerCase();
+      case "employees": return l.employees ?? -1;
+      case "score": return l.score ?? -1;
+      case "last_activity": return l.last_activity_at ?? "";
+      case "created_at": return l.created_at ?? "";
       case "email": return (l.email ?? "").toLowerCase();
       case "phone": return l.phone ?? "";
       default: return "";
@@ -864,33 +1494,115 @@ function ListDetailView({
   }
 
   const rows = useMemo(() => {
-    if (!sort.column) return baseRows;
+    if (!sort.column) return filteredRows;
     const col = sort.column;
     const dir = sort.direction === "asc" ? 1 : -1;
-    // Stable sort via slice + localeCompare; empty strings sort last on asc
-    // by collation, which is acceptable here.
-    return [...baseRows].sort((a, b) => {
+    return [...filteredRows].sort((a, b) => {
       const av = rowField(a, col);
       const bv = rowField(b, col);
       if (av === bv) return 0;
-      if (av === "") return 1;
-      if (bv === "") return -1;
-      return av.localeCompare(bv) * dir;
+      if (av === "" || av === -1) return 1;
+      if (bv === "" || bv === -1) return -1;
+      if (typeof av === "number" && typeof bv === "number") {
+        return (av - bv) * dir;
+      }
+      return String(av).localeCompare(String(bv)) * dir;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseRows, sort, users]);
+  }, [filteredRows, sort, users]);
 
   const isLoading = list.is_dynamic ? smartLoading : staticLoading;
   const leadIds = rows.map((r) => r.lead?.id).filter((v): v is string => !!v);
+  const selectedIds = Array.from(selected).filter((id) => leadIds.includes(id));
+  const allChecked =
+    !!leadIds.length && leadIds.every((id) => selected.has(id));
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function toggleAll() {
+    if (allChecked) {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        leadIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        leadIds.forEach((id) => next.add(id));
+        return next;
+      });
+    }
+  }
+
+  function isColumnVisible(k: ColumnKey) {
+    return visibleColumns.includes(k);
+  }
+
+  // CSV export uses the currently visible columns + filtered/sorted rows.
+  function handleExport() {
+    const cols = visibleColumns;
+    const csvRows = rows.map((r) => {
+      const out: Record<string, unknown> = {};
+      for (const k of cols) {
+        const col = ALL_COLUMNS.find((c) => c.key === k)!;
+        const v = rowField(r, k);
+        out[col.label] = typeof v === "number" && v < 0 ? "" : v;
+      }
+      return out;
+    });
+    const date = new Date().toISOString().slice(0, 10);
+    exportRowsToCSV(csvRows, `${list.name.replace(/\s+/g, "_")}_${date}.csv`);
+  }
+
+  async function handleBulkAssignOwner(userId: string) {
+    if (!selectedIds.length) return;
+    await bulkOwner.mutateAsync({ ids: selectedIds, owner_user_id: userId });
+    toast.success(`Assigned ${selectedIds.length} lead(s)`);
+    setSelected(new Set());
+  }
+
+  async function handleBulkSetStatus(status: string) {
+    if (!selectedIds.length) return;
+    let count = 0;
+    for (const id of selectedIds) {
+      try {
+        await updateLead.mutateAsync({ id, status: status as Lead["status"] });
+        count++;
+      } catch { /* skip RLS-blocked rows */ }
+    }
+    toast.success(`Updated status on ${count} lead(s)`);
+    setSelected(new Set());
+  }
+
+  async function handleBulkOptOut() {
+    if (!selectedIds.length) return;
+    if (!confirm(`Mark ${selectedIds.length} lead(s) as do-not-market? This is reversible per-lead.`)) return;
+    let count = 0;
+    for (const id of selectedIds) {
+      try {
+        await updateLead.mutateAsync({ id, do_not_market_to: true });
+        count++;
+      } catch { /* skip */ }
+    }
+    toast.success(`Marked ${count} lead(s)`);
+    setSelected(new Set());
+  }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 flex-wrap">
         <Button variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeft className="h-4 w-4 mr-1" />
-          Back
+          Back to lists
         </Button>
-        <div className="flex-1">
+        <div className="flex-1 min-w-[300px]">
           <h2 className="text-lg font-semibold flex items-center gap-2">
             {list.is_dynamic ? (
               <Sparkles className="h-4 w-4 text-primary" />
@@ -903,6 +1615,7 @@ function ListDetailView({
             </Badge>
             <span className="text-sm font-normal text-muted-foreground ml-2">
               {rows.length} {rows.length === 1 ? "lead" : "leads"}
+              {quickQuery && ` (filtered from ${baseRows.length})`}
             </span>
           </h2>
           {list.description && (
@@ -911,7 +1624,18 @@ function ListDetailView({
             </p>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          <Input
+            value={quickQuery}
+            onChange={(e) => setQuickQuery(e.target.value)}
+            placeholder="Quick filter…"
+            className="w-48"
+          />
+          <ColumnChooser visible={visibleColumns} onChange={setVisibleColumns} />
+          <Button variant="outline" onClick={handleExport}>
+            <Download className="h-4 w-4 mr-2" />
+            Export CSV
+          </Button>
           <Button
             variant="outline"
             onClick={() => setShowEnroll(true)}
@@ -943,115 +1667,90 @@ function ListDetailView({
       ) : !rows.length ? (
         <EmptyState
           icon={list.is_dynamic ? Filter : UserPlus}
-          title={list.is_dynamic ? "No leads match" : "No members yet"}
+          title={
+            list.is_dynamic
+              ? "No leads match"
+              : baseRows.length === 0
+                ? "No leads in this list yet"
+                : "No leads match the quick filter"
+          }
           description={
             list.is_dynamic
               ? "Adjust the filters to widen the criteria."
-              : "Add leads to this list."
+              : baseRows.length === 0
+                ? "Click \"Add Leads\" to start filling this list."
+                : "Clear the quick filter or add more leads."
+          }
+          action={
+            !list.is_dynamic && baseRows.length === 0
+              ? { label: "Add Leads", onClick: () => setShowAddLeads(true) }
+              : undefined
           }
         />
       ) : (
         <div className="border rounded-lg overflow-auto">
           <Table>
-            <TableHeader>
+            <TableHeader className="sticky top-0 bg-background z-10">
               <TableRow>
-                <SortableHeader column="name" sort={sort} onSort={setSort}>Name</SortableHeader>
-                <SortableHeader column="company" sort={sort} onSort={setSort}>Company</SortableHeader>
-                <SortableHeader column="status" sort={sort} onSort={setSort}>Status</SortableHeader>
-                <SortableHeader column="qualification" sort={sort} onSort={setSort}>Qualification</SortableHeader>
-                <SortableHeader column="rating" sort={sort} onSort={setSort}>Rating</SortableHeader>
-                <SortableHeader column="owner" sort={sort} onSort={setSort}>Owner</SortableHeader>
-                <SortableHeader column="email" sort={sort} onSort={setSort}>Email</SortableHeader>
-                <SortableHeader column="phone" sort={sort} onSort={setSort}>Phone</SortableHeader>
-                <TableHead className="w-[80px]" />
+                <TableHead className="w-[40px]">
+                  <Checkbox
+                    checked={allChecked}
+                    onCheckedChange={toggleAll}
+                    aria-label="Select all"
+                  />
+                </TableHead>
+                {ALL_COLUMNS.filter((c) => isColumnVisible(c.key)).map((c) => (
+                  c.sortable ? (
+                    <SortableHeader
+                      key={c.key}
+                      column={c.key}
+                      sort={sort}
+                      onSort={setSort}
+                    >
+                      {c.label}
+                    </SortableHeader>
+                  ) : (
+                    <TableHead key={c.key}>{c.label}</TableHead>
+                  )
+                ))}
+                <TableHead className="w-[60px]" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {rows.map((r) => (
                 <TableRow
                   key={r.rowKey}
-                  className={r.lead ? "cursor-pointer" : undefined}
+                  className={cn(r.lead && "cursor-pointer")}
                   onClick={() => {
-                    if (r.lead) navigate(`/leads/${r.lead.id}`);
+                    if (r.lead) {
+                      navigate(
+                        `/leads/${r.lead.id}?from=list:${list.id}`,
+                      );
+                    }
                   }}
                 >
-                  <TableCell className="font-medium">
-                    {r.lead ? (
-                      <Link
-                        to={`/leads/${r.lead.id}`}
-                        className="text-primary hover:underline"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {`${r.lead.first_name ?? ""} ${r.lead.last_name ?? ""}`.trim() || "Unnamed"}
-                      </Link>
-                    ) : (
-                      r.contactName || "Unknown"
-                    )}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {(r.isContact ? r.contactCompany : r.lead?.company) || "—"}
-                  </TableCell>
-                  <TableCell>
-                    {r.lead ? (
-                      <InlineSelectCell
-                        leadId={r.lead.id}
-                        field="status"
-                        value={r.lead.status}
-                        options={STATUS_OPTIONS}
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    {r.lead && (
+                      <Checkbox
+                        checked={selected.has(r.lead.id)}
+                        onCheckedChange={() => toggleSelect(r.lead!.id)}
+                        aria-label="Select row"
                       />
-                    ) : (
-                      <Badge variant="outline">contact</Badge>
                     )}
                   </TableCell>
-                  <TableCell>
-                    {r.lead ? (
-                      <InlineSelectCell
-                        leadId={r.lead.id}
-                        field="qualification"
-                        value={r.lead.qualification}
-                        options={QUALIFICATION_OPTIONS}
-                      />
-                    ) : (
-                      "—"
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {r.lead ? (
-                      <InlineSelectCell
-                        leadId={r.lead.id}
-                        field="rating"
-                        value={r.lead.rating}
-                        options={RATING_OPTIONS}
-                      />
-                    ) : (
-                      "—"
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {r.lead ? (
-                      <InlineSelectCell
-                        leadId={r.lead.id}
-                        field="owner_user_id"
-                        value={r.lead.owner_user_id}
-                        options={(users ?? []).map((u) => ({
-                          value: u.id,
-                          label: u.full_name ?? "Unknown",
-                        }))}
-                      />
-                    ) : (
-                      "—"
-                    )}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {(r.isContact ? r.contactEmail : r.lead?.email) || "—"}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {(r.isContact ? r.contactPhone : r.lead?.phone) || "—"}
-                  </TableCell>
-                  <TableCell>
-                    {/* Smart lists don't have explicit membership, so
-                        the only action is exclude-via-filter. We hide
-                        the trash icon for smart rows. */}
+                  {ALL_COLUMNS.filter((c) => isColumnVisible(c.key)).map((c) => (
+                    <TableCell
+                      key={c.key}
+                      className={
+                        ["name", "title", "company", "email"].includes(c.key)
+                          ? ""
+                          : "text-muted-foreground"
+                      }
+                    >
+                      {renderCell(c.key, r, users ?? [])}
+                    </TableCell>
+                  ))}
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     {!list.is_dynamic && r.memberId ? (
                       <Button
                         variant="ghost"
@@ -1092,30 +1791,219 @@ function ListDetailView({
       <EnrollSequenceDialog
         open={showEnroll}
         onOpenChange={setShowEnroll}
-        leadIds={leadIds}
+        leadIds={selectedIds.length ? selectedIds : leadIds}
       />
+
+      <ChooseListDialog
+        open={showCopyToList}
+        onOpenChange={setShowCopyToList}
+        leadIds={selectedIds}
+        excludeListId={list.id}
+      />
+
+      {/* Bulk-action toolbar — only shown when rows are selected. */}
+      {selectedIds.length > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 flex flex-wrap items-center gap-2 border-t bg-background px-4 py-3 shadow-lg">
+          <span className="text-sm font-medium">{selectedIds.length} selected</span>
+          <Select onValueChange={handleBulkAssignOwner}>
+            <SelectTrigger className="w-44">
+              <SelectValue placeholder="Assign owner…" />
+            </SelectTrigger>
+            <SelectContent>
+              {(users ?? []).map((u) => (
+                <SelectItem key={u.id} value={u.id}>
+                  {u.full_name ?? "Unnamed"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select onValueChange={handleBulkSetStatus}>
+            <SelectTrigger className="w-44">
+              <SelectValue placeholder="Set status…" />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button variant="outline" size="sm" onClick={() => setShowCopyToList(true)}>
+            <Plus className="h-4 w-4 mr-1" />
+            Add to list…
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setShowEnroll(true)}>
+            <Send className="h-4 w-4 mr-1" />
+            Enroll in sequence
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleBulkOptOut}>
+            Mark do-not-market
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setSelected(new Set())}
+            className="ml-auto"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
 
+// Cell renderer for a given column. Pulled out of the JSX so the table
+// loop stays compact and the renderer can branch on column key cleanly.
+function renderCell(
+  col: ColumnKey,
+  r: { lead: EnrichedLead | null; isContact: boolean; contactName?: string; contactEmail?: string; contactPhone?: string; contactCompany?: string },
+  users: Array<{ id: string; full_name: string | null }>,
+) {
+  if (r.isContact) {
+    switch (col) {
+      case "name": return r.contactName || "Unknown";
+      case "company": return r.contactCompany || "—";
+      case "email": return r.contactEmail || "—";
+      case "phone": return r.contactPhone || "—";
+      default: return <Badge variant="outline" className="text-[10px]">contact</Badge>;
+    }
+  }
+  const l = r.lead;
+  if (!l) return "—";
+  switch (col) {
+    case "name":
+      return (
+        <Link
+          to={`/leads/${l.id}`}
+          className="text-primary hover:underline font-medium"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {`${l.first_name ?? ""} ${l.last_name ?? ""}`.trim() || "Unnamed"}
+        </Link>
+      );
+    case "company": return l.company || "—";
+    case "title": return l.title || "—";
+    case "email":
+      return l.email ? (
+        <a
+          href={`mailto:${l.email}`}
+          className="hover:underline inline-flex items-center gap-1"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Mail className="h-3 w-3 opacity-50" />
+          {l.email}
+        </a>
+      ) : "—";
+    case "phone":
+      return l.phone ? (
+        <a
+          href={`tel:${l.phone}`}
+          className="hover:underline inline-flex items-center gap-1"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Phone className="h-3 w-3 opacity-50" />
+          {l.phone}
+        </a>
+      ) : "—";
+    case "status":
+      return (
+        <InlineSelectCell
+          leadId={l.id}
+          field="status"
+          value={l.status}
+          options={STATUS_OPTIONS}
+        />
+      );
+    case "qualification":
+      return (
+        <InlineSelectCell
+          leadId={l.id}
+          field="qualification"
+          value={l.qualification}
+          options={QUALIFICATION_OPTIONS}
+        />
+      );
+    case "rating":
+      return (
+        <InlineSelectCell
+          leadId={l.id}
+          field="rating"
+          value={l.rating}
+          options={RATING_OPTIONS}
+        />
+      );
+    case "owner":
+      return (
+        <InlineSelectCell
+          leadId={l.id}
+          field="owner_user_id"
+          value={l.owner_user_id}
+          options={users.map((u) => ({
+            value: u.id,
+            label: u.full_name ?? "Unknown",
+          }))}
+        />
+      );
+    case "source": return l.source ? l.source.replace(/_/g, " ") : "—";
+    case "industry": return l.industry_category ? l.industry_category.replace(/_/g, " ") : "—";
+    case "state": return l.state || "—";
+    case "city": return l.city || "—";
+    case "employees": return l.employees != null ? l.employees.toLocaleString() : "—";
+    case "score": return l.score != null ? l.score : "—";
+    case "last_activity":
+      return l.last_activity_at ? formatDate(l.last_activity_at) : (
+        <span className="text-xs italic">never</span>
+      );
+    case "in_sequence":
+      return l.in_active_sequence ? (
+        <Badge variant="secondary" className="text-[10px]">in sequence</Badge>
+      ) : "—";
+    case "created_at": return formatDate(l.created_at);
+    default: return "";
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Main page — list of lists.
+// Main page — list of lists, with URL-driven selection.
 // ---------------------------------------------------------------------------
 
 export function LeadListsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [showCreate, setShowCreate] = useState(false);
-  const [selectedList, setSelectedList] = useState<LeadList | null>(null);
+  const [seedFilters, setSeedFilters] = useState<LeadListFilterConfig | null>(null);
+  const [seedName, setSeedName] = useState<string>("");
   const { data: lists, isLoading } = useLeadLists();
   const { data: memberCounts } = useLeadListMemberCount();
   const deleteMutation = useDeleteLeadList();
 
+  // selectedListId lives in the URL so navigating to a lead detail and
+  // hitting "Back to list" returns to the same view (with sort + quick
+  // filter intact since those are also URL-driven).
+  const selectedListId = searchParams.get("list");
+  const selectedList = (lists ?? []).find((l) => l.id === selectedListId);
+
+  function selectList(id: string | null) {
+    const live = new URLSearchParams(window.location.search);
+    if (id) live.set("list", id);
+    else {
+      // Clear list-scoped state when leaving a list.
+      live.delete("list");
+      live.delete("sort");
+      live.delete("dir");
+      live.delete("q");
+    }
+    setSearchParams(live, { replace: true });
+  }
+
   if (selectedList) {
-    // Re-resolve the latest list (e.g. after edit-filters mutation
-    // invalidates ["lead-lists"]) so the detail view always reflects
-    // the current filter_config without forcing a back-and-forth.
-    const fresh =
-      (lists ?? []).find((l) => l.id === selectedList.id) ?? selectedList;
-    return <ListDetailView list={fresh} onBack={() => setSelectedList(null)} />;
+    return (
+      <ListDetailView
+        list={selectedList}
+        onBack={() => selectList(null)}
+      />
+    );
   }
 
   return (
@@ -1124,7 +2012,7 @@ export function LeadListsPage() {
         title="Lead Lists"
         description="Build static lists for outreach or smart lists that update as your data changes."
         actions={
-          <Button onClick={() => setShowCreate(true)}>
+          <Button onClick={() => { setSeedFilters(null); setSeedName(""); setShowCreate(true); }}>
             <Plus className="h-4 w-4 mr-2" />
             Create List
           </Button>
@@ -1144,7 +2032,7 @@ export function LeadListsPage() {
           description="Create your first list to organize leads for outreach."
           action={{
             label: "Create List",
-            onClick: () => setShowCreate(true),
+            onClick: () => { setSeedFilters(null); setSeedName(""); setShowCreate(true); },
           }}
         />
       ) : (
@@ -1153,7 +2041,7 @@ export function LeadListsPage() {
             <Card
               key={list.id}
               className="cursor-pointer hover:shadow-md transition-shadow"
-              onClick={() => setSelectedList(list)}
+              onClick={() => selectList(list.id)}
             >
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between">
@@ -1209,7 +2097,12 @@ export function LeadListsPage() {
         </div>
       )}
 
-      <CreateListDialog open={showCreate} onOpenChange={setShowCreate} />
+      <CreateListDialog
+        open={showCreate}
+        onOpenChange={setShowCreate}
+        initialFilters={seedFilters}
+        initialName={seedName}
+      />
     </div>
   );
 }

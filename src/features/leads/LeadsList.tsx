@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState, useUrlArrayState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { UserPlus, Plus, Search, X } from "lucide-react";
+import { UserPlus, Plus, Search, X, ListChecks, Save } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useLeads, useArchiveLead, useBulkUpdateOwner, useBulkDeleteLeads } from "./api";
 import { useUsers } from "@/features/accounts/api";
@@ -39,6 +39,11 @@ import type { LeadSource } from "@/types/crm";
 import { SortableHeader, type SortState } from "@/components/SortableHeader";
 import { MultiSelect } from "@/components/MultiSelect";
 import { formatPhone } from "@/components/PhoneInput";
+import {
+  ChooseListDialog,
+  CreateListDialog,
+} from "@/features/lead-lists/LeadListsPage";
+import type { LeadListFilterConfig } from "@/features/lead-lists/lead-lists-api";
 
 const PAGE_SIZE = 25;
 
@@ -133,6 +138,40 @@ export function LeadsList() {
   const [page, setPage] = useUrlNumberState("page", 0);
   const [sort, setSort] = useState<SortState>({ column: null, direction: "desc" });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showAddToList, setShowAddToList] = useState(false);
+  const [showSaveSmartList, setShowSaveSmartList] = useState(false);
+
+  // Translates the /leads URL filters into the LeadListFilterConfig
+  // shape used by smart lists. Only fields that have a smart-list filter
+  // analog get carried over; the rest (verified, showConverted) are
+  // /leads-only chrome and don't make sense as list criteria.
+  function buildSmartListSeed(): LeadListFilterConfig {
+    const config: LeadListFilterConfig = {};
+    if (statusFilter.length) config.status = statusFilter;
+    if (sourceFilter.length) config.source = sourceFilter;
+    if (qualificationFilter.length) config.qualification = qualificationFilter;
+    if (ratingFilter.length) config.rating = ratingFilter;
+    if (industryFilter.length) config.industry_category = industryFilter;
+    if (ownerFilter.length) {
+      // 'mine' is a /leads convenience token meaning the current user.
+      // Map it to the actual user id so the smart list keeps working
+      // for the rep who created it (and not the viewer).
+      config.owner_user_id = ownerFilter.map((id) =>
+        id === "mine" && profile ? profile.id : id,
+      );
+    }
+    if (search) config.search = search;
+    return config;
+  }
+
+  function suggestedListName(): string {
+    const parts: string[] = [];
+    if (statusFilter.length) parts.push(statusFilter.join("/"));
+    if (qualificationFilter.length) parts.push(qualificationFilter.map((q) => q.toUpperCase()).join("/"));
+    if (industryFilter.length) parts.push(industryFilter[0].replace(/_/g, " "));
+    if (ratingFilter.length) parts.push(`${ratingFilter.join("/")} leads`);
+    return parts.length ? parts.join(" · ") : "New smart list";
+  }
 
   // Reset to page 0 whenever sort changes so the user doesn't end up
   // on page 47 of the new ordering with nothing visible.
@@ -401,6 +440,27 @@ export function LeadsList() {
             <SelectItem value="true">Show converted</SelectItem>
           </SelectContent>
         </Select>
+        {/* Save the current filter set as a reusable smart list. Disabled
+            when there are no filters to capture — saving an empty list
+            is just confusing. */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setShowSaveSmartList(true)}
+          disabled={
+            !search &&
+            !statusFilter.length &&
+            !sourceFilter.length &&
+            !qualificationFilter.length &&
+            !ownerFilter.length &&
+            !ratingFilter.length &&
+            !industryFilter.length
+          }
+          title="Save the current filter as a smart list"
+        >
+          <Save className="h-4 w-4 mr-1" />
+          Save as smart list
+        </Button>
       </div>
 
       {/* Applied-filter chip row. */}
@@ -584,6 +644,33 @@ export function LeadsList() {
         onDelete={isAdmin ? handleBulkDelete : undefined}
         onAssignOwner={handleBulkAssignOwner}
         users={users}
+      >
+        <Button variant="outline" size="sm" onClick={() => setShowAddToList(true)}>
+          <ListChecks className="h-4 w-4 mr-1" />
+          Add to list…
+        </Button>
+      </BulkActionBar>
+
+      {/* Static-list picker for the bulk "Add to list…" action. The
+          dialog itself filters out smart lists since they're criteria-
+          driven and can't accept manual additions. */}
+      <ChooseListDialog
+        open={showAddToList}
+        onOpenChange={(o) => {
+          setShowAddToList(o);
+          if (!o) setSelectedIds(new Set());
+        }}
+        leadIds={Array.from(selectedIds)}
+      />
+
+      {/* "Save filter as smart list" — opens the standard CreateListDialog
+          seeded with the current /leads filter state. Defaults to the
+          smart-list type so the user just names it and saves. */}
+      <CreateListDialog
+        open={showSaveSmartList}
+        onOpenChange={setShowSaveSmartList}
+        initialFilters={buildSmartListSeed()}
+        initialName={suggestedListName()}
       />
     </div>
   );

@@ -16,6 +16,12 @@ interface BulkActionBarProps {
   onDelete?: () => void;
   onAssignOwner?: (userId: string) => void;
   users?: { id: string; full_name: string | null }[];
+  /**
+   * Extra action buttons rendered after the built-in actions but before
+   * the clear (X) button. Use this for page-specific actions like
+   * "Add to list…" without forking the component.
+   */
+  children?: React.ReactNode;
 }
 
 export function BulkActionBar({
@@ -25,6 +31,7 @@ export function BulkActionBar({
   onDelete,
   onAssignOwner,
   users,
+  children,
 }: BulkActionBarProps) {
   return (
     <div
@@ -63,6 +70,8 @@ export function BulkActionBar({
           Delete Permanently
         </Button>
       )}
+
+      {children}
 
       <Button variant="ghost" size="icon" onClick={onClear} className="ml-auto">
         <X className="h-4 w-4" />
