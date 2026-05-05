@@ -262,9 +262,22 @@ function useRenewalsDueThisQuarter(quarterStart: string, quarterEnd: string) {
   });
 }
 
+/**
+ * Dashboard "owner" = the one user allowed to edit goals, the manual
+ * widgets (quote, QTD billing override), and the dev milestones. Other
+ * admins / users get the read-only team-view experience.
+ *
+ * Brayden's call-out: regular admins should see the dashboard but not be
+ * able to mutate goals. Gate by email so role escalation in user_profiles
+ * doesn't accidentally hand someone else editing rights.
+ */
+const DASHBOARD_OWNER_EMAIL = "braydenf@medcurity.com";
+
 export function TeamDashboard() {
-  const { profile } = useAuth();
-  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
+  const { profile, user } = useAuth();
+  const isOwner =
+    (profile?.role === "admin" || profile?.role === "super_admin") &&
+    user?.email === DASHBOARD_OWNER_EMAIL;
 
   const [goals, setGoals] = useState<Goals>(() => loadGoals());
   useEffect(() => {
@@ -459,7 +472,7 @@ export function TeamDashboard() {
           <p className="text-xs text-muted-foreground">
             Fiscal {m.fiscal_period} ({m.fiscal_quarter_start} → {m.fiscal_quarter_end}).
             Click any KPI to drill into the underlying records.
-            {isAdmin ? " Admins can edit goals via the pencil." : ""}
+            {isOwner ? " You can edit goals via the pencil icons." : ""}
           </p>
         </div>
         <span className="text-[11px] text-muted-foreground">
@@ -476,7 +489,7 @@ export function TeamDashboard() {
           goal={goals.arr}
           formatGoal={formatCurrency}
           onGoalChange={(v) => setGoals((g) => ({ ...g, arr: v }))}
-          editable={isAdmin}
+          editable={isOwner}
           hint="Sum of closed-won amount in the trailing 365 days (v_arr_rolling_365)."
           to="/reports?tab=standard"
         />
@@ -487,7 +500,7 @@ export function TeamDashboard() {
           goal={goals.new_customers}
           formatGoal={(v) => String(v)}
           onGoalChange={(v) => setGoals((g) => ({ ...g, new_customers: v }))}
-          editable={isAdmin}
+          editable={isOwner}
           hint="Closed-won opps with kind='new_business' & close_date in current fiscal quarter (v_new_customers_qtd)."
           to="/reports?tab=standard"
         />
@@ -498,7 +511,7 @@ export function TeamDashboard() {
           goal={goals.new_sales}
           formatGoal={formatCurrency}
           onGoalChange={(v) => setGoals((g) => ({ ...g, new_sales: v }))}
-          editable={isAdmin}
+          editable={isOwner}
           hint="Sum of amount on rows in v_new_customers_qtd."
           to="/reports?tab=standard"
         />
@@ -509,14 +522,16 @@ export function TeamDashboard() {
           goal={goals.total_active_pipeline}
           formatGoal={formatCurrency}
           onGoalChange={(v) => setGoals((g) => ({ ...g, total_active_pipeline: v }))}
-          editable={isAdmin}
+          editable={isOwner}
           hint={`${m.pipeline_count ?? 0} open • weighted ${formatCurrency(num(m.pipeline_weighted_amount))} (v_active_pipeline)`}
           to="/opportunities"
         />
       </Section>
 
       {arrPoints.length > 0 && (
-        <ChartCard title="ARR Trend (rolling 365)">
+        <ChartCard
+          title={`ARR Trend (rolling 365) — goal ${formatCurrency(goals.arr)}`}
+        >
           <ChartLegend />
           <SegmentedLineChart
             data={arrPoints}
@@ -561,7 +576,7 @@ export function TeamDashboard() {
           goal={goals.sql}
           formatGoal={(v) => String(v)}
           onGoalChange={(v) => setGoals((g) => ({ ...g, sql: v }))}
-          editable={isAdmin}
+          editable={isOwner}
           hint="Accounts with a contact whose sql_date falls in current quarter (v_sql_accounts)."
           to="/contacts?qualification=sql"
         />
@@ -572,7 +587,7 @@ export function TeamDashboard() {
           goal={goals.mql}
           formatGoal={(v) => String(v)}
           onGoalChange={(v) => setGoals((g) => ({ ...g, mql: v }))}
-          editable={isAdmin}
+          editable={isOwner}
           hint="Deduped MQL across leads + contacts in current quarter."
           to="/leads?qualification=mql"
         />
@@ -613,7 +628,7 @@ export function TeamDashboard() {
           goal={goals.renewals_amount}
           formatGoal={formatCurrency}
           onGoalChange={(v) => setGoals((g) => ({ ...g, renewals_amount: v }))}
-          editable={isAdmin}
+          editable={isOwner}
           hint={`${m.renewals_qtd ?? 0} renewal-kind closed-won w/ close_date this quarter (v_renewals_qtd, excludes EHR Implementation).`}
           to="/renewals?tab=closed-won&preset=this-quarter"
         />
@@ -624,7 +639,7 @@ export function TeamDashboard() {
           goal={goals.renewals_amount}
           formatGoal={formatCurrency}
           onGoalChange={(v) => setGoals((g) => ({ ...g, renewals_amount: v }))}
-          editable={isAdmin}
+          editable={isOwner}
           hint={`${renewalsDueCount} closed-won opps with contract_end_date in this quarter — at-risk ARR.`}
           to="/renewals?preset=this-quarter"
         />
@@ -635,7 +650,7 @@ export function TeamDashboard() {
           goal={goals.nrr_customer_pct}
           formatGoal={(v) => `${v}%`}
           onGoalChange={(v) => setGoals((g) => ({ ...g, nrr_customer_pct: v }))}
-          editable={isAdmin}
+          editable={isOwner}
           hint="(starting customers − churn QTD) / starting customers. 100% means zero churn this quarter so far."
         />
         <KpiCard
@@ -645,7 +660,7 @@ export function TeamDashboard() {
           goal={goals.nrr_dollar_pct}
           formatGoal={(v) => `${v}%`}
           onGoalChange={(v) => setGoals((g) => ({ ...g, nrr_dollar_pct: v }))}
-          editable={isAdmin}
+          editable={isOwner}
           hint="(starting ARR − churn $ QTD) / starting ARR."
         />
         <KpiCard
@@ -666,7 +681,7 @@ export function TeamDashboard() {
           goal={goals.qtd_billing}
           formatGoal={formatCurrency}
           onGoalChange={(v) => setGoals((g) => ({ ...g, qtd_billing: v }))}
-          editable={isAdmin}
+          editable={isOwner}
           hint={
             widgets.qtd_billing_actual != null
               ? "Using manual override. Clear it below to fall back to New Sales + Renewals."
@@ -675,13 +690,13 @@ export function TeamDashboard() {
         />
       </Section>
 
-      {/* QTD Billing manual override (admin-only edit, visible to all) */}
+      {/* QTD Billing manual override (owner-only edit, visible to all) */}
       <Card>
         <CardContent className="p-3 flex flex-wrap items-center gap-3">
           <p className="text-xs text-muted-foreground font-medium">
             QTD Billing actual override:
           </p>
-          {isAdmin ? (
+          {isOwner ? (
             <>
               <Input
                 type="number"
@@ -732,13 +747,13 @@ export function TeamDashboard() {
                 </span>
               )}
             </h4>
-            {!isAdmin && !widgets.quote_text && (
+            {!isOwner && !widgets.quote_text && (
               <span className="text-[11px] text-muted-foreground italic">
                 No quote yet.
               </span>
             )}
           </div>
-          {isAdmin ? (
+          {isOwner ? (
             <div className="space-y-2">
               <Textarea
                 value={widgets.quote_text}
@@ -921,9 +936,9 @@ export function TeamDashboard() {
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
                 Manually-tracked dev projects. Status auto-derives from completion
-                date + checkbox; admins can edit inline.
+                date + checkbox.
               </p>
-              {isAdmin && (
+              {isOwner && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -941,7 +956,7 @@ export function TeamDashboard() {
             </div>
             {widgets.dev_items.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-6">
-                No dev items yet. {isAdmin ? "Click 'Add row' to track one." : ""}
+                No dev items yet. {isOwner ? "Click 'Add row' to track one." : ""}
               </p>
             ) : (
               <div className="overflow-x-auto">
@@ -952,7 +967,7 @@ export function TeamDashboard() {
                       <th className="px-2 py-2 font-medium">Completion Date</th>
                       <th className="px-2 py-2 font-medium text-center">Complete</th>
                       <th className="px-2 py-2 font-medium">Status</th>
-                      {isAdmin && <th className="px-2 py-2 w-10" />}
+                      {isOwner && <th className="px-2 py-2 w-10" />}
                     </tr>
                   </thead>
                   <tbody>
@@ -964,7 +979,7 @@ export function TeamDashboard() {
                       return (
                         <tr key={item.id} className="border-t">
                           <td className="px-2 py-1.5">
-                            {isAdmin ? (
+                            {isOwner ? (
                               <Input
                                 value={item.project}
                                 onChange={(e) =>
@@ -985,7 +1000,7 @@ export function TeamDashboard() {
                             )}
                           </td>
                           <td className="px-2 py-1.5">
-                            {isAdmin ? (
+                            {isOwner ? (
                               <Input
                                 type="date"
                                 value={item.completion_date}
@@ -1009,7 +1024,7 @@ export function TeamDashboard() {
                             <input
                               type="checkbox"
                               checked={item.complete}
-                              disabled={!isAdmin}
+                              disabled={!isOwner}
                               onChange={(e) =>
                                 setWidgets((w) => ({
                                   ...w,
@@ -1030,7 +1045,7 @@ export function TeamDashboard() {
                               {status}
                             </span>
                           </td>
-                          {isAdmin && (
+                          {isOwner && (
                             <td className="px-2 py-1.5 text-right">
                               <Button
                                 size="sm"
@@ -1088,11 +1103,16 @@ function num(v: number | null | undefined): number {
 }
 
 /**
- * Build a weekly running-total point series for a charted KPI within
- * the current fiscal quarter. Each point's `goal` is the proportional
- * portion of the quarter's full goal we'd expect by that point if
- * progress were perfectly linear — that's what gets the segments
- * colored R/Y/G in SegmentedLineChart.
+ * Build a MONTHLY running-total point series for a charted KPI within
+ * the current fiscal quarter — produces 3 points (M1, M2, M3), matching
+ * the format Codex's Python dashboard uses (`chart_data: [{month, label,
+ * value}, ...]`). Brayden specifically asked for monthly buckets, not
+ * weekly.
+ *
+ * `actual` at month N = cumulative total of events through end-of-month-N.
+ * `goal` at month N = proportional pace, i.e. quarter_goal * (N/3) by
+ * default. (Per-month overrides come from the per-quarter goals store
+ * once that's wired in — for now we use even thirds.)
  */
 function buildRunningTotal(
   events: { date: string; value: number }[],
@@ -1103,45 +1123,34 @@ function buildRunningTotal(
   if (!quarterStart || !quarterEnd) return [];
   const start = new Date(quarterStart);
   const end = new Date(quarterEnd);
-  const totalMs = end.getTime() - start.getTime();
-  if (!Number.isFinite(totalMs) || totalMs <= 0) return [];
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
+    return [];
+  }
 
   const sorted = [...events]
     .filter((e) => e.date >= quarterStart && e.date <= quarterEnd)
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  const fmt = (d: Date) =>
-    d.toLocaleString("en-US", { month: "short", day: "numeric" });
-
-  const points: SegmentPoint[] = [
-    { label: fmt(start), actual: 0, goal: 0 },
-  ];
-
-  let cumulative = 0;
-  let evIdx = 0;
-
-  for (let w = 1; w <= 14; w++) {
-    const weekEnd = new Date(start);
-    weekEnd.setDate(start.getDate() + w * 7);
-    const cap = weekEnd > end ? new Date(end) : weekEnd;
+  // The 3 calendar months of the current fiscal quarter. Use the start
+  // month as M1 — this matches Codex's labels (e.g., Q1 → Jan/Feb/Mar).
+  const points: SegmentPoint[] = [];
+  for (let i = 0; i < 3; i++) {
+    const monthStart = new Date(start.getFullYear(), start.getMonth() + i, 1);
+    const monthEnd = new Date(start.getFullYear(), start.getMonth() + i + 1, 0);
+    // Don't extend past quarter end (e.g., short quarters / off-by-one).
+    const cap = monthEnd > end ? end : monthEnd;
     const capStr = cap.toISOString().slice(0, 10);
 
-    while (evIdx < sorted.length && sorted[evIdx].date <= capStr) {
-      cumulative += sorted[evIdx].value;
-      evIdx++;
-    }
-
-    const fraction = (cap.getTime() - start.getTime()) / totalMs;
+    const cumulative = sorted
+      .filter((e) => e.date <= capStr)
+      .reduce((s, e) => s + e.value, 0);
 
     points.push({
-      label: fmt(cap),
+      label: monthStart.toLocaleString("en-US", { month: "short" }),
       actual: cumulative,
-      goal: totalGoal * fraction,
+      goal: totalGoal * ((i + 1) / 3),
     });
-
-    if (cap.getTime() >= end.getTime()) break;
   }
-
   return points;
 }
 

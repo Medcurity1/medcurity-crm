@@ -23,10 +23,18 @@ import { Save, RotateCcw } from "lucide-react";
  * per-quarter history can replace `loadGoals/saveGoals` without changing
  * this component.
  */
+/**
+ * Dashboard owner — only this user can edit goals. Other admins see a
+ * read-only message. Brayden's call-out: regular admins shouldn't be
+ * able to mutate dashboard goals, only the dashboard owner.
+ */
+const DASHBOARD_OWNER_EMAIL = "braydenf@medcurity.com";
+
 export function DashboardGoalsManager() {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const isAdmin =
-    profile?.role === "admin" || profile?.role === "super_admin";
+    (profile?.role === "admin" || profile?.role === "super_admin") &&
+    user?.email === DASHBOARD_OWNER_EMAIL;
 
   const [draft, setDraft] = useState<Goals>(() => loadGoals());
   const [saved, setSaved] = useState<Goals>(() => loadGoals());
@@ -70,7 +78,7 @@ export function DashboardGoalsManager() {
     return (
       <Card>
         <CardContent className="p-6 text-sm text-muted-foreground">
-          Only admins can edit dashboard goals.
+          Dashboard goals are managed by the dashboard owner.
         </CardContent>
       </Card>
     );
