@@ -213,10 +213,14 @@ function normalizeMetricGoal(
 
   const m1raw = raw?.month_goals?.[0];
   const m2raw = raw?.month_goals?.[1];
-  // M3 is forced to quarter_goal (cumulative end-of-quarter target).
+  const m3raw = raw?.month_goals?.[2];
+  // All three months are independently editable. M3 defaults to quarter_goal
+  // when null (see fillMonthGoals), but the user can override with a
+  // different cumulative end-of-quarter target if their split needs it.
   const m1 = typeof m1raw === "number" && Number.isFinite(m1raw) ? m1raw : null;
   const m2 = typeof m2raw === "number" && Number.isFinite(m2raw) ? m2raw : null;
-  return { quarter_goal, month_goals: [m1, m2, quarter_goal] };
+  const m3 = typeof m3raw === "number" && Number.isFinite(m3raw) ? m3raw : null;
+  return { quarter_goal, month_goals: [m1, m2, m3] };
 }
 
 /** Returns the per-metric goals for a quarter, normalized. Always returns
