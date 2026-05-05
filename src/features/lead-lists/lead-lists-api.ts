@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import type { LeadList, LeadListMember, Lead } from "@/types/crm";
+import { buildIndustryOrClause } from "@/features/leads/industry-keywords";
 
 // Shape of filter_config for dynamic ("smart") lists. Each key maps onto
 // columns on `leads` (or supporting views). Stored as jsonb on
@@ -96,8 +97,13 @@ function applyFilters<T>(
   if (fc.source?.length) q = q.in("source", fc.source);
   if (fc.qualification?.length) q = q.in("qualification", fc.qualification);
   if (fc.rating?.length) q = q.in("rating", fc.rating);
-  if (fc.industry_category?.length)
-    q = q.in("industry_category", fc.industry_category);
+  if (fc.industry_category?.length) {
+    // Match BOTH the normalized enum column AND legacy free-text column
+    // — SF-imported leads sit with `industry_category=null` and a free-text
+    // value in `industry`. See `buildIndustryOrClause` for the keyword map.
+    const orClause = buildIndustryOrClause(fc.industry_category);
+    if (orClause) q = q.or(orClause);
+  }
   if (fc.owner_user_id?.length) q = q.in("owner_user_id", fc.owner_user_id);
   if (fc.business_relationship_tag?.length)
     q = q.in("business_relationship_tag", fc.business_relationship_tag);

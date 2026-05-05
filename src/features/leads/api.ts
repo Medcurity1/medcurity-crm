@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import type { Lead } from "@/types/crm";
+import { buildIndustryOrClause } from "./industry-keywords";
 
 interface LeadFilters {
   search?: string;
@@ -94,12 +95,14 @@ export function useLeads(filters?: LeadFilters) {
         }
       }
       if (filters?.industryCategory) {
-        if (Array.isArray(filters.industryCategory)) {
-          if (filters.industryCategory.length > 0)
-            query = query.in("industry_category", filters.industryCategory);
-        } else {
-          query = query.eq("industry_category", filters.industryCategory);
-        }
+        // OR-match the normalized enum AND legacy free-text column so
+        // SF-imported leads (industry_category=null, industry='Rural
+        // Hospital') still match. See `industry-keywords.ts`.
+        const cats = Array.isArray(filters.industryCategory)
+          ? filters.industryCategory
+          : [filters.industryCategory];
+        const orClause = buildIndustryOrClause(cats);
+        if (orClause) query = query.or(orClause);
       }
       if (filters?.verified === "true") query = query.eq("verified", true);
       else if (filters?.verified === "false") query = query.eq("verified", false);

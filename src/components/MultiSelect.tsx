@@ -71,16 +71,26 @@ export function MultiSelect({
             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
-        {/* bg-popover is applied by PopoverContent already, but we
-            re-assert it here so that even when this MultiSelect is used
-            inside a Dialog (which renders a dim backdrop), nothing
-            beneath the popover bleeds through and makes options look
-            translucent. Native overflow-y-auto + a fixed max-height
-            scrolls reliably on long lists (e.g. the 24-item Industry
-            picker) — Radix ScrollArea's display-table inner wrapper
-            can swallow scroll inside popovers. */}
+        {/* When this MultiSelect is opened inside a Dialog (e.g. the
+            Lead List filter editor), three things go wrong with the
+            naive shadcn defaults:
+              1. PopoverContent gets clipped by the available viewport
+                 height without exposing a scrollbar — Radix sets
+                 `--radix-popover-content-available-height` for exactly
+                 this case, so we cap our scroll container by both that
+                 and a max of 18rem.
+              2. `overscroll-contain` on a nested scroller, combined
+                 with Dialog's body-scroll-lock, can swallow wheel
+                 events. Drop it; the popover is portaled at body level
+                 so chained scroll isn't a hazard anyway.
+              3. Without `bg-popover` re-asserted, a Dialog's dim
+                 backdrop bleeds through and makes options look
+                 translucent.
+            We also force `pointer-events-auto` on the inner scroller
+            because Radix Dialog sets `pointer-events: none` on body in
+            modal mode and the portaled popover inherits it. */}
         <PopoverContent
-          className="w-64 p-0 bg-popover text-popover-foreground"
+          className="w-64 p-0 bg-popover text-popover-foreground pointer-events-auto"
           align="start"
         >
           <div className="flex items-center justify-between px-3 py-2 text-xs text-muted-foreground border-b bg-popover">
@@ -95,7 +105,13 @@ export function MultiSelect({
               </button>
             )}
           </div>
-          <div className="max-h-72 overflow-y-auto overscroll-contain p-1">
+          <div
+            className="overflow-y-auto p-1"
+            style={{
+              maxHeight:
+                "min(18rem, var(--radix-popover-content-available-height, 18rem))",
+            }}
+          >
             {options.map((opt) => {
               const checked = value.includes(opt.value);
               return (
