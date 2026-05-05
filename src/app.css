@@ -130,3 +130,65 @@
     transition: background-color 9999s ease-in-out 0s;
   }
 }
+
+/*
+ * Dashboard PDF export print rules.
+ *
+ * The dashboard's "Export PDF" button calls window.print(). Without
+ * special handling, the browser includes the sidebar, top bar, and
+ * any other surrounding chrome — and Chrome's default print behavior
+ * strips background colors and dark-mode tokens, producing a flat
+ * white sheet that looks nothing like the live UI.
+ *
+ * The strategy: any element marked `data-dashboard-print-root` becomes
+ * the only thing visible on print, positioned at the top of the page,
+ * with backgrounds forced on so the section tints + KPI tiles render
+ * faithfully in either light or dark mode (whatever the user has on
+ * screen at the time).
+ */
+@media print {
+  /* Honor every background color / image — browsers strip these by default. */
+  *,
+  *::before,
+  *::after {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* When the user has the dashboard open and hits Export PDF, only the
+     dashboard itself should render. Hide everything by default, then
+     promote the print root + its descendants back to visible. */
+  body:has([data-dashboard-print-root]) > * {
+    visibility: hidden;
+  }
+  [data-dashboard-print-root],
+  [data-dashboard-print-root] * {
+    visibility: visible;
+  }
+  [data-dashboard-print-root] {
+    position: absolute;
+    inset: 0 0 auto 0;
+    width: 100%;
+    padding: 0.5rem 1rem;
+    background: var(--color-background);
+    color: var(--color-foreground);
+  }
+
+  /* Tailwind's print:hidden utility (compiled by tw-animate-css/Tailwind). */
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* Don't break a Card across pages if we can help it. */
+  [data-dashboard-print-root] .rounded-md,
+  [data-dashboard-print-root] [class*="rounded-lg"] {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Strip the global page background so the dashboard's own bg shows through. */
+  html,
+  body {
+    background: var(--color-background) !important;
+  }
+}

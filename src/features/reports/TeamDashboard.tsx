@@ -284,6 +284,53 @@ function useMqlRowsQtd(quarterStart: string, quarterEnd: string) {
  */
 const DASHBOARD_OWNER_EMAIL = "braydenf@medcurity.com";
 
+/**
+ * Build a quarterly trend (one point per calendar quarter, Q2-2025 → today)
+ * from weekly snapshots. Mirrors the `arrPoints` window logic so the
+ * Pipeline / NRR charts share the same X-axis as the ARR chart.
+ *
+ * For each quarter we keep the LAST snapshot in that quarter (closest
+ * to end-of-quarter). The current quarter always shows the latest
+ * snapshot so the line keeps moving forward instead of dropping off.
+ */
+function quarterlySnapshotTrend(
+  snapshots: DashboardSnapshot[],
+  metricKey: keyof DashboardSnapshot["metrics"],
+  goal: number,
+): SegmentPoint[] {
+  if (snapshots.length === 0) return [];
+  const WINDOW_START_YEAR = 2025;
+  const WINDOW_START_Q = 2;
+
+  // Group by quarter, keep the latest snapshot per quarter (sorted by week_start ASC).
+  const sorted = [...snapshots].sort((a, b) =>
+    a.week_start.localeCompare(b.week_start),
+  );
+  const lastPerQuarter = new Map<string, DashboardSnapshot>();
+  for (const s of sorted) {
+    lastPerQuarter.set(s.quarter, s);
+  }
+
+  // Build ordered list of quarter labels from window start through today.
+  const today = new Date();
+  const currentYear = today.getUTCFullYear();
+  const currentQuarter = Math.floor(today.getUTCMonth() / 3) + 1;
+
+  const points: SegmentPoint[] = [];
+  for (let y = WINDOW_START_YEAR; y <= currentYear; y++) {
+    const startQ = y === WINDOW_START_YEAR ? WINDOW_START_Q : 1;
+    const endQ = y === currentYear ? currentQuarter : 4;
+    for (let q = startQ; q <= endQ; q++) {
+      const label = `Q${q}-${y}`;
+      const snap = lastPerQuarter.get(label);
+      if (!snap) continue;
+      const value = Number(snap.metrics[metricKey]) || 0;
+      points.push({ label, actual: value, goal });
+    }
+  }
+  return points;
+}
+
 type DashboardView = "dashboard" | "goals" | "historical";
 
 export function TeamDashboard() {
@@ -530,13 +577,20 @@ export function TeamDashboard() {
     });
   }, [arrTrend, goals.arr]);
 
+  // Snapshots feed the historical-trend charts (Pipeline, NRR). Loaded
+  // once on mount, refreshed whenever a new weekly snapshot is captured
+  // so today's row appears on the chart immediately.
+  const [snapshots, setSnapshots] = useState<DashboardSnapshot[]>(() =>
+    loadSnapshots(),
+  );
+
   // Capture a weekly snapshot once per ISO week the first time the
   // dashboard renders with real metrics that week. Idempotent — safe
   // to call on every render. Owner-only: writing snapshots from the
   // team-view session would pollute history with the wrong author.
   useEffect(() => {
     if (!isOwnerAccount || !m) return;
-    captureWeeklySnapshotIfNeeded({
+    const newSnap = captureWeeklySnapshotIfNeeded({
       metrics: {
         arr: num(m.current_arr),
         new_customers_qtd: num(m.new_customers_qtd),
@@ -559,7 +613,65 @@ export function TeamDashboard() {
       quote_text: widgets.quote_text,
       quote_author: widgets.quote_author,
     });
+    if (newSnap) setSnapshots(loadSnapshots());
   }, [isOwnerAccount, m, milestones, widgets]);
+
+  // Quarterly trend points sourced from snapshots, with the current
+  // quarter overridden by the live metric so the rightmost point always
+  // reflects the current dashboard value (snapshots only capture weekly).
+  const pipelineTrendPoints = useMemo<SegmentPoint[]>(() => {
+    const base = quarterlySnapshotTrend(
+      snapshots,
+      "pipeline_amount",
+      goals.total_active_pipeline,
+    );
+    if (!m) return base;
+    const live: SegmentPoint = {
+      label: currentQuarter,
+      actual: num(m.pipeline_amount),
+      goal: goals.total_active_pipeline,
+    };
+    const idx = base.findIndex((p) => p.label === currentQuarter);
+    if (idx >= 0) base[idx] = live;
+    else base.push(live);
+    return base;
+  }, [snapshots, goals.total_active_pipeline, m, currentQuarter]);
+
+  const nrrCustomerTrendPoints = useMemo<SegmentPoint[]>(() => {
+    const base = quarterlySnapshotTrend(
+      snapshots,
+      "nrr_by_customer_pct",
+      goals.nrr_customer_pct,
+    );
+    if (!m) return base;
+    const live: SegmentPoint = {
+      label: currentQuarter,
+      actual: num(m.nrr_by_customer_true_pct ?? m.nrr_by_customer_legacy_pct),
+      goal: goals.nrr_customer_pct,
+    };
+    const idx = base.findIndex((p) => p.label === currentQuarter);
+    if (idx >= 0) base[idx] = live;
+    else base.push(live);
+    return base;
+  }, [snapshots, goals.nrr_customer_pct, m, currentQuarter]);
+
+  const nrrDollarTrendPoints = useMemo<SegmentPoint[]>(() => {
+    const base = quarterlySnapshotTrend(
+      snapshots,
+      "nrr_by_dollar_pct",
+      goals.nrr_dollar_pct,
+    );
+    if (!m) return base;
+    const live: SegmentPoint = {
+      label: currentQuarter,
+      actual: num(m.nrr_by_dollar_true_pct ?? m.nrr_by_dollar_legacy_pct),
+      goal: goals.nrr_dollar_pct,
+    };
+    const idx = base.findIndex((p) => p.label === currentQuarter);
+    if (idx >= 0) base[idx] = live;
+    else base.push(live);
+    return base;
+  }, [snapshots, goals.nrr_dollar_pct, m, currentQuarter]);
 
   // ---- Owner sub-views (Goals, Historical) ----
   // Both gated to the raw owner account so a "team view" preview still
@@ -628,14 +740,13 @@ export function TeamDashboard() {
 
   const arr = num(m.current_arr);
   const newCustomers = num(m.new_customers_qtd);
-  const newSales = num(m.new_customer_amount_qtd);
   const pipeline = num(m.pipeline_amount);
   const renewalsClosedAmt = num(m.renewals_amount_qtd);
   const nrrCust = num(m.nrr_by_customer_true_pct ?? m.nrr_by_customer_legacy_pct);
   const nrrDollar = num(m.nrr_by_dollar_true_pct ?? m.nrr_by_dollar_legacy_pct);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-dashboard-print-root>
       {tabBar}
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
@@ -726,19 +837,8 @@ export function TeamDashboard() {
             )}
           </div>
 
-          {/* New Sales — KPI above running-total chart */}
+          {/* New Sales — chart only (graph-driven per Codex parity) */}
           <div className="space-y-3">
-            <KpiCard
-              label="New Sales $ QTD"
-              value={formatCurrency(newSales)}
-              progress={pct(newSales, goals.new_sales)}
-              goal={goals.new_sales}
-              formatGoal={formatCurrency}
-              onGoalChange={(v) => setGoalQuarter("new_sales", v)}
-              editable={isOwner}
-              hint="Sum of amount on rows in v_new_customers_qtd."
-              to="/reports?tab=standard"
-            />
             {newSalesRunning.length > 1 && (
               <ChartCard
                 title={`New Sales $ — running total (Q goal ${formatCurrency(goals.new_sales)})`}
@@ -766,19 +866,32 @@ export function TeamDashboard() {
             )}
           </div>
 
-          {/* Pipeline — KPI alone (locked metric, no per-month split) */}
+          {/* Pipeline — chart only, sourced from weekly snapshots so we
+              get a quarter-over-quarter trend (locked metric, flat goal). */}
           <div className="space-y-3">
-            <KpiCard
-              label="Active Pipeline"
-              value={formatCurrency(pipeline)}
-              progress={pct(pipeline, goals.total_active_pipeline)}
-              goal={goals.total_active_pipeline}
-              formatGoal={formatCurrency}
-              onGoalChange={(v) => setGoalQuarter("total_active_pipeline", v)}
-              editable={isOwner}
-              hint={`${m.pipeline_count ?? 0} open • weighted ${formatCurrency(num(m.pipeline_weighted_amount))} (v_active_pipeline)`}
-              to="/opportunities"
-            />
+            {pipelineTrendPoints.length > 0 ? (
+              <ChartCard
+                title={`Active Pipeline by Quarter — goal ${formatCurrency(goals.total_active_pipeline)}`}
+                subtitle={`Now: ${formatCurrency(pipeline)} • ${m.pipeline_count ?? 0} open • weighted ${formatCurrency(num(m.pipeline_weighted_amount))}`}
+              >
+                <ChartLegend />
+                <SegmentedLineChart
+                  data={pipelineTrendPoints}
+                  yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+                  tooltipFormatter={(v) => formatCurrency(v)}
+                  height={220}
+                />
+              </ChartCard>
+            ) : (
+              <ChartCard
+                title={`Active Pipeline — goal ${formatCurrency(goals.total_active_pipeline)}`}
+                subtitle={`Now: ${formatCurrency(pipeline)} • ${m.pipeline_count ?? 0} open • weighted ${formatCurrency(num(m.pipeline_weighted_amount))}. Trend will fill in as weekly snapshots accumulate.`}
+              >
+                <div className="h-[220px] flex items-center justify-center text-xs text-muted-foreground">
+                  No history yet.
+                </div>
+              </ChartCard>
+            )}
           </div>
         </div>
       </SectionWrap>
@@ -842,19 +955,8 @@ export function TeamDashboard() {
       {/* ----- Customer Success ----- */}
       <SectionWrap title="Customer Success" tone="bg-emerald-50 dark:bg-emerald-950/30">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Renewals — KPI above running-total chart */}
+          {/* Renewals — chart only (graph-driven per Codex parity) */}
           <div className="space-y-3">
-            <KpiCard
-              label="Renewals Closed QTD"
-              value={formatCurrency(renewalsClosedAmt)}
-              progress={pct(renewalsClosedAmt, goals.renewals_amount)}
-              goal={goals.renewals_amount}
-              formatGoal={formatCurrency}
-              onGoalChange={(v) => setGoalQuarter("renewals_number", v)}
-              editable={isOwner}
-              hint={`${m.renewals_qtd ?? 0} renewal-kind closed-won w/ close_date this quarter (v_renewals_qtd, excludes EHR Implementation).`}
-              to="/renewals?tab=closed-won&preset=this-quarter"
-            />
             {renewalsClosedRunning.length > 1 && (
               <ChartCard
                 title={`Renewals Closed $ — running total (Q goal ${formatCurrency(goals.renewals_amount)})`}
@@ -885,29 +987,19 @@ export function TeamDashboard() {
           {/* QTD Billing — KPI alone */}
           <div className="space-y-3">
             <KpiCard
-              label={
-                widgets.qtd_billing_actual != null
-                  ? "QTD Billing (manual)"
-                  : "QTD Billing Goal"
-              }
+              label="QTD Billing Goal"
               value={formatCurrency(
-                widgets.qtd_billing_actual ??
-                  num(m.new_customer_amount_qtd) + renewalsClosedAmt,
+                num(m.new_customer_amount_qtd) + renewalsClosedAmt,
               )}
               progress={pct(
-                widgets.qtd_billing_actual ??
-                  num(m.new_customer_amount_qtd) + renewalsClosedAmt,
+                num(m.new_customer_amount_qtd) + renewalsClosedAmt,
                 goals.qtd_billing,
               )}
               goal={goals.qtd_billing}
               formatGoal={formatCurrency}
               onGoalChange={(v) => setGoalQuarter("qtd_billing_progress", v)}
               editable={isOwner}
-              hint={
-                widgets.qtd_billing_actual != null
-                  ? "Using manual override. Clear it below to fall back to New Sales + Renewals."
-                  : "New Sales $ QTD + Renewals Closed $ QTD. Set a manual override below if billing system says otherwise."
-              }
+              hint="New Sales $ QTD + Renewals Closed $ QTD."
             />
             <KpiCard
               label="NRR by Customer"
@@ -919,6 +1011,19 @@ export function TeamDashboard() {
               editable={isOwner}
               hint="(starting customers − churn QTD) / starting customers. 100% means zero churn this quarter so far."
             />
+            {nrrCustomerTrendPoints.length > 1 && (
+              <ChartCard
+                title={`NRR by Customer — quarterly (goal ${goals.nrr_customer_pct}%)`}
+              >
+                <ChartLegend />
+                <SegmentedLineChart
+                  data={nrrCustomerTrendPoints}
+                  yFormatter={(v) => `${v.toFixed(0)}%`}
+                  tooltipFormatter={(v) => `${v.toFixed(1)}%`}
+                  height={200}
+                />
+              </ChartCard>
+            )}
             <KpiCard
               label="NRR by Dollar"
               value={fmtPct(nrrDollar)}
@@ -929,54 +1034,22 @@ export function TeamDashboard() {
               editable={isOwner}
               hint="(starting ARR − churn $ QTD) / starting ARR."
             />
+            {nrrDollarTrendPoints.length > 1 && (
+              <ChartCard
+                title={`NRR by Dollar — quarterly (goal ${goals.nrr_dollar_pct}%)`}
+              >
+                <ChartLegend />
+                <SegmentedLineChart
+                  data={nrrDollarTrendPoints}
+                  yFormatter={(v) => `${v.toFixed(0)}%`}
+                  tooltipFormatter={(v) => `${v.toFixed(1)}%`}
+                  height={200}
+                />
+              </ChartCard>
+            )}
           </div>
         </div>
       </SectionWrap>
-
-      {/* QTD Billing manual override (owner-only edit, visible to all) */}
-      <Card>
-        <CardContent className="p-3 flex flex-wrap items-center gap-3">
-          <p className="text-xs text-muted-foreground font-medium">
-            QTD Billing actual override:
-          </p>
-          {isOwner ? (
-            <>
-              <Input
-                type="number"
-                value={widgets.qtd_billing_actual ?? ""}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  const parsed = raw === "" ? null : Number(raw);
-                  setWidgets((w) => ({
-                    ...w,
-                    qtd_billing_actual:
-                      parsed === null || !Number.isFinite(parsed) ? null : parsed,
-                  }));
-                }}
-                placeholder="Auto-compute"
-                className="h-8 w-40 text-sm"
-              />
-              {widgets.qtd_billing_actual != null && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() =>
-                    setWidgets((w) => ({ ...w, qtd_billing_actual: null }))
-                  }
-                >
-                  Clear override
-                </Button>
-              )}
-            </>
-          ) : (
-            <span className="text-sm">
-              {widgets.qtd_billing_actual != null
-                ? formatCurrency(widgets.qtd_billing_actual)
-                : "(none — using auto-computed value)"}
-            </span>
-          )}
-        </CardContent>
-      </Card>
 
       {/* Most Recent Quote — manually edited on the dashboard */}
       <Card>
@@ -2461,20 +2534,25 @@ function HistoricalView() {
  */
 function SnapshotDetailView({
   snapshot,
-  previous,
   onBack,
 }: {
   snapshot: DashboardSnapshot;
   previous?: DashboardSnapshot;
   onBack: () => void;
 }) {
-  // Pull live goals for the captured quarter so the user has context for
-  // each KPI. If the snapshot's quarter has been retconned the numbers
-  // shown here will use the latest goal — that's fine because the actuals
-  // are immutable.
+  // Pull goals for the captured quarter so the snapshot view shows the
+  // same progress-bar context the live dashboard would. If the goals for
+  // that quarter were retconned, we use the latest stored values — the
+  // actuals are still immutable.
   const goals = useMemo(() => getQuarterGoals(snapshot.quarter), [snapshot.quarter]);
   const monthIdx = currentMonthIndex(snapshot.quarter, new Date(snapshot.snapshot_date));
 
+  /**
+   * Cumulative goal at the snapshot's month-of-quarter, matching the
+   * progress-bar logic on the live dashboard. Used for QTD-style metrics
+   * (new sales, renewals, etc.). For point-in-time metrics (ARR,
+   * pipeline, NRR%) we use the quarter goal directly.
+   */
   const cumulativeGoalAt = (key: MetricKey): number => {
     const g = goals[key];
     const filled = fillMonthGoals(g);
@@ -2482,124 +2560,161 @@ function SnapshotDetailView({
     return filled[monthIdx];
   };
 
-  // Map snapshot metric key → matching goal key (where one exists).
-  // Some snapshot metrics (e.g. qtd_billing) line up 1:1; others are
-  // computed and not goal-backed.
-  const goalKeyFor: Partial<Record<keyof DashboardSnapshot["metrics"], MetricKey>> = {
-    arr: "arr",
-    new_customers_qtd: "new_customers",
-    new_customer_amount_qtd: "new_sales",
-    pipeline_amount: "total_active_pipeline",
-    renewals_amount_qtd: "renewals_number",
-    nrr_by_customer_pct: "nrr_customer_pct",
-    nrr_by_dollar_pct: "nrr_dollar_pct",
-    sql_qtd: "sql",
-    mql_unique_qtd: "mql",
-    qtd_billing: "qtd_billing_progress",
-  };
+  const sm = snapshot.metrics;
+  const noop = () => {};
+
+  // Per-metric resolved goal numbers, mirroring the live dashboard.
+  const arrGoal = goals.arr.quarter_goal;
+  const pipelineGoal = goals.total_active_pipeline.quarter_goal;
+  const nrrCustGoal = goals.nrr_customer_pct.quarter_goal;
+  const nrrDollarGoal = goals.nrr_dollar_pct.quarter_goal;
+  const newCustomersGoal = cumulativeGoalAt("new_customers");
+  const newSalesGoal = cumulativeGoalAt("new_sales");
+  const renewalsGoal = cumulativeGoalAt("renewals_number");
+  const sqlGoal = cumulativeGoalAt("sql");
+  const mqlGoal = cumulativeGoalAt("mql");
+  const qtdBillingGoal = cumulativeGoalAt("qtd_billing_progress");
 
   return (
-    <Card>
-      <CardContent className="p-6 space-y-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onBack}
-              className="-ml-2 h-7 px-2 text-xs"
-            >
-              ← Back to all snapshots
-            </Button>
-            <h2 className="text-lg font-semibold">
-              Dashboard snapshot — week of {snapshot.week_start}
-            </h2>
-            <p className="text-xs text-muted-foreground">
-              {snapshot.quarter} · captured {snapshot.snapshot_date} ·
-              this is the frozen view from that Monday at 11:59 — not live
-              data
-            </p>
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onBack}
+            className="-ml-2 h-7 px-2 text-xs"
+          >
+            ← Back to all snapshots
+          </Button>
+          <h2 className="text-lg font-semibold">
+            Dashboard snapshot — week of {snapshot.week_start}
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            {snapshot.quarter} · captured {snapshot.snapshot_date} · frozen
+            view from that Monday — not live data. Trend graphs aren't part
+            of the snapshot, so each metric shows as a card.
+          </p>
+        </div>
+      </div>
+
+      {/* ----- Sales ----- */}
+      <SectionWrap title="Sales" tone="bg-blue-50 dark:bg-blue-950/30">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <KpiCard
+            label="ARR (rolling 365)"
+            value={formatCurrency(sm.arr)}
+            progress={pct(sm.arr, arrGoal)}
+            goal={arrGoal}
+            formatGoal={formatCurrency}
+            onGoalChange={noop}
+            editable={false}
+          />
+          <KpiCard
+            label="New Customers QTD"
+            value={String(sm.new_customers_qtd)}
+            progress={pct(sm.new_customers_qtd, newCustomersGoal)}
+            goal={newCustomersGoal}
+            formatGoal={(v) => String(v)}
+            onGoalChange={noop}
+            editable={false}
+          />
+          <KpiCard
+            label="New Sales $ QTD"
+            value={formatCurrency(sm.new_customer_amount_qtd)}
+            progress={pct(sm.new_customer_amount_qtd, newSalesGoal)}
+            goal={newSalesGoal}
+            formatGoal={formatCurrency}
+            onGoalChange={noop}
+            editable={false}
+          />
+          <KpiCard
+            label="Active Pipeline"
+            value={formatCurrency(sm.pipeline_amount)}
+            progress={pct(sm.pipeline_amount, pipelineGoal)}
+            goal={pipelineGoal}
+            formatGoal={formatCurrency}
+            onGoalChange={noop}
+            editable={false}
+          />
+        </div>
+      </SectionWrap>
+
+      {/* ----- Marketing ----- */}
+      <SectionWrap title="Marketing" tone="bg-purple-50 dark:bg-purple-950/30">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <KpiCard
+            label="SQL QTD"
+            value={String(sm.sql_qtd)}
+            progress={pct(sm.sql_qtd, sqlGoal)}
+            goal={sqlGoal}
+            formatGoal={(v) => String(v)}
+            onGoalChange={noop}
+            editable={false}
+          />
+          <KpiCard
+            label="MQL QTD (unique)"
+            value={String(sm.mql_unique_qtd)}
+            progress={pct(sm.mql_unique_qtd, mqlGoal)}
+            goal={mqlGoal}
+            formatGoal={(v) => String(v)}
+            onGoalChange={noop}
+            editable={false}
+          />
+        </div>
+      </SectionWrap>
+
+      {/* ----- Customer Success ----- */}
+      <SectionWrap title="Customer Success" tone="bg-emerald-50 dark:bg-emerald-950/30">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <KpiCard
+            label="Renewals Closed QTD"
+            value={formatCurrency(sm.renewals_amount_qtd)}
+            progress={pct(sm.renewals_amount_qtd, renewalsGoal)}
+            goal={renewalsGoal}
+            formatGoal={formatCurrency}
+            onGoalChange={noop}
+            editable={false}
+          />
+          <div className="space-y-3">
+            <KpiCard
+              label="QTD Billing Goal"
+              value={formatCurrency(sm.qtd_billing)}
+              progress={pct(sm.qtd_billing, qtdBillingGoal)}
+              goal={qtdBillingGoal}
+              formatGoal={formatCurrency}
+              onGoalChange={noop}
+              editable={false}
+            />
+            <KpiCard
+              label="NRR by Customer"
+              value={fmtPct(sm.nrr_by_customer_pct)}
+              progress={Math.min(100, (sm.nrr_by_customer_pct / nrrCustGoal) * 100)}
+              goal={nrrCustGoal}
+              formatGoal={(v) => `${v}%`}
+              onGoalChange={noop}
+              editable={false}
+            />
+            <KpiCard
+              label="NRR by Dollar"
+              value={fmtPct(sm.nrr_by_dollar_pct)}
+              progress={Math.min(100, (sm.nrr_by_dollar_pct / nrrDollarGoal) * 100)}
+              goal={nrrDollarGoal}
+              formatGoal={(v) => `${v}%`}
+              onGoalChange={noop}
+              editable={false}
+            />
           </div>
         </div>
+      </SectionWrap>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {SNAPSHOT_METRIC_LABELS.map((c) => {
-            const actual = snapshot.metrics[c.key];
-            const prevVal = previous ? previous.metrics[c.key] : null;
-            const gk = goalKeyFor[c.key];
-            const goalVal = gk ? cumulativeGoalAt(gk) : null;
-            return (
-              <div
-                key={c.key}
-                className="rounded-md border bg-card p-3 space-y-1"
-              >
-                <div className="text-[11px] text-muted-foreground uppercase tracking-wide">
-                  {c.label}
-                </div>
-                <div className="text-xl font-semibold tabular-nums">
-                  {formatSnap(actual, c.format)}
-                </div>
-                <div className="flex items-center gap-2">
-                  {goalVal != null && (
-                    <span className="text-[11px] text-muted-foreground">
-                      goal {formatSnap(goalVal, c.format)}
-                    </span>
-                  )}
-                  {prevVal != null && (
-                    <DeltaPill
-                      current={actual}
-                      previous={prevVal}
-                      format={c.format}
-                    />
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {snapshot.milestones.length > 0 && (
-          <div className="space-y-2">
-            <h3 className="text-sm font-semibold">Milestones at the time</h3>
-            <div className="rounded-md border overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50">
-                  <tr className="text-left">
-                    <th className="px-3 py-2 font-medium">Project</th>
-                    <th className="px-3 py-2 font-medium">Completion date</th>
-                    <th className="px-3 py-2 font-medium">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {snapshot.milestones.map((m) => {
-                    const status = deriveStatus(m);
-                    const tone =
-                      STATUS_TONES[status] ??
-                      "bg-slate-100 text-slate-700";
-                    return (
-                      <tr key={m.id} className="border-t">
-                        <td className="px-3 py-2">{m.project || "—"}</td>
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          {m.completion_date || "—"}
-                        </td>
-                        <td className="px-3 py-2">
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${tone}`}
-                          >
-                            {status}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {(snapshot.quote_text || snapshot.quote_author) && (
-          <div className="rounded-md border bg-muted/30 p-4 space-y-1">
+      {/* ----- Quote (Most Recent Quote at the time) ----- */}
+      {(snapshot.quote_text || snapshot.quote_author) && (
+        <Card>
+          <CardContent className="p-4 space-y-1">
+            <h4 className="text-sm font-medium text-muted-foreground">
+              Most Recent Quote
+            </h4>
             {snapshot.quote_text && (
               <p className="text-sm italic">"{snapshot.quote_text}"</p>
             )}
@@ -2608,10 +2723,49 @@ function SnapshotDetailView({
                 — {snapshot.quote_author}
               </p>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ----- Development (Milestones at the time) ----- */}
+      {snapshot.milestones.length > 0 && (
+        <SectionWrap title="Development" tone="bg-slate-50 dark:bg-slate-900/40">
+          <div className="rounded-md border bg-card overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr className="text-left">
+                  <th className="px-3 py-2 font-medium">Project</th>
+                  <th className="px-3 py-2 font-medium">Completion date</th>
+                  <th className="px-3 py-2 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {snapshot.milestones.map((mi) => {
+                  const status = deriveStatus(mi);
+                  const tone =
+                    STATUS_TONES[status] ?? "bg-slate-100 text-slate-700";
+                  return (
+                    <tr key={mi.id} className="border-t">
+                      <td className="px-3 py-2">{mi.project || "—"}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {mi.completion_date || "—"}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${tone}`}
+                        >
+                          {status}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        )}
-      </CardContent>
-    </Card>
+        </SectionWrap>
+      )}
+    </div>
   );
 }
 
