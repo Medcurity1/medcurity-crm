@@ -7,7 +7,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 export interface MultiSelectOption {
   value: string;
@@ -72,8 +71,19 @@ export function MultiSelect({
             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-64 p-0" align="start">
-          <div className="flex items-center justify-between px-3 py-2 text-xs text-muted-foreground border-b">
+        {/* bg-popover is applied by PopoverContent already, but we
+            re-assert it here so that even when this MultiSelect is used
+            inside a Dialog (which renders a dim backdrop), nothing
+            beneath the popover bleeds through and makes options look
+            translucent. Native overflow-y-auto + a fixed max-height
+            scrolls reliably on long lists (e.g. the 24-item Industry
+            picker) — Radix ScrollArea's display-table inner wrapper
+            can swallow scroll inside popovers. */}
+        <PopoverContent
+          className="w-64 p-0 bg-popover text-popover-foreground"
+          align="start"
+        >
+          <div className="flex items-center justify-between px-3 py-2 text-xs text-muted-foreground border-b bg-popover">
             <span>{value.length} selected</span>
             {value.length > 0 && (
               <button
@@ -85,37 +95,35 @@ export function MultiSelect({
               </button>
             )}
           </div>
-          <ScrollArea className="max-h-72">
-            <div className="p-1">
-              {options.map((opt) => {
-                const checked = value.includes(opt.value);
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => toggle(opt.value)}
+          <div className="max-h-72 overflow-y-auto overscroll-contain p-1">
+            {options.map((opt) => {
+              const checked = value.includes(opt.value);
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => toggle(opt.value)}
+                  className={cn(
+                    "w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm",
+                    "hover:bg-accent hover:text-accent-foreground",
+                    checked && "bg-accent text-accent-foreground"
+                  )}
+                >
+                  <span
                     className={cn(
-                      "w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm",
-                      "hover:bg-accent hover:text-accent-foreground",
-                      checked && "bg-accent/50"
+                      "flex h-4 w-4 items-center justify-center rounded-sm border",
+                      checked
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-input bg-background"
                     )}
                   >
-                    <span
-                      className={cn(
-                        "flex h-4 w-4 items-center justify-center rounded-sm border",
-                        checked
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-input"
-                      )}
-                    >
-                      {checked && <Check className="h-3 w-3" />}
-                    </span>
-                    <span className="truncate text-left">{opt.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </ScrollArea>
+                    {checked && <Check className="h-3 w-3" />}
+                  </span>
+                  <span className="truncate text-left">{opt.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </PopoverContent>
       </Popover>
     </div>
