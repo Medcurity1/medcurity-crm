@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import type { Contact } from "@/types/crm";
+import { buildPersonSearchClause } from "@/lib/search-clause";
 
 interface ContactFilters {
   search?: string;
@@ -38,25 +39,28 @@ export function useContacts(filters?: ContactFilters) {
       }
 
       if (filters?.search) {
-        // Search contact fields AND parent account name.
+        // Search contact fields AND parent account name. Multi-word
+        // queries also match across (first_name, last_name) — see
+        // `buildPersonSearchClause`.
         const term = filters.search;
         const { data: matchedAccounts } = await supabase
           .from("accounts")
           .select("id")
-          .ilike("name", `%${term}%`)
+          .ilike("name", `%${term.replace(/[(),%]/g, " ")}%`)
           .limit(200);
         const acctIds = (matchedAccounts ?? []).map((a) => a.id as string);
-        const safe = term.replace(/[(),]/g, " ");
-        const orParts = [
-          `first_name.ilike.%${safe}%`,
-          `last_name.ilike.%${safe}%`,
-          `email.ilike.%${safe}%`,
-          `title.ilike.%${safe}%`,
-        ];
+        const baseClause = buildPersonSearchClause(term, [
+          "first_name",
+          "last_name",
+          "email",
+          "title",
+        ]);
+        const parts: string[] = [];
+        if (baseClause) parts.push(baseClause);
         if (acctIds.length > 0) {
-          orParts.push(`account_id.in.(${acctIds.join(",")})`);
+          parts.push(`account_id.in.(${acctIds.join(",")})`);
         }
-        query = query.or(orParts.join(","));
+        if (parts.length > 0) query = query.or(parts.join(","));
       }
       if (filters?.account_id) {
         query = query.eq("account_id", filters.account_id);

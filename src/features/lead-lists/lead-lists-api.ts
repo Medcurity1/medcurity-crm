@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import type { LeadList, LeadListMember, Lead } from "@/types/crm";
 import { buildIndustryOrClause } from "@/features/leads/industry-keywords";
+import { buildPersonSearchClause } from "@/lib/search-clause";
 
 // Shape of filter_config for dynamic ("smart") lists. Each key maps onto
 // columns on `leads` (or supporting views). Stored as jsonb on
@@ -166,10 +167,15 @@ function applyFilters<T>(
 
   // Free-text search — kept last so it's the outermost OR group.
   if (fc.search) {
-    const safe = fc.search.replace(/[(),]/g, " ");
-    q = q.or(
-      `first_name.ilike.%${safe}%,last_name.ilike.%${safe}%,company.ilike.%${safe}%,email.ilike.%${safe}%,title.ilike.%${safe}%,phone.ilike.%${safe}%`,
-    );
+    const orClause = buildPersonSearchClause(fc.search, [
+      "first_name",
+      "last_name",
+      "company",
+      "email",
+      "title",
+      "phone",
+    ]);
+    if (orClause) q = q.or(orClause);
   }
   return q as T;
 }
@@ -514,14 +520,18 @@ export function useSearchLeadsForList(search: string) {
     queryKey: ["lead-search-for-list", search],
     queryFn: async () => {
       if (!search || search.length < 2) return [];
-      const { data, error } = await supabase
+      const orClause = buildPersonSearchClause(search, [
+        "first_name",
+        "last_name",
+        "company",
+        "email",
+      ]);
+      let q = supabase
         .from("leads")
         .select("id, first_name, last_name, email, company, status")
-        .is("archived_at", null)
-        .or(
-          `first_name.ilike.%${search}%,last_name.ilike.%${search}%,company.ilike.%${search}%,email.ilike.%${search}%`,
-        )
-        .limit(20);
+        .is("archived_at", null);
+      if (orClause) q = q.or(orClause);
+      const { data, error } = await q.limit(20);
       if (error) throw error;
       return data;
     },

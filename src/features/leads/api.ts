@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import type { Lead } from "@/types/crm";
 import { buildIndustryOrClause } from "./industry-keywords";
+import { buildPersonSearchClause } from "@/lib/search-clause";
 
 interface LeadFilters {
   search?: string;
@@ -40,9 +41,14 @@ export function useLeads(filters?: LeadFilters) {
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (filters?.search) {
-        query = query.or(
-          `first_name.ilike.%${filters.search}%,last_name.ilike.%${filters.search}%,company.ilike.%${filters.search}%,email.ilike.%${filters.search}%,industry.ilike.%${filters.search}%`
-        );
+        const orClause = buildPersonSearchClause(filters.search, [
+          "first_name",
+          "last_name",
+          "company",
+          "email",
+          "industry",
+        ]);
+        if (orClause) query = query.or(orClause);
       }
       if (filters?.status) {
         if (Array.isArray(filters.status)) {

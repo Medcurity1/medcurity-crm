@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/command";
 import { supabase } from "@/lib/supabase";
 import { formatCurrency } from "@/lib/formatters";
+import { buildPersonSearchClause } from "@/lib/search-clause";
 import type {
   Account,
   Contact,
@@ -115,14 +116,17 @@ export function GlobalSearch() {
   const { data: contacts } = useQuery({
     queryKey: ["global-search", "contacts", debouncedQuery],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const orClause = buildPersonSearchClause(debouncedQuery, [
+        "first_name",
+        "last_name",
+        "email",
+      ]);
+      let q = supabase
         .from("contacts")
         .select("id, first_name, last_name, email")
-        .is("archived_at", null)
-        .or(
-          `first_name.ilike.${searchPattern},last_name.ilike.${searchPattern},email.ilike.${searchPattern}`
-        )
-        .limit(RESULTS_PER_ENTITY);
+        .is("archived_at", null);
+      if (orClause) q = q.or(orClause);
+      const { data, error } = await q.limit(RESULTS_PER_ENTITY);
       if (error) throw error;
       return data as ContactResult[];
     },
@@ -147,13 +151,17 @@ export function GlobalSearch() {
   const { data: leads } = useQuery({
     queryKey: ["global-search", "leads", debouncedQuery],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const orClause = buildPersonSearchClause(debouncedQuery, [
+        "first_name",
+        "last_name",
+        "email",
+        "company",
+      ]);
+      let q = supabase
         .from("leads")
-        .select("id, first_name, last_name, email, company, status")
-        .or(
-          `first_name.ilike.${searchPattern},last_name.ilike.${searchPattern},email.ilike.${searchPattern},company.ilike.${searchPattern}`
-        )
-        .limit(RESULTS_PER_ENTITY);
+        .select("id, first_name, last_name, email, company, status");
+      if (orClause) q = q.or(orClause);
+      const { data, error } = await q.limit(RESULTS_PER_ENTITY);
       if (error) throw error;
       return data as LeadResult[];
     },
