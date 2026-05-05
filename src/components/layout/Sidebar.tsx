@@ -22,6 +22,8 @@ import {
   Mail,
   Calendar as CalendarIcon,
   Clock,
+  Megaphone,
+  ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { branding } from "@/lib/branding";
@@ -41,7 +43,19 @@ interface SidebarProps {
   isMobile?: boolean;
 }
 
-const navItems = [
+type NavItem = {
+  to: string;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  /**
+   * If set, the link opens in a new tab via a plain <a>. Used for tools
+   * that live outside the CRM (e.g. Nexus marketing outreach). Activity
+   * still flows back into the CRM via the nexus-activity webhook.
+   */
+  external?: boolean;
+};
+
+const navItems: NavItem[] = [
   { to: "/", icon: Home, label: "Home" },
   { to: "/accounts", icon: Building2, label: "Accounts" },
   { to: "/contacts", icon: Users, label: "Contacts" },
@@ -60,7 +74,16 @@ const navItems = [
   // Forecasting + Analytics moved into /reports as tabs (2026-04-17).
 ];
 
-const adminItems = [
+// Nexus is the in-house outreach tool — externally hosted but wired back
+// into the CRM via the nexus-activity webhook (logs every send/open/reply
+// as an activity on the matching contact or lead). Configure the URL via
+// VITE_NEXUS_URL; if unset the link doesn't render.
+const NEXUS_URL = import.meta.env.VITE_NEXUS_URL as string | undefined;
+const externalNavItems: NavItem[] = NEXUS_URL
+  ? [{ to: NEXUS_URL, icon: Megaphone, label: "Nexus", external: true }]
+  : [];
+
+const adminItems: NavItem[] = [
   { to: "/archive", icon: Archive, label: "Archive" },
   { to: "/admin", icon: Settings, label: "Admin Settings" },
 ];
@@ -71,8 +94,8 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
   const navigate = useNavigate();
 
   const allItems = profile?.role === "admin" || profile?.role === "super_admin"
-    ? [...navItems, ...adminItems]
-    : navItems;
+    ? [...navItems, ...externalNavItems, ...adminItems]
+    : [...navItems, ...externalNavItems];
 
   function roleColor(role: string) {
     switch (role) {
@@ -148,18 +171,35 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
       {/* Nav */}
       <nav className="flex-1 py-3 px-2 space-y-1 overflow-y-auto">
         {allItems.map((item) => {
-          const isActive = item.to === "/" ? location.pathname === "/" : location.pathname.startsWith(item.to);
-          const link = (
-            <NavLink
+          const isActive = item.external
+            ? false
+            : item.to === "/"
+              ? location.pathname === "/"
+              : location.pathname.startsWith(item.to);
+          const linkClasses = cn(
+            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+            isActive
+              ? "bg-sidebar-accent text-sidebar-primary"
+              : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground",
+          );
+          const link = item.external ? (
+            <a
               key={item.to}
-              to={item.to}
-              className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                isActive
-                  ? "bg-sidebar-accent text-sidebar-primary"
-                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-              )}
+              href={item.to}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={linkClasses}
             >
+              <item.icon className="h-5 w-5 shrink-0" />
+              {!collapsed && (
+                <span className="flex-1 flex items-center justify-between gap-2">
+                  {item.label}
+                  <ExternalLink className="h-3 w-3 opacity-60" />
+                </span>
+              )}
+            </a>
+          ) : (
+            <NavLink key={item.to} to={item.to} className={linkClasses}>
               <item.icon className="h-5 w-5 shrink-0" />
               {!collapsed && <span>{item.label}</span>}
             </NavLink>
@@ -169,7 +209,10 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
             return (
               <Tooltip key={item.to} delayDuration={0}>
                 <TooltipTrigger asChild>{link}</TooltipTrigger>
-                <TooltipContent side="right">{item.label}</TooltipContent>
+                <TooltipContent side="right">
+                  {item.label}
+                  {item.external && " (opens in new tab)"}
+                </TooltipContent>
               </Tooltip>
             );
           }
