@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Pencil, Check, X, ExternalLink, Info } from "lucide-react";
+import { Pencil, Check, X, ExternalLink, Info, Plus, Trash2 } from "lucide-react";
 import {
   ResponsiveContainer,
-  LineChart,
-  Line,
   XAxis,
   YAxis,
   Tooltip,
@@ -19,16 +17,27 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency } from "@/lib/formatters";
 import {
   loadGoals,
   saveGoals,
-  goalStatus,
-  STATUS_HEX,
   STATUS_BG,
   type Goals,
   type GoalStatus,
 } from "@/features/reports/dashboardGoals";
+import {
+  loadWidgets,
+  saveWidgets,
+  newDevItem,
+  autoStatus,
+  STATUS_TONES,
+  type DashboardWidgets,
+} from "@/features/reports/dashboardWidgets";
+import {
+  SegmentedLineChart,
+  type SegmentPoint,
+} from "@/features/reports/SegmentedLineChart";
 
 /**
  * Team Dashboard — CRM-native port of the Python /Team Dashboard
@@ -139,6 +148,93 @@ function useArrTrend() {
   });
 }
 
+/** Per-row data for the running-total charts. */
+function useNewCustomersRows(quarterStart: string, quarterEnd: string) {
+  return useQuery({
+    queryKey: ["team-dashboard", "new-customers-rows", quarterStart, quarterEnd],
+    enabled: !!quarterStart && !!quarterEnd,
+    queryFn: async (): Promise<{ close_date: string; amount: number }[]> => {
+      const { data, error } = await supabase
+        .from("v_new_customers_qtd")
+        .select("close_date, amount");
+      if (error) throw error;
+      return (data ?? []).map((r: any) => ({
+        close_date: r.close_date,
+        amount: Number(r.amount) || 0,
+      }));
+    },
+  });
+}
+
+function useRenewalsClosedRows(quarterStart: string, quarterEnd: string) {
+  return useQuery({
+    queryKey: ["team-dashboard", "renewals-closed-rows", quarterStart, quarterEnd],
+    enabled: !!quarterStart && !!quarterEnd,
+    queryFn: async (): Promise<{ close_date: string; amount: number }[]> => {
+      const { data, error } = await supabase
+        .from("v_renewals_qtd")
+        .select("close_date, amount");
+      if (error) throw error;
+      return (data ?? []).map((r: any) => ({
+        close_date: r.close_date,
+        amount: Number(r.amount) || 0,
+      }));
+    },
+  });
+}
+
+function useSqlRowsQtd(quarterStart: string, quarterEnd: string) {
+  return useQuery({
+    queryKey: ["team-dashboard", "sql-rows", quarterStart, quarterEnd],
+    enabled: !!quarterStart && !!quarterEnd,
+    queryFn: async (): Promise<{ event_date: string }[]> => {
+      const { data, error } = await supabase
+        .from("v_sql_accounts")
+        .select("sql_date")
+        .gte("sql_date", quarterStart)
+        .lte("sql_date", quarterEnd);
+      if (error) throw error;
+      return (data ?? []).map((r: any) => ({ event_date: r.sql_date }));
+    },
+  });
+}
+
+function useMqlRowsQtd(quarterStart: string, quarterEnd: string) {
+  return useQuery({
+    queryKey: ["team-dashboard", "mql-rows", quarterStart, quarterEnd],
+    enabled: !!quarterStart && !!quarterEnd,
+    queryFn: async (): Promise<{ event_date: string }[]> => {
+      // Pull from both leads + contacts deduped by date count (we just need
+      // dates — uniqueness across leads/contacts already handled in the
+      // dashboard's `mql_unique_qtd` aggregate; for the running-total chart
+      // a simple union of dates is enough for the visual.)
+      const [{ data: lRows, error: lErr }, { data: cRows, error: cErr }] = await Promise.all([
+        supabase
+          .from("leads")
+          .select("mql_date")
+          .not("mql_date", "is", null)
+          .gte("mql_date", quarterStart)
+          .lte("mql_date", quarterEnd)
+          .is("archived_at", null),
+        supabase
+          .from("contacts")
+          .select("mql_date")
+          .not("mql_date", "is", null)
+          .gte("mql_date", quarterStart)
+          .lte("mql_date", quarterEnd)
+          .is("archived_at", null),
+      ]);
+      if (lErr) throw lErr;
+      if (cErr) throw cErr;
+      const all = [
+        ...(lRows ?? []).map((r: any) => ({ event_date: r.mql_date })),
+        ...(cRows ?? []).map((r: any) => ({ event_date: r.mql_date })),
+      ];
+      return all;
+    },
+  });
+}
+
 /** Renewals "due this quarter" — closed-won opps whose contract_end_date
  * sits inside the current calendar quarter. Different from the metrics
  * view's `renewals_amount_qtd`, which is closed-won renewals ALREADY
@@ -188,10 +284,32 @@ export function TeamDashboard() {
     };
   }, []);
 
+  // Manual widgets (Most Recent Quote, QTD Billing override, Dev items)
+  const [widgets, setWidgets] = useState<DashboardWidgets>(() => loadWidgets());
+  useEffect(() => {
+    saveWidgets(widgets);
+  }, [widgets]);
+
   const { data: m, isLoading, error } = useDashboardMetrics();
   const { data: lost } = useLostCustomers();
   const { data: arrTrend } = useArrTrend();
   const { data: renewalsDue } = useRenewalsDueThisQuarter(
+    m?.fiscal_quarter_start ?? "",
+    m?.fiscal_quarter_end ?? "",
+  );
+  const { data: newCustomerRows } = useNewCustomersRows(
+    m?.fiscal_quarter_start ?? "",
+    m?.fiscal_quarter_end ?? "",
+  );
+  const { data: renewalsClosedRows } = useRenewalsClosedRows(
+    m?.fiscal_quarter_start ?? "",
+    m?.fiscal_quarter_end ?? "",
+  );
+  const { data: sqlRows } = useSqlRowsQtd(
+    m?.fiscal_quarter_start ?? "",
+    m?.fiscal_quarter_end ?? "",
+  );
+  const { data: mqlRows } = useMqlRowsQtd(
     m?.fiscal_quarter_start ?? "",
     m?.fiscal_quarter_end ?? "",
   );
@@ -221,6 +339,77 @@ export function TeamDashboard() {
       };
     });
   }, [m, renewalsDue]);
+
+  // Running-total point arrays for the segmented line charts.
+  const qStart = m?.fiscal_quarter_start ?? "";
+  const qEnd = m?.fiscal_quarter_end ?? "";
+
+  const newCustomersRunning = useMemo<SegmentPoint[]>(
+    () =>
+      buildRunningTotal(
+        (newCustomerRows ?? []).map((r) => ({ date: r.close_date, value: 1 })),
+        qStart,
+        qEnd,
+        goals.new_customers,
+      ),
+    [newCustomerRows, qStart, qEnd, goals.new_customers],
+  );
+
+  const newSalesRunning = useMemo<SegmentPoint[]>(
+    () =>
+      buildRunningTotal(
+        (newCustomerRows ?? []).map((r) => ({ date: r.close_date, value: r.amount })),
+        qStart,
+        qEnd,
+        goals.new_sales,
+      ),
+    [newCustomerRows, qStart, qEnd, goals.new_sales],
+  );
+
+  const renewalsClosedRunning = useMemo<SegmentPoint[]>(
+    () =>
+      buildRunningTotal(
+        (renewalsClosedRows ?? []).map((r) => ({ date: r.close_date, value: r.amount })),
+        qStart,
+        qEnd,
+        goals.renewals_amount,
+      ),
+    [renewalsClosedRows, qStart, qEnd, goals.renewals_amount],
+  );
+
+  const sqlRunning = useMemo<SegmentPoint[]>(
+    () =>
+      buildRunningTotal(
+        (sqlRows ?? []).map((r) => ({ date: r.event_date, value: 1 })),
+        qStart,
+        qEnd,
+        goals.sql,
+      ),
+    [sqlRows, qStart, qEnd, goals.sql],
+  );
+
+  const mqlRunning = useMemo<SegmentPoint[]>(
+    () =>
+      buildRunningTotal(
+        (mqlRows ?? []).map((r) => ({ date: r.event_date, value: 1 })),
+        qStart,
+        qEnd,
+        goals.mql,
+      ),
+    [mqlRows, qStart, qEnd, goals.mql],
+  );
+
+  // ARR trend → SegmentPoint format. Goal is constant across the trend
+  // (one ARR target for the year), so each segment gets colored vs
+  // that single threshold and the dashed reference line is flat.
+  const arrPoints = useMemo<SegmentPoint[]>(() => {
+    if (!arrTrend) return [];
+    return arrTrend.slice(-12).map((p) => ({
+      label: p.fiscal_period,
+      actual: Number(p.trailing_365_arr) || 0,
+      goal: goals.arr,
+    }));
+  }, [arrTrend, goals.arr]);
 
   if (isLoading) {
     return (
@@ -326,57 +515,42 @@ export function TeamDashboard() {
         />
       </Section>
 
-      {arrTrend && arrTrend.length > 0 && (
+      {arrPoints.length > 0 && (
         <ChartCard title="ARR Trend (rolling 365)">
-          <p className="text-[11px] text-muted-foreground mb-2">
-            Each dot is colored vs the ARR goal:{" "}
-            <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 align-middle mr-1" />
-            ≥ 90%{" "}
-            <span className="inline-block h-2 w-2 rounded-full bg-amber-500 align-middle ml-2 mr-1" />
-            50–89%{" "}
-            <span className="inline-block h-2 w-2 rounded-full bg-red-500 align-middle ml-2 mr-1" />
-            &lt; 50%
-          </p>
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={arrTrend.slice(-18)}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="fiscal_period" tick={{ fontSize: 10 }} />
-              <YAxis
-                tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-                tick={{ fontSize: 10 }}
-              />
-              <Tooltip formatter={(v) => formatCurrency(Number(v))} />
-              <Line
-                type="monotone"
-                dataKey="trailing_365_arr"
-                stroke="#2563eb"
-                strokeWidth={2}
-                name="Trailing 365 ARR"
-                dot={(props: any) => {
-                  const { cx, cy, payload, index } = props;
-                  if (cx == null || cy == null) {
-                    return <g key={`dot-${index ?? 0}`} />;
-                  }
-                  const v = Number(payload?.trailing_365_arr ?? 0);
-                  const fill = STATUS_HEX[goalStatus(v, goals.arr)];
-                  return (
-                    <circle
-                      key={`dot-${index ?? 0}`}
-                      cx={cx}
-                      cy={cy}
-                      r={4}
-                      fill={fill}
-                      stroke="#fff"
-                      strokeWidth={1}
-                    />
-                  );
-                }}
-                activeDot={{ r: 6 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
+          <ChartLegend />
+          <SegmentedLineChart
+            data={arrPoints}
+            yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+            tooltipFormatter={(v) => formatCurrency(v)}
+          />
         </ChartCard>
       )}
+
+      {/* Sales running totals (bottom of Sales section) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        {newCustomersRunning.length > 1 && (
+          <ChartCard title={`New Customers — running total (goal ${goals.new_customers})`}>
+            <ChartLegend />
+            <SegmentedLineChart
+              data={newCustomersRunning}
+              yFormatter={(v) => String(Math.round(v))}
+              tooltipFormatter={(v) => String(Math.round(v))}
+              height={200}
+            />
+          </ChartCard>
+        )}
+        {newSalesRunning.length > 1 && (
+          <ChartCard title={`New Sales $ — running total (goal ${formatCurrency(goals.new_sales)})`}>
+            <ChartLegend />
+            <SegmentedLineChart
+              data={newSalesRunning}
+              yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+              tooltipFormatter={(v) => formatCurrency(v)}
+              height={200}
+            />
+          </ChartCard>
+        )}
+      </div>
 
       {/* ----- Marketing ----- */}
       <Section title="Marketing" tone="bg-violet-50 dark:bg-violet-950/30">
@@ -403,6 +577,32 @@ export function TeamDashboard() {
           to="/leads?qualification=mql"
         />
       </Section>
+
+      {/* Marketing running totals */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        {sqlRunning.length > 1 && (
+          <ChartCard title={`SQL — running total (goal ${goals.sql})`}>
+            <ChartLegend />
+            <SegmentedLineChart
+              data={sqlRunning}
+              yFormatter={(v) => String(Math.round(v))}
+              tooltipFormatter={(v) => String(Math.round(v))}
+              height={200}
+            />
+          </ChartCard>
+        )}
+        {mqlRunning.length > 1 && (
+          <ChartCard title={`MQL — running total (goal ${goals.mql})`}>
+            <ChartLegend />
+            <SegmentedLineChart
+              data={mqlRunning}
+              yFormatter={(v) => String(Math.round(v))}
+              tooltipFormatter={(v) => String(Math.round(v))}
+              height={200}
+            />
+          </ChartCard>
+        )}
+      </div>
 
       {/* ----- Customer Success ----- */}
       <Section title="Customer Success" tone="bg-emerald-50 dark:bg-emerald-950/30">
@@ -449,19 +649,151 @@ export function TeamDashboard() {
           hint="(starting ARR − churn $ QTD) / starting ARR."
         />
         <KpiCard
-          label="QTD Billing Goal"
-          value={formatCurrency(num(m.new_customer_amount_qtd) + renewalsClosedAmt)}
+          label={
+            widgets.qtd_billing_actual != null
+              ? "QTD Billing (manual)"
+              : "QTD Billing Goal"
+          }
+          value={formatCurrency(
+            widgets.qtd_billing_actual ??
+              num(m.new_customer_amount_qtd) + renewalsClosedAmt,
+          )}
           progress={pct(
-            num(m.new_customer_amount_qtd) + renewalsClosedAmt,
+            widgets.qtd_billing_actual ??
+              num(m.new_customer_amount_qtd) + renewalsClosedAmt,
             goals.qtd_billing,
           )}
           goal={goals.qtd_billing}
           formatGoal={formatCurrency}
           onGoalChange={(v) => setGoals((g) => ({ ...g, qtd_billing: v }))}
           editable={isAdmin}
-          hint="New Sales $ QTD + Renewals Closed $ QTD. Replace with billing system data when wired."
+          hint={
+            widgets.qtd_billing_actual != null
+              ? "Using manual override. Clear it below to fall back to New Sales + Renewals."
+              : "New Sales $ QTD + Renewals Closed $ QTD. Set a manual override below if billing system says otherwise."
+          }
         />
       </Section>
+
+      {/* QTD Billing manual override (admin-only edit, visible to all) */}
+      <Card>
+        <CardContent className="p-3 flex flex-wrap items-center gap-3">
+          <p className="text-xs text-muted-foreground font-medium">
+            QTD Billing actual override:
+          </p>
+          {isAdmin ? (
+            <>
+              <Input
+                type="number"
+                value={widgets.qtd_billing_actual ?? ""}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  const parsed = raw === "" ? null : Number(raw);
+                  setWidgets((w) => ({
+                    ...w,
+                    qtd_billing_actual:
+                      parsed === null || !Number.isFinite(parsed) ? null : parsed,
+                  }));
+                }}
+                placeholder="Auto-compute"
+                className="h-8 w-40 text-sm"
+              />
+              {widgets.qtd_billing_actual != null && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() =>
+                    setWidgets((w) => ({ ...w, qtd_billing_actual: null }))
+                  }
+                >
+                  Clear override
+                </Button>
+              )}
+            </>
+          ) : (
+            <span className="text-sm">
+              {widgets.qtd_billing_actual != null
+                ? formatCurrency(widgets.qtd_billing_actual)
+                : "(none — using auto-computed value)"}
+            </span>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Most Recent Quote — manually edited on the dashboard */}
+      <Card>
+        <CardContent className="p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-medium text-muted-foreground">
+              Most Recent Quote
+              {widgets.quote_rating && (
+                <span className="ml-2 text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
+                  {widgets.quote_rating}
+                </span>
+              )}
+            </h4>
+            {!isAdmin && !widgets.quote_text && (
+              <span className="text-[11px] text-muted-foreground italic">
+                No quote yet.
+              </span>
+            )}
+          </div>
+          {isAdmin ? (
+            <div className="space-y-2">
+              <Textarea
+                value={widgets.quote_text}
+                onChange={(e) =>
+                  setWidgets((w) => ({ ...w, quote_text: e.target.value }))
+                }
+                placeholder="Customer quote…"
+                className="min-h-[80px] text-sm"
+              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <Input
+                  value={widgets.quote_author}
+                  onChange={(e) =>
+                    setWidgets((w) => ({ ...w, quote_author: e.target.value }))
+                  }
+                  placeholder="Attribution (e.g., Holli Kivett @ Northwest Women's Clinic)"
+                  className="h-8 text-sm"
+                />
+                <Input
+                  value={widgets.quote_rating}
+                  onChange={(e) =>
+                    setWidgets((w) => ({ ...w, quote_rating: e.target.value }))
+                  }
+                  placeholder="Rating (e.g., 10/10)"
+                  className="h-8 text-sm"
+                />
+              </div>
+            </div>
+          ) : widgets.quote_text ? (
+            <div className="space-y-1">
+              <blockquote className="text-sm italic border-l-2 pl-3 border-emerald-500/40">
+                "{widgets.quote_text}"
+              </blockquote>
+              {widgets.quote_author && (
+                <p className="text-xs text-muted-foreground text-right">
+                  — {widgets.quote_author}
+                </p>
+              )}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      {/* Renewals closed running-total */}
+      {renewalsClosedRunning.length > 1 && (
+        <ChartCard title={`Renewals Closed $ — running total (goal ${formatCurrency(goals.renewals_amount)})`}>
+          <ChartLegend />
+          <SegmentedLineChart
+            data={renewalsClosedRunning}
+            yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+            tooltipFormatter={(v) => formatCurrency(v)}
+            height={220}
+          />
+        </ChartCard>
+      )}
 
       {/* Per-month breakdown of renewals due in current quarter */}
       {renewalsDueByMonth.length > 0 && (
@@ -579,19 +911,155 @@ export function TeamDashboard() {
         />
       </Section>
 
-      {/* ----- Development ----- */}
-      <Section title="Development" tone="bg-rose-50 dark:bg-rose-950/30">
-        <PlaceholderCard
-          label="Roadmap Items"
-          message="Line-item view (date, status, checkbox) lands once a project tracker is wired (ClickUp/Linear/etc.)."
-          cta="Tracker connector pending"
-        />
-        <PlaceholderCard
-          label="Production Health"
-          message="No production-data source connected yet."
-          cta="Connector pending"
-        />
-      </Section>
+      {/* ----- Development (manual line items) ----- */}
+      <div>
+        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+          Development
+        </h3>
+        <Card>
+          <CardContent className="p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                Manually-tracked dev projects. Status auto-derives from completion
+                date + checkbox; admins can edit inline.
+              </p>
+              {isAdmin && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    setWidgets((w) => ({
+                      ...w,
+                      dev_items: [...w.dev_items, newDevItem()],
+                    }))
+                  }
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1" />
+                  Add row
+                </Button>
+              )}
+            </div>
+            {widgets.dev_items.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-6">
+                No dev items yet. {isAdmin ? "Click 'Add row' to track one." : ""}
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr className="text-left">
+                      <th className="px-2 py-2 font-medium">Project</th>
+                      <th className="px-2 py-2 font-medium">Completion Date</th>
+                      <th className="px-2 py-2 font-medium text-center">Complete</th>
+                      <th className="px-2 py-2 font-medium">Status</th>
+                      {isAdmin && <th className="px-2 py-2 w-10" />}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {widgets.dev_items.map((item) => {
+                      const status = autoStatus(item);
+                      const tone =
+                        STATUS_TONES[status] ??
+                        "bg-muted text-muted-foreground";
+                      return (
+                        <tr key={item.id} className="border-t">
+                          <td className="px-2 py-1.5">
+                            {isAdmin ? (
+                              <Input
+                                value={item.project}
+                                onChange={(e) =>
+                                  setWidgets((w) => ({
+                                    ...w,
+                                    dev_items: w.dev_items.map((d) =>
+                                      d.id === item.id
+                                        ? { ...d, project: e.target.value }
+                                        : d,
+                                    ),
+                                  }))
+                                }
+                                className="h-7 text-sm"
+                                placeholder="Project name"
+                              />
+                            ) : (
+                              <span>{item.project || "—"}</span>
+                            )}
+                          </td>
+                          <td className="px-2 py-1.5">
+                            {isAdmin ? (
+                              <Input
+                                type="date"
+                                value={item.completion_date}
+                                onChange={(e) =>
+                                  setWidgets((w) => ({
+                                    ...w,
+                                    dev_items: w.dev_items.map((d) =>
+                                      d.id === item.id
+                                        ? { ...d, completion_date: e.target.value }
+                                        : d,
+                                    ),
+                                  }))
+                                }
+                                className="h-7 text-sm"
+                              />
+                            ) : (
+                              <span>{item.completion_date}</span>
+                            )}
+                          </td>
+                          <td className="px-2 py-1.5 text-center">
+                            <input
+                              type="checkbox"
+                              checked={item.complete}
+                              disabled={!isAdmin}
+                              onChange={(e) =>
+                                setWidgets((w) => ({
+                                  ...w,
+                                  dev_items: w.dev_items.map((d) =>
+                                    d.id === item.id
+                                      ? { ...d, complete: e.target.checked }
+                                      : d,
+                                  ),
+                                }))
+                              }
+                              className="h-4 w-4 cursor-pointer"
+                            />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <span
+                              className={`inline-flex px-2 py-0.5 rounded text-[11px] font-medium ${tone}`}
+                            >
+                              {status}
+                            </span>
+                          </td>
+                          {isAdmin && (
+                            <td className="px-2 py-1.5 text-right">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 w-7 p-0"
+                                onClick={() =>
+                                  setWidgets((w) => ({
+                                    ...w,
+                                    dev_items: w.dev_items.filter(
+                                      (d) => d.id !== item.id,
+                                    ),
+                                  }))
+                                }
+                                title="Delete row"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       <Card>
         <CardContent className="p-3 text-[11px] text-muted-foreground space-y-1">
@@ -617,6 +1085,64 @@ export function TeamDashboard() {
 function num(v: number | null | undefined): number {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Build a weekly running-total point series for a charted KPI within
+ * the current fiscal quarter. Each point's `goal` is the proportional
+ * portion of the quarter's full goal we'd expect by that point if
+ * progress were perfectly linear — that's what gets the segments
+ * colored R/Y/G in SegmentedLineChart.
+ */
+function buildRunningTotal(
+  events: { date: string; value: number }[],
+  quarterStart: string,
+  quarterEnd: string,
+  totalGoal: number,
+): SegmentPoint[] {
+  if (!quarterStart || !quarterEnd) return [];
+  const start = new Date(quarterStart);
+  const end = new Date(quarterEnd);
+  const totalMs = end.getTime() - start.getTime();
+  if (!Number.isFinite(totalMs) || totalMs <= 0) return [];
+
+  const sorted = [...events]
+    .filter((e) => e.date >= quarterStart && e.date <= quarterEnd)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const fmt = (d: Date) =>
+    d.toLocaleString("en-US", { month: "short", day: "numeric" });
+
+  const points: SegmentPoint[] = [
+    { label: fmt(start), actual: 0, goal: 0 },
+  ];
+
+  let cumulative = 0;
+  let evIdx = 0;
+
+  for (let w = 1; w <= 14; w++) {
+    const weekEnd = new Date(start);
+    weekEnd.setDate(start.getDate() + w * 7);
+    const cap = weekEnd > end ? new Date(end) : weekEnd;
+    const capStr = cap.toISOString().slice(0, 10);
+
+    while (evIdx < sorted.length && sorted[evIdx].date <= capStr) {
+      cumulative += sorted[evIdx].value;
+      evIdx++;
+    }
+
+    const fraction = (cap.getTime() - start.getTime()) / totalMs;
+
+    points.push({
+      label: fmt(cap),
+      actual: cumulative,
+      goal: totalGoal * fraction,
+    });
+
+    if (cap.getTime() >= end.getTime()) break;
+  }
+
+  return points;
 }
 
 function pct(actual: number, goal: number): number {
@@ -647,6 +1173,21 @@ function Section({
         {children}
       </div>
     </div>
+  );
+}
+
+/** Legend explaining the R/Y/G segment coloring on the running-total charts. */
+function ChartLegend() {
+  return (
+    <p className="text-[11px] text-muted-foreground mb-2">
+      Segments colored vs proportional goal:{" "}
+      <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 align-middle mr-1" />
+      ≥ 90%{" "}
+      <span className="inline-block h-2 w-2 rounded-full bg-amber-500 align-middle ml-2 mr-1" />
+      50–89%{" "}
+      <span className="inline-block h-2 w-2 rounded-full bg-red-500 align-middle ml-2 mr-1" />
+      &lt; 50% — dashed line is the goal pace.
+    </p>
   );
 }
 
