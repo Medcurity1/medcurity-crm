@@ -134,17 +134,36 @@
 /*
  * Dashboard PDF export print rules.
  *
- * The dashboard's "Export PDF" button calls window.print(). Without
- * special handling, the browser includes the sidebar, top bar, and
- * any other surrounding chrome — and Chrome's default print behavior
- * strips background colors and dark-mode tokens, producing a flat
- * white sheet that looks nothing like the live UI.
+ * The dashboard's "Export PDF" button toggles `body.printing-dashboard`
+ * for the duration of the print dialog, then calls window.print(). The
+ * class lets us scope these aggressive `display: none` rules to the
+ * actual export — they don't affect any other window.print() that may
+ * happen elsewhere in the app.
  *
- * The strategy: any element marked `data-dashboard-print-root` becomes
- * the only thing visible on print, positioned at the top of the page,
- * with backgrounds forced on so the section tints + KPI tiles render
- * faithfully in either light or dark mode (whatever the user has on
- * screen at the time).
+ * Two problems we've hit in the past:
+ *
+ *  (1) Sidebar / top bar / route shell were leaking onto the printed
+ *      sheet because they're siblings of the dashboard within the
+ *      app shell. `visibility: hidden` reserved their layout space,
+ *      pushing the dashboard onto page 2+ and leaving page 1 blank.
+ *
+ *  (2) The dashboard didn't fit on a single page, so people had to
+ *      flip through 3-4 pages to see the whole picture.
+ *
+ * The strategy fixes both:
+ *
+ *  - `display: contents` on every ancestor of `[data-dashboard-print-root]`
+ *    flattens the wrapper chain so the dashboard renders at body level
+ *    with no inherited padding / max-width / flex layout.
+ *  - `display: none` on every body descendant that isn't the print root,
+ *    isn't an ancestor of the print root, and isn't a descendant of the
+ *    print root. This cleanly removes the sidebar / top bar without
+ *    leaving phantom layout space.
+ *  - `zoom: 0.55` shrinks the dashboard so it fits one letter page.
+ *    Chrome / Edge / Safari respect `zoom` on print; Firefox falls back
+ *    gracefully (still readable, just slightly larger).
+ *  - Color preservation forced via `print-color-adjust: exact` so the
+ *    dark-mode tokens + section tints render faithfully.
  */
 @media print {
   /* Honor every background color / image — browsers strip these by default. */
@@ -155,23 +174,55 @@
     print-color-adjust: exact !important;
   }
 
-  /* When the user has the dashboard open and hits Export PDF, only the
-     dashboard itself should render. Hide everything by default, then
-     promote the print root + its descendants back to visible. */
-  body:has([data-dashboard-print-root]) > * {
-    visibility: hidden;
+  @page {
+    size: letter portrait;
+    margin: 0.25in;
   }
-  [data-dashboard-print-root],
-  [data-dashboard-print-root] * {
-    visibility: visible;
+
+  body.printing-dashboard,
+  html:has(body.printing-dashboard) {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: var(--color-background) !important;
+    color: var(--color-foreground) !important;
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
   }
-  [data-dashboard-print-root] {
-    position: absolute;
-    inset: 0 0 auto 0;
-    width: 100%;
-    padding: 0.5rem 1rem;
-    background: var(--color-background);
-    color: var(--color-foreground);
+
+  /* Hide every element that is NOT in the chain to the print root and
+     NOT part of the print-root subtree. The triple :not() means:
+       - skip elements that contain the print root  (ancestors stay)
+       - skip the print root itself
+       - skip descendants of the print root
+     Everything else (sidebar, top bar, other route content) gets
+     display: none, which removes its layout space — so the dashboard
+     renders starting at page 1, top of page. */
+  body.printing-dashboard
+    *:not(:has([data-dashboard-print-root])):not([data-dashboard-print-root]):not(
+      [data-dashboard-print-root] *
+    ) {
+    display: none !important;
+  }
+
+  /* Ancestor chain: collapse to display: contents so the wrapper boxes
+     don't impose padding / max-width / flex on the print root. */
+  body.printing-dashboard *:has([data-dashboard-print-root]) {
+    display: contents !important;
+    background: transparent !important;
+  }
+
+  /* Print root itself — full width, scaled to fit one page. */
+  body.printing-dashboard [data-dashboard-print-root] {
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: var(--color-background) !important;
+    color: var(--color-foreground) !important;
+    /* Single-page fit. Tuned for the Sales+Marketing+CS+Quote+Dev stack
+       at letter portrait. Adjust if the dashboard grows substantially. */
+    zoom: 0.55;
   }
 
   /* Tailwind's print:hidden utility (compiled by tw-animate-css/Tailwind). */
@@ -184,11 +235,5 @@
   [data-dashboard-print-root] [class*="rounded-lg"] {
     break-inside: avoid;
     page-break-inside: avoid;
-  }
-
-  /* Strip the global page background so the dashboard's own bg shows through. */
-  html,
-  body {
-    background: var(--color-background) !important;
   }
 }

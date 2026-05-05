@@ -16,7 +16,25 @@ import {
   Lock,
   LockOpen,
   Printer,
+  GripVertical,
 } from "lucide-react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  rectSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Card, CardContent } from "@/components/ui/card";
@@ -82,6 +100,12 @@ import {
   SNAPSHOT_METRIC_LABELS,
   type DashboardSnapshot,
 } from "@/features/reports/dashboardSnapshots";
+import {
+  loadCardOrder,
+  saveCardOrder,
+  type CardOrder,
+  type DashboardSectionId,
+} from "@/features/reports/dashboardCardOrder";
 
 /**
  * Team Dashboard — CRM-native port of the Python /Team Dashboard
@@ -673,6 +697,38 @@ export function TeamDashboard() {
     return base;
   }, [snapshots, goals.nrr_dollar_pct, m, currentQuarter]);
 
+  // ---- Drag-and-drop card ordering ----
+  // Each section (Sales / Marketing / CS) has its own sortable list
+  // persisted to localStorage. Owners can drag cards within a section
+  // via the grip handle that appears on hover. Cross-section drags
+  // aren't supported intentionally — the section grouping is part of
+  // the dashboard's information architecture (Codex parity).
+  const [cardOrder, setCardOrder] = useState<CardOrder>(() => loadCardOrder());
+  useEffect(() => {
+    saveCardOrder(cardOrder);
+  }, [cardOrder]);
+
+  const dndSensors = useSensors(
+    // 6px activation distance keeps clicks (e.g. KpiCard pencils, chart
+    // tooltips) from accidentally starting a drag.
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+
+  function handleCardDragEnd(section: DashboardSectionId, e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    setCardOrder((prev) => {
+      const ids = prev[section];
+      const from = ids.indexOf(String(active.id));
+      const to = ids.indexOf(String(over.id));
+      if (from < 0 || to < 0) return prev;
+      return { ...prev, [section]: arrayMove(ids, from, to) };
+    });
+  }
+
   // ---- Owner sub-views (Goals, Historical) ----
   // Both gated to the raw owner account so a "team view" preview still
   // shows them in the tab bar.
@@ -765,226 +821,287 @@ export function TeamDashboard() {
       {/* ----- Sales -----
           Codex-parity layout: KPI directly above its chart (ARR | New
           Customers stacked on top row), then New Sales | Pipeline side by
-          side below. Whole section is wrapped in a tinted card so it's
-          clearly demarcated from Marketing / CS / Services / Development. */}
+          side below. Cards are individually draggable for the owner so
+          the layout can be tuned per personal preference. */}
       <SectionWrap title="Sales" tone="bg-blue-50 dark:bg-blue-950/30">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* ARR — KPI above quarterly chart */}
-          <div className="space-y-3">
-            <KpiCard
-              label="ARR (rolling 365)"
-              value={formatCurrency(arr)}
-              progress={pct(arr, goals.arr)}
-              goal={goals.arr}
-              formatGoal={formatCurrency}
-              onGoalChange={(v) => setGoalQuarter("arr", v)}
-              editable={isOwner}
-              hint="Sum of closed-won amount in the trailing 365 days (v_arr_rolling_365)."
-              to="/reports?tab=standard"
-            />
-            {arrPoints.length > 0 && (
-              <ChartCard
-                title={`ARR by Quarter — goal ${formatCurrency(goals.arr)}`}
-              >
-                <ChartLegend />
-                <SegmentedLineChart
-                  data={arrPoints}
-                  yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-                  tooltipFormatter={(v) => formatCurrency(v)}
-                  height={220}
-                />
-              </ChartCard>
-            )}
-          </div>
+        <DndContext
+          sensors={dndSensors}
+          collisionDetection={closestCenter}
+          onDragEnd={(e) => handleCardDragEnd("sales", e)}
+        >
+          <SortableContext
+            items={cardOrder.sales}
+            strategy={rectSortingStrategy}
+          >
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {cardOrder.sales.map((id) => (
+                <SortableCard key={id} id={id} enabled={isOwner}>
+                  {id === "arr" && (
+                    <div className="space-y-3">
+                      <KpiCard
+                        label="ARR (rolling 365)"
+                        value={formatCurrency(arr)}
+                        progress={pct(arr, goals.arr)}
+                        goal={goals.arr}
+                        formatGoal={formatCurrency}
+                        onGoalChange={(v) => setGoalQuarter("arr", v)}
+                        editable={isOwner}
+                        hint="Sum of closed-won amount in the trailing 365 days (v_arr_rolling_365)."
+                        to="/reports?tab=standard"
+                      />
+                      {arrPoints.length > 0 && (
+                        <ChartCard
+                          title={`ARR by Quarter — goal ${formatCurrency(goals.arr)}`}
+                        >
+                          <ChartLegend />
+                          <SegmentedLineChart
+                            data={arrPoints}
+                            yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+                            tooltipFormatter={(v) => formatCurrency(v)}
+                            height={220}
+                          />
+                        </ChartCard>
+                      )}
+                    </div>
+                  )}
 
-          {/* New Customers — KPI above running-total chart */}
-          <div className="space-y-3">
-            <KpiCard
-              label="New Customers QTD"
-              value={String(newCustomers)}
-              progress={pct(newCustomers, goals.new_customers)}
-              goal={goals.new_customers}
-              formatGoal={(v) => String(v)}
-              onGoalChange={(v) => setGoalQuarter("new_customers", v)}
-              editable={isOwner}
-              hint="Closed-won opps with kind='new_business' & close_date in current fiscal quarter (v_new_customers_qtd)."
-              to="/reports?tab=standard"
-            />
-            {newCustomersRunning.length > 1 && (
-              <ChartCard
-                title={`New Customers — running total (Q goal ${goals.new_customers})`}
-                subtitle={
-                  monthIdx != null
-                    ? `${monthShort} pace goal: ${Math.round(newCustomersMonthGoals[monthIdx])}`
-                    : undefined
-                }
-              >
-                <ChartLegend />
-                <SegmentedLineChart
-                  data={newCustomersRunning}
-                  yFormatter={(v) => String(Math.round(v))}
-                  tooltipFormatter={(v) => String(Math.round(v))}
-                  height={220}
-                />
-                {isOwner && (
-                  <MonthSplitInline
-                    metricKey="new_customers"
-                    quarter={currentQuarter}
-                    onSaved={() => setQgoals(getQuarterGoals(currentQuarter))}
-                  />
-                )}
-              </ChartCard>
-            )}
-          </div>
+                  {id === "new_customers" && (
+                    <div className="space-y-3">
+                      <KpiCard
+                        label="New Customers QTD"
+                        value={String(newCustomers)}
+                        progress={pct(newCustomers, goals.new_customers)}
+                        goal={goals.new_customers}
+                        formatGoal={(v) => String(v)}
+                        onGoalChange={(v) =>
+                          setGoalQuarter("new_customers", v)
+                        }
+                        editable={isOwner}
+                        hint="Closed-won opps with kind='new_business' & close_date in current fiscal quarter (v_new_customers_qtd)."
+                        to="/reports?tab=standard"
+                      />
+                      {newCustomersRunning.length > 1 && (
+                        <ChartCard
+                          title={`New Customers — running total (Q goal ${goals.new_customers})`}
+                          subtitle={
+                            monthIdx != null
+                              ? `${monthShort} pace goal: ${Math.round(newCustomersMonthGoals[monthIdx])}`
+                              : undefined
+                          }
+                        >
+                          <ChartLegend />
+                          <SegmentedLineChart
+                            data={newCustomersRunning}
+                            yFormatter={(v) => String(Math.round(v))}
+                            tooltipFormatter={(v) => String(Math.round(v))}
+                            height={220}
+                          />
+                          {isOwner && (
+                            <MonthSplitInline
+                              metricKey="new_customers"
+                              quarter={currentQuarter}
+                              onSaved={() =>
+                                setQgoals(getQuarterGoals(currentQuarter))
+                              }
+                            />
+                          )}
+                        </ChartCard>
+                      )}
+                    </div>
+                  )}
 
-          {/* New Sales — chart only (graph-driven per Codex parity) */}
-          <div className="space-y-3">
-            {newSalesRunning.length > 1 && (
-              <ChartCard
-                title={`New Sales $ — running total (Q goal ${formatCurrency(goals.new_sales)})`}
-                subtitle={
-                  monthIdx != null
-                    ? `${monthShort} pace goal: ${formatCurrency(newSalesMonthGoals[monthIdx])}`
-                    : undefined
-                }
-              >
-                <ChartLegend />
-                <SegmentedLineChart
-                  data={newSalesRunning}
-                  yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-                  tooltipFormatter={(v) => formatCurrency(v)}
-                  height={220}
-                />
-                {isOwner && (
-                  <MonthSplitInline
-                    metricKey="new_sales"
-                    quarter={currentQuarter}
-                    onSaved={() => setQgoals(getQuarterGoals(currentQuarter))}
-                  />
-                )}
-              </ChartCard>
-            )}
-          </div>
+                  {id === "new_sales" && (
+                    <div className="space-y-3">
+                      {newSalesRunning.length > 1 && (
+                        <ChartCard
+                          title={`New Sales $ — running total (Q goal ${formatCurrency(goals.new_sales)})`}
+                          subtitle={
+                            monthIdx != null
+                              ? `${monthShort} pace goal: ${formatCurrency(newSalesMonthGoals[monthIdx])}`
+                              : undefined
+                          }
+                        >
+                          <ChartLegend />
+                          <SegmentedLineChart
+                            data={newSalesRunning}
+                            yFormatter={(v) =>
+                              `$${(v / 1000).toFixed(0)}k`
+                            }
+                            tooltipFormatter={(v) => formatCurrency(v)}
+                            height={220}
+                          />
+                          {isOwner && (
+                            <MonthSplitInline
+                              metricKey="new_sales"
+                              quarter={currentQuarter}
+                              onSaved={() =>
+                                setQgoals(getQuarterGoals(currentQuarter))
+                              }
+                            />
+                          )}
+                        </ChartCard>
+                      )}
+                    </div>
+                  )}
 
-          {/* Pipeline — chart only, sourced from weekly snapshots so we
-              get a quarter-over-quarter trend (locked metric, flat goal). */}
-          <div className="space-y-3">
-            {pipelineTrendPoints.length > 0 ? (
-              <ChartCard
-                title={`Active Pipeline by Quarter — goal ${formatCurrency(goals.total_active_pipeline)}`}
-                subtitle={`Now: ${formatCurrency(pipeline)} • ${m.pipeline_count ?? 0} open • weighted ${formatCurrency(num(m.pipeline_weighted_amount))}`}
-              >
-                <ChartLegend />
-                <SegmentedLineChart
-                  data={pipelineTrendPoints}
-                  yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-                  tooltipFormatter={(v) => formatCurrency(v)}
-                  height={220}
-                />
-              </ChartCard>
-            ) : (
-              <ChartCard
-                title={`Active Pipeline — goal ${formatCurrency(goals.total_active_pipeline)}`}
-                subtitle={`Now: ${formatCurrency(pipeline)} • ${m.pipeline_count ?? 0} open • weighted ${formatCurrency(num(m.pipeline_weighted_amount))}. Trend will fill in as weekly snapshots accumulate.`}
-              >
-                <div className="h-[220px] flex items-center justify-center text-xs text-muted-foreground">
-                  No history yet.
-                </div>
-              </ChartCard>
-            )}
-          </div>
-        </div>
+                  {id === "pipeline" && (
+                    <div className="space-y-3">
+                      {pipelineTrendPoints.length > 0 ? (
+                        <ChartCard
+                          title={`Active Pipeline by Quarter — goal ${formatCurrency(goals.total_active_pipeline)}`}
+                          subtitle={`Now: ${formatCurrency(pipeline)} • ${m.pipeline_count ?? 0} open • weighted ${formatCurrency(num(m.pipeline_weighted_amount))}`}
+                        >
+                          <ChartLegend />
+                          <SegmentedLineChart
+                            data={pipelineTrendPoints}
+                            yFormatter={(v) =>
+                              `$${(v / 1000).toFixed(0)}k`
+                            }
+                            tooltipFormatter={(v) => formatCurrency(v)}
+                            height={220}
+                          />
+                        </ChartCard>
+                      ) : (
+                        <ChartCard
+                          title={`Active Pipeline — goal ${formatCurrency(goals.total_active_pipeline)}`}
+                          subtitle={`Now: ${formatCurrency(pipeline)} • ${m.pipeline_count ?? 0} open • weighted ${formatCurrency(num(m.pipeline_weighted_amount))}. Trend will fill in as weekly snapshots accumulate.`}
+                        >
+                          <div className="h-[220px] flex items-center justify-center text-xs text-muted-foreground">
+                            No history yet.
+                          </div>
+                        </ChartCard>
+                      )}
+                    </div>
+                  )}
+                </SortableCard>
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
       </SectionWrap>
 
       {/* ----- Marketing (graphs-only per Codex parity) ----- */}
       <SectionWrap title="Marketing" tone="bg-purple-50 dark:bg-purple-950/30">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          {sqlRunning.length > 1 && (
-            <ChartCard
-              title={`SQL — running total (Q goal ${goals.sql})`}
-              subtitle={
-                monthIdx != null
-                  ? `${monthShort} pace goal: ${Math.round(sqlMonthGoals[monthIdx])}`
-                  : undefined
-              }
-            >
-              <ChartLegend />
-              <SegmentedLineChart
-                data={sqlRunning}
-                yFormatter={(v) => String(Math.round(v))}
-                tooltipFormatter={(v) => String(Math.round(v))}
-                height={220}
-              />
-              {isOwner && (
-                <MonthSplitInline
-                  metricKey="sql"
-                  quarter={currentQuarter}
-                  onSaved={() => setQgoals(getQuarterGoals(currentQuarter))}
-                />
-              )}
-            </ChartCard>
-          )}
-          {mqlRunning.length > 1 && (
-            <ChartCard
-              title={`MQL — running total (Q goal ${goals.mql})`}
-              subtitle={
-                monthIdx != null
-                  ? `${monthShort} pace goal: ${Math.round(mqlMonthGoals[monthIdx])}`
-                  : undefined
-              }
-            >
-              <ChartLegend />
-              <SegmentedLineChart
-                data={mqlRunning}
-                yFormatter={(v) => String(Math.round(v))}
-                tooltipFormatter={(v) => String(Math.round(v))}
-                height={220}
-              />
-              {isOwner && (
-                <MonthSplitInline
-                  metricKey="mql"
-                  quarter={currentQuarter}
-                  onSaved={() => setQgoals(getQuarterGoals(currentQuarter))}
-                />
-              )}
-            </ChartCard>
-          )}
-        </div>
+        <DndContext
+          sensors={dndSensors}
+          collisionDetection={closestCenter}
+          onDragEnd={(e) => handleCardDragEnd("marketing", e)}
+        >
+          <SortableContext
+            items={cardOrder.marketing}
+            strategy={rectSortingStrategy}
+          >
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {cardOrder.marketing.map((id) => (
+                <SortableCard key={id} id={id} enabled={isOwner}>
+                  {id === "sql" && sqlRunning.length > 1 && (
+                    <ChartCard
+                      title={`SQL — running total (Q goal ${goals.sql})`}
+                      subtitle={
+                        monthIdx != null
+                          ? `${monthShort} pace goal: ${Math.round(sqlMonthGoals[monthIdx])}`
+                          : undefined
+                      }
+                    >
+                      <ChartLegend />
+                      <SegmentedLineChart
+                        data={sqlRunning}
+                        yFormatter={(v) => String(Math.round(v))}
+                        tooltipFormatter={(v) => String(Math.round(v))}
+                        height={220}
+                      />
+                      {isOwner && (
+                        <MonthSplitInline
+                          metricKey="sql"
+                          quarter={currentQuarter}
+                          onSaved={() =>
+                            setQgoals(getQuarterGoals(currentQuarter))
+                          }
+                        />
+                      )}
+                    </ChartCard>
+                  )}
+                  {id === "mql" && mqlRunning.length > 1 && (
+                    <ChartCard
+                      title={`MQL — running total (Q goal ${goals.mql})`}
+                      subtitle={
+                        monthIdx != null
+                          ? `${monthShort} pace goal: ${Math.round(mqlMonthGoals[monthIdx])}`
+                          : undefined
+                      }
+                    >
+                      <ChartLegend />
+                      <SegmentedLineChart
+                        data={mqlRunning}
+                        yFormatter={(v) => String(Math.round(v))}
+                        tooltipFormatter={(v) => String(Math.round(v))}
+                        height={220}
+                      />
+                      {isOwner && (
+                        <MonthSplitInline
+                          metricKey="mql"
+                          quarter={currentQuarter}
+                          onSaved={() =>
+                            setQgoals(getQuarterGoals(currentQuarter))
+                          }
+                        />
+                      )}
+                    </ChartCard>
+                  )}
+                </SortableCard>
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
       </SectionWrap>
 
       {/* ----- Customer Success ----- */}
       <SectionWrap title="Customer Success" tone="bg-emerald-50 dark:bg-emerald-950/30">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Renewals — chart only (graph-driven per Codex parity) */}
-          <div className="space-y-3">
-            {renewalsClosedRunning.length > 1 && (
-              <ChartCard
-                title={`Renewals Closed $ — running total (Q goal ${formatCurrency(goals.renewals_amount)})`}
-                subtitle={
-                  monthIdx != null
-                    ? `${monthShort} pace goal: ${formatCurrency(renewalsMonthGoals[monthIdx])}`
-                    : undefined
-                }
-              >
-                <ChartLegend />
-                <SegmentedLineChart
-                  data={renewalsClosedRunning}
-                  yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-                  tooltipFormatter={(v) => formatCurrency(v)}
-                  height={220}
-                />
-                {isOwner && (
-                  <MonthSplitInline
-                    metricKey="renewals_number"
-                    quarter={currentQuarter}
-                    onSaved={() => setQgoals(getQuarterGoals(currentQuarter))}
-                  />
-                )}
-              </ChartCard>
-            )}
-          </div>
+        <DndContext
+          sensors={dndSensors}
+          collisionDetection={closestCenter}
+          onDragEnd={(e) => handleCardDragEnd("cs", e)}
+        >
+          <SortableContext
+            items={cardOrder.cs}
+            strategy={rectSortingStrategy}
+          >
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {cardOrder.cs.map((id) => (
+                <SortableCard key={id} id={id} enabled={isOwner}>
+                  {id === "renewals" && (
+                    <div className="space-y-3">
+                      {renewalsClosedRunning.length > 1 && (
+                        <ChartCard
+                          title={`Renewals Closed $ — running total (Q goal ${formatCurrency(goals.renewals_amount)})`}
+                          subtitle={
+                            monthIdx != null
+                              ? `${monthShort} pace goal: ${formatCurrency(renewalsMonthGoals[monthIdx])}`
+                              : undefined
+                          }
+                        >
+                          <ChartLegend />
+                          <SegmentedLineChart
+                            data={renewalsClosedRunning}
+                            yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+                            tooltipFormatter={(v) => formatCurrency(v)}
+                            height={220}
+                          />
+                          {isOwner && (
+                            <MonthSplitInline
+                              metricKey="renewals_number"
+                              quarter={currentQuarter}
+                              onSaved={() =>
+                                setQgoals(getQuarterGoals(currentQuarter))
+                              }
+                            />
+                          )}
+                        </ChartCard>
+                      )}
+                    </div>
+                  )}
 
-          {/* QTD Billing — KPI alone */}
+                  {id === "qtd_billing_nrr_block" && (
           <div className="space-y-3">
             <KpiCard
               label="QTD Billing Goal"
@@ -1011,9 +1128,14 @@ export function TeamDashboard() {
               editable={isOwner}
               hint="(starting customers − churn QTD) / starting customers. 100% means zero churn this quarter so far."
             />
-            {nrrCustomerTrendPoints.length > 1 && (
+            {nrrCustomerTrendPoints.length > 0 && (
               <ChartCard
                 title={`NRR by Customer — quarterly (goal ${goals.nrr_customer_pct}%)`}
+                subtitle={
+                  nrrCustomerTrendPoints.length === 1
+                    ? "Trend will fill in as weekly snapshots accumulate."
+                    : undefined
+                }
               >
                 <ChartLegend />
                 <SegmentedLineChart
@@ -1034,9 +1156,14 @@ export function TeamDashboard() {
               editable={isOwner}
               hint="(starting ARR − churn $ QTD) / starting ARR."
             />
-            {nrrDollarTrendPoints.length > 1 && (
+            {nrrDollarTrendPoints.length > 0 && (
               <ChartCard
                 title={`NRR by Dollar — quarterly (goal ${goals.nrr_dollar_pct}%)`}
+                subtitle={
+                  nrrDollarTrendPoints.length === 1
+                    ? "Trend will fill in as weekly snapshots accumulate."
+                    : undefined
+                }
               >
                 <ChartLegend />
                 <SegmentedLineChart
@@ -1048,7 +1175,12 @@ export function TeamDashboard() {
               </ChartCard>
             )}
           </div>
-        </div>
+                  )}
+                </SortableCard>
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
       </SectionWrap>
 
       {/* Most Recent Quote — manually edited on the dashboard */}
@@ -1511,6 +1643,56 @@ function SectionWrap({
   );
 }
 
+/**
+ * Sortable wrapper for a dashboard card. Owner-only — when `enabled` is
+ * false (team-view preview, snapshot detail, non-admin) we render the
+ * children unwrapped so the drag affordances are completely invisible.
+ *
+ * The grip handle floats to the upper-left of each card and only
+ * appears on hover, so the live dashboard isn't visually noisy. It is
+ * also marked `print:hidden` so PDF exports don't capture it.
+ */
+function SortableCard({
+  id,
+  enabled,
+  children,
+}: {
+  id: string;
+  enabled: boolean;
+  children: React.ReactNode;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id, disabled: !enabled });
+  if (!enabled) return <>{children}</>;
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.55 : 1,
+    zIndex: isDragging ? 10 : undefined,
+  };
+  return (
+    <div ref={setNodeRef} style={style} className="relative group/card">
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        aria-label="Drag to reorder card"
+        title="Drag to reorder"
+        className="absolute -left-2 top-2 z-20 hidden group-hover/card:flex items-center justify-center h-7 w-7 rounded-md bg-background/95 border border-border text-muted-foreground hover:text-foreground cursor-grab active:cursor-grabbing shadow-sm print:hidden"
+      >
+        <GripVertical className="h-4 w-4" />
+      </button>
+      {children}
+    </div>
+  );
+}
+
 /** Legend explaining the R/Y/G segment coloring on the running-total charts. */
 function ChartLegend() {
   return (
@@ -1897,8 +2079,22 @@ function DashboardTabBar({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => window.print()}
-            title="Export the current dashboard view to PDF (uses your browser's print → Save as PDF)"
+            onClick={() => {
+              // Toggle the body class that scopes our aggressive print
+              // CSS (see app.css → @media print). The afterprint listener
+              // cleans up so the class doesn't leak into the live UI if
+              // the user cancels the dialog.
+              const cleanup = () => {
+                document.body.classList.remove("printing-dashboard");
+                window.removeEventListener("afterprint", cleanup);
+              };
+              window.addEventListener("afterprint", cleanup);
+              document.body.classList.add("printing-dashboard");
+              // Give the browser one paint tick to apply the class
+              // before the print dialog snapshots the layout.
+              window.requestAnimationFrame(() => window.print());
+            }}
+            title="Export the current dashboard view to PDF (uses your browser's print → Save as PDF). Tip: enable 'Background graphics' in the print dialog for the colored sections."
             className="mb-1"
           >
             <Printer className="h-3.5 w-3.5 mr-1.5" />
@@ -2425,6 +2621,7 @@ function HistoricalView() {
       <SnapshotDetailView
         snapshot={snap}
         previous={prev}
+        snapshots={snapshots}
         onBack={() => setSelectedWeek("")}
       />
     );
@@ -2534,10 +2731,13 @@ function HistoricalView() {
  */
 function SnapshotDetailView({
   snapshot,
+  snapshots,
   onBack,
 }: {
   snapshot: DashboardSnapshot;
   previous?: DashboardSnapshot;
+  /** All snapshots — used to build the as-of-then trend charts. */
+  snapshots: DashboardSnapshot[];
   onBack: () => void;
 }) {
   // Pull goals for the captured quarter so the snapshot view shows the
@@ -2546,6 +2746,50 @@ function SnapshotDetailView({
   // actuals are still immutable.
   const goals = useMemo(() => getQuarterGoals(snapshot.quarter), [snapshot.quarter]);
   const monthIdx = currentMonthIndex(snapshot.quarter, new Date(snapshot.snapshot_date));
+
+  /**
+   * Trend charts on the snapshot view show the dashboard "as it would
+   * have looked that week" — so we filter the snapshots array down to
+   * everything captured ON OR BEFORE the selected snapshot's week and
+   * group by quarter (last snapshot of each quarter wins). This mirrors
+   * the live dashboard's `quarterlySnapshotTrend()` but with a moving
+   * cutoff instead of "today".
+   */
+  const trendBaseSnapshots = useMemo(
+    () => snapshots.filter((s) => s.week_start <= snapshot.week_start),
+    [snapshots, snapshot.week_start],
+  );
+  const arrTrendPoints = useMemo(
+    () => quarterlySnapshotTrend(trendBaseSnapshots, "arr", goals.arr.quarter_goal),
+    [trendBaseSnapshots, goals.arr.quarter_goal],
+  );
+  const pipelineTrendPoints = useMemo(
+    () =>
+      quarterlySnapshotTrend(
+        trendBaseSnapshots,
+        "pipeline_amount",
+        goals.total_active_pipeline.quarter_goal,
+      ),
+    [trendBaseSnapshots, goals.total_active_pipeline.quarter_goal],
+  );
+  const nrrCustomerTrendPoints = useMemo(
+    () =>
+      quarterlySnapshotTrend(
+        trendBaseSnapshots,
+        "nrr_by_customer_pct",
+        goals.nrr_customer_pct.quarter_goal,
+      ),
+    [trendBaseSnapshots, goals.nrr_customer_pct.quarter_goal],
+  );
+  const nrrDollarTrendPoints = useMemo(
+    () =>
+      quarterlySnapshotTrend(
+        trendBaseSnapshots,
+        "nrr_by_dollar_pct",
+        goals.nrr_dollar_pct.quarter_goal,
+      ),
+    [trendBaseSnapshots, goals.nrr_dollar_pct.quarter_goal],
+  );
 
   /**
    * Cumulative goal at the snapshot's month-of-quarter, matching the
@@ -2592,8 +2836,8 @@ function SnapshotDetailView({
           </h2>
           <p className="text-xs text-muted-foreground">
             {snapshot.quarter} · captured {snapshot.snapshot_date} · frozen
-            view from that Monday — not live data. Trend graphs aren't part
-            of the snapshot, so each metric shows as a card.
+            view from that Monday — not live data. Quarterly trend lines
+            show only the snapshots captured on or before this date.
           </p>
         </div>
       </div>
@@ -2601,15 +2845,30 @@ function SnapshotDetailView({
       {/* ----- Sales ----- */}
       <SectionWrap title="Sales" tone="bg-blue-50 dark:bg-blue-950/30">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <KpiCard
-            label="ARR (rolling 365)"
-            value={formatCurrency(sm.arr)}
-            progress={pct(sm.arr, arrGoal)}
-            goal={arrGoal}
-            formatGoal={formatCurrency}
-            onGoalChange={noop}
-            editable={false}
-          />
+          <div className="space-y-3">
+            <KpiCard
+              label="ARR (rolling 365)"
+              value={formatCurrency(sm.arr)}
+              progress={pct(sm.arr, arrGoal)}
+              goal={arrGoal}
+              formatGoal={formatCurrency}
+              onGoalChange={noop}
+              editable={false}
+            />
+            {arrTrendPoints.length > 0 && (
+              <ChartCard
+                title={`ARR by Quarter — goal ${formatCurrency(arrGoal)}`}
+              >
+                <ChartLegend />
+                <SegmentedLineChart
+                  data={arrTrendPoints}
+                  yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+                  tooltipFormatter={(v) => formatCurrency(v)}
+                  height={200}
+                />
+              </ChartCard>
+            )}
+          </div>
           <KpiCard
             label="New Customers QTD"
             value={String(sm.new_customers_qtd)}
@@ -2628,15 +2887,30 @@ function SnapshotDetailView({
             onGoalChange={noop}
             editable={false}
           />
-          <KpiCard
-            label="Active Pipeline"
-            value={formatCurrency(sm.pipeline_amount)}
-            progress={pct(sm.pipeline_amount, pipelineGoal)}
-            goal={pipelineGoal}
-            formatGoal={formatCurrency}
-            onGoalChange={noop}
-            editable={false}
-          />
+          <div className="space-y-3">
+            <KpiCard
+              label="Active Pipeline"
+              value={formatCurrency(sm.pipeline_amount)}
+              progress={pct(sm.pipeline_amount, pipelineGoal)}
+              goal={pipelineGoal}
+              formatGoal={formatCurrency}
+              onGoalChange={noop}
+              editable={false}
+            />
+            {pipelineTrendPoints.length > 0 && (
+              <ChartCard
+                title={`Active Pipeline by Quarter — goal ${formatCurrency(pipelineGoal)}`}
+              >
+                <ChartLegend />
+                <SegmentedLineChart
+                  data={pipelineTrendPoints}
+                  yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+                  tooltipFormatter={(v) => formatCurrency(v)}
+                  height={200}
+                />
+              </ChartCard>
+            )}
+          </div>
         </div>
       </SectionWrap>
 
@@ -2695,6 +2969,19 @@ function SnapshotDetailView({
               onGoalChange={noop}
               editable={false}
             />
+            {nrrCustomerTrendPoints.length > 0 && (
+              <ChartCard
+                title={`NRR by Customer — quarterly (goal ${nrrCustGoal}%)`}
+              >
+                <ChartLegend />
+                <SegmentedLineChart
+                  data={nrrCustomerTrendPoints}
+                  yFormatter={(v) => `${v.toFixed(0)}%`}
+                  tooltipFormatter={(v) => `${v.toFixed(1)}%`}
+                  height={180}
+                />
+              </ChartCard>
+            )}
             <KpiCard
               label="NRR by Dollar"
               value={fmtPct(sm.nrr_by_dollar_pct)}
@@ -2704,6 +2991,19 @@ function SnapshotDetailView({
               onGoalChange={noop}
               editable={false}
             />
+            {nrrDollarTrendPoints.length > 0 && (
+              <ChartCard
+                title={`NRR by Dollar — quarterly (goal ${nrrDollarGoal}%)`}
+              >
+                <ChartLegend />
+                <SegmentedLineChart
+                  data={nrrDollarTrendPoints}
+                  yFormatter={(v) => `${v.toFixed(0)}%`}
+                  tooltipFormatter={(v) => `${v.toFixed(1)}%`}
+                  height={180}
+                />
+              </ChartCard>
+            )}
           </div>
         </div>
       </SectionWrap>
