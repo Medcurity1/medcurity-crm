@@ -19,6 +19,10 @@ import {
   GripVertical,
   Phone,
   History,
+  Mail,
+  Calendar,
+  StickyNote,
+  CheckSquare,
 } from "lucide-react";
 import { useRecentRecords, type RecentRecord } from "@/hooks/useRecentRecords";
 import { TeamActivityFeed } from "./TeamActivityFeed";
@@ -167,6 +171,25 @@ function QuickActions() {
   );
 }
 
+// Per-type icon + tint so each row in Recent Activity reflects what it
+// actually is (call/email/meeting/note/task) instead of the generic Clock
+// glyph that everything used to show.
+const RECENT_ACTIVITY_ICONS: Record<ActivityType, typeof Phone> = {
+  call: Phone,
+  email: Mail,
+  meeting: Calendar,
+  note: StickyNote,
+  task: CheckSquare,
+};
+
+const RECENT_ACTIVITY_TINTS: Record<ActivityType, string> = {
+  call: "bg-blue-100 text-blue-600",
+  email: "bg-purple-100 text-purple-600",
+  meeting: "bg-amber-100 text-amber-600",
+  note: "bg-gray-100 text-gray-600",
+  task: "bg-emerald-100 text-emerald-600",
+};
+
 function RecentActivitySection() {
   const { data: activities, isLoading } = useRecentActivity();
 
@@ -192,10 +215,15 @@ function RecentActivitySection() {
           <p className="text-sm text-muted-foreground">No recent activity.</p>
         ) : (
           <div className="space-y-4">
-            {activities.map((a) => (
+            {activities.map((a) => {
+              const Icon = RECENT_ACTIVITY_ICONS[a.activity_type] ?? Clock;
+              const tint =
+                RECENT_ACTIVITY_TINTS[a.activity_type] ??
+                "bg-primary/10 text-primary";
+              return (
               <div key={a.id} className="flex items-start gap-3">
-                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                  <Clock className="h-4 w-4 text-primary" />
+                <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${tint}`}>
+                  <Icon className="h-4 w-4" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium leading-snug">
@@ -210,7 +238,8 @@ function RecentActivitySection() {
                   </p>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </CardContent>

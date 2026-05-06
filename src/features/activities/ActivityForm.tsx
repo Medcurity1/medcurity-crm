@@ -65,6 +65,19 @@ export function ActivityForm({
     return `${yyyy}-${mm}-${dd}`;
   };
 
+  // Convert "YYYY-MM-DD" (from <input type="date">) to a local-noon ISO
+  // string. Sending the bare date string makes Postgres interpret it as
+  // UTC midnight; in negative-UTC timezones that renders as the prior
+  // day (a rep added a task on May 5 and the timeline read "Due May 4").
+  // Using local noon avoids any timezone-induced day-shift on either
+  // side of the date line.
+  const dateToLocalNoonISO = (yyyyMmDd: string): string | null => {
+    if (!yyyyMmDd) return null;
+    const [y, m, d] = yyyyMmDd.split("-").map(Number);
+    if (!y || !m || !d) return null;
+    return new Date(y, m - 1, d, 12, 0, 0, 0).toISOString();
+  };
+
   const form = useForm<ActivityFormValues>({
     resolver: zodResolver(activityFormSchema),
     defaultValues: {
@@ -123,6 +136,8 @@ export function ActivityForm({
         : ["in_app"]
     ) as Array<"in_app" | "email">;
 
+    const dueAtIso = dateToLocalNoonISO(values.due_at ?? "");
+
     if (isEditing && activity) {
       updateMutation.mutate(
         {
@@ -130,7 +145,7 @@ export function ActivityForm({
           activity_type: values.activity_type,
           subject: values.subject,
           body: values.body || null,
-          due_at: values.due_at || null,
+          due_at: dueAtIso,
           reminder_schedule: reminderSchedule,
           reminder_at: reminderAt,
           reminder_channels: reminderChannels,
@@ -153,7 +168,7 @@ export function ActivityForm({
         activity_type: values.activity_type,
         subject: values.subject,
         body: values.body || undefined,
-        due_at: values.due_at || undefined,
+        due_at: dueAtIso ?? undefined,
         account_id: accountId,
         contact_id: contactId,
         opportunity_id: opportunityId,
@@ -213,10 +228,37 @@ export function ActivityForm({
             )}
           </div>
 
-          {/* Subject */}
+          {/* Subject — calls and meetings get a curated dropdown of the
+              outcomes reps actually log so the data is consistent across
+              the team (Brayden's request); other types stay free-text. */}
           <div className="space-y-2">
             <Label htmlFor="subject">Subject</Label>
-            <Input id="subject" {...form.register("subject")} placeholder="Activity subject" />
+            {selectedType === "call" ? (
+              <select
+                id="subject"
+                className="w-full border rounded-md h-9 px-2 bg-background text-sm"
+                value={form.watch("subject") ?? ""}
+                onChange={(e) => form.setValue("subject", e.target.value)}
+              >
+                <option value="">Select call outcome...</option>
+                <option value="Call - Spoke">Call - Spoke</option>
+                <option value="Call - Left VM">Call - Left VM</option>
+                <option value="Call - No answer">Call - No answer</option>
+              </select>
+            ) : selectedType === "meeting" ? (
+              <select
+                id="subject"
+                className="w-full border rounded-md h-9 px-2 bg-background text-sm"
+                value={form.watch("subject") ?? ""}
+                onChange={(e) => form.setValue("subject", e.target.value)}
+              >
+                <option value="">Select meeting type...</option>
+                <option value="Demo">Demo</option>
+                <option value="Proposal conversation">Proposal conversation</option>
+              </select>
+            ) : (
+              <Input id="subject" {...form.register("subject")} placeholder="Activity subject" />
+            )}
             {form.formState.errors.subject && (
               <p className="text-sm text-destructive">
                 {form.formState.errors.subject.message}

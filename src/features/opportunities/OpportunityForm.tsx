@@ -338,8 +338,18 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   // NOT be recomputed from subtotal here — that would overwrite the real
   // post-discount value with gross-subtotal math.
   const hasProducts = isEditing && existingProducts != null && existingProducts.length > 0;
+  // existingProducts is `undefined` while the line-items query is still
+  // in flight. The auto-recalc effects below MUST wait for it; otherwise
+  // an opp whose amount is line-item-driven gets clobbered on first
+  // render (effect runs → hasProducts is still false → overwrites
+  // amount with subtotal × (1−disc/100), losing per-line-item discount
+  // math). User-reported as: "edit form 0's out the data and throws
+  // errors."  See OpportunityProductsEditor — inline edit on detail
+  // page already worked because that flow doesn't gate amount.
+  const productsLoaded = !isEditing || existingProducts !== undefined;
 
   useEffect(() => {
+    if (!productsLoaded) return; // wait until we know if opp has products
     if (hasProducts) return; // DB trigger owns amount when products exist
     if (lastEditedRef.current === "amount") return; // skip — handled below
     const sub = Number(watchedSubtotal) || 0;
@@ -349,9 +359,10 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       setValue("amount", next, { shouldDirty: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watchedSubtotal, watchedDiscount, hasProducts]);
+  }, [watchedSubtotal, watchedDiscount, hasProducts, productsLoaded]);
 
   useEffect(() => {
+    if (!productsLoaded) return;
     if (hasProducts) return;
     if (lastEditedRef.current !== "amount") return;
     // User typed in Amount directly → back-solve Subtotal.
@@ -366,7 +377,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     // Reset the flag so the next subtotal/discount edit re-triggers.
     lastEditedRef.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watchedAmount, hasProducts]);
+  }, [watchedAmount, hasProducts, productsLoaded]);
 
   // ----- Auto-set probability from stage -----
   // Whenever the stage changes, populate probability from the SF

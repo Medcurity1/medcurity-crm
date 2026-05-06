@@ -232,6 +232,14 @@ export function OpportunityDetail() {
   const [pendingRemoveProduct, setPendingRemoveProduct] = useState<{ id: string; name: string } | null>(null);
   const [pendingStage, setPendingStage] = useState<OpportunityStage | null>(null);
   const [newNote, setNewNote] = useState("");
+  // Per-line inline edit state for the Notes log. The notes column is a
+  // single concatenated text field (`name | date | content` per line),
+  // so to edit a note we split, replace at index, and re-join. Indices
+  // refer to the order in the rendered list (newest first), which is
+  // also the storage order — newest entries are prepended on add.
+  const [editingNoteIndex, setEditingNoteIndex] = useState<number | null>(null);
+  const [editNoteValue, setEditNoteValue] = useState("");
+  const [pendingDeleteNoteIndex, setPendingDeleteNoteIndex] = useState<number | null>(null);
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { addRecent } = useRecentRecords();
@@ -749,24 +757,172 @@ export function OpportunityDetail() {
       {/* --------- Notes --------- */}
       <CollapsibleSection title="Notes" defaultOpen={!!opp.notes}>
         {/* Scrollable log of existing notes */}
-        {opp.notes && (
-          <div className="border rounded-md p-3 max-h-64 overflow-y-auto bg-muted/30 space-y-1 text-sm mb-3">
-            {opp.notes.split("\n").filter(Boolean).map((line, i) => {
-              const parts = line.split(" | ");
-              if (parts.length >= 3) {
-                const [name, date, ...rest] = parts;
+        {opp.notes && (() => {
+          const lines = opp.notes.split("\n").filter(Boolean);
+          const saveEdit = (i: number) => {
+            if (!id) return;
+            const trimmed = editNoteValue.trim();
+            if (!trimmed) {
+              toast.error("Note cannot be empty");
+              return;
+            }
+            const original = lines[i];
+            const parts = original.split(" | ");
+            // Preserve the original `name | date` prefix so attribution
+            // and original timestamp survive the edit. Only the content
+            // portion is user-editable inline.
+            const updatedLine =
+              parts.length >= 3
+                ? `${parts[0]} | ${parts[1]} | ${trimmed}`
+                : trimmed;
+            const next = [...lines];
+            next[i] = updatedLine;
+            updateMutation.mutate(
+              { id, notes: next.join("\n") },
+              {
+                onSuccess: () => {
+                  setEditingNoteIndex(null);
+                  setEditNoteValue("");
+                  toast.success("Note updated");
+                },
+                onError: (err) => toast.error("Failed to update note: " + (err as Error).message),
+              },
+            );
+          };
+          const deleteAt = (i: number) => {
+            if (!id) return;
+            const next = lines.filter((_, idx) => idx !== i);
+            updateMutation.mutate(
+              { id, notes: next.length ? next.join("\n") : null },
+              {
+                onSuccess: () => {
+                  setPendingDeleteNoteIndex(null);
+                  toast.success("Note deleted");
+                },
+                onError: (err) => toast.error("Failed to delete note: " + (err as Error).message),
+              },
+            );
+          };
+          return (
+            <div className="border rounded-md p-3 max-h-64 overflow-y-auto bg-muted/30 space-y-1 text-sm mb-3">
+              {lines.map((line, i) => {
+                const parts = line.split(" | ");
+                const hasMeta = parts.length >= 3;
+                const name = hasMeta ? parts[0] : "";
+                const date = hasMeta ? parts[1] : "";
+                const content = hasMeta ? parts.slice(2).join(" | ") : line;
+                const isEditing = editingNoteIndex === i;
+                const isPendingDelete = pendingDeleteNoteIndex === i;
+
+                if (isEditing) {
+                  return (
+                    <div key={i} className="py-2 border-b last:border-b-0 border-muted space-y-1">
+                      {hasMeta && (
+                        <div className="text-xs text-muted-foreground">
+                          <span className="font-medium">{name}</span> - {date}
+                        </div>
+                      )}
+                      <Input
+                        autoFocus
+                        value={editNoteValue}
+                        onChange={(e) => setEditNoteValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            saveEdit(i);
+                          } else if (e.key === "Escape") {
+                            e.preventDefault();
+                            setEditingNoteIndex(null);
+                            setEditNoteValue("");
+                          }
+                        }}
+                      />
+                      <div className="flex gap-2">
+                        <Button size="sm" onClick={() => saveEdit(i)} disabled={updateMutation.isPending}>
+                          Save
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setEditingNoteIndex(null);
+                            setEditNoteValue("");
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                }
+
                 return (
-                  <div key={i} className="py-1 border-b last:border-b-0 border-muted">
-                    <span className="font-medium">{name}</span>
-                    <span className="text-muted-foreground"> - {date}: </span>
-                    <span>{rest.join(" | ")}</span>
+                  <div
+                    key={i}
+                    className="group py-1 border-b last:border-b-0 border-muted flex items-start gap-2"
+                  >
+                    <div className="flex-1 min-w-0">
+                      {hasMeta ? (
+                        <>
+                          <span className="font-medium">{name}</span>
+                          <span className="text-muted-foreground"> - {date}: </span>
+                          <span>{content}</span>
+                        </>
+                      ) : (
+                        <span>{line}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <button
+                        type="button"
+                        title="Edit note"
+                        className="p-1 rounded hover:bg-muted"
+                        onClick={() => {
+                          setEditingNoteIndex(i);
+                          setEditNoteValue(content);
+                          setPendingDeleteNoteIndex(null);
+                        }}
+                      >
+                        <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                      </button>
+                      {isPendingDelete ? (
+                        <>
+                          <button
+                            type="button"
+                            className="text-xs text-destructive font-medium px-1"
+                            onClick={() => deleteAt(i)}
+                            disabled={updateMutation.isPending}
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            type="button"
+                            className="text-xs text-muted-foreground px-1"
+                            onClick={() => setPendingDeleteNoteIndex(null)}
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          title="Delete note"
+                          className="p-1 rounded hover:bg-muted"
+                          onClick={() => {
+                            setPendingDeleteNoteIndex(i);
+                            setEditingNoteIndex(null);
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
-              }
-              return <div key={i} className="py-1 border-b last:border-b-0 border-muted">{line}</div>;
-            })}
-          </div>
-        )}
+              })}
+            </div>
+          );
+        })()}
         {/* Add new note */}
         <div className="flex gap-2">
           <Input
