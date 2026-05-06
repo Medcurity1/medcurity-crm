@@ -1,7 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Check, ChevronsUpDown, Download, RefreshCw, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  Check,
+  ChevronsUpDown,
+  Download,
+  RefreshCw,
+  X,
+} from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useUsers } from "@/features/leads/api";
 import { PageHeader } from "@/components/PageHeader";
@@ -61,6 +70,59 @@ import { formatCurrency, formatDate } from "@/lib/formatters";
 const OWNER_LS_KEY = "renewals_owner_filter_v1";
 const EXCLUDE_LS_KEY = "renewals_exclude_account_v1";
 const RANGE_LS_KEY = "renewals_date_range_v1";
+const PRESET_LS_KEY = "renewals_date_preset_v1";
+const SORT_LS_KEY_UPCOMING = "renewals_sort_upcoming_v1";
+const SORT_LS_KEY_CLOSED = "renewals_sort_closed_v1";
+
+type SortDir = "asc" | "desc";
+type UpcomingSortCol =
+  | "owner"
+  | "account"
+  | "name"
+  | "contract_end_date"
+  | "close_date"
+  | "expected_close_date"
+  | "amount"
+  | "lead_source"
+  | "days";
+type ClosedSortCol =
+  | "owner"
+  | "account"
+  | "name"
+  | "close_date"
+  | "expected_close_date"
+  | "contract_end_date"
+  | "amount"
+  | "lead_source";
+
+interface SortState<T extends string> {
+  col: T;
+  dir: SortDir;
+}
+
+function readSortFromStorage<T extends string>(
+  key: string,
+  fallback: SortState<T>,
+  validCols: readonly T[],
+): SortState<T> {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      validCols.includes(parsed.col) &&
+      (parsed.dir === "asc" || parsed.dir === "desc")
+    ) {
+      return parsed as SortState<T>;
+    }
+  } catch {
+    /* ignore */
+  }
+  return fallback;
+}
 
 type RenewalRow = {
   id: string;
@@ -178,10 +240,21 @@ function useClosedWonRenewals() {
   });
 }
 
+/**
+ * Days-to-contract-end urgency. Red is reserved for contracts that are
+ * already past their end date — i.e. genuinely overdue. Up to that
+ * point the contract is just "approaching", colored amber/yellow as it
+ * gets closer. Earlier the column went red at 30 days out which made
+ * every healthy upcoming renewal look like it was on fire.
+ */
 function urgencyClass(days: number | null): string {
   if (days === null) return "bg-muted text-muted-foreground";
-  if (days <= 30) return "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300";
-  if (days <= 60) return "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300";
+  if (days < 0)
+    return "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300";
+  if (days <= 30)
+    return "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300";
+  if (days <= 60)
+    return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300";
   return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300";
 }
 
@@ -245,6 +318,138 @@ function monthsInRange(
     cursor.setMonth(cursor.getMonth() + 1);
   }
   return months;
+}
+
+/** Compare two values that might be null. Nulls sort last regardless
+ * of direction so a missing date doesn't masquerade as the most-urgent
+ * row. Returns the sign of (a - b) under ascending. */
+function nullableCompare(a: unknown, b: unknown): number {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(a).localeCompare(String(b), undefined, { sensitivity: "base" });
+}
+
+function dateValue(s: string | null): number | null {
+  if (!s) return null;
+  const t = new Date(s).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+/** "Effective close" — the date the row should be ordered by when the
+ * rep hasn't picked an explicit sort. Falls back to the contract end
+ * so brand-new rows still slot in, then to close_date as a last
+ * resort. Pushing expected_close_date out moves the row down. */
+function effectiveCloseValue(r: RenewalRow): number | null {
+  return (
+    dateValue(r.expected_close_date) ??
+    dateValue(r.contract_end_date) ??
+    dateValue(r.close_date)
+  );
+}
+
+function sortUpcoming(
+  rows: RenewalRow[],
+  sort: SortState<UpcomingSortCol>,
+): RenewalRow[] {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const sign = sort.dir === "asc" ? 1 : -1;
+  const get = (r: RenewalRow): unknown => {
+    switch (sort.col) {
+      case "owner":
+        return r.owner_name?.toLowerCase() ?? null;
+      case "account":
+        return r.account_name.toLowerCase();
+      case "name":
+        return r.name?.toLowerCase() ?? null;
+      case "contract_end_date":
+        return dateValue(r.contract_end_date);
+      case "close_date":
+        return dateValue(r.close_date);
+      case "expected_close_date":
+        // Use the effective close so rows without an explicit
+        // expected date still order against the contract end (which
+        // is what the rep visually expects when they pick "Expected
+        // Close" as the sort).
+        return effectiveCloseValue(r);
+      case "amount":
+        return r.amount;
+      case "lead_source":
+        return r.lead_source?.toLowerCase() ?? null;
+      case "days":
+        // Days until contract end. Past-due rows (negative) sort
+        // before future rows under ascending, so the most-overdue
+        // rises to the top.
+        return dateValue(r.contract_end_date) === null
+          ? null
+          : Math.round(
+              (dateValue(r.contract_end_date)! - today.getTime()) /
+                86_400_000,
+            );
+    }
+  };
+  return [...rows].sort((a, b) => sign * nullableCompare(get(a), get(b)));
+}
+
+function sortClosed(
+  rows: RenewalRow[],
+  sort: SortState<ClosedSortCol>,
+): RenewalRow[] {
+  const sign = sort.dir === "asc" ? 1 : -1;
+  const get = (r: RenewalRow): unknown => {
+    switch (sort.col) {
+      case "owner":
+        return r.owner_name?.toLowerCase() ?? null;
+      case "account":
+        return r.account_name.toLowerCase();
+      case "name":
+        return r.name?.toLowerCase() ?? null;
+      case "close_date":
+        return dateValue(r.close_date);
+      case "expected_close_date":
+        return dateValue(r.expected_close_date);
+      case "contract_end_date":
+        return dateValue(r.contract_end_date);
+      case "amount":
+        return r.amount;
+      case "lead_source":
+        return r.lead_source?.toLowerCase() ?? null;
+    }
+  };
+  return [...rows].sort((a, b) => sign * nullableCompare(get(a), get(b)));
+}
+
+function SortableHeader<T extends string>({
+  col,
+  state,
+  onClick,
+  children,
+  align,
+}: {
+  col: T;
+  state: SortState<T>;
+  onClick: (col: T) => void;
+  children: ReactNode;
+  align?: "left" | "right";
+}) {
+  const active = state.col === col;
+  const Icon = active ? (state.dir === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <button
+      type="button"
+      onClick={() => onClick(col)}
+      className={cn(
+        "inline-flex items-center gap-1 hover:text-foreground transition-colors",
+        align === "right" && "flex-row-reverse",
+        active ? "text-foreground" : "text-muted-foreground",
+      )}
+    >
+      <span>{children}</span>
+      <Icon className="h-3 w-3 opacity-70" />
+    </button>
+  );
 }
 
 function csvEscape(v: unknown): string {
@@ -444,9 +649,23 @@ export function RenewalsQueue() {
   const tab =
     searchParams.get("tab") === "closed-won" ? "closed-won" : "upcoming";
 
-  // Date preset: default to a 120-day forward window so the page
-  // matches what /renewals always showed for upcoming renewals.
-  const preset = (searchParams.get("preset") as DatePreset | null) ?? "120";
+  // Date preset: URL wins on first paint, falls back to localStorage,
+  // and finally to a 120-day forward window. Persisting means a rep
+  // who lives in "This quarter" comes back to "This quarter" instead
+  // of getting bumped to the default every reload.
+  const preset: DatePreset = (() => {
+    const fromUrl = searchParams.get("preset") as DatePreset | null;
+    if (fromUrl) return fromUrl;
+    if (typeof window !== "undefined") {
+      try {
+        const raw = window.localStorage.getItem(PRESET_LS_KEY) as DatePreset | null;
+        if (raw) return raw;
+      } catch {
+        /* ignore */
+      }
+    }
+    return "120";
+  })();
 
   // Owner filter: URL wins on first paint, falls back to localStorage.
   const [owners, setOwnersState] = useState<string[]>(() => {
@@ -550,6 +769,79 @@ export function RenewalsQueue() {
       next.set("preset", v);
       return next;
     });
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(PRESET_LS_KEY, v);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // Sort state per tab. Default upcoming order is by effective close
+  // (expected_close_date ?? contract_end_date) ascending — when a rep
+  // pushes the expected close out, the row drops down naturally.
+  const [upcomingSort, setUpcomingSort] = useState<SortState<UpcomingSortCol>>(
+    () =>
+      readSortFromStorage<UpcomingSortCol>(
+        SORT_LS_KEY_UPCOMING,
+        { col: "expected_close_date", dir: "asc" },
+        [
+          "owner",
+          "account",
+          "name",
+          "contract_end_date",
+          "close_date",
+          "expected_close_date",
+          "amount",
+          "lead_source",
+          "days",
+        ] as const,
+      ),
+  );
+  const [closedSort, setClosedSort] = useState<SortState<ClosedSortCol>>(
+    () =>
+      readSortFromStorage<ClosedSortCol>(
+        SORT_LS_KEY_CLOSED,
+        { col: "close_date", dir: "desc" },
+        [
+          "owner",
+          "account",
+          "name",
+          "close_date",
+          "expected_close_date",
+          "contract_end_date",
+          "amount",
+          "lead_source",
+        ] as const,
+      ),
+  );
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SORT_LS_KEY_UPCOMING, JSON.stringify(upcomingSort));
+    } catch {
+      /* ignore */
+    }
+  }, [upcomingSort]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SORT_LS_KEY_CLOSED, JSON.stringify(closedSort));
+    } catch {
+      /* ignore */
+    }
+  }, [closedSort]);
+
+  function toggleSort<T extends string>(
+    col: T,
+    state: SortState<T>,
+    setState: (s: SortState<T>) => void,
+  ) {
+    if (state.col === col) {
+      setState({ col, dir: state.dir === "asc" ? "desc" : "asc" });
+    } else {
+      setState({ col, dir: "asc" });
+    }
   }
   function setTab(v: string) {
     setSearchParams((prev) => {
@@ -586,15 +878,35 @@ export function RenewalsQueue() {
 
   const upcomingFiltered = useMemo(() => {
     if (!upcoming) return undefined;
-    return applyCommonFilters(upcoming, "contract_end_date", upcomingRange);
+    const base = applyCommonFilters(upcoming, "contract_end_date", upcomingRange);
+    return sortUpcoming(base, upcomingSort);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [upcoming, owners.join(","), excludeAccount, preset, customRange.start, customRange.end]);
+  }, [
+    upcoming,
+    owners.join(","),
+    excludeAccount,
+    preset,
+    customRange.start,
+    customRange.end,
+    upcomingSort.col,
+    upcomingSort.dir,
+  ]);
 
   const closedWonFiltered = useMemo(() => {
     if (!closedWon) return undefined;
-    return applyCommonFilters(closedWon, "close_date", closedRange);
+    const base = applyCommonFilters(closedWon, "close_date", closedRange);
+    return sortClosed(base, closedSort);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [closedWon, owners.join(","), excludeAccount, preset, customRange.start, customRange.end]);
+  }, [
+    closedWon,
+    owners.join(","),
+    excludeAccount,
+    preset,
+    customRange.start,
+    customRange.end,
+    closedSort.col,
+    closedSort.dir,
+  ]);
 
   // Month buckets reflect whatever filter window is active, so reps can
   // see the breakdown change as they switch between "Next 30 days",
@@ -853,27 +1165,107 @@ export function RenewalsQueue() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Owner</TableHead>
-                    <TableHead>Account</TableHead>
-                    <TableHead>Opportunity</TableHead>
-                    <TableHead>Contract End</TableHead>
-                    <TableHead>Close Date</TableHead>
-                    <TableHead>Expected Close</TableHead>
+                    <TableHead>
+                      <SortableHeader
+                        col="owner"
+                        state={upcomingSort}
+                        onClick={(c) => toggleSort(c, upcomingSort, setUpcomingSort)}
+                      >
+                        Owner
+                      </SortableHeader>
+                    </TableHead>
+                    <TableHead>
+                      <SortableHeader
+                        col="account"
+                        state={upcomingSort}
+                        onClick={(c) => toggleSort(c, upcomingSort, setUpcomingSort)}
+                      >
+                        Account
+                      </SortableHeader>
+                    </TableHead>
+                    <TableHead>
+                      <SortableHeader
+                        col="name"
+                        state={upcomingSort}
+                        onClick={(c) => toggleSort(c, upcomingSort, setUpcomingSort)}
+                      >
+                        Opportunity
+                      </SortableHeader>
+                    </TableHead>
+                    <TableHead>
+                      <SortableHeader
+                        col="contract_end_date"
+                        state={upcomingSort}
+                        onClick={(c) => toggleSort(c, upcomingSort, setUpcomingSort)}
+                      >
+                        Contract End
+                      </SortableHeader>
+                    </TableHead>
+                    <TableHead>
+                      <SortableHeader
+                        col="close_date"
+                        state={upcomingSort}
+                        onClick={(c) => toggleSort(c, upcomingSort, setUpcomingSort)}
+                      >
+                        Close Date
+                      </SortableHeader>
+                    </TableHead>
+                    <TableHead>
+                      <SortableHeader
+                        col="expected_close_date"
+                        state={upcomingSort}
+                        onClick={(c) => toggleSort(c, upcomingSort, setUpcomingSort)}
+                      >
+                        Expected Close
+                      </SortableHeader>
+                    </TableHead>
                     <TableHead className="min-w-[12rem]">Next Step</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                    <TableHead>Lead Source</TableHead>
+                    <TableHead className="text-right">
+                      <SortableHeader
+                        col="amount"
+                        state={upcomingSort}
+                        onClick={(c) => toggleSort(c, upcomingSort, setUpcomingSort)}
+                        align="right"
+                      >
+                        Amount
+                      </SortableHeader>
+                    </TableHead>
+                    <TableHead>
+                      <SortableHeader
+                        col="lead_source"
+                        state={upcomingSort}
+                        onClick={(c) => toggleSort(c, upcomingSort, setUpcomingSort)}
+                      >
+                        Lead Source
+                      </SortableHeader>
+                    </TableHead>
                     <TableHead className="min-w-[16rem]">Description</TableHead>
-                    <TableHead>Days</TableHead>
+                    <TableHead>
+                      <SortableHeader
+                        col="days"
+                        state={upcomingSort}
+                        onClick={(c) => toggleSort(c, upcomingSort, setUpcomingSort)}
+                      >
+                        Days
+                      </SortableHeader>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {upcomingFiltered.map((r) => {
                     const days = daysBetween(today, r.contract_end_date);
+                    // "Slip" measures how far the rep's CURRENT
+                    // expected close has slid past the original
+                    // contract end. close_date isn't useful for the
+                    // upcoming tab (it's the source-deal's date, not
+                    // the renewal target). Positive = expected late,
+                    // negative = expected to close before the
+                    // contract even ends — both are interesting.
                     const slip =
-                      r.expected_close_date && r.close_date
+                      r.expected_close_date && r.contract_end_date
                         ? Math.round(
                             (new Date(r.expected_close_date).getTime() -
-                              new Date(r.close_date).getTime()) /
+                              new Date(r.contract_end_date).getTime()) /
                               (1000 * 60 * 60 * 24),
                           )
                         : null;
@@ -893,7 +1285,7 @@ export function RenewalsQueue() {
                         <TableCell>
                           <Link
                             to={`/opportunities/${r.id}`}
-                            className="text-sm hover:underline"
+                            className="text-sm font-medium text-primary hover:underline"
                           >
                             {r.name}
                           </Link>
@@ -908,14 +1300,14 @@ export function RenewalsQueue() {
                           <div className="text-muted-foreground">
                             {formatDate(r.expected_close_date)}
                           </div>
-                          {slip !== null && slip !== 0 && (
-                            <div
-                              className={cn(
-                                "text-[10px] mt-0.5",
-                                slip > 0 ? "text-amber-600" : "text-emerald-600",
-                              )}
-                            >
-                              {slip > 0 ? `+${slip}d slip` : `${slip}d early`}
+                          {slip !== null && slip > 0 && (
+                            <div className="text-[10px] mt-0.5 text-amber-600">
+                              +{slip}d past contract end
+                            </div>
+                          )}
+                          {slip !== null && slip < 0 && (
+                            <div className="text-[10px] mt-0.5 text-emerald-600">
+                              {-slip}d before contract end
                             </div>
                           )}
                         </TableCell>
@@ -1050,25 +1442,97 @@ export function RenewalsQueue() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Owner</TableHead>
-                    <TableHead>Account</TableHead>
-                    <TableHead>Opportunity</TableHead>
-                    <TableHead>Close Date</TableHead>
-                    <TableHead>Expected Close</TableHead>
-                    <TableHead>Contract End</TableHead>
+                    <TableHead>
+                      <SortableHeader
+                        col="owner"
+                        state={closedSort}
+                        onClick={(c) => toggleSort(c, closedSort, setClosedSort)}
+                      >
+                        Owner
+                      </SortableHeader>
+                    </TableHead>
+                    <TableHead>
+                      <SortableHeader
+                        col="account"
+                        state={closedSort}
+                        onClick={(c) => toggleSort(c, closedSort, setClosedSort)}
+                      >
+                        Account
+                      </SortableHeader>
+                    </TableHead>
+                    <TableHead>
+                      <SortableHeader
+                        col="name"
+                        state={closedSort}
+                        onClick={(c) => toggleSort(c, closedSort, setClosedSort)}
+                      >
+                        Opportunity
+                      </SortableHeader>
+                    </TableHead>
+                    <TableHead>
+                      <SortableHeader
+                        col="close_date"
+                        state={closedSort}
+                        onClick={(c) => toggleSort(c, closedSort, setClosedSort)}
+                      >
+                        Close Date
+                      </SortableHeader>
+                    </TableHead>
+                    <TableHead>
+                      <SortableHeader
+                        col="expected_close_date"
+                        state={closedSort}
+                        onClick={(c) => toggleSort(c, closedSort, setClosedSort)}
+                      >
+                        Expected Close
+                      </SortableHeader>
+                    </TableHead>
+                    <TableHead>
+                      <SortableHeader
+                        col="contract_end_date"
+                        state={closedSort}
+                        onClick={(c) => toggleSort(c, closedSort, setClosedSort)}
+                      >
+                        Contract End
+                      </SortableHeader>
+                    </TableHead>
                     <TableHead className="min-w-[12rem]">Next Step</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                    <TableHead>Lead Source</TableHead>
+                    <TableHead className="text-right">
+                      <SortableHeader
+                        col="amount"
+                        state={closedSort}
+                        onClick={(c) => toggleSort(c, closedSort, setClosedSort)}
+                        align="right"
+                      >
+                        Amount
+                      </SortableHeader>
+                    </TableHead>
+                    <TableHead>
+                      <SortableHeader
+                        col="lead_source"
+                        state={closedSort}
+                        onClick={(c) => toggleSort(c, closedSort, setClosedSort)}
+                      >
+                        Lead Source
+                      </SortableHeader>
+                    </TableHead>
                     <TableHead className="min-w-[16rem]">Description</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {closedWonFiltered.map((r) => {
+                    // For an already-closed renewal, the meaningful
+                    // "slip" is how late we actually closed compared
+                    // to the original contract end (the deadline that
+                    // mattered to the customer), not the rep's most
+                    // recent forecast. Positive = closed after the
+                    // contract had already lapsed; negative = closed
+                    // before the contract end (a "clean" renewal).
                     const slip =
-                      r.expected_close_date && r.close_date
+                      r.close_date && r.contract_end_date
                         ? Math.round(
                             (new Date(r.close_date).getTime() -
-                              new Date(r.expected_close_date).getTime()) /
+                              new Date(r.contract_end_date).getTime()) /
                               (1000 * 60 * 60 * 24),
                           )
                         : null;
@@ -1088,7 +1552,7 @@ export function RenewalsQueue() {
                         <TableCell>
                           <Link
                             to={`/opportunities/${r.id}`}
-                            className="text-sm hover:underline"
+                            className="text-sm font-medium text-primary hover:underline"
                           >
                             {r.name}
                           </Link>
@@ -1100,21 +1564,21 @@ export function RenewalsQueue() {
                           <div className="text-muted-foreground">
                             {formatDate(r.expected_close_date)}
                           </div>
-                          {slip !== null && slip !== 0 && (
-                            <div
-                              className={cn(
-                                "text-[10px] mt-0.5",
-                                slip > 0 ? "text-amber-600" : "text-emerald-600",
-                              )}
-                            >
-                              {slip > 0
-                                ? `closed ${slip}d late`
-                                : `closed ${-slip}d early`}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          <div className="text-muted-foreground">
+                            {formatDate(r.contract_end_date)}
+                          </div>
+                          {slip !== null && slip > 0 && (
+                            <div className="text-[10px] mt-0.5 text-amber-600">
+                              closed {slip}d after contract end
                             </div>
                           )}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground whitespace-nowrap">
-                          {formatDate(r.contract_end_date)}
+                          {slip !== null && slip < 0 && (
+                            <div className="text-[10px] mt-0.5 text-emerald-600">
+                              closed {-slip}d before contract end
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="text-muted-foreground max-w-[16rem] whitespace-pre-wrap break-words">
                           {r.next_step ?? "—"}
