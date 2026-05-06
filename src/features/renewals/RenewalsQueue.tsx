@@ -159,11 +159,21 @@ function useUpcomingRenewals() {
   return useQuery({
     queryKey: ["renewal_queue", "upcoming"],
     queryFn: async () => {
-      // Pull a generous 18-month forward window. The UI then narrows
-      // by the date-filter chip — this lets "All time" still feel
-      // bounded while supporting custom ranges out into the future.
+      // Window: 24 months back through 18 months forward.
+      //
+      // The lookback matters: a closed_won deal whose contract_end_date
+      // has already passed is the MOST urgent renewal in the queue, not
+      // the least. Previously we filtered to `contract_end_date >=
+      // today`, which silently dropped past-due deals off the list as
+      // soon as their date passed (this is what happened to North
+      // Cascade Cancer Center BNVA). Reps need to see those rows so
+      // they can update expected close dates / push the renewal
+      // through. The 24-month floor keeps very old deals (likely
+      // churned, never renewed) from polluting the working view.
       const today = new Date();
-      const todayIso = today.toISOString().slice(0, 10);
+      const floor = new Date(today);
+      floor.setMonth(floor.getMonth() - 24);
+      const floorIso = floor.toISOString().slice(0, 10);
       const cap = new Date(today);
       cap.setMonth(cap.getMonth() + 18);
       const capIso = cap.toISOString().slice(0, 10);
@@ -176,7 +186,7 @@ function useUpcomingRenewals() {
         .is("archived_at", null)
         .eq("stage", "closed_won")
         .not("contract_end_date", "is", null)
-        .gte("contract_end_date", todayIso)
+        .gte("contract_end_date", floorIso)
         .lte("contract_end_date", capIso)
         .order("contract_end_date", { ascending: true });
       if (error) throw error;
@@ -885,8 +895,20 @@ export function RenewalsQueue() {
   const closedRange = rangeFromPreset(preset, customRange, "closed-won");
 
   // Common filter helper applied to both lists.
-  function applyCommonFilters(rows: RenewalRow[], dateField: "contract_end_date" | "close_date", range: { start: Date | null; end: Date | null }) {
+  //
+  // `tab` controls one nuance: on the upcoming tab, past-due rows
+  // (contract_end_date < today) are ALWAYS kept regardless of the date
+  // preset. Filtering "current quarter" should narrow the future view
+  // without hiding overdue work — those are the rows the rep most needs
+  // to see.
+  function applyCommonFilters(
+    rows: RenewalRow[],
+    dateField: "contract_end_date" | "close_date",
+    range: { start: Date | null; end: Date | null },
+    tab: "upcoming" | "closed-won",
+  ) {
     const exclude = excludeAccount.trim().toLowerCase();
+    const todayMs = today.getTime();
     return rows.filter((r) => {
       if (owners.length > 0 && (!r.owner_user_id || !owners.includes(r.owner_user_id))) {
         return false;
@@ -897,6 +919,12 @@ export function RenewalsQueue() {
       if (range.start || range.end) {
         const dateStr =
           dateField === "contract_end_date" ? r.contract_end_date : r.close_date;
+        // Always keep past-due rows on the upcoming tab. They need
+        // attention more than future-dated rows.
+        if (tab === "upcoming") {
+          const dv = dateValue(r.contract_end_date);
+          if (dv !== null && dv < todayMs) return true;
+        }
         if (!inDateRange(dateStr, range.start, range.end)) return false;
       }
       return true;
@@ -905,7 +933,7 @@ export function RenewalsQueue() {
 
   const upcomingFiltered = useMemo(() => {
     if (!upcoming) return undefined;
-    const base = applyCommonFilters(upcoming, "contract_end_date", upcomingRange);
+    const base = applyCommonFilters(upcoming, "contract_end_date", upcomingRange, "upcoming");
     return sortUpcoming(base, upcomingSort);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -921,7 +949,7 @@ export function RenewalsQueue() {
 
   const closedWonFiltered = useMemo(() => {
     if (!closedWon) return undefined;
-    const base = applyCommonFilters(closedWon, "close_date", closedRange);
+    const base = applyCommonFilters(closedWon, "close_date", closedRange, "closed-won");
     return sortClosed(base, closedSort);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
