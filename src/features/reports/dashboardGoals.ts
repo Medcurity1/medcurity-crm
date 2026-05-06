@@ -78,17 +78,23 @@ export function saveGoals(g: Goals) {
 }
 
 /**
- * Goal status used to color KPI dots and the ARR chart points.
+ * Goal status used to color KPI dots and chart segment colors.
  *  red    = below 50% of goal
- *  yellow = 50% – 89% of goal
- *  green  = 90%+ of goal
+ *  yellow = 50% – 99% of goal (below the goal line)
+ *  green  = 100%+ of goal (at or above the goal line)
+ *
+ * Green means "hit the goal." Anything below the dashed goal line
+ * on a chart is yellow (or red if far below). The previous ≥90%
+ * green threshold caused points sitting visually below the goal
+ * line to render green, which read as misleading once charts
+ * zoomed in (e.g. NRR Y-axis [60, 100]).
  */
 export type GoalStatus = "red" | "yellow" | "green" | "neutral";
 
 export function goalStatus(actual: number, goal: number): GoalStatus {
   if (!goal || goal <= 0) return "neutral";
   const pct = (actual / goal) * 100;
-  if (pct >= 90) return "green";
+  if (pct >= 100) return "green";
   if (pct >= 50) return "yellow";
   return "red";
 }
