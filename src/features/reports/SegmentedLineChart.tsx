@@ -26,6 +26,10 @@ export interface SegmentPoint {
   actual: number;
   /** Goal at this point (proportional or full) */
   goal: number;
+  /** Prior point's goal — used by `goalStatus` to decide whether a
+   *  miss is yellow (held last month's pace) or red (fell below it).
+   *  Undefined for M1 (first point in quarter) → M1 buffer applies. */
+  previousGoal?: number;
 }
 
 export function SegmentedLineChart({
@@ -37,6 +41,7 @@ export function SegmentedLineChart({
   showGoal = true,
   yDomain,
   yTicks,
+  lineColor,
 }: {
   title?: string;
   data: SegmentPoint[];
@@ -56,6 +61,10 @@ export function SegmentedLineChart({
   /** Explicit tick values when paired with `yDomain` — e.g.
    *  `[60, 65, 70, 75, 80, 85, 90, 95, 100]` for NRR. */
   yTicks?: number[];
+  /** Override the per-segment R/Y/G coloring with a single color.
+   *  Used for charts (like ARR rolling-365) that aren't tracked
+   *  against a R/Y/G goal — caller passes e.g. `"#3b82f6"` (blue). */
+  lineColor?: string;
 }) {
   // Build N segments. Each segment is a separate dataset of 2 points
   // with all the OTHER points' actual=null so the segment doesn't bridge.
@@ -64,8 +73,12 @@ export function SegmentedLineChart({
     const segments: { color: string; key: string; data: any[] }[] = [];
     for (let i = 0; i < data.length - 1; i++) {
       const b = data[i + 1];
-      const status: GoalStatus = goalStatus(b.actual, b.goal);
-      const color = STATUS_HEX[status];
+      // Prefer caller-supplied previousGoal; fall back to the prior
+      // point's goal so legacy callers get reasonable behavior.
+      const prevGoal = b.previousGoal ?? data[i]?.goal;
+      const color = lineColor
+        ? lineColor
+        : STATUS_HEX[goalStatus(b.actual, b.goal, prevGoal) as GoalStatus];
       const dataKey = `seg_${i}`;
       const segData = data.map((p, idx) => ({
         label: p.label,
@@ -83,7 +96,7 @@ export function SegmentedLineChart({
       return row;
     });
     return { segments, merged };
-  }, [data]);
+  }, [data, lineColor]);
 
   if (data.length === 0) {
     return (
@@ -191,6 +204,7 @@ export function SegmentedLineChart({
               type="linear"
               dataKey="actual"
               stroke={
+                lineColor ??
                 STATUS_HEX[
                   goalStatus(data[0]?.actual ?? 0, data[0]?.goal ?? 0)
                 ]
@@ -199,9 +213,11 @@ export function SegmentedLineChart({
               connectNulls={false}
               dot={{
                 r: 5,
-                fill: STATUS_HEX[
-                  goalStatus(data[0]?.actual ?? 0, data[0]?.goal ?? 0)
-                ],
+                fill:
+                  lineColor ??
+                  STATUS_HEX[
+                    goalStatus(data[0]?.actual ?? 0, data[0]?.goal ?? 0)
+                  ],
                 stroke: "#fff",
                 strokeWidth: 1,
               }}

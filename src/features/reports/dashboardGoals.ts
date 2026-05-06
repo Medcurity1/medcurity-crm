@@ -79,23 +79,36 @@ export function saveGoals(g: Goals) {
 
 /**
  * Goal status used to color KPI dots and chart segment colors.
- *  red    = below 50% of goal
- *  yellow = 50% – 99% of goal (below the goal line)
- *  green  = 100%+ of goal (at or above the goal line)
  *
- * Green means "hit the goal." Anything below the dashed goal line
- * on a chart is yellow (or red if far below). The previous ≥90%
- * green threshold caused points sitting visually below the goal
- * line to render green, which read as misleading once charts
- * zoomed in (e.g. NRR Y-axis [60, 100]).
+ * Time-aware logic for running-total charts (per Brayden's spec):
+ *   - green:  actual >= goal at this point (hit the prorated target)
+ *   - yellow: actual < goal but >= previousGoal (held the prior month's
+ *             pace; in flight but not yet at this month's target)
+ *   - red:    actual < previousGoal (fell below last month's bar too)
+ *
+ * For the FIRST point in a quarter (M1) there is no previous month to
+ * compare against, so a miss reads as "yellow" (buffer / in-progress)
+ * rather than "red". This matches the user's instruction:
+ *   "yellow in first month of quarter if not to goal yet (buffer so
+ *    its not automatically red)"
+ *
+ * Static (non-running-total) callers can omit `previousGoal` — they
+ * get the same M1-buffer treatment (yellow when below goal, never red
+ * unless explicitly compared to a prior bar).
  */
 export type GoalStatus = "red" | "yellow" | "green" | "neutral";
 
-export function goalStatus(actual: number, goal: number): GoalStatus {
+export function goalStatus(
+  actual: number,
+  goal: number,
+  previousGoal?: number,
+): GoalStatus {
   if (!goal || goal <= 0) return "neutral";
-  const pct = (actual / goal) * 100;
-  if (pct >= 100) return "green";
-  if (pct >= 50) return "yellow";
+  if (actual >= goal) return "green";
+  // No prior bar → M1 buffer: never red, just "below goal".
+  if (previousGoal === undefined || previousGoal <= 0) return "yellow";
+  // M2/M3: held last month's pace → yellow; fell below it → red.
+  if (actual >= previousGoal) return "yellow";
   return "red";
 }
 

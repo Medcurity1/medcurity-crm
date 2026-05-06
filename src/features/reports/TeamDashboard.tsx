@@ -970,6 +970,7 @@ export function TeamDashboard() {
                             tooltipFormatter={(v) => formatCurrency(v)}
                             height={220}
                             showGoal={false}
+                            lineColor="#3b82f6"
                           />
                         </ChartCard>
                       )}
@@ -1767,6 +1768,10 @@ function buildRunningTotal(
       label: monthStart.toLocaleString("en-US", { month: "short" }),
       actual: cumulative,
       goal: monthGoals[i],
+      // M1 (i=0) intentionally has no previousGoal → goalStatus
+      // applies the M1 buffer (yellow, never red, when below goal).
+      // M2 + M3 compare against the prior month's cumulative goal.
+      previousGoal: i === 0 ? undefined : monthGoals[i - 1],
     });
   }
   return points;
@@ -3069,6 +3074,7 @@ function SnapshotDetailView({
                   tooltipFormatter={(v) => formatCurrency(v)}
                   height={200}
                   showGoal={false}
+                  lineColor="#3b82f6"
                 />
               </ChartCard>
             )}
