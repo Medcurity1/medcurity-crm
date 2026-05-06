@@ -34,12 +34,18 @@ export function SegmentedLineChart({
   height = 220,
   yFormatter = (v) => String(Math.round(v)),
   tooltipFormatter = (v) => String(v),
+  showGoal = true,
 }: {
   title?: string;
   data: SegmentPoint[];
   height?: number;
   yFormatter?: (v: number) => string;
   tooltipFormatter?: (v: number) => string;
+  /** When false, the dashed goal reference line is hidden (e.g. ARR
+   *  trend, where the user wants the absolute value with no target).
+   *  Defaults to true to preserve existing behavior on every other
+   *  chart. */
+  showGoal?: boolean;
 }) {
   // Build N segments. Each segment is a separate dataset of 2 points
   // with all the OTHER points' actual=null so the segment doesn't bridge.
@@ -88,27 +94,109 @@ export function SegmentedLineChart({
         <LineChart data={segmented.merged}>
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-          <YAxis tickFormatter={yFormatter} tick={{ fontSize: 10 }} />
+          {/* 10% headroom above the highest value so the dot isn't
+              clipped by the SVG bounds. The Active Pipeline chart
+              looked empty on main because the dot at the goal was
+              flush with the top edge. */}
+          <YAxis
+            tickFormatter={yFormatter}
+            tick={{ fontSize: 10 }}
+            domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.1)]}
+          />
           <Tooltip
-            formatter={(v, name) => {
-              const num = Number(v);
-              if (!Number.isFinite(num)) return ["—", name];
-              if (name === "Goal") return [tooltipFormatter(num), "Goal"];
-              return [tooltipFormatter(num), "Actual"];
+            content={({ active, payload, label }) => {
+              if (!active || !payload || payload.length === 0) return null;
+              // Dedup: each segment's start AND end share a payload
+              // entry at the boundary X, so without filtering you'd see
+              // "Actual: 100 / Actual: 100" in the same tooltip. Keep
+              // the first non-null Actual we encounter; ignore the
+              // rest. Goal is always shown once (when enabled).
+              let actualShown = false;
+              const rows: { name: string; value: string; color: string }[] = [];
+              for (const p of payload) {
+                const v = Number(p.value);
+                if (!Number.isFinite(v)) continue;
+                if (p.name === "Goal") {
+                  if (!showGoal) continue;
+                  rows.push({
+                    name: "Goal",
+                    value: tooltipFormatter(v),
+                    color: "#3b82f6",
+                  });
+                  continue;
+                }
+                if (actualShown) continue;
+                actualShown = true;
+                rows.push({
+                  name: "Actual",
+                  value: tooltipFormatter(v),
+                  color: String(p.color ?? "#111"),
+                });
+              }
+              if (rows.length === 0) return null;
+              return (
+                <div className="rounded-md border bg-popover px-2 py-1 text-xs shadow-sm">
+                  <div className="font-medium">{String(label)}</div>
+                  {rows.map((r) => (
+                    <div
+                      key={r.name}
+                      className="flex items-center gap-2"
+                      style={{ color: r.color }}
+                    >
+                      <span>{r.name}:</span>
+                      <span>{r.value}</span>
+                    </div>
+                  ))}
+                </div>
+              );
             }}
             labelFormatter={(l) => String(l)}
           />
-          {/* Goal reference (dashed) */}
-          <Line
-            type="monotone"
-            dataKey="goal"
-            stroke="#3b82f6"
-            strokeDasharray="5 5"
-            dot={false}
-            strokeWidth={1.5}
-            name="Goal"
-            isAnimationActive={false}
-          />
+          {/* Goal reference (dashed) — hidden when showGoal=false. */}
+          {showGoal && (
+            <Line
+              type="monotone"
+              dataKey="goal"
+              stroke="#3b82f6"
+              strokeDasharray="5 5"
+              dot={false}
+              strokeWidth={1.5}
+              name="Goal"
+              isAnimationActive={false}
+            />
+          )}
+          {/* Single-point fallback — when there's only one quarter of
+              data (e.g. brand-new dashboard, no historical snapshots
+              yet), the per-segment loop below renders nothing because
+              segments need 2+ points. Without this, the user sees
+              just a dashed goal line with no actual marker. Render a
+              single status-colored dot via a Line whose data is just
+              that one point. */}
+          {data.length === 1 && (
+            <Line
+              type="linear"
+              dataKey="actual"
+              stroke={
+                STATUS_HEX[
+                  goalStatus(data[0]?.actual ?? 0, data[0]?.goal ?? 0)
+                ]
+              }
+              strokeWidth={3}
+              connectNulls={false}
+              dot={{
+                r: 5,
+                fill: STATUS_HEX[
+                  goalStatus(data[0]?.actual ?? 0, data[0]?.goal ?? 0)
+                ],
+                stroke: "#fff",
+                strokeWidth: 1,
+              }}
+              activeDot={{ r: 6 }}
+              isAnimationActive={false}
+              legendType="none"
+              name="Actual"
+            />
+          )}
           {/* Per-segment colored lines */}
           {segmented.segments.map((s, i) => (
             <Line

@@ -22,8 +22,17 @@ export const DEFAULT_CARD_ORDER: Record<DashboardSectionId, string[]> = {
   sales: ["arr", "new_customers", "new_sales", "pipeline"],
   // SQL chart, MQL chart
   marketing: ["sql", "mql"],
-  // Renewals chart, QTD Billing + NRR stack
-  cs: ["renewals", "qtd_billing_nrr_block"],
+  // Renewals chart, then 3 individually-draggable cards
+  // (previously bundled as `qtd_billing_nrr_block` — split so users can
+  // reorder each one independently. mergeOrder() expands legacy ids.)
+  cs: ["renewals", "qtd_billing", "nrr_customer", "nrr_dollar"],
+};
+
+/** Cards that used to be a single bundled id but were later split into
+ *  multiple independent cards. mergeOrder() expands these so users with
+ *  the legacy id in localStorage don't lose their cards. */
+const SPLIT_LEGACY_IDS: Record<string, string[]> = {
+  qtd_billing_nrr_block: ["qtd_billing", "nrr_customer", "nrr_dollar"],
 };
 
 export type CardOrder = Record<DashboardSectionId, string[]>;
@@ -71,9 +80,15 @@ function mergeOrder(stored: unknown, defaults: string[]): string[] {
   const out: string[] = [];
   for (const id of stored) {
     if (typeof id !== "string") continue;
-    if (!known.has(id) || seen.has(id)) continue;
-    out.push(id);
-    seen.add(id);
+    // Expand legacy bundled ids (e.g. qtd_billing_nrr_block → 3 cards)
+    // so users who saved the old order before the split don't lose
+    // their cards. Each expanded id is processed normally below.
+    const expanded = SPLIT_LEGACY_IDS[id] ?? [id];
+    for (const eid of expanded) {
+      if (!known.has(eid) || seen.has(eid)) continue;
+      out.push(eid);
+      seen.add(eid);
+    }
   }
   for (const id of defaults) {
     if (!seen.has(id)) out.push(id);

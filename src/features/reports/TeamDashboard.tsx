@@ -850,15 +850,14 @@ export function TeamDashboard() {
                         to="/reports?tab=standard"
                       />
                       {arrPoints.length > 0 && (
-                        <ChartCard
-                          title={`ARR by Quarter — goal ${formatCurrency(goals.arr)}`}
-                        >
-                          <ChartLegend />
+                        <ChartCard title="ARR by Quarter">
+                          <ChartLegend showGoal={false} />
                           <SegmentedLineChart
                             data={arrPoints}
                             yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
                             tooltipFormatter={(v) => formatCurrency(v)}
                             height={220}
+                            showGoal={false}
                           />
                         </ChartCard>
                       )}
@@ -1101,80 +1100,86 @@ export function TeamDashboard() {
                     </div>
                   )}
 
-                  {id === "qtd_billing_nrr_block" && (
-          <div className="space-y-3">
-            <KpiCard
-              label="QTD Billing Goal"
-              value={formatCurrency(
-                num(m.new_customer_amount_qtd) + renewalsClosedAmt,
-              )}
-              progress={pct(
-                num(m.new_customer_amount_qtd) + renewalsClosedAmt,
-                goals.qtd_billing,
-              )}
-              goal={goals.qtd_billing}
-              formatGoal={formatCurrency}
-              onGoalChange={(v) => setGoalQuarter("qtd_billing_progress", v)}
-              editable={isOwner}
-              hint="New Sales $ QTD + Renewals Closed $ QTD."
-            />
-            <KpiCard
-              label="NRR by Customer"
-              value={fmtPct(nrrCust)}
-              progress={Math.min(100, (nrrCust / goals.nrr_customer_pct) * 100)}
-              goal={goals.nrr_customer_pct}
-              formatGoal={(v) => `${v}%`}
-              onGoalChange={(v) => setGoalQuarter("nrr_customer_pct", v)}
-              editable={isOwner}
-              hint="(starting customers − churn QTD) / starting customers. 100% means zero churn this quarter so far."
-            />
-            {nrrCustomerTrendPoints.length > 0 && (
-              <ChartCard
-                title={`NRR by Customer — quarterly (goal ${goals.nrr_customer_pct}%)`}
-                subtitle={
-                  nrrCustomerTrendPoints.length === 1
-                    ? "Trend will fill in as weekly snapshots accumulate."
-                    : undefined
-                }
-              >
-                <ChartLegend />
-                <SegmentedLineChart
-                  data={nrrCustomerTrendPoints}
-                  yFormatter={(v) => `${v.toFixed(0)}%`}
-                  tooltipFormatter={(v) => `${v.toFixed(1)}%`}
-                  height={200}
-                />
-              </ChartCard>
-            )}
-            <KpiCard
-              label="NRR by Dollar"
-              value={fmtPct(nrrDollar)}
-              progress={Math.min(100, (nrrDollar / goals.nrr_dollar_pct) * 100)}
-              goal={goals.nrr_dollar_pct}
-              formatGoal={(v) => `${v}%`}
-              onGoalChange={(v) => setGoalQuarter("nrr_dollar_pct", v)}
-              editable={isOwner}
-              hint="(starting ARR − churn $ QTD) / starting ARR."
-            />
-            {nrrDollarTrendPoints.length > 0 && (
-              <ChartCard
-                title={`NRR by Dollar — quarterly (goal ${goals.nrr_dollar_pct}%)`}
-                subtitle={
-                  nrrDollarTrendPoints.length === 1
-                    ? "Trend will fill in as weekly snapshots accumulate."
-                    : undefined
-                }
-              >
-                <ChartLegend />
-                <SegmentedLineChart
-                  data={nrrDollarTrendPoints}
-                  yFormatter={(v) => `${v.toFixed(0)}%`}
-                  tooltipFormatter={(v) => `${v.toFixed(1)}%`}
-                  height={200}
-                />
-              </ChartCard>
-            )}
-          </div>
+                  {id === "qtd_billing" && (
+                    <KpiCard
+                      label="QTD Billing Goal"
+                      value={formatCurrency(
+                        num(m.new_customer_amount_qtd) + renewalsClosedAmt,
+                      )}
+                      progress={pct(
+                        num(m.new_customer_amount_qtd) + renewalsClosedAmt,
+                        goals.qtd_billing,
+                      )}
+                      goal={goals.qtd_billing}
+                      formatGoal={formatCurrency}
+                      onGoalChange={(v) => setGoalQuarter("qtd_billing_progress", v)}
+                      editable={isOwner}
+                      hint="New Sales $ QTD + Renewals Closed $ QTD."
+                    />
+                  )}
+                  {id === "nrr_customer" && (
+                    <div className="space-y-3">
+                      <KpiCard
+                        label="NRR by Customer"
+                        value={fmtPct(nrrCust)}
+                        progress={Math.min(100, (nrrCust / goals.nrr_customer_pct) * 100)}
+                        goal={goals.nrr_customer_pct}
+                        formatGoal={(v) => `${v}%`}
+                        onGoalChange={(v) => setGoalQuarter("nrr_customer_pct", v)}
+                        editable={isOwner}
+                        hint="(starting customers − churn QTD) / starting customers. 100% means zero churn this quarter so far."
+                      />
+                      {nrrCustomerTrendPoints.length > 0 && (
+                        <ChartCard
+                          title={`NRR by Customer — quarterly (goal ${goals.nrr_customer_pct}%)`}
+                          subtitle={
+                            nrrCustomerTrendPoints.length === 1
+                              ? "Trend will fill in as weekly snapshots accumulate."
+                              : undefined
+                          }
+                        >
+                          <ChartLegend />
+                          <SegmentedLineChart
+                            data={nrrCustomerTrendPoints}
+                            yFormatter={(v) => `${v.toFixed(0)}%`}
+                            tooltipFormatter={(v) => `${v.toFixed(1)}%`}
+                            height={200}
+                          />
+                        </ChartCard>
+                      )}
+                    </div>
+                  )}
+                  {id === "nrr_dollar" && (
+                    <div className="space-y-3">
+                      <KpiCard
+                        label="NRR by Dollar"
+                        value={fmtPct(nrrDollar)}
+                        progress={Math.min(100, (nrrDollar / goals.nrr_dollar_pct) * 100)}
+                        goal={goals.nrr_dollar_pct}
+                        formatGoal={(v) => `${v}%`}
+                        onGoalChange={(v) => setGoalQuarter("nrr_dollar_pct", v)}
+                        editable={isOwner}
+                        hint="(starting ARR − churn $ QTD) / starting ARR."
+                      />
+                      {nrrDollarTrendPoints.length > 0 && (
+                        <ChartCard
+                          title={`NRR by Dollar — quarterly (goal ${goals.nrr_dollar_pct}%)`}
+                          subtitle={
+                            nrrDollarTrendPoints.length === 1
+                              ? "Trend will fill in as weekly snapshots accumulate."
+                              : undefined
+                          }
+                        >
+                          <ChartLegend />
+                          <SegmentedLineChart
+                            data={nrrDollarTrendPoints}
+                            yFormatter={(v) => `${v.toFixed(0)}%`}
+                            tooltipFormatter={(v) => `${v.toFixed(1)}%`}
+                            height={200}
+                          />
+                        </ChartCard>
+                      )}
+                    </div>
                   )}
                 </SortableCard>
               ))}
@@ -1572,9 +1577,20 @@ function buildRunningTotal(
   monthGoals: [number, number, number],
 ): SegmentPoint[] {
   if (!quarterStart || !quarterEnd) return [];
-  const start = new Date(quarterStart);
-  const end = new Date(quarterEnd);
-  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
+  // Parse YYYY-MM-DD as LOCAL time (not UTC). `new Date("2026-04-01")`
+  // is interpreted as midnight UTC, which becomes the previous day in
+  // any negative-UTC timezone — so `getMonth()` returns March instead
+  // of April for Q2 starts. This used to make the New Customers /
+  // Renewals / SQL / MQL charts label months as Mar/Apr/May in PT
+  // during Q2. Splitting the parts forces local-midnight construction.
+  const start = parseLocalDate(quarterStart);
+  const end = parseLocalDate(quarterEnd);
+  if (
+    !start ||
+    !end ||
+    !Number.isFinite(start.getTime()) ||
+    !Number.isFinite(end.getTime())
+  ) {
     return [];
   }
 
@@ -1592,7 +1608,10 @@ function buildRunningTotal(
     const monthEnd = new Date(start.getFullYear(), start.getMonth() + i + 1, 0);
     // Don't extend past quarter end (e.g., short quarters / off-by-one).
     const cap = monthEnd > end ? end : monthEnd;
-    const capStr = cap.toISOString().slice(0, 10);
+    // Format the cap date in local time. toISOString() converts to UTC
+    // which drifts the date in negative-UTC timezones (Apr 30 PT
+    // becomes May 1 UTC).
+    const capStr = formatLocalDate(cap);
 
     const cumulative = sorted
       .filter((e) => e.date <= capStr)
@@ -1605,6 +1624,25 @@ function buildRunningTotal(
     });
   }
   return points;
+}
+
+/** Parse a "YYYY-MM-DD" string as a local-midnight Date. Returns null
+ *  for malformed input. Avoids the `new Date("YYYY-MM-DD")` UTC trap. */
+function parseLocalDate(s: string): Date | null {
+  const parts = s.split("-");
+  if (parts.length !== 3) return null;
+  const [y, mo, d] = parts.map(Number);
+  if (![y, mo, d].every((n) => Number.isFinite(n))) return null;
+  return new Date(y, mo - 1, d);
+}
+
+/** Format a Date as "YYYY-MM-DD" in LOCAL time (mirror of toISOString
+ *  but without the timezone shift). */
+function formatLocalDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function pct(actual: number, goal: number): number {
@@ -1694,7 +1732,17 @@ function SortableCard({
 }
 
 /** Legend explaining the R/Y/G segment coloring on the running-total charts. */
-function ChartLegend() {
+function ChartLegend({ showGoal = true }: { showGoal?: boolean }) {
+  // ARR chart and other charts without a goal line want a simpler
+  // legend (no "vs proportional goal" or "dashed line is the goal pace"
+  // copy, since neither is rendered).
+  if (!showGoal) {
+    return (
+      <p className="text-[11px] text-muted-foreground mb-2">
+        Segments colored by quarter-over-quarter direction.
+      </p>
+    );
+  }
   return (
     <p className="text-[11px] text-muted-foreground mb-2">
       Segments colored vs proportional goal:{" "}
@@ -2856,15 +2904,14 @@ function SnapshotDetailView({
               editable={false}
             />
             {arrTrendPoints.length > 0 && (
-              <ChartCard
-                title={`ARR by Quarter — goal ${formatCurrency(arrGoal)}`}
-              >
-                <ChartLegend />
+              <ChartCard title="ARR by Quarter">
+                <ChartLegend showGoal={false} />
                 <SegmentedLineChart
                   data={arrTrendPoints}
                   yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
                   tooltipFormatter={(v) => formatCurrency(v)}
                   height={200}
+                  showGoal={false}
                 />
               </ChartCard>
             )}
