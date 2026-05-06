@@ -261,10 +261,6 @@ interface ConvertLeadInput {
   opportunityName?: string;
   opportunityAmount?: number;
   opportunityStage?: string;
-  /** Deal-level percent reduction (0–100). Mirrors Opportunity.discount. */
-  opportunityDiscount?: number | null;
-  /** Optional campaign code to tag the discount with. */
-  opportunityPromoCode?: string | null;
 }
 
 export function useConvertLead() {
@@ -340,8 +336,6 @@ export function useConvertLead() {
             stage: input.opportunityStage ?? "details_analysis",
             team: "sales",
             kind: "new_business",
-            discount: input.opportunityDiscount ?? null,
-            promo_code: input.opportunityPromoCode ?? null,
           })
           .select()
           .single();
