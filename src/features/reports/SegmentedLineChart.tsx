@@ -83,13 +83,19 @@ export function SegmentedLineChart({
       const segData = data.map((p, idx) => ({
         label: p.label,
         goal: p.goal,
+        previousGoal: p.previousGoal,
         [dataKey]: idx === i || idx === i + 1 ? p.actual : null,
       }));
       segments.push({ color, key: dataKey, data: segData });
     }
     // Merge all segment datasets into one (so the X axis aligns).
     const merged = data.map((p, idx) => {
-      const row: any = { label: p.label, goal: p.goal, actual: p.actual };
+      const row: any = {
+        label: p.label,
+        goal: p.goal,
+        previousGoal: p.previousGoal,
+        actual: p.actual,
+      };
       for (let i = 0; i < data.length - 1; i++) {
         row[`seg_${i}`] = idx === i || idx === i + 1 ? p.actual : null;
       }
@@ -251,14 +257,22 @@ export function SegmentedLineChart({
                       ) {
                         return <g key={`dot-${i}-${index ?? 0}`} />;
                       }
-                      const status = goalStatus(v, payload?.goal ?? 0);
+                      const fill = lineColor
+                        ? lineColor
+                        : STATUS_HEX[
+                            goalStatus(
+                              v,
+                              payload?.goal ?? 0,
+                              payload?.previousGoal,
+                            )
+                          ];
                       return (
                         <circle
                           key={`dot-${i}-${index ?? 0}`}
                           cx={cx}
                           cy={cy}
                           r={5}
-                          fill={STATUS_HEX[status]}
+                          fill={fill}
                           stroke="#fff"
                           strokeWidth={1}
                         />
@@ -280,14 +294,22 @@ export function SegmentedLineChart({
                       if (index !== i + 1) {
                         return <g key={`dot-${i}-${index ?? 0}`} />;
                       }
-                      const status = goalStatus(v, payload?.goal ?? 0);
+                      const fill = lineColor
+                        ? lineColor
+                        : STATUS_HEX[
+                            goalStatus(
+                              v,
+                              payload?.goal ?? 0,
+                              payload?.previousGoal,
+                            )
+                          ];
                       return (
                         <circle
                           key={`dot-${i}-${index ?? 0}`}
                           cx={cx}
                           cy={cy}
                           r={5}
-                          fill={STATUS_HEX[status]}
+                          fill={fill}
                           stroke="#fff"
                           strokeWidth={1}
                         />
