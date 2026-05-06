@@ -22,10 +22,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Loader2, Search } from "lucide-react";
+import { Loader2, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { Lead } from "@/types/crm";
+import {
+  MultiProductPicker,
+  type StagedOpportunityProduct,
+} from "@/features/opportunities/MultiProductPicker";
+import { useAddOpportunityProductsBulk } from "@/features/opportunities/api";
+import { employeesToFteRange, formatCurrency } from "@/lib/formatters";
 
 interface ConvertLeadDialogProps {
   open: boolean;
@@ -62,6 +68,7 @@ type AccountMode = "existing" | "new";
 export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialogProps) {
   const navigate = useNavigate();
   const convertMutation = useConvertLead();
+  const addProductsBulkMutation = useAddOpportunityProductsBulk();
 
   const seedName = lead.company ?? `${lead.first_name} ${lead.last_name}`;
 
@@ -80,11 +87,16 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
   const [firstName, setFirstName] = useState(lead.first_name);
   const [lastName, setLastName] = useState(lead.last_name);
   const [createOpportunity, setCreateOpportunity] = useState(true);
-  const [opportunityName, setOpportunityName] = useState(
-    `${lead.company ?? lead.last_name} - New Business`
-  );
-  const [opportunityAmount, setOpportunityAmount] = useState<string>("");
   const [opportunityStage, setOpportunityStage] = useState("details_analysis");
+
+  // Opportunity products: same product-picker pattern as OpportunityForm.
+  // We force the rep to add at least one product before they can convert
+  // (when createOpportunity is on) so the opp gets a real product-derived
+  // name + amount instead of free-typed placeholder text. Removed the
+  // free-text Opportunity Name + Amount inputs entirely — both are
+  // derived from staged products via the same logic OpportunityForm uses.
+  const [stagedProducts, setStagedProducts] = useState<StagedOpportunityProduct[]>([]);
+  const [showAddProduct, setShowAddProduct] = useState(false);
 
   // Reset state when the dialog reopens for a different lead
   useEffect(() => {
@@ -95,13 +107,43 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
     setAccountName(seedName);
     setFirstName(lead.first_name);
     setLastName(lead.last_name);
-    setOpportunityName(`${lead.company ?? lead.last_name} - New Business`);
+    setStagedProducts([]);
+    setShowAddProduct(false);
     setHasOpenedOnce(false);
     // seedName depends on lead.* — listing it would loop the effect
     // since seedName is computed each render. Just key off `open` and
     // `lead.id`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, lead.id]);
+
+  // Auto-derived opportunity name from staged products. Mirrors the
+  // SF-style "SHORT1 | SHORT2 | SHORT3" pattern used by OpportunityForm —
+  // falls back through short_name → code → name per product. The DB
+  // trigger + bulk hook resync this server-side too once products
+  // attach, but we compute a placeholder for the initial insert so the
+  // opp never carries a blank name.
+  const derivedOpportunityName = useMemo(() => {
+    const labels = stagedProducts
+      .map((p) => {
+        const sn = p.product_short_name?.trim();
+        if (sn) return sn;
+        const code = p.product_code?.trim();
+        if (code) return code;
+        const nm = p.product_name?.trim();
+        return nm || null;
+      })
+      .filter((c): c is string => !!c);
+    return labels.length ? labels.join(" | ") : "";
+  }, [stagedProducts]);
+
+  // FTE range for price-book lookup. We can't pass an account_id when
+  // creating a new account, so we derive the FTE bucket from the lead's
+  // employee count. For existing-account mode the picker also accepts
+  // accountId and will look up the account's FTE directly.
+  const fteRangeFromLead = useMemo(
+    () => employeesToFteRange(lead.employees ?? null) || null,
+    [lead.employees],
+  );
 
   // Debounced account search
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -161,6 +203,15 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
 
   async function handleConvert() {
     try {
+      // Pre-flight: require at least one product when creating an opp.
+      // The opp's name + amount come from products, not free-text inputs.
+      if (createOpportunity && stagedProducts.length === 0) {
+        toast.error(
+          "Add at least one product to the opportunity before converting (name + amount come from products).",
+        );
+        return;
+      }
+
       const result = await convertMutation.mutateAsync({
         leadId: lead.id,
         existingAccountId: mode === "existing" ? selectedAccount!.id : undefined,
@@ -179,12 +230,41 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
         country: lead.country,
         leadSource: lead.source,
         createOpportunity,
-        opportunityName: createOpportunity ? opportunityName : undefined,
-        opportunityAmount: createOpportunity && opportunityAmount
-          ? Number(opportunityAmount)
+        // Pass the derived name so the row never lands in the DB blank.
+        // The bulk-products step right after this resyncs it server-side
+        // anyway, but a derived placeholder is safer in case the bulk
+        // call fails midway.
+        opportunityName: createOpportunity
+          ? (derivedOpportunityName || "New Opportunity")
           : undefined,
         opportunityStage: createOpportunity ? opportunityStage : undefined,
       });
+
+      // Attach staged products. useAddOpportunityProductsBulk also
+      // recomputes totals + resyncs the auto-name on the server, so the
+      // opp lands with the right name and amount even if the rep didn't
+      // type anything.
+      if (createOpportunity && result.opportunity && stagedProducts.length > 0) {
+        try {
+          await addProductsBulkMutation.mutateAsync({
+            opportunity_id: result.opportunity.id,
+            rows: stagedProducts.map((sp) => ({
+              product_id: sp.product_id,
+              quantity: sp.quantity,
+              unit_price: sp.unit_price,
+              arr_amount: sp.arr_amount,
+              discount_percent: sp.discount_percent,
+              discount_type: sp.discount_type,
+            })),
+          });
+        } catch (err) {
+          console.error("Failed to attach products to converted opp:", err);
+          toast.error(
+            "Lead converted, but products failed to attach. Open the opportunity and add them from the products section.",
+          );
+        }
+      }
+
       toast.success(
         mode === "existing"
           ? `Lead converted into existing account "${result.account.name}"`
@@ -378,39 +458,104 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
 
             {createOpportunity && (
               <div className="space-y-4 pl-6 border-l-2 border-muted">
+                {/* Read-only auto-derived name. Mirrors OpportunityForm's
+                    create flow — name comes from product short codes
+                    joined "SHORT1 | SHORT2 | SHORT3", never free-typed.
+                    Avoids the same SF anti-pattern that lets reps
+                    invent inconsistent opp titles. */}
                 <div className="space-y-2">
-                  <Label htmlFor="convert_opp_name">Opportunity Name</Label>
-                  <Input
-                    id="convert_opp_name"
-                    value={opportunityName}
-                    onChange={(e) => setOpportunityName(e.target.value)}
-                  />
+                  <Label>Opportunity Name</Label>
+                  <div className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 bg-muted/30 min-h-9">
+                    <span className="font-medium truncate">
+                      {derivedOpportunityName || (
+                        <span className="text-muted-foreground italic font-normal">
+                          Add a product to generate the name
+                        </span>
+                      )}
+                    </span>
+                    {derivedOpportunityName && (
+                      <Badge variant="outline" className="text-xs shrink-0">
+                        From products
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Built automatically from the products you add — same
+                    behavior as creating an opportunity from scratch. To
+                    rename later, edit the opportunity directly.
+                  </p>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="convert_opp_amount">Amount</Label>
-                    <Input
-                      id="convert_opp_amount"
-                      type="number"
-                      step="0.01"
-                      value={opportunityAmount}
-                      onChange={(e) => setOpportunityAmount(e.target.value)}
-                    />
+
+                {/* Stage picker only — Amount is derived from the
+                    products you attach (price book × quantity − discount). */}
+                <div className="space-y-2">
+                  <Label>Stage</Label>
+                  <Select value={opportunityStage} onValueChange={setOpportunityStage}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="details_analysis">Details Analysis</SelectItem>
+                      <SelectItem value="demo">Demo</SelectItem>
+                      <SelectItem value="proposal_and_price_quote">Proposal and Price Quote</SelectItem>
+                      <SelectItem value="proposal_conversation">Proposal Conversation</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Staged products list + add button. */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Products *</Label>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setShowAddProduct(true)}
+                    >
+                      <Plus className="h-4 w-4 mr-1" />
+                      Add Products
+                    </Button>
                   </div>
-                  <div className="space-y-2">
-                    <Label>Stage</Label>
-                    <Select value={opportunityStage} onValueChange={setOpportunityStage}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="details_analysis">Details Analysis</SelectItem>
-                        <SelectItem value="demo">Demo</SelectItem>
-                        <SelectItem value="proposal_and_price_quote">Proposal and Price Quote</SelectItem>
-                        <SelectItem value="proposal_conversation">Proposal Conversation</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  {stagedProducts.length === 0 ? (
+                    <div className="border border-dashed rounded-md p-3 text-xs text-muted-foreground text-center">
+                      No products yet. The opportunity name and amount
+                      come from the products you add here.
+                    </div>
+                  ) : (
+                    <div className="border rounded-md divide-y">
+                      {stagedProducts.map((p, idx) => (
+                        <div
+                          key={`${p.product_id}-${idx}`}
+                          className="flex items-center justify-between gap-2 px-3 py-2 text-sm"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="font-medium truncate">{p.product_name}</div>
+                            <div className="text-xs text-muted-foreground">
+                              Qty {p.quantity} · {formatCurrency(p.arr_amount)}
+                              {p.discount_percent
+                                ? ` · ${p.discount_percent}% off`
+                                : ""}
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="text-muted-foreground hover:text-destructive"
+                            onClick={() =>
+                              setStagedProducts((prev) =>
+                                prev.filter((_, i) => i !== idx),
+                              )
+                            }
+                            aria-label={`Remove ${p.product_name}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -427,10 +572,12 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
               !accountReady ||
               !firstName ||
               !lastName ||
-              convertMutation.isPending
+              (createOpportunity && stagedProducts.length === 0) ||
+              convertMutation.isPending ||
+              addProductsBulkMutation.isPending
             }
           >
-            {convertMutation.isPending
+            {convertMutation.isPending || addProductsBulkMutation.isPending
               ? "Converting..."
               : mode === "existing"
                 ? "Convert into existing account"
@@ -438,6 +585,22 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      {/* Product picker dialog. Same component used by OpportunityForm
+          create flow — staged mode means it returns rows the caller
+          owns until insert time. accountId is best-effort: only
+          available when converting into an existing account; for the
+          new-account path we fall back to an FTE range derived from
+          the lead's employee count so price-book selection still
+          works. */}
+      <MultiProductPicker
+        mode="staged"
+        open={showAddProduct}
+        onOpenChange={setShowAddProduct}
+        accountId={mode === "existing" ? selectedAccount?.id ?? null : null}
+        fteRange={fteRangeFromLead}
+        onStage={(rows) => setStagedProducts((prev) => [...prev, ...rows])}
+      />
     </Dialog>
   );
 }

@@ -56,8 +56,10 @@ import { formatCurrency, formatDate } from "@/lib/formatters";
  * Renewals view, Salesforce "Open Renewal Opportunities" report style.
  *
  * Two tabs share the same filter rail:
- * - Upcoming: closed-won deals whose contract_end_date is in the
- *   selected date window. This is where renewal-prep work happens.
+ * - Upcoming: OPEN renewal-kind opps (stage not in closed_won /
+ *   closed_lost) whose contract_end_date is in the selected date
+ *   window. This is the active work queue; past-due open renewals
+ *   stay visible regardless of the window so reps can chase them.
  * - Closed-Won Renewals: renewal-kind opps that have already been won
  *   in the selected date window (filtered by close_date).
  *
@@ -159,17 +161,19 @@ function useUpcomingRenewals() {
   return useQuery({
     queryKey: ["renewal_queue", "upcoming"],
     queryFn: async () => {
-      // Window: 24 months back through 18 months forward.
+      // Upcoming = OPEN renewal opportunities — kind=renewal opps that
+      // haven't been won or lost yet. These are the rows reps actively
+      // work to close; the closed-won tab is for the historical record.
       //
-      // The lookback matters: a closed_won deal whose contract_end_date
-      // has already passed is the MOST urgent renewal in the queue, not
-      // the least. Previously we filtered to `contract_end_date >=
-      // today`, which silently dropped past-due deals off the list as
-      // soon as their date passed (this is what happened to North
-      // Cascade Cancer Center BNVA). Reps need to see those rows so
-      // they can update expected close dates / push the renewal
-      // through. The 24-month floor keeps very old deals (likely
-      // churned, never renewed) from polluting the working view.
+      // We previously pulled closed_won deals here as a renewal-prep
+      // queue, but Brayden flagged that pulled in stale historical
+      // rows. The right view here is the open work queue.
+      //
+      // Window: 24 months back through 18 months forward, on
+      // contract_end_date. Past-due open renewals matter most (they're
+      // the actively overdue work), so the 24-month lookback keeps them
+      // visible — the client filter also force-keeps past-due rows
+      // regardless of the date preset.
       const today = new Date();
       const floor = new Date(today);
       floor.setMonth(floor.getMonth() - 24);
@@ -184,7 +188,11 @@ function useUpcomingRenewals() {
           "id, account_id, owner_user_id, contract_end_date, close_date, expected_close_date, amount, stage, kind, name, next_step, lead_source, description, account:accounts!inner(id, name, archived_at), owner:user_profiles!owner_user_id(id, full_name)",
         )
         .is("archived_at", null)
-        .eq("stage", "closed_won")
+        .eq("kind", "renewal")
+        // Open = anything that isn't terminal. Using `not in` rather
+        // than enumerating the open stages so newly added open stages
+        // (e.g. "Verbal Commit") show up automatically.
+        .not("stage", "in", "(closed_won,closed_lost)")
         .not("contract_end_date", "is", null)
         .gte("contract_end_date", floorIso)
         .lte("contract_end_date", capIso)
