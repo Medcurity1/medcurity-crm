@@ -309,6 +309,45 @@ function useMqlRowsQtd(quarterStart: string, quarterEnd: string) {
 const DASHBOARD_OWNER_EMAIL = "braydenf@medcurity.com";
 
 /**
+ * Hard-coded historical end-of-quarter values for charts that pre-date
+ * the new CRM's snapshot history. Sourced from the external Codex
+ * Team Dashboard so the line picks up at the same place it left off.
+ *
+ * The current (in-progress) quarter is NEVER seeded here — that always
+ * comes from live metrics so the rightmost point reflects today.
+ *
+ * Add a quarter once it's complete and the value is final; remove it
+ * when weekly snapshot history covers the same quarter.
+ */
+const HISTORICAL_TREND_SEED: Record<
+  keyof DashboardSnapshot["metrics"],
+  Record<string, number>
+> = {
+  arr: {},
+  new_customers_qtd: {},
+  new_customer_amount_qtd: {},
+  pipeline_amount: {
+    "Q1-2026": 877123,
+  },
+  renewals_amount_qtd: {},
+  nrr_by_customer_pct: {
+    "Q2-2025": 74.4,
+    "Q3-2025": 91.3,
+    "Q4-2025": 87.7,
+    "Q1-2026": 88.8,
+  },
+  nrr_by_dollar_pct: {
+    "Q2-2025": 84.1,
+    "Q3-2025": 93.3,
+    "Q4-2025": 84.0,
+    "Q1-2026": 94.3,
+  },
+  sql_qtd: {},
+  mql_unique_qtd: {},
+  qtd_billing: {},
+};
+
+/**
  * Build a quarterly trend (one point per calendar quarter, Q2-2025 → today)
  * from weekly snapshots. Mirrors the `arrPoints` window logic so the
  * Pipeline / NRR charts share the same X-axis as the ARR chart.
@@ -316,6 +355,9 @@ const DASHBOARD_OWNER_EMAIL = "braydenf@medcurity.com";
  * For each quarter we keep the LAST snapshot in that quarter (closest
  * to end-of-quarter). The current quarter always shows the latest
  * snapshot so the line keeps moving forward instead of dropping off.
+ *
+ * If a quarter has no snapshot, fall back to HISTORICAL_TREND_SEED so
+ * the line still extends back to Q2-2025 even on a fresh install.
  */
 function quarterlySnapshotTrend(
   snapshots: DashboardSnapshot[],
@@ -340,6 +382,7 @@ function quarterlySnapshotTrend(
   const currentYear = today.getUTCFullYear();
   const currentQuarter = Math.floor(today.getUTCMonth() / 3) + 1;
 
+  const seed = HISTORICAL_TREND_SEED[metricKey] ?? {};
   const points: SegmentPoint[] = [];
   for (let y = WINDOW_START_YEAR; y <= currentYear; y++) {
     const startQ = y === WINDOW_START_YEAR ? WINDOW_START_Q : 1;
@@ -347,9 +390,19 @@ function quarterlySnapshotTrend(
     for (let q = startQ; q <= endQ; q++) {
       const label = `Q${q}-${y}`;
       const snap = lastPerQuarter.get(label);
-      if (!snap) continue;
-      const value = Number(snap.metrics[metricKey]) || 0;
-      points.push({ label, actual: value, goal });
+      if (snap) {
+        const value = Number(snap.metrics[metricKey]) || 0;
+        points.push({ label, actual: value, goal });
+        continue;
+      }
+      // Fall back to a hardcoded historical value for completed quarters
+      // so brand-new installs (or any owner without 12 months of weekly
+      // snapshots) still see the trend going back to Q2-2025.
+      const seeded = seed[label];
+      const isCurrent = y === currentYear && q === currentQuarter;
+      if (!isCurrent && typeof seeded === "number") {
+        points.push({ label, actual: seeded, goal });
+      }
     }
   }
   return points;
