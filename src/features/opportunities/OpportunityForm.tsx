@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Pencil } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
 import {
@@ -126,6 +126,14 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   const updateMutation = useUpdateOpportunity();
   const { profile } = useAuth();
   const [newNote, setNewNote] = useState("");
+  // Per-line inline edit state for the form's Notes log. Mirrors the
+  // detail page so reps can fix a typo from either entry point. Edits
+  // mutate the in-memory `notes` field via setValue and persist on form
+  // save (we don't write to the DB directly here — the rest of the
+  // form's edits would be lost otherwise).
+  const [editingNoteIndex, setEditingNoteIndex] = useState<number | null>(null);
+  const [editNoteValue, setEditNoteValue] = useState("");
+  const [pendingDeleteNoteIndex, setPendingDeleteNoteIndex] = useState<number | null>(null);
 
   const preselectedAccountId = searchParams.get("account_id");
 
@@ -1392,25 +1400,158 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                 </div>
                 <div className="space-y-2">
                   <Label>Notes</Label>
-                  {/* Scrollable log of existing notes */}
-                  {watch("notes") && (
-                    <div className="border rounded-md p-3 max-h-48 overflow-y-auto bg-muted/30 space-y-1 text-sm">
-                      {watch("notes")!.split("\n").filter(Boolean).map((line, i) => {
-                        const parts = line.split(" | ");
-                        if (parts.length >= 3) {
-                          const [name, date, ...rest] = parts;
+                  {/* Scrollable log of existing notes with per-line
+                      Edit + Delete affordance. Edits flow through
+                      setValue("notes", ...) so they persist when the
+                      user clicks Save Changes — same lifecycle as the
+                      rest of the form's edits. */}
+                  {watch("notes") && (() => {
+                    const lines = watch("notes")!.split("\n").filter(Boolean);
+                    const writeLines = (next: string[]) =>
+                      setValue("notes", next.join("\n"), { shouldDirty: true });
+                    const saveEdit = (i: number) => {
+                      const trimmed = editNoteValue.trim();
+                      if (!trimmed) {
+                        toast.error("Note cannot be empty");
+                        return;
+                      }
+                      const original = lines[i];
+                      const parts = original.split(" | ");
+                      const updatedLine =
+                        parts.length >= 3
+                          ? `${parts[0]} | ${parts[1]} | ${trimmed}`
+                          : trimmed;
+                      const next = [...lines];
+                      next[i] = updatedLine;
+                      writeLines(next);
+                      setEditingNoteIndex(null);
+                      setEditNoteValue("");
+                    };
+                    const deleteAt = (i: number) => {
+                      const next = lines.filter((_, idx) => idx !== i);
+                      writeLines(next);
+                      setPendingDeleteNoteIndex(null);
+                    };
+                    return (
+                      <div className="border rounded-md p-3 max-h-48 overflow-y-auto bg-muted/30 space-y-1 text-sm">
+                        {lines.map((line, i) => {
+                          const parts = line.split(" | ");
+                          const hasMeta = parts.length >= 3;
+                          const name = hasMeta ? parts[0] : "";
+                          const date = hasMeta ? parts[1] : "";
+                          const content = hasMeta ? parts.slice(2).join(" | ") : line;
+                          const isEditing = editingNoteIndex === i;
+                          const isPendingDelete = pendingDeleteNoteIndex === i;
+
+                          if (isEditing) {
+                            return (
+                              <div key={i} className="py-2 border-b last:border-b-0 border-muted space-y-1">
+                                {hasMeta && (
+                                  <div className="text-xs text-muted-foreground">
+                                    <span className="font-medium">{name}</span> - {date}
+                                  </div>
+                                )}
+                                <Input
+                                  autoFocus
+                                  value={editNoteValue}
+                                  onChange={(e) => setEditNoteValue(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      saveEdit(i);
+                                    } else if (e.key === "Escape") {
+                                      e.preventDefault();
+                                      setEditingNoteIndex(null);
+                                      setEditNoteValue("");
+                                    }
+                                  }}
+                                />
+                                <div className="flex gap-2">
+                                  <Button type="button" size="sm" onClick={() => saveEdit(i)}>
+                                    Save
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => {
+                                      setEditingNoteIndex(null);
+                                      setEditNoteValue("");
+                                    }}
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
+                              </div>
+                            );
+                          }
+
                           return (
-                            <div key={i} className="py-1 border-b last:border-b-0 border-muted">
-                              <span className="font-medium">{name}</span>
-                              <span className="text-muted-foreground"> - {date}: </span>
-                              <span>{rest.join(" | ")}</span>
+                            <div
+                              key={i}
+                              className="group py-1 border-b last:border-b-0 border-muted flex items-start gap-2"
+                            >
+                              <div className="flex-1 min-w-0">
+                                {hasMeta ? (
+                                  <>
+                                    <span className="font-medium">{name}</span>
+                                    <span className="text-muted-foreground"> - {date}: </span>
+                                    <span>{content}</span>
+                                  </>
+                                ) : (
+                                  <span>{line}</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                <button
+                                  type="button"
+                                  title="Edit note"
+                                  className="p-1 rounded hover:bg-muted"
+                                  onClick={() => {
+                                    setEditingNoteIndex(i);
+                                    setEditNoteValue(content);
+                                    setPendingDeleteNoteIndex(null);
+                                  }}
+                                >
+                                  <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                                </button>
+                                {isPendingDelete ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="text-xs text-destructive font-medium px-1"
+                                      onClick={() => deleteAt(i)}
+                                    >
+                                      Confirm
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="text-xs text-muted-foreground px-1"
+                                      onClick={() => setPendingDeleteNoteIndex(null)}
+                                    >
+                                      Cancel
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    title="Delete note"
+                                    className="p-1 rounded hover:bg-muted"
+                                    onClick={() => {
+                                      setPendingDeleteNoteIndex(i);
+                                      setEditingNoteIndex(null);
+                                    }}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           );
-                        }
-                        return <div key={i} className="py-1 border-b last:border-b-0 border-muted">{line}</div>;
-                      })}
-                    </div>
-                  )}
+                        })}
+                      </div>
+                    );
+                  })()}
                   {/* Add new note input */}
                   <div className="flex gap-2">
                     <Input
@@ -1620,10 +1761,19 @@ function OpportunityProductsEditor({
     );
   }
 
-  function setDraft(rowId: string, patch: Partial<RowDraft>) {
+  function setDraft(
+    p: { id: string; quantity: number; unit_price: number; discount_percent?: number | null },
+    patch: Partial<RowDraft>,
+  ) {
     setDrafts((prev) => ({
       ...prev,
-      [rowId]: { ...getDraft({ id: rowId, quantity: 0, unit_price: 0, discount_percent: 0 }), ...prev[rowId], ...patch },
+      // Seed the draft from the ACTUAL product values, not 0/0/0. The
+      // old version seeded everything to "0" on first edit, so typing
+      // into Disc% would commit qty=0 on blur and trip the
+      // opportunity_products_quantity_check constraint. The product
+      // object now flows through so a partial edit of one field doesn't
+      // clobber the others.
+      [p.id]: { ...getDraft(p), ...prev[p.id], ...patch },
     }));
   }
 
@@ -1636,7 +1786,11 @@ function OpportunityProductsEditor({
     if (!opportunityId) return;
     const draft = drafts[p.id];
     if (!draft) return; // never edited
-    const qty = Math.max(0, Number(draft.quantity) || 0);
+    // qty must be >= 1 (DB constraint opportunity_products_quantity_check).
+    // If the input was momentarily empty or 0, fall back to the prior
+    // quantity so we don't trip the constraint.
+    const rawQty = Number(draft.quantity);
+    const qty = Number.isFinite(rawQty) && rawQty >= 1 ? rawQty : Number(p.quantity ?? 1);
     const price = Math.max(0, Number(draft.unit_price) || 0);
     const disc = Math.min(100, Math.max(0, Number(draft.discount_percent) || 0));
     const noChange =
@@ -1755,7 +1909,7 @@ function OpportunityProductsEditor({
                           min={1}
                           step="1"
                           value={r.draft.quantity}
-                          onChange={(e) => setDraft(r.rowId, { quantity: e.target.value })}
+                          onChange={(e) => setDraft(r.original, { quantity: e.target.value })}
                           onBlur={() => commitDraft(r.original)}
                           className="h-8 w-20 text-right ml-auto"
                         />
@@ -1766,7 +1920,7 @@ function OpportunityProductsEditor({
                           min={0}
                           step="0.01"
                           value={r.draft.unit_price}
-                          onChange={(e) => setDraft(r.rowId, { unit_price: e.target.value })}
+                          onChange={(e) => setDraft(r.original, { unit_price: e.target.value })}
                           onBlur={() => commitDraft(r.original)}
                           className="h-8 w-28 text-right ml-auto"
                         />
@@ -1778,7 +1932,7 @@ function OpportunityProductsEditor({
                           max={100}
                           step="1"
                           value={r.draft.discount_percent}
-                          onChange={(e) => setDraft(r.rowId, { discount_percent: e.target.value })}
+                          onChange={(e) => setDraft(r.original, { discount_percent: e.target.value })}
                           onBlur={() => commitDraft(r.original)}
                           className="h-8 w-20 text-right ml-auto"
                         />
