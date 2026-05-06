@@ -98,6 +98,14 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
   const [stagedProducts, setStagedProducts] = useState<StagedOpportunityProduct[]>([]);
   const [showAddProduct, setShowAddProduct] = useState(false);
 
+  // Opp-level discount fields. Mirror OpportunityForm: `discount` is a
+  // PERCENT (0–100) applied on top of any per-product discounts already
+  // staged in the picker; `promo_code` is an optional campaign tag.
+  // Stored as strings so the input can be empty (=> null) without
+  // forcing 0 into the DB.
+  const [opportunityDiscount, setOpportunityDiscount] = useState("");
+  const [opportunityPromoCode, setOpportunityPromoCode] = useState("");
+
   // Reset state when the dialog reopens for a different lead
   useEffect(() => {
     if (!open) return;
@@ -109,6 +117,8 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
     setLastName(lead.last_name);
     setStagedProducts([]);
     setShowAddProduct(false);
+    setOpportunityDiscount("");
+    setOpportunityPromoCode("");
     setHasOpenedOnce(false);
     // seedName depends on lead.* — listing it would loop the effect
     // since seedName is computed each render. Just key off `open` and
@@ -238,6 +248,14 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
           ? (derivedOpportunityName || "New Opportunity")
           : undefined,
         opportunityStage: createOpportunity ? opportunityStage : undefined,
+        opportunityDiscount: createOpportunity
+          ? (opportunityDiscount.trim() === ""
+              ? null
+              : Math.max(0, Math.min(100, Number(opportunityDiscount) || 0)))
+          : undefined,
+        opportunityPromoCode: createOpportunity
+          ? (opportunityPromoCode.trim() === "" ? null : opportunityPromoCode.trim())
+          : undefined,
       });
 
       // Attach staged products. useAddOpportunityProductsBulk also
@@ -501,6 +519,53 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
                       <SelectItem value="proposal_conversation">Proposal Conversation</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+
+                {/* Deal-level discount + promo code. Mirrors
+                    OpportunityForm's "Overall Adjustment Discount" — a
+                    percent reduction applied on top of any per-product
+                    discounts the rep set in the picker. Optional
+                    promo_code tags it with a campaign code. Both
+                    behave like the regular opp edit form so reps
+                    don't have to convert first then re-open the opp
+                    just to apply a discount. */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="convert_opp_discount">
+                      Overall Adjustment Discount (%)
+                    </Label>
+                    <div className="relative">
+                      <Input
+                        id="convert_opp_discount"
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        max={100}
+                        placeholder="0"
+                        value={opportunityDiscount}
+                        onChange={(e) => setOpportunityDiscount(e.target.value)}
+                        className="pr-8"
+                      />
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">
+                        %
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Deal-level reduction on top of any per-product discounts.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="convert_opp_promo">Promo Code</Label>
+                    <Input
+                      id="convert_opp_promo"
+                      value={opportunityPromoCode}
+                      onChange={(e) => setOpportunityPromoCode(e.target.value)}
+                      placeholder="Optional"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Tag the discount with a campaign code.
+                    </p>
+                  </div>
                 </div>
 
                 {/* Staged products list + add button. */}

@@ -56,10 +56,12 @@ import { formatCurrency, formatDate } from "@/lib/formatters";
  * Renewals view, Salesforce "Open Renewal Opportunities" report style.
  *
  * Two tabs share the same filter rail:
- * - Upcoming: OPEN renewal-kind opps (stage not in closed_won /
- *   closed_lost) whose contract_end_date is in the selected date
- *   window. This is the active work queue; past-due open renewals
- *   stay visible regardless of the window so reps can chase them.
+ * - Upcoming: closed-won deals whose contract_end_date is in the
+ *   selected date window. This is where renewal-prep work happens.
+ *   Past-due rows (contract_end_date < today) WITHIN the filter
+ *   window are kept naturally — only when the user's range covers
+ *   their date. Picking "this quarter" won't pull last quarter, and
+ *   "next 120 days" won't pull rows from years ago.
  * - Closed-Won Renewals: renewal-kind opps that have already been won
  *   in the selected date window (filtered by close_date).
  *
@@ -161,19 +163,19 @@ function useUpcomingRenewals() {
   return useQuery({
     queryKey: ["renewal_queue", "upcoming"],
     queryFn: async () => {
-      // Upcoming = OPEN renewal opportunities — kind=renewal opps that
-      // haven't been won or lost yet. These are the rows reps actively
-      // work to close; the closed-won tab is for the historical record.
+      // Upcoming = closed-won deals whose contract is approaching its
+      // end date. This is the renewal-prep view: each row is a deal
+      // that needs to be renewed before contract_end_date.
       //
-      // We previously pulled closed_won deals here as a renewal-prep
-      // queue, but Brayden flagged that pulled in stale historical
-      // rows. The right view here is the open work queue.
-      //
-      // Window: 24 months back through 18 months forward, on
-      // contract_end_date. Past-due open renewals matter most (they're
-      // the actively overdue work), so the 24-month lookback keeps them
-      // visible — the client filter also force-keeps past-due rows
-      // regardless of the date preset.
+      // SQL window: 24 months back through 18 months forward. The
+      // 24-month lookback exists so past-due rows are QUERYABLE (e.g.
+      // North Cascade Cancer Center BNVA whose contract_end has
+      // passed) — but the actual visibility decision is made by the
+      // client-side date filter. If the user picks "this quarter",
+      // past-due rows from last quarter naturally fall outside the
+      // window and don't appear. If they pick a custom range that
+      // covers older dates, those rows do appear. The query is just a
+      // generous outer bound.
       const today = new Date();
       const floor = new Date(today);
       floor.setMonth(floor.getMonth() - 24);
@@ -188,11 +190,7 @@ function useUpcomingRenewals() {
           "id, account_id, owner_user_id, contract_end_date, close_date, expected_close_date, amount, stage, kind, name, next_step, lead_source, description, account:accounts!inner(id, name, archived_at), owner:user_profiles!owner_user_id(id, full_name)",
         )
         .is("archived_at", null)
-        .eq("kind", "renewal")
-        // Open = anything that isn't terminal. Using `not in` rather
-        // than enumerating the open stages so newly added open stages
-        // (e.g. "Verbal Commit") show up automatically.
-        .not("stage", "in", "(closed_won,closed_lost)")
+        .eq("stage", "closed_won")
         .not("contract_end_date", "is", null)
         .gte("contract_end_date", floorIso)
         .lte("contract_end_date", capIso)
@@ -902,21 +900,18 @@ export function RenewalsQueue() {
   const upcomingRange = rangeFromPreset(preset, customRange, "upcoming");
   const closedRange = rangeFromPreset(preset, customRange, "closed-won");
 
-  // Common filter helper applied to both lists.
-  //
-  // `tab` controls one nuance: on the upcoming tab, past-due rows
-  // (contract_end_date < today) are ALWAYS kept regardless of the date
-  // preset. Filtering "current quarter" should narrow the future view
-  // without hiding overdue work — those are the rows the rep most needs
-  // to see.
+  // Common filter helper applied to both lists. The date range is
+  // honored as-is — past-due rows show up naturally when the user's
+  // window covers their contract_end_date, and don't show up when it
+  // doesn't. (An earlier version always kept past-due rows on the
+  // upcoming tab regardless of range, which pulled in years-old data
+  // when the user just wanted "this quarter".)
   function applyCommonFilters(
     rows: RenewalRow[],
     dateField: "contract_end_date" | "close_date",
     range: { start: Date | null; end: Date | null },
-    tab: "upcoming" | "closed-won",
   ) {
     const exclude = excludeAccount.trim().toLowerCase();
-    const todayMs = today.getTime();
     return rows.filter((r) => {
       if (owners.length > 0 && (!r.owner_user_id || !owners.includes(r.owner_user_id))) {
         return false;
@@ -927,12 +922,6 @@ export function RenewalsQueue() {
       if (range.start || range.end) {
         const dateStr =
           dateField === "contract_end_date" ? r.contract_end_date : r.close_date;
-        // Always keep past-due rows on the upcoming tab. They need
-        // attention more than future-dated rows.
-        if (tab === "upcoming") {
-          const dv = dateValue(r.contract_end_date);
-          if (dv !== null && dv < todayMs) return true;
-        }
         if (!inDateRange(dateStr, range.start, range.end)) return false;
       }
       return true;
@@ -941,7 +930,7 @@ export function RenewalsQueue() {
 
   const upcomingFiltered = useMemo(() => {
     if (!upcoming) return undefined;
-    const base = applyCommonFilters(upcoming, "contract_end_date", upcomingRange, "upcoming");
+    const base = applyCommonFilters(upcoming, "contract_end_date", upcomingRange);
     return sortUpcoming(base, upcomingSort);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -957,7 +946,7 @@ export function RenewalsQueue() {
 
   const closedWonFiltered = useMemo(() => {
     if (!closedWon) return undefined;
-    const base = applyCommonFilters(closedWon, "close_date", closedRange, "closed-won");
+    const base = applyCommonFilters(closedWon, "close_date", closedRange);
     return sortClosed(base, closedSort);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
