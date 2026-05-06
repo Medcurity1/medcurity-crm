@@ -35,6 +35,8 @@ export function SegmentedLineChart({
   yFormatter = (v) => String(Math.round(v)),
   tooltipFormatter = (v) => String(v),
   showGoal = true,
+  yDomain,
+  yTicks,
 }: {
   title?: string;
   data: SegmentPoint[];
@@ -46,6 +48,14 @@ export function SegmentedLineChart({
    *  Defaults to true to preserve existing behavior on every other
    *  chart. */
   showGoal?: boolean;
+  /** Explicit Y-axis domain. Pass `[60, 100]` for NRR-style charts
+   *  where you want a "zoomed-in" view between two fixed bounds.
+   *  When omitted, falls back to `[0, dataMax * 1.1]` (the previous
+   *  default with 10% headroom). */
+  yDomain?: [number, number];
+  /** Explicit tick values when paired with `yDomain` — e.g.
+   *  `[60, 65, 70, 75, 80, 85, 90, 95, 100]` for NRR. */
+  yTicks?: number[];
 }) {
   // Build N segments. Each segment is a separate dataset of 2 points
   // with all the OTHER points' actual=null so the segment doesn't bridge.
@@ -101,7 +111,11 @@ export function SegmentedLineChart({
           <YAxis
             tickFormatter={yFormatter}
             tick={{ fontSize: 10 }}
-            domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.1)]}
+            domain={
+              yDomain ?? [0, (dataMax: number) => Math.ceil(dataMax * 1.1)]
+            }
+            ticks={yTicks}
+            allowDataOverflow={!!yDomain}
           />
           <Tooltip
             content={({ active, payload, label }) => {

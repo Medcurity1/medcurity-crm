@@ -468,31 +468,34 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                       <SelectValue placeholder="Select industry..." />
                     </SelectTrigger>
                     <SelectContent>
+                      {/* Sorted alphabetically by display label so users
+                          can find values quickly. "None" pinned at top
+                          and "Other" pinned at bottom intentionally. */}
                       <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="hospital">Hospital</SelectItem>
-                      <SelectItem value="medical_group">Medical Group</SelectItem>
-                      <SelectItem value="fqhc">FQHC</SelectItem>
-                      <SelectItem value="rural_health_clinic">Rural Health Clinic</SelectItem>
-                      <SelectItem value="skilled_nursing">Skilled Nursing</SelectItem>
-                      <SelectItem value="long_term_care">Long-Term Care</SelectItem>
-                      <SelectItem value="home_health">Home Health</SelectItem>
-                      <SelectItem value="hospice">Hospice</SelectItem>
                       <SelectItem value="behavioral_health">Behavioral Health</SelectItem>
                       <SelectItem value="dental">Dental</SelectItem>
-                      <SelectItem value="pediatrics">Pediatrics</SelectItem>
-                      <SelectItem value="specialty_clinic">Specialty Clinic</SelectItem>
-                      <SelectItem value="urgent_care">Urgent Care</SelectItem>
+                      <SelectItem value="fqhc">FQHC</SelectItem>
+                      <SelectItem value="healthcare_consulting">Healthcare Consulting</SelectItem>
+                      <SelectItem value="healthcare_it_vendor">Healthcare IT Vendor</SelectItem>
+                      <SelectItem value="home_health">Home Health</SelectItem>
+                      <SelectItem value="hospice">Hospice</SelectItem>
+                      <SelectItem value="hospital">Hospital</SelectItem>
                       <SelectItem value="imaging_center">Imaging Center</SelectItem>
+                      <SelectItem value="insurance_payer">Insurance / Payer</SelectItem>
                       <SelectItem value="lab_services">Lab Services</SelectItem>
+                      <SelectItem value="long_term_care">Long-Term Care</SelectItem>
+                      <SelectItem value="managed_service_provider">Managed Service Provider</SelectItem>
+                      <SelectItem value="medical_group">Medical Group</SelectItem>
+                      <SelectItem value="other_healthcare">Other Healthcare</SelectItem>
+                      <SelectItem value="pediatrics">Pediatrics</SelectItem>
                       <SelectItem value="pharmacy">Pharmacy</SelectItem>
+                      <SelectItem value="public_health_agency">Public Health Agency</SelectItem>
+                      <SelectItem value="rural_health_clinic">Rural Health Clinic</SelectItem>
+                      <SelectItem value="skilled_nursing">Skilled Nursing</SelectItem>
+                      <SelectItem value="specialty_clinic">Specialty Clinic</SelectItem>
                       <SelectItem value="telemedicine">Telemedicine</SelectItem>
                       <SelectItem value="tribal_health">Tribal Health</SelectItem>
-                      <SelectItem value="public_health_agency">Public Health Agency</SelectItem>
-                      <SelectItem value="healthcare_it_vendor">Healthcare IT Vendor</SelectItem>
-                      <SelectItem value="managed_service_provider">Managed Service Provider</SelectItem>
-                      <SelectItem value="healthcare_consulting">Healthcare Consulting</SelectItem>
-                      <SelectItem value="insurance_payer">Insurance / Payer</SelectItem>
-                      <SelectItem value="other_healthcare">Other Healthcare</SelectItem>
+                      <SelectItem value="urgent_care">Urgent Care</SelectItem>
                       <SelectItem value="other">Other</SelectItem>
                     </SelectContent>
                   </Select>

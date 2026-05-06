@@ -181,6 +181,43 @@ function useDashboardMetrics() {
   });
 }
 
+/**
+ * Year-over-year NRR from v_dashboard_arr_financial. The QoQ NRR
+ * fields on v_dashboard_metrics (nrr_by_customer_true_pct etc.)
+ * compare current-quarter churn against the customer base AT THE
+ * START of the same quarter — which is null/0 for any account whose
+ * first deal was inside the quarter, producing 0% NRR cards. The
+ * external Codex dashboard (and the canonical SaaS metric) uses YoY:
+ * customer base = active 365 days ago, churn = base minus active
+ * today. Source the live point from there so live NRR matches what
+ * the rest of the org sees.
+ */
+interface ArrFinancialRow {
+  arr: number | null;
+  nrr_customer_pct: number | null;
+  nrr_dollar_pct: number | null;
+  customer_base_count: number | null;
+  customer_base_arr: number | null;
+  lost_count_rolling_365: number | null;
+  lost_amount_rolling_365: number | null;
+}
+
+function useArrFinancial() {
+  return useQuery({
+    queryKey: ["team-dashboard", "arr-financial"],
+    queryFn: async (): Promise<ArrFinancialRow | null> => {
+      const { data, error } = await supabase
+        .from("v_dashboard_arr_financial")
+        .select(
+          "arr, nrr_customer_pct, nrr_dollar_pct, customer_base_count, customer_base_arr, lost_count_rolling_365, lost_amount_rolling_365",
+        )
+        .maybeSingle();
+      if (error) throw error;
+      return data as ArrFinancialRow | null;
+    },
+  });
+}
+
 function useLostCustomers() {
   return useQuery({
     queryKey: ["team-dashboard", "lost-customers"],
@@ -510,6 +547,7 @@ export function TeamDashboard() {
   );
 
   const { data: m, isLoading, error } = useDashboardMetrics();
+  const { data: arrFin } = useArrFinancial();
   const { data: lost } = useLostCustomers();
   const { data: arrTrend } = useArrTrend();
   const { data: newCustomerRows } = useNewCustomersRows(
@@ -720,17 +758,24 @@ export function TeamDashboard() {
       "nrr_by_customer_pct",
       goals.nrr_customer_pct,
     );
-    if (!m) return base;
+    // Prefer YoY NRR from v_dashboard_arr_financial (matches external
+    // Codex dashboard). Fall back to QoQ if the YoY view returns null.
+    const yoy = arrFin?.nrr_customer_pct;
+    const liveValue =
+      yoy != null
+        ? Number(yoy)
+        : num(m?.nrr_by_customer_true_pct ?? m?.nrr_by_customer_legacy_pct);
+    if (!m && yoy == null) return base;
     const live: SegmentPoint = {
       label: currentQuarter,
-      actual: num(m.nrr_by_customer_true_pct ?? m.nrr_by_customer_legacy_pct),
+      actual: liveValue,
       goal: goals.nrr_customer_pct,
     };
     const idx = base.findIndex((p) => p.label === currentQuarter);
     if (idx >= 0) base[idx] = live;
     else base.push(live);
     return base;
-  }, [snapshots, goals.nrr_customer_pct, m, currentQuarter]);
+  }, [snapshots, goals.nrr_customer_pct, m, arrFin, currentQuarter]);
 
   const nrrDollarTrendPoints = useMemo<SegmentPoint[]>(() => {
     const base = quarterlySnapshotTrend(
@@ -738,17 +783,22 @@ export function TeamDashboard() {
       "nrr_by_dollar_pct",
       goals.nrr_dollar_pct,
     );
-    if (!m) return base;
+    const yoy = arrFin?.nrr_dollar_pct;
+    const liveValue =
+      yoy != null
+        ? Number(yoy)
+        : num(m?.nrr_by_dollar_true_pct ?? m?.nrr_by_dollar_legacy_pct);
+    if (!m && yoy == null) return base;
     const live: SegmentPoint = {
       label: currentQuarter,
-      actual: num(m.nrr_by_dollar_true_pct ?? m.nrr_by_dollar_legacy_pct),
+      actual: liveValue,
       goal: goals.nrr_dollar_pct,
     };
     const idx = base.findIndex((p) => p.label === currentQuarter);
     if (idx >= 0) base[idx] = live;
     else base.push(live);
     return base;
-  }, [snapshots, goals.nrr_dollar_pct, m, currentQuarter]);
+  }, [snapshots, goals.nrr_dollar_pct, m, arrFin, currentQuarter]);
 
   // ---- Drag-and-drop card ordering ----
   // Each section (Sales / Marketing / CS) has its own sortable list
@@ -851,8 +901,16 @@ export function TeamDashboard() {
   const newCustomers = num(m.new_customers_qtd);
   const pipeline = num(m.pipeline_amount);
   const renewalsClosedAmt = num(m.renewals_amount_qtd);
-  const nrrCust = num(m.nrr_by_customer_true_pct ?? m.nrr_by_customer_legacy_pct);
-  const nrrDollar = num(m.nrr_by_dollar_true_pct ?? m.nrr_by_dollar_legacy_pct);
+  // Prefer YoY NRR from v_dashboard_arr_financial; fall back to QoQ
+  // from v_dashboard_metrics if the YoY view is null. See useArrFinancial.
+  const nrrCust =
+    arrFin?.nrr_customer_pct != null
+      ? Number(arrFin.nrr_customer_pct)
+      : num(m.nrr_by_customer_true_pct ?? m.nrr_by_customer_legacy_pct);
+  const nrrDollar =
+    arrFin?.nrr_dollar_pct != null
+      ? Number(arrFin.nrr_dollar_pct)
+      : num(m.nrr_by_dollar_true_pct ?? m.nrr_by_dollar_legacy_pct);
 
   return (
     <div className="space-y-6" data-dashboard-print-root>
@@ -1134,12 +1192,22 @@ export function TeamDashboard() {
                           }
                         >
                           <ChartLegend />
-                          <SegmentedLineChart
-                            data={renewalsClosedRunning}
-                            yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-                            tooltipFormatter={(v) => formatCurrency(v)}
-                            height={220}
-                          />
+                          {(() => {
+                            const ticks = fixedStepTicks(
+                              renewalsClosedRunning,
+                              20_000,
+                            );
+                            return (
+                              <SegmentedLineChart
+                                data={renewalsClosedRunning}
+                                yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+                                tooltipFormatter={(v) => formatCurrency(v)}
+                                height={220}
+                                yDomain={[0, ticks[ticks.length - 1]]}
+                                yTicks={ticks}
+                              />
+                            );
+                          })()}
                           {isOwner && (
                             <MonthSplitInline
                               metricKey="renewals_number"
@@ -1198,6 +1266,8 @@ export function TeamDashboard() {
                             yFormatter={(v) => `${v.toFixed(0)}%`}
                             tooltipFormatter={(v) => `${v.toFixed(1)}%`}
                             height={200}
+                            yDomain={[60, 100]}
+                            yTicks={[60, 65, 70, 75, 80, 85, 90, 95, 100]}
                           />
                         </ChartCard>
                       )}
@@ -1230,6 +1300,8 @@ export function TeamDashboard() {
                             yFormatter={(v) => `${v.toFixed(0)}%`}
                             tooltipFormatter={(v) => `${v.toFixed(1)}%`}
                             height={200}
+                            yDomain={[60, 100]}
+                            yTicks={[60, 65, 70, 75, 80, 85, 90, 95, 100]}
                           />
                         </ChartCard>
                       )}
@@ -1610,6 +1682,26 @@ export function TeamDashboard() {
 function num(v: number | null | undefined): number {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Generate Y-axis ticks at a fixed step from 0 up to the next step
+ * boundary above the max value in the data set. Used by currency
+ * running-total charts (renewals, new sales) where the user prefers
+ * evenly-spaced increments (20k for renewals) over Recharts' default
+ * auto-ticks, which can produce big jumps when data is sparse.
+ */
+function fixedStepTicks(points: SegmentPoint[], step: number): number[] {
+  if (points.length === 0) return [0];
+  let max = 0;
+  for (const p of points) {
+    if (Number.isFinite(p.actual) && p.actual > max) max = p.actual;
+    if (Number.isFinite(p.goal) && p.goal > max) max = p.goal;
+  }
+  const top = Math.max(step, Math.ceil(max / step) * step);
+  const ticks: number[] = [];
+  for (let v = 0; v <= top; v += step) ticks.push(v);
+  return ticks;
 }
 
 /**
