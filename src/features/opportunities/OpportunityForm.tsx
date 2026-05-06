@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -134,6 +134,15 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   const [editingNoteIndex, setEditingNoteIndex] = useState<number | null>(null);
   const [editNoteValue, setEditNoteValue] = useState("");
   const [pendingDeleteNoteIndex, setPendingDeleteNoteIndex] = useState<number | null>(null);
+
+  // Products editor exposes a `flushDrafts()` imperative handle so the
+  // form's onSubmit can persist any in-flight line-item edits as part of
+  // the same Save Changes click. Previously the editor auto-saved per
+  // input blur, which surprised reps: changes "stuck" even when they
+  // hit Cancel, because the row was already in the DB. Now drafts live
+  // only in the editor's local state until the form submits — Cancel
+  // simply navigates away and the drafts vanish.
+  const productsEditorRef = useRef<OpportunityProductsEditorHandle | null>(null);
 
   const preselectedAccountId = searchParams.get("account_id");
 
@@ -584,6 +593,21 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     try {
       if (isEditing && id) {
         await updateMutation.mutateAsync({ id, ...payload } as Parameters<typeof updateMutation.mutateAsync>[0]);
+        // Flush pending product line-item edits AFTER the opp-level
+        // update so the per-line recompute (inside commitDraft) has the
+        // final say on amount/subtotal. If we flushed first, the
+        // updateMutation would overwrite the recomputed totals with the
+        // form's stale amount/subtotal values.
+        try {
+          await productsEditorRef.current?.flushDrafts();
+        } catch (err) {
+          toast.error(
+            "Opportunity saved, but one or more product edits failed: " +
+              (err as Error).message,
+          );
+          // Stay on the page so the rep can retry the line edits.
+          return;
+        }
         toast.success("Opportunity updated");
         navigate(`/opportunities/${id}`);
       } else {
@@ -1602,6 +1626,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
             {isEditing && (
               <FormSection title="Products">
                 <OpportunityProductsEditor
+                  ref={productsEditorRef}
                   isEditing={isEditing}
                   opportunityId={id ?? null}
                   stagedProducts={stagedProducts}
@@ -1710,40 +1735,64 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   );
 }
 
-/* ---------- Products editor (staged for create, live for edit) ---------- */
+/* ---------- Products editor (staged for create, deferred for edit) ---------- */
 
-function OpportunityProductsEditor({
-  isEditing,
-  opportunityId,
-  stagedProducts,
-  existingProducts,
-  onOpenAdd,
-  onRemoveStaged,
-  onRemoveExisting,
-}: {
-  isEditing: boolean;
-  opportunityId: string | null;
-  stagedProducts: StagedOpportunityProduct[];
-  existingProducts: Array<{
-    id: string;
-    quantity: number;
-    unit_price: number;
-    arr_amount: number;
-    discount_percent?: number | null;
-    product?: { name?: string | null; code?: string | null } | null;
-  }>;
-  onOpenAdd: () => void;
-  onRemoveStaged: (idx: number) => void;
-  onRemoveExisting: (productRowId: string) => void;
-}) {
+export interface OpportunityProductsEditorHandle {
+  /**
+   * Persist any pending row drafts to the DB. Called by the parent
+   * form's onSubmit so line-item edits commit alongside the rest of
+   * the form's Save Changes click — not on each input's blur. Awaits
+   * every per-row mutation and surfaces the first error.
+   */
+  flushDrafts: () => Promise<void>;
+}
+
+type ExistingProductRow = {
+  id: string;
+  quantity: number;
+  unit_price: number;
+  arr_amount: number;
+  discount_percent?: number | null;
+  discount_type?: "percent" | "amount" | null;
+  product?: { name?: string | null; code?: string | null } | null;
+};
+
+const OpportunityProductsEditor = forwardRef<
+  OpportunityProductsEditorHandle,
+  {
+    isEditing: boolean;
+    opportunityId: string | null;
+    stagedProducts: StagedOpportunityProduct[];
+    existingProducts: ExistingProductRow[];
+    onOpenAdd: () => void;
+    onRemoveStaged: (idx: number) => void;
+    onRemoveExisting: (productRowId: string) => void;
+  }
+>(function OpportunityProductsEditor(
+  {
+    isEditing,
+    opportunityId,
+    stagedProducts,
+    existingProducts,
+    onOpenAdd,
+    onRemoveStaged,
+    onRemoveExisting,
+  },
+  ref,
+) {
   const updateProductMutation = useUpdateOpportunityProduct();
 
-  // Live-edit state per row, mirroring the MultiProductPicker UX:
-  // each row has Qty / Unit$ / Disc% / Total inputs you can edit
-  // freely. Changes are buffered locally and persisted on blur (so we
-  // don't fire a mutation per keystroke). Total previews live as you
-  // type, matching the "pretty" add-products dialog.
-  type RowDraft = { quantity: string; unit_price: string; discount_percent: string };
+  // Per-row draft buffer. Inputs write here on every keystroke. The
+  // drafts are NOT auto-flushed to the DB — the parent form's onSubmit
+  // calls `flushDrafts()` (via the ref above) so all line edits land in
+  // the same Save Changes click. Cancel just unmounts the component
+  // and the drafts evaporate.
+  type RowDraft = {
+    quantity: string;
+    unit_price: string;
+    discount_percent: string;
+    discount_type: "percent" | "amount";
+  };
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
 
   function getDraft(p: {
@@ -1751,18 +1800,26 @@ function OpportunityProductsEditor({
     quantity: number;
     unit_price: number;
     discount_percent?: number | null;
+    discount_type?: "percent" | "amount" | null;
   }): RowDraft {
     return (
       drafts[p.id] ?? {
         quantity: String(p.quantity ?? 1),
         unit_price: String(p.unit_price ?? 0),
         discount_percent: String(p.discount_percent ?? 0),
+        discount_type: (p.discount_type ?? "percent") as "percent" | "amount",
       }
     );
   }
 
   function setDraft(
-    p: { id: string; quantity: number; unit_price: number; discount_percent?: number | null },
+    p: {
+      id: string;
+      quantity: number;
+      unit_price: number;
+      discount_percent?: number | null;
+      discount_type?: "percent" | "amount" | null;
+    },
     patch: Partial<RowDraft>,
   ) {
     setDrafts((prev) => ({
@@ -1777,12 +1834,7 @@ function OpportunityProductsEditor({
     }));
   }
 
-  async function commitDraft(p: {
-    id: string;
-    quantity: number;
-    unit_price: number;
-    discount_percent?: number | null;
-  }) {
+  async function commitDraft(p: ExistingProductRow): Promise<void> {
     if (!opportunityId) return;
     const draft = drafts[p.id];
     if (!draft) return; // never edited
@@ -1792,14 +1844,19 @@ function OpportunityProductsEditor({
     const rawQty = Number(draft.quantity);
     const qty = Number.isFinite(rawQty) && rawQty >= 1 ? rawQty : Number(p.quantity ?? 1);
     const price = Math.max(0, Number(draft.unit_price) || 0);
-    const disc = Math.min(100, Math.max(0, Number(draft.discount_percent) || 0));
+    // The DISCOUNT input is interpreted by `discount_type`: in "percent"
+    // mode it's clamped to 0-100; in "amount" mode it's a flat dollar
+    // value with no upper clamp (other than the line subtotal — handled
+    // server-side in arr_amount calc).
+    const rawDisc = Math.max(0, Number(draft.discount_percent) || 0);
+    const dtype = draft.discount_type ?? "percent";
+    const disc = dtype === "percent" ? Math.min(100, rawDisc) : rawDisc;
     const noChange =
       qty === Number(p.quantity ?? 0) &&
       price === Number(p.unit_price ?? 0) &&
-      disc === Number(p.discount_percent ?? 0);
+      disc === Number(p.discount_percent ?? 0) &&
+      dtype === ((p.discount_type ?? "percent") as "percent" | "amount");
     if (noChange) {
-      // Discard untouched draft so it doesn't keep showing a "modified"
-      // tint forever.
       setDrafts((prev) => {
         const next = { ...prev };
         delete next[p.id];
@@ -1807,35 +1864,62 @@ function OpportunityProductsEditor({
       });
       return;
     }
-    try {
-      await updateProductMutation.mutateAsync({
-        id: p.id,
-        opportunity_id: opportunityId,
-        patch: { quantity: qty, unit_price: price, discount_percent: disc },
-      });
-      // Drop the draft once persisted; next render reads from the
-      // refreshed query.
-      setDrafts((prev) => {
-        const next = { ...prev };
-        delete next[p.id];
-        return next;
-      });
-      toast.success("Saved");
-    } catch (err) {
-      toast.error("Failed to update: " + errorMessage(err));
-    }
+    await updateProductMutation.mutateAsync({
+      id: p.id,
+      opportunity_id: opportunityId,
+      patch: {
+        quantity: qty,
+        unit_price: price,
+        discount_percent: disc,
+        discount_type: dtype,
+      },
+    });
+    setDrafts((prev) => {
+      const next = { ...prev };
+      delete next[p.id];
+      return next;
+    });
   }
 
-  // EDIT mode rows render as live-editable inputs (matching the "pretty"
-  // add-products picker). CREATE mode rows are read-only previews of
-  // staged products that will be flushed on Create.
+  useImperativeHandle(
+    ref,
+    () => ({
+      async flushDrafts() {
+        // Walk the current drafts and commit each. Sequential (not
+        // Promise.all) so recompute_opportunity_totals fires per row in
+        // a deterministic order. If any row fails we rethrow — the
+        // parent surfaces the error and stays on the page.
+        const ids = Object.keys(drafts);
+        for (const id of ids) {
+          const original = existingProducts.find((p) => p.id === id);
+          if (!original) continue;
+          await commitDraft(original);
+        }
+      },
+    }),
+    // Re-bind the handle whenever drafts or existingProducts change so
+    // the closure always sees the latest values when the parent calls
+    // flushDrafts().
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [drafts, existingProducts],
+  );
+
+  // EDIT mode rows render as editable inputs that buffer in `drafts`
+  // until the parent form's Save Changes click invokes `flushDrafts()`.
+  // CREATE mode rows are read-only previews of staged products that
+  // get flushed on Create.
   const editRows = isEditing
     ? existingProducts.map((p) => {
         const draft = getDraft(p);
         const previewQty = Number(draft.quantity) || 0;
         const previewPrice = Number(draft.unit_price) || 0;
         const previewDisc = Number(draft.discount_percent) || 0;
-        const previewArr = previewQty * previewPrice * (1 - previewDisc / 100);
+        // Match the API's arr_amount calc: percent vs flat-amount
+        // discount means the preview total has to honor the type.
+        const previewArr =
+          draft.discount_type === "amount"
+            ? Math.max(0, previewQty * previewPrice - previewDisc)
+            : previewQty * previewPrice * (1 - previewDisc / 100);
         const dirty = !!drafts[p.id];
         return {
           key: p.id,
@@ -1892,7 +1976,7 @@ function OpportunityProductsEditor({
                 <TableHead>Code</TableHead>
                 <TableHead className="text-right w-20">Qty</TableHead>
                 <TableHead className="text-right w-28">Unit $</TableHead>
-                <TableHead className="text-right w-20">Disc %</TableHead>
+                <TableHead className="text-right w-32">Discount</TableHead>
                 <TableHead className="text-right">Total</TableHead>
                 <TableHead className="w-16 text-right">{isEditing ? "" : ""}</TableHead>
               </TableRow>
@@ -1910,7 +1994,6 @@ function OpportunityProductsEditor({
                           step="1"
                           value={r.draft.quantity}
                           onChange={(e) => setDraft(r.original, { quantity: e.target.value })}
-                          onBlur={() => commitDraft(r.original)}
                           className="h-8 w-20 text-right ml-auto"
                         />
                       </TableCell>
@@ -1921,21 +2004,41 @@ function OpportunityProductsEditor({
                           step="0.01"
                           value={r.draft.unit_price}
                           onChange={(e) => setDraft(r.original, { unit_price: e.target.value })}
-                          onBlur={() => commitDraft(r.original)}
                           className="h-8 w-28 text-right ml-auto"
                         />
                       </TableCell>
                       <TableCell className="text-right">
-                        <Input
-                          type="number"
-                          min={0}
-                          max={100}
-                          step="1"
-                          value={r.draft.discount_percent}
-                          onChange={(e) => setDraft(r.original, { discount_percent: e.target.value })}
-                          onBlur={() => commitDraft(r.original)}
-                          className="h-8 w-20 text-right ml-auto"
-                        />
+                        {/* $/% type selector + value input. Matches the
+                            Add Products dialog so reps can switch a line
+                            from a percent discount to a flat dollar
+                            amount (or vice versa) without removing and
+                            re-adding the product. */}
+                        <div className="flex items-center justify-end gap-1">
+                          <select
+                            value={r.draft.discount_type}
+                            onChange={(e) =>
+                              setDraft(r.original, {
+                                discount_type: e.target.value as "percent" | "amount",
+                              })
+                            }
+                            className="h-8 border rounded text-xs px-1 bg-background"
+                            aria-label="Discount type"
+                          >
+                            <option value="percent">%</option>
+                            <option value="amount">$</option>
+                          </select>
+                          <Input
+                            type="number"
+                            min={0}
+                            max={r.draft.discount_type === "percent" ? 100 : undefined}
+                            step={r.draft.discount_type === "percent" ? "1" : "0.01"}
+                            value={r.draft.discount_percent}
+                            onChange={(e) =>
+                              setDraft(r.original, { discount_percent: e.target.value })
+                            }
+                            className="h-8 w-20 text-right"
+                          />
+                        </div>
                       </TableCell>
                       <TableCell className="text-right font-medium">
                         {formatCurrencyDetailed(r.previewArr)}
@@ -1988,14 +2091,15 @@ function OpportunityProductsEditor({
           </Table>
           {isEditing && (
             <p className="px-3 py-2 text-xs text-muted-foreground border-t bg-muted/20">
-              Edits save automatically when you tab away or click out of a field.
+              Edits are saved when you click <strong>Save Changes</strong>. Click
+              Cancel to discard.
             </p>
           )}
         </div>
       )}
     </div>
   );
-}
+});
 
 /* ---------- Custom Field Input ---------- */
 
