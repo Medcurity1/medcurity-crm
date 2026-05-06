@@ -315,16 +315,24 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
               </div>
             ) : (
               <div className="space-y-2">
-                <Label htmlFor="convert_account_name">New Account Name *</Label>
-                <Input
-                  id="convert_account_name"
-                  value={accountName}
-                  onChange={(e) => setAccountName(e.target.value)}
-                  placeholder="Account name"
-                />
+                <Label>New Account Name</Label>
+                {/* Read-only on purpose. We pull the name straight from
+                    `lead.company` (or the contact name as a last resort)
+                    so reps can't free-type a new account name here and
+                    accidentally introduce a typo'd duplicate. If the
+                    lead's company is wrong, fix the lead first, then
+                    convert. */}
+                <div className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 bg-muted/30">
+                  <span className="font-medium truncate">{accountName}</span>
+                  <Badge variant="outline" className="text-xs shrink-0">
+                    From lead
+                  </Badge>
+                </div>
                 <p className="text-xs text-muted-foreground">
-                  A new account will be created with this name. Switch to "Existing account"
-                  if this company is already in the CRM.
+                  A new account will be created with this name. To change it,
+                  cancel, edit the lead's Company, then re-open Convert. Or
+                  switch to "Existing account" to attach this lead to an
+                  account that's already in the CRM.
                 </p>
               </div>
             )}

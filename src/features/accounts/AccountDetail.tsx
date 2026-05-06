@@ -422,6 +422,11 @@ export function AccountDetail() {
           );
         }}
         inlineEditExcluded={[
+          // Account NAME: only editable through the main Edit button.
+          // Inline-edit was being bumped accidentally and the name is
+          // referenced everywhere (opps, contacts, search) — silent
+          // renames create confusion. Force the explicit edit flow.
+          "name",
           // FK / lookup fields
           "owner_user_id",
           "parent_account_id",
