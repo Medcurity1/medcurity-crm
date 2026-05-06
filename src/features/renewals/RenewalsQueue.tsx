@@ -100,16 +100,29 @@ interface SortState<T extends string> {
   dir: SortDir;
 }
 
+// Default sort applied when the user hasn't picked one (or has cleared it
+// via the third click). Upcoming defaults to effective close ascending so
+// pushing expected-close out drops the row down the queue.
+const DEFAULT_UPCOMING_SORT: SortState<UpcomingSortCol> = {
+  col: "expected_close_date",
+  dir: "asc",
+};
+const DEFAULT_CLOSED_SORT: SortState<ClosedSortCol> = {
+  col: "close_date",
+  dir: "desc",
+};
+
+// User sort is null when no explicit sort is active — the default applies.
 function readSortFromStorage<T extends string>(
   key: string,
-  fallback: SortState<T>,
   validCols: readonly T[],
-): SortState<T> {
-  if (typeof window === "undefined") return fallback;
+): SortState<T> | null {
+  if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(key);
-    if (!raw) return fallback;
+    if (!raw) return null;
     const parsed = JSON.parse(raw);
+    if (parsed === null) return null;
     if (
       parsed &&
       typeof parsed === "object" &&
@@ -121,7 +134,7 @@ function readSortFromStorage<T extends string>(
   } catch {
     /* ignore */
   }
-  return fallback;
+  return null;
 }
 
 type RenewalRow = {
@@ -351,8 +364,10 @@ function effectiveCloseValue(r: RenewalRow): number | null {
 
 function sortUpcoming(
   rows: RenewalRow[],
-  sort: SortState<UpcomingSortCol>,
+  userSort: SortState<UpcomingSortCol> | null,
 ): RenewalRow[] {
+  // Null = no explicit user sort, fall back to the default ordering.
+  const sort = userSort ?? DEFAULT_UPCOMING_SORT;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const sign = sort.dir === "asc" ? 1 : -1;
@@ -395,8 +410,9 @@ function sortUpcoming(
 
 function sortClosed(
   rows: RenewalRow[],
-  sort: SortState<ClosedSortCol>,
+  userSort: SortState<ClosedSortCol> | null,
 ): RenewalRow[] {
+  const sort = userSort ?? DEFAULT_CLOSED_SORT;
   const sign = sort.dir === "asc" ? 1 : -1;
   const get = (r: RenewalRow): unknown => {
     switch (sort.col) {
@@ -429,17 +445,23 @@ function SortableHeader<T extends string>({
   align,
 }: {
   col: T;
-  state: SortState<T>;
+  // Null = no explicit user sort. The header still renders, just inactive.
+  state: SortState<T> | null;
   onClick: (col: T) => void;
   children: ReactNode;
   align?: "left" | "right";
 }) {
-  const active = state.col === col;
-  const Icon = active ? (state.dir === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
+  const active = state !== null && state.col === col;
+  const Icon = active ? (state!.dir === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
   return (
     <button
       type="button"
       onClick={() => onClick(col)}
+      title={
+        active
+          ? "Click again to " + (state!.dir === "asc" ? "reverse" : "clear sort")
+          : "Click to sort"
+      }
       className={cn(
         "inline-flex items-center gap-1 hover:text-foreground transition-colors",
         align === "right" && "flex-row-reverse",
@@ -778,69 +800,74 @@ export function RenewalsQueue() {
     }
   }
 
-  // Sort state per tab. Default upcoming order is by effective close
-  // (expected_close_date ?? contract_end_date) ascending — when a rep
-  // pushes the expected close out, the row drops down naturally.
-  const [upcomingSort, setUpcomingSort] = useState<SortState<UpcomingSortCol>>(
+  // Sort state per tab. `null` = no explicit user sort, fall back to the
+  // default (effective close asc for upcoming, close_date desc for closed).
+  // Click cycle on a header: asc → desc → cleared (back to default).
+  const [upcomingSort, setUpcomingSort] = useState<SortState<UpcomingSortCol> | null>(
     () =>
-      readSortFromStorage<UpcomingSortCol>(
-        SORT_LS_KEY_UPCOMING,
-        { col: "expected_close_date", dir: "asc" },
-        [
-          "owner",
-          "account",
-          "name",
-          "contract_end_date",
-          "close_date",
-          "expected_close_date",
-          "amount",
-          "lead_source",
-          "days",
-        ] as const,
-      ),
+      readSortFromStorage<UpcomingSortCol>(SORT_LS_KEY_UPCOMING, [
+        "owner",
+        "account",
+        "name",
+        "contract_end_date",
+        "close_date",
+        "expected_close_date",
+        "amount",
+        "lead_source",
+        "days",
+      ] as const),
   );
-  const [closedSort, setClosedSort] = useState<SortState<ClosedSortCol>>(
+  const [closedSort, setClosedSort] = useState<SortState<ClosedSortCol> | null>(
     () =>
-      readSortFromStorage<ClosedSortCol>(
-        SORT_LS_KEY_CLOSED,
-        { col: "close_date", dir: "desc" },
-        [
-          "owner",
-          "account",
-          "name",
-          "close_date",
-          "expected_close_date",
-          "contract_end_date",
-          "amount",
-          "lead_source",
-        ] as const,
-      ),
+      readSortFromStorage<ClosedSortCol>(SORT_LS_KEY_CLOSED, [
+        "owner",
+        "account",
+        "name",
+        "close_date",
+        "expected_close_date",
+        "contract_end_date",
+        "amount",
+        "lead_source",
+      ] as const),
   );
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(SORT_LS_KEY_UPCOMING, JSON.stringify(upcomingSort));
+      if (upcomingSort === null) {
+        window.localStorage.removeItem(SORT_LS_KEY_UPCOMING);
+      } else {
+        window.localStorage.setItem(SORT_LS_KEY_UPCOMING, JSON.stringify(upcomingSort));
+      }
     } catch {
       /* ignore */
     }
   }, [upcomingSort]);
   useEffect(() => {
     try {
-      window.localStorage.setItem(SORT_LS_KEY_CLOSED, JSON.stringify(closedSort));
+      if (closedSort === null) {
+        window.localStorage.removeItem(SORT_LS_KEY_CLOSED);
+      } else {
+        window.localStorage.setItem(SORT_LS_KEY_CLOSED, JSON.stringify(closedSort));
+      }
     } catch {
       /* ignore */
     }
   }, [closedSort]);
 
+  // Three-state toggle: not-sorted → asc → desc → not-sorted.
+  // Clicking a different column always starts at asc.
   function toggleSort<T extends string>(
     col: T,
-    state: SortState<T>,
-    setState: (s: SortState<T>) => void,
+    state: SortState<T> | null,
+    setState: (s: SortState<T> | null) => void,
   ) {
-    if (state.col === col) {
-      setState({ col, dir: state.dir === "asc" ? "desc" : "asc" });
-    } else {
+    if (state === null || state.col !== col) {
       setState({ col, dir: "asc" });
+    } else if (state.dir === "asc") {
+      setState({ col, dir: "desc" });
+    } else {
+      // Was desc → clear back to default
+      setState(null);
     }
   }
   function setTab(v: string) {
@@ -888,8 +915,8 @@ export function RenewalsQueue() {
     preset,
     customRange.start,
     customRange.end,
-    upcomingSort.col,
-    upcomingSort.dir,
+    upcomingSort?.col ?? null,
+    upcomingSort?.dir ?? null,
   ]);
 
   const closedWonFiltered = useMemo(() => {
@@ -904,8 +931,8 @@ export function RenewalsQueue() {
     preset,
     customRange.start,
     customRange.end,
-    closedSort.col,
-    closedSort.dir,
+    closedSort?.col ?? null,
+    closedSort?.dir ?? null,
   ]);
 
   // Month buckets reflect whatever filter window is active, so reps can
