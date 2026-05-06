@@ -848,6 +848,7 @@ export function TeamDashboard() {
                         editable={isOwner}
                         hint="Sum of closed-won amount in the trailing 365 days (v_arr_rolling_365)."
                         to="/reports?tab=standard"
+                        showGoal={false}
                       />
                       {arrPoints.length > 0 && (
                         <ChartCard title="ARR by Quarter">
@@ -1914,6 +1915,7 @@ function KpiCard({
   editable,
   hint,
   to,
+  showGoal = true,
 }: {
   label: string;
   value: string;
@@ -1924,6 +1926,9 @@ function KpiCard({
   editable: boolean;
   hint?: string;
   to?: string;
+  /** When false, hide the goal text, progress bar, and red/yellow/green
+   *  status dot. Used by ARR which has no target. */
+  showGoal?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<string>(String(goal));
@@ -1960,19 +1965,21 @@ function KpiCard({
         <div>
           <div className="flex items-center justify-between gap-1">
             <div className="flex items-center gap-1.5 min-w-0">
-              <span
-                aria-hidden="true"
-                title={
-                  status === "green"
-                    ? "≥ 90% of goal"
-                    : status === "yellow"
-                    ? "50–89% of goal"
-                    : status === "red"
-                    ? "< 50% of goal"
-                    : "No goal set"
-                }
-                className={`inline-block h-2 w-2 rounded-full ${dotClass} shrink-0`}
-              />
+              {showGoal && (
+                <span
+                  aria-hidden="true"
+                  title={
+                    status === "green"
+                      ? "≥ 90% of goal"
+                      : status === "yellow"
+                      ? "50–89% of goal"
+                      : status === "red"
+                      ? "< 50% of goal"
+                      : "No goal set"
+                  }
+                  className={`inline-block h-2 w-2 rounded-full ${dotClass} shrink-0`}
+                />
+              )}
               <p className="text-xs text-muted-foreground font-medium truncate">
                 {label}
               </p>
@@ -1989,70 +1996,74 @@ function KpiCard({
           </div>
           <p className="text-2xl font-semibold mt-0.5">{value}</p>
         </div>
-        <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-          <div
-            className={`h-full transition-all ${barClass}`}
-            style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
-          />
-        </div>
-        <div className="flex items-center justify-between gap-1">
-          {editing ? (
-            <div className="flex items-center gap-1 flex-1">
-              <Input
-                type="number"
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                className="h-6 text-[11px] px-1.5"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") commit();
-                  if (e.key === "Escape") {
-                    setDraft(String(goal));
-                    setEditing(false);
-                  }
-                }}
-                autoFocus
-              />
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-6 w-6 p-0"
-                onClick={commit}
-              >
-                <Check className="h-3 w-3" />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-6 w-6 p-0"
-                onClick={() => {
-                  setDraft(String(goal));
-                  setEditing(false);
-                }}
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </div>
-          ) : (
-            <>
-              <p className="text-[10px] text-muted-foreground">
-                Goal {formatGoal(goal)}
-              </p>
-              {editable && (
-                <button
-                  type="button"
-                  className="text-muted-foreground hover:text-foreground"
+        {showGoal && (
+          <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+            <div
+              className={`h-full transition-all ${barClass}`}
+              style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
+            />
+          </div>
+        )}
+        {showGoal && (
+          <div className="flex items-center justify-between gap-1">
+            {editing ? (
+              <div className="flex items-center gap-1 flex-1">
+                <Input
+                  type="number"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  className="h-6 text-[11px] px-1.5"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commit();
+                    if (e.key === "Escape") {
+                      setDraft(String(goal));
+                      setEditing(false);
+                    }
+                  }}
+                  autoFocus
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 w-6 p-0"
+                  onClick={commit}
+                >
+                  <Check className="h-3 w-3" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 w-6 p-0"
                   onClick={() => {
                     setDraft(String(goal));
-                    setEditing(true);
+                    setEditing(false);
                   }}
-                  title="Edit goal"
                 >
-                  <Pencil className="h-3 w-3" />
-                </button>
-              )}
-            </>
-          )}
-        </div>
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+            ) : (
+              <>
+                <p className="text-[10px] text-muted-foreground">
+                  Goal {formatGoal(goal)}
+                </p>
+                {editable && (
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      setDraft(String(goal));
+                      setEditing(true);
+                    }}
+                    title="Edit goal"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        )}
         {hint && (
           <p className="text-[10px] text-muted-foreground flex items-start gap-1">
             <Info className="h-3 w-3 mt-0.5 shrink-0" />
@@ -2902,6 +2913,7 @@ function SnapshotDetailView({
               formatGoal={formatCurrency}
               onGoalChange={noop}
               editable={false}
+              showGoal={false}
             />
             {arrTrendPoints.length > 0 && (
               <ChartCard title="ARR by Quarter">
