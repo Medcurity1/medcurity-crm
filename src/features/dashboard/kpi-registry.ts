@@ -90,6 +90,17 @@ function getMonthStart(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 }
 
+// Local-timezone YYYY-MM-DD. Used for KPI deep-link URLs so the
+// list-page filter ("Closed on/after …") matches the user's local
+// month/quarter boundary instead of UTC's. Naive `.toISOString()`
+// would shift west-of-UTC users back a day.
+function localISODate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 // ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
@@ -136,7 +147,8 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "sales",
     icon: Trophy,
     format: "number",
-    link: () => "/opportunities?owner=mine&stage=closed_won",
+    link: () =>
+      `/opportunities?owner=mine&stage=closed_won&closed_after=${localISODate(getQuarterStart(new Date()))}`,
     query: async (supabase, userId) => {
       const quarterStart = getQuarterStart(new Date());
       const { count } = await supabase
@@ -155,11 +167,16 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "sales",
     icon: CalendarClock,
     format: "number",
-    // Best-effort link: filter to my open opps. The list page doesn't
-    // currently have an expected_close_date date-window filter, so the
-    // landing view is broader than the count. Improving the list page
-    // to honor a `?expected_within=30` param would tighten this up.
-    link: () => `/opportunities?owner=mine&stage=${OPEN_STAGES}`,
+    // Land on my open opps with expected_close_date in the same
+    // 30-day forward window the card counts. Without expected_after/
+    // expected_before, the list looked identical to "My Open Pipeline"
+    // and showed all open opps regardless of expected close.
+    link: () => {
+      const today = new Date();
+      const thirty = new Date(today);
+      thirty.setDate(thirty.getDate() + 30);
+      return `/opportunities?owner=mine&stage=${OPEN_STAGES}&expected_after=${localISODate(today)}&expected_before=${localISODate(thirty)}`;
+    },
     query: async (supabase, userId) => {
       const now = new Date();
       const thirtyDaysOut = new Date(now);
@@ -373,11 +390,8 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     // count on the card. Without `closed_after`, the link landed on
     // every closed-won opp ever and showed e.g. $4M vs the card's
     // $3,600.
-    link: () => {
-      const monthStart = getMonthStart(new Date());
-      const iso = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, "0")}-${String(monthStart.getDate()).padStart(2, "0")}`;
-      return `/opportunities?stage=closed_won&closed_after=${iso}`;
-    },
+    link: () =>
+      `/opportunities?stage=closed_won&closed_after=${localISODate(getMonthStart(new Date()))}`,
     query: async (supabase) => {
       const monthStart = getMonthStart(new Date());
       const { data } = await supabase

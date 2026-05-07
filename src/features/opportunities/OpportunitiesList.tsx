@@ -55,6 +55,11 @@ export function OpportunitiesList() {
   // <month-start>) so the list view matches the count on the card.
   const [closedAfter, setClosedAfter] = useUrlState("closed_after", "");
   const [closedBefore, setClosedBefore] = useUrlState("closed_before", "");
+  // Same idea against expected_close_date — used by the "Upcoming
+  // Close Dates" KPI deep-link so the list matches the 30-day window
+  // the card is counting.
+  const [expectedAfter, setExpectedAfter] = useUrlState("expected_after", "");
+  const [expectedBefore, setExpectedBefore] = useUrlState("expected_before", "");
   const [page, setPage] = useUrlNumberState("page", 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sort, setSortState] = useUrlSortState("sort");
@@ -77,6 +82,8 @@ export function OpportunitiesList() {
         : undefined,
     closeAfter: closedAfter || undefined,
     closeBefore: closedBefore || undefined,
+    expectedAfter: expectedAfter || undefined,
+    expectedBefore: expectedBefore || undefined,
   };
 
   const { data: result, isLoading } = useOpportunities({
@@ -262,7 +269,7 @@ export function OpportunitiesList() {
               the constraint with one click. Without this, the list
               looks like it's narrower than the user's other filters
               for no obvious reason. */}
-          {(closedAfter || closedBefore) && (
+          {(closedAfter || closedBefore || expectedAfter || expectedBefore) && (
             <div className="flex flex-wrap items-center gap-2 mb-2">
               {closedAfter && (
                 <button
@@ -281,6 +288,26 @@ export function OpportunitiesList() {
                   className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-1 text-xs hover:bg-muted/70"
                 >
                   <span>Closed on/before {closedBefore}</span>
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+              {expectedAfter && (
+                <button
+                  type="button"
+                  onClick={() => setExpectedAfter("")}
+                  className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-1 text-xs hover:bg-muted/70"
+                >
+                  <span>Expected on/after {expectedAfter}</span>
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+              {expectedBefore && (
+                <button
+                  type="button"
+                  onClick={() => setExpectedBefore("")}
+                  className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-1 text-xs hover:bg-muted/70"
+                >
+                  <span>Expected on/before {expectedBefore}</span>
                   <X className="h-3 w-3" />
                 </button>
               )}

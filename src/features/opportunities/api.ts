@@ -16,6 +16,12 @@ interface OppFilters {
   closeAfter?: string;
   /** ISO date. Filters close_date <= this value. */
   closeBefore?: string;
+  /** ISO date. Filters expected_close_date >= this value. Used by
+   *  the "Upcoming Close Dates" KPI to land on a 30-day forecast
+   *  window matching the card's count. */
+  expectedAfter?: string;
+  /** ISO date. Filters expected_close_date <= this value. */
+  expectedBefore?: string;
   page?: number;
   pageSize?: number;
   sortColumn?: string | null;
@@ -129,6 +135,8 @@ export function useOpportunities(filters?: OppFilters) {
       else if (filters?.verified === "false") query = query.eq("verified", false);
       if (filters?.closeAfter) query = query.gte("close_date", filters.closeAfter);
       if (filters?.closeBefore) query = query.lte("close_date", filters.closeBefore);
+      if (filters?.expectedAfter) query = query.gte("expected_close_date", filters.expectedAfter);
+      if (filters?.expectedBefore) query = query.lte("expected_close_date", filters.expectedBefore);
 
       const { data, error, count } = await query;
       if (error) throw error;
@@ -232,6 +240,8 @@ export function useOpportunitiesTotals(filters?: Omit<OppFilters, "page" | "page
         else if (filters?.verified === "false") q = q.eq("verified", false);
         if (filters?.closeAfter) q = q.gte("close_date", filters.closeAfter);
         if (filters?.closeBefore) q = q.lte("close_date", filters.closeBefore);
+        if (filters?.expectedAfter) q = q.gte("expected_close_date", filters.expectedAfter);
+        if (filters?.expectedBefore) q = q.lte("expected_close_date", filters.expectedBefore);
 
         const { data, error } = await q.range(from, from + pageSize - 1);
         if (error) throw error;
