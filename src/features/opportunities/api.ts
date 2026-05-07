@@ -10,6 +10,12 @@ interface OppFilters {
   account_id?: string;
   ownerId?: string | "mine" | string[];
   verified?: "true" | "false";
+  /** ISO date (YYYY-MM-DD). Filters close_date >= this value.
+   *  Used by KPI deep-links (e.g. "Team Closed Won This Month") to
+   *  scope the list to the same window the card is counting. */
+  closeAfter?: string;
+  /** ISO date. Filters close_date <= this value. */
+  closeBefore?: string;
   page?: number;
   pageSize?: number;
   sortColumn?: string | null;
@@ -121,6 +127,8 @@ export function useOpportunities(filters?: OppFilters) {
       }
       if (filters?.verified === "true") query = query.eq("verified", true);
       else if (filters?.verified === "false") query = query.eq("verified", false);
+      if (filters?.closeAfter) query = query.gte("close_date", filters.closeAfter);
+      if (filters?.closeBefore) query = query.lte("close_date", filters.closeBefore);
 
       const { data, error, count } = await query;
       if (error) throw error;
@@ -222,6 +230,8 @@ export function useOpportunitiesTotals(filters?: Omit<OppFilters, "page" | "page
         else if (singleOwnerId) q = q.eq("owner_user_id", singleOwnerId);
         if (filters?.verified === "true") q = q.eq("verified", true);
         else if (filters?.verified === "false") q = q.eq("verified", false);
+        if (filters?.closeAfter) q = q.gte("close_date", filters.closeAfter);
+        if (filters?.closeBefore) q = q.lte("close_date", filters.closeBefore);
 
         const { data, error } = await q.range(from, from + pageSize - 1);
         if (error) throw error;

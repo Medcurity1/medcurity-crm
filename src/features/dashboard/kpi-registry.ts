@@ -368,11 +368,16 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     icon: Trophy,
     format: "currency",
     requiredRole: ["admin"],
-    // Lands on all closed-won deals; the opp list doesn't currently
-    // have a date-window filter, so the visible set is broader than
-    // the count. Adding a `?closed_within=month` filter to the list
-    // page would tighten this match.
-    link: "/opportunities?stage=closed_won",
+    // Filter the list to closed-won AND close_date >= start of this
+    // calendar month, so the totals strip on the opp list matches the
+    // count on the card. Without `closed_after`, the link landed on
+    // every closed-won opp ever and showed e.g. $4M vs the card's
+    // $3,600.
+    link: () => {
+      const monthStart = getMonthStart(new Date());
+      const iso = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, "0")}-${String(monthStart.getDate()).padStart(2, "0")}`;
+      return `/opportunities?stage=closed_won&closed_after=${iso}`;
+    },
     query: async (supabase) => {
       const monthStart = getMonthStart(new Date());
       const { data } = await supabase

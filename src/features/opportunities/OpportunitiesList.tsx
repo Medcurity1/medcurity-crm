@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState, useUrlArrayState, useUrlSortState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Target, Plus, Search } from "lucide-react";
+import { Target, Plus, Search, X } from "lucide-react";
 import { useOpportunities, useOpportunitiesTotals, useArchiveOpportunity, useBulkUpdateOwner, useBulkDeleteOpportunities } from "./api";
 import { toast } from "sonner";
 import { useUsers } from "@/features/accounts/api";
@@ -50,6 +50,11 @@ export function OpportunitiesList() {
   const [kindFilter, setKindFilter] = useUrlArrayState("kind");
   const [ownerFilter, setOwnerFilter] = useUrlArrayState("owner");
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
+  // Date-range filter: ISO YYYY-MM-DD on close_date. Set by KPI
+  // deep-links (e.g. "Team Closed Won This Month" → ?closed_after=
+  // <month-start>) so the list view matches the count on the card.
+  const [closedAfter, setClosedAfter] = useUrlState("closed_after", "");
+  const [closedBefore, setClosedBefore] = useUrlState("closed_before", "");
   const [page, setPage] = useUrlNumberState("page", 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sort, setSortState] = useUrlSortState("sort");
@@ -70,6 +75,8 @@ export function OpportunitiesList() {
         : verifiedFilter === "unverified"
         ? ("false" as const)
         : undefined,
+    closeAfter: closedAfter || undefined,
+    closeBefore: closedBefore || undefined,
   };
 
   const { data: result, isLoading } = useOpportunities({
@@ -249,6 +256,36 @@ export function OpportunitiesList() {
         />
       ) : (
         <>
+          {/* Active date-range chips. Surfaced when a KPI deep-link
+              (or manual URL edit) sets `closed_after` / `closed_before`
+              so the user can SEE why the list is filtered and clear
+              the constraint with one click. Without this, the list
+              looks like it's narrower than the user's other filters
+              for no obvious reason. */}
+          {(closedAfter || closedBefore) && (
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              {closedAfter && (
+                <button
+                  type="button"
+                  onClick={() => setClosedAfter("")}
+                  className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-1 text-xs hover:bg-muted/70"
+                >
+                  <span>Closed on/after {closedAfter}</span>
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+              {closedBefore && (
+                <button
+                  type="button"
+                  onClick={() => setClosedBefore("")}
+                  className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-1 text-xs hover:bg-muted/70"
+                >
+                  <span>Closed on/before {closedBefore}</span>
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          )}
           {/* Totals across the full filtered set (not just the visible
               page). Lets the user cross-check a dashboard KPI by
               landing here with the same filters and reading the sum
