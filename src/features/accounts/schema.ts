@@ -7,14 +7,36 @@ export const accountSchema = z.object({
   owner_user_id: z.string().uuid().nullable().optional(),
   website: z.string().url("Must be a valid URL").optional().or(z.literal("")),
   industry: z.string().optional().or(z.literal("")),
+  // Mirrors the public.industry_category Postgres enum. Keep this list
+  // in sync with supabase/migrations/20260418000001_field_decisions_april_18.sql
+  // and 20260506000002_industry_category_expand.sql. If the DB has a
+  // value the Zod schema doesn't, opening an existing account silently
+  // fails the submit handler (handleSubmit swallows the rejection and
+  // the field has no visible error slot), which looks to the user like
+  // "Save Changes does nothing".
   industry_category: z
     .enum([
+      // Original 25 (April 18)
       "hospital","medical_group","fqhc","rural_health_clinic","skilled_nursing",
       "long_term_care","home_health","hospice","behavioral_health","dental",
       "pediatrics","specialty_clinic","urgent_care","imaging_center","lab_services",
       "pharmacy","telemedicine","tribal_health","public_health_agency",
       "healthcare_it_vendor","managed_service_provider","healthcare_consulting",
       "insurance_payer","other_healthcare","other",
+      // Added May 6 (industry_category_expand)
+      "rural_hospital","community_health_center","university_hospital",
+      "medical_practice","multi_specialty","primary_care","primary_care_association",
+      "internal_medicine","family_medicine","women_health","group_purchasing_organization",
+      "cardiology","dermatology","oncology","urology","ophthalmology","audiology",
+      "orthopedics","rheumatology","gastroenterology","general_surgery","neurology",
+      "endocrinology","nephrology","pulmonology","chiropractic","optometry","podiatry",
+      "physical_therapy","pain_management","ent_otolaryngology","radiology",
+      "anesthesiology","emergency_medicine","plastic_surgery","allergy_immunology",
+      "psychiatry","mental_health","vascular","reproductive_medicine","sleep_medicine",
+      "geriatrics","rehabilitation","naturopathy","colon_rectal",
+      "pharmaceuticals","medical_device","non_profit","business_associate",
+      "direct_care","consulting","accounting","technology","higher_education",
+      "association","government",
     ])
     .optional().nullable().or(z.literal("")),
   account_type: z.string().optional().or(z.literal("")),
