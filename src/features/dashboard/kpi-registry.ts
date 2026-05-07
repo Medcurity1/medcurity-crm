@@ -336,6 +336,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     icon: Building2,
     format: "number",
     requiredRole: ["admin"],
+    link: "/accounts",
     query: async (supabase) => {
       const { count } = await supabase
         .from("accounts")
@@ -351,6 +352,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     icon: Users,
     format: "number",
     requiredRole: ["admin"],
+    link: "/contacts",
     query: async (supabase) => {
       const { count } = await supabase
         .from("contacts")
@@ -366,6 +368,11 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     icon: Trophy,
     format: "currency",
     requiredRole: ["admin"],
+    // Lands on all closed-won deals; the opp list doesn't currently
+    // have a date-window filter, so the visible set is broader than
+    // the count. Adding a `?closed_within=month` filter to the list
+    // page would tighten this match.
+    link: "/opportunities?stage=closed_won",
     query: async (supabase) => {
       const monthStart = getMonthStart(new Date());
       const { data } = await supabase

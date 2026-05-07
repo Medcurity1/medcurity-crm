@@ -4,7 +4,7 @@ import { useUrlState, useUrlNumberState, useUrlArrayState, useUrlSortState } fro
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Target, Plus, Search } from "lucide-react";
-import { useOpportunities, useArchiveOpportunity, useBulkUpdateOwner, useBulkDeleteOpportunities } from "./api";
+import { useOpportunities, useOpportunitiesTotals, useArchiveOpportunity, useBulkUpdateOwner, useBulkDeleteOpportunities } from "./api";
 import { toast } from "sonner";
 import { useUsers } from "@/features/accounts/api";
 import { PageHeader } from "@/components/PageHeader";
@@ -54,7 +54,11 @@ export function OpportunitiesList() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sort, setSortState] = useUrlSortState("sort");
 
-  const { data: result, isLoading } = useOpportunities({
+  // Totals query: same filter set as the visible list, but no
+  // pagination/sort. Lets the user verify dashboard KPI numbers
+  // against the same filtered list (e.g. clicking "My Open Pipeline"
+  // should show a sum that matches the card).
+  const totalsFilters = {
     search: search || undefined,
     stage: stageFilter.length ? stageFilter : undefined,
     team: teamFilter.length ? teamFilter : undefined,
@@ -62,15 +66,20 @@ export function OpportunitiesList() {
     ownerId: ownerFilter.length > 0 ? ownerFilter : undefined,
     verified:
       verifiedFilter === "verified"
-        ? "true"
+        ? ("true" as const)
         : verifiedFilter === "unverified"
-        ? "false"
+        ? ("false" as const)
         : undefined,
+  };
+
+  const { data: result, isLoading } = useOpportunities({
+    ...totalsFilters,
     page,
     pageSize: PAGE_SIZE,
     sortColumn: sort.column,
     sortDirection: sort.direction,
   });
+  const { data: totals } = useOpportunitiesTotals(totalsFilters);
   const { data: users } = useUsers();
   const archiveMutation = useArchiveOpportunity();
   const bulkOwnerMutation = useBulkUpdateOwner();
@@ -240,6 +249,21 @@ export function OpportunitiesList() {
         />
       ) : (
         <>
+          {/* Totals across the full filtered set (not just the visible
+              page). Lets the user cross-check a dashboard KPI by
+              landing here with the same filters and reading the sum
+              off the strip. */}
+          {totals && (
+            <div className="flex items-center justify-end gap-4 mb-2 text-sm text-muted-foreground">
+              <span>
+                {totals.count.toLocaleString()} opportunit
+                {totals.count === 1 ? "y" : "ies"}
+              </span>
+              <span className="font-medium text-foreground">
+                Total: {formatCurrency(totals.sum)}
+              </span>
+            </div>
+          )}
           <div className="border rounded-lg overflow-x-auto">
             <Table>
               <TableHeader>

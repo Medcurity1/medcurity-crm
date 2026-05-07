@@ -129,6 +129,113 @@ export function useOpportunities(filters?: OppFilters) {
   });
 }
 
+/**
+ * Sum of `amount` and exact row count across the SAME filtered set
+ * `useOpportunities` returns, but ignoring pagination and sort. Used
+ * by the list page to show a verifiable total under the table — so a
+ * dashboard KPI like "My Open Pipeline" can be cross-checked against
+ * the same filtered list view.
+ *
+ * Pages past PostgREST's 1000-row cap so the sum is honest on large
+ * filtered sets (e.g. all closed_won across 5 years > 1000 rows).
+ */
+export function useOpportunitiesTotals(filters?: Omit<OppFilters, "page" | "pageSize" | "sortColumn" | "sortDirection">) {
+  return useQuery({
+    queryKey: ["opportunities", "totals", filters],
+    queryFn: async () => {
+      // Resolve search-by-account-name the same way useOpportunities
+      // does, so the total matches the visible filtered set exactly.
+      let acctIds: string[] | null = null;
+      if (filters?.search) {
+        const { data: matchedAccounts } = await supabase
+          .from("accounts")
+          .select("id")
+          .ilike("name", `%${filters.search}%`)
+          .limit(200);
+        acctIds = (matchedAccounts ?? []).map((a) => a.id as string);
+      }
+
+      // "mine" → real user id (mirrors useOpportunities).
+      let resolvedOwnerIds: string[] | null = null;
+      let singleOwnerId: string | null = null;
+      if (Array.isArray(filters?.ownerId)) {
+        const ids = filters!.ownerId;
+        if (ids.includes("mine")) {
+          const { data: userData } = await supabase.auth.getUser();
+          if (userData.user?.id) {
+            resolvedOwnerIds = Array.from(
+              new Set(ids.map((v) => (v === "mine" ? userData.user!.id : v))),
+            );
+          } else {
+            const noMine = ids.filter((v) => v !== "mine");
+            if (noMine.length > 0) resolvedOwnerIds = noMine;
+          }
+        } else if (ids.length > 0) {
+          resolvedOwnerIds = ids;
+        }
+      } else if (filters?.ownerId === "mine") {
+        const { data: userData } = await supabase.auth.getUser();
+        singleOwnerId = userData.user?.id ?? null;
+      } else if (filters?.ownerId) {
+        singleOwnerId = filters.ownerId;
+      }
+
+      // Page past the 1000-row cap so the sum is exact on large sets.
+      const all: number[] = [];
+      let from = 0;
+      const pageSize = 1000;
+      while (all.length < 100_000) {
+        let q = supabase.from("opportunities").select("amount");
+        if (filters?.search) {
+          const safe = filters.search.replace(/[(),]/g, " ");
+          const orParts = [`name.ilike.%${safe}%`];
+          if (acctIds && acctIds.length > 0) {
+            orParts.push(`account_id.in.(${acctIds.join(",")})`);
+          }
+          q = q.or(orParts.join(","));
+        }
+        if (filters?.stage) {
+          if (Array.isArray(filters.stage)) {
+            if (filters.stage.length > 0) q = q.in("stage", filters.stage);
+          } else if (filters.stage === "open") {
+            q = q.not("stage", "in", "(closed_won,closed_lost)");
+          } else {
+            q = q.eq("stage", filters.stage);
+          }
+        }
+        if (filters?.team) {
+          if (Array.isArray(filters.team)) {
+            if (filters.team.length > 0) q = q.in("team", filters.team);
+          } else {
+            q = q.eq("team", filters.team);
+          }
+        }
+        if (filters?.kind) {
+          if (Array.isArray(filters.kind)) {
+            if (filters.kind.length > 0) q = q.in("kind", filters.kind);
+          } else {
+            q = q.eq("kind", filters.kind);
+          }
+        }
+        if (filters?.account_id) q = q.eq("account_id", filters.account_id);
+        if (resolvedOwnerIds) q = q.in("owner_user_id", resolvedOwnerIds);
+        else if (singleOwnerId) q = q.eq("owner_user_id", singleOwnerId);
+        if (filters?.verified === "true") q = q.eq("verified", true);
+        else if (filters?.verified === "false") q = q.eq("verified", false);
+
+        const { data, error } = await q.range(from, from + pageSize - 1);
+        if (error) throw error;
+        const rows = (data ?? []) as { amount: number | string | null }[];
+        for (const r of rows) all.push(Number(r.amount ?? 0));
+        if (rows.length < pageSize) break;
+        from += pageSize;
+      }
+      const sum = all.reduce((s, n) => s + n, 0);
+      return { count: all.length, sum };
+    },
+  });
+}
+
 export function useOpportunity(id: string | undefined) {
   return useQuery({
     queryKey: ["opportunities", id],
