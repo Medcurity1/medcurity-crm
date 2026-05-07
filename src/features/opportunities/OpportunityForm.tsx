@@ -2031,7 +2031,11 @@ const OpportunityProductsEditor = forwardRef<
                             type="number"
                             min={0}
                             max={r.draft.discount_type === "percent" ? 100 : undefined}
-                            step={r.draft.discount_type === "percent" ? "1" : "0.01"}
+                            // Allow decimal percents (e.g. 27.5%). Previously
+                            // step="1" blocked the browser's HTML5 number-input
+                            // validation, so the form refused to submit when a
+                            // rep typed something like "27.5".
+                            step="0.01"
                             value={r.draft.discount_percent}
                             onChange={(e) =>
                               setDraft(r.original, { discount_percent: e.target.value })
