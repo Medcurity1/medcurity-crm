@@ -68,6 +68,18 @@ async function fetchAllOppAmounts(
 // Helpers
 // ---------------------------------------------------------------------------
 
+// "Open" = anything not closed. The opportunities list filter is
+// per-stage (no "open" pseudo-value), so KPI links must enumerate the
+// real open stages or the page parses `stage=open` as a literal value
+// that matches zero rows (the source of the "Team Total Pipeline goes
+// to a blank page" bug).
+const OPEN_STAGES = [
+  "details_analysis",
+  "demo",
+  "proposal_and_price_quote",
+  "proposal_conversation",
+].join(",");
+
 function getQuarterStart(date: Date): Date {
   const month = date.getMonth();
   const quarterStartMonth = month - (month % 3);
@@ -90,7 +102,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "sales",
     icon: DollarSign,
     format: "currency",
-    link: () => "/opportunities?owner=mine&stage=open",
+    link: () => `/opportunities?owner=mine&stage=${OPEN_STAGES}`,
     query: async (supabase, userId) => {
       const amounts = await fetchAllOppAmounts(supabase, (q) =>
         q
@@ -107,7 +119,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "sales",
     icon: TrendingUp,
     format: "number",
-    link: () => "/opportunities?owner=mine&stage=open",
+    link: () => `/opportunities?owner=mine&stage=${OPEN_STAGES}`,
     query: async (supabase, userId) => {
       const { count } = await supabase
         .from("opportunities")
@@ -143,7 +155,11 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "sales",
     icon: CalendarClock,
     format: "number",
-    link: () => "/opportunities?owner=mine&stage=open",
+    // Best-effort link: filter to my open opps. The list page doesn't
+    // currently have an expected_close_date date-window filter, so the
+    // landing view is broader than the count. Improving the list page
+    // to honor a `?expected_within=30` param would tighten this up.
+    link: () => `/opportunities?owner=mine&stage=${OPEN_STAGES}`,
     query: async (supabase, userId) => {
       const now = new Date();
       const thirtyDaysOut = new Date(now);
@@ -215,17 +231,27 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "renewals",
     icon: RefreshCw,
     format: "number",
-    // Forward-looking renewals queue. The /reports/standard/renewals
-    // path showed PAST closed_won renewals — wrong target for this
-    // KPI which is "upcoming renewals due within X days".
-    link: "/renewals?within=30",
+    // Forward-looking renewals queue. Uses the renewals page's own
+    // preset param so the page lands on "Next 30 days" (matching this
+    // count). `fresh=1` tells the page to ignore the rep's saved
+    // owner/exclude filters from localStorage so the count and the
+    // filtered table match — and so it doesn't ruin the rep's saved
+    // filters on the actual /renewals tab.
+    link: "/renewals?preset=30&fresh=1",
     query: async (supabase) => {
       const { data } = await supabase
         .from("renewal_queue")
         .select("days_until_renewal");
+      // Forward-looking only: matches the page's preset=30 window
+      // (today → today+30). Earlier this also included past-due
+      // (negative days_until_renewal), which made the count exceed
+      // what the renewals page showed.
       return (
         data?.filter(
-          (r) => r.days_until_renewal !== null && r.days_until_renewal <= 30,
+          (r) =>
+            r.days_until_renewal !== null &&
+            r.days_until_renewal >= 0 &&
+            r.days_until_renewal <= 30,
         ).length ?? 0
       );
     },
@@ -236,14 +262,17 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "renewals",
     icon: CalendarClock,
     format: "number",
-    link: "/renewals?within=60",
+    link: "/renewals?preset=60&fresh=1",
     query: async (supabase) => {
       const { data } = await supabase
         .from("renewal_queue")
         .select("days_until_renewal");
       return (
         data?.filter(
-          (r) => r.days_until_renewal !== null && r.days_until_renewal <= 60,
+          (r) =>
+            r.days_until_renewal !== null &&
+            r.days_until_renewal >= 0 &&
+            r.days_until_renewal <= 60,
         ).length ?? 0
       );
     },
@@ -254,7 +283,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "renewals",
     icon: AlertTriangle,
     format: "currency",
-    link: "/renewals",
+    link: "/renewals?fresh=1",
     query: async (supabase) => {
       const { data } = await supabase
         .from("renewal_queue")
@@ -268,7 +297,8 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "renewals",
     icon: RefreshCw,
     format: "number",
-    link: () => "/opportunities?owner=mine&kind=renewal&stage=open",
+    link: () =>
+      `/opportunities?owner=mine&kind=renewal&stage=${OPEN_STAGES}`,
     query: async (supabase, userId) => {
       const { count } = await supabase
         .from("opportunities")
@@ -289,7 +319,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     icon: DollarSign,
     format: "currency",
     requiredRole: ["admin"],
-    link: "/opportunities?stage=open",
+    link: `/opportunities?stage=${OPEN_STAGES}`,
     query: async (supabase) => {
       const amounts = await fetchAllOppAmounts(supabase, (q) =>
         q

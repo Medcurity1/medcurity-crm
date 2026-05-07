@@ -687,14 +687,27 @@ export function RenewalsQueue() {
   const tab =
     searchParams.get("tab") === "closed-won" ? "closed-won" : "upcoming";
 
+  // "Fresh view" mode: when arriving from a dashboard KPI we want the
+  // count on the card to match the page, AND we want to leave the
+  // rep's saved filters on /renewals untouched. With `?fresh=1` we
+  // (1) skip localStorage on initial hydration so the page starts
+  // from URL params + empty defaults, and (2) skip writing filter
+  // changes back to localStorage so a KPI-driven session never
+  // clobbers the rep's saved owner/range/exclude state on the real
+  // tab. The flag is captured once at mount via useState so removing
+  // it from the URL later (e.g. by setSearchParams) doesn't flip the
+  // page back into persistent mode mid-session.
+  const [isFreshView] = useState(() => searchParams.get("fresh") === "1");
+
   // Date preset: URL wins on first paint, falls back to localStorage,
   // and finally to a 120-day forward window. Persisting means a rep
   // who lives in "This quarter" comes back to "This quarter" instead
-  // of getting bumped to the default every reload.
+  // of getting bumped to the default every reload. In fresh-view
+  // mode, localStorage is bypassed.
   const preset: DatePreset = (() => {
     const fromUrl = searchParams.get("preset") as DatePreset | null;
     if (fromUrl) return fromUrl;
-    if (typeof window !== "undefined") {
+    if (!isFreshView && typeof window !== "undefined") {
       try {
         const raw = window.localStorage.getItem(PRESET_LS_KEY) as DatePreset | null;
         if (raw) return raw;
@@ -709,7 +722,7 @@ export function RenewalsQueue() {
   const [owners, setOwnersState] = useState<string[]>(() => {
     const fromUrl = searchParams.get("owners");
     if (fromUrl !== null) return fromUrl.split(",").filter(Boolean);
-    if (typeof window !== "undefined") {
+    if (!isFreshView && typeof window !== "undefined") {
       try {
         const raw = window.localStorage.getItem(OWNER_LS_KEY);
         if (raw) {
@@ -730,7 +743,7 @@ export function RenewalsQueue() {
   const [excludeAccount, setExcludeAccount] = useState<string>(() => {
     const fromUrl = searchParams.get("exclude");
     if (fromUrl !== null) return fromUrl;
-    if (typeof window !== "undefined") {
+    if (!isFreshView && typeof window !== "undefined") {
       try {
         const raw = window.localStorage.getItem(EXCLUDE_LS_KEY);
         if (raw !== null) return raw;
@@ -749,7 +762,7 @@ export function RenewalsQueue() {
         end: searchParams.get("to") ?? "",
       };
       if (fromUrl.start || fromUrl.end) return fromUrl;
-      if (typeof window !== "undefined") {
+      if (!isFreshView && typeof window !== "undefined") {
         try {
           const raw = window.localStorage.getItem(RANGE_LS_KEY);
           if (raw) {
@@ -769,7 +782,9 @@ export function RenewalsQueue() {
     },
   );
 
-  // Persist filters back to URL + localStorage on every change.
+  // Persist filters back to URL + localStorage on every change. In
+  // fresh-view mode we skip the localStorage write so a KPI-driven
+  // session leaves the rep's saved /renewals filters untouched.
   useEffect(() => {
     setSearchParams(
       (prev) => {
@@ -786,6 +801,7 @@ export function RenewalsQueue() {
       },
       { replace: true },
     );
+    if (isFreshView) return;
     try {
       if (typeof window !== "undefined") {
         window.localStorage.setItem(OWNER_LS_KEY, JSON.stringify(owners));
@@ -807,6 +823,7 @@ export function RenewalsQueue() {
       next.set("preset", v);
       return next;
     });
+    if (isFreshView) return;
     try {
       if (typeof window !== "undefined") {
         window.localStorage.setItem(PRESET_LS_KEY, v);
