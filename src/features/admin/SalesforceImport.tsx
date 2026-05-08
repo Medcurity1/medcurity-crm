@@ -3386,6 +3386,55 @@ export function SalesforceImport() {
                 "duration_minutes",
               ].includes(field)
             ) {
+              // SF text-picklist parsing for contract_length_months and
+              // contract_year. These are stored as text picklists in SF
+              // ("3 year contract", "Year 1") but as integers in the new
+              // CRM. Without this, Number("3 year contract") is NaN and
+              // the value gets dropped — which is why the original CSV
+              // import lost contract_length and contract_year for many
+              // opps even though SF had the data.
+              if (field === "contract_length_months") {
+                const lc = value.toLowerCase().trim();
+                // Match "3 year", "3-year", "3 yr", "3 years", etc.
+                const yearMatch = lc.match(/^(\d+)\s*-?\s*(?:year|yr)/);
+                // Match "12 months", "36 months", etc.
+                const monthMatch = lc.match(/^(\d+)\s*month/);
+                if (yearMatch) {
+                  const years = parseInt(yearMatch[1], 10);
+                  if (years > 0) {
+                    record[field] = years * 12;
+                  }
+                  continue;
+                }
+                if (monthMatch) {
+                  const months = parseInt(monthMatch[1], 10);
+                  if (months > 0) {
+                    record[field] = months;
+                  }
+                  continue;
+                }
+                if (lc === "annual") {
+                  record[field] = 12;
+                  continue;
+                }
+                // Fall through to generic numeric coercion (handles bare
+                // "12" or "36" cells from CSVs that happened to be numeric).
+              }
+
+              if (field === "contract_year") {
+                const lc = value.toLowerCase().trim();
+                // Match "Year 1", "year 2", etc.
+                const yearLabelMatch = lc.match(/^year\s*(\d+)/);
+                if (yearLabelMatch) {
+                  const yr = parseInt(yearLabelMatch[1], 10);
+                  if (yr > 0) {
+                    record[field] = yr;
+                  }
+                  continue;
+                }
+                // Fall through to generic numeric coercion (bare "1"/"2"/"3").
+              }
+
               const num = Number(value.replace(/[,$]/g, ""));
               if (!isNaN(num)) {
                 // cycle_count has a CHECK (cycle_count IS NULL OR > 0).
