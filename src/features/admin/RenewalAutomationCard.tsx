@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Card,
   CardContent,
@@ -20,13 +20,30 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Loader2, RefreshCw, RotateCw } from "lucide-react";
-import { toast } from "sonner";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  AlertCircle,
+  CheckCircle2,
+  Loader2,
+  RefreshCw,
+  RotateCw,
+  TestTube2,
+  X,
+} from "lucide-react";
+import { toast } from "sonner";
+import { Link } from "react-router-dom";
+import {
+  useAccountsForPicker,
+  useRenewalAudit,
   useRenewalAutomationConfig,
-  useUpdateRenewalAutomationConfig,
   useRenewalAutomationRuns,
   useRunRenewalAutomationNow,
+  useUpdateRenewalAutomationConfig,
+  type RenewalAuditRow,
 } from "./automations-api";
 
 function formatDateTime(value: string | null): string {
@@ -38,20 +55,84 @@ function formatDateTime(value: string | null): string {
   }
 }
 
+function formatDate(value: string | null): string {
+  if (!value) return "—";
+  try {
+    return new Date(value + "T00:00:00").toLocaleDateString();
+  } catch {
+    return value;
+  }
+}
+
+const CATEGORY_META: Record<
+  RenewalAuditRow["audit_category"],
+  { label: string; tone: "warn" | "info" | "ok" }
+> = {
+  missing_renewal: { label: "Will create renewal", tone: "ok" },
+  missing_dates: { label: "Blocked: no dates", tone: "warn" },
+  missing_contract_year: { label: "Blocked: no year", tone: "warn" },
+  every_other_year_skip: { label: "Skip (every-other-year)", tone: "info" },
+  auto_renew_null: { label: "Needs auto_renew set", tone: "info" },
+  do_not_auto_renew: { label: "Skip (do not auto-renew)", tone: "info" },
+};
+
 export function RenewalAutomationCard() {
   const { data: config, isLoading: loadingConfig } = useRenewalAutomationConfig();
   const { data: runs, isLoading: loadingRuns } = useRenewalAutomationRuns(10);
+  const { data: audit, isLoading: loadingAudit } = useRenewalAudit();
+  const { data: accounts, isLoading: loadingAccounts } = useAccountsForPicker();
   const updateConfig = useUpdateRenewalAutomationConfig();
   const runNow = useRunRenewalAutomationNow();
 
-  // Local state for the lookahead input so we can debounce the save.
   const [lookahead, setLookahead] = useState<string>("");
+  const [pullAuto, setPullAuto] = useState<string>("");
+  const [pullSig, setPullSig] = useState<string>("");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
 
   useEffect(() => {
     if (config) {
       setLookahead(String(config.lookahead_days));
+      setPullAuto(String(config.pullback_days_auto_renew));
+      setPullSig(String(config.pullback_days_signature_required));
     }
   }, [config]);
+
+  // Audit grouping for the summary chips.
+  const auditCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const row of audit ?? []) {
+      counts[row.audit_category] = (counts[row.audit_category] ?? 0) + 1;
+    }
+    return counts;
+  }, [audit]);
+
+  const willCreateRows = useMemo(
+    () => (audit ?? []).filter((r) => r.audit_category === "missing_renewal"),
+    [audit],
+  );
+
+  const blockedRows = useMemo(
+    () =>
+      (audit ?? []).filter((r) =>
+        ["missing_dates", "missing_contract_year"].includes(r.audit_category),
+      ),
+    [audit],
+  );
+
+  const filteredAccounts = useMemo(() => {
+    const q = pickerQuery.trim().toLowerCase();
+    const list = accounts ?? [];
+    if (!q) return list.slice(0, 50);
+    return list
+      .filter((a) => a.name.toLowerCase().includes(q))
+      .slice(0, 50);
+  }, [accounts, pickerQuery]);
+
+  const selectedTestAccount = useMemo(() => {
+    if (!config?.test_account_id) return null;
+    return accounts?.find((a) => a.id === config.test_account_id) ?? null;
+  }, [accounts, config?.test_account_id]);
 
   function handleToggleEnabled(checked: boolean) {
     updateConfig.mutate(
@@ -59,11 +140,11 @@ export function RenewalAutomationCard() {
       {
         onSuccess: () =>
           toast.success(
-            checked ? "Renewal automation enabled" : "Renewal automation paused"
+            checked ? "Renewal automation enabled" : "Renewal automation paused",
           ),
         onError: (err: Error) =>
           toast.error("Failed to update", { description: err.message }),
-      }
+      },
     );
   }
 
@@ -80,7 +161,50 @@ export function RenewalAutomationCard() {
         onSuccess: () => toast.success("Lookahead updated"),
         onError: (err: Error) =>
           toast.error("Failed to update", { description: err.message }),
-      }
+      },
+    );
+  }
+
+  function handleSavePullback(kind: "auto" | "sig") {
+    const raw = kind === "auto" ? pullAuto : pullSig;
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 180) {
+      toast.error("Pull-back must be between 0 and 180 days");
+      return;
+    }
+    const current =
+      kind === "auto"
+        ? config?.pullback_days_auto_renew
+        : config?.pullback_days_signature_required;
+    if (parsed === current) return;
+    updateConfig.mutate(
+      kind === "auto"
+        ? { pullback_days_auto_renew: parsed }
+        : { pullback_days_signature_required: parsed },
+      {
+        onSuccess: () => toast.success("Pull-back updated"),
+        onError: (err: Error) =>
+          toast.error("Failed to update", { description: err.message }),
+      },
+    );
+  }
+
+  function handleSelectTestAccount(id: string | null) {
+    updateConfig.mutate(
+      { test_account_id: id },
+      {
+        onSuccess: () => {
+          toast.success(
+            id
+              ? "Test mode on — automation will only process the selected account"
+              : "Test mode cleared — automation will process all accounts",
+          );
+          setPickerOpen(false);
+          setPickerQuery("");
+        },
+        onError: (err: Error) =>
+          toast.error("Failed to update", { description: err.message }),
+      },
     );
   }
 
@@ -90,14 +214,19 @@ export function RenewalAutomationCard() {
         const created = data?.[0]?.created_count ?? 0;
         toast.success(
           created > 0
-            ? `Created ${created} renewal opportunity${created === 1 ? "" : "ies"}`
-            : "Run complete — no new renewals needed"
+            ? `Created ${created} renewal opportunit${created === 1 ? "y" : "ies"}`
+            : "Run complete — no new renewals needed",
         );
       },
       onError: (err: Error) =>
         toast.error("Run failed", { description: err.message }),
     });
   }
+
+  const inTestMode = !!config?.test_account_id;
+  const willCreateCount = auditCounts.missing_renewal ?? 0;
+  const blockedCount =
+    (auditCounts.missing_dates ?? 0) + (auditCounts.missing_contract_year ?? 0);
 
   return (
     <Card className="p-6">
@@ -108,10 +237,9 @@ export function RenewalAutomationCard() {
             Renewal Automation
           </h2>
           <p className="text-sm text-muted-foreground max-w-2xl">
-            Automatically generates renewal opportunities for closed-won deals
-            whose contract end date is approaching. Runs daily at 09:00 UTC and
-            can be triggered manually. Accounts with renewal type &quot;no auto
-            renew&quot; are skipped.
+            Generates renewal opportunities for closed-won deals approaching
+            their contract end date. Auto-renew accounts get a 30-day pull-back;
+            those needing a new signature get 60 days. Runs daily at 09:00 UTC.
           </p>
         </div>
         {loadingConfig ? (
@@ -125,11 +253,40 @@ export function RenewalAutomationCard() {
         )}
       </div>
 
+      {/* Test mode banner — when active, large + impossible to miss. */}
+      {inTestMode && (
+        <div className="rounded-md border-2 border-amber-400 bg-amber-50 dark:bg-amber-900/20 p-3 mb-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm">
+            <TestTube2 className="h-4 w-4 text-amber-600" />
+            <span className="font-medium text-amber-900 dark:text-amber-200">
+              Test mode active
+            </span>
+            <span className="text-amber-800 dark:text-amber-300">
+              — only processing{" "}
+              <span className="font-semibold">
+                {selectedTestAccount?.name ?? "selected account"}
+              </span>
+            </span>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+            onClick={() => handleSelectTestAccount(null)}
+            disabled={updateConfig.isPending}
+          >
+            <X className="h-3 w-3 mr-1" />
+            Clear
+          </Button>
+        </div>
+      )}
+
       <Separator className="mb-4" />
 
-      <div className="grid gap-4 sm:grid-cols-2 mb-6">
+      {/* Config row */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
         <div className="space-y-2">
-          <Label htmlFor="renewal-lookahead">Lookahead window (days)</Label>
+          <Label htmlFor="renewal-lookahead">Lookahead (days)</Label>
           <div className="flex gap-2">
             <Input
               id="renewal-lookahead"
@@ -140,57 +297,306 @@ export function RenewalAutomationCard() {
               onChange={(e) => setLookahead(e.target.value)}
               onBlur={handleSaveLookahead}
               disabled={!config || updateConfig.isPending}
-              className="max-w-[120px]"
             />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleSaveLookahead}
-              disabled={
-                !config ||
-                updateConfig.isPending ||
-                Number.parseInt(lookahead, 10) === config?.lookahead_days
-              }
-            >
-              Save
-            </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Renewals are created when a contract ends within this many days.
+            How far ahead to look for ending contracts.
           </p>
         </div>
 
         <div className="space-y-2">
-          <Label>Last run</Label>
-          <div className="text-sm">
-            <div className="font-medium">
-              {formatDateTime(config?.last_run_at ?? null)}
-            </div>
-            {config?.last_run_error ? (
-              <Badge variant="destructive" className="mt-1">
-                Last run failed
-              </Badge>
-            ) : config?.last_run_created_count != null ? (
-              <span className="text-muted-foreground">
-                Created {config.last_run_created_count} renewal
-                {config.last_run_created_count === 1 ? "" : "s"}
-              </span>
-            ) : null}
-          </div>
-          <Button
-            size="sm"
-            onClick={handleRunNow}
-            disabled={runNow.isPending || !config?.enabled}
-          >
-            {runNow.isPending ? (
-              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-3 w-3" />
-            )}
-            Run Now
-          </Button>
+          <Label htmlFor="pullback-auto">Pull-back: auto-renew</Label>
+          <Input
+            id="pullback-auto"
+            type="number"
+            min={0}
+            max={180}
+            value={pullAuto}
+            onChange={(e) => setPullAuto(e.target.value)}
+            onBlur={() => handleSavePullback("auto")}
+            disabled={!config || updateConfig.isPending}
+          />
+          <p className="text-xs text-muted-foreground">
+            Days before end date when auto_renew=true. (default 30)
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="pullback-sig">Pull-back: signature</Label>
+          <Input
+            id="pullback-sig"
+            type="number"
+            min={0}
+            max={180}
+            value={pullSig}
+            onChange={(e) => setPullSig(e.target.value)}
+            onBlur={() => handleSavePullback("sig")}
+            disabled={!config || updateConfig.isPending}
+          />
+          <p className="text-xs text-muted-foreground">
+            Days when a new signature is required. (default 60)
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Test account scope</Label>
+          <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full justify-start font-normal"
+                disabled={loadingAccounts || updateConfig.isPending}
+              >
+                {selectedTestAccount?.name ??
+                  (inTestMode ? "Loading…" : "All accounts (production)")}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="p-0 w-72" align="end">
+              <div className="p-2 border-b">
+                <Input
+                  autoFocus
+                  placeholder="Search accounts…"
+                  value={pickerQuery}
+                  onChange={(e) => setPickerQuery(e.target.value)}
+                  className="h-8"
+                />
+              </div>
+              <div className="max-h-64 overflow-y-auto">
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-2 text-xs hover:bg-muted border-b font-medium text-muted-foreground"
+                  onClick={() => handleSelectTestAccount(null)}
+                >
+                  All accounts (clear test mode)
+                </button>
+                {filteredAccounts.length === 0 ? (
+                  <p className="text-xs text-muted-foreground p-3 text-center">
+                    No matches.
+                  </p>
+                ) : (
+                  filteredAccounts.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center justify-between"
+                      onClick={() => handleSelectTestAccount(a.id)}
+                    >
+                      <span className="truncate">{a.name}</span>
+                      {a.lifecycle_status && (
+                        <span className="text-xs text-muted-foreground ml-2">
+                          {a.lifecycle_status}
+                        </span>
+                      )}
+                    </button>
+                  ))
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
+          <p className="text-xs text-muted-foreground">
+            Limit run to one account for testing.
+          </p>
         </div>
       </div>
+
+      {/* Summary chips + Run Now */}
+      <div className="rounded-md border p-4 mb-4 bg-muted/30">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="space-y-2 flex-1 min-w-[280px]">
+            <div className="text-sm font-medium">Next run preview</div>
+            {loadingAudit ? (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            ) : (
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge
+                  variant="outline"
+                  className="bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-300 border-green-300"
+                >
+                  <CheckCircle2 className="h-3 w-3 mr-1" />
+                  {willCreateCount} will create
+                </Badge>
+                {blockedCount > 0 && (
+                  <Badge
+                    variant="outline"
+                    className="bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 border-amber-300"
+                  >
+                    <AlertCircle className="h-3 w-3 mr-1" />
+                    {blockedCount} blocked
+                  </Badge>
+                )}
+                {(auditCounts.every_other_year_skip ?? 0) > 0 && (
+                  <Badge variant="secondary">
+                    {auditCounts.every_other_year_skip} skipped (EoY)
+                  </Badge>
+                )}
+                {(auditCounts.do_not_auto_renew ?? 0) > 0 && (
+                  <Badge variant="secondary">
+                    {auditCounts.do_not_auto_renew} skipped (no auto-renew)
+                  </Badge>
+                )}
+                {(auditCounts.auto_renew_null ?? 0) > 0 && (
+                  <Badge variant="secondary">
+                    {auditCounts.auto_renew_null} need auto_renew set
+                  </Badge>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <Label className="text-xs">Last run</Label>
+            <div className="text-sm font-medium">
+              {formatDateTime(config?.last_run_at ?? null)}
+            </div>
+            <Button
+              size="sm"
+              onClick={handleRunNow}
+              disabled={runNow.isPending || !config?.enabled}
+            >
+              {runNow.isPending ? (
+                <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-3 w-3" />
+              )}
+              Run Now
+            </Button>
+            {!config?.enabled && (
+              <p className="text-xs text-muted-foreground">
+                Toggle on to enable Run Now.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Will-create preview */}
+      {willCreateRows.length > 0 && (
+        <div className="space-y-2 mb-4">
+          <CardHeader className="p-0">
+            <CardTitle className="text-sm">Renewals to be created</CardTitle>
+            <CardDescription className="text-xs">
+              These closed-won opps will get a renewal child on the next run.
+            </CardDescription>
+          </CardHeader>
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Account</TableHead>
+                  <TableHead>Parent opp</TableHead>
+                  <TableHead>Ends</TableHead>
+                  <TableHead>Length</TableHead>
+                  <TableHead>Year/Cycle</TableHead>
+                  <TableHead>Auto-renew</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {willCreateRows.slice(0, 25).map((r) => (
+                  <TableRow key={`${r.parent_opportunity_id}`}>
+                    <TableCell className="text-xs font-medium">
+                      <Link
+                        to={`/accounts/${r.account_id}`}
+                        className="hover:underline"
+                      >
+                        {r.account_name}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {r.parent_opportunity_id ? (
+                        <Link
+                          to={`/opportunities/${r.parent_opportunity_id}`}
+                          className="hover:underline"
+                        >
+                          {r.opportunity_name}
+                        </Link>
+                      ) : (
+                        r.opportunity_name
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {formatDate(r.effective_end_date)}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {r.contract_length_months
+                        ? `${r.contract_length_months}mo`
+                        : "—"}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {r.contract_year ?? "—"}
+                      {r.cycle_count != null && ` / c${r.cycle_count}`}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {r.auto_renew == null
+                        ? "—"
+                        : r.auto_renew
+                          ? "yes"
+                          : "no"}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {willCreateRows.length > 25 && (
+              <p className="text-xs text-muted-foreground text-center py-2 border-t">
+                + {willCreateRows.length - 25} more
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Blocked rows — admin needs to fix data */}
+      {blockedRows.length > 0 && (
+        <div className="space-y-2 mb-4">
+          <CardHeader className="p-0">
+            <CardTitle className="text-sm">Blocked — fix data first</CardTitle>
+            <CardDescription className="text-xs">
+              Closed-wons the automation can't process. Set the missing fields
+              on the parent opp, then re-run.
+            </CardDescription>
+          </CardHeader>
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Account</TableHead>
+                  <TableHead>Parent opp</TableHead>
+                  <TableHead>Reason</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {blockedRows.slice(0, 25).map((r) => (
+                  <TableRow key={`${r.parent_opportunity_id}`}>
+                    <TableCell className="text-xs font-medium">
+                      <Link
+                        to={`/accounts/${r.account_id}`}
+                        className="hover:underline"
+                      >
+                        {r.account_name}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {r.parent_opportunity_id ? (
+                        <Link
+                          to={`/opportunities/${r.parent_opportunity_id}`}
+                          className="hover:underline"
+                        >
+                          {r.opportunity_name}
+                        </Link>
+                      ) : (
+                        r.opportunity_name
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {CATEGORY_META[r.audit_category].label}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      )}
 
       {config?.last_run_error && (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 mb-4">

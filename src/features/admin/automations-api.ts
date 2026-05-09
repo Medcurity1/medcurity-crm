@@ -168,6 +168,41 @@ export interface RenewalAutomationConfig {
   last_run_created_count: number | null;
   last_run_error: string | null;
   updated_at: string;
+  /** When set, automation only runs against this single account. */
+  test_account_id: string | null;
+  pullback_days_auto_renew: number;
+  pullback_days_signature_required: number;
+}
+
+/**
+ * One row from v_renewal_audit. Categories surface different reasons
+ * the automation will or won't act on a given opp/account on its
+ * next run. See migration 20260508000004.
+ */
+export interface RenewalAuditRow {
+  audit_category:
+    | "missing_renewal"
+    | "missing_dates"
+    | "missing_contract_year"
+    | "every_other_year_skip"
+    | "auto_renew_null"
+    | "do_not_auto_renew";
+  parent_opportunity_id: string | null;
+  account_id: string;
+  account_name: string;
+  opportunity_name: string | null;
+  close_date: string | null;
+  contract_end_date: string | null;
+  effective_end_date: string | null;
+  contract_length_months: number | null;
+  contract_year: number | null;
+  cycle_count: number | null;
+  lifecycle_status: string | null;
+  renewal_type: string | null;
+  auto_renew: boolean | null;
+  every_other_year: boolean | null;
+  do_not_auto_renew: boolean | null;
+  note: string;
 }
 
 export interface RenewalAutomationRun {
@@ -201,7 +236,16 @@ export function useUpdateRenewalAutomationConfig() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (
-      values: Partial<Pick<RenewalAutomationConfig, "enabled" | "lookahead_days">>
+      values: Partial<
+        Pick<
+          RenewalAutomationConfig,
+          | "enabled"
+          | "lookahead_days"
+          | "test_account_id"
+          | "pullback_days_auto_renew"
+          | "pullback_days_signature_required"
+        >
+      >
     ) => {
       const { data, error } = await supabase
         .from("renewal_automation_config")
@@ -214,6 +258,7 @@ export function useUpdateRenewalAutomationConfig() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["renewal_automation_config"] });
+      qc.invalidateQueries({ queryKey: ["renewal_audit"] });
     },
   });
 }
@@ -234,6 +279,51 @@ export function useRenewalAutomationRuns(limit = 10) {
   });
 }
 
+/**
+ * Fetch the renewal audit view — what the automation would (or wouldn't)
+ * do on its next run. Honors `renewal_automation_config.test_account_id`
+ * scoping at the DB level.
+ */
+export function useRenewalAudit() {
+  return useQuery({
+    queryKey: ["renewal_audit"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("v_renewal_audit")
+        .select("*")
+        .order("audit_category")
+        .order("effective_end_date", { ascending: true, nullsFirst: false });
+      if (error) throw error;
+      return (data ?? []) as RenewalAuditRow[];
+    },
+  });
+}
+
+/**
+ * Lightweight account picker for the test_account_id selector. We
+ * deliberately don't filter by lifecycle_status here — Brayden's test
+ * account may be a prospect with one manually-flipped closed_won opp.
+ */
+export function useAccountsForPicker() {
+  return useQuery({
+    queryKey: ["accounts_for_picker"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("accounts")
+        .select("id, name, lifecycle_status")
+        .is("archived_at", null)
+        .order("name", { ascending: true })
+        .limit(2000);
+      if (error) throw error;
+      return (data ?? []) as Array<{
+        id: string;
+        name: string;
+        lifecycle_status: string | null;
+      }>;
+    },
+  });
+}
+
 /** Trigger a manual renewal automation run via the admin RPC. */
 export function useRunRenewalAutomationNow() {
   const qc = useQueryClient();
@@ -246,6 +336,7 @@ export function useRunRenewalAutomationNow() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["renewal_automation_config"] });
       qc.invalidateQueries({ queryKey: ["renewal_automation_runs"] });
+      qc.invalidateQueries({ queryKey: ["renewal_audit"] });
       qc.invalidateQueries({ queryKey: ["opportunities"] });
     },
   });
