@@ -238,7 +238,7 @@ select
 from public.accounts a
 where a.archived_at is null
   and a.auto_renew is null
-  and a.lifecycle_status = 'active'
+  and a.lifecycle_status = 'customer'
 
 union all
 
@@ -264,7 +264,7 @@ select
 from public.accounts a
 where a.archived_at is null
   and a.do_not_auto_renew = true
-  and a.lifecycle_status = 'active';
+  and a.lifecycle_status = 'customer';
 
 comment on view public.v_renewal_audit is
   'Surfaces closed-won opps and accounts that the renewal automation cannot or will not act on. Six audit_category values: missing_renewal, missing_dates, missing_contract_year, every_other_year_skip, auto_renew_null, do_not_auto_renew. Used by the admin renewal-automation page.';
