@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Pencil,
   Check,
@@ -17,6 +17,7 @@ import {
   LockOpen,
   Printer,
   GripVertical,
+  RefreshCw,
 } from "lucide-react";
 import {
   DndContext,
@@ -255,6 +256,29 @@ function useClickUpServices() {
         .maybeSingle();
       if (error) throw error;
       return data as ClickUpServicesSnapshot | null;
+    },
+  });
+}
+
+/**
+ * Manual refresh trigger — invokes the `clickup-services-sync` Edge
+ * Function, which pulls every task on the configured ClickUp list,
+ * recomputes the Services metrics, and writes a new snapshot row.
+ * Invalidates the latest-snapshot query on success so the panel re-reads.
+ */
+function useRefreshClickUpServices() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke(
+        "clickup-services-sync",
+        { body: {} },
+      );
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["team-dashboard", "clickup-services"] });
     },
   });
 }
@@ -769,9 +793,14 @@ export function TeamDashboard() {
       milestones,
       quote_text: widgets.quote_text,
       quote_author: widgets.quote_author,
+      // Freeze the live goals into the snapshot so the historical view
+      // shows the targets that were in effect THAT week. Without this,
+      // retconning a quarter's goals retroactively changes every past
+      // snapshot's progress bars and chart goal lines.
+      goals: qgoals,
     });
     if (newSnap) setSnapshots(loadSnapshots());
-  }, [isOwnerAccount, m, milestones, widgets]);
+  }, [isOwnerAccount, m, milestones, widgets, qgoals]);
 
   // Quarterly trend points sourced from snapshots, with the current
   // quarter overridden by the live metric so the rightmost point always
@@ -955,15 +984,13 @@ export function TeamDashboard() {
       : num(m.nrr_by_dollar_true_pct ?? m.nrr_by_dollar_legacy_pct);
 
   return (
-    <div className="space-y-6" data-dashboard-print-root>
+    <div className="space-y-3" data-dashboard-print-root>
       {tabBar}
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight">Team Dashboard</h2>
-          <p className="text-xs text-muted-foreground">
-            Fiscal {m.fiscal_period} ({m.fiscal_quarter_start} → {m.fiscal_quarter_end}).
-            Click any KPI to drill into the underlying records.
-            {isOwner ? " You can edit goals via the pencil icons." : ""}
+        <div className="flex items-baseline gap-2">
+          <h2 className="text-lg font-bold tracking-tight">Team Dashboard</h2>
+          <p className="text-[11px] text-muted-foreground">
+            Fiscal {m.fiscal_period} ({m.fiscal_quarter_start} → {m.fiscal_quarter_end})
           </p>
         </div>
         <span className="text-[11px] text-muted-foreground">
@@ -986,7 +1013,7 @@ export function TeamDashboard() {
             items={cardOrder.sales}
             strategy={rectSortingStrategy}
           >
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
               {cardOrder.sales.map((id) => (
                 <SortableCard key={id} id={id} enabled={isOwner}>
                   {id === "arr" && (
@@ -1010,7 +1037,7 @@ export function TeamDashboard() {
                             data={arrPoints}
                             yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
                             tooltipFormatter={(v) => formatCurrency(v)}
-                            height={220}
+                            height={170}
                             showGoal={false}
                             lineColor="#3b82f6"
                           />
@@ -1048,7 +1075,7 @@ export function TeamDashboard() {
                             data={newCustomersRunning}
                             yFormatter={(v) => String(Math.round(v))}
                             tooltipFormatter={(v) => String(Math.round(v))}
-                            height={220}
+                            height={170}
                           />
                           {isOwner && (
                             <MonthSplitInline
@@ -1082,7 +1109,7 @@ export function TeamDashboard() {
                               `$${(v / 1000).toFixed(0)}k`
                             }
                             tooltipFormatter={(v) => formatCurrency(v)}
-                            height={220}
+                            height={170}
                           />
                           {isOwner && (
                             <MonthSplitInline
@@ -1112,7 +1139,7 @@ export function TeamDashboard() {
                               `$${(v / 1000).toFixed(0)}k`
                             }
                             tooltipFormatter={(v) => formatCurrency(v)}
-                            height={220}
+                            height={170}
                           />
                         </ChartCard>
                       ) : (
@@ -1145,7 +1172,7 @@ export function TeamDashboard() {
             items={cardOrder.marketing}
             strategy={rectSortingStrategy}
           >
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
               {cardOrder.marketing.map((id) => (
                 <SortableCard key={id} id={id} enabled={isOwner}>
                   {id === "sql" && sqlRunning.length > 1 && (
@@ -1162,7 +1189,7 @@ export function TeamDashboard() {
                         data={sqlRunning}
                         yFormatter={(v) => String(Math.round(v))}
                         tooltipFormatter={(v) => String(Math.round(v))}
-                        height={220}
+                        height={170}
                       />
                       {isOwner && (
                         <MonthSplitInline
@@ -1189,7 +1216,7 @@ export function TeamDashboard() {
                         data={mqlRunning}
                         yFormatter={(v) => String(Math.round(v))}
                         tooltipFormatter={(v) => String(Math.round(v))}
-                        height={220}
+                        height={170}
                       />
                       {isOwner && (
                         <MonthSplitInline
@@ -1220,7 +1247,7 @@ export function TeamDashboard() {
             items={cardOrder.cs}
             strategy={rectSortingStrategy}
           >
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
               {cardOrder.cs.map((id) => (
                 <SortableCard key={id} id={id} enabled={isOwner}>
                   {id === "renewals" && (
@@ -1245,7 +1272,7 @@ export function TeamDashboard() {
                                 data={renewalsClosedRunning}
                                 yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
                                 tooltipFormatter={(v) => formatCurrency(v)}
-                                height={220}
+                                height={170}
                                 yDomain={[0, ticks[ticks.length - 1]]}
                                 yTicks={ticks}
                               />
@@ -1308,7 +1335,7 @@ export function TeamDashboard() {
                             data={nrrCustomerTrendPoints}
                             yFormatter={(v) => `${v.toFixed(0)}%`}
                             tooltipFormatter={(v) => `${v.toFixed(1)}%`}
-                            height={200}
+                            height={160}
                             yDomain={[60, 100]}
                             yTicks={[60, 65, 70, 75, 80, 85, 90, 95, 100]}
                           />
@@ -1342,7 +1369,7 @@ export function TeamDashboard() {
                             data={nrrDollarTrendPoints}
                             yFormatter={(v) => `${v.toFixed(0)}%`}
                             tooltipFormatter={(v) => `${v.toFixed(1)}%`}
-                            height={200}
+                            height={160}
                             yDomain={[60, 100]}
                             yTicks={[60, 65, 70, 75, 80, 85, 90, 95, 100]}
                           />
@@ -1483,7 +1510,7 @@ export function TeamDashboard() {
 
       {/* ----- Services (ClickUp) ----- */}
       <SectionWrap title="Services" tone="bg-amber-50 dark:bg-amber-950/30">
-        <ServicesPanel services={services ?? null} />
+        <ServicesPanel services={services ?? null} isOwner={isOwner} />
       </SectionWrap>
 
       {/* ----- Development (manual milestones) ----- */}
@@ -1780,9 +1807,21 @@ function buildRunningTotal(
   // month as M1 — this matches Codex's labels (e.g., Q1 → Jan/Feb/Mar).
   // monthGoals are cumulative end-of-month-N targets — admin can set
   // per-month targets in Goals page (else default to even thirds).
+  //
+  // Skip future months: when the dashboard is being viewed mid-quarter
+  // (e.g. it's May and we're in Q2), the June point used to render as a
+  // red dot because the cumulative-actual flat-lined from May while the
+  // June goal was higher. Brayden flagged that "we don't have June data
+  // yet, the red doesn't belong there". Only emit a point for month i
+  // if month i has already started (monthStart <= today). For historical
+  // quarters (today > quarterEnd) this naturally emits all 3 months.
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
   const points: SegmentPoint[] = [];
   for (let i = 0; i < 3; i++) {
     const monthStart = new Date(start.getFullYear(), start.getMonth() + i, 1);
+    if (monthStart > today) break;
     const monthEnd = new Date(start.getFullYear(), start.getMonth() + i + 1, 0);
     // Don't extend past quarter end (e.g., short quarters / off-by-one).
     const cap = monthEnd > end ? end : monthEnd;
@@ -1853,12 +1892,16 @@ function SectionWrap({
   tone: string;
   children: React.ReactNode;
 }) {
+  // Title is now inside the colored panel as a single compact row, not
+  // an outer h3 above it. Drops the previous mb-2 gap between label and
+  // panel plus a full line height — biggest single win for fitting the
+  // whole dashboard on a smaller office TV without scrolling.
   return (
-    <div>
-      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+    <div className={`rounded-lg px-3 py-2 ${tone}`}>
+      <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
         {title}
       </h3>
-      <div className={`rounded-lg p-3 ${tone}`}>{children}</div>
+      {children}
     </div>
   );
 }
@@ -2142,7 +2185,7 @@ function KpiCard({
 
   return (
     <Card>
-      <CardContent className="p-3 space-y-2">
+      <CardContent className="p-2 space-y-1.5">
         <div>
           <div className="flex items-center justify-between gap-1">
             <div className="flex items-center gap-1.5 min-w-0">
@@ -2161,7 +2204,7 @@ function KpiCard({
                   className={`inline-block h-2 w-2 rounded-full ${dotClass} shrink-0`}
                 />
               )}
-              <p className="text-xs text-muted-foreground font-medium truncate">
+              <p className="text-[11px] text-muted-foreground font-medium truncate">
                 {label}
               </p>
             </div>
@@ -2175,7 +2218,7 @@ function KpiCard({
               </Link>
             )}
           </div>
-          <p className="text-2xl font-semibold mt-0.5">{value}</p>
+          <p className="text-xl font-semibold leading-tight">{value}</p>
         </div>
         {showGoal && (
           <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
@@ -2265,18 +2308,51 @@ function KpiCard({
  */
 function ServicesPanel({
   services,
+  isOwner,
 }: {
   services: ClickUpServicesSnapshot | null;
+  isOwner: boolean;
 }) {
+  const refresh = useRefreshClickUpServices();
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+
+  const handleRefresh = () => {
+    setRefreshError(null);
+    refresh.mutate(undefined, {
+      onError: (err: any) => {
+        setRefreshError(err?.message ?? "Sync failed");
+      },
+    });
+  };
+
   if (!services) {
     return (
       <Card className="border-dashed">
-        <CardContent className="p-4">
+        <CardContent className="p-4 space-y-2">
           <p className="text-sm text-muted-foreground">
             No ClickUp snapshot yet. Once the daily sync runs (or you invoke{" "}
             <code>clickup-services-sync</code> manually), metrics will appear
             here.
           </p>
+          {isOwner && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleRefresh}
+              disabled={refresh.isPending}
+            >
+              <RefreshCw
+                className={
+                  "h-3.5 w-3.5 mr-1.5 " +
+                  (refresh.isPending ? "animate-spin" : "")
+                }
+              />
+              {refresh.isPending ? "Syncing…" : "Sync now"}
+            </Button>
+          )}
+          {refreshError && (
+            <p className="text-xs text-rose-600">{refreshError}</p>
+          )}
         </CardContent>
       </Card>
     );
@@ -2329,10 +2405,32 @@ function ServicesPanel({
               ))}
             </div>
           )}
-          <p className="text-[10px] text-muted-foreground italic">
-            Last sync:{" "}
-            {new Date(services.captured_at).toLocaleString()}
-          </p>
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <p className="text-[10px] text-muted-foreground italic">
+              Last sync: {new Date(services.captured_at).toLocaleString()}
+            </p>
+            {isOwner && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 px-2 text-[11px]"
+                onClick={handleRefresh}
+                disabled={refresh.isPending}
+                title="Pull fresh data from ClickUp"
+              >
+                <RefreshCw
+                  className={
+                    "h-3 w-3 mr-1 " +
+                    (refresh.isPending ? "animate-spin" : "")
+                  }
+                />
+                {refresh.isPending ? "Syncing…" : "Refresh"}
+              </Button>
+            )}
+          </div>
+          {refreshError && (
+            <p className="text-xs text-rose-600">{refreshError}</p>
+          )}
         </CardContent>
       </Card>
     </div>
@@ -3173,11 +3271,14 @@ function SnapshotDetailView({
   snapshots: DashboardSnapshot[];
   onBack: () => void;
 }) {
-  // Pull goals for the captured quarter so the snapshot view shows the
-  // same progress-bar context the live dashboard would. If the goals for
-  // that quarter were retconned, we use the latest stored values — the
-  // actuals are still immutable.
-  const goals = useMemo(() => getQuarterGoals(snapshot.quarter), [snapshot.quarter]);
+  // Prefer the frozen `snapshot.goals` captured at write time so a
+  // historical week renders with the targets that were live then. Older
+  // snapshots written before this field existed fall back to the
+  // current per-quarter goals (the legacy, drift-prone behavior).
+  const goals = useMemo(
+    () => snapshot.goals ?? getQuarterGoals(snapshot.quarter),
+    [snapshot.goals, snapshot.quarter],
+  );
   const monthIdx = currentMonthIndex(snapshot.quarter, new Date(snapshot.snapshot_date));
 
   /**
@@ -3277,7 +3378,7 @@ function SnapshotDetailView({
 
       {/* ----- Sales ----- */}
       <SectionWrap title="Sales" tone="bg-blue-50 dark:bg-blue-950/30">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
           <div className="space-y-3">
             <KpiCard
               label="ARR (rolling 365)"
@@ -3296,7 +3397,7 @@ function SnapshotDetailView({
                   data={arrTrendPoints}
                   yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
                   tooltipFormatter={(v) => formatCurrency(v)}
-                  height={200}
+                  height={160}
                   showGoal={false}
                   lineColor="#3b82f6"
                 />
@@ -3340,7 +3441,7 @@ function SnapshotDetailView({
                   data={pipelineTrendPoints}
                   yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
                   tooltipFormatter={(v) => formatCurrency(v)}
-                  height={200}
+                  height={160}
                 />
               </ChartCard>
             )}
@@ -3350,7 +3451,7 @@ function SnapshotDetailView({
 
       {/* ----- Marketing ----- */}
       <SectionWrap title="Marketing" tone="bg-purple-50 dark:bg-purple-950/30">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
           <KpiCard
             label="SQL QTD"
             value={String(sm.sql_qtd)}
@@ -3374,7 +3475,7 @@ function SnapshotDetailView({
 
       {/* ----- Customer Success ----- */}
       <SectionWrap title="Customer Success" tone="bg-emerald-50 dark:bg-emerald-950/30">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
           <KpiCard
             label="Renewals Closed QTD"
             value={formatCurrency(sm.renewals_amount_qtd)}
@@ -3412,7 +3513,7 @@ function SnapshotDetailView({
                   data={nrrCustomerTrendPoints}
                   yFormatter={(v) => `${v.toFixed(0)}%`}
                   tooltipFormatter={(v) => `${v.toFixed(1)}%`}
-                  height={180}
+                  height={150}
                 />
               </ChartCard>
             )}
@@ -3434,7 +3535,7 @@ function SnapshotDetailView({
                   data={nrrDollarTrendPoints}
                   yFormatter={(v) => `${v.toFixed(0)}%`}
                   tooltipFormatter={(v) => `${v.toFixed(1)}%`}
-                  height={180}
+                  height={150}
                 />
               </ChartCard>
             )}

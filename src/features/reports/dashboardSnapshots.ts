@@ -9,7 +9,7 @@
  * swap `loadAll` / `saveAll` for HTTP calls — the rest is pure data.
  */
 
-import { quarterLabelFromDate } from "./dashboardGoalsByQuarter";
+import { quarterLabelFromDate, type QuarterGoals } from "./dashboardGoalsByQuarter";
 import type { Milestone } from "./dashboardMilestones";
 
 export const SNAPSHOTS_LS_KEY = "dashboard_snapshots_v1";
@@ -43,6 +43,13 @@ export interface DashboardSnapshot {
   /** Free-text quote at capture time, for context. */
   quote_text: string;
   quote_author: string;
+  /**
+   * Frozen copy of the per-metric goals for `quarter` at capture time.
+   * Optional for backwards-compat with snapshots captured before this
+   * field existed — those fall back to the current `getQuarterGoals()`
+   * value (the prior, slightly drift-prone behavior).
+   */
+  goals?: QuarterGoals;
 }
 
 /** ISO-week start (Monday) for a given date, formatted YYYY-MM-DD. */
@@ -99,6 +106,9 @@ export function captureWeeklySnapshotIfNeeded(input: {
   milestones: Milestone[];
   quote_text: string;
   quote_author: string;
+  /** Frozen goals copy. Caller passes `getQuarterGoals(quarter)` so the
+   *  historical view shows the goals that were live at capture time. */
+  goals?: QuarterGoals;
   now?: Date;
 }): DashboardSnapshot | null {
   const now = input.now ?? new Date();
@@ -113,6 +123,7 @@ export function captureWeeklySnapshotIfNeeded(input: {
     milestones: input.milestones.map((m) => ({ ...m })),
     quote_text: input.quote_text,
     quote_author: input.quote_author,
+    goals: input.goals,
   };
   const all = loadAll();
   all.push(snap);
