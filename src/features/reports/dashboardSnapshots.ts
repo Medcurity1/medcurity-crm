@@ -28,6 +28,54 @@ export interface SnapshotMetrics {
   qtd_billing: number;
 }
 
+/**
+ * Frozen copy of the ClickUp Services panel at capture time. Mirrors
+ * the `ClickUpServicesSnapshot` interface in TeamDashboard.tsx — kept
+ * shape-compatible so the Historical view can render it through the
+ * same `ServicesPanel` component.
+ */
+export interface ServicesPanelSnapshot {
+  captured_at: string;
+  quarter_label: string | null;
+  task_count: number;
+  active_projects: number;
+  closed_projects_this_quarter: number;
+  closed_projects_sra_final_quarter: number;
+  avg_project_close_days_qtd: number;
+  close_day_sample_count: number;
+  overall_project_status: "green" | "red";
+  red_item_threshold: number | null;
+  projects_over_red_threshold: { project: string; red_items: number }[];
+  status_breakdown: { status: string; count: number }[];
+  closed_projects_quarter_names: string[];
+  sra_final_quarter_names: string[];
+}
+
+export interface ArrFinancialSnapshot {
+  arr: number | null;
+  nrr_customer_pct: number | null;
+  nrr_dollar_pct: number | null;
+  customer_base_count: number | null;
+  customer_base_arr: number | null;
+  lost_count_rolling_365: number | null;
+  lost_amount_rolling_365: number | null;
+}
+
+export interface LostCustomerSnapshot {
+  id: string;
+  account_id: string | null;
+  account_name: string;
+  opportunity_name: string;
+  amount: number | null;
+  close_date: string;
+}
+
+/** Raw closed-won row used to rebuild a running-total chart. */
+export interface RunningTotalRow {
+  close_date: string;
+  amount: number;
+}
+
 export interface DashboardSnapshot {
   /** ISO date YYYY-MM-DD; the Monday of the captured ISO week. */
   week_start: string;
@@ -50,6 +98,29 @@ export interface DashboardSnapshot {
    * value (the prior, slightly drift-prone behavior).
    */
   goals?: QuarterGoals;
+  /** ClickUp services panel at capture time. Optional for older snapshots. */
+  services?: ServicesPanelSnapshot | null;
+  /** YoY ARR financial card at capture time. Optional for older snapshots. */
+  arr_financial?: ArrFinancialSnapshot | null;
+  /** Lost customers list at capture time. Optional for older snapshots. */
+  lost_customers?: LostCustomerSnapshot[];
+  /**
+   * Raw running-total rows per metric at capture time. Lets the
+   * historical view rebuild the exact R/Y/G segmented chart that was
+   * on screen that week, even if the source deal was later moved or
+   * deleted. Keyed by metric name; missing entries fall back to a
+   * computed proxy from `metrics`.
+   */
+  running_totals?: {
+    new_customers?: RunningTotalRow[];
+    new_sales?: RunningTotalRow[];
+    renewals?: RunningTotalRow[];
+    sql?: RunningTotalRow[];
+    mql?: RunningTotalRow[];
+  };
+  /** Fiscal quarter window the snapshot was captured in (for chart axes). */
+  fiscal_quarter_start?: string;
+  fiscal_quarter_end?: string;
 }
 
 /** ISO-week start (Monday) for a given date, formatted YYYY-MM-DD. */
@@ -101,7 +172,7 @@ export function hasSnapshotForWeek(weekStart: string): boolean {
  * week, insert one. Otherwise no-op. Returns the newly-written
  * snapshot, or null if nothing was written.
  */
-export function captureWeeklySnapshotIfNeeded(input: {
+export interface CaptureSnapshotInput {
   metrics: SnapshotMetrics;
   milestones: Milestone[];
   quote_text: string;
@@ -109,11 +180,45 @@ export function captureWeeklySnapshotIfNeeded(input: {
   /** Frozen goals copy. Caller passes `getQuarterGoals(quarter)` so the
    *  historical view shows the goals that were live at capture time. */
   goals?: QuarterGoals;
+  services?: ServicesPanelSnapshot | null;
+  arr_financial?: ArrFinancialSnapshot | null;
+  lost_customers?: LostCustomerSnapshot[];
+  running_totals?: DashboardSnapshot["running_totals"];
+  fiscal_quarter_start?: string;
+  fiscal_quarter_end?: string;
   now?: Date;
-}): DashboardSnapshot | null {
+}
+
+export function captureWeeklySnapshotIfNeeded(
+  input: CaptureSnapshotInput,
+): DashboardSnapshot | null {
   const now = input.now ?? new Date();
   const week_start = isoWeekStart(now);
   if (hasSnapshotForWeek(week_start)) return null;
+  return writeSnapshot(week_start, now, input);
+}
+
+/**
+ * Force-write a snapshot for the current ISO week, overwriting any
+ * existing entry. Used by the "Recapture now" button so the owner can
+ * refresh the baseline after fixing data quality / display issues
+ * without waiting for next Monday.
+ */
+export function captureSnapshotNow(
+  input: CaptureSnapshotInput,
+): DashboardSnapshot {
+  const now = input.now ?? new Date();
+  const week_start = isoWeekStart(now);
+  // Drop any existing row for this week so we don't duplicate.
+  saveAll(loadAll().filter((s) => s.week_start !== week_start));
+  return writeSnapshot(week_start, now, input);
+}
+
+function writeSnapshot(
+  week_start: string,
+  now: Date,
+  input: CaptureSnapshotInput,
+): DashboardSnapshot {
   const snap: DashboardSnapshot = {
     week_start,
     snapshot_date: now.toISOString().slice(0, 10),
@@ -124,6 +229,14 @@ export function captureWeeklySnapshotIfNeeded(input: {
     quote_text: input.quote_text,
     quote_author: input.quote_author,
     goals: input.goals,
+    services: input.services ?? null,
+    arr_financial: input.arr_financial ?? null,
+    lost_customers: input.lost_customers
+      ? input.lost_customers.map((r) => ({ ...r }))
+      : undefined,
+    running_totals: input.running_totals,
+    fiscal_quarter_start: input.fiscal_quarter_start,
+    fiscal_quarter_end: input.fiscal_quarter_end,
   };
   const all = loadAll();
   all.push(snap);

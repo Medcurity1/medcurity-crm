@@ -96,10 +96,12 @@ import {
 } from "@/features/reports/SegmentedLineChart";
 import {
   captureWeeklySnapshotIfNeeded,
+  captureSnapshotNow,
   loadSnapshots,
   deleteSnapshot,
   SNAPSHOT_METRIC_LABELS,
   type DashboardSnapshot,
+  type CaptureSnapshotInput,
 } from "@/features/reports/dashboardSnapshots";
 import {
   loadCardOrder,
@@ -779,25 +781,32 @@ export function TeamDashboard() {
     loadSnapshots(),
   );
 
-  // Capture a weekly snapshot once per ISO week the first time the
-  // dashboard renders with real metrics that week. Idempotent — safe
-  // to call on every render. Owner-only: writing snapshots from the
-  // team-view session would pollute history with the wrong author.
-  useEffect(() => {
-    if (!isOwnerAccount || !m) return;
-    const newSnap = captureWeeklySnapshotIfNeeded({
+  // Build the snapshot payload once per render. Used by both the
+  // automatic weekly capture and the owner-triggered "Recapture now"
+  // button so every code path freezes the SAME everything-on-screen
+  // bundle (KPIs + services + ARR YoY + lost customers + raw rows
+  // backing every running-total chart + goals).
+  const snapshotPayload: CaptureSnapshotInput | null = useMemo(() => {
+    if (!m) return null;
+    return {
       metrics: {
         arr: num(m.current_arr),
         new_customers_qtd: num(m.new_customers_qtd),
         new_customer_amount_qtd: num(m.new_customer_amount_qtd),
         pipeline_amount: num(m.pipeline_amount),
         renewals_amount_qtd: num(m.renewals_amount_qtd),
-        nrr_by_customer_pct: num(
-          m.nrr_by_customer_true_pct ?? m.nrr_by_customer_legacy_pct,
-        ),
-        nrr_by_dollar_pct: num(
-          m.nrr_by_dollar_true_pct ?? m.nrr_by_dollar_legacy_pct,
-        ),
+        // Prefer the YoY NRR (v_dashboard_arr_financial) the live dashboard
+        // actually renders. Falls back to the QoQ true/legacy values from
+        // v_dashboard_metrics if the YoY view is null. Without this the
+        // snapshot's NRR would diverge from what was on screen.
+        nrr_by_customer_pct:
+          arrFin?.nrr_customer_pct != null
+            ? Number(arrFin.nrr_customer_pct)
+            : num(m.nrr_by_customer_true_pct ?? m.nrr_by_customer_legacy_pct),
+        nrr_by_dollar_pct:
+          arrFin?.nrr_dollar_pct != null
+            ? Number(arrFin.nrr_dollar_pct)
+            : num(m.nrr_by_dollar_true_pct ?? m.nrr_by_dollar_legacy_pct),
         sql_qtd: num(m.sql_qtd),
         mql_unique_qtd: num(m.mql_unique_qtd),
         qtd_billing:
@@ -812,9 +821,69 @@ export function TeamDashboard() {
       // retconning a quarter's goals retroactively changes every past
       // snapshot's progress bars and chart goal lines.
       goals: qgoals,
-    });
+      services: services ?? null,
+      arr_financial: arrFin ?? null,
+      lost_customers: lost ?? [],
+      running_totals: {
+        new_customers: (newCustomerRows ?? []).map((r) => ({
+          close_date: r.close_date,
+          amount: 1,
+        })),
+        new_sales: (newCustomerRows ?? []).map((r) => ({
+          close_date: r.close_date,
+          amount: Number(r.amount) || 0,
+        })),
+        renewals: (renewalsClosedRows ?? []).map((r) => ({
+          close_date: r.close_date,
+          amount: Number(r.amount) || 0,
+        })),
+        // SQL / MQL queries return `event_date`; normalize to `close_date`
+        // so RunningTotalRow has a single date-field shape. `amount = 1`
+        // mirrors the live count-per-row used by buildRunningTotal.
+        sql: (sqlRows ?? []).map((r: any) => ({
+          close_date: r.event_date ?? r.close_date,
+          amount: 1,
+        })),
+        mql: (mqlRows ?? []).map((r: any) => ({
+          close_date: r.event_date ?? r.close_date,
+          amount: 1,
+        })),
+      },
+      fiscal_quarter_start: m.fiscal_quarter_start ?? undefined,
+      fiscal_quarter_end: m.fiscal_quarter_end ?? undefined,
+    };
+  }, [
+    m,
+    widgets,
+    milestones,
+    qgoals,
+    services,
+    arrFin,
+    lost,
+    newCustomerRows,
+    renewalsClosedRows,
+    sqlRows,
+    mqlRows,
+  ]);
+
+  // Capture a weekly snapshot once per ISO week the first time the
+  // dashboard renders with real metrics that week. Idempotent — safe
+  // to call on every render. Owner-only: writing snapshots from the
+  // team-view session would pollute history with the wrong author.
+  useEffect(() => {
+    if (!isOwnerAccount || !snapshotPayload) return;
+    const newSnap = captureWeeklySnapshotIfNeeded(snapshotPayload);
     if (newSnap) setSnapshots(loadSnapshots());
-  }, [isOwnerAccount, m, milestones, widgets, qgoals]);
+  }, [isOwnerAccount, snapshotPayload]);
+
+  /** Owner-only manual snapshot recapture — overwrites this week's
+   *  snapshot so a fresh baseline can be taken after the user fixes a
+   *  display issue or recovers a missing data source. */
+  const handleRecaptureSnapshot = () => {
+    if (!snapshotPayload) return;
+    captureSnapshotNow(snapshotPayload);
+    setSnapshots(loadSnapshots());
+  };
 
   // Quarterly trend points sourced from snapshots, with the current
   // quarter overridden by the live metric so the rightmost point always
@@ -942,7 +1011,10 @@ export function TeamDashboard() {
     return (
       <div className="space-y-4">
         {tabBar}
-        <HistoricalView />
+        <HistoricalView
+          onRecapture={handleRecaptureSnapshot}
+          canRecapture={!!snapshotPayload}
+        />
       </div>
     );
   }
@@ -2041,11 +2113,19 @@ function ChartCard({
   // Tighter padding (p-2.5) and a single-line title row make each chart
   // tile ~24px shorter than before. Subtitle pill (the M2 pace target)
   // stays full-saturation green so it remains the eye's natural focus.
+  // Premium polish: layered shadow + translucent surface to match the
+  // refined KpiCard look, with a hairline inner highlight at the top.
   return (
-    <Card className="border-border/60 shadow-sm">
+    <Card className="relative overflow-hidden border-border/40 bg-card/90 backdrop-blur-sm ring-1 ring-black/[0.04] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_2px_8px_-2px_rgba(0,0,0,0.06)]">
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent dark:via-white/10"
+        aria-hidden="true"
+      />
       <CardContent className="p-2.5">
         <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
-          <h4 className="text-xs font-semibold text-foreground/80">{title}</h4>
+          <h4 className="text-[11px] font-semibold text-foreground/80 tracking-tight">
+            {title}
+          </h4>
           {subtitle && (
             <span className="text-[10px] font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded-full px-2 py-0.5">
               {subtitle}
@@ -2234,8 +2314,18 @@ function KpiCard({
       ? "bg-red-500"
       : "bg-primary";
 
+  // Premium-polish card: slightly translucent surface, refined ring + soft
+  // layered shadow, subtle inner highlight at the top. The gradient track
+  // on the progress bar gives the bar a 3D-ish feel without animation
+  // overhead, and the % label sits inline with the goal text to read like
+  // a financial KPI tile.
+  const pctLabel = `${Math.max(0, Math.min(999, Math.round(progress)))}%`;
   return (
-    <Card className="border-border/60 shadow-sm hover:shadow transition-shadow">
+    <Card className="relative overflow-hidden border-border/40 bg-card/90 backdrop-blur-sm ring-1 ring-black/[0.04] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_2px_8px_-2px_rgba(0,0,0,0.06)] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),0_8px_24px_-4px_rgba(0,0,0,0.10)] hover:-translate-y-px transition-all duration-200">
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent dark:via-white/10"
+        aria-hidden="true"
+      />
       <CardContent className="p-2.5 space-y-1.5">
         <div>
           <div className="flex items-center justify-between gap-1">
@@ -2252,10 +2342,10 @@ function KpiCard({
                       ? "< 50% of goal"
                       : "No goal set"
                   }
-                  className={`inline-block h-2 w-2 rounded-full ${dotClass} shrink-0`}
+                  className={`inline-block h-2 w-2 rounded-full ${dotClass} shrink-0 ring-2 ring-background`}
                 />
               )}
-              <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide truncate">
+              <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-[0.08em] truncate">
                 {label}
               </p>
             </div>
@@ -2269,12 +2359,14 @@ function KpiCard({
               </Link>
             )}
           </div>
-          <p className="text-2xl font-bold leading-none tracking-tight tabular-nums">{value}</p>
+          <p className="text-2xl font-bold leading-none tracking-tight tabular-nums text-foreground">
+            {value}
+          </p>
         </div>
         {showGoal && (
-          <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+          <div className="h-1.5 w-full rounded-full bg-gradient-to-r from-muted/80 to-muted/40 overflow-hidden ring-1 ring-black/[0.03]">
             <div
-              className={`h-full transition-all ${barClass}`}
+              className={`h-full transition-all duration-500 ease-out ${barClass} shadow-[inset_0_-1px_0_rgba(0,0,0,0.12)]`}
               style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
             />
           </div>
@@ -2321,6 +2413,21 @@ function KpiCard({
               <>
                 <p className="text-[10px] text-muted-foreground">
                   Goal {formatGoal(goal)}
+                  {goal > 0 && (
+                    <span
+                      className={`ml-1.5 font-semibold tabular-nums ${
+                        status === "green"
+                          ? "text-emerald-700 dark:text-emerald-400"
+                          : status === "yellow"
+                          ? "text-amber-700 dark:text-amber-400"
+                          : status === "red"
+                          ? "text-red-700 dark:text-red-400"
+                          : "text-muted-foreground"
+                      }`}
+                    >
+                      · {pctLabel}
+                    </span>
+                  )}
                 </p>
                 {editable && (
                   <button
@@ -3172,7 +3279,16 @@ function GoalRow({
 
 // ----- Historical view (weekly snapshots) ------------------------------------
 
-function HistoricalView() {
+function HistoricalView({
+  onRecapture,
+  canRecapture,
+}: {
+  /** Owner-only "Recapture this week" handler. When absent, button is
+   *  hidden. Called after writing the new snapshot so the parent can
+   *  refresh its own state too. */
+  onRecapture?: () => void;
+  canRecapture?: boolean;
+}) {
   const [snapshots, setSnapshots] = useState<DashboardSnapshot[]>(() =>
     loadSnapshots(),
   );
@@ -3212,14 +3328,37 @@ function HistoricalView() {
   return (
     <Card>
       <CardContent className="p-6 space-y-4">
-        <div className="space-y-1">
-          <h2 className="text-lg font-semibold">Historical Snapshots</h2>
-          <p className="text-sm text-muted-foreground max-w-2xl">
-            One snapshot per ISO week, captured automatically the first time
-            you load the dashboard each week. Each row shows the week's KPI
-            values and the delta vs the previous week. Click a row to see
-            the frozen dashboard from that week.
-          </p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold">Historical Snapshots</h2>
+            <p className="text-sm text-muted-foreground max-w-2xl">
+              One snapshot per ISO week, captured automatically the first
+              time you load the dashboard each week. Each row shows the
+              week's KPI values and the delta vs the previous week. Click a
+              row to see the frozen dashboard from that week.
+            </p>
+          </div>
+          {onRecapture && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!canRecapture}
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    "Overwrite this week's snapshot with the current live dashboard values? The existing entry for this ISO week will be replaced.",
+                  )
+                ) {
+                  return;
+                }
+                onRecapture();
+                refresh();
+              }}
+              title="Overwrite this week's snapshot using the current live dashboard"
+            >
+              Recapture this week
+            </Button>
+          )}
         </div>
 
         {snapshots.length === 0 ? (
@@ -3403,6 +3542,79 @@ function SnapshotDetailView({
   const sm = snapshot.metrics;
   const noop = () => {};
 
+  // Frozen running-total charts — rebuilt from the raw rows captured at
+  // snapshot time so the historical view shows the EXACT segmented R/Y/G
+  // chart that was on screen that Monday. Falls back to empty arrays for
+  // older snapshots written before `running_totals` existed (those weeks
+  // simply won't render the per-section trend charts).
+  const frozenQStart = snapshot.fiscal_quarter_start ?? "";
+  const frozenQEnd = snapshot.fiscal_quarter_end ?? "";
+  const newCustomersRunning = useMemo<SegmentPoint[]>(
+    () =>
+      buildRunningTotal(
+        (snapshot.running_totals?.new_customers ?? []).map((r) => ({
+          date: r.close_date,
+          value: r.amount,
+        })),
+        frozenQStart,
+        frozenQEnd,
+        fillMonthGoals(goals.new_customers),
+      ),
+    [snapshot.running_totals?.new_customers, frozenQStart, frozenQEnd, goals.new_customers],
+  );
+  const newSalesRunning = useMemo<SegmentPoint[]>(
+    () =>
+      buildRunningTotal(
+        (snapshot.running_totals?.new_sales ?? []).map((r) => ({
+          date: r.close_date,
+          value: r.amount,
+        })),
+        frozenQStart,
+        frozenQEnd,
+        fillMonthGoals(goals.new_sales),
+      ),
+    [snapshot.running_totals?.new_sales, frozenQStart, frozenQEnd, goals.new_sales],
+  );
+  const renewalsRunning = useMemo<SegmentPoint[]>(
+    () =>
+      buildRunningTotal(
+        (snapshot.running_totals?.renewals ?? []).map((r) => ({
+          date: r.close_date,
+          value: r.amount,
+        })),
+        frozenQStart,
+        frozenQEnd,
+        fillMonthGoals(goals.renewals_number),
+      ),
+    [snapshot.running_totals?.renewals, frozenQStart, frozenQEnd, goals.renewals_number],
+  );
+  const sqlRunning = useMemo<SegmentPoint[]>(
+    () =>
+      buildRunningTotal(
+        (snapshot.running_totals?.sql ?? []).map((r) => ({
+          date: r.close_date,
+          value: r.amount,
+        })),
+        frozenQStart,
+        frozenQEnd,
+        fillMonthGoals(goals.sql),
+      ),
+    [snapshot.running_totals?.sql, frozenQStart, frozenQEnd, goals.sql],
+  );
+  const mqlRunning = useMemo<SegmentPoint[]>(
+    () =>
+      buildRunningTotal(
+        (snapshot.running_totals?.mql ?? []).map((r) => ({
+          date: r.close_date,
+          value: r.amount,
+        })),
+        frozenQStart,
+        frozenQEnd,
+        fillMonthGoals(goals.mql),
+      ),
+    [snapshot.running_totals?.mql, frozenQStart, frozenQEnd, goals.mql],
+  );
+
   // Per-metric resolved goal numbers, mirroring the live dashboard.
   const arrGoal = goals.arr.quarter_goal;
   const pipelineGoal = goals.total_active_pipeline.quarter_goal;
@@ -3470,24 +3682,50 @@ function SnapshotDetailView({
               </ChartCard>
             )}
           </div>
-          <KpiCard
-            label="New Customers QTD"
-            value={String(sm.new_customers_qtd)}
-            progress={pct(sm.new_customers_qtd, newCustomersGoal)}
-            goal={newCustomersGoal}
-            formatGoal={(v) => String(v)}
-            onGoalChange={noop}
-            editable={false}
-          />
-          <KpiCard
-            label="New Sales $ QTD"
-            value={formatCurrency(sm.new_customer_amount_qtd)}
-            progress={pct(sm.new_customer_amount_qtd, newSalesGoal)}
-            goal={newSalesGoal}
-            formatGoal={formatCurrency}
-            onGoalChange={noop}
-            editable={false}
-          />
+          <div className="space-y-2">
+            <KpiCard
+              label="New Customers QTD"
+              value={String(sm.new_customers_qtd)}
+              progress={pct(sm.new_customers_qtd, newCustomersGoal)}
+              goal={newCustomersGoal}
+              formatGoal={(v) => String(v)}
+              onGoalChange={noop}
+              editable={false}
+            />
+            {newCustomersRunning.length > 0 && (
+              <ChartCard title={`New Customers (cumulative) — goal ${newCustomersGoal}`}>
+                <ChartLegend />
+                <SegmentedLineChart
+                  data={newCustomersRunning}
+                  yFormatter={(v) => String(Math.round(v))}
+                  tooltipFormatter={(v) => String(Math.round(v))}
+                  height={140}
+                />
+              </ChartCard>
+            )}
+          </div>
+          <div className="space-y-2">
+            <KpiCard
+              label="New Sales $ QTD"
+              value={formatCurrency(sm.new_customer_amount_qtd)}
+              progress={pct(sm.new_customer_amount_qtd, newSalesGoal)}
+              goal={newSalesGoal}
+              formatGoal={formatCurrency}
+              onGoalChange={noop}
+              editable={false}
+            />
+            {newSalesRunning.length > 0 && (
+              <ChartCard title={`New Sales $ (cumulative) — goal ${formatCurrency(newSalesGoal)}`}>
+                <ChartLegend />
+                <SegmentedLineChart
+                  data={newSalesRunning}
+                  yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+                  tooltipFormatter={(v) => formatCurrency(v)}
+                  height={140}
+                />
+              </ChartCard>
+            )}
+          </div>
           <div className="space-y-2">
             <KpiCard
               label="Active Pipeline"
@@ -3522,24 +3760,50 @@ function SnapshotDetailView({
         accent="bg-purple-500"
       >
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
-          <KpiCard
-            label="SQL QTD"
-            value={String(sm.sql_qtd)}
-            progress={pct(sm.sql_qtd, sqlGoal)}
-            goal={sqlGoal}
-            formatGoal={(v) => String(v)}
-            onGoalChange={noop}
-            editable={false}
-          />
-          <KpiCard
-            label="MQL QTD (unique)"
-            value={String(sm.mql_unique_qtd)}
-            progress={pct(sm.mql_unique_qtd, mqlGoal)}
-            goal={mqlGoal}
-            formatGoal={(v) => String(v)}
-            onGoalChange={noop}
-            editable={false}
-          />
+          <div className="space-y-2">
+            <KpiCard
+              label="SQL QTD"
+              value={String(sm.sql_qtd)}
+              progress={pct(sm.sql_qtd, sqlGoal)}
+              goal={sqlGoal}
+              formatGoal={(v) => String(v)}
+              onGoalChange={noop}
+              editable={false}
+            />
+            {sqlRunning.length > 0 && (
+              <ChartCard title={`SQL (cumulative) — goal ${sqlGoal}`}>
+                <ChartLegend />
+                <SegmentedLineChart
+                  data={sqlRunning}
+                  yFormatter={(v) => String(Math.round(v))}
+                  tooltipFormatter={(v) => String(Math.round(v))}
+                  height={140}
+                />
+              </ChartCard>
+            )}
+          </div>
+          <div className="space-y-2">
+            <KpiCard
+              label="MQL QTD (unique)"
+              value={String(sm.mql_unique_qtd)}
+              progress={pct(sm.mql_unique_qtd, mqlGoal)}
+              goal={mqlGoal}
+              formatGoal={(v) => String(v)}
+              onGoalChange={noop}
+              editable={false}
+            />
+            {mqlRunning.length > 0 && (
+              <ChartCard title={`MQL (cumulative) — goal ${mqlGoal}`}>
+                <ChartLegend />
+                <SegmentedLineChart
+                  data={mqlRunning}
+                  yFormatter={(v) => String(Math.round(v))}
+                  tooltipFormatter={(v) => String(Math.round(v))}
+                  height={140}
+                />
+              </ChartCard>
+            )}
+          </div>
         </div>
       </SectionWrap>
 
@@ -3550,15 +3814,28 @@ function SnapshotDetailView({
         accent="bg-emerald-500"
       >
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
-          <KpiCard
-            label="Renewals Closed QTD"
-            value={formatCurrency(sm.renewals_amount_qtd)}
-            progress={pct(sm.renewals_amount_qtd, renewalsGoal)}
-            goal={renewalsGoal}
-            formatGoal={formatCurrency}
-            onGoalChange={noop}
-            editable={false}
-          />
+          <div className="space-y-2">
+            <KpiCard
+              label="Renewals Closed QTD"
+              value={formatCurrency(sm.renewals_amount_qtd)}
+              progress={pct(sm.renewals_amount_qtd, renewalsGoal)}
+              goal={renewalsGoal}
+              formatGoal={formatCurrency}
+              onGoalChange={noop}
+              editable={false}
+            />
+            {renewalsRunning.length > 0 && (
+              <ChartCard title={`Renewals $ (cumulative) — goal ${formatCurrency(renewalsGoal)}`}>
+                <ChartLegend />
+                <SegmentedLineChart
+                  data={renewalsRunning}
+                  yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+                  tooltipFormatter={(v) => formatCurrency(v)}
+                  height={140}
+                />
+              </ChartCard>
+            )}
+          </div>
           <div className="space-y-2">
             <KpiCard
               label="QTD Billing Goal"
@@ -3616,6 +3893,66 @@ function SnapshotDetailView({
           </div>
         </div>
       </SectionWrap>
+
+      {/* ----- Lost Customers (frozen list at capture time) ----- */}
+      {snapshot.lost_customers && snapshot.lost_customers.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+            Lost Customers — this quarter (
+            {snapshot.lost_customers.length} ·{" "}
+            {formatCurrency(
+              snapshot.lost_customers.reduce(
+                (s, r) => s + (Number(r.amount) || 0),
+                0,
+              ),
+            )}
+            )
+          </h3>
+          <Card>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr className="text-left">
+                      <th className="px-3 py-2 font-medium">Account</th>
+                      <th className="px-3 py-2 font-medium">Opportunity</th>
+                      <th className="px-3 py-2 font-medium">Close Date</th>
+                      <th className="px-3 py-2 font-medium text-right">
+                        Amount
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {snapshot.lost_customers.map((r) => (
+                      <tr key={r.id} className="border-t hover:bg-muted/30">
+                        <td className="px-3 py-2">{r.account_name}</td>
+                        <td className="px-3 py-2">{r.opportunity_name}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          {new Date(r.close_date).toLocaleDateString()}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {formatCurrency(Number(r.amount) || 0)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ----- Services (frozen ClickUp snapshot at capture time) ----- */}
+      {snapshot.services && (
+        <SectionWrap
+          title="Services"
+          tone="bg-gradient-to-br from-amber-50 to-amber-100/50 dark:from-amber-950/40 dark:to-amber-900/20"
+          accent="bg-amber-500"
+        >
+          <ServicesPanel services={snapshot.services} isOwner={false} />
+        </SectionWrap>
+      )}
 
       {/* ----- Quote (Most Recent Quote at the time) ----- */}
       {(snapshot.quote_text || snapshot.quote_author) && (

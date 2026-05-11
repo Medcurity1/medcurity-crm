@@ -1,4 +1,4 @@
-import { lazy } from "react";
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -31,6 +31,7 @@ const ProductsPage = lazy(() => import("@/features/products/ProductsPage").then(
 const ProductDetail = lazy(() => import("@/features/products/ProductDetail").then(m => ({ default: m.ProductDetail })));
 const RenewalsQueue = lazy(() => import("@/features/renewals/RenewalsQueue").then(m => ({ default: m.RenewalsQueue })));
 const ReportsHub = lazy(() => import("@/features/reports/ReportsHub").then(m => ({ default: m.ReportsHub })));
+const TeamDashboardTv = lazy(() => import("@/features/reports/TeamDashboardTv").then(m => ({ default: m.TeamDashboardTv })));
 // ForecastPage is now only reached via /reports?tab=forecasting and
 // lazy-loaded inside ReportsHub.
 const ActivityCalendar = lazy(() => import("@/features/activities/ActivityCalendar").then(m => ({ default: m.ActivityCalendar })));
@@ -70,6 +71,21 @@ export default function App() {
               <Route path="/forgot-password" element={<ForgotPasswordPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route element={<ProtectedRoute />}>
+                {/* Office-TV view: full-bleed, no AppLayout chrome. */}
+                <Route
+                  path="team/tv"
+                  element={
+                    <Suspense
+                      fallback={
+                        <div className="fixed inset-0 flex items-center justify-center bg-black text-white text-sm">
+                          Loading dashboard…
+                        </div>
+                      }
+                    >
+                      <TeamDashboardTv />
+                    </Suspense>
+                  }
+                />
                 <Route element={<AppLayout />}>
                   <Route index element={<HomePage />} />
                   <Route path="accounts" element={<AccountsList />} />
