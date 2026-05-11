@@ -218,6 +218,47 @@ function useArrFinancial() {
   });
 }
 
+/**
+ * Latest snapshot from the `clickup-services-sync` Edge Function. Writes
+ * one row per daily run to `clickup_services_snapshots`; we read the most
+ * recent. Surfaces the same Services-section metrics the external Python
+ * dashboard's `compute_services_from_clickup` produced.
+ */
+interface ClickUpServicesSnapshot {
+  captured_at: string;
+  quarter_label: string | null;
+  task_count: number;
+  active_projects: number;
+  closed_projects_this_quarter: number;
+  closed_projects_sra_final_quarter: number;
+  avg_project_close_days_qtd: number;
+  close_day_sample_count: number;
+  overall_project_status: "green" | "red";
+  red_item_threshold: number | null;
+  projects_over_red_threshold: { project: string; red_items: number }[];
+  status_breakdown: { status: string; count: number }[];
+  closed_projects_quarter_names: string[];
+  sra_final_quarter_names: string[];
+}
+
+function useClickUpServices() {
+  return useQuery({
+    queryKey: ["team-dashboard", "clickup-services"],
+    queryFn: async (): Promise<ClickUpServicesSnapshot | null> => {
+      const { data, error } = await supabase
+        .from("clickup_services_snapshots")
+        .select(
+          "captured_at, quarter_label, task_count, active_projects, closed_projects_this_quarter, closed_projects_sra_final_quarter, avg_project_close_days_qtd, close_day_sample_count, overall_project_status, red_item_threshold, projects_over_red_threshold, status_breakdown, closed_projects_quarter_names, sra_final_quarter_names",
+        )
+        .order("captured_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data as ClickUpServicesSnapshot | null;
+    },
+  });
+}
+
 function useLostCustomers() {
   return useQuery({
     queryKey: ["team-dashboard", "lost-customers"],
@@ -548,6 +589,7 @@ export function TeamDashboard() {
 
   const { data: m, isLoading, error } = useDashboardMetrics();
   const { data: arrFin } = useArrFinancial();
+  const { data: services } = useClickUpServices();
   const { data: lost } = useLostCustomers();
   const { data: arrTrend } = useArrTrend();
   const { data: newCustomerRows } = useNewCustomersRows(
@@ -1441,18 +1483,7 @@ export function TeamDashboard() {
 
       {/* ----- Services (ClickUp) ----- */}
       <SectionWrap title="Services" tone="bg-amber-50 dark:bg-amber-950/30">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <PlaceholderCard
-            label="Project Status Breakdown"
-            message="ClickUp integration not yet wired. The Python dashboard pulls Project Status from ClickUp; the CRM doesn't have that data source yet."
-            cta="ClickUp connector pending"
-          />
-          <PlaceholderCard
-            label="Active Projects"
-            message="Awaiting ClickUp connector."
-            cta="—"
-          />
-        </div>
+        <ServicesPanel services={services ?? null} />
       </SectionWrap>
 
       {/* ----- Development (manual milestones) ----- */}
@@ -2225,21 +2256,214 @@ function KpiCard({
   );
 }
 
-function PlaceholderCard({
-  label,
-  message,
-  cta,
+/**
+ * Renders the Services section from the latest
+ * `clickup_services_snapshots` row. Mirrors the layout of the external
+ * Python team dashboard's Services card: three KPI tiles + a Project
+ * Health donut + a status-breakdown chip strip (closed statuses filtered
+ * out, same as the HTML view).
+ */
+function ServicesPanel({
+  services,
 }: {
-  label: string;
-  message: string;
-  cta: string;
+  services: ClickUpServicesSnapshot | null;
 }) {
+  if (!services) {
+    return (
+      <Card className="border-dashed">
+        <CardContent className="p-4">
+          <p className="text-sm text-muted-foreground">
+            No ClickUp snapshot yet. Once the daily sync runs (or you invoke{" "}
+            <code>clickup-services-sync</code> manually), metrics will appear
+            here.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const active = services.active_projects ?? 0;
+  const flagged = (services.projects_over_red_threshold ?? []).length;
+  const healthy = Math.max(active - flagged, 0);
+  const breakdown = (services.status_breakdown ?? []).filter(
+    (s) => s.status.trim().toLowerCase() !== "completed",
+  );
+  const isRed = services.overall_project_status === "red";
+
   return (
-    <Card className="border-dashed">
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <ServicesKpi label="Active Projects" value={active} />
+        <ServicesKpi
+          label="Closed This Quarter"
+          value={services.closed_projects_this_quarter ?? 0}
+        />
+        <ServicesKpi
+          label="Avg Close Days (QTD)"
+          value={Math.round(services.avg_project_close_days_qtd ?? 0)}
+        />
+        <ProjectHealthCard
+          status={isRed ? "Red" : "Green"}
+          healthy={healthy}
+          atRisk={flagged}
+          total={active}
+        />
+      </div>
+
+      <Card>
+        <CardContent className="p-3 space-y-2">
+          <p className="text-xs text-muted-foreground font-medium">
+            Project Status Breakdown
+          </p>
+          {breakdown.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No status data.</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {breakdown.map((s) => (
+                <span
+                  key={s.status}
+                  className="text-xs px-2 py-1 rounded-full border bg-background"
+                >
+                  {s.status}: {s.count}
+                </span>
+              ))}
+            </div>
+          )}
+          <p className="text-[10px] text-muted-foreground italic">
+            Last sync:{" "}
+            {new Date(services.captured_at).toLocaleString()}
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function ServicesKpi({ label, value }: { label: string; value: number }) {
+  return (
+    <Card>
       <CardContent className="p-3 space-y-1">
-        <p className="text-xs text-muted-foreground font-medium">{label}</p>
-        <p className="text-sm">{message}</p>
-        <p className="text-[10px] text-muted-foreground italic">{cta}</p>
+        <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
+          {label}
+        </p>
+        <p className="text-3xl font-semibold tabular-nums">
+          {value.toLocaleString()}
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Donut-style health indicator. Pure SVG (no chart-library) since we only
+ * ever show a two-segment ring (healthy / at-risk) — recharts would be
+ * overkill.
+ */
+function ProjectHealthCard({
+  status,
+  healthy,
+  atRisk,
+  total,
+}: {
+  status: "Green" | "Red";
+  healthy: number;
+  atRisk: number;
+  total: number;
+}) {
+  const size = 88;
+  const stroke = 14;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const denom = Math.max(healthy + atRisk, 1);
+  const healthyLen = (healthy / denom) * c;
+  const atRiskLen = (atRisk / denom) * c;
+  const greenColor = "#16a34a";
+  const redColor = "#dc2626";
+  const isRed = status === "Red";
+
+  return (
+    <Card>
+      <CardContent className="p-3 space-y-1">
+        <div className="flex items-center justify-between">
+          <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
+            Project Health
+          </p>
+          <span
+            className={
+              "text-[10px] font-semibold px-2 py-0.5 rounded-full " +
+              (isRed
+                ? "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
+                : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200")
+            }
+          >
+            {status}
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+            <circle
+              cx={size / 2}
+              cy={size / 2}
+              r={r}
+              fill="none"
+              stroke="#e5e7eb"
+              strokeWidth={stroke}
+            />
+            {healthy > 0 && (
+              <circle
+                cx={size / 2}
+                cy={size / 2}
+                r={r}
+                fill="none"
+                stroke={greenColor}
+                strokeWidth={stroke}
+                strokeDasharray={`${healthyLen} ${c}`}
+                strokeDashoffset={0}
+                transform={`rotate(-90 ${size / 2} ${size / 2})`}
+              />
+            )}
+            {atRisk > 0 && (
+              <circle
+                cx={size / 2}
+                cy={size / 2}
+                r={r}
+                fill="none"
+                stroke={redColor}
+                strokeWidth={stroke}
+                strokeDasharray={`${atRiskLen} ${c}`}
+                strokeDashoffset={-healthyLen}
+                transform={`rotate(-90 ${size / 2} ${size / 2})`}
+              />
+            )}
+            <text
+              x={size / 2}
+              y={size / 2}
+              textAnchor="middle"
+              dominantBaseline="central"
+              fontSize="14"
+              fontWeight="700"
+              fill="currentColor"
+            >
+              {total}
+            </text>
+          </svg>
+          <div className="text-[11px] space-y-0.5">
+            <div className="flex items-center gap-1.5">
+              <span
+                className="inline-block w-2.5 h-2.5 rounded-sm"
+                style={{ background: greenColor }}
+              />
+              <span>Healthy: {healthy}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span
+                className="inline-block w-2.5 h-2.5 rounded-sm"
+                style={{ background: redColor }}
+              />
+              <span>At Risk: {atRisk}</span>
+            </div>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
