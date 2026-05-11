@@ -575,19 +575,24 @@ async function syncConnection(
     const userEmail = conn.email_address ?? "";
 
     // 2. Determine the starting point for this sync.
-    //    First-ever sync (last_sync_at is null) backfills the last 7 days
-    //    so newly-connected users get a useful slice of recent email history
-    //    without blowing past the Edge Function gateway's 150s wall-clock
-    //    timeout. A 90-day backfill on a busy mailbox can fetch 10k+ emails
-    //    via Graph/Gmail pagination and exceed the timeout, causing the
-    //    worker to be SIGKILL'd mid-sync (which left zombie email_sync_runs
-    //    rows on prod 2026-04-30). Every subsequent sync picks up from
-    //    last_sync_at, so reps still see ongoing email logged in real time.
-    //    Future enhancement: optional one-time deep backfill via a separate
-    //    background-task pattern that doesn't share the cron's wall budget.
-    //    We subtract a 2-minute overlap to ride over clock drift, and rely
-    //    on the activities.external_message_id dedup to prevent duplicates.
-    const INITIAL_BACKFILL_DAYS = 7;
+    //    First-ever sync (last_sync_at is null) backfills the last
+    //    30 days so newly-connected users get enough recent history
+    //    to cover newly-added contacts (Rachel 2026-05-11: added a
+    //    training contact whose first emails were ~2 weeks old and
+    //    missed the 7-day window). 30 days is a balance — large
+    //    enough that adding a contact this month surfaces their
+    //    recent threads, small enough that a busy mailbox usually
+    //    fits inside the Edge Function gateway's 150s wall-clock
+    //    timeout. A full 90-day backfill on a busy mailbox can fetch
+    //    10k+ emails and exceed the timeout, causing the worker to
+    //    be SIGKILL'd mid-sync (which left zombie email_sync_runs
+    //    rows on prod 2026-04-30). The orphan-reaper at handler
+    //    start cleans those up on the next tick if it does happen.
+    //    Every subsequent sync picks up from last_sync_at, so reps
+    //    still see ongoing email logged in real time. We subtract a
+    //    2-minute overlap to ride over clock drift, and rely on the
+    //    activities.external_message_id dedup to prevent duplicates.
+    const INITIAL_BACKFILL_DAYS = 30;
     const baseSince =
       override?.since ??
       conn.last_sync_at ??
@@ -869,6 +874,34 @@ serve(async (req) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
+    }
+
+    // Pre-flight: reap orphan email_sync_runs rows whose worker was
+    // SIGKILL'd before the catch block could set finished_at. Without
+    // this, the UI's "syncing…" spinner stays spinning forever because
+    // it interprets `finished_at IS NULL` as "in progress" (Rachel hit
+    // this on 2026-05-11 after reconnecting Outlook). 15 minutes is
+    // well past the 90s wall-clock budget + the 150s gateway timeout,
+    // so any row still pending after that is definitely abandoned.
+    {
+      const cutoffIso = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      const { error: reapErr, count } = await supabase
+        .from("email_sync_runs")
+        .update(
+          {
+            finished_at: new Date().toISOString(),
+            error_message:
+              "orphaned: worker terminated before finished_at was set",
+          },
+          { count: "exact" }
+        )
+        .is("finished_at", null)
+        .lt("started_at", cutoffIso);
+      if (reapErr) {
+        console.warn(`orphan reap failed: ${reapErr.message}`);
+      } else if (count && count > 0) {
+        console.log(`Reaped ${count} orphan email_sync_runs row(s)`);
+      }
     }
 
     // Fetch all active email sync connections, oldest-stale first so the
