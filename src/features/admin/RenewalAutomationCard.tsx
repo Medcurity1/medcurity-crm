@@ -69,6 +69,7 @@ const CATEGORY_META: Record<
   { label: string; tone: "warn" | "info" | "ok" }
 > = {
   missing_renewal: { label: "Will create renewal", tone: "ok" },
+  past_due_no_renewal: { label: "Past due (needs backfill)", tone: "warn" },
   missing_dates: { label: "Blocked: no dates", tone: "warn" },
   missing_contract_year: { label: "Blocked: no year", tone: "warn" },
   every_other_year_skip: { label: "Skip (every-other-year)", tone: "info" },
@@ -117,6 +118,12 @@ export function RenewalAutomationCard() {
       (audit ?? []).filter((r) =>
         ["missing_dates", "missing_contract_year"].includes(r.audit_category),
       ),
+    [audit],
+  );
+
+  const pastDueRows = useMemo(
+    () =>
+      (audit ?? []).filter((r) => r.audit_category === "past_due_no_renewal"),
     [audit],
   );
 
@@ -589,6 +596,64 @@ export function RenewalAutomationCard() {
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {CATEGORY_META[r.audit_category].label}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      )}
+
+      {/* Past-due rows — already ended, outside automation window */}
+      {pastDueRows.length > 0 && (
+        <div className="space-y-2 mb-4">
+          <CardHeader className="p-0">
+            <CardTitle className="text-sm">
+              Past due — needs manual backfill
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Closed-wons whose end date has already passed without a renewal.
+              These are outside the automation's lookahead window, so it
+              won't act on them. Either create the renewal opp manually, or
+              extend lookahead_days if you want the automation to handle
+              recent past-dues.
+            </CardDescription>
+          </CardHeader>
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Account</TableHead>
+                  <TableHead>Parent opp</TableHead>
+                  <TableHead>Ended</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pastDueRows.slice(0, 25).map((r) => (
+                  <TableRow key={`pd-${r.parent_opportunity_id}`}>
+                    <TableCell className="text-xs font-medium">
+                      <Link
+                        to={`/accounts/${r.account_id}`}
+                        className="hover:underline"
+                      >
+                        {r.account_name}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {r.parent_opportunity_id ? (
+                        <Link
+                          to={`/opportunities/${r.parent_opportunity_id}`}
+                          className="hover:underline"
+                        >
+                          {r.opportunity_name}
+                        </Link>
+                      ) : (
+                        r.opportunity_name
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {formatDate(r.effective_end_date)}
                     </TableCell>
                   </TableRow>
                 ))}

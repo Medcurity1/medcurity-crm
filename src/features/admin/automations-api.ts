@@ -182,6 +182,7 @@ export interface RenewalAutomationConfig {
 export interface RenewalAuditRow {
   audit_category:
     | "missing_renewal"
+    | "past_due_no_renewal"
     | "missing_dates"
     | "missing_contract_year"
     | "every_other_year_skip"
