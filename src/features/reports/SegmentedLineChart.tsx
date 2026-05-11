@@ -72,7 +72,15 @@ export function SegmentedLineChart({
     if (data.length < 2) return { segments: [], merged: data };
     const segments: { color: string; key: string; data: any[] }[] = [];
     for (let i = 0; i < data.length - 1; i++) {
+      const a = data[i];
       const b = data[i + 1];
+      // Skip segments where either endpoint lacks an actual — happens
+      // for future months ("we're in May, Jun has no data yet"). The
+      // X-axis label still renders because the merged dataset always
+      // includes the row, but no dot/segment is drawn.
+      const aOk = a && Number.isFinite(a.actual as unknown as number);
+      const bOk = b && Number.isFinite(b.actual as unknown as number);
+      if (!aOk || !bOk) continue;
       // Prefer caller-supplied previousGoal; fall back to the prior
       // point's goal so legacy callers get reasonable behavior.
       const prevGoal = b.previousGoal ?? data[i]?.goal;

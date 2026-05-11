@@ -450,6 +450,58 @@ const HISTORICAL_TREND_SEED: Record<
 };
 
 /**
+ * Build the ARR quarterly chart points from the `v_arr_rolling_365`
+ * monthly time-series. Pulled out of the live dashboard so the
+ * Historical snapshot view can render the SAME chart as of an earlier
+ * date — passing `capDate` (an ISO YYYY-MM-DD string) drops any
+ * months strictly after that date and treats the latest month at or
+ * before the cap as the "current" in-progress quarter point.
+ */
+export function buildArrPoints(
+  arrTrend: { month_start: string; trailing_365_arr: number | string }[],
+  goalArr: number,
+  capDate?: string,
+): SegmentPoint[] {
+  if (!arrTrend || arrTrend.length === 0) return [];
+  const trend = capDate
+    ? arrTrend.filter((p) => p.month_start <= capDate)
+    : arrTrend;
+  if (trend.length === 0) return [];
+  // End-of-quarter month for each calendar quarter is month index
+  // 2 (Mar), 5 (Jun), 8 (Sep), 11 (Dec). Filter monthly rows to those.
+  const eoq = trend.filter((p) => {
+    const d = new Date(p.month_start);
+    const m = d.getUTCMonth();
+    return m === 2 || m === 5 || m === 8 || m === 11;
+  });
+  // Start at Q2-2025 (June 2025 — month_start '2025-06-01') going forward.
+  const WINDOW_START = "2025-06-01";
+  const completed = eoq.filter((p) => p.month_start >= WINDOW_START);
+  // Append the current in-progress quarter using the latest available
+  // monthly row at/before the cap (only if it isn't already an EOQ row
+  // already captured above).
+  const last = trend[trend.length - 1];
+  const lastIsEoq = (() => {
+    const m = new Date(last.month_start).getUTCMonth();
+    return m === 2 || m === 5 || m === 8 || m === 11;
+  })();
+  const points: typeof trend = [...completed];
+  if (!lastIsEoq && last.month_start >= WINDOW_START) {
+    points.push(last);
+  }
+  return points.map((p) => {
+    const d = new Date(p.month_start);
+    const q = Math.floor(d.getUTCMonth() / 3) + 1;
+    const label = `Q${q}-${d.getUTCFullYear()}`;
+    return {
+      label,
+      actual: Number(p.trailing_365_arr) || 0,
+      goal: goalArr,
+    } as SegmentPoint;
+  });
+}
+
+/**
  * Build a quarterly trend (one point per calendar quarter, Q2-2025 → today)
  * from weekly snapshots. Mirrors the `arrPoints` window logic so the
  * Pipeline / NRR charts share the same X-axis as the ARR chart.
@@ -715,48 +767,10 @@ export function TeamDashboard() {
   // at Q2-2025 and rolling forward as new quarters complete. The
   // current in-progress quarter is shown using the latest available
   // monthly snapshot so the line keeps moving instead of dropping off.
-  const arrPoints = useMemo<SegmentPoint[]>(() => {
-    if (!arrTrend || arrTrend.length === 0) return [];
-    // End-of-quarter month for each calendar quarter is month index
-    // 2 (Mar), 5 (Jun), 8 (Sep), 11 (Dec). Filter monthly rows to those.
-    const eoq = arrTrend.filter((p) => {
-      const d = new Date(p.month_start);
-      const m = d.getUTCMonth();
-      return m === 2 || m === 5 || m === 8 || m === 11;
-    });
-    // Start at Q2-2025 (June 2025 — month_start '2025-06-01') going forward.
-    const WINDOW_START = "2025-06-01";
-    const completed = eoq.filter((p) => p.month_start >= WINDOW_START);
-    // Append the current in-progress quarter using the latest available
-    // monthly snapshot (only if it isn't already an EOQ row that was
-    // captured above).
-    const last = arrTrend[arrTrend.length - 1];
-    const lastIsEoq = (() => {
-      const m = new Date(last.month_start).getUTCMonth();
-      return m === 2 || m === 5 || m === 8 || m === 11;
-    })();
-    const points = [...completed];
-    if (!lastIsEoq && last.month_start >= WINDOW_START) {
-      const today = new Date();
-      const currentQ = Math.floor(today.getUTCMonth() / 3) + 1;
-      points.push({
-        ...last,
-        fiscal_period: `Q${currentQ}-${today.getUTCFullYear()}`,
-      });
-    }
-    return points.map((p) => {
-      // Re-label completed EOQ rows from the month_start, since
-      // `fiscal_period` from the view may use a different convention.
-      const d = new Date(p.month_start);
-      const q = Math.floor(d.getUTCMonth() / 3) + 1;
-      const label = `Q${q}-${d.getUTCFullYear()}`;
-      return {
-        label,
-        actual: Number(p.trailing_365_arr) || 0,
-        goal: goals.arr,
-      };
-    });
-  }, [arrTrend, goals.arr]);
+  const arrPoints = useMemo<SegmentPoint[]>(
+    () => buildArrPoints(arrTrend ?? [], goals.arr),
+    [arrTrend, goals.arr],
+  );
 
   // Snapshots feed the historical-trend charts (Pipeline, NRR). Loaded
   // once on mount, refreshed whenever a new weekly snapshot is captured
@@ -984,7 +998,7 @@ export function TeamDashboard() {
       : num(m.nrr_by_dollar_true_pct ?? m.nrr_by_dollar_legacy_pct);
 
   return (
-    <div className="space-y-3" data-dashboard-print-root>
+    <div className="space-y-2" data-dashboard-print-root>
       {tabBar}
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div className="flex items-baseline gap-2">
@@ -1003,7 +1017,11 @@ export function TeamDashboard() {
           Customers stacked on top row), then New Sales | Pipeline side by
           side below. Cards are individually draggable for the owner so
           the layout can be tuned per personal preference. */}
-      <SectionWrap title="Sales" tone="bg-blue-50 dark:bg-blue-950/30">
+      <SectionWrap
+        title="Sales"
+        tone="bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-950/40 dark:to-blue-900/20"
+        accent="bg-blue-500"
+      >
         <DndContext
           sensors={dndSensors}
           collisionDetection={closestCenter}
@@ -1017,7 +1035,7 @@ export function TeamDashboard() {
               {cardOrder.sales.map((id) => (
                 <SortableCard key={id} id={id} enabled={isOwner}>
                   {id === "arr" && (
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       <KpiCard
                         label="ARR (rolling 365)"
                         value={formatCurrency(arr)}
@@ -1037,7 +1055,7 @@ export function TeamDashboard() {
                             data={arrPoints}
                             yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
                             tooltipFormatter={(v) => formatCurrency(v)}
-                            height={170}
+                            height={145}
                             showGoal={false}
                             lineColor="#3b82f6"
                           />
@@ -1047,7 +1065,7 @@ export function TeamDashboard() {
                   )}
 
                   {id === "new_customers" && (
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       <KpiCard
                         label="New Customers QTD"
                         value={String(newCustomers)}
@@ -1075,7 +1093,7 @@ export function TeamDashboard() {
                             data={newCustomersRunning}
                             yFormatter={(v) => String(Math.round(v))}
                             tooltipFormatter={(v) => String(Math.round(v))}
-                            height={170}
+                            height={145}
                           />
                           {isOwner && (
                             <MonthSplitInline
@@ -1092,7 +1110,7 @@ export function TeamDashboard() {
                   )}
 
                   {id === "new_sales" && (
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       {newSalesRunning.length > 1 && (
                         <ChartCard
                           title={`New Sales $ — running total (Q goal ${formatCurrency(goals.new_sales)})`}
@@ -1109,7 +1127,7 @@ export function TeamDashboard() {
                               `$${(v / 1000).toFixed(0)}k`
                             }
                             tooltipFormatter={(v) => formatCurrency(v)}
-                            height={170}
+                            height={145}
                           />
                           {isOwner && (
                             <MonthSplitInline
@@ -1126,7 +1144,7 @@ export function TeamDashboard() {
                   )}
 
                   {id === "pipeline" && (
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       {pipelineTrendPoints.length > 0 ? (
                         <ChartCard
                           title={`Active Pipeline by Quarter — goal ${formatCurrency(goals.total_active_pipeline)}`}
@@ -1139,7 +1157,7 @@ export function TeamDashboard() {
                               `$${(v / 1000).toFixed(0)}k`
                             }
                             tooltipFormatter={(v) => formatCurrency(v)}
-                            height={170}
+                            height={145}
                           />
                         </ChartCard>
                       ) : (
@@ -1162,7 +1180,11 @@ export function TeamDashboard() {
       </SectionWrap>
 
       {/* ----- Marketing (graphs-only per Codex parity) ----- */}
-      <SectionWrap title="Marketing" tone="bg-purple-50 dark:bg-purple-950/30">
+      <SectionWrap
+        title="Marketing"
+        tone="bg-gradient-to-br from-purple-50 to-purple-100/50 dark:from-purple-950/40 dark:to-purple-900/20"
+        accent="bg-purple-500"
+      >
         <DndContext
           sensors={dndSensors}
           collisionDetection={closestCenter}
@@ -1189,7 +1211,7 @@ export function TeamDashboard() {
                         data={sqlRunning}
                         yFormatter={(v) => String(Math.round(v))}
                         tooltipFormatter={(v) => String(Math.round(v))}
-                        height={170}
+                        height={145}
                       />
                       {isOwner && (
                         <MonthSplitInline
@@ -1216,7 +1238,7 @@ export function TeamDashboard() {
                         data={mqlRunning}
                         yFormatter={(v) => String(Math.round(v))}
                         tooltipFormatter={(v) => String(Math.round(v))}
-                        height={170}
+                        height={145}
                       />
                       {isOwner && (
                         <MonthSplitInline
@@ -1237,7 +1259,11 @@ export function TeamDashboard() {
       </SectionWrap>
 
       {/* ----- Customer Success ----- */}
-      <SectionWrap title="Customer Success" tone="bg-emerald-50 dark:bg-emerald-950/30">
+      <SectionWrap
+        title="Customer Success"
+        tone="bg-gradient-to-br from-emerald-50 to-emerald-100/50 dark:from-emerald-950/40 dark:to-emerald-900/20"
+        accent="bg-emerald-500"
+      >
         <DndContext
           sensors={dndSensors}
           collisionDetection={closestCenter}
@@ -1251,7 +1277,7 @@ export function TeamDashboard() {
               {cardOrder.cs.map((id) => (
                 <SortableCard key={id} id={id} enabled={isOwner}>
                   {id === "renewals" && (
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       {renewalsClosedRunning.length > 1 && (
                         <ChartCard
                           title={`Renewals Closed $ — running total (Q goal ${formatCurrency(goals.renewals_amount)})`}
@@ -1272,7 +1298,7 @@ export function TeamDashboard() {
                                 data={renewalsClosedRunning}
                                 yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
                                 tooltipFormatter={(v) => formatCurrency(v)}
-                                height={170}
+                                height={145}
                                 yDomain={[0, ticks[ticks.length - 1]]}
                                 yTicks={ticks}
                               />
@@ -1310,7 +1336,7 @@ export function TeamDashboard() {
                     />
                   )}
                   {id === "nrr_customer" && (
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       <KpiCard
                         label="NRR by Customer"
                         value={fmtPct(nrrCust)}
@@ -1335,7 +1361,7 @@ export function TeamDashboard() {
                             data={nrrCustomerTrendPoints}
                             yFormatter={(v) => `${v.toFixed(0)}%`}
                             tooltipFormatter={(v) => `${v.toFixed(1)}%`}
-                            height={160}
+                            height={140}
                             yDomain={[60, 100]}
                             yTicks={[60, 65, 70, 75, 80, 85, 90, 95, 100]}
                           />
@@ -1344,7 +1370,7 @@ export function TeamDashboard() {
                     </div>
                   )}
                   {id === "nrr_dollar" && (
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       <KpiCard
                         label="NRR by Dollar"
                         value={fmtPct(nrrDollar)}
@@ -1369,7 +1395,7 @@ export function TeamDashboard() {
                             data={nrrDollarTrendPoints}
                             yFormatter={(v) => `${v.toFixed(0)}%`}
                             tooltipFormatter={(v) => `${v.toFixed(1)}%`}
-                            height={160}
+                            height={140}
                             yDomain={[60, 100]}
                             yTicks={[60, 65, 70, 75, 80, 85, 90, 95, 100]}
                           />
@@ -1509,12 +1535,20 @@ export function TeamDashboard() {
       </div>
 
       {/* ----- Services (ClickUp) ----- */}
-      <SectionWrap title="Services" tone="bg-amber-50 dark:bg-amber-950/30">
+      <SectionWrap
+        title="Services"
+        tone="bg-gradient-to-br from-amber-50 to-amber-100/50 dark:from-amber-950/40 dark:to-amber-900/20"
+        accent="bg-amber-500"
+      >
         <ServicesPanel services={services ?? null} isOwner={isOwner} />
       </SectionWrap>
 
       {/* ----- Development (manual milestones) ----- */}
-      <SectionWrap title="Development" tone="bg-rose-50 dark:bg-rose-950/30">
+      <SectionWrap
+        title="Development"
+        tone="bg-gradient-to-br from-rose-50 to-rose-100/50 dark:from-rose-950/40 dark:to-rose-900/20"
+        accent="bg-rose-500"
+      >
         <Card>
           <CardContent className="p-3 space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1808,21 +1842,19 @@ function buildRunningTotal(
   // monthGoals are cumulative end-of-month-N targets — admin can set
   // per-month targets in Goals page (else default to even thirds).
   //
-  // Skip future months: when the dashboard is being viewed mid-quarter
-  // (e.g. it's May and we're in Q2), the June point used to render as a
-  // red dot because the cumulative-actual flat-lined from May while the
-  // June goal was higher. Brayden flagged that "we don't have June data
-  // yet, the red doesn't belong there". Only emit a point for month i
-  // if month i has already started (monthStart <= today). For historical
-  // quarters (today > quarterEnd) this naturally emits all 3 months.
+  // Always emit all 3 month labels (Apr/May/Jun) so the X-axis stays
+  // consistent quarter-over-quarter, but leave `actual = null` for any
+  // month that hasn't started yet — the chart skips dots/segments for
+  // null actuals. Goal line keeps drawing across all 3 so the user can
+  // still see the trajectory needed to hit quarter.
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
   const points: SegmentPoint[] = [];
   for (let i = 0; i < 3; i++) {
     const monthStart = new Date(start.getFullYear(), start.getMonth() + i, 1);
-    if (monthStart > today) break;
     const monthEnd = new Date(start.getFullYear(), start.getMonth() + i + 1, 0);
+    const inFuture = monthStart > today;
     // Don't extend past quarter end (e.g., short quarters / off-by-one).
     const cap = monthEnd > end ? end : monthEnd;
     // Format the cap date in local time. toISOString() converts to UTC
@@ -1830,13 +1862,15 @@ function buildRunningTotal(
     // becomes May 1 UTC).
     const capStr = formatLocalDate(cap);
 
-    const cumulative = sorted
-      .filter((e) => e.date <= capStr)
-      .reduce((s, e) => s + e.value, 0);
+    const cumulative = inFuture
+      ? null
+      : sorted.filter((e) => e.date <= capStr).reduce((s, e) => s + e.value, 0);
 
     points.push({
       label: monthStart.toLocaleString("en-US", { month: "short" }),
-      actual: cumulative,
+      // actual is typed `number` on SegmentPoint but the chart tolerates
+      // null and renders no dot for that index — cast through unknown.
+      actual: cumulative as unknown as number,
       goal: monthGoals[i],
       // M1 (i=0) intentionally has no previousGoal → goalStatus
       // applies the M1 buffer (yellow, never red, when below goal).
@@ -1887,18 +1921,31 @@ function SectionWrap({
   title,
   tone,
   children,
+  accent,
 }: {
   title: string;
   tone: string;
   children: React.ReactNode;
+  /** Tailwind class for the left-edge accent bar (e.g. "bg-blue-500"). */
+  accent?: string;
 }) {
-  // Title is now inside the colored panel as a single compact row, not
-  // an outer h3 above it. Drops the previous mb-2 gap between label and
-  // panel plus a full line height — biggest single win for fitting the
-  // whole dashboard on a smaller office TV without scrolling.
+  // Compact, TV-friendly section panel:
+  //  • Title sits inside the panel as a single tight row, no outer h3
+  //  • Optional left-edge accent bar gives each section visual identity
+  //    without taking extra vertical space.
+  //  • px-3 py-1.5 + mb-1 title gap is the smallest legible footprint
+  //    for a 1080p office TV at typical viewing distance.
   return (
-    <div className={`rounded-lg px-3 py-2 ${tone}`}>
-      <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+    <div
+      className={`relative rounded-lg px-3 py-1.5 shadow-sm ring-1 ring-black/[0.03] ${tone}`}
+    >
+      {accent && (
+        <div
+          className={`absolute left-0 top-2 bottom-2 w-1 rounded-full ${accent}`}
+          aria-hidden="true"
+        />
+      )}
+      <h3 className="text-[11px] font-semibold text-foreground/70 uppercase tracking-wider mb-1 pl-1.5">
         {title}
       </h3>
       {children}
@@ -1960,23 +2007,24 @@ function SortableCard({
 function ChartLegend({ showGoal = true }: { showGoal?: boolean }) {
   // ARR chart and other charts without a goal line want a simpler
   // legend (no "vs proportional goal" or "dashed line is the goal pace"
-  // copy, since neither is rendered).
+  // copy, since neither is rendered). Compact icon-only key — saves ~16px
+  // vertical per chart vs the prior wordy paragraph, while staying
+  // legible on the office TV.
   if (!showGoal) {
     return (
-      <p className="text-[11px] text-muted-foreground mb-2">
+      <p className="text-[10px] text-muted-foreground mb-1 leading-none">
         Segments colored by quarter-over-quarter direction.
       </p>
     );
   }
   return (
-    <p className="text-[11px] text-muted-foreground mb-2">
-      Segments colored vs proportional goal:{" "}
-      <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 align-middle mr-1" />
-      ≥ 90%{" "}
-      <span className="inline-block h-2 w-2 rounded-full bg-amber-500 align-middle ml-2 mr-1" />
-      50–89%{" "}
-      <span className="inline-block h-2 w-2 rounded-full bg-red-500 align-middle ml-2 mr-1" />
-      &lt; 50% — dashed line is the goal pace.
+    <p className="text-[10px] text-muted-foreground mb-1 leading-none">
+      <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 align-middle mr-1" />
+      ≥90%
+      <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500 align-middle ml-2 mr-1" />
+      50–89%
+      <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500 align-middle ml-2 mr-1" />
+      &lt;50% · dashed = goal pace
     </p>
   );
 }
@@ -1990,13 +2038,16 @@ function ChartCard({
   subtitle?: string;
   children: React.ReactNode;
 }) {
+  // Tighter padding (p-2.5) and a single-line title row make each chart
+  // tile ~24px shorter than before. Subtitle pill (the M2 pace target)
+  // stays full-saturation green so it remains the eye's natural focus.
   return (
-    <Card>
-      <CardContent className="p-4">
-        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
-          <h4 className="text-sm font-medium text-muted-foreground">{title}</h4>
+    <Card className="border-border/60 shadow-sm">
+      <CardContent className="p-2.5">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+          <h4 className="text-xs font-semibold text-foreground/80">{title}</h4>
           {subtitle && (
-            <span className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded px-2 py-0.5">
+            <span className="text-[10px] font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded-full px-2 py-0.5">
               {subtitle}
             </span>
           )}
@@ -2184,8 +2235,8 @@ function KpiCard({
       : "bg-primary";
 
   return (
-    <Card>
-      <CardContent className="p-2 space-y-1.5">
+    <Card className="border-border/60 shadow-sm hover:shadow transition-shadow">
+      <CardContent className="p-2.5 space-y-1.5">
         <div>
           <div className="flex items-center justify-between gap-1">
             <div className="flex items-center gap-1.5 min-w-0">
@@ -2204,7 +2255,7 @@ function KpiCard({
                   className={`inline-block h-2 w-2 rounded-full ${dotClass} shrink-0`}
                 />
               )}
-              <p className="text-[11px] text-muted-foreground font-medium truncate">
+              <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide truncate">
                 {label}
               </p>
             </div>
@@ -2218,7 +2269,7 @@ function KpiCard({
               </Link>
             )}
           </div>
-          <p className="text-xl font-semibold leading-tight">{value}</p>
+          <p className="text-2xl font-bold leading-none tracking-tight tabular-nums">{value}</p>
         </div>
         {showGoal && (
           <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
@@ -2367,7 +2418,7 @@ function ServicesPanel({
   const isRed = services.overall_project_status === "red";
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <ServicesKpi label="Active Projects" value={active} />
         <ServicesKpi
@@ -3293,9 +3344,20 @@ function SnapshotDetailView({
     () => snapshots.filter((s) => s.week_start <= snapshot.week_start),
     [snapshots, snapshot.week_start],
   );
+  // ARR is point-in-time stable for past months — read from the live
+  // `v_arr_rolling_365` view capped at the snapshot's week_start so the
+  // historical view shows the FULL ARR history (every quarter from
+  // Q2-2025 onward) instead of just the weekly snapshots captured so
+  // far. Mirrors what the live ARR chart looked like that week.
+  const { data: arrTrend } = useArrTrend();
   const arrTrendPoints = useMemo(
-    () => quarterlySnapshotTrend(trendBaseSnapshots, "arr", goals.arr.quarter_goal),
-    [trendBaseSnapshots, goals.arr.quarter_goal],
+    () =>
+      buildArrPoints(
+        arrTrend ?? [],
+        goals.arr.quarter_goal,
+        snapshot.week_start,
+      ),
+    [arrTrend, goals.arr.quarter_goal, snapshot.week_start],
   );
   const pipelineTrendPoints = useMemo(
     () =>
@@ -3377,9 +3439,13 @@ function SnapshotDetailView({
       </div>
 
       {/* ----- Sales ----- */}
-      <SectionWrap title="Sales" tone="bg-blue-50 dark:bg-blue-950/30">
+      <SectionWrap
+        title="Sales"
+        tone="bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-950/40 dark:to-blue-900/20"
+        accent="bg-blue-500"
+      >
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
-          <div className="space-y-3">
+          <div className="space-y-2">
             <KpiCard
               label="ARR (rolling 365)"
               value={formatCurrency(sm.arr)}
@@ -3397,7 +3463,7 @@ function SnapshotDetailView({
                   data={arrTrendPoints}
                   yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
                   tooltipFormatter={(v) => formatCurrency(v)}
-                  height={160}
+                  height={140}
                   showGoal={false}
                   lineColor="#3b82f6"
                 />
@@ -3422,7 +3488,7 @@ function SnapshotDetailView({
             onGoalChange={noop}
             editable={false}
           />
-          <div className="space-y-3">
+          <div className="space-y-2">
             <KpiCard
               label="Active Pipeline"
               value={formatCurrency(sm.pipeline_amount)}
@@ -3441,7 +3507,7 @@ function SnapshotDetailView({
                   data={pipelineTrendPoints}
                   yFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
                   tooltipFormatter={(v) => formatCurrency(v)}
-                  height={160}
+                  height={140}
                 />
               </ChartCard>
             )}
@@ -3450,7 +3516,11 @@ function SnapshotDetailView({
       </SectionWrap>
 
       {/* ----- Marketing ----- */}
-      <SectionWrap title="Marketing" tone="bg-purple-50 dark:bg-purple-950/30">
+      <SectionWrap
+        title="Marketing"
+        tone="bg-gradient-to-br from-purple-50 to-purple-100/50 dark:from-purple-950/40 dark:to-purple-900/20"
+        accent="bg-purple-500"
+      >
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
           <KpiCard
             label="SQL QTD"
@@ -3474,7 +3544,11 @@ function SnapshotDetailView({
       </SectionWrap>
 
       {/* ----- Customer Success ----- */}
-      <SectionWrap title="Customer Success" tone="bg-emerald-50 dark:bg-emerald-950/30">
+      <SectionWrap
+        title="Customer Success"
+        tone="bg-gradient-to-br from-emerald-50 to-emerald-100/50 dark:from-emerald-950/40 dark:to-emerald-900/20"
+        accent="bg-emerald-500"
+      >
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
           <KpiCard
             label="Renewals Closed QTD"
@@ -3485,7 +3559,7 @@ function SnapshotDetailView({
             onGoalChange={noop}
             editable={false}
           />
-          <div className="space-y-3">
+          <div className="space-y-2">
             <KpiCard
               label="QTD Billing Goal"
               value={formatCurrency(sm.qtd_billing)}
@@ -3513,7 +3587,7 @@ function SnapshotDetailView({
                   data={nrrCustomerTrendPoints}
                   yFormatter={(v) => `${v.toFixed(0)}%`}
                   tooltipFormatter={(v) => `${v.toFixed(1)}%`}
-                  height={150}
+                  height={135}
                 />
               </ChartCard>
             )}
@@ -3535,7 +3609,7 @@ function SnapshotDetailView({
                   data={nrrDollarTrendPoints}
                   yFormatter={(v) => `${v.toFixed(0)}%`}
                   tooltipFormatter={(v) => `${v.toFixed(1)}%`}
-                  height={150}
+                  height={135}
                 />
               </ChartCard>
             )}
@@ -3564,7 +3638,11 @@ function SnapshotDetailView({
 
       {/* ----- Development (Milestones at the time) ----- */}
       {snapshot.milestones.length > 0 && (
-        <SectionWrap title="Development" tone="bg-slate-50 dark:bg-slate-900/40">
+        <SectionWrap
+          title="Development"
+          tone="bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-900/40 dark:to-slate-800/20"
+          accent="bg-slate-400"
+        >
           <div className="rounded-md border bg-card overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
