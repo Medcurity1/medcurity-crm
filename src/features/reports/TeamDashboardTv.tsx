@@ -1,27 +1,40 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { TeamDashboard } from "./TeamDashboard";
+import { supabase } from "@/lib/supabase";
 
 /**
  * TeamDashboardTv — full-screen, chrome-less wrapper for the Team
  * Dashboard intended for an always-on office TV.
  *
  * Behavior:
- *   - Forces the chosen theme (light by default; user-toggleable, persisted)
- *     while mounted. Restores prior `.dark` state on unmount.
+ *   - Forces the chosen theme (light by default; user-toggleable,
+ *     persisted) while mounted. Restores prior `.dark` state on
+ *     unmount.
  *   - Renders <TeamDashboard tvMode> which:
  *       (a) strips ALL owner/admin affordances even when the owner is
- *           signed in (TV is read-only — edit from your normal session)
- *       (b) flows top-level sections into 2 columns so the wide TV
- *           canvas fills horizontally instead of stacking vertically.
- *   - Measures the dashboard's rendered height after mount and scales
- *     the canvas down so width AND height fit the viewport. No scroll.
+ *           signed in (TV is read-only — edit from your normal
+ *           session)
+ *       (b) uses width-based CSS columns so sections auto-pack into
+ *           as many columns as the viewport fits (2 / 3 / 4+)
+ *   - Renders at NATIVE viewport width — no horizontal canvas scaling
+ *     — so wider monitors actually flow more content side-by-side
+ *     instead of just zooming a 1920-wide design.
+ *   - Measures the rendered height and ONLY shrinks vertically if it
+ *     overflows the viewport, so everything stays on one screen
+ *     without scroll.
  *   - Auto-reloads every 10 minutes for fresh data.
- *   - Tiny theme toggle in the bottom-right corner (small + low-opacity
- *     so it doesn't dominate the display, but discoverable).
+ *   - Proactively refreshes the Supabase session every 30 minutes so
+ *     the always-on TV never gets signed out for inactivity. (The
+ *     regular idle-logout hook lives in AppLayout, which this route
+ *     deliberately bypasses — and this refresh keeps Supabase's own
+ *     access-token / refresh-token chain from expiring.)
+ *   - Tiny theme toggle in the bottom-right corner (small +
+ *     low-opacity so it doesn't dominate the display, but
+ *     discoverable).
  */
 
-const CANVAS_W = 1920;
 const RELOAD_INTERVAL_MS = 10 * 60 * 1000;
+const SESSION_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
 const THEME_STORAGE_KEY = "medcurity_tv_theme";
 
 type TvTheme = "light" | "dark";
@@ -35,7 +48,6 @@ function readSavedTheme(): TvTheme {
 export function TeamDashboardTv() {
   const contentRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
-  const [contentH, setContentH] = useState<number>(1080);
   const [theme, setTheme] = useState<TvTheme>(() => readSavedTheme());
 
   // Apply the chosen theme to <html> while mounted; restore on unmount.
@@ -59,17 +71,22 @@ export function TeamDashboardTv() {
     }
   }, [theme]);
 
-  // Measure dashboard height and recompute scale on viewport/content resize.
+  // Measure content height; only scale DOWN if it exceeds viewport
+  // height. No horizontal scaling — content renders at actual viewport
+  // width so the width-based column flow inside <TeamDashboard tvMode>
+  // gets to use the real screen real-estate.
   useLayoutEffect(() => {
     const el = contentRef.current;
     if (!el) return;
 
     function recompute() {
-      const h = el?.scrollHeight ?? 1080;
-      if (h && Math.abs(h - contentH) > 4) setContentH(h);
-      const vw = window.innerWidth;
+      const h = el?.scrollHeight ?? 0;
       const vh = window.innerHeight;
-      const next = Math.min(vw / CANVAS_W, vh / Math.max(h, 1));
+      if (h <= 0) {
+        setScale(1);
+        return;
+      }
+      const next = Math.min(1, vh / h);
       setScale(next);
     }
 
@@ -81,7 +98,7 @@ export function TeamDashboardTv() {
       ro.disconnect();
       window.removeEventListener("resize", recompute);
     };
-  }, [contentH, theme]);
+  }, [theme]);
 
   // Periodic full-page reload so the TV always shows fresh data.
   useEffect(() => {
@@ -91,8 +108,22 @@ export function TeamDashboardTv() {
     return () => window.clearInterval(t);
   }, []);
 
+  // Keep the Supabase session alive indefinitely while the TV is
+  // mounted. Each refreshSession() rotates the refresh token, so the
+  // refresh-token chain never expires as long as we call this within
+  // its lifetime (Supabase default: 1 week). 30 minutes is well inside
+  // the 1-hour access-token window too.
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      supabase.auth.refreshSession().catch(() => {
+        // Network blip — next interval will retry. The 10-minute page
+        // reload also re-bootstraps auth on its own.
+      });
+    }, SESSION_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(t);
+  }, []);
+
   const bgClass = theme === "dark" ? "bg-neutral-950" : "bg-white";
-  const innerBg = theme === "dark" ? "#0a0a0a" : "white";
 
   return (
     <div
@@ -101,14 +132,14 @@ export function TeamDashboardTv() {
     >
       <div
         style={{
-          width: CANVAS_W,
-          height: contentH,
-          transform: `translate(-50%, -50%) scale(${scale})`,
-          transformOrigin: "center center",
+          width: "100vw",
+          transform: `scale(${scale})`,
+          transformOrigin: "top center",
+          // When scaled <1, content occupies less vertical room than
+          // 100vh — center it vertically.
           position: "absolute",
-          top: "50%",
-          left: "50%",
-          background: innerBg,
+          top: 0,
+          left: 0,
         }}
       >
         <div ref={contentRef} className="w-full p-6">

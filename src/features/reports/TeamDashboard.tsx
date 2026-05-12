@@ -1073,12 +1073,16 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
       ? Number(arrFin.nrr_dollar_pct)
       : num(m.nrr_by_dollar_true_pct ?? m.nrr_by_dollar_legacy_pct);
 
-  // TV mode flows top-level sections into 2 CSS columns so the wide
-  // horizontal canvas fills instead of running tall. Each section
-  // stays an unbroken block. Non-TV keeps the original vertical
-  // `space-y-2` stack used everywhere else.
+  // TV mode: width-based column flow. The browser packs as many ~560px
+  // columns as fit the viewport — 2 on a typical 1080p monitor, 3 on a
+  // 1440p / ultrawide, 4 on a 4K TV. Sections automatically migrate up
+  // next to others as more horizontal room appears (e.g. customer
+  // success metrics jump into a third column instead of dropping
+  // below). Each section stays an unbroken block thanks to
+  // `break-inside-avoid`. Non-TV keeps the original vertical
+  // `space-y-2` stack.
   const rootClass = tvMode
-    ? "columns-2 gap-4 [&>*]:mb-4 [&>*]:break-inside-avoid"
+    ? "columns-[560px] gap-4 [&>*]:mb-4 [&>*]:break-inside-avoid"
     : "space-y-2";
 
   return (
