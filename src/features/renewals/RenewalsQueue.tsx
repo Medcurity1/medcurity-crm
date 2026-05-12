@@ -57,24 +57,23 @@ import { formatCurrency, formatDate } from "@/lib/formatters";
  *
  * Two tabs share the same filter rail, but they answer different
  * questions and anchor on different date fields:
- * - Upcoming: ALL closed-won opps (regardless of kind) whose
- *   contract_end_date falls in the selected window. This is "what's
- *   coming up for renewal" — every active contract approaching its
- *   end date, including renewal-kind opps the rep won last year that
- *   are now themselves up for renewal again.
+ * - Upcoming: OPEN opps (stage not in closed_won / closed_lost) whose
+ *   close_date falls in the selected window. This is the rep's
+ *   workload — deals they need to close. The moment a rep marks an
+ *   opp Closed Won the row drops off this tab (it's done, the
+ *   customer is renewed). If they mark Closed Lost it also drops off.
  * - Closed-Won Renewals: kind='renewal' opps that closed within the
  *   window (anchored on close_date — when the renewal was actually
  *   sold). This is "renewal bookings", a backward-looking sales view.
  *
- * The two tabs CAN reference the same row in different windows (e.g.
- * a renewal sold May 2025 with contract_end_date May 2026 shows in
- * Closed-Won when filtered to 2025 and in Upcoming when filtered to
- * 2026). That's intentional — they're different lifecycle moments of
- * the same contract. Totals on each tab reflect only that tab's
- * filtered list.
+ * NOTE: this filter intentionally hides closed-won parent contracts
+ * whose end date is approaching but for which no successor renewal
+ * opp has been created yet. Surfacing those gaps is a job for the
+ * renewal automation (which creates the successor opp) or a separate
+ * "contracts ending, no renewal yet" report.
  *
- * Past-due rows (contract_end_date < today) WITHIN the filter window
- * are kept naturally — only when the user's range covers their date.
+ * Past-due rows (close_date < today) WITHIN the filter window are
+ * kept naturally — only when the user's range covers their date.
  * Picking "this quarter" won't pull last quarter, and "next 120 days"
  * won't pull rows from years ago.
  *
@@ -176,11 +175,12 @@ function useUpcomingRenewals() {
   return useQuery({
     queryKey: ["renewal_queue", "upcoming"],
     queryFn: async () => {
-      // Upcoming = every closed-won opp whose contract_end_date is
-      // approaching, regardless of kind. A renewal sold last year is
-      // itself a contract that needs renewing again this year — it
-      // belongs here even though it ALSO appears on Closed-Won
-      // Renewals when the user filters back to its sale month.
+      // Upcoming = OPEN opps (stage not closed_won / closed_lost)
+      // whose close_date is approaching. close_date is the right
+      // anchor for an open renewal opp: it's when the rep wants to
+      // close the deal, which equals when the current contract ends.
+      // (contract_end_date on the open opp is the NEW contract's end,
+      // 12 months out — wrong anchor for "coming up.")
       //
       // SQL window: 24 months back through 18 months forward. The
       // 24-month lookback exists so past-due rows are QUERYABLE — but
@@ -204,11 +204,11 @@ function useUpcomingRenewals() {
           "id, account_id, owner_user_id, contract_end_date, close_date, expected_close_date, amount, stage, kind, name, next_step, lead_source, description, account:accounts!inner(id, name, archived_at), owner:user_profiles!owner_user_id(id, full_name)",
         )
         .is("archived_at", null)
-        .eq("stage", "closed_won")
-        .not("contract_end_date", "is", null)
-        .gte("contract_end_date", floorIso)
-        .lte("contract_end_date", capIso)
-        .order("contract_end_date", { ascending: true });
+        .not("stage", "in", "(closed_won,closed_lost)")
+        .not("close_date", "is", null)
+        .gte("close_date", floorIso)
+        .lte("close_date", capIso)
+        .order("close_date", { ascending: true });
       if (error) throw error;
 
       return (data ?? [])
@@ -424,13 +424,13 @@ function sortUpcoming(
       case "lead_source":
         return r.lead_source?.toLowerCase() ?? null;
       case "days":
-        // Days until contract end. Past-due rows (negative) sort
+        // Days until expected close. Past-due rows (negative) sort
         // before future rows under ascending, so the most-overdue
         // rises to the top.
-        return dateValue(r.contract_end_date) === null
+        return dateValue(r.close_date) === null
           ? null
           : Math.round(
-              (dateValue(r.contract_end_date)! - today.getTime()) /
+              (dateValue(r.close_date)! - today.getTime()) /
                 86_400_000,
             );
     }
@@ -964,7 +964,7 @@ export function RenewalsQueue() {
     // Upcoming filter anchors on contract_end_date — the source
     // closed-won deal's contract expiry is the deadline that decides
     // whether the renewal is in this user's window.
-    const base = applyCommonFilters(upcoming, "contract_end_date", upcomingRange);
+    const base = applyCommonFilters(upcoming, "close_date", upcomingRange);
     return sortUpcoming(base, upcomingSort);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -1010,11 +1010,10 @@ export function RenewalsQueue() {
     const list = upcomingFiltered ?? [];
     const total = list.reduce((s, r) => s + r.amount, 0);
     const monthly = upcomingMonthBuckets.map(({ start, end, label }) => {
-      // Bucket source deals by their contract_end_date so the monthly
-      // breakdown lines up with the filter window's date-field
-      // semantics.
+      // Bucket open opps by close_date so the monthly breakdown lines
+      // up with the filter window's date-field semantics.
       const inWindow = list.filter((r) =>
-        inDateRange(r.contract_end_date, start, end),
+        inDateRange(r.close_date, start, end),
       );
       return {
         label,
@@ -1342,18 +1341,19 @@ export function RenewalsQueue() {
                 </TableHeader>
                 <TableBody>
                   {upcomingFiltered.map((r) => {
-                    // Days-until-contract-end — the deadline reps
-                    // care about for upcoming renewals.
-                    const days = daysBetween(today, r.contract_end_date);
+                    // Days-until-close — the deadline reps care about
+                    // for an open renewal opp. close_date is the
+                    // anniversary / when the current contract ends.
+                    const days = daysBetween(today, r.close_date);
                     // "Slip" measures how far the rep's CURRENT
-                    // expected close has slid past the contract end.
-                    // Positive = expected late, negative = expected
-                    // before contract end — both are interesting.
+                    // expected close has slid past the target
+                    // close_date. Positive = expected late, negative
+                    // = expected early — both are interesting.
                     const slip =
-                      r.expected_close_date && r.contract_end_date
+                      r.expected_close_date && r.close_date
                         ? Math.round(
                             (new Date(r.expected_close_date).getTime() -
-                              new Date(r.contract_end_date).getTime()) /
+                              new Date(r.close_date).getTime()) /
                               (1000 * 60 * 60 * 24),
                           )
                         : null;
@@ -1390,12 +1390,12 @@ export function RenewalsQueue() {
                           </div>
                           {slip !== null && slip > 0 && (
                             <div className="text-[10px] mt-0.5 text-amber-600">
-                              +{slip}d past contract end
+                              +{slip}d past target close
                             </div>
                           )}
                           {slip !== null && slip < 0 && (
                             <div className="text-[10px] mt-0.5 text-emerald-600">
-                              {-slip}d before contract end
+                              {-slip}d before target close
                             </div>
                           )}
                         </TableCell>

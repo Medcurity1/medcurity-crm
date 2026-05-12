@@ -342,20 +342,39 @@ async function runSync(): Promise<ServicesSnapshot> {
   return snapshot;
 }
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+};
+
 serve(async (req: Request) => {
+  // Handle CORS preflight from the browser. Without this the
+  // Team Dashboard "Sync" button fails with "Failed to send a request
+  // to the Edge Function" — the preflight never reaches the handler.
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
   if (req.method !== "POST" && req.method !== "GET") {
-    return new Response("method_not_allowed", { status: 405 });
+    return new Response("method_not_allowed", {
+      status: 405,
+      headers: corsHeaders,
+    });
   }
   try {
     const snapshot = await runSync();
     return new Response(JSON.stringify(snapshot), {
       status: 200,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
     return new Response(
       JSON.stringify({ error: (e as Error).message }),
-      { status: 500, headers: { "Content-Type": "application/json" } },
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
     );
   }
 });
