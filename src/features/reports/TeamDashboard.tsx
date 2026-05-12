@@ -75,6 +75,15 @@ import {
   useUpsertMilestones,
 } from "@/features/reports/dashboardMilestonesApi";
 import {
+  useGoalsStoreQuery,
+  useUpsertGoalsStore,
+  localGoalsSnapshot,
+} from "@/features/reports/dashboardGoalsApi";
+import {
+  useWidgetsQuery,
+  useUpsertWidgets,
+} from "@/features/reports/dashboardWidgetsApi";
+import {
   METRICS,
   METRIC_KEYS,
   DEFAULT_GOALS,
@@ -594,17 +603,74 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
   const [viewAsTeam, setViewAsTeam] = useState(false);
   const isOwner = isOwnerAccount && !viewAsTeam;
 
-  // Per-quarter goals — Codex-parity store. The dashboard always reads
-  // the *current* quarter; the Goals admin page can edit any quarter.
+  // Per-quarter goals — Codex-parity store, DB-backed via the
+  // `dashboard_goals` table so the TV browser and the laptop edit
+  // the same payload. localStorage stays as the synchronous read
+  // path for `getQuarterGoals()` (the admin page calls it inside
+  // `useMemo`, so swapping it for an async hook would require
+  // refactoring the whole admin page). The query function mirrors
+  // every DB response back into localStorage; that's enough to keep
+  // the sync getters returning fresh values.
   const currentQuarter = useMemo(() => quarterLabelFromDate(new Date()), []);
+  const goalsQuery = useGoalsStoreQuery();
+  const upsertGoals = useUpsertGoalsStore();
   const [qgoals, setQgoals] = useState<QuarterGoals>(() =>
     getQuarterGoals(currentQuarter),
   );
-  useEffect(() => {
-    saveQuarterGoals(currentQuarter, qgoals);
-  }, [currentQuarter, qgoals]);
+  const [goalsHydrated, setGoalsHydrated] = useState(false);
 
-  // Pick up goal edits made on the admin page (cross-tab + same-tab).
+  // First-mount hydrate: if DB has data, take it. If DB is empty but
+  // localStorage has prior goals (the pre-migration cache from before
+  // we moved to DB), push them up so the user doesn't lose what's
+  // already there. After hydrate, qgoals tracks the DB.
+  useEffect(() => {
+    if (goalsHydrated) return;
+    if (goalsQuery.data === undefined) return;
+    const remote = goalsQuery.data;
+    const remoteEmpty = Object.keys(remote).length === 0;
+    if (remoteEmpty) {
+      const local = localGoalsSnapshot();
+      if (Object.keys(local).length > 0) {
+        upsertGoals.mutate(local);
+      }
+    } else {
+      // The query already wrote remote → localStorage, so refresh
+      // our React state from the normalized read.
+      setQgoals(getQuarterGoals(currentQuarter));
+    }
+    setGoalsHydrated(true);
+  }, [goalsQuery.data, goalsHydrated, currentQuarter, upsertGoals]);
+
+  // Persist edits: write to localStorage immediately (cache) + DB
+  // after a short debounce so rapid pencil clicks coalesce into one
+  // network call.
+  useEffect(() => {
+    if (!goalsHydrated) return;
+    saveQuarterGoals(currentQuarter, qgoals);
+    const t = setTimeout(() => {
+      upsertGoals.mutate(localGoalsSnapshot());
+    }, 600);
+    return () => clearTimeout(t);
+    // upsertGoals is stable from TanStack Query; only re-run on
+    // qgoals/quarter changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qgoals, currentQuarter, goalsHydrated]);
+
+  // Cross-device pull: DB refetch every 30s. If the current
+  // quarter's slice changed remotely, swap it in. JSON-string compare
+  // is cheap for a single quarter's payload and avoids retriggering
+  // the debounced write-back loop.
+  useEffect(() => {
+    if (!goalsHydrated || !goalsQuery.data) return;
+    const fresh = getQuarterGoals(currentQuarter);
+    if (JSON.stringify(fresh) === JSON.stringify(qgoals)) return;
+    setQgoals(fresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goalsQuery.data, currentQuarter]);
+
+  // Cross-tab same-domain: the admin page writes to localStorage on
+  // every keystroke. Storage events fire in other tabs so the TV
+  // picks them up without waiting for the 30s DB poll.
   useEffect(() => {
     function refresh() {
       setQgoals(getQuarterGoals(currentQuarter));
@@ -654,12 +720,64 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
     return monthIdx == null ? names[2] : names[monthIdx];
   }, [currentQuarter, monthIdx]);
 
-  // Manual widgets (Most Recent Quote, QTD Billing override).
-  // Milestones moved to their own store (`dashboardMilestones`).
+  // Manual widgets (Most Recent Quote, QTD Billing actual, Dev list)
+  // — DB-backed via `dashboard_widgets` so the laptop and the TV
+  // share a single source of truth. localStorage stays as the cache.
+  // Same hydrate / persist / cross-device-pull pattern as milestones
+  // and goals above.
+  const widgetsQuery = useWidgetsQuery();
+  const upsertWidgets = useUpsertWidgets();
   const [widgets, setWidgets] = useState<DashboardWidgets>(() => loadWidgets());
+  const [widgetsHydrated, setWidgetsHydrated] = useState(false);
+
   useEffect(() => {
+    if (widgetsHydrated) return;
+    if (widgetsQuery.data === undefined) return;
+    const remote = widgetsQuery.data;
+    // "Empty" = default-equivalent; treat as cold-start and backfill
+    // from localStorage if the laptop already has data.
+    const remoteEmpty =
+      !remote.quote_text &&
+      !remote.quote_author &&
+      !remote.quote_rating &&
+      remote.qtd_billing_actual == null &&
+      (!remote.dev_items || remote.dev_items.length === 0);
+    if (remoteEmpty) {
+      const local = loadWidgets();
+      const localHasData =
+        !!local.quote_text ||
+        !!local.quote_author ||
+        !!local.quote_rating ||
+        local.qtd_billing_actual != null ||
+        (local.dev_items && local.dev_items.length > 0);
+      if (localHasData) {
+        upsertWidgets.mutate(local);
+        setWidgets(local);
+      } else {
+        setWidgets(remote);
+      }
+    } else {
+      setWidgets(remote);
+    }
+    setWidgetsHydrated(true);
+  }, [widgetsQuery.data, widgetsHydrated, upsertWidgets]);
+
+  useEffect(() => {
+    if (!widgetsHydrated) return;
     saveWidgets(widgets);
-  }, [widgets]);
+    const t = setTimeout(() => {
+      upsertWidgets.mutate(widgets);
+    }, 600);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [widgets, widgetsHydrated]);
+
+  useEffect(() => {
+    if (!widgetsHydrated || !widgetsQuery.data) return;
+    if (JSON.stringify(widgetsQuery.data) === JSON.stringify(widgets)) return;
+    setWidgets(widgetsQuery.data);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [widgetsQuery.data]);
 
   // Milestones (Development section) — DB-backed so the TV browser
   // sees what the laptop edits. localStorage stays as a fast cache for

@@ -29,6 +29,14 @@ import {
   type MetricKey,
   type MetricMeta,
 } from "@/features/reports/dashboardGoalsByQuarter";
+import {
+  useGoalsStoreQuery,
+  useLocksStoreQuery,
+  useUpsertGoalsStore,
+  useUpsertLocksStore,
+  localGoalsSnapshot,
+  localLocksSnapshot,
+} from "@/features/reports/dashboardGoalsApi";
 import { Save, RotateCcw, Lock, LockOpen, Pencil } from "lucide-react";
 
 /**
@@ -108,6 +116,40 @@ function TabButton({
 
 function GoalsTab() {
   const currentQuarter = useMemo(() => quarterLabelFromDate(new Date()), []);
+
+  // DB-backed sync. Mounting the queries here keeps localStorage in
+  // sync with the server (the query functions write through), and the
+  // upsert mutations get called after every Save / Reset / Lock so
+  // the laptop + the TV always see the same goals. See
+  // `dashboardGoalsApi.ts` for the cache strategy.
+  const goalsQuery = useGoalsStoreQuery();
+  const locksQuery = useLocksStoreQuery();
+  const upsertGoals = useUpsertGoalsStore();
+  const upsertLocks = useUpsertLocksStore();
+
+  // Cold-start backfill: if the admin lands here on a fresh DB but
+  // their browser has older localStorage goals, push them up so we
+  // don't silently lose data. Runs once.
+  const [backfilled, setBackfilled] = useState(false);
+  useEffect(() => {
+    if (backfilled) return;
+    if (goalsQuery.data === undefined || locksQuery.data === undefined) return;
+    if (Object.keys(goalsQuery.data).length === 0) {
+      const local = localGoalsSnapshot();
+      if (Object.keys(local).length > 0) upsertGoals.mutate(local);
+    }
+    if (Object.keys(locksQuery.data).length === 0) {
+      const local = localLocksSnapshot();
+      if (Object.keys(local).length > 0) upsertLocks.mutate(local);
+    }
+    setBackfilled(true);
+  }, [
+    backfilled,
+    goalsQuery.data,
+    locksQuery.data,
+    upsertGoals,
+    upsertLocks,
+  ]);
 
   // Available quarters in dropdown: saved ones + current + a few future.
   const quarterOptions = useMemo(() => {
@@ -212,6 +254,7 @@ function GoalsTab() {
 
   function handleSave() {
     saveQuarterGoals(quarter, draft);
+    upsertGoals.mutate(localGoalsSnapshot());
     setSaved(draft);
     setEditing(false);
     setFeedback(`Saved goals for ${quarter}.`);
@@ -219,6 +262,7 @@ function GoalsTab() {
 
   function handleResetQuarterDefaults() {
     resetQuarterToDefaults(quarter);
+    upsertGoals.mutate(localGoalsSnapshot());
     const fresh = getQuarterGoals(quarter);
     setDraft(fresh);
     setSaved(fresh);
@@ -232,6 +276,7 @@ function GoalsTab() {
   function toggleLock() {
     const next = !locked;
     setQuarterLocked(quarter, next);
+    upsertLocks.mutate(localLocksSnapshot());
     setLockedState(next);
     if (next) setEditing(false);
     setFeedback(next ? `Locked ${quarter}.` : `Unlocked ${quarter}.`);
