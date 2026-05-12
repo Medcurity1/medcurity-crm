@@ -24,42 +24,19 @@ export const contactSchema = z.object({
   lead_source: z.string().nullable().optional(),
   mql_date: z.string().optional().or(z.literal("")),
   sql_date: z.string().optional().or(z.literal("")),
-  // Phase 1 SF-parity additions
-  credential: z
-    .enum([
-      "md", "do", "rn", "lpn", "np", "pa",
-      "chc", "chps", "chpc", "hipaa_certified",
-      "ceo", "cfo", "coo", "cio", "cto", "ciso", "cmo",
-      "it_director", "practice_manager", "office_manager",
-      "compliance_officer", "privacy_officer", "security_officer",
-      "other",
-    ])
-    .optional()
-    .nullable()
-    .or(z.literal("")),
+  // Picklist-backed fields. Source of truth is public.picklist_options
+  // (admin-editable) + the Postgres enum on the column. Keeping a second
+  // hardcoded list in zod made saves silently fail whenever the admin
+  // added a value here — same regression that hit accounts/leads. Now
+  // the schema only validates "is a string"; Postgres rejects garbage
+  // at write time and that error surfaces as a visible toast.
+  credential: z.string().optional().nullable().or(z.literal("")),
   phone_ext: z.string().optional().or(z.literal("")),
   mobile_phone: z.string().optional().or(z.literal("")),
   events_attended: z.array(z.string()).optional().nullable(),
-  time_zone: z
-    .enum(["eastern", "central", "mountain", "pacific", "alaska", "hawaii", "arizona_no_dst"])
-    .optional()
-    .nullable()
-    .or(z.literal("")),
-  type: z
-    .enum(["prospect", "customer", "partner", "vendor", "referral_source", "internal", "other"])
-    .optional()
-    .nullable()
-    .or(z.literal("")),
-  business_relationship_tag: z
-    .enum([
-      "decision_maker", "influencer", "economic_buyer",
-      "technical_buyer", "champion", "detractor",
-      "end_user", "gatekeeper",
-      "executive_sponsor", "other",
-    ])
-    .optional()
-    .nullable()
-    .or(z.literal("")),
+  time_zone: z.string().optional().nullable().or(z.literal("")),
+  type: z.string().optional().nullable().or(z.literal("")),
+  business_relationship_tag: z.string().optional().nullable().or(z.literal("")),
   notes: z.string().optional().or(z.literal("")),
   next_steps: z.string().optional().or(z.literal("")),
 });

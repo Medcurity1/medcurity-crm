@@ -1,8 +1,9 @@
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useContact, useCreateContact, useUpdateContact } from "./api";
+import type { Contact } from "@/types/crm";
 import { PicklistSelect } from "@/features/picklists/PicklistSelect";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { US_STATES } from "@/lib/us-states";
@@ -31,17 +32,49 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { DuplicateWarning } from "@/components/DuplicateWarning";
 
+/**
+ * Outer wrapper — handles the data-load gate. We must NOT mount the
+ * inner form (and therefore useForm) until we have both the contact
+ * record (edit mode) and the accounts list. See the matching comment
+ * on LeadForm for the full rationale — short version: the previous
+ * defaultValues={empty} + useEffect(reset) pattern raced with Radix
+ * Select children (PicklistSelect), leaving picklist values blank on
+ * edit.
+ */
 export function ContactForm() {
+  const { id } = useParams<{ id: string }>();
+  const isEditing = !!id;
+  const { data: contact, isLoading: loadingContact } = useContact(id);
+  const { data: accounts } = useAccountsList();
+
+  if ((isEditing && (loadingContact || !contact)) || !accounts) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-10 w-48" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+
+  return <ContactFormInner key={id ?? "new"} contact={contact} accounts={accounts} />;
+}
+
+/* ---------- Inner form ---------- */
+
+interface AccountOption { id: string; name: string }
+
+function ContactFormInner({
+  contact,
+  accounts,
+}: {
+  contact: Contact | undefined;
+  accounts: AccountOption[];
+}) {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const isEditing = !!id;
   const { user } = useAuth();
-  const { data: contact, isLoading: loadingContact } = useContact(id);
-  // Pulls EVERY non-archived account (paged through all pages so the
-  // dropdown isn't capped at 25 / 1000). Was using useAccounts() which
-  // page-defaulted to 25 — users couldn't scroll past the A's.
-  const { data: accounts } = useAccountsList();
   const { data: users } = useUsers();
   const { data: requiredFieldsData } = useRequiredFields("contacts");
   const requiredKeys = requiredFieldsData?.map((f) => f.field_key) ?? [];
@@ -56,7 +89,7 @@ export function ContactForm() {
   // shows an empty Select (placeholder), which then fails the
   // "Account is required" zod check on save.
   const accountOptions = useMemo(() => {
-    const list = accounts ? [...accounts] : [];
+    const list = [...accounts];
     const contactAcc = contact?.account;
     if (contactAcc && !list.some((a) => a.id === contactAcc.id)) {
       list.unshift({ id: contactAcc.id, name: `${contactAcc.name} (archived)` });
@@ -69,77 +102,91 @@ export function ContactForm() {
     handleSubmit,
     setValue,
     watch,
-    reset,
     formState: { errors, isSubmitting },
   } = useForm<ContactFormValues>({
     resolver: zodResolver(contactSchema),
-    defaultValues: {
-      account_id: preselectedAccountId ?? "",
-      first_name: "",
-      last_name: "",
-      email: "",
-      title: "",
-      phone: "",
-      department: "",
-      linkedin_url: "",
-      do_not_contact: false,
-      mailing_street: "",
-      mailing_city: "",
-      mailing_state: "",
-      mailing_zip: "",
-      mailing_country: "",
-      is_primary: false,
-      // Default contact owner to current user (creator). Rep can change.
-      owner_user_id: user?.id ?? null,
-      lead_source: null,
-      mql_date: "",
-      sql_date: "",
-      credential: "",
-      phone_ext: "",
-      mobile_phone: "",
-      events_attended: null,
-      time_zone: "",
-      type: "",
-      business_relationship_tag: "",
-      notes: "",
-      next_steps: "",
-    },
+    defaultValues: isEditing && contact
+      ? {
+          account_id: contact.account_id,
+          first_name: contact.first_name,
+          last_name: contact.last_name,
+          email: contact.email ?? "",
+          title: contact.title ?? "",
+          phone: contact.phone ?? "",
+          department: contact.department ?? "",
+          linkedin_url: contact.linkedin_url ?? "",
+          do_not_contact: contact.do_not_contact ?? false,
+          mailing_street: contact.mailing_street ?? "",
+          mailing_city: contact.mailing_city ?? "",
+          mailing_state: contact.mailing_state ?? "",
+          mailing_zip: contact.mailing_zip ?? "",
+          mailing_country: contact.mailing_country ?? "",
+          is_primary: contact.is_primary,
+          owner_user_id: contact.owner_user_id,
+          lead_source: contact.lead_source ?? null,
+          mql_date: contact.mql_date ?? "",
+          sql_date: contact.sql_date ?? "",
+          credential: contact.credential ?? "",
+          phone_ext: contact.phone_ext ?? "",
+          mobile_phone: contact.mobile_phone ?? "",
+          events_attended: contact.events_attended ?? null,
+          time_zone: contact.time_zone ?? "",
+          type: contact.type ?? "",
+          business_relationship_tag: contact.business_relationship_tag ?? "",
+          notes: contact.notes ?? "",
+          next_steps: contact.next_steps ?? "",
+        }
+      : {
+          account_id: preselectedAccountId ?? "",
+          first_name: "",
+          last_name: "",
+          email: "",
+          title: "",
+          phone: "",
+          department: "",
+          linkedin_url: "",
+          do_not_contact: false,
+          mailing_street: "",
+          mailing_city: "",
+          mailing_state: "",
+          mailing_zip: "",
+          mailing_country: "",
+          is_primary: false,
+          // Default contact owner to current user (creator). Rep can
+          // change.
+          owner_user_id: user?.id ?? null,
+          lead_source: null,
+          mql_date: "",
+          sql_date: "",
+          credential: "",
+          phone_ext: "",
+          mobile_phone: "",
+          events_attended: null,
+          time_zone: "",
+          type: "",
+          business_relationship_tag: "",
+          notes: "",
+          next_steps: "",
+        },
   });
 
-  useEffect(() => {
-    if (contact && isEditing) {
-      reset({
-        account_id: contact.account_id,
-        first_name: contact.first_name,
-        last_name: contact.last_name,
-        email: contact.email ?? "",
-        title: contact.title ?? "",
-        phone: contact.phone ?? "",
-        department: contact.department ?? "",
-        linkedin_url: contact.linkedin_url ?? "",
-        do_not_contact: contact.do_not_contact ?? false,
-        mailing_street: contact.mailing_street ?? "",
-        mailing_city: contact.mailing_city ?? "",
-        mailing_state: contact.mailing_state ?? "",
-        mailing_zip: contact.mailing_zip ?? "",
-        mailing_country: contact.mailing_country ?? "",
-        is_primary: contact.is_primary,
-        owner_user_id: contact.owner_user_id,
-        lead_source: contact.lead_source ?? null,
-        mql_date: contact.mql_date ?? "",
-        sql_date: contact.sql_date ?? "",
-        credential: contact.credential ?? "",
-        phone_ext: contact.phone_ext ?? "",
-        mobile_phone: contact.mobile_phone ?? "",
-        events_attended: contact.events_attended ?? null,
-        time_zone: contact.time_zone ?? "",
-        type: contact.type ?? "",
-        business_relationship_tag: contact.business_relationship_tag ?? "",
-        notes: contact.notes ?? "",
-        next_steps: contact.next_steps ?? "",
-      });
-    }
-  }, [contact, isEditing, reset]);
+  // Surface zod failures (most picklist fields don't render their own
+  // error message — without this the click looks like a no-op).
+  function onInvalid(formErrors: typeof errors) {
+    const fields = Object.keys(formErrors);
+    if (fields.length === 0) return;
+    const detail = fields
+      .map((f) => {
+        const e = formErrors[f as keyof typeof formErrors] as
+          | { message?: string }
+          | undefined;
+        const msg = e?.message ? `: ${e.message}` : "";
+        return `${f.replace(/_/g, " ")}${msg}`;
+      })
+      .join("; ");
+    toast.error(`Can't save — invalid field(s): ${detail}`);
+    console.warn("Contact form validation errors:", formErrors);
+  }
 
   async function onSubmit(values: ContactFormValues) {
     // Check dynamic required fields
@@ -198,27 +245,13 @@ export function ContactForm() {
     }
   }
 
-  // Wait for BOTH the contact AND the accounts list before rendering.
-  // If we render with the dropdown options not yet loaded, the Select's
-  // controlled `value` resolves to no matching SelectItem and shows the
-  // placeholder instead of the contact's actual account — making it
-  // look like account isn't auto-selected.
-  if ((isEditing && loadingContact) || !accounts) {
-    return (
-      <div className="space-y-4">
-        <Skeleton className="h-10 w-48" />
-        <Skeleton className="h-64 w-full" />
-      </div>
-    );
-  }
-
   return (
     <div>
       <PageHeader title={isEditing ? "Edit Contact" : "New Contact"} />
 
       <Card>
         <CardContent className="pt-6">
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+          <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2 md:col-span-2">
                 <Label>Account *<RequiredIndicator fieldKey="account_id" requiredFields={requiredKeys} /></Label>
