@@ -322,7 +322,12 @@ function inDateRange(
   start: Date | null,
   end: Date | null,
 ): boolean {
-  if (!dateStr) return false;
+  // Null-date rows pass through. These are SF-imported open renewals
+  // where the source SF automation never set a close_date. They still
+  // belong on the Upcoming tab — we can't compare them against a date
+  // window, so we always include them. Dropping them was the bug that
+  // hid Harbor Regional and ~20 other open renewals.
+  if (!dateStr) return true;
   const d = new Date(dateStr);
   if (start && d < start) return false;
   if (end && d > end) return false;
