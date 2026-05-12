@@ -56,21 +56,16 @@ import { formatCurrency, formatDate } from "@/lib/formatters";
  * Renewals view, Salesforce "Open Renewal Opportunities" report style.
  *
  * Two tabs share the same filter rail, but they answer different
- * questions and anchor on different date fields:
- * - Upcoming: OPEN opps (stage not in closed_won / closed_lost) whose
- *   close_date falls in the selected window. This is the rep's
- *   workload — deals they need to close. The moment a rep marks an
- *   opp Closed Won the row drops off this tab (it's done, the
- *   customer is renewed). If they mark Closed Lost it also drops off.
+ * questions:
+ * - Upcoming: open renewal opps (kind='renewal' AND stage not in
+ *   closed_won / closed_lost) with close_date in the selected
+ *   window. This is the rep's workload — open renewals that need to
+ *   be closed. New-business and 'opportunity'-categorized rows live
+ *   on the regular sales pipeline, not here. The moment a rep marks
+ *   the row Closed Won or Closed Lost it drops off this tab.
  * - Closed-Won Renewals: kind='renewal' opps that closed within the
  *   window (anchored on close_date — when the renewal was actually
  *   sold). This is "renewal bookings", a backward-looking sales view.
- *
- * NOTE: this filter intentionally hides closed-won parent contracts
- * whose end date is approaching but for which no successor renewal
- * opp has been created yet. Surfacing those gaps is a job for the
- * renewal automation (which creates the successor opp) or a separate
- * "contracts ending, no renewal yet" report.
  *
  * Past-due rows (close_date < today) WITHIN the filter window are
  * kept naturally — only when the user's range covers their date.
@@ -198,13 +193,23 @@ function useUpcomingRenewals() {
       cap.setMonth(cap.getMonth() + 18);
       const capIso = cap.toISOString().slice(0, 10);
 
+      // Filter:
+      //   - kind = 'renewal' (NOT new_business, NOT one-off
+      //     'opportunity' rows — those are sales' new-business work,
+      //     they live on the regular pipeline, not on this tab)
+      //   - stage != closed_won AND stage != closed_lost (the moment a
+      //     rep closes the renewal it drops off; Closed Lost too)
+      //   - close_date in window
+      // No parent/child anything. Just open renewal opps.
       const { data, error } = await supabase
         .from("opportunities")
         .select(
           "id, account_id, owner_user_id, contract_end_date, close_date, expected_close_date, amount, stage, kind, name, next_step, lead_source, description, account:accounts!inner(id, name, archived_at), owner:user_profiles!owner_user_id(id, full_name)",
         )
         .is("archived_at", null)
-        .not("stage", "in", "(closed_won,closed_lost)")
+        .eq("kind", "renewal")
+        .neq("stage", "closed_won")
+        .neq("stage", "closed_lost")
         .not("close_date", "is", null)
         .gte("close_date", floorIso)
         .lte("close_date", capIso)
