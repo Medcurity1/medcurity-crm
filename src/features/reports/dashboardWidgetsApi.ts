@@ -2,8 +2,9 @@
  * Server-backed manual widgets (Most Recent Quote, QTD Billing actual,
  * Dev project line items). Mirrors the `DashboardWidgets` shape from
  * `dashboardWidgets.ts` but persists in a single jsonb row of
- * `public.dashboard_widgets` so the laptop and the TV see the same
- * data.
+ * `public.team_dashboard_widgets` so the laptop and the TV see the
+ * same data. (The unrelated `dashboard_widgets` table from an older
+ * migration is a per-user widget-config store — not used here.)
  *
  * Same cache pattern as milestones: localStorage stays as the
  * synchronous read path; the DB is source of truth and gets re-pulled
@@ -23,7 +24,7 @@ const SINGLETON_KEY = "singleton";
 
 async function fetchWidgets(): Promise<DashboardWidgets> {
   const { data, error } = await supabase
-    .from("dashboard_widgets")
+    .from("team_dashboard_widgets")
     .select("data")
     .eq("key", SINGLETON_KEY)
     .maybeSingle();
@@ -38,7 +39,7 @@ async function fetchWidgets(): Promise<DashboardWidgets> {
 
 async function persistWidgets(w: DashboardWidgets): Promise<void> {
   const { error } = await supabase
-    .from("dashboard_widgets")
+    .from("team_dashboard_widgets")
     .upsert(
       { key: SINGLETON_KEY, data: w as unknown as object },
       { onConflict: "key" },

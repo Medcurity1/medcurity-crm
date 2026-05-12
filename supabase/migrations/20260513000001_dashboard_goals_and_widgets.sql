@@ -4,6 +4,11 @@
 -- Postgres. Mirrors the dashboard_milestones table that already exists
 -- (see 20260512000001_dashboard_milestones.sql).
 --
+-- Name note: `dashboard_widgets` is already taken by an older
+-- migration (20260404000003_mql_sql_and_sequences.sql) for an unused
+-- per-user widget-config store. We pick `team_dashboard_widgets` to
+-- avoid the collision rather than dropping the orphan table.
+--
 -- Why two tables instead of one: goals and widgets are read/written
 -- independently by different components, and goals has a separate
 -- "locks" payload that's edited from the admin page. Keeping them
@@ -57,31 +62,31 @@ create policy "dashboard_goals_write"
   with check (true);
 
 -- ---------------------------------------------------------------------
--- dashboard_widgets — manual-entry widgets (quote, QTD billing, dev list)
+-- team_dashboard_widgets — manual-entry widgets (quote, QTD billing, dev list)
 -- ---------------------------------------------------------------------
-create table if not exists public.dashboard_widgets (
+create table if not exists public.team_dashboard_widgets (
   key         text primary key,
   data        jsonb not null default '{}'::jsonb,
   updated_at  timestamptz not null default timezone('utc', now()),
   updated_by  uuid references auth.users(id)
 );
 
-insert into public.dashboard_widgets (key, data)
+insert into public.team_dashboard_widgets (key, data)
 values ('singleton', '{}'::jsonb)
 on conflict (key) do nothing;
 
-alter table public.dashboard_widgets enable row level security;
+alter table public.team_dashboard_widgets enable row level security;
 
-drop policy if exists "dashboard_widgets_read" on public.dashboard_widgets;
-create policy "dashboard_widgets_read"
-  on public.dashboard_widgets
+drop policy if exists "team_dashboard_widgets_read" on public.team_dashboard_widgets;
+create policy "team_dashboard_widgets_read"
+  on public.team_dashboard_widgets
   for select
   to authenticated
   using (true);
 
-drop policy if exists "dashboard_widgets_write" on public.dashboard_widgets;
-create policy "dashboard_widgets_write"
-  on public.dashboard_widgets
+drop policy if exists "team_dashboard_widgets_write" on public.team_dashboard_widgets;
+create policy "team_dashboard_widgets_write"
+  on public.team_dashboard_widgets
   for all
   to authenticated
   using (true)
@@ -105,9 +110,9 @@ create trigger dashboard_goals_touch_trg
   before update on public.dashboard_goals
   for each row execute function public.dashboard_kv_touch();
 
-drop trigger if exists dashboard_widgets_touch_trg on public.dashboard_widgets;
-create trigger dashboard_widgets_touch_trg
-  before update on public.dashboard_widgets
+drop trigger if exists team_dashboard_widgets_touch_trg on public.team_dashboard_widgets;
+create trigger team_dashboard_widgets_touch_trg
+  before update on public.team_dashboard_widgets
   for each row execute function public.dashboard_kv_touch();
 
 commit;
