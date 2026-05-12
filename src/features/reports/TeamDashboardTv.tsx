@@ -6,43 +6,60 @@ import { TeamDashboard } from "./TeamDashboard";
  * Dashboard intended for an always-on office TV.
  *
  * Behavior:
- *   - Forces LIGHT theme while mounted, regardless of the signed-in
- *     user's preference or OS setting. Restores prior `.dark` state
- *     on unmount. Avoids the dark-card-on-white-page mix.
- *   - Renders <TeamDashboard tvMode> which strips ALL owner/admin
- *     affordances (tabs, edit pencils, drag handles, milestone Edit,
- *     quote editor, etc.) even when the owner account is signed in.
- *     The dashboard can only be edited from the owner's normal
- *     `/reports?tab=team` session.
- *   - Measures the dashboard's natural rendered height after mount
- *     and scales the entire canvas down so width AND height fit the
- *     viewport. No scrolling — everything is on one page, just smaller.
- *   - Auto-reloads every 10 minutes so the displayed numbers stay fresh.
+ *   - Forces the chosen theme (light by default; user-toggleable, persisted)
+ *     while mounted. Restores prior `.dark` state on unmount.
+ *   - Renders <TeamDashboard tvMode> which:
+ *       (a) strips ALL owner/admin affordances even when the owner is
+ *           signed in (TV is read-only — edit from your normal session)
+ *       (b) flows top-level sections into 2 columns so the wide TV
+ *           canvas fills horizontally instead of stacking vertically.
+ *   - Measures the dashboard's rendered height after mount and scales
+ *     the canvas down so width AND height fit the viewport. No scroll.
+ *   - Auto-reloads every 10 minutes for fresh data.
+ *   - Tiny theme toggle in the bottom-right corner (small + low-opacity
+ *     so it doesn't dominate the display, but discoverable).
  */
 
-const CANVAS_W = 1920; // fixed canvas width — layout was designed for this
-const RELOAD_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+const CANVAS_W = 1920;
+const RELOAD_INTERVAL_MS = 10 * 60 * 1000;
+const THEME_STORAGE_KEY = "medcurity_tv_theme";
+
+type TvTheme = "light" | "dark";
+
+function readSavedTheme(): TvTheme {
+  if (typeof window === "undefined") return "light";
+  const raw = window.localStorage.getItem(THEME_STORAGE_KEY);
+  return raw === "dark" ? "dark" : "light";
+}
 
 export function TeamDashboardTv() {
   const contentRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [contentH, setContentH] = useState<number>(1080);
+  const [theme, setTheme] = useState<TvTheme>(() => readSavedTheme());
 
-  // Force light mode while the TV view is mounted. Capture and restore
-  // the previous `.dark` state so we don't trample the user's choice
-  // if they navigate back to a normal page.
+  // Apply the chosen theme to <html> while mounted; restore on unmount.
   useLayoutEffect(() => {
     const root = document.documentElement;
     const wasDark = root.classList.contains("dark");
-    root.classList.remove("dark");
+    if (theme === "dark") root.classList.add("dark");
+    else root.classList.remove("dark");
     return () => {
       if (wasDark) root.classList.add("dark");
+      else root.classList.remove("dark");
     };
-  }, []);
+  }, [theme]);
 
-  // Measure the natural rendered height of the dashboard and recompute
-  // scale on viewport resize OR content resize. We scale by min(width
-  // ratio, height ratio) so the full dashboard always fits.
+  // Persist theme choice across page reloads.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch {
+      // localStorage disabled — fine.
+    }
+  }, [theme]);
+
+  // Measure dashboard height and recompute scale on viewport/content resize.
   useLayoutEffect(() => {
     const el = contentRef.current;
     if (!el) return;
@@ -64,7 +81,7 @@ export function TeamDashboardTv() {
       ro.disconnect();
       window.removeEventListener("resize", recompute);
     };
-  }, [contentH]);
+  }, [contentH, theme]);
 
   // Periodic full-page reload so the TV always shows fresh data.
   useEffect(() => {
@@ -74,9 +91,12 @@ export function TeamDashboardTv() {
     return () => window.clearInterval(t);
   }, []);
 
+  const bgClass = theme === "dark" ? "bg-neutral-950" : "bg-white";
+  const innerBg = theme === "dark" ? "#0a0a0a" : "white";
+
   return (
     <div
-      className="fixed inset-0 overflow-hidden bg-white"
+      className={`fixed inset-0 overflow-hidden ${bgClass}`}
       style={{ width: "100vw", height: "100vh" }}
     >
       <div
@@ -88,13 +108,27 @@ export function TeamDashboardTv() {
           position: "absolute",
           top: "50%",
           left: "50%",
-          background: "white",
+          background: innerBg,
         }}
       >
         <div ref={contentRef} className="w-full p-6">
           <TeamDashboard tvMode />
         </div>
       </div>
+
+      {/* Theme toggle — small, low-opacity, bottom-right. */}
+      <button
+        type="button"
+        onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+        className={`fixed bottom-3 right-3 z-50 rounded-full px-3 py-1.5 text-xs font-medium opacity-30 hover:opacity-100 transition-opacity ${
+          theme === "dark"
+            ? "bg-white/10 text-white border border-white/20"
+            : "bg-black/10 text-black border border-black/20"
+        }`}
+        title="Toggle dashboard theme"
+      >
+        {theme === "dark" ? "☀ Light" : "☾ Dark"}
+      </button>
     </div>
   );
 }

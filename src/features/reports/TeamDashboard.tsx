@@ -1073,8 +1073,16 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
       ? Number(arrFin.nrr_dollar_pct)
       : num(m.nrr_by_dollar_true_pct ?? m.nrr_by_dollar_legacy_pct);
 
+  // TV mode flows top-level sections into 2 CSS columns so the wide
+  // horizontal canvas fills instead of running tall. Each section
+  // stays an unbroken block. Non-TV keeps the original vertical
+  // `space-y-2` stack used everywhere else.
+  const rootClass = tvMode
+    ? "columns-2 gap-4 [&>*]:mb-4 [&>*]:break-inside-avoid"
+    : "space-y-2";
+
   return (
-    <div className="space-y-2" data-dashboard-print-root>
+    <div className={rootClass} data-dashboard-print-root>
       {tabBar}
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div className="flex items-baseline gap-2">
