@@ -55,15 +55,21 @@ import { formatCurrency, formatDate } from "@/lib/formatters";
 /**
  * Renewals view, Salesforce "Open Renewal Opportunities" report style.
  *
- * Two tabs share the same filter rail:
- * - Upcoming: closed-won deals whose contract_end_date is in the
- *   selected date window. This is where renewal-prep work happens.
- *   Past-due rows (contract_end_date < today) WITHIN the filter
- *   window are kept naturally — only when the user's range covers
- *   their date. Picking "this quarter" won't pull last quarter, and
- *   "next 120 days" won't pull rows from years ago.
+ * Two MUTUALLY EXCLUSIVE tabs share the same filter rail:
+ * - Upcoming: open renewal-kind opps (kind='renewal' AND stage NOT IN
+ *   closed_won/closed_lost) whose close_date is in the selected date
+ *   window. close_date on a renewal opp is the anniversary anchor
+ *   (parent.close_date + 12 months) — i.e. the customer-facing renewal
+ *   deadline. This is where renewal-prep work happens. Past-due rows
+ *   (close_date < today) WITHIN the filter window are kept naturally
+ *   — only when the user's range covers their date. Picking
+ *   "this quarter" won't pull last quarter, and "next 120 days" won't
+ *   pull rows from years ago.
  * - Closed-Won Renewals: renewal-kind opps that have already been won
  *   in the selected date window (filtered by close_date).
+ *
+ * Closed-won renewals only appear in the Closed-Won tab — never in
+ * Upcoming. Totals on each tab reflect only what that tab shows.
  *
  * All filters (date window, owner, account-name exclusion) apply to
  * both tabs. Owner filter is persisted to URL (?owners=…) AND to
@@ -163,19 +169,26 @@ function useUpcomingRenewals() {
   return useQuery({
     queryKey: ["renewal_queue", "upcoming"],
     queryFn: async () => {
-      // Upcoming = closed-won deals whose contract is approaching its
-      // end date. This is the renewal-prep view: each row is a deal
-      // that needs to be renewed before contract_end_date.
+      // Upcoming = open renewal-kind opportunities (the renewal
+      // pipeline). Closed-won renewals belong to the other tab, so
+      // they're excluded here; closed-lost renewals are also excluded
+      // (they're churned, not upcoming). Each row is an in-progress
+      // renewal that the rep is working to close.
+      //
+      // Date anchor is close_date, which the renewal automation sets
+      // to the parent opp's anniversary (parent.close_date + 12
+      // months). contract_end_date on a renewal opp is the POST-
+      // renewal contract end (often null when the parent had no
+      // contract_end_date) and isn't useful as the deadline anchor.
       //
       // SQL window: 24 months back through 18 months forward. The
-      // 24-month lookback exists so past-due rows are QUERYABLE (e.g.
-      // North Cascade Cancer Center BNVA whose contract_end has
-      // passed) — but the actual visibility decision is made by the
-      // client-side date filter. If the user picks "this quarter",
-      // past-due rows from last quarter naturally fall outside the
-      // window and don't appear. If they pick a custom range that
-      // covers older dates, those rows do appear. The query is just a
-      // generous outer bound.
+      // 24-month lookback exists so past-due rows are QUERYABLE — but
+      // the actual visibility decision is made by the client-side
+      // date filter. If the user picks "this quarter", past-due rows
+      // from last quarter naturally fall outside the window and don't
+      // appear. If they pick a custom range that covers older dates,
+      // those rows do appear. The query is just a generous outer
+      // bound.
       const today = new Date();
       const floor = new Date(today);
       floor.setMonth(floor.getMonth() - 24);
@@ -190,11 +203,12 @@ function useUpcomingRenewals() {
           "id, account_id, owner_user_id, contract_end_date, close_date, expected_close_date, amount, stage, kind, name, next_step, lead_source, description, account:accounts!inner(id, name, archived_at), owner:user_profiles!owner_user_id(id, full_name)",
         )
         .is("archived_at", null)
-        .eq("stage", "closed_won")
-        .not("contract_end_date", "is", null)
-        .gte("contract_end_date", floorIso)
-        .lte("contract_end_date", capIso)
-        .order("contract_end_date", { ascending: true });
+        .eq("kind", "renewal")
+        .not("stage", "in", "(closed_won,closed_lost)")
+        .not("close_date", "is", null)
+        .gte("close_date", floorIso)
+        .lte("close_date", capIso)
+        .order("close_date", { ascending: true });
       if (error) throw error;
 
       return (data ?? [])
@@ -410,13 +424,13 @@ function sortUpcoming(
       case "lead_source":
         return r.lead_source?.toLowerCase() ?? null;
       case "days":
-        // Days until contract end. Past-due rows (negative) sort
-        // before future rows under ascending, so the most-overdue
-        // rises to the top.
-        return dateValue(r.contract_end_date) === null
+        // Days until the renewal anniversary (close_date on the
+        // renewal opp). Past-due rows (negative) sort before future
+        // rows under ascending, so the most-overdue rises to the top.
+        return dateValue(r.close_date) === null
           ? null
           : Math.round(
-              (dateValue(r.contract_end_date)! - today.getTime()) /
+              (dateValue(r.close_date)! - today.getTime()) /
                 86_400_000,
             );
     }
@@ -947,7 +961,11 @@ export function RenewalsQueue() {
 
   const upcomingFiltered = useMemo(() => {
     if (!upcoming) return undefined;
-    const base = applyCommonFilters(upcoming, "contract_end_date", upcomingRange);
+    // Upcoming filter anchors on close_date (= the renewal anniversary
+    // set by the automation) — renewal opps may have null
+    // contract_end_date when the parent had none, so close_date is
+    // the reliable deadline field.
+    const base = applyCommonFilters(upcoming, "close_date", upcomingRange);
     return sortUpcoming(base, upcomingSort);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -993,8 +1011,11 @@ export function RenewalsQueue() {
     const list = upcomingFiltered ?? [];
     const total = list.reduce((s, r) => s + r.amount, 0);
     const monthly = upcomingMonthBuckets.map(({ start, end, label }) => {
+      // Bucket renewal opps by their close_date (anniversary anchor)
+      // so the monthly breakdown matches the filter window and the
+      // tab's date-field semantics.
       const inWindow = list.filter((r) =>
-        inDateRange(r.contract_end_date, start, end),
+        inDateRange(r.close_date, start, end),
       );
       return {
         label,
@@ -1322,7 +1343,10 @@ export function RenewalsQueue() {
                 </TableHeader>
                 <TableBody>
                   {upcomingFiltered.map((r) => {
-                    const days = daysBetween(today, r.contract_end_date);
+                    // Days-until-anniversary (close_date on the
+                    // renewal opp). This is the customer-facing
+                    // renewal deadline; urgency colors hang off it.
+                    const days = daysBetween(today, r.close_date);
                     // "Slip" measures how far the rep's CURRENT
                     // expected close has slid past the original
                     // contract end. close_date isn't useful for the
