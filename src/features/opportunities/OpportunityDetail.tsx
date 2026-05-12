@@ -556,8 +556,17 @@ export function OpportunityDetail() {
           <Field
             label="Business Type"
             value={(() => {
+              // Display ONLY what's actually stored in business_type.
+              // Previously this fell back to kindLabel(opp.kind) when
+              // business_type was null, which made the detail page
+              // show "Renewal" for opps whose business_type column was
+              // genuinely empty. Reps then opened Edit and saw the
+              // Business Type picklist set to None and reported it as
+              // a "blank on edit" bug — but the DB really was null;
+              // detail was the one lying. No more fallback: detail
+              // and edit now agree.
               const bt = opp.business_type;
-              if (!bt) return kindLabel(opp.kind);
+              if (!bt) return null;
               const labels: Record<string, string> = {
                 new_business: "New Business",
                 existing_business: "Existing Business",

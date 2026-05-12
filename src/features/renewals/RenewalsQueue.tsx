@@ -55,18 +55,22 @@ import { formatCurrency, formatDate } from "@/lib/formatters";
 /**
  * Renewals view, Salesforce "Open Renewal Opportunities" report style.
  *
- * Two MUTUALLY EXCLUSIVE tabs share the same filter rail:
- * - Upcoming: closed-won SOURCE deals (kind != 'renewal') whose
- *   contract_end_date is in the selected date window. These are the
- *   active contracts that need to be renewed before they lapse.
- *   Renewal-kind opps are excluded so they don't double-count against
- *   the closed-won tab.
- * - Closed-Won Renewals: renewal-kind opps that have already been won
- *   in the selected date window (filtered by close_date).
+ * Two tabs share the same filter rail, but they answer different
+ * questions and anchor on different date fields:
+ * - Upcoming: ALL closed-won opps (regardless of kind) whose
+ *   contract_end_date falls in the selected window. This is "what's
+ *   coming up for renewal" — every active contract approaching its
+ *   end date, including renewal-kind opps the rep won last year that
+ *   are now themselves up for renewal again.
+ * - Closed-Won Renewals: kind='renewal' opps that closed within the
+ *   window (anchored on close_date — when the renewal was actually
+ *   sold). This is "renewal bookings", a backward-looking sales view.
  *
- * Renewal-kind opps belong exclusively to the Closed-Won tab. Source
- * deals (kind='new', null, 'expansion', etc.) belong to Upcoming.
- * No row appears in both. Totals on each tab reflect only that tab's
+ * The two tabs CAN reference the same row in different windows (e.g.
+ * a renewal sold May 2025 with contract_end_date May 2026 shows in
+ * Closed-Won when filtered to 2025 and in Upcoming when filtered to
+ * 2026). That's intentional — they're different lifecycle moments of
+ * the same contract. Totals on each tab reflect only that tab's
  * filtered list.
  *
  * Past-due rows (contract_end_date < today) WITHIN the filter window
@@ -172,12 +176,11 @@ function useUpcomingRenewals() {
   return useQuery({
     queryKey: ["renewal_queue", "upcoming"],
     queryFn: async () => {
-      // Upcoming = closed-won SOURCE deals whose contract is
-      // approaching its end date. Renewal-kind opps are excluded so
-      // they live exclusively in the Closed-Won tab (which queries
-      // kind='renewal'). The exclusion is `kind IS NULL OR kind <>
-      // 'renewal'` — imported SF data often has kind=null which is
-      // still source business, not a renewal child.
+      // Upcoming = every closed-won opp whose contract_end_date is
+      // approaching, regardless of kind. A renewal sold last year is
+      // itself a contract that needs renewing again this year — it
+      // belongs here even though it ALSO appears on Closed-Won
+      // Renewals when the user filters back to its sale month.
       //
       // SQL window: 24 months back through 18 months forward. The
       // 24-month lookback exists so past-due rows are QUERYABLE — but
@@ -202,7 +205,6 @@ function useUpcomingRenewals() {
         )
         .is("archived_at", null)
         .eq("stage", "closed_won")
-        .or("kind.is.null,kind.neq.renewal")
         .not("contract_end_date", "is", null)
         .gte("contract_end_date", floorIso)
         .lte("contract_end_date", capIso)
