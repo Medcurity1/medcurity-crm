@@ -199,8 +199,12 @@ function useUpcomingRenewals() {
       //     they live on the regular pipeline, not on this tab)
       //   - stage != closed_won AND stage != closed_lost (the moment a
       //     rep closes the renewal it drops off; Closed Lost too)
-      //   - close_date in window
-      // No parent/child anything. Just open renewal opps.
+      //   - close_date: either in window, OR null. Null-date rows are
+      //     the SF-imported open renewals (Harbor Regional and
+      //     similar) — the original SF automation created the renewal
+      //     opp without setting a close_date, but they're still
+      //     "open renewals needing to be worked", so they belong here.
+      //     Dropping them was the bug. They sort to the bottom.
       const { data, error } = await supabase
         .from("opportunities")
         .select(
@@ -210,10 +214,10 @@ function useUpcomingRenewals() {
         .eq("kind", "renewal")
         .neq("stage", "closed_won")
         .neq("stage", "closed_lost")
-        .not("close_date", "is", null)
-        .gte("close_date", floorIso)
-        .lte("close_date", capIso)
-        .order("close_date", { ascending: true });
+        .or(
+          `close_date.is.null,and(close_date.gte.${floorIso},close_date.lte.${capIso})`,
+        )
+        .order("close_date", { ascending: true, nullsFirst: false });
       if (error) throw error;
 
       return (data ?? [])
