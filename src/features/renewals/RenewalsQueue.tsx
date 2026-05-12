@@ -199,12 +199,12 @@ function useUpcomingRenewals() {
       //     they live on the regular pipeline, not on this tab)
       //   - stage != closed_won AND stage != closed_lost (the moment a
       //     rep closes the renewal it drops off; Closed Lost too)
-      //   - close_date: either in window, OR null. Null-date rows are
-      //     the SF-imported open renewals (Harbor Regional and
-      //     similar) — the original SF automation created the renewal
-      //     opp without setting a close_date, but they're still
-      //     "open renewals needing to be worked", so they belong here.
-      //     Dropping them was the bug. They sort to the bottom.
+      //   - expected_close_date: in window OR null. This is the field
+      //     the date preset (This Quarter, This Month, etc.) anchors
+      //     on — it's the rep's working estimate of when the deal will
+      //     close. close_date stays in the projection for display, but
+      //     filter logic uses expected_close_date. Null rows pass
+      //     through always (SF-imported renewals without an estimate).
       const { data, error } = await supabase
         .from("opportunities")
         .select(
@@ -215,9 +215,9 @@ function useUpcomingRenewals() {
         .neq("stage", "closed_won")
         .neq("stage", "closed_lost")
         .or(
-          `close_date.is.null,and(close_date.gte.${floorIso},close_date.lte.${capIso})`,
+          `expected_close_date.is.null,and(expected_close_date.gte.${floorIso},expected_close_date.lte.${capIso})`,
         )
-        .order("close_date", { ascending: true, nullsFirst: false });
+        .order("expected_close_date", { ascending: true, nullsFirst: false });
       if (error) throw error;
 
       return (data ?? [])
@@ -953,7 +953,7 @@ export function RenewalsQueue() {
   // when the user just wanted "this quarter".)
   function applyCommonFilters(
     rows: RenewalRow[],
-    dateField: "contract_end_date" | "close_date",
+    dateField: "contract_end_date" | "close_date" | "expected_close_date",
     range: { start: Date | null; end: Date | null },
   ) {
     const exclude = excludeAccount.trim().toLowerCase();
@@ -966,7 +966,11 @@ export function RenewalsQueue() {
       }
       if (range.start || range.end) {
         const dateStr =
-          dateField === "contract_end_date" ? r.contract_end_date : r.close_date;
+          dateField === "contract_end_date"
+            ? r.contract_end_date
+            : dateField === "expected_close_date"
+              ? r.expected_close_date
+              : r.close_date;
         if (!inDateRange(dateStr, range.start, range.end)) return false;
       }
       return true;
@@ -975,10 +979,16 @@ export function RenewalsQueue() {
 
   const upcomingFiltered = useMemo(() => {
     if (!upcoming) return undefined;
-    // Upcoming filter anchors on contract_end_date — the source
-    // closed-won deal's contract expiry is the deadline that decides
-    // whether the renewal is in this user's window.
-    const base = applyCommonFilters(upcoming, "close_date", upcomingRange);
+    // Upcoming filter anchors on expected_close_date — the rep's
+    // working estimate of when the renewal will close. That's the
+    // field "This Quarter" / "This Month" presets should narrow by,
+    // because it reflects what's actually expected to close in the
+    // selected window.
+    const base = applyCommonFilters(
+      upcoming,
+      "expected_close_date",
+      upcomingRange,
+    );
     return sortUpcoming(base, upcomingSort);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
