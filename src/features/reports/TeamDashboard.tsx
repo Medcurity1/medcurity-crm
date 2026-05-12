@@ -566,10 +566,14 @@ function quarterlySnapshotTrend(
 
 type DashboardView = "dashboard" | "goals" | "historical";
 
-export function TeamDashboard() {
+export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
   const { profile, user } = useAuth();
-  /** Raw owner status (drives tab/toggle visibility — always honored). */
+  /** Raw owner status (drives tab/toggle visibility — always honored).
+   *  TV mode (office display) always renders as a non-owner: no tabs,
+   *  no edit affordances, regardless of which account is signed in.
+   *  The dashboard can only be edited from the owner's normal session. */
   const isOwnerAccount =
+    !tvMode &&
     (profile?.role === "admin" || profile?.role === "super_admin") &&
     user?.email === DASHBOARD_OWNER_EMAIL;
 

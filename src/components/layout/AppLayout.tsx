@@ -115,6 +115,16 @@ export function AppLayout() {
   const handleToggle = useCallback(() => setCollapsed((c) => !c), []);
   const handleOverlayClick = useCallback(() => setCollapsed(true), []);
 
+  // Staging banner. Detect via hostname so we never accidentally show
+  // it in production. Added 2026-05-12 after a user spent time editing
+  // records on staging thinking it was prod and reported the data as
+  // "lost." Banner is unmissable on purpose.
+  const isStaging =
+    typeof window !== "undefined" &&
+    (window.location.hostname.startsWith("staging.") ||
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1");
+
   return (
     <div className="flex h-screen overflow-hidden">
       {/* Mobile overlay */}
@@ -133,6 +143,17 @@ export function AppLayout() {
       />
 
       <main className="flex-1 overflow-y-auto bg-background">
+        {isStaging && (
+          <div className="sticky top-0 z-20 bg-yellow-400 text-black text-center text-sm font-semibold py-1.5 border-b-2 border-yellow-600 shadow-sm">
+            ⚠️ STAGING ENVIRONMENT — data here is NOT real. For production go to{" "}
+            <a
+              href="https://crm.medcurity.com"
+              className="underline hover:text-yellow-900"
+            >
+              crm.medcurity.com
+            </a>
+          </div>
+        )}
         {/* Top bar */}
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-background/95 px-6 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <span className="text-sm font-medium text-muted-foreground">{sectionName}</span>
