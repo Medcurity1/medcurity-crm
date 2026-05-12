@@ -3829,7 +3829,12 @@ function SnapshotDetailView({
         tone="bg-gradient-to-br from-emerald-50 to-emerald-100/50 dark:from-emerald-950/40 dark:to-emerald-900/20"
         accent="bg-emerald-500"
       >
+        {/* Mirrors the main dashboard's Customer Success layout: 4
+            grouped cards in a 2-col grid (Renewals / QTD Billing /
+            NRR-Customer / NRR-Dollar) so the grid auto-balances
+            instead of stuffing one tall column next to a short one. */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+          {/* Renewals (KPI + cumulative chart) */}
           <div className="space-y-2">
             <KpiCard
               label="Renewals Closed QTD"
@@ -3852,16 +3857,20 @@ function SnapshotDetailView({
               </ChartCard>
             )}
           </div>
+
+          {/* QTD Billing Goal (single KPI) */}
+          <KpiCard
+            label="QTD Billing Goal"
+            value={formatCurrency(sm.qtd_billing)}
+            progress={pct(sm.qtd_billing, qtdBillingGoal)}
+            goal={qtdBillingGoal}
+            formatGoal={formatCurrency}
+            onGoalChange={noop}
+            editable={false}
+          />
+
+          {/* NRR by Customer (KPI + quarterly trend chart) */}
           <div className="space-y-2">
-            <KpiCard
-              label="QTD Billing Goal"
-              value={formatCurrency(sm.qtd_billing)}
-              progress={pct(sm.qtd_billing, qtdBillingGoal)}
-              goal={qtdBillingGoal}
-              formatGoal={formatCurrency}
-              onGoalChange={noop}
-              editable={false}
-            />
             <KpiCard
               label="NRR by Customer"
               value={fmtPct(sm.nrr_by_customer_pct)}
@@ -3884,6 +3893,10 @@ function SnapshotDetailView({
                 />
               </ChartCard>
             )}
+          </div>
+
+          {/* NRR by Dollar (KPI + quarterly trend chart) */}
+          <div className="space-y-2">
             <KpiCard
               label="NRR by Dollar"
               value={fmtPct(sm.nrr_by_dollar_pct)}
