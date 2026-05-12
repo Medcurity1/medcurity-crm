@@ -868,9 +868,12 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
             : num(m.nrr_by_dollar_true_pct ?? m.nrr_by_dollar_legacy_pct),
         sql_qtd: num(m.sql_qtd),
         mql_unique_qtd: num(m.mql_unique_qtd),
-        qtd_billing:
-          widgets.qtd_billing_actual ??
-          num(m.new_customer_amount_qtd) + num(m.renewals_amount_qtd),
+        // Manual-entry metric — billing director's QuickBooks total.
+        // No auto-calc fallback (new_sales + renewals_closed isn't an
+        // accurate proxy because QuickBooks bills more than that).
+        // Snapshots 0 when unset; owner fills the number in via the
+        // pencil on the QTD Billing card.
+        qtd_billing: widgets.qtd_billing_actual ?? 0,
       },
       milestones,
       quote_text: widgets.quote_text,
@@ -1116,7 +1119,6 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
   const arr = num(m.current_arr);
   const newCustomers = num(m.new_customers_qtd);
   const pipeline = num(m.pipeline_amount);
-  const renewalsClosedAmt = num(m.renewals_amount_qtd);
   // Prefer YoY NRR from v_dashboard_arr_financial; fall back to QoQ
   // from v_dashboard_metrics if the YoY view is null. See useArrFinancial.
   const nrrCust =
@@ -1463,19 +1465,30 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
 
                   {id === "qtd_billing" && (
                     <KpiCard
-                      label="QTD Billing Goal"
-                      value={formatCurrency(
-                        num(m.new_customer_amount_qtd) + renewalsClosedAmt,
-                      )}
+                      label="QTD Billing"
+                      // Manual entry only — billing director pulls this
+                      // from QuickBooks (which bills more than just new
+                      // sales + renewals, so the old auto-calc was
+                      // always wrong). Owner edits the number directly
+                      // via the pencil next to the value.
+                      value={
+                        widgets.qtd_billing_actual == null
+                          ? "—"
+                          : formatCurrency(widgets.qtd_billing_actual)
+                      }
+                      valueNumber={widgets.qtd_billing_actual}
+                      onValueChange={(v) =>
+                        setWidgets((w) => ({ ...w, qtd_billing_actual: v }))
+                      }
                       progress={pct(
-                        num(m.new_customer_amount_qtd) + renewalsClosedAmt,
+                        widgets.qtd_billing_actual ?? 0,
                         goals.qtd_billing,
                       )}
                       goal={goals.qtd_billing}
                       formatGoal={formatCurrency}
                       onGoalChange={(v) => setGoalQuarter("qtd_billing_progress", v)}
                       editable={isOwner}
-                      hint="New Sales $ QTD + Renewals Closed $ QTD."
+                      hint="Manually entered from the billing director's QuickBooks total."
                     />
                   )}
                   {id === "nrr_customer" && (
@@ -2342,6 +2355,8 @@ function KpiCard({
   hint,
   to,
   showGoal = true,
+  valueNumber,
+  onValueChange,
 }: {
   label: string;
   value: string;
@@ -2355,14 +2370,32 @@ function KpiCard({
   /** When false, hide the goal text, progress bar, and red/yellow/green
    *  status dot. Used by ARR which has no target. */
   showGoal?: boolean;
+  /** Current numeric value (only needed when onValueChange is provided —
+   *  used to seed the inline edit input). */
+  valueNumber?: number | null;
+  /** When provided, the value itself becomes click-to-edit (pencil
+   *  appears next to it). Used for manual-override metrics like QTD
+   *  Billing whose number doesn't come from a CRM query. */
+  onValueChange?: (v: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<string>(String(goal));
+  const [editingValue, setEditingValue] = useState(false);
+  const [valueDraft, setValueDraft] = useState<string>(
+    valueNumber == null ? "" : String(valueNumber),
+  );
 
   function commit() {
     const parsed = Number(draft);
     if (Number.isFinite(parsed) && parsed >= 0) onGoalChange(parsed);
     setEditing(false);
+  }
+
+  function commitValue() {
+    if (!onValueChange) return;
+    const parsed = Number(valueDraft);
+    if (Number.isFinite(parsed) && parsed >= 0) onValueChange(parsed);
+    setEditingValue(false);
   }
 
   // Approximate "actual" from progress so we can color the dot. progress
@@ -2430,9 +2463,66 @@ function KpiCard({
               </Link>
             )}
           </div>
-          <p className="text-2xl font-bold leading-none tracking-tight tabular-nums text-foreground">
-            {value}
-          </p>
+          {editingValue && onValueChange ? (
+            <div className="flex items-center gap-1">
+              <Input
+                type="number"
+                value={valueDraft}
+                onChange={(e) => setValueDraft(e.target.value)}
+                className="h-8 text-base font-bold px-1.5"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitValue();
+                  if (e.key === "Escape") {
+                    setValueDraft(valueNumber == null ? "" : String(valueNumber));
+                    setEditingValue(false);
+                  }
+                }}
+                autoFocus
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 p-0"
+                onClick={commitValue}
+              >
+                <Check className="h-3 w-3" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 p-0"
+                onClick={() => {
+                  setValueDraft(
+                    valueNumber == null ? "" : String(valueNumber),
+                  );
+                  setEditingValue(false);
+                }}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <p className="text-2xl font-bold leading-none tracking-tight tabular-nums text-foreground">
+                {value}
+              </p>
+              {onValueChange && editable && (
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() => {
+                    setValueDraft(
+                      valueNumber == null ? "" : String(valueNumber),
+                    );
+                    setEditingValue(true);
+                  }}
+                  title="Edit value"
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          )}
         </div>
         {showGoal && (
           <div className="h-1.5 w-full rounded-full bg-gradient-to-r from-muted/80 to-muted/40 overflow-hidden ring-1 ring-black/[0.03]">
