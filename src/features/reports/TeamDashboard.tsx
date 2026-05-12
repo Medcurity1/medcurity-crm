@@ -71,6 +71,10 @@ import {
   type Milestone,
 } from "@/features/reports/dashboardMilestones";
 import {
+  useMilestonesQuery,
+  useUpsertMilestones,
+} from "@/features/reports/dashboardMilestonesApi";
+import {
   METRICS,
   METRIC_KEYS,
   DEFAULT_GOALS,
@@ -657,13 +661,64 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
     saveWidgets(widgets);
   }, [widgets]);
 
-  // Milestones (Development section) — Codex-parity storage.
+  // Milestones (Development section) — DB-backed so the TV browser
+  // sees what the laptop edits. localStorage stays as a fast cache for
+  // instant repaints on the laptop (the original Codex-parity store).
+  // First paint is hydrated from localStorage; once the DB query
+  // resolves we replace local state with the authoritative server
+  // list. After that, every change writes through to both stores
+  // (debounced for the DB).
+  const { data: dbMilestones } = useMilestonesQuery();
+  const upsertMilestones = useUpsertMilestones();
   const [milestones, setMilestones] = useState<Milestone[]>(() =>
     loadMilestones(),
   );
+  // `hydrated` flips to true the first time we successfully take a
+  // server snapshot. Without this gate, every refetch (every 30s)
+  // would clobber whatever the user just typed locally.
+  const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
+    if (hydrated) return;
+    if (dbMilestones === undefined) return;
+    // Cold-start migration: if the DB row is empty but localStorage
+    // has milestones, push them up so the user doesn't lose the rows
+    // they typed in pre-migration.
+    if (dbMilestones.length === 0) {
+      const local = loadMilestones();
+      if (local.length > 0) {
+        upsertMilestones.mutate(local);
+        setMilestones(local);
+      } else {
+        setMilestones([]);
+      }
+    } else {
+      setMilestones(dbMilestones);
+    }
+    setHydrated(true);
+  }, [dbMilestones, hydrated, upsertMilestones]);
+  // Persist changes: localStorage immediately (cache), DB after a
+  // short debounce so rapid edits coalesce into one write.
+  useEffect(() => {
+    if (!hydrated) return;
     saveMilestones(milestones);
-  }, [milestones]);
+    const t = setTimeout(() => {
+      upsertMilestones.mutate(milestones);
+    }, 600);
+    return () => clearTimeout(t);
+    // upsertMilestones is stable from TanStack Query; only re-run on
+    // milestone list changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [milestones, hydrated]);
+  // Receive server updates (e.g. the laptop edited; TV refetches every
+  // 30s). Only swap in the server list if it actually differs from
+  // what we have locally — JSON-string compare is cheap for a list
+  // this small and avoids triggering the debounced write-back loop.
+  useEffect(() => {
+    if (!hydrated || !dbMilestones) return;
+    if (JSON.stringify(dbMilestones) === JSON.stringify(milestones)) return;
+    setMilestones(dbMilestones);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dbMilestones]);
   const [milestoneEditMode, setMilestoneEditMode] = useState(false);
   const [milestoneSelected, setMilestoneSelected] = useState<Set<string>>(
     new Set(),
