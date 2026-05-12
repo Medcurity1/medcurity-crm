@@ -1,8 +1,8 @@
-import { useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useLead, useCreateLead, useUpdateLead, useUsers } from "./api";
+import type { Lead } from "@/types/crm";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
@@ -46,12 +46,46 @@ function FormSection({ title, children }: { title: string; children: React.React
 
 /* ---------- Main component ---------- */
 
+/**
+ * Outer wrapper — handles the data-load gate. We must NOT mount the
+ * inner form (and therefore useForm) until we have either:
+ *   - the lead record (edit mode), OR
+ *   - the knowledge that we're creating a new one.
+ *
+ * Why this matters: previously, `useForm` was initialized with empty
+ * defaultValues, the form rendered, and a useEffect called `reset()`
+ * once the lead arrived. That race left some Radix-Select-based
+ * picklist fields (PicklistSelect) showing as blank on edit — the
+ * Select's internal value lookup happened before the reset propagated.
+ * Accounts and Opportunities use the same wrapper/inner pattern to
+ * avoid this; leads now does too.
+ */
 export function LeadForm() {
+  const { id } = useParams<{ id: string }>();
+  const isEditing = !!id;
+  const { data: lead, isLoading: loadingLead } = useLead(id);
+
+  if (isEditing && (loadingLead || !lead)) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-10 w-48" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+
+  // `key` forces a fresh inner mount whenever we navigate between
+  // edit/new — useForm only reads defaultValues on initial mount.
+  return <LeadFormInner key={id ?? "new"} lead={lead} />;
+}
+
+/* ---------- Inner form ---------- */
+
+function LeadFormInner({ lead }: { lead: Lead | undefined }) {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const isEditing = !!id;
   const { user } = useAuth();
-  const { data: lead, isLoading: loadingLead } = useLead(id);
   const { data: users } = useUsers();
   const { data: customFieldDefs } = useCustomFieldDefinitions("leads");
   const { data: requiredFieldsData } = useRequiredFields("leads");
@@ -64,105 +98,123 @@ export function LeadForm() {
     handleSubmit,
     setValue,
     watch,
-    reset,
     formState: { errors, isSubmitting },
   } = useForm<LeadFormValues>({
     resolver: zodResolver(leadSchema),
-    defaultValues: {
-      first_name: "",
-      last_name: "",
-      email: "",
-      phone: "",
-      mobile_phone: "",
-      do_not_contact: false,
-      company: "",
-      title: "",
-      industry: "",
-      website: "",
-      status: "new",
-      source: "",
-      qualification: "unqualified",
-      score: "",
-      mql_date: "",
-      do_not_market_to: false,
-      description: "",
-      employees: "",
-      annual_revenue: "",
-      // Default new leads to the current rep as the owner. Feedback
-      // from Summer 2026-04-19: "Make owner assignment preset to user,
-      // can change if needed."
-      owner_user_id: user?.id ?? null,
-      street: "",
-      city: "",
-      state: "",
-      zip: "",
-      country: "",
-      credential: "",
-      phone_ext: "",
-      time_zone: "",
-      type: "",
-      priority_lead: false,
-      project: "",
-      business_relationship_tag: "",
-      linkedin_url: "",
-      cold_lead: false,
-      cold_lead_source: "",
-      rating: "",
-      industry_category: "",
-      project_segment: "",
-      custom_fields: {},
-    },
+    defaultValues: isEditing && lead
+      ? {
+          first_name: lead.first_name,
+          last_name: lead.last_name,
+          email: lead.email ?? "",
+          phone: lead.phone ?? "",
+          mobile_phone: lead.mobile_phone ?? "",
+          do_not_contact: lead.do_not_contact ?? false,
+          company: lead.company ?? "",
+          title: lead.title ?? "",
+          industry: lead.industry ?? "",
+          website: lead.website ?? "",
+          status: lead.status,
+          source: lead.source ?? "",
+          qualification: lead.qualification ?? "unqualified",
+          score: lead.score ?? "",
+          mql_date: lead.mql_date ?? "",
+          do_not_market_to: lead.do_not_market_to ?? false,
+          description: lead.description ?? "",
+          employees: lead.employees ?? "",
+          annual_revenue: lead.annual_revenue ?? "",
+          owner_user_id: lead.owner_user_id,
+          street: lead.street ?? "",
+          city: lead.city ?? "",
+          state: lead.state ?? "",
+          zip: lead.zip ?? "",
+          country: lead.country ?? "",
+          credential: lead.credential ?? "",
+          phone_ext: lead.phone_ext ?? "",
+          time_zone: lead.time_zone ?? "",
+          type: lead.type ?? "",
+          priority_lead: lead.priority_lead ?? false,
+          project: lead.project ?? "",
+          business_relationship_tag: lead.business_relationship_tag ?? "",
+          linkedin_url: lead.linkedin_url ?? "",
+          cold_lead: lead.cold_lead ?? false,
+          cold_lead_source: lead.cold_lead_source ?? "",
+          rating: lead.rating ?? "",
+          industry_category: lead.industry_category ?? "",
+          project_segment: lead.project_segment ?? "",
+          custom_fields: lead.custom_fields ?? {},
+        }
+      : {
+          first_name: "",
+          last_name: "",
+          email: "",
+          phone: "",
+          mobile_phone: "",
+          do_not_contact: false,
+          company: "",
+          title: "",
+          industry: "",
+          website: "",
+          status: "new",
+          source: "",
+          qualification: "unqualified",
+          score: "",
+          mql_date: "",
+          do_not_market_to: false,
+          description: "",
+          employees: "",
+          annual_revenue: "",
+          // Default new leads to the current rep as the owner. Feedback
+          // from Summer 2026-04-19: "Make owner assignment preset to
+          // user, can change if needed."
+          owner_user_id: user?.id ?? null,
+          street: "",
+          city: "",
+          state: "",
+          zip: "",
+          country: "",
+          credential: "",
+          phone_ext: "",
+          time_zone: "",
+          type: "",
+          priority_lead: false,
+          project: "",
+          business_relationship_tag: "",
+          linkedin_url: "",
+          cold_lead: false,
+          cold_lead_source: "",
+          rating: "",
+          industry_category: "",
+          project_segment: "",
+          custom_fields: {},
+        },
   });
-
-  useEffect(() => {
-    if (lead && isEditing) {
-      reset({
-        first_name: lead.first_name,
-        last_name: lead.last_name,
-        email: lead.email ?? "",
-        phone: lead.phone ?? "",
-        mobile_phone: lead.mobile_phone ?? "",
-        do_not_contact: lead.do_not_contact ?? false,
-        company: lead.company ?? "",
-        title: lead.title ?? "",
-        industry: lead.industry ?? "",
-        website: lead.website ?? "",
-        status: lead.status,
-        source: lead.source ?? "",
-        qualification: lead.qualification ?? "unqualified",
-        score: lead.score ?? "",
-        mql_date: lead.mql_date ?? "",
-        do_not_market_to: lead.do_not_market_to ?? false,
-        description: lead.description ?? "",
-        employees: lead.employees ?? "",
-        annual_revenue: lead.annual_revenue ?? "",
-        owner_user_id: lead.owner_user_id,
-        street: lead.street ?? "",
-        city: lead.city ?? "",
-        state: lead.state ?? "",
-        zip: lead.zip ?? "",
-        country: lead.country ?? "",
-        credential: lead.credential ?? "",
-        phone_ext: lead.phone_ext ?? "",
-        time_zone: lead.time_zone ?? "",
-        type: lead.type ?? "",
-        priority_lead: lead.priority_lead ?? false,
-        project: lead.project ?? "",
-        business_relationship_tag: lead.business_relationship_tag ?? "",
-        linkedin_url: lead.linkedin_url ?? "",
-        cold_lead: lead.cold_lead ?? false,
-        cold_lead_source: lead.cold_lead_source ?? "",
-        rating: lead.rating ?? "",
-        industry_category: lead.industry_category ?? "",
-        project_segment: lead.project_segment ?? "",
-        custom_fields: lead.custom_fields ?? {},
-      });
-    }
-  }, [lead, isEditing, reset]);
 
   function emptyToNull(v: unknown): unknown {
     if (v === "" || v === undefined) return null;
     return v;
+  }
+
+  // Surface zod validation failures as a toast. Without this, fields
+  // that don't render their own `errors.*` message (most enum/picklist
+  // fields) fail silently — the user clicks Save, nothing happens, and
+  // we have no idea which field was rejected. Usually fires when a
+  // value selected from PicklistSelect (sourced from the DB
+  // picklist_options table) drifts away from the hardcoded zod enum
+  // in schema.ts.
+  function onInvalid(formErrors: typeof errors) {
+    const fields = Object.keys(formErrors);
+    if (fields.length === 0) return;
+    const detail = fields
+      .map((f) => {
+        const e = formErrors[f as keyof typeof formErrors] as
+          | { message?: string }
+          | undefined;
+        const msg = e?.message ? `: ${e.message}` : "";
+        return `${f.replace(/_/g, " ")}${msg}`;
+      })
+      .join("; ");
+    toast.error(`Can't save — invalid field(s): ${detail}`);
+    console.warn("Lead form validation errors:", formErrors);
   }
 
   async function onSubmit(values: LeadFormValues) {
@@ -236,22 +288,13 @@ export function LeadForm() {
     }
   }
 
-  if (isEditing && loadingLead) {
-    return (
-      <div className="space-y-4">
-        <Skeleton className="h-10 w-48" />
-        <Skeleton className="h-64 w-full" />
-      </div>
-    );
-  }
-
   return (
     <div>
       <PageHeader title={isEditing ? "Edit Lead" : "New Lead"} />
 
       <Card>
         <CardContent className="pt-6">
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
+          <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-8">
             {/* ---- Basic Info ---- */}
             <FormSection title="Basic Info">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

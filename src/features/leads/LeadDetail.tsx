@@ -92,9 +92,15 @@ export function LeadDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { data: lead, isLoading } = useLead(id);
+  // Anyone admin OR who owns / created this lead can archive it. This
+  // unblocks reps from cleaning up their own test/duplicate leads
+  // without needing admin help.
+  const isOwnLead =
+    !!user && !!lead && (lead.owner_user_id === user.id || lead.created_by === user.id);
+  const canArchive = isAdmin || isOwnLead;
   const { data: customFieldDefs } = useCustomFieldDefinitions("leads");
   const updateMutation = useUpdateLead();
   const archiveMutation = useArchiveLead();
@@ -257,7 +263,7 @@ export function LeadDetail() {
                 Convert
               </Button>
             )}
-            {isAdmin && (
+            {canArchive && (
               <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>
                 <Archive className="h-4 w-4 mr-1" />
                 Archive
