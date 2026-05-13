@@ -2070,23 +2070,6 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
           </CardContent>
         </Card>
       </SectionWrap>
-
-      <Card className="print:hidden">
-        <CardContent className="p-3 text-[11px] text-muted-foreground space-y-1">
-          <p>
-            Sources:{" "}
-            <code className="bg-muted px-1 py-0.5 rounded">v_dashboard_metrics</code>
-            ,{" "}
-            <code className="bg-muted px-1 py-0.5 rounded">v_lost_customers_qtd</code>
-            ,{" "}
-            <code className="bg-muted px-1 py-0.5 rounded">v_arr_rolling_365</code>.
-          </p>
-          <p>
-            Goals + milestones + weekly snapshots persist in your browser
-            (localStorage). DB-backed storage can come next.
-          </p>
-        </CardContent>
-      </Card>
     </div>
   );
 }
