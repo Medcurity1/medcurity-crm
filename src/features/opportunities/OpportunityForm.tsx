@@ -368,7 +368,17 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   useEffect(() => {
     if (!productsLoaded) return; // wait until we know if opp has products
     if (hasProducts) return; // DB trigger owns amount when products exist
-    if (lastEditedRef.current === "amount") return; // skip — handled below
+    // Only recompute when the USER edited subtotal or discount. On initial
+    // mount, lastEditedRef.current is null because reset() populated the
+    // form from DB values — we must NOT recompute then, or SF-imported
+    // opps with subtotal=0, discount=0, amount=12000 get silently zeroed.
+    // (Issue: discount on SF data was informational, not multiplicative.)
+    if (
+      lastEditedRef.current !== "subtotal" &&
+      lastEditedRef.current !== "discount"
+    ) {
+      return;
+    }
     const sub = Number(watchedSubtotal) || 0;
     const discPct = Math.max(0, Math.min(100, Number(watchedDiscount) || 0));
     const next = Math.round(sub * (1 - discPct / 100) * 100) / 100;
