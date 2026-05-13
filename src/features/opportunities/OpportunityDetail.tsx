@@ -645,23 +645,70 @@ export function OpportunityDetail() {
               // same way the edit form would. Only do this for productless
               // opps; opps with line items have amount owned by the DB
               // trigger and the recompute fires on its own after the
-              // update. Percent-discount only — '$' discounts on the opp
-              // level are too rare to bother with here; rep can fall
-              // back to the edit form for that case.
+              // update. Both percent and $ discount types are supported:
+              //   percent: amount = subtotal × (1 − value/100)
+              //   amount:  amount = subtotal − value
+              // Capture the pre-edit values so we can offer an Undo toast.
+              const prevDiscount = opp.discount;
+              const prevDiscountType =
+                (opp as { discount_type?: string | null }).discount_type ??
+                "percent";
+              const prevAmount = opp.amount;
+              const hasProducts = (products?.length ?? 0) > 0;
+
               const patch: Record<string, unknown> = {
                 id: oppId,
                 discount: value,
                 discount_type: type,
               };
-              const hasProducts = (products?.length ?? 0) > 0;
-              if (!hasProducts && type === "percent") {
+              if (!hasProducts) {
                 const sub = Number(opp.subtotal) || 0;
-                const discPct = Math.max(0, Math.min(100, Number(value) || 0));
-                patch.amount = Math.round(sub * (1 - discPct / 100) * 100) / 100;
+                if (type === "percent") {
+                  const discPct = Math.max(
+                    0,
+                    Math.min(100, Number(value) || 0),
+                  );
+                  patch.amount =
+                    Math.round(sub * (1 - discPct / 100) * 100) / 100;
+                } else if (type === "amount") {
+                  const discAmt = Math.max(0, Number(value) || 0);
+                  patch.amount = Math.round((sub - discAmt) * 100) / 100;
+                }
               }
               await updateMutation.mutateAsync(
                 patch as Parameters<typeof updateMutation.mutateAsync>[0],
               );
+
+              // Undo toast — restores discount, discount_type, and amount
+              // to whatever they were before this edit. Stays up for 10s
+              // so the user has time to react if they realize the edit
+              // was wrong.
+              toast.success("Discount updated", {
+                duration: 10_000,
+                action: {
+                  label: "Undo",
+                  onClick: async () => {
+                    const undoPatch: Record<string, unknown> = {
+                      id: oppId,
+                      discount: prevDiscount,
+                      discount_type: prevDiscountType,
+                    };
+                    if (!hasProducts) undoPatch.amount = prevAmount;
+                    try {
+                      await updateMutation.mutateAsync(
+                        undoPatch as Parameters<
+                          typeof updateMutation.mutateAsync
+                        >[0],
+                      );
+                      toast.success("Reverted");
+                    } catch (e) {
+                      toast.error(
+                        `Failed to undo: ${(e as Error).message}`,
+                      );
+                    }
+                  },
+                },
+              });
             }}
           />
           <div className="flex flex-col">
