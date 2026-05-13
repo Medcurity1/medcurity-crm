@@ -81,9 +81,22 @@ export function SegmentedLineChart({
       const aOk = a && Number.isFinite(a.actual as unknown as number);
       const bOk = b && Number.isFinite(b.actual as unknown as number);
       if (!aOk || !bOk) continue;
-      // Prefer caller-supplied previousGoal; fall back to the prior
-      // point's goal so legacy callers get reasonable behavior.
-      const prevGoal = b.previousGoal ?? data[i]?.goal;
+      // Use the caller-supplied previousGoal verbatim. Earlier we fell
+      // back to `data[i]?.goal` here, but that produced a subtle bug:
+      // the dot at point `b` was colored with `payload.previousGoal`
+      // (undefined → M1 buffer → yellow), while the segment leading
+      // INTO it was colored with the fallback (prior point's goal,
+      // which for constant-goal quarterly trends like NRR equals
+      // `b.goal` and demoted yellow to red). The line between a green
+      // dot and a yellow dot ended up red.
+      //
+      // Removing the fallback aligns line color with dot color: any
+      // caller that wants running-total semantics (R/Y/G across M1→M2→
+      // M3) sets previousGoal explicitly via `buildRunningTotal`;
+      // every other caller (NRR/pipeline/ARR quarterly trends) gets
+      // the M1-buffer treatment (yellow-when-below, never red) which
+      // is what goalStatus already documents.
+      const prevGoal = b.previousGoal;
       const color = lineColor
         ? lineColor
         : STATUS_HEX[goalStatus(b.actual, b.goal, prevGoal) as GoalStatus];
@@ -130,7 +143,11 @@ export function SegmentedLineChart({
       <ResponsiveContainer width="100%" height={height}>
         <LineChart data={segmented.merged}>
           <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+          {/* interval=0 forces every tick label to render — without it
+              recharts auto-drops labels on narrow widths (the TV's
+              ARR chart was losing "Q1 2026" because the column fit
+              was just tight enough to trigger label collision). */}
+          <XAxis dataKey="label" tick={{ fontSize: 10 }} interval={0} />
           {/* 10% headroom above the highest value so the dot isn't
               clipped by the SVG bounds. The Active Pipeline chart
               looked empty on main because the dot at the goal was
