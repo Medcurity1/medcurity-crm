@@ -517,6 +517,25 @@ export function buildArrPoints(
 }
 
 /**
+ * Per-month seed values for point-in-time metrics. Keyed by
+ * "YYYY-MM" of the month's first day. Used when we lack a snapshot
+ * for a past month — e.g. April 2026 has no snapshots because the
+ * dashboard cut over mid-April. Same idea as HISTORICAL_TREND_SEED
+ * above, but at month granularity so the Active Pipeline 3-month
+ * chart can show a real number for completed months instead of an
+ * empty dot.
+ *
+ * Remove an entry once snapshot history catches up.
+ */
+const MONTH_PIT_SEED: Partial<
+  Record<keyof DashboardSnapshot["metrics"], Record<string, number>>
+> = {
+  pipeline_amount: {
+    "2026-04": 877123,
+  },
+};
+
+/**
  * Build a 3-point series (M1/M2/M3 of the current fiscal quarter) for
  * a point-in-time metric like Active Pipeline. The TV view used to
  * render this as a quarter-trend, which (a) showed only 1 quarter
@@ -572,7 +591,16 @@ function pipelineMonthOfQuarter(
       const cap = formatLocalDate(monthEnd);
       const snap = [...sorted].reverse().find((s) => s.week_start <= cap);
       const v = snap ? Number(snap.metrics[metricKey]) : null;
-      actual = Number.isFinite(v as number) ? (v as number) : null;
+      if (Number.isFinite(v as number)) {
+        actual = v as number;
+      } else {
+        // Pre-snapshot-history months (e.g. April 2026 right after
+        // cutover): fall back to MONTH_PIT_SEED so the user sees a
+        // real number instead of an empty dot.
+        const monthKey = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, "0")}`;
+        const seeded = MONTH_PIT_SEED[metricKey]?.[monthKey];
+        actual = typeof seeded === "number" ? seeded : null;
+      }
     }
     points.push({
       label: monthStart.toLocaleString("en-US", { month: "short" }),
