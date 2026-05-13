@@ -35,86 +35,93 @@ interface FieldDef {
 }
 
 // ---------------------------------------------------------------------------
-// Field definitions per entity
+// Field definitions per entity — sourced dynamically from v_field_inventory
+// so new columns auto-appear here without code edits.
 // ---------------------------------------------------------------------------
 
-const ACCOUNT_FIELDS: FieldDef[] = [
-  { key: "name", label: "Account Name" },
-  { key: "lifecycle_status", label: "Lifecycle Status" },
-  { key: "status", label: "Status" },
-  { key: "owner_user_id", label: "Owner" },
-  { key: "website", label: "Website" },
-  { key: "industry", label: "Industry" },
-  { key: "account_type", label: "Account Type" },
-  { key: "timezone", label: "Timezone" },
-  { key: "employees", label: "Employees" },
-  { key: "locations", label: "Locations" },
-  { key: "fte_count", label: "FTE Count" },
-  { key: "fte_range", label: "FTE Range" },
-  { key: "annual_revenue", label: "Annual Revenue" },
-  { key: "active_since", label: "Active Since" },
-  { key: "renewal_type", label: "Renewal Type" },
-  { key: "current_contract_start_date", label: "Contract Start Date" },
-  { key: "current_contract_end_date", label: "Contract End Date" },
-  { key: "current_contract_length_months", label: "Contract Length (months)" },
-  { key: "acv", label: "ACV" },
-  { key: "billing_street", label: "Billing Street" },
-  { key: "billing_city", label: "Billing City" },
-  { key: "billing_state", label: "Billing State" },
-  { key: "billing_zip", label: "Billing Zip" },
-  { key: "billing_country", label: "Billing Country" },
-  { key: "notes", label: "Notes" },
-];
+// System / audit / computed columns that shouldn't be user-required.
+// Anything not on this list (and not matched by the prefix rules below)
+// shows up as a toggleable required-field candidate.
+const SYSTEM_FIELDS = new Set<string>([
+  "id",
+  "created_at",
+  "updated_at",
+  "deleted_at",
+  "created_by",
+  "updated_by",
+  "owner_id", // accounts uses owner_user_id; opportunities uses owner_user_id
+  // Computed / system-managed
+  "search_text",
+  "tsv",
+  "lifecycle_derived_at",
+  "lifecycle_source",
+  "lifecycle_status_override",
+  "lifecycle_status_override_reason",
+  // Big jsonb blob — managed via Custom Fields admin, not required-fields
+  "custom_fields",
+  // External-system IDs (SF migration leftovers; not user-edited)
+  "sf_id",
+  "salesforce_id",
+  "hubspot_id",
+  "external_id",
+]);
 
-const CONTACT_FIELDS: FieldDef[] = [
-  { key: "first_name", label: "First Name" },
-  { key: "last_name", label: "Last Name" },
-  { key: "email", label: "Email" },
-  { key: "phone", label: "Phone" },
-  { key: "title", label: "Title" },
-  { key: "department", label: "Department" },
-  { key: "linkedin_url", label: "LinkedIn URL" },
-  { key: "mailing_street", label: "Mailing Street" },
-  { key: "mailing_city", label: "Mailing City" },
-  { key: "mailing_state", label: "Mailing State" },
-  { key: "mailing_zip", label: "Mailing Zip" },
-  { key: "mailing_country", label: "Mailing Country" },
-];
-
-const OPPORTUNITY_FIELDS: FieldDef[] = [
-  { key: "name", label: "Opportunity Name" },
-  { key: "stage", label: "Stage" },
-  { key: "amount", label: "Amount" },
-  { key: "expected_close_date", label: "Expected Close Date" },
-  { key: "close_date", label: "Close Date" },
-  { key: "probability", label: "Probability" },
-  { key: "next_step", label: "Next Step" },
-  { key: "lead_source", label: "Lead Source" },
-  { key: "payment_frequency", label: "Payment Frequency" },
-  { key: "description", label: "Description" },
-  { key: "notes", label: "Notes" },
-];
-
-const LEAD_FIELDS: FieldDef[] = [
-  { key: "first_name", label: "First Name" },
-  { key: "last_name", label: "Last Name" },
-  { key: "email", label: "Email" },
-  { key: "phone", label: "Phone" },
-  { key: "company", label: "Company" },
-  { key: "title", label: "Title" },
-  { key: "industry", label: "Industry" },
-  { key: "website", label: "Website" },
-  { key: "status", label: "Status" },
-  { key: "source", label: "Source" },
-  { key: "description", label: "Description" },
-];
-
-const ENTITY_FIELD_MAP: Record<EntityType, FieldDef[]> = {
-  accounts: ACCOUNT_FIELDS,
-  contacts: CONTACT_FIELDS,
-  opportunities: OPPORTUNITY_FIELDS,
-  leads: LEAD_FIELDS,
+// Friendly label overrides for column names where snake_case prettify
+// produces something awkward (e.g., "Acv" vs "ACV").
+const LABEL_OVERRIDES: Record<string, string> = {
+  acv: "ACV",
+  fte_count: "FTE Count",
+  fte_range: "FTE Range",
+  ftes: "FTEs",
+  mrr: "MRR",
+  arr: "ARR",
+  url: "URL",
+  linkedin_url: "LinkedIn URL",
+  owner_user_id: "Owner",
+  account_id: "Account",
+  contact_id: "Contact",
+  partner_id: "Partner",
+  parent_account_id: "Parent Account",
+  primary_contact_id: "Primary Contact",
+  current_contract_length_months: "Contract Length (months)",
+  current_contract_start_date: "Contract Start Date",
+  current_contract_end_date: "Contract End Date",
 };
+
+function prettifyFieldName(field: string): string {
+  if (LABEL_OVERRIDES[field]) return LABEL_OVERRIDES[field];
+  // snake_case → Title Case, with "_id" suffix stripped for FK columns.
+  const stripped = field.endsWith("_id") ? field.slice(0, -3) : field;
+  return stripped
+    .split("_")
+    .map((w) => (w.length === 0 ? w : w[0].toUpperCase() + w.slice(1)))
+    .join(" ");
+}
+
+interface FieldInventoryRow {
+  entity: string;
+  field: string;
+  data_type: string;
+  ordinal_position: number;
+}
+
+function useEntityFields(entity: EntityType) {
+  return useQuery({
+    queryKey: ["required-fields-inventory", entity],
+    queryFn: async (): Promise<FieldDef[]> => {
+      const { data, error } = await supabase
+        .from("v_field_inventory")
+        .select("entity,field,data_type,ordinal_position")
+        .eq("entity", entity)
+        .order("ordinal_position");
+      if (error) throw error;
+      const rows = (data ?? []) as FieldInventoryRow[];
+      return rows
+        .filter((r) => !SYSTEM_FIELDS.has(r.field))
+        .map((r) => ({ key: r.field, label: prettifyFieldName(r.field) }));
+    },
+  });
+}
 
 const ENTITY_TABS: { value: EntityType; label: string }[] = [
   { value: "accounts", label: "Accounts" },
@@ -181,8 +188,8 @@ function useUpsertRequiredField() {
 
 function EntityRequiredFields({ entity }: { entity: EntityType }) {
   const { data: configs, isLoading, isError } = useRequiredFieldConfigs(entity);
+  const { data: fields, isLoading: fieldsLoading } = useEntityFields(entity);
   const upsert = useUpsertRequiredField();
-  const fields = ENTITY_FIELD_MAP[entity];
 
   // Build a lookup for current required state
   const requiredMap = new Map<string, boolean>();
@@ -224,7 +231,7 @@ function EntityRequiredFields({ entity }: { entity: EntityType }) {
     [entity, upsert],
   );
 
-  if (isLoading) {
+  if (isLoading || fieldsLoading) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -256,7 +263,7 @@ function EntityRequiredFields({ entity }: { entity: EntityType }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {fields.map((f) => {
+            {(fields ?? []).map((f) => {
               const isRequired =
                 optimistic[f.key] ?? requiredMap.get(f.key) ?? false;
               return (
