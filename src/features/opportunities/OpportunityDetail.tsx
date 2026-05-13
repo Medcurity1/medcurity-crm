@@ -640,33 +640,42 @@ export function OpportunityDetail() {
             discountType={(opp as { discount_type?: string | null }).discount_type ?? "percent"}
             helpText={helpMap.get("discount")}
             onSave={async (value, type) => {
-              await updateMutation.mutateAsync({
+              // Editing the discount inline counts as user-confirming
+              // the new overall discount semantics — recompute amount the
+              // same way the edit form would. Only do this for productless
+              // opps; opps with line items have amount owned by the DB
+              // trigger and the recompute fires on its own after the
+              // update. Percent-discount only — '$' discounts on the opp
+              // level are too rare to bother with here; rep can fall
+              // back to the edit form for that case.
+              const patch: Record<string, unknown> = {
                 id: oppId,
                 discount: value,
                 discount_type: type,
-              } as Parameters<typeof updateMutation.mutateAsync>[0]);
+              };
+              const hasProducts = (products?.length ?? 0) > 0;
+              if (!hasProducts && type === "percent") {
+                const sub = Number(opp.subtotal) || 0;
+                const discPct = Math.max(0, Math.min(100, Number(value) || 0));
+                patch.amount = Math.round(sub * (1 - discPct / 100) * 100) / 100;
+              }
+              await updateMutation.mutateAsync(
+                patch as Parameters<typeof updateMutation.mutateAsync>[0],
+              );
             }}
           />
-          {products && products.length > 0 ? (
-            <div className="flex flex-col">
-              <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
-                Amount
-                <HelpTooltip text={helpMap.get("amount")} />
-              </span>
-              <span className="text-sm font-medium">
-                {opp.amount != null ? formatCurrencyDetailed(opp.amount) : "\u2014"}
+          <div className="flex flex-col">
+            <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+              Amount
+              <HelpTooltip text={helpMap.get("amount")} />
+            </span>
+            <span className="text-sm font-medium">
+              {opp.amount != null ? formatCurrencyDetailed(opp.amount) : "\u2014"}
+              {products && products.length > 0 && (
                 <span className="text-xs text-muted-foreground ml-1">(auto-calculated from line items)</span>
-              </span>
-            </div>
-          ) : (
-            <EditableField
-              label="Amount"
-              value={opp.amount}
-              onSave={saveField("amount", (v) => (v === "" ? 0 : Number(v)))}
-              type="currency"
-              helpText={helpMap.get("amount")}
-            />
-          )}
+              )}
+            </span>
+          </div>
           <Field label="FTE Range (at time of opp)" value={opp.fte_range ?? opp.account?.fte_range} />
           <Field
             label="FTEs (at time of opp)"
