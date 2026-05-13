@@ -517,6 +517,73 @@ export function buildArrPoints(
 }
 
 /**
+ * Build a 3-point series (M1/M2/M3 of the current fiscal quarter) for
+ * a point-in-time metric like Active Pipeline. The TV view used to
+ * render this as a quarter-trend, which (a) showed only 1 quarter
+ * when the device had no historical snapshots, and (b) lost the
+ * dashed goal line because Recharts won't draw a 1-point line.
+ *
+ *  - X axis: short month name of M1, M2, M3 (e.g. "Apr", "May", "Jun").
+ *  - Goal: the same point-in-time goal on every month (not cumulative).
+ *  - Actual at M1/M2 (past months): latest snapshot value at or before
+ *    end-of-month for the requested metric.
+ *  - Actual at the current month: prefer the caller-supplied
+ *    `liveValue` (so the user sees today's number, not last Monday's
+ *    snapshot). Past months still use the snapshot row so historical
+ *    points are accurate.
+ *  - Future months: actual=null → no dot rendered, but the label and
+ *    goal line still draw.
+ *
+ * `previousGoal` is intentionally left undefined on every point: the
+ * pipeline target is a "be at this number" bar, not a running-total
+ * cumulative one, so the M2/M3 "fell below last month's pace" path
+ * doesn't apply. goalStatus treats undefined previousGoal as the
+ * M1-buffer → yellow when below goal, never red — which matches how
+ * we color the live KPI tile.
+ */
+function pipelineMonthOfQuarter(
+  snapshots: DashboardSnapshot[],
+  metricKey: keyof DashboardSnapshot["metrics"],
+  goal: number,
+  quarterStart: string,
+  liveValue: number | null,
+): SegmentPoint[] {
+  if (!quarterStart) return [];
+  const start = parseLocalDate(quarterStart);
+  if (!start) return [];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const sorted = [...snapshots].sort((a, b) =>
+    a.week_start.localeCompare(b.week_start),
+  );
+  const points: SegmentPoint[] = [];
+  for (let i = 0; i < 3; i++) {
+    const monthStart = new Date(start.getFullYear(), start.getMonth() + i, 1);
+    const monthEnd = new Date(start.getFullYear(), start.getMonth() + i + 1, 0);
+    const inFuture = monthStart > today;
+    const isCurrent = monthStart <= today && today <= monthEnd;
+    let actual: number | null;
+    if (inFuture) {
+      actual = null;
+    } else if (isCurrent && liveValue != null) {
+      actual = liveValue;
+    } else {
+      // Latest snapshot whose week_start is on or before end-of-month.
+      const cap = formatLocalDate(monthEnd);
+      const snap = [...sorted].reverse().find((s) => s.week_start <= cap);
+      const v = snap ? Number(snap.metrics[metricKey]) : null;
+      actual = Number.isFinite(v as number) ? (v as number) : null;
+    }
+    points.push({
+      label: monthStart.toLocaleString("en-US", { month: "short" }),
+      actual: actual as unknown as number,
+      goal,
+    });
+  }
+  return points;
+}
+
+/**
  * Build a quarterly trend (one point per calendar quarter, Q2-2025 → today)
  * from weekly snapshots. Mirrors the `arrPoints` window logic so the
  * Pipeline / NRR charts share the same X-axis as the ARR chart.
@@ -1110,26 +1177,23 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
     setSnapshots(loadSnapshots());
   };
 
-  // Quarterly trend points sourced from snapshots, with the current
-  // quarter overridden by the live metric so the rightmost point always
-  // reflects the current dashboard value (snapshots only capture weekly).
-  const pipelineTrendPoints = useMemo<SegmentPoint[]>(() => {
-    const base = quarterlySnapshotTrend(
-      snapshots,
-      "pipeline_amount",
-      goals.total_active_pipeline,
-    );
-    if (!m) return base;
-    const live: SegmentPoint = {
-      label: currentQuarter,
-      actual: num(m.pipeline_amount),
-      goal: goals.total_active_pipeline,
-    };
-    const idx = base.findIndex((p) => p.label === currentQuarter);
-    if (idx >= 0) base[idx] = live;
-    else base.push(live);
-    return base;
-  }, [snapshots, goals.total_active_pipeline, m, currentQuarter]);
+  // Pipeline is a point-in-time KPI (not cumulative), so we plot it
+  // as the 3 months of the current fiscal quarter (Apr/May/Jun for
+  // Q2). M1/M2 use the latest snapshot at or before end-of-month;
+  // the current month uses the live value so the rightmost dot
+  // matches the KPI tile. NRR stays a quarter-trend below — they're
+  // YoY metrics where a quarterly cadence is meaningful.
+  const pipelineTrendPoints = useMemo<SegmentPoint[]>(
+    () =>
+      pipelineMonthOfQuarter(
+        snapshots,
+        "pipeline_amount",
+        goals.total_active_pipeline,
+        m?.fiscal_quarter_start ?? "",
+        m ? num(m.pipeline_amount) : null,
+      ),
+    [snapshots, goals.total_active_pipeline, m],
+  );
 
   const nrrCustomerTrendPoints = useMemo<SegmentPoint[]>(() => {
     const base = quarterlySnapshotTrend(
@@ -1455,7 +1519,7 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
                     <div className="space-y-2">
                       {pipelineTrendPoints.length > 0 ? (
                         <ChartCard
-                          title={`Active Pipeline by Quarter — goal ${formatCurrency(goals.total_active_pipeline)}`}
+                          title={`Active Pipeline by Month — goal ${formatCurrency(goals.total_active_pipeline)}`}
                           subtitle={`Now: ${formatCurrency(pipeline)} • ${m.pipeline_count ?? 0} open • weighted ${formatCurrency(num(m.pipeline_weighted_amount))}`}
                         >
                           <ChartLegend />
