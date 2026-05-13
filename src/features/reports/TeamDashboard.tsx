@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -618,6 +618,11 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
     getQuarterGoals(currentQuarter),
   );
   const [goalsHydrated, setGoalsHydrated] = useState(false);
+  // True while a local edit is debouncing OR the resulting upsert is
+  // in flight. The cross-device-pull effect below checks this so a
+  // stale 30s refetch (or a focus-refetch landing mid-edit) can't
+  // overwrite what the user is still typing.
+  const goalsPendingLocalEditRef = useRef(false);
 
   // First-mount hydrate: if DB has data, take it. If DB is empty but
   // localStorage has prior goals (the pre-migration cache from before
@@ -647,8 +652,13 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
   useEffect(() => {
     if (!goalsHydrated) return;
     saveQuarterGoals(currentQuarter, qgoals);
+    goalsPendingLocalEditRef.current = true;
     const t = setTimeout(() => {
-      upsertGoals.mutate(localGoalsSnapshot());
+      upsertGoals.mutate(localGoalsSnapshot(), {
+        onSettled: () => {
+          goalsPendingLocalEditRef.current = false;
+        },
+      });
     }, 600);
     return () => clearTimeout(t);
     // upsertGoals is stable from TanStack Query; only re-run on
@@ -660,13 +670,20 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
   // quarter's slice changed remotely, swap it in. JSON-string compare
   // is cheap for a single quarter's payload and avoids retriggering
   // the debounced write-back loop.
+  //
+  // Gate: if the user is mid-edit (debounce pending OR upsert in
+  // flight), skip — otherwise a stale refetch can clobber the typed
+  // value before our write hits the DB. See goalsPendingLocalEditRef
+  // declaration above.
   useEffect(() => {
     if (!goalsHydrated || !goalsQuery.data) return;
+    if (upsertGoals.isPending) return;
+    if (goalsPendingLocalEditRef.current) return;
     const fresh = getQuarterGoals(currentQuarter);
     if (JSON.stringify(fresh) === JSON.stringify(qgoals)) return;
     setQgoals(fresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [goalsQuery.data, currentQuarter]);
+  }, [goalsQuery.data, currentQuarter, upsertGoals.isPending]);
 
   // Cross-tab same-domain: the admin page writes to localStorage on
   // every keystroke. Storage events fire in other tabs so the TV
@@ -729,6 +746,12 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
   const upsertWidgets = useUpsertWidgets();
   const [widgets, setWidgets] = useState<DashboardWidgets>(() => loadWidgets());
   const [widgetsHydrated, setWidgetsHydrated] = useState(false);
+  // True while a local widget edit is debouncing OR the resulting
+  // upsert is in flight. Without this, a 30s refetch (or focus
+  // refetch) that returns the *pre-edit* server row will reset
+  // `widgets` to the old value mid-type — the bug Brayden hit where
+  // the quote vanished after typing it.
+  const widgetsPendingLocalEditRef = useRef(false);
 
   useEffect(() => {
     if (widgetsHydrated) return;
@@ -765,19 +788,29 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
   useEffect(() => {
     if (!widgetsHydrated) return;
     saveWidgets(widgets);
+    widgetsPendingLocalEditRef.current = true;
     const t = setTimeout(() => {
-      upsertWidgets.mutate(widgets);
+      upsertWidgets.mutate(widgets, {
+        onSettled: () => {
+          widgetsPendingLocalEditRef.current = false;
+        },
+      });
     }, 600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [widgets, widgetsHydrated]);
 
+  // Cross-device pull. Gated on isPending + the local-edit ref so a
+  // stale refetch can't clobber an in-progress edit (see ref
+  // declaration above for the bug history).
   useEffect(() => {
     if (!widgetsHydrated || !widgetsQuery.data) return;
+    if (upsertWidgets.isPending) return;
+    if (widgetsPendingLocalEditRef.current) return;
     if (JSON.stringify(widgetsQuery.data) === JSON.stringify(widgets)) return;
     setWidgets(widgetsQuery.data);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [widgetsQuery.data]);
+  }, [widgetsQuery.data, upsertWidgets.isPending]);
 
   // Milestones (Development section) — DB-backed so the TV browser
   // sees what the laptop edits. localStorage stays as a fast cache for
@@ -795,6 +828,9 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
   // server snapshot. Without this gate, every refetch (every 30s)
   // would clobber whatever the user just typed locally.
   const [hydrated, setHydrated] = useState(false);
+  // Same dirty-flag pattern as goals/widgets above — prevents a
+  // 30s refetch from overwriting the milestone list mid-edit.
+  const milestonesPendingLocalEditRef = useRef(false);
   useEffect(() => {
     if (hydrated) return;
     if (dbMilestones === undefined) return;
@@ -819,8 +855,13 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
   useEffect(() => {
     if (!hydrated) return;
     saveMilestones(milestones);
+    milestonesPendingLocalEditRef.current = true;
     const t = setTimeout(() => {
-      upsertMilestones.mutate(milestones);
+      upsertMilestones.mutate(milestones, {
+        onSettled: () => {
+          milestonesPendingLocalEditRef.current = false;
+        },
+      });
     }, 600);
     return () => clearTimeout(t);
     // upsertMilestones is stable from TanStack Query; only re-run on
@@ -831,12 +872,16 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
   // 30s). Only swap in the server list if it actually differs from
   // what we have locally — JSON-string compare is cheap for a list
   // this small and avoids triggering the debounced write-back loop.
+  // Gated on isPending + the dirty ref so refetches can't clobber an
+  // in-progress edit.
   useEffect(() => {
     if (!hydrated || !dbMilestones) return;
+    if (upsertMilestones.isPending) return;
+    if (milestonesPendingLocalEditRef.current) return;
     if (JSON.stringify(dbMilestones) === JSON.stringify(milestones)) return;
     setMilestones(dbMilestones);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dbMilestones]);
+  }, [dbMilestones, upsertMilestones.isPending]);
   const [milestoneEditMode, setMilestoneEditMode] = useState(false);
   const [milestoneSelected, setMilestoneSelected] = useState<Set<string>>(
     new Set(),
