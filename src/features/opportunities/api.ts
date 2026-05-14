@@ -773,8 +773,21 @@ export function useRemoveOpportunityProduct() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, opportunityId }: { id: string; opportunityId: string }) => {
-      const { error } = await supabase.from("opportunity_products").delete().eq("id", id);
+      // `.select()` makes PostgREST return the deleted rows so we can
+      // detect "0 rows affected" — happens silently when RLS blocks
+      // a delete. Without this, a blocked delete looks like success
+      // and the toast lies (see migration 20260514000004).
+      const { data, error } = await supabase
+        .from("opportunity_products")
+        .delete()
+        .eq("id", id)
+        .select("id");
       if (error) throw error;
+      if (!data || data.length === 0) {
+        throw new Error(
+          "Couldn't remove this product — your account may not have permission. Ask an admin.",
+        );
+      }
       // Belt-and-suspenders: recompute totals AND resync opp name.
       await recomputeOpportunityTotals(opportunityId);
       await resyncOpportunityName(opportunityId);
