@@ -17,7 +17,7 @@ import { RecordId } from "@/components/RecordId";
 import { InlineEdit, type InlineEditProps } from "@/components/InlineEdit";
 import { HelpTooltip } from "@/components/ui/help-tooltip";
 import { useFieldHelpMap } from "@/features/layouts/api";
-import { AccountContacts } from "@/features/accounts/AccountContacts";
+import { OpportunityContacts } from "./OpportunityContacts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -513,10 +513,11 @@ export function OpportunityDetail() {
           {
             value: "contacts",
             label: "Contacts",
-            content: opp.account_id ? (
-              <AccountContacts accountId={opp.account_id} />
-            ) : (
-              <p className="text-sm text-muted-foreground py-4">No account linked to this opportunity.</p>
+            content: (
+              <OpportunityContacts
+                opportunityId={opp.id}
+                opportunityAccountId={opp.account_id}
+              />
             ),
           },
         ]}
