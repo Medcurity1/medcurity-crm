@@ -26,6 +26,7 @@ import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
 import { TasksPanel } from "@/features/activities/TasksPanel";
 import { SequencesTab } from "@/features/sequences/SequencesTab";
 import { LayoutDrivenDetail } from "@/features/layouts/LayoutDrivenDetail";
+import { ContactRelatedRecords } from "./ContactRelatedRecords";
 
 /* ---------- Collapsible section ---------- */
 
@@ -296,6 +297,13 @@ export function ContactDetail() {
           },
         ]}
       >
+
+      <div className="mt-2">
+        <ContactRelatedRecords
+          contactId={contact.id}
+          homeAccountId={contact.account_id ?? null}
+        />
+      </div>
 
       <CollapsibleTabs
         className="mt-2"
