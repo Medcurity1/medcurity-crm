@@ -16,16 +16,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatName } from "@/lib/formatters";
-import { buildPersonSearchClause } from "@/lib/search-clause";
-
-function useDebouncedValue<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(t);
-  }, [value, delay]);
-  return debounced;
-}
 
 interface ContactSearchResult {
   id: string;
@@ -34,223 +24,144 @@ interface ContactSearchResult {
   email: string | null;
   title: string | null;
   account_id: string | null;
-  account: { id: string; name: string } | null;
 }
-
-/**
- * Records this dialog can attach a contact to. Adding a new mode here
- * means adding a new link table + the read-side logic in the relevant
- * tab component (see AccountContacts / OpportunityContacts).
- */
-type RecordKind = "account" | "opportunity";
 
 interface AddContactDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The record (account or opportunity) we're attaching the contact to. */
-  recordKind: RecordKind;
-  recordId: string;
-  /** Optional: when adding from an Opportunity, we know the opp's
-   *  account_id so the "Create new" fallback can default the contact's
-   *  home account to that. From an Account page this is just the
-   *  recordId. */
-  defaultAccountIdForNewContact?: string;
+  /** The opportunity we're attaching a contact to. */
+  opportunityId: string;
+  /** The opp's home account_id — search results are restricted to
+   *  contacts homed at this account, and "Create new" defaults the new
+   *  contact's home account here. */
+  accountId: string;
 }
 
 /**
- * Dialog opened by the "Add Contact" affordance on an Account or
- * Opportunity detail page. Two paths:
+ * "Add Contact" dialog for an Opportunity's Contacts tab.
  *
- *   - Find existing → insert a row in `contact_account_links` (account
- *     mode) or `contact_opportunity_links` (opportunity mode). The
- *     contact itself is NOT duplicated and their home account is NOT
- *     changed. Mirrors SF's "Add Relationship" / "Add Contact Roles".
+ * Behavior (decided 2026-05-14): contacts are 1:1 with accounts, so
+ * the only contacts that can be added to an opp are ones already homed
+ * at the opp's account. The picker filters to those — no cross-account
+ * search, no multi-account linkage. If the person doesn't exist at
+ * this account yet, "Create new contact" routes to the contact form
+ * with account_id pre-filled.
  *
- *   - Create new → navigate to /contacts/new?account_id=X for the
- *     existing form flow. In account mode the new contact lands with
- *     this account as their home (no link row needed). In opp mode the
- *     contact lands at the opp's home account AND we'll need a link
- *     row — but creating the contact happens on the next page, so this
- *     dialog just routes; OpportunityContacts handles the post-create
- *     wiring when it re-mounts.
+ * Account-level Contacts tabs no longer use this dialog at all; they
+ * just send the user to /contacts/new?account_id=X to create.
  */
 export function AddContactDialog({
   open,
   onOpenChange,
-  recordKind,
-  recordId,
-  defaultAccountIdForNewContact,
+  opportunityId,
+  accountId,
 }: AddContactDialogProps) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
-  const debouncedSearch = useDebouncedValue(search, 250);
-  const [results, setResults] = useState<ContactSearchResult[]>([]);
   const [selected, setSelected] = useState<ContactSearchResult | null>(null);
-  const [searching, setSearching] = useState(false);
 
   useEffect(() => {
     if (!open) {
       setSearch("");
       setSelected(null);
-      setResults([]);
     }
   }, [open]);
 
-  // Pull the existing links on this record so we can disable the
-  // "Add" button for contacts that are already attached (UI affordance
-  // — the DB PK would reject the insert anyway, but showing the user
-  // upfront is friendlier).
-  const { data: existingLinks } = useQuery({
-    queryKey: ["contact-record-links", recordKind, recordId],
+  // Every contact homed at this account — used as the picker source and
+  // to detect "already on this opp" by intersecting with existing links.
+  const { data: accountContacts } = useQuery({
+    queryKey: ["account-home-contacts", accountId],
     queryFn: async () => {
-      if (recordKind === "account") {
-        const { data, error } = await supabase
-          .from("contact_account_links")
-          .select("contact_id")
-          .eq("account_id", recordId);
-        if (error) throw error;
-        return new Set<string>((data ?? []).map((r) => r.contact_id as string));
-      } else {
-        const { data, error } = await supabase
-          .from("contact_opportunity_links")
-          .select("contact_id")
-          .eq("opportunity_id", recordId);
-        if (error) throw error;
-        return new Set<string>((data ?? []).map((r) => r.contact_id as string));
-      }
+      const { data, error } = await supabase
+        .from("contacts")
+        .select("id, first_name, last_name, email, title, account_id")
+        .eq("account_id", accountId)
+        .is("archived_at", null)
+        .order("last_name");
+      if (error) throw error;
+      return (data ?? []) as ContactSearchResult[];
+    },
+    enabled: open && !!accountId,
+  });
+
+  const { data: existingLinkIds } = useQuery({
+    queryKey: ["contact-opportunity-links", opportunityId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("contact_opportunity_links")
+        .select("contact_id")
+        .eq("opportunity_id", opportunityId);
+      if (error) throw error;
+      return new Set<string>((data ?? []).map((r) => r.contact_id as string));
     },
     enabled: open,
   });
 
-  // Also fetch the home-account contact IDs when in account mode so we
-  // can flag them too — a contact homed at this account is already
-  // visible on the Contacts tab; a second link row would be redundant.
-  const { data: homeContactIds } = useQuery({
-    queryKey: ["home-contacts-on-account", recordId],
-    queryFn: async () => {
-      if (recordKind !== "account") return new Set<string>();
-      const { data, error } = await supabase
-        .from("contacts")
-        .select("id")
-        .eq("account_id", recordId)
-        .is("archived_at", null);
-      if (error) throw error;
-      return new Set<string>((data ?? []).map((r) => r.id as string));
-    },
-    enabled: open && recordKind === "account",
-  });
-
-  useEffect(() => {
-    if (!open) return;
-    if (!debouncedSearch || debouncedSearch.trim().length < 2) {
-      setResults([]);
-      return;
-    }
-    let cancelled = false;
-    setSearching(true);
-    (async () => {
-      const clause = buildPersonSearchClause(debouncedSearch, [
-        "first_name",
-        "last_name",
-        "email",
-        "title",
-      ]);
-      let query = supabase
-        .from("contacts")
-        .select(
-          "id, first_name, last_name, email, title, account_id, account:accounts!account_id(id, name)",
-        )
-        .is("archived_at", null)
-        .order("last_name")
-        .limit(20);
-      if (clause) query = query.or(clause);
-      const { data, error } = await query;
-      if (cancelled) return;
-      setSearching(false);
-      if (error) {
-        toast.error("Contact search failed: " + error.message);
-        setResults([]);
-        return;
-      }
-      setResults((data ?? []) as unknown as ContactSearchResult[]);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [debouncedSearch, open]);
+  // Local filter — accountContacts is bounded (one account's worth) so
+  // we don't need server-side search; this is faster and avoids hitting
+  // the DB on every keystroke.
+  const filtered = useMemo(() => {
+    const all = accountContacts ?? [];
+    const q = search.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter((c) => {
+      const haystack = [
+        c.first_name ?? "",
+        c.last_name ?? "",
+        c.email ?? "",
+        c.title ?? "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [accountContacts, search]);
 
   const linkMutation = useMutation({
     mutationFn: async () => {
       if (!selected) throw new Error("No contact selected");
       const { data: userRes } = await supabase.auth.getUser();
-      if (recordKind === "account") {
-        const { error } = await supabase
-          .from("contact_account_links")
-          .insert({
-            contact_id: selected.id,
-            account_id: recordId,
-            added_by: userRes.user?.id ?? null,
-          });
-        if (error) {
-          if (error.code === "23505") {
-            throw new Error("This contact is already linked to this account.");
-          }
-          throw error;
+      const { error } = await supabase
+        .from("contact_opportunity_links")
+        .insert({
+          contact_id: selected.id,
+          opportunity_id: opportunityId,
+          added_by: userRes.user?.id ?? null,
+        });
+      if (error) {
+        if (error.code === "23505") {
+          throw new Error("This contact is already on this opportunity.");
         }
-      } else {
-        const { error } = await supabase
-          .from("contact_opportunity_links")
-          .insert({
-            contact_id: selected.id,
-            opportunity_id: recordId,
-            added_by: userRes.user?.id ?? null,
-          });
-        if (error) {
-          if (error.code === "23505") {
-            throw new Error("This contact is already on this opportunity.");
-          }
-          throw error;
-        }
+        throw error;
       }
     },
     onSuccess: () => {
       toast.success("Contact added");
-      // Invalidate everything that might surface this association.
-      qc.invalidateQueries({ queryKey: ["contact-record-links"] });
-      qc.invalidateQueries({ queryKey: ["account-contacts"] });
-      qc.invalidateQueries({ queryKey: ["opportunity-contacts"] });
-      qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["opportunity-contacts", opportunityId] });
+      qc.invalidateQueries({ queryKey: ["contact-opportunity-links", opportunityId] });
       onOpenChange(false);
     },
     onError: (err) => toast.error((err as Error).message),
   });
 
-  const selectedIsAlreadyLinked = useMemo(() => {
-    if (!selected) return false;
-    if (existingLinks?.has(selected.id)) return true;
-    if (recordKind === "account" && homeContactIds?.has(selected.id))
-      return true;
-    return false;
-  }, [selected, existingLinks, homeContactIds, recordKind]);
-
-  const recordWord = recordKind === "account" ? "account" : "opportunity";
+  const selectedAlreadyLinked =
+    !!selected && !!existingLinkIds?.has(selected.id);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Add Contact</DialogTitle>
+          <DialogTitle>Add Contact to Opportunity</DialogTitle>
           <DialogDescription>
-            Search for an existing contact, or create a new one. Existing
-            contacts will be linked to this {recordWord} — their original
-            account is not changed.
+            Pick a contact already at this account, or create a new one.
+            Only contacts homed at this account can be added.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="contact-search">Find existing contact</Label>
+            <Label htmlFor="contact-search">Find contact at this account</Label>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -266,16 +177,14 @@ export function AddContactDialog({
               />
             </div>
 
-            {!selected && results.length > 0 && (
+            {!selected && filtered.length > 0 && (
               <div className="rounded-md border max-h-60 overflow-y-auto">
-                {results.map((r) => {
+                {filtered.map((r) => {
                   const name =
                     formatName(r.first_name ?? "", r.last_name ?? "").trim() ||
                     r.email ||
                     "(no name)";
-                  const alreadyHere =
-                    existingLinks?.has(r.id) ||
-                    (recordKind === "account" && homeContactIds?.has(r.id));
+                  const alreadyHere = existingLinkIds?.has(r.id);
                   return (
                     <button
                       key={r.id}
@@ -287,27 +196,26 @@ export function AddContactDialog({
                         <span className="font-medium">{name}</span>
                         {alreadyHere && (
                           <span className="text-[10px] uppercase tracking-wider text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                            already here
+                            already on opp
                           </span>
                         )}
                       </div>
-                      <div className="text-xs text-muted-foreground flex justify-between gap-2">
-                        <span className="truncate">
-                          {r.title ? r.title : (r.email ?? "—")}
-                        </span>
-                        <span className="shrink-0">
-                          {r.account?.name ?? "No account"}
-                        </span>
+                      <div className="text-xs text-muted-foreground truncate">
+                        {r.title ? r.title : (r.email ?? "—")}
                       </div>
                     </button>
                   );
                 })}
               </div>
             )}
+            {!selected && (accountContacts?.length ?? 0) === 0 && (
+              <p className="text-xs text-muted-foreground">
+                No contacts at this account yet. Use "Create new contact" below.
+              </p>
+            )}
             {!selected &&
-              search.length >= 2 &&
-              !searching &&
-              results.length === 0 && (
+              (accountContacts?.length ?? 0) > 0 &&
+              filtered.length === 0 && (
                 <p className="text-xs text-muted-foreground">No matches.</p>
               )}
 
@@ -326,12 +234,6 @@ export function AddContactDialog({
                     <div className="text-xs text-muted-foreground">
                       {selected.title ?? selected.email ?? "—"}
                     </div>
-                    <div className="text-xs text-muted-foreground mt-0.5">
-                      Home account:{" "}
-                      <span className="font-medium">
-                        {selected.account?.name ?? "(none)"}
-                      </span>
-                    </div>
                   </div>
                   <Button
                     variant="ghost"
@@ -344,9 +246,9 @@ export function AddContactDialog({
                     Change
                   </Button>
                 </div>
-                {selectedIsAlreadyLinked && (
+                {selectedAlreadyLinked && (
                   <p className="text-xs text-muted-foreground italic mt-1">
-                    This contact is already on this {recordWord}.
+                    This contact is already on this opportunity.
                   </p>
                 )}
               </div>
@@ -370,15 +272,11 @@ export function AddContactDialog({
             className="w-full"
             onClick={() => {
               onOpenChange(false);
-              const homeId =
-                defaultAccountIdForNewContact ??
-                (recordKind === "account" ? recordId : undefined);
-              const qs = homeId ? `?account_id=${homeId}` : "";
-              navigate(`/contacts/new${qs}`);
+              navigate(`/contacts/new?account_id=${accountId}`);
             }}
           >
             <Plus className="h-4 w-4 mr-1" />
-            Create new contact
+            Create new contact at this account
           </Button>
         </div>
 
@@ -388,13 +286,11 @@ export function AddContactDialog({
           </Button>
           <Button
             disabled={
-              !selected || selectedIsAlreadyLinked || linkMutation.isPending
+              !selected || selectedAlreadyLinked || linkMutation.isPending
             }
             onClick={() => linkMutation.mutate()}
           >
-            {linkMutation.isPending
-              ? "Adding…"
-              : `Add to this ${recordWord}`}
+            {linkMutation.isPending ? "Adding…" : "Add to this opportunity"}
           </Button>
         </DialogFooter>
       </DialogContent>

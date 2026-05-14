@@ -150,19 +150,10 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   // Create mode: stage products locally and flush after the opp is created.
   // Edit mode: products come from the DB and are mutated directly.
   const [stagedProducts, setStagedProducts] = useState<StagedOpportunityProduct[]>([]);
-  // Tracks whether the user has manually typed in the Name field. Once
-  // they have, we stop auto-suggesting from product codes — their value
-  // wins.
-  // In EDIT mode we DON'T default to overridden: we wait for the
-  // existingProducts to load and decide based on whether the saved name
-  // already matches the auto-suggestion. If it does, the user never
-  // customized it and we'll keep auto-syncing it as products change.
-  // If the saved name differs, they typed something custom and we
-  // back off (until they click "Use suggested").
-  const [nameUserOverridden, setNameUserOverridden] = useState(false);
-  // Once we've decided override-vs-auto for an existing opp's name,
-  // don't second-guess it on later renders.
-  const [editNameOverrideInitialized, setEditNameOverrideInitialized] = useState(false);
+  // Opportunity name is fully derived from attached products (decision
+  // 2026-05-14). Users cannot type into the Name field. The override
+  // state + edit-init flag that used to detect hand-typed names are
+  // gone — auto-sync is always on.
   // Two-step wizard for CREATE mode:
   //   "products" — slim view with Account + Products picker only
   //   "details"  — full form with all fields, name pre-filled
@@ -431,12 +422,11 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchedStage, probabilityUserOverridden]);
 
-  // ----- Auto-suggest opportunity name from staged product codes -----
-  // Format: "Code1 | Code2 | Code3" — joined with spaces and pipes,
-  // matching the SF naming convention (e.g. "SRA | Onsite Services | BNVA").
-  // Only fires in CREATE mode and only if the user hasn't manually
-  // typed a name. Edit mode preserves the existing name; users typing
-  // in the field flips nameUserOverridden = true and we back off.
+  // ----- Auto-derive opportunity name from attached product codes -----
+  // Format: "Code1 | Code2 | Code3" — pipe-separated, matching the SF
+  // naming convention (e.g. "SRA | Onsite Services | BNVA"). Always
+  // applied (in both create + edit modes) — the name field is no
+  // longer user-editable.
   /**
    * Compute the suggested opp name from currently-attached products.
    * Works in both CREATE (stagedProducts) and EDIT (existingProducts) mode.
@@ -468,55 +458,18 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     return labels.length ? labels.join(" | ") : "";
   })();
 
-  // EDIT mode: once existingProducts load, decide whether the saved
-  // name was auto-generated (matches suggestion from existing products)
-  // or hand-typed. If hand-typed, lock auto-suggest off so we don't
-  // clobber the user's intent. If it matches, leave auto-suggest on so
-  // the name stays in sync as products are added/removed.
+  // Auto-sync name from products whenever the product list changes. In
+  // both create + edit modes — name is purely a function of attached
+  // products, never a free-text field.
   useEffect(() => {
-    if (!isEditing) return;
-    if (editNameOverrideInitialized) return;
-    if (existingProducts === undefined) return; // wait for fetch
-    const currentName = (watch("name") ?? "").trim();
-    if (currentName) {
-      const initialSuggestion = (existingProducts ?? [])
-        .map((ep) => {
-          const sn = ep.product?.short_name?.trim();
-          if (sn) return sn;
-          const code = ep.product?.code?.trim();
-          if (code) return code;
-          const nm = ep.product?.name?.trim();
-          return nm || null;
-        })
-        .filter((c): c is string => !!c)
-        .join(" | ");
-      if (!initialSuggestion || initialSuggestion !== currentName) {
-        setNameUserOverridden(true);
-      }
-    }
-    setEditNameOverrideInitialized(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditing, existingProducts, editNameOverrideInitialized]);
-
-  // Auto-suggest name when staged or attached products change.
-  // Runs in BOTH modes — EDIT mode used to be gated off, which broke
-  // the "name should reflect attached products" guarantee whenever a
-  // user added or removed a product on an existing opp.
-  // nameUserOverridden gates this off once the user customizes.
-  useEffect(() => {
-    if (nameUserOverridden) return;
     if (!suggestedName) return;
-    // In EDIT mode, wait for the override-detection effect above to
-    // run first so we don't briefly clobber a custom name with the
-    // computed one before deciding it was custom.
-    if (isEditing && !editNameOverrideInitialized) return;
     if (suggestedName !== watch("name")) {
       // shouldDirty=true in EDIT so the user sees the "save" prompt and
       // the change actually persists when they hit Save Opportunity.
       setValue("name", suggestedName, { shouldDirty: isEditing });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [suggestedName, isEditing, nameUserOverridden, editNameOverrideInitialized]);
+  }, [suggestedName, isEditing]);
 
   function emptyToNull(v: unknown): unknown {
     if (v === "" || v === undefined) return null;
@@ -592,12 +545,10 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       assigned_assessor_id: values.assigned_assessor_id ?? null,
       original_sales_rep_id: values.original_sales_rep_id ?? null,
       custom_fields: values.custom_fields ?? {},
-      // Persist the rep's auto-sync intent so the server-side trigger
-      // honors it on every product change (not just edits made in this
-      // form). nameUserOverridden = the user typed a custom name, so
-      // name_auto_sync flips false; otherwise leave the trigger free
-      // to keep the name in sync with attached products.
-      name_auto_sync: !nameUserOverridden,
+      // Name is always auto-synced from attached products now (decision
+      // 2026-05-14). The server-side trigger and this client-side
+      // useEffect both keep `name` in sync on every product change.
+      name_auto_sync: true,
     };
 
     try {
@@ -814,62 +765,27 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2 md:col-span-2">
                   <Label htmlFor="name">Opportunity Name *<RequiredIndicator fieldKey="name" requiredFields={requiredKeys} /></Label>
-                  <div className="flex items-start gap-2">
-                    <Input
-                      id="name"
-                      className="flex-1"
-                      {...register("name", {
-                        onChange: () => {
-                          // User typed — stop auto-suggesting from products.
-                          if (!nameUserOverridden) setNameUserOverridden(true);
-                        },
-                      })}
-                    />
-                    {/* Reset-to-suggested affordance. Visible whenever
-                        we have a usable suggestion AND it differs from
-                        the current name. Works in both create + edit
-                        modes — covers the case where products were
-                        added/removed AFTER the name was set. */}
-                    {suggestedName && suggestedName !== watch("name") && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setValue("name", suggestedName, { shouldDirty: true });
-                          setNameUserOverridden(false);
-                        }}
-                        title={`Sync name to: ${suggestedName}`}
-                      >
-                        Sync from products
-                      </Button>
-                    )}
+                  {/* Auto-generated from attached product short names — no
+                      manual edit. Decision 2026-05-14: the name is a
+                      function of products, not a free-text field. The
+                      hidden input keeps RHF's value flow intact for the
+                      submit payload. */}
+                  <Input
+                    id="name"
+                    type="hidden"
+                    {...register("name")}
+                  />
+                  <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm font-mono min-h-[2.25rem] flex items-center">
+                    {watch("name")?.trim() ||
+                      (stagedProducts.length === 0
+                        ? "(add products — name auto-builds from product short names)"
+                        : "(generating…)")}
                   </div>
-                  {!isEditing && !nameUserOverridden && stagedProducts.length > 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      Auto-suggested from product short names. Type to override.
-                    </p>
-                  )}
-                  {isEditing && (
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                      <label className="inline-flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          className="h-3.5 w-3.5"
-                          checked={!nameUserOverridden}
-                          onChange={(e) => setNameUserOverridden(!e.target.checked)}
-                        />
-                        <span>
-                          Auto-sync name from attached products
-                        </span>
-                      </label>
-                      {suggestedName && suggestedName !== watch("name") && (
-                        <span>
-                          Suggested: <span className="font-mono">{suggestedName}</span>
-                        </span>
-                      )}
-                    </div>
-                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Auto-built from attached product short names (e.g.{" "}
+                    <span className="font-mono">SRA | CO Training | Remote Services</span>
+                    ). Add or remove products to change the name.
+                  </p>
                   {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}
                 </div>
 
