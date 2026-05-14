@@ -43,6 +43,7 @@ const ROLE_OPTIONS: { value: AppRole; label: string }[] = [
   { value: "renewals", label: "Renewals" },
   { value: "admin", label: "Admin" },
   { value: "super_admin", label: "Super Admin" },
+  { value: "read_only", label: "Read Only" },
 ];
 
 function roleBadgeClass(role: AppRole): string {
@@ -55,6 +56,8 @@ function roleBadgeClass(role: AppRole): string {
       return "bg-chart-2 text-white";
     case "renewals":
       return "bg-chart-3 text-white";
+    case "read_only":
+      return "bg-muted text-muted-foreground";
   }
 }
 
