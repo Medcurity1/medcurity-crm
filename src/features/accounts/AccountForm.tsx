@@ -275,7 +275,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
       industry: emptyToNull(values.industry),
       industry_category: emptyToNull(values.industry_category),
       account_type: emptyToNull(values.account_type),
-      account_number: emptyToNull(values.account_number),
+      // account_number is auto-assigned by DB trigger; never written from form.
       parent_account_id: values.parent_account_id ?? null,
       phone: emptyToNull(values.phone),
       phone_extension: emptyToNull(values.phone_extension),
@@ -400,16 +400,17 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="account_number">
-                    Account Number<RequiredIndicator fieldKey="account_number" requiredFields={requiredKeys} />
-                  </Label>
-                  <Input
+                  <Label htmlFor="account_number">Account Number</Label>
+                  <div
                     id="account_number"
-                    placeholder="Auto or internal ID"
-                    {...register("account_number")}
-                  />
+                    className="rounded-md border bg-muted/40 px-3 py-2 text-sm font-mono min-h-[2.25rem] flex items-center"
+                  >
+                    {isEditing
+                      ? (account?.account_number ?? "—")
+                      : "(auto-assigned on save)"}
+                  </div>
                   <p className="text-xs text-muted-foreground">
-                    Internal reference ID (billing, contract number, etc.). Leave blank if you don't use these.
+                    Auto-assigned 4-digit ID. Not editable.
                   </p>
                 </div>
 

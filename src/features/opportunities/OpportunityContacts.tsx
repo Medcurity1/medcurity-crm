@@ -99,19 +99,30 @@ export function OpportunityContacts({
   return (
     <div>
       <div className="flex justify-end mb-3">
-        <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setAddOpen(true)}
+          disabled={!opportunityAccountId}
+          title={
+            !opportunityAccountId
+              ? "Attach this opportunity to an account first"
+              : undefined
+          }
+        >
           <Plus className="h-4 w-4 mr-1" />
           Add Contact
         </Button>
       </div>
 
-      <AddContactDialog
-        open={addOpen}
-        onOpenChange={setAddOpen}
-        recordKind="opportunity"
-        recordId={opportunityId}
-        defaultAccountIdForNewContact={opportunityAccountId ?? undefined}
-      />
+      {opportunityAccountId && (
+        <AddContactDialog
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          opportunityId={opportunityId}
+          accountId={opportunityAccountId}
+        />
+      )}
 
       {!rows?.length ? (
         <EmptyState

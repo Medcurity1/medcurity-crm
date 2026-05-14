@@ -9,7 +9,6 @@ import {
   FileBarChart,
   UserCheck,
   UserPlus,
-  Link2,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -112,15 +111,6 @@ const REPORTS: ReportCard[] = [
       "Single-row scalar summary: ARR, New Customers QTD, NRR (legacy + true), pipeline, churn. Powers the Team Dashboard.",
     icon: FileBarChart,
     apiView: "v_dashboard_metrics",
-    status: "live",
-  },
-  {
-    id: "contact-cross-linkage",
-    title: "Contact Cross-Linkage",
-    description:
-      "Contacts appearing on multiple accounts and/or opportunities. Surfaces cross-linkage from the new contact_account_links + contact_opportunity_links join tables.",
-    icon: Link2,
-    apiView: "v_contact_cross_linkage",
     status: "live",
   },
 ];
