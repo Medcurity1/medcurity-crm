@@ -1,4 +1,4 @@
-export type AppRole = "sales" | "renewals" | "admin" | "super_admin";
+export type AppRole = "sales" | "renewals" | "admin" | "super_admin" | "read_only";
 export type AccountLifecycle = "prospect" | "customer" | "former_customer";
 export type AccountStatus = "discovery" | "pending" | "active" | "inactive" | "churned";
 export type RenewalType = "auto_renew" | "manual_renew" | "no_auto_renew" | "full_auto_renew" | "platform_only_auto_renew";

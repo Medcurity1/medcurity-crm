@@ -481,6 +481,14 @@ export const DEFAULT_KPIS: Record<AppRole, string[]> = {
     "upcoming_close",
   ],
   renewals: ["renewals_30", "renewals_60", "arr_at_risk", "my_renewals"],
+  // read_only sees the same default KPI set as sales — they can SELECT
+  // anything but can't act on it. UI gating handles the rest.
+  read_only: [
+    "my_open_pipeline",
+    "my_deals_in_progress",
+    "closed_won_quarter",
+    "upcoming_close",
+  ],
   admin: [
     "my_open_pipeline",
     "my_deals_in_progress",
