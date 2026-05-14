@@ -159,6 +159,12 @@ export function AddContactDialog({
           </DialogDescription>
         </DialogHeader>
 
+        <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          Don't see who you're looking for? They need to be added to this
+          account first — open the account, add them under Contacts, then
+          come back here.
+        </div>
+
         <div className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="contact-search">Find contact at this account</Label>
