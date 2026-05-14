@@ -1,4 +1,5 @@
-import { Link, useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Users } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -15,9 +16,10 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { formatName } from "@/lib/formatters";
+import { AddContactDialog } from "./AddContactDialog";
 
 export function AccountContacts({ accountId }: { accountId: string }) {
-  const navigate = useNavigate();
+  const [addOpen, setAddOpen] = useState(false);
   const { data: contacts, isLoading } = useQuery({
     queryKey: ["contacts", { account_id: accountId }],
     queryFn: async () => {
@@ -39,12 +41,18 @@ export function AccountContacts({ accountId }: { accountId: string }) {
         <Button
           size="sm"
           variant="outline"
-          onClick={() => navigate(`/contacts/new?account_id=${accountId}`)}
+          onClick={() => setAddOpen(true)}
         >
           <Plus className="h-4 w-4 mr-1" />
           Add Contact
         </Button>
       </div>
+
+      <AddContactDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        accountId={accountId}
+      />
 
       {!contacts?.length ? (
         <EmptyState
