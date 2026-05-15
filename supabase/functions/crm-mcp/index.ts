@@ -7,10 +7,23 @@
 // Spec: docs from Cowork team (2026-05-15).
 //
 // Authentication:
-//   - Inbound (Cowork → MCP):  `key` query parameter, compared against the
+//   - Inbound (Cowork → MCP):  `key` query parameter on every request
+//                              (GET and POST), compared against the
 //                              MCP_CLIENT_SECRET env var. Requests with a
 //                              missing or mismatched key get a 401.
 //   - Outbound (MCP → Supabase): service role key, never returned to the caller.
+//
+// Transport: Streamable HTTP (the standard remote MCP transport).
+//   - POST: JSON-RPC 2.0 envelopes (initialize / tools/list / tools/call / etc.)
+//   - GET: long-lived Server-Sent Events stream (no events are pushed; we
+//          just keep the connection open so the client's transport handshake
+//          completes). Heartbeats every 25s to keep proxies from idling out.
+//   - OPTIONS: 204 with full CORS preflight headers.
+//
+// Session management:
+//   - If the client sends an `Mcp-Session-Id` header it is echoed back.
+//   - If it doesn't, the server mints one (UUID) and returns it. Sessions
+//     are not enforced or persisted — purely for client compatibility.
 //
 // Tools exposed (READ-ONLY ONLY):
 //   - find_clients({ name })                  → top-5 fuzzy name matches
@@ -90,31 +103,54 @@ const JSONRPC_INTERNAL_ERROR = -32603;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers":
+    "content-type, authorization, mcp-session-id, mcp-protocol-version",
 };
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(
+  body: unknown,
+  status = 200,
+  extraHeaders: Record<string, string> = {},
+) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "application/json",
+      ...extraHeaders,
+    },
   });
 }
 
-function rpcError(id: unknown, code: number, message: string, data?: unknown) {
-  return jsonResponse({
-    jsonrpc: "2.0",
-    id: id ?? null,
-    error: { code, message, ...(data !== undefined ? { data } : {}) },
-  });
+function rpcError(
+  id: unknown,
+  code: number,
+  message: string,
+  data?: unknown,
+  sessionId?: string,
+) {
+  return jsonResponse(
+    {
+      jsonrpc: "2.0",
+      id: id ?? null,
+      error: { code, message, ...(data !== undefined ? { data } : {}) },
+    },
+    200,
+    sessionId ? { "Mcp-Session-Id": sessionId } : {},
+  );
 }
 
-function rpcResult(id: unknown, result: unknown) {
-  return jsonResponse({ jsonrpc: "2.0", id: id ?? null, result });
+function rpcResult(id: unknown, result: unknown, sessionId?: string) {
+  return jsonResponse(
+    { jsonrpc: "2.0", id: id ?? null, result },
+    200,
+    sessionId ? { "Mcp-Session-Id": sessionId } : {},
+  );
 }
 
 /**
@@ -301,25 +337,108 @@ async function handleToolCall(
 // HTTP entrypoint
 // ---------------------------------------------------------------------------
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-  if (req.method !== "POST") {
-    return jsonResponse({ error: "Method not allowed. Use POST." }, 405);
-  }
-
-  // ── 1. Query-param auth ──────────────────────────────────────────────
+function authedSecretOrError(req: Request): {
+  ok: boolean;
+  response?: Response;
+  expectedSecret?: string;
+} {
   const expectedSecret = Deno.env.get("MCP_CLIENT_SECRET");
   if (!expectedSecret) {
     console.error("MCP_CLIENT_SECRET is not set");
-    return jsonResponse({ error: "Server misconfiguration" }, 500);
+    return {
+      ok: false,
+      response: jsonResponse({ error: "Server misconfiguration" }, 500),
+    };
   }
   const url = new URL(req.url);
   const provided = (url.searchParams.get("key") ?? "").trim();
   if (!provided || provided !== expectedSecret) {
-    return jsonResponse({ error: "Unauthorized" }, 401);
+    return {
+      ok: false,
+      response: jsonResponse({ error: "Unauthorized" }, 401),
+    };
   }
+  return { ok: true, expectedSecret };
+}
+
+function sessionIdFor(req: Request, generateIfMissing: boolean): string | undefined {
+  const incoming = req.headers.get("mcp-session-id");
+  if (incoming) return incoming;
+  if (!generateIfMissing) return undefined;
+  return crypto.randomUUID();
+}
+
+/**
+ * Open an SSE stream for GET requests. Per MCP Streamable HTTP spec, clients
+ * can open a long-lived GET to receive server-pushed events. We don't push
+ * anything (no server-initiated notifications in this MCP), but we still
+ * keep the connection open so the client's handshake completes.
+ */
+function openSseStream(sessionId: string): Response {
+  const encoder = new TextEncoder();
+  let keepalive: number | undefined;
+
+  const stream = new ReadableStream({
+    start(controller) {
+      // Emit one comment line so intermediaries don't buffer waiting for data.
+      controller.enqueue(encoder.encode(": connected\n\n"));
+      // Send a heartbeat every 25s to keep proxies from idling us out.
+      keepalive = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(": keepalive\n\n"));
+        } catch {
+          // controller closed — clean up below.
+          if (keepalive !== undefined) clearInterval(keepalive);
+        }
+      }, 25_000) as unknown as number;
+    },
+    cancel() {
+      // Client disconnected; stop heartbeats.
+      if (keepalive !== undefined) clearInterval(keepalive);
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "Mcp-Session-Id": sessionId,
+    },
+  });
+}
+
+serve(async (req) => {
+  // ── OPTIONS preflight ────────────────────────────────────────────────
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: { ...corsHeaders, "Access-Control-Max-Age": "86400" },
+    });
+  }
+
+  // ── GET (SSE stream) ─────────────────────────────────────────────────
+  if (req.method === "GET") {
+    const auth = authedSecretOrError(req);
+    if (!auth.ok) return auth.response!;
+    const sid = sessionIdFor(req, true)!;
+    return openSseStream(sid);
+  }
+
+  if (req.method !== "POST") {
+    return jsonResponse(
+      { error: "Method not allowed. Use GET, POST, or OPTIONS." },
+      405,
+    );
+  }
+
+  // ── POST: auth ───────────────────────────────────────────────────────
+  const auth = authedSecretOrError(req);
+  if (!auth.ok) return auth.response!;
+  // Echo provided session id, or mint a new one for this request.
+  const sessionId = sessionIdFor(req, true)!;
 
   // ── 2. Parse JSON-RPC envelope ───────────────────────────────────────
   let payload: {
@@ -331,7 +450,7 @@ serve(async (req) => {
   try {
     payload = await req.json();
   } catch {
-    return rpcError(null, JSONRPC_PARSE_ERROR, "Invalid JSON payload");
+    return rpcError(null, JSONRPC_PARSE_ERROR, "Invalid JSON payload", undefined, sessionId);
   }
 
   if (payload?.jsonrpc !== "2.0" || typeof payload.method !== "string") {
@@ -339,6 +458,8 @@ serve(async (req) => {
       payload?.id,
       JSONRPC_INVALID_REQUEST,
       "Request must be JSON-RPC 2.0 with a string `method`.",
+      undefined,
+      sessionId,
     );
   }
 
@@ -349,7 +470,7 @@ serve(async (req) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!supabaseUrl || !serviceKey) {
     console.error("Supabase env vars missing");
-    return rpcError(id, JSONRPC_INTERNAL_ERROR, "Server misconfiguration");
+    return rpcError(id, JSONRPC_INTERNAL_ERROR, "Server misconfiguration", undefined, sessionId);
   }
   const supabase = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -359,17 +480,33 @@ serve(async (req) => {
   try {
     switch (method) {
       case "initialize":
-        return rpcResult(id, {
-          protocolVersion: "2024-11-05",
-          capabilities: { tools: {} },
-          serverInfo: {
-            name: "medcurity-crm-mcp",
-            version: "0.1.0",
+        return rpcResult(
+          id,
+          {
+            protocolVersion: "2024-11-05",
+            capabilities: { tools: {} },
+            serverInfo: {
+              name: "medcurity-crm-mcp",
+              version: "0.1.0",
+            },
           },
+          sessionId,
+        );
+
+      case "notifications/initialized":
+      case "notifications/cancelled":
+        // MCP notifications carry no id and expect no response body.
+        // Return 204 so the client knows it was accepted.
+        return new Response(null, {
+          status: 204,
+          headers: { ...corsHeaders, "Mcp-Session-Id": sessionId },
         });
 
+      case "ping":
+        return rpcResult(id, {}, sessionId);
+
       case "tools/list":
-        return rpcResult(id, { tools: TOOLS });
+        return rpcResult(id, { tools: TOOLS }, sessionId);
 
       case "tools/call": {
         const toolName = params?.name;
@@ -379,6 +516,8 @@ serve(async (req) => {
             id,
             JSONRPC_INVALID_PARAMS,
             "`params.name` is required (tool name).",
+            undefined,
+            sessionId,
           );
         }
         const result = await handleToolCall(supabase, toolName, toolArgs);
@@ -396,6 +535,8 @@ serve(async (req) => {
             id,
             JSONRPC_METHOD_NOT_FOUND,
             `Unknown tool: ${toolName}`,
+            undefined,
+            sessionId,
           );
         }
         if (
@@ -408,10 +549,12 @@ serve(async (req) => {
             id,
             JSONRPC_INVALID_PARAMS,
             `Missing required parameter: ${(result as { param: string }).param}`,
+            undefined,
+            sessionId,
           );
         }
 
-        return rpcResult(id, toolResult(result));
+        return rpcResult(id, toolResult(result), sessionId);
       }
 
       default:
@@ -419,11 +562,13 @@ serve(async (req) => {
           id,
           JSONRPC_METHOD_NOT_FOUND,
           `Unsupported method: ${method}`,
+          undefined,
+          sessionId,
         );
     }
   } catch (err) {
     // Never leak raw error details to the client (per spec § Error handling).
     console.error("crm-mcp unhandled error", err);
-    return rpcError(id, JSONRPC_INTERNAL_ERROR, "Internal server error");
+    return rpcError(id, JSONRPC_INTERNAL_ERROR, "Internal server error", undefined, sessionId);
   }
 });
