@@ -6,7 +6,7 @@ Read-only Model Context Protocol (MCP) server exposing three CRM lookups to Cowo
 - `get_client({ client_id })` — fetch FTE range/count for one account
 - `find_client_by_pandadoc({ pandadoc_id })` — resolve a PandaDoc doc → account
 
-Uses the Supabase **service role** key on the server side and a separate **bearer secret** (`MCP_CLIENT_SECRET`) for the inbound MCP client. Read-only by design — there are no write tools and the function never accepts raw SQL.
+Uses the Supabase **service role** key on the server side and a separate **client secret** (`MCP_CLIENT_SECRET`) passed via the `?key=` query parameter for inbound auth. Read-only by design — there are no write tools and the function never accepts raw SQL.
 
 ## Deploy
 
@@ -35,30 +35,26 @@ https://igmwomnkbbsytihtvhbp.functions.supabase.co/crm-mcp
 ## Smoke tests
 
 ```bash
-URL=https://igmwomnkbbsytihtvhbp.functions.supabase.co/crm-mcp
+BASE=https://igmwomnkbbsytihtvhbp.functions.supabase.co/crm-mcp
 SECRET=<the value of MCP_CLIENT_SECRET>
 
 # tools/list — should return all three tools.
-curl -sS -X POST "$URL" \
-  -H "Authorization: Bearer $SECRET" \
+curl -sS -X POST "$BASE?key=$SECRET" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq
 
 # find_clients — replace with a real client name you know is in the CRM.
-curl -sS -X POST "$URL" \
-  -H "Authorization: Bearer $SECRET" \
+curl -sS -X POST "$BASE?key=$SECRET" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"find_clients","arguments":{"name":"Medcurity"}}}' | jq
 
 # get_client — paste a client_id from the previous response.
-curl -sS -X POST "$URL" \
-  -H "Authorization: Bearer $SECRET" \
+curl -sS -X POST "$BASE?key=$SECRET" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_client","arguments":{"client_id":"<uuid>"}}}' | jq
 
 # Auth failure should return 401.
-curl -sS -i -X POST "$URL" \
-  -H "Authorization: Bearer wrong-secret" \
+curl -sS -i -X POST "$BASE?key=wrong-secret" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":4,"method":"tools/list"}'
 ```

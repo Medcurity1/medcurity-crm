@@ -7,8 +7,9 @@
 // Spec: docs from Cowork team (2026-05-15).
 //
 // Authentication:
-//   - Inbound (Cowork → MCP):  Bearer token in `Authorization` header,
-//                              compared against the MCP_CLIENT_SECRET env var.
+//   - Inbound (Cowork → MCP):  `key` query parameter, compared against the
+//                              MCP_CLIENT_SECRET env var. Requests with a
+//                              missing or mismatched key get a 401.
 //   - Outbound (MCP → Supabase): service role key, never returned to the caller.
 //
 // Tools exposed (READ-ONLY ONLY):
@@ -89,8 +90,7 @@ const JSONRPC_INTERNAL_ERROR = -32603;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -309,14 +309,14 @@ serve(async (req) => {
     return jsonResponse({ error: "Method not allowed. Use POST." }, 405);
   }
 
-  // ── 1. Bearer auth ───────────────────────────────────────────────────
+  // ── 1. Query-param auth ──────────────────────────────────────────────
   const expectedSecret = Deno.env.get("MCP_CLIENT_SECRET");
   if (!expectedSecret) {
     console.error("MCP_CLIENT_SECRET is not set");
     return jsonResponse({ error: "Server misconfiguration" }, 500);
   }
-  const authHeader = req.headers.get("authorization") ?? "";
-  const provided = authHeader.replace(/^Bearer\s+/i, "").trim();
+  const url = new URL(req.url);
+  const provided = (url.searchParams.get("key") ?? "").trim();
   if (!provided || provided !== expectedSecret) {
     return jsonResponse({ error: "Unauthorized" }, 401);
   }
