@@ -1030,14 +1030,31 @@ export function RenewalsQueue() {
     [closedRange.start, closedRange.end, today.getMonth(), today.getFullYear()],
   );
 
+  // Strict month-bucket match: unlike inDateRange(), null close_date rows
+  // do NOT fall into any bucket — they'd otherwise flood every month with
+  // the same total. They still count toward the overall window total (via
+  // upcomingFiltered) and surface in the table; they're just not assigned
+  // to a specific month.
+  const inMonthBucket = (
+    dateStr: string | null,
+    start: Date,
+    end: Date,
+  ): boolean => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    return d >= start && d <= end;
+  };
+
   const upcomingTotals = useMemo(() => {
     const list = upcomingFiltered ?? [];
     const total = list.reduce((s, r) => s + r.amount, 0);
+    const undatedCount = list.filter((r) => !r.close_date).length;
+    const undatedTotal = list
+      .filter((r) => !r.close_date)
+      .reduce((s, r) => s + r.amount, 0);
     const monthly = upcomingMonthBuckets.map(({ start, end, label }) => {
-      // Bucket open opps by close_date so the monthly breakdown lines
-      // up with the filter window's date-field semantics.
       const inWindow = list.filter((r) =>
-        inDateRange(r.close_date, start, end),
+        inMonthBucket(r.close_date, start, end),
       );
       return {
         label,
@@ -1045,14 +1062,18 @@ export function RenewalsQueue() {
         total: inWindow.reduce((s, r) => s + r.amount, 0),
       };
     });
-    return { count: list.length, total, monthly };
+    return { count: list.length, total, monthly, undatedCount, undatedTotal };
   }, [upcomingFiltered, upcomingMonthBuckets]);
 
   const closedTotals = useMemo(() => {
     const list = closedWonFiltered ?? [];
+    const undatedCount = list.filter((r) => !r.close_date).length;
+    const undatedTotal = list
+      .filter((r) => !r.close_date)
+      .reduce((s, r) => s + r.amount, 0);
     const monthly = closedMonthBuckets.map(({ start, end, label }) => {
       const inWindow = list.filter((r) =>
-        inDateRange(r.close_date, start, end),
+        inMonthBucket(r.close_date, start, end),
       );
       return {
         label,
@@ -1064,6 +1085,8 @@ export function RenewalsQueue() {
       count: list.length,
       total: list.reduce((s, r) => s + r.amount, 0),
       monthly,
+      undatedCount,
+      undatedTotal,
     };
   }, [closedWonFiltered, closedMonthBuckets]);
 
@@ -1241,23 +1264,35 @@ export function RenewalsQueue() {
             </Card>
           </div>
           {upcomingTotals.monthly.length > 0 && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-              {upcomingTotals.monthly.map((m) => (
-                <Card key={m.label}>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-xs text-muted-foreground font-medium">
-                      {m.label}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-lg font-semibold">{formatCurrency(m.total)}</p>
-                    <p className="text-[10px] text-muted-foreground mt-1">
-                      {m.count} renewal{m.count === 1 ? "" : "s"}
-                    </p>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-2">
+                {upcomingTotals.monthly.map((m) => (
+                  <Card key={m.label}>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-xs text-muted-foreground font-medium">
+                        {m.label}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-lg font-semibold">{formatCurrency(m.total)}</p>
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        {m.count} renewal{m.count === 1 ? "" : "s"}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+              {upcomingTotals.undatedCount > 0 && (
+                <p className="text-[11px] text-muted-foreground mb-6">
+                  {upcomingTotals.undatedCount} renewal
+                  {upcomingTotals.undatedCount === 1 ? "" : "s"} (
+                  {formatCurrency(upcomingTotals.undatedTotal)}) have no close
+                  date set and aren't shown in any month above. Open them and
+                  set a close date to put them on the calendar.
+                </p>
+              )}
+              {upcomingTotals.undatedCount === 0 && <div className="mb-6" />}
+            </>
           )}
 
           {upcomingLoading ? (
@@ -1518,23 +1553,35 @@ export function RenewalsQueue() {
             </Card>
           </div>
           {closedTotals.monthly.length > 0 && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-              {closedTotals.monthly.map((m) => (
-                <Card key={m.label}>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-xs text-muted-foreground font-medium">
-                      {m.label}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-lg font-semibold">{formatCurrency(m.total)}</p>
-                    <p className="text-[10px] text-muted-foreground mt-1">
-                      {m.count} renewal{m.count === 1 ? "" : "s"}
-                    </p>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-2">
+                {closedTotals.monthly.map((m) => (
+                  <Card key={m.label}>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-xs text-muted-foreground font-medium">
+                        {m.label}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-lg font-semibold">{formatCurrency(m.total)}</p>
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        {m.count} renewal{m.count === 1 ? "" : "s"}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+              {closedTotals.undatedCount > 0 ? (
+                <p className="text-[11px] text-muted-foreground mb-6">
+                  {closedTotals.undatedCount} renewal
+                  {closedTotals.undatedCount === 1 ? "" : "s"} (
+                  {formatCurrency(closedTotals.undatedTotal)}) have no close
+                  date set and aren't shown in any month above.
+                </p>
+              ) : (
+                <div className="mb-6" />
+              )}
+            </>
           )}
 
           {closedLoading ? (
