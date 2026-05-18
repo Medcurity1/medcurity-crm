@@ -118,6 +118,7 @@ function useAuditLogs(filters: {
   dateRange: string;
   search: string;
   recordId: string;
+  relatedAccountId: string;
   page: number;
 }) {
   return useQuery({
@@ -128,9 +129,12 @@ function useAuditLogs(filters: {
         entity_filter: filters.entity === "all" ? null : filters.entity,
         action_filter: filters.action === "all" ? null : filters.action,
         record_id_filter: filters.recordId || null,
+        related_account_id: filters.relatedAccountId || null,
         date_cutoff: getDateCutoff(filters.dateRange),
         page_offset: filters.page * PAGE_SIZE,
         page_limit: PAGE_SIZE,
+        include_count: true,
+        include_data: true,
       });
       if (error) throw error;
       const rows = (data ?? []) as AuditLogRow[];
@@ -142,31 +146,52 @@ function useAuditLogs(filters: {
   });
 }
 
-/** Fetch ALL matching rows for export (caps at 5000 to avoid runaway downloads) */
+/**
+ * Fetch all matching rows for export.
+ *
+ * The previous version blew the 8s statement timeout on "All time"
+ * exports because every paginated call recomputed count(*) over the
+ * full 164k-row table AND detoasted all the matched JSONB blobs into a
+ * single CTE. We now:
+ *
+ *   - ask for the count only on the first page; subsequent pages skip
+ *     it (the export loop doesn't care about it),
+ *   - cap the export at 2000 rows instead of 5000 to keep payload size
+ *     under PostgREST's limits with full JSONB.
+ *
+ * If a user genuinely needs more than 2000 rows they can narrow the
+ * date range and re-export.
+ */
 async function fetchAllForExport(filters: {
   entity: string;
   action: string;
   dateRange: string;
   search: string;
   recordId: string;
+  relatedAccountId: string;
 }): Promise<AuditLogRow[]> {
   const all: AuditLogRow[] = [];
   const EXPORT_PAGE = 500;
-  const MAX = 5000;
+  const MAX = 2000;
+  let pageIdx = 0;
   for (let offset = 0; offset < MAX; offset += EXPORT_PAGE) {
     const { data, error } = await supabase.rpc("search_audit_logs", {
       search_term: filters.search || null,
       entity_filter: filters.entity === "all" ? null : filters.entity,
       action_filter: filters.action === "all" ? null : filters.action,
       record_id_filter: filters.recordId || null,
+      related_account_id: filters.relatedAccountId || null,
       date_cutoff: getDateCutoff(filters.dateRange),
       page_offset: offset,
       page_limit: EXPORT_PAGE,
+      include_count: pageIdx === 0, // count once on page 0, skip thereafter
+      include_data: true,
     });
     if (error) throw error;
     const rows = (data ?? []) as AuditLogRow[];
     all.push(...rows);
     if (rows.length < EXPORT_PAGE) break;
+    pageIdx += 1;
   }
   return all;
 }
@@ -316,7 +341,13 @@ export function AuditLogViewer() {
 
   const entity = searchParams.get("entity") ?? "all";
   const action = searchParams.get("action") ?? "all";
-  const dateRange = searchParams.get("range") ?? "7d";
+  // When scoping to an account's related history, default to "All time"
+  // so the user actually sees what they came looking for. The 7-day
+  // default makes sense for ad-hoc admin browsing, but not for
+  // "show me everything that touched this account".
+  const relatedAccountId = searchParams.get("related_account_id") ?? "";
+  const dateRange =
+    searchParams.get("range") ?? (relatedAccountId ? "all" : "7d");
   const search = searchParams.get("q") ?? "";
   const recordId = searchParams.get("record_id") ?? "";
   const page = Number(searchParams.get("page") ?? "0");
@@ -347,6 +378,7 @@ export function AuditLogViewer() {
     dateRange,
     search,
     recordId,
+    relatedAccountId,
     page,
   });
 
@@ -354,8 +386,8 @@ export function AuditLogViewer() {
   const totalCount = data?.totalCount ?? 0;
 
   const filters = useMemo(
-    () => ({ entity, action, dateRange, search, recordId }),
-    [entity, action, dateRange, search, recordId]
+    () => ({ entity, action, dateRange, search, recordId, relatedAccountId }),
+    [entity, action, dateRange, search, recordId, relatedAccountId]
   );
 
   function handleSearchSubmit(e: React.FormEvent) {
@@ -365,6 +397,10 @@ export function AuditLogViewer() {
 
   function handleClearRecordFilter() {
     updateParam("record_id", null);
+  }
+
+  function handleClearRelatedAccountFilter() {
+    updateParam("related_account_id", null);
   }
 
   async function handleExport(fmt: "csv" | "xlsx") {
@@ -474,6 +510,29 @@ export function AuditLogViewer() {
             </Badge>
             <span className="text-xs text-muted-foreground">
               Showing history for one record
+            </span>
+          </div>
+        )}
+
+        {relatedAccountId && (
+          <div className="flex items-center gap-2 text-sm">
+            <Badge variant="outline" className="gap-1">
+              Account &amp; related:{" "}
+              <span className="font-mono">
+                {truncateUUID(relatedAccountId)}
+              </span>
+              <button
+                type="button"
+                onClick={handleClearRelatedAccountFilter}
+                className="ml-1 hover:text-destructive"
+                aria-label="Clear account scope filter"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+            <span className="text-xs text-muted-foreground">
+              Showing edits to this account plus its activities, contacts,
+              opportunities, and opportunity products.
             </span>
           </div>
         )}

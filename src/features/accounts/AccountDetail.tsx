@@ -560,9 +560,9 @@ export function AccountDetail() {
             label="Last Modified By"
             value={
               <Link
-                to={`/admin?tab=audit-log&record_id=${account.id}`}
+                to={`/admin?tab=audit-log&related_account_id=${account.id}`}
                 className="text-primary hover:underline inline-flex items-center gap-1"
-                title="View audit history for this record"
+                title="View audit history for this account and its related records"
               >
                 {account.updater?.full_name ?? "\u2014"}
                 <History className="h-3 w-3" />
@@ -574,9 +574,9 @@ export function AccountDetail() {
             label="Last Modified"
             value={
               <Link
-                to={`/admin?tab=audit-log&record_id=${account.id}`}
+                to={`/admin?tab=audit-log&related_account_id=${account.id}`}
                 className="text-primary hover:underline"
-                title="View audit history for this record"
+                title="View audit history for this account and its related records"
               >
                 {formatDateTime(account.updated_at)}
               </Link>
