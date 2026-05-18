@@ -1045,16 +1045,23 @@ export function RenewalsQueue() {
     return d >= start && d <= end;
   };
 
+  // Upcoming tab buckets by expected_close_date (the rep's projected
+  // close), falling back to contract_end_date so SF-imported rows
+  // without an estimate still land somewhere. close_date on these rows
+  // is the OLD SF stamp — useless for future-facing month tiles.
+  const upcomingBucketDate = (r: RenewalRow): string | null =>
+    r.expected_close_date ?? r.contract_end_date ?? null;
+
   const upcomingTotals = useMemo(() => {
     const list = upcomingFiltered ?? [];
     const total = list.reduce((s, r) => s + r.amount, 0);
-    const undatedCount = list.filter((r) => !r.close_date).length;
+    const undatedCount = list.filter((r) => !upcomingBucketDate(r)).length;
     const undatedTotal = list
-      .filter((r) => !r.close_date)
+      .filter((r) => !upcomingBucketDate(r))
       .reduce((s, r) => s + r.amount, 0);
     const monthly = upcomingMonthBuckets.map(({ start, end, label }) => {
       const inWindow = list.filter((r) =>
-        inMonthBucket(r.close_date, start, end),
+        inMonthBucket(upcomingBucketDate(r), start, end),
       );
       return {
         label,
@@ -1065,6 +1072,8 @@ export function RenewalsQueue() {
     return { count: list.length, total, monthly, undatedCount, undatedTotal };
   }, [upcomingFiltered, upcomingMonthBuckets]);
 
+  // Closed-won always has a real close_date — it's the day the deal
+  // closed, populated by the DB on stage transition.
   const closedTotals = useMemo(() => {
     const list = closedWonFiltered ?? [];
     const undatedCount = list.filter((r) => !r.close_date).length;
