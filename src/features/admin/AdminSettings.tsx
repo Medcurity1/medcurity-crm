@@ -16,6 +16,7 @@ import { ObjectManager } from "./ObjectManager";
 import { LayoutsViewer } from "@/features/layouts/LayoutsViewer";
 import { LayoutEditor } from "@/features/layouts/LayoutEditor";
 import { AuditLogViewer } from "./AuditLogViewer";
+import { ClientErrorsViewer } from "./ClientErrorsViewer";
 import { AutomationsManager } from "./AutomationsManager";
 import { SystemInfo } from "./SystemInfo";
 import { DataHealthDashboard } from "./DataHealthDashboard";
@@ -100,6 +101,7 @@ export function AdminSettings() {
         // Drop audit-log-specific filters when navigating away
         if (tab !== "audit-log") {
           next.delete("record_id");
+          next.delete("related_account_id");
           next.delete("q");
           next.delete("entity");
           next.delete("action");
@@ -280,7 +282,7 @@ export function AdminSettings() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="data-health">
+        <TabsContent value="data-health" className="space-y-6">
           <Card className="p-6">
             <div className="space-y-1 mb-6">
               <h2 className="text-lg font-semibold">Data Health & Protection</h2>
@@ -289,6 +291,20 @@ export function AdminSettings() {
               </p>
             </div>
             <DataHealthDashboard />
+          </Card>
+
+          <Card className="p-6">
+            <div className="space-y-1 mb-6">
+              <h2 className="text-lg font-semibold">Silent Save Failures</h2>
+              <p className="text-sm text-muted-foreground">
+                Every client-side mutation that throws (a save, edit, or
+                delete that didn't make it to the database) is captured
+                here, with the user, route, and error details. Use this to
+                investigate reports like "I logged that call but it's not
+                showing up."
+              </p>
+            </div>
+            <ClientErrorsViewer />
           </Card>
         </TabsContent>
 
