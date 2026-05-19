@@ -179,6 +179,10 @@ export function useUpdateActivity() {
       subject?: string;
       body?: string | null;
       due_at?: string | null;
+      // Allow re-attributing the contact on an existing activity. Reps
+      // sometimes log an interaction before they remember which contact
+      // it was with; editing should let them fix it.
+      contact_id?: string | null;
       reminder_schedule?: "none" | "once" | "daily" | "weekdays" | "weekly";
       reminder_at?: string | null;
       reminder_channels?: Array<"in_app" | "email">;

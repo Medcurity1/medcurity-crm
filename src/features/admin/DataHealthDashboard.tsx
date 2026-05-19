@@ -40,13 +40,29 @@ import { useBulkUpdateOwner as useBulkUpdateLeadOwner } from "@/features/leads/a
 
 /* ---------- Types ---------- */
 
+interface SchemaSize {
+  schema: string;
+  size_bytes: number;
+  size: string;
+}
+
 interface DatabaseStats {
   total_rows: number;
   database_size: string;
   database_size_bytes: number;
-  largest_tables: { table: string; rows: number; size: string }[] | null;
+  largest_tables:
+    | { table: string; rows: number; size: string; size_bytes?: number }[]
+    | null;
   audit_log_count: number;
   oldest_audit_log: string | null;
+  // Fields added in 20260518000004_storage_stats_breakdown.sql. Marked
+  // optional so the page still renders against an older RPC version
+  // during the migration deploy window.
+  schema_sizes?: SchemaSize[] | null;
+  audit_log_bytes?: number;
+  audit_log_size?: string;
+  storage_objects_bytes?: number;
+  storage_objects_size?: string;
 }
 
 interface DataHealthRow {
@@ -174,7 +190,30 @@ function entityPath(entity: string): string {
 
 /* ---------- Constants ---------- */
 
-const SUPABASE_FREE_TIER_BYTES = 500 * 1024 * 1024; // 500 MB
+// Plan cap is read from a Vite env var so we don't hardcode a tier. The
+// old code assumed Free (500 MB), which made the gauge read "X / 500MB"
+// even after the project moved to Pro (8 GB). Set
+// VITE_SUPABASE_DB_CAP_BYTES in .env.local / the Vercel project to
+// match whatever Supabase plan is active. Defaults to Pro (8 GB) since
+// the project is no longer on Free.
+const SUPABASE_DB_CAP_BYTES = (() => {
+  const raw = import.meta.env.VITE_SUPABASE_DB_CAP_BYTES as string | undefined;
+  const parsed = raw ? Number(raw) : NaN;
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  return 8 * 1024 * 1024 * 1024; // 8 GB Pro default
+})();
+
+function formatBytes(bytes: number | undefined | null): string {
+  if (!bytes || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let n = bytes;
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i++;
+  }
+  return `${n.toFixed(n < 10 ? 2 : 1)} ${units[i]}`;
+}
 
 const PROTECTION_CHECKLIST = [
   { enabled: true, label: "Soft deletes enabled (all records archived, not deleted)" },
@@ -431,8 +470,16 @@ export function DataHealthDashboard() {
     );
   }
 
+  // What the percent represents: Postgres data only (pg_database_size).
+  // Supabase Studio's "disk usage" line ALSO counts Storage buckets,
+  // WAL, and backups — so it can read much higher than this. That's
+  // not a bug in the CRM; it's two different things being measured.
+  // The breakdown card below makes this explicit so admins can stop
+  // worrying that data is "missing".
+  const totalReportedBytes =
+    (stats?.database_size_bytes ?? 0) + (stats?.storage_objects_bytes ?? 0);
   const sizePercent = stats
-    ? Math.round((stats.database_size_bytes / SUPABASE_FREE_TIER_BYTES) * 100)
+    ? Math.round((totalReportedBytes / SUPABASE_DB_CAP_BYTES) * 100)
     : 0;
   const sizeWarning = sizePercent > 80;
 
@@ -458,9 +505,12 @@ export function DataHealthDashboard() {
           {stats && (
             <>
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Database Size</span>
+                <span className="text-muted-foreground">
+                  Postgres + Storage usage
+                </span>
                 <span className="font-medium flex items-center gap-2">
-                  {stats.database_size} / 500 MB ({sizePercent}% used)
+                  {formatBytes(totalReportedBytes)} /{" "}
+                  {formatBytes(SUPABASE_DB_CAP_BYTES)} ({sizePercent}% used)
                   {sizeWarning && (
                     <Badge variant="destructive" className="text-xs">Warning</Badge>
                   )}
@@ -474,12 +524,72 @@ export function DataHealthDashboard() {
                   style={{ width: `${Math.min(sizePercent, 100)}%` }}
                 />
               </div>
+
+              {/* Explainer: why this number can differ from Supabase
+                  Studio's "disk usage". Avoids the "we're at 200%!"
+                  panic by spelling out exactly what's counted. */}
+              <p className="text-xs text-muted-foreground">
+                This includes the Postgres database (
+                {formatBytes(stats.database_size_bytes)}) plus uploaded files
+                in Storage (
+                {formatBytes(stats.storage_objects_bytes ?? 0)}). Supabase
+                Studio's "disk usage" line can read higher because it also
+                counts WAL and daily backups, which don't affect your
+                available capacity. <strong>Your data is safe</strong> — if
+                the database ever does hit its hard cap, Supabase puts it
+                in read-only mode (no corruption, no silent data loss).
+              </p>
+
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Total Rows</span>
+                <span className="text-muted-foreground">Total CRM rows</span>
                 <span className="font-medium">
                   {stats.total_rows?.toLocaleString() ?? "0"}
                 </span>
               </div>
+
+              {stats.audit_log_bytes != null && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">
+                    Audit log storage
+                  </span>
+                  <span className="font-medium">
+                    {stats.audit_log_size ?? formatBytes(stats.audit_log_bytes)}
+                  </span>
+                </div>
+              )}
+
+              {stats.schema_sizes && stats.schema_sizes.length > 0 && (
+                <div className="mt-2">
+                  <p className="text-xs text-muted-foreground mb-2 font-medium">
+                    Storage by schema
+                  </p>
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Schema</TableHead>
+                          <TableHead className="text-right">Size</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {stats.schema_sizes.map((s) => (
+                          <TableRow key={s.schema}>
+                            <TableCell className="font-mono text-xs">
+                              {s.schema}
+                            </TableCell>
+                            <TableCell className="text-right">{s.size}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    `public` is your CRM data. `auth`, `storage`, `realtime`
+                    are Supabase internals. If one schema is far larger than
+                    the others, that's where to look first.
+                  </p>
+                </div>
+              )}
 
               {stats.largest_tables && stats.largest_tables.length > 0 && (
                 <div className="mt-2">

@@ -1,10 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Phone, Mail, Calendar, StickyNote, CheckSquare } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Phone, Mail, Calendar, CheckSquare } from "lucide-react";
 import { activityFormSchema, type ActivityFormValues } from "./schema";
 import { useCreateActivity, useUpdateActivity } from "./api";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { supabase } from "@/lib/supabase";
 import {
   Dialog,
   DialogContent,
@@ -32,13 +34,73 @@ interface ActivityFormProps {
   activity?: Activity | null;
 }
 
+// "Note" was intentionally removed as a NEW activity option — Brayden
+// wanted reps logging calls/meetings/tasks tied to real interactions
+// rather than free-floating notes. Existing note rows in the database
+// stay editable (see schema.ts comment on `activity_type`), but the
+// picker below no longer offers it.
 const activityTypes: { value: ActivityType; label: string; icon: typeof Phone }[] = [
   { value: "call", label: "Call", icon: Phone },
   { value: "email", label: "Email", icon: Mail },
   { value: "meeting", label: "Meeting", icon: Calendar },
-  { value: "note", label: "Note", icon: StickyNote },
   { value: "task", label: "Task", icon: CheckSquare },
 ];
+
+interface ContactPickerOption {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  title: string | null;
+}
+
+/**
+ * Resolve the account this activity is being logged against, even when
+ * the caller only supplied an opportunity or lead. Returning null means
+ * we have no account context (raw lead with no converted account yet),
+ * in which case the contact picker is hidden — there's nobody to scope
+ * the dropdown to.
+ */
+function useEffectiveAccountId(args: {
+  accountId?: string;
+  opportunityId?: string;
+}): { accountId: string | null; loading: boolean } {
+  const { accountId, opportunityId } = args;
+  const { data, isLoading } = useQuery({
+    queryKey: ["activity-form-account-resolver", accountId, opportunityId],
+    enabled: !accountId && !!opportunityId,
+    queryFn: async () => {
+      if (!opportunityId) return null;
+      const { data, error } = await supabase
+        .from("opportunities")
+        .select("account_id")
+        .eq("id", opportunityId)
+        .maybeSingle();
+      if (error) throw error;
+      return (data?.account_id as string | null) ?? null;
+    },
+  });
+  if (accountId) return { accountId, loading: false };
+  return { accountId: data ?? null, loading: isLoading };
+}
+
+function useContactOptions(accountId: string | null) {
+  return useQuery({
+    queryKey: ["activity-form-contact-options", accountId],
+    enabled: !!accountId,
+    queryFn: async () => {
+      if (!accountId) return [] as ContactPickerOption[];
+      const { data, error } = await supabase
+        .from("contacts")
+        .select("id, first_name, last_name, title")
+        .eq("account_id", accountId)
+        .is("archived_at", null)
+        .order("last_name", { ascending: true, nullsFirst: false })
+        .limit(200);
+      if (error) throw error;
+      return (data ?? []) as ContactPickerOption[];
+    },
+  });
+}
 
 export function ActivityForm({
   open,
@@ -81,15 +143,39 @@ export function ActivityForm({
   const form = useForm<ActivityFormValues>({
     resolver: zodResolver(activityFormSchema),
     defaultValues: {
-      activity_type: "note",
+      activity_type: "call",
       subject: "",
       body: "",
       due_at: todayLocalISO(),
+      contact_id: contactId ?? null,
       reminder_schedule: "none",
       reminder_at: "",
       reminder_channels: ["in_app"],
     },
   });
+
+  // Resolve the account context so the contact dropdown can list the
+  // right people. When the rep opens the form from a contact page,
+  // contactId is pre-set and we lock the picker — there's nothing to
+  // pick. When opened from an opportunity page, we look up the opp's
+  // account so the dropdown still works.
+  const { accountId: effectiveAccountId } = useEffectiveAccountId({
+    accountId,
+    opportunityId,
+  });
+  const { data: contactOptions = [] } = useContactOptions(effectiveAccountId);
+  const lockedContactName = useMemo(() => {
+    if (!contactId) return null;
+    const c = contactOptions.find((c) => c.id === contactId);
+    if (!c) return null;
+    return [c.first_name, c.last_name].filter(Boolean).join(" ") || "Contact";
+  }, [contactId, contactOptions]);
+  // Show picker only when:
+  //   1. We have an account context to scope the contacts by, and
+  //   2. The caller didn't already nail down a specific contact.
+  // The lead-only path (no accountId, no opp) intentionally hides the
+  // picker — a raw lead doesn't have related contacts yet.
+  const showContactPicker = !contactId && !!effectiveAccountId;
 
   // Pre-fill when editing an existing activity. We only take the YYYY-MM-DD
   // prefix off the due_at ISO timestamp since the input is type="date".
@@ -101,6 +187,7 @@ export function ActivityForm({
         subject: activity.subject ?? "",
         body: activity.body ?? "",
         due_at: activity.due_at ? activity.due_at.slice(0, 10) : "",
+        contact_id: activity.contact_id ?? null,
         reminder_schedule:
           (activity.reminder_schedule as ActivityFormValues["reminder_schedule"]) ??
           "none",
@@ -110,16 +197,17 @@ export function ActivityForm({
       });
     } else {
       form.reset({
-        activity_type: "note",
+        activity_type: "call",
         subject: "",
         body: "",
         due_at: todayLocalISO(),
+        contact_id: contactId ?? null,
         reminder_schedule: "none",
         reminder_at: "",
         reminder_channels: ["in_app"],
       });
     }
-  }, [open, activity, form]);
+  }, [open, activity, form, contactId]);
 
   function onSubmit(values: ActivityFormValues) {
     const isTask = values.activity_type === "task";
@@ -137,6 +225,11 @@ export function ActivityForm({
     ) as Array<"in_app" | "email">;
 
     const dueAtIso = dateToLocalNoonISO(values.due_at ?? "");
+    // Prop wins when the form was opened from a contact's own page
+    // (locked picker); otherwise honor whatever the user picked, which
+    // may legitimately be "no contact" (null) for account-level logs.
+    const resolvedContactId: string | null =
+      contactId ?? values.contact_id ?? null;
 
     if (isEditing && activity) {
       updateMutation.mutate(
@@ -146,6 +239,7 @@ export function ActivityForm({
           subject: values.subject,
           body: values.body || null,
           due_at: dueAtIso,
+          contact_id: resolvedContactId,
           reminder_schedule: reminderSchedule,
           reminder_at: reminderAt,
           reminder_channels: reminderChannels,
@@ -170,7 +264,7 @@ export function ActivityForm({
         body: values.body || undefined,
         due_at: dueAtIso ?? undefined,
         account_id: accountId,
-        contact_id: contactId,
+        contact_id: resolvedContactId ?? undefined,
         opportunity_id: opportunityId,
         lead_id: leadId,
         owner_user_id: user?.id,
@@ -227,6 +321,48 @@ export function ActivityForm({
               </p>
             )}
           </div>
+
+          {/* Contact picker. Reps were misattributing calls/meetings to
+              the wrong record because the form didn't ask. Now the
+              activity is linked to BOTH the account and (optionally) a
+              specific contact, so it shows up on the contact's timeline
+              without manual double-entry. Hidden when the form was
+              opened from a contact page (already locked) or from a raw
+              lead (no account to scope to). */}
+          {showContactPicker && (
+            <div className="space-y-2">
+              <Label htmlFor="contact_id">Contact (optional)</Label>
+              <select
+                id="contact_id"
+                className="w-full border rounded-md h-9 px-2 bg-background text-sm"
+                value={form.watch("contact_id") ?? ""}
+                onChange={(e) =>
+                  form.setValue("contact_id", e.target.value || null)
+                }
+              >
+                <option value="">No specific contact</option>
+                {contactOptions.map((c) => {
+                  const name =
+                    [c.first_name, c.last_name].filter(Boolean).join(" ") ||
+                    "(unnamed)";
+                  return (
+                    <option key={c.id} value={c.id}>
+                      {name}
+                      {c.title ? ` — ${c.title}` : ""}
+                    </option>
+                  );
+                })}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Linking a contact also logs this activity on their timeline.
+              </p>
+            </div>
+          )}
+          {contactId && lockedContactName && (
+            <p className="text-xs text-muted-foreground">
+              Logging for contact: <strong>{lockedContactName}</strong>
+            </p>
+          )}
 
           {/* Subject — calls and meetings get a curated dropdown of the
               outcomes reps actually log so the data is consistent across

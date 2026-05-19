@@ -106,6 +106,7 @@ export function AdminSettings() {
           next.delete("entity");
           next.delete("action");
           next.delete("range");
+          next.delete("changer");
           next.delete("page");
         }
         return next;
