@@ -301,6 +301,59 @@ export function useRenewalAudit() {
 }
 
 /**
+ * One row from preview_upcoming_renewals(). Mirrors the renewals
+ * function's filter exactly (including the close_date + 12 months
+ * anniversary anchor), so the preview shows precisely what Run Now
+ * would do — and surfaces a reason for every rejection.
+ */
+export interface RenewalPreviewRow {
+  status:
+    | "will_create"
+    | "anniversary_outside_window"
+    | "has_live_renewal"
+    | "account_not_active"
+    | "account_do_not_auto_renew"
+    | "one_time_project"
+    | "no_close_date"
+    | "archived"
+    | "not_test_account";
+  parent_opportunity_id: string;
+  parent_opportunity_name: string;
+  account_id: string;
+  account_name: string;
+  account_status: string | null;
+  close_date: string | null;
+  contract_end_date: string | null;
+  contract_length_months: number | null;
+  contract_year: number | null;
+  cycle_count: number | null;
+  one_time_project: boolean;
+  do_not_auto_renew: boolean;
+  archived: boolean;
+  computed_anniversary: string | null;
+  days_until_anniversary: number | null;
+  lookahead_days: number;
+  test_account_id: string | null;
+  reason: string;
+}
+
+/**
+ * Preview every closed-won opp the next renewal run will touch,
+ * with the precise reason it will or won't generate a renewal.
+ * Read-only RPC; see migration 20260519000009.
+ */
+export function useRenewalPreview() {
+  return useQuery({
+    queryKey: ["renewal_preview"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("preview_upcoming_renewals");
+      if (error) throw error;
+      return (data ?? []) as RenewalPreviewRow[];
+    },
+  });
+}
+
+/**
  * Lightweight account picker for the test_account_id selector. We
  * deliberately don't filter by lifecycle_status here — Brayden's test
  * account may be a prospect with one manually-flipped closed_won opp.
