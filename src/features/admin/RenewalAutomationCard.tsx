@@ -36,14 +36,17 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useAccountsForPicker,
   useRenewalAudit,
   useRenewalAutomationConfig,
   useRenewalAutomationRuns,
+  useRenewalPreview,
   useRunRenewalAutomationNow,
   useUpdateRenewalAutomationConfig,
   type RenewalAuditRow,
+  type RenewalPreviewRow,
 } from "./automations-api";
 
 function formatDateTime(value: string | null): string {
@@ -77,13 +80,52 @@ const CATEGORY_META: Record<
   do_not_auto_renew: { label: "Skip (do not auto-renew)", tone: "info" },
 };
 
+const PREVIEW_STATUS_META: Record<
+  RenewalPreviewRow["status"],
+  { label: string; tone: "success" | "warning" | "muted" }
+> = {
+  will_create: { label: "Will create", tone: "success" },
+  anniversary_outside_window: {
+    label: "Outside window",
+    tone: "warning",
+  },
+  has_live_renewal: { label: "Already has renewal", tone: "muted" },
+  account_not_active: { label: "Account not active", tone: "warning" },
+  account_do_not_auto_renew: {
+    label: "Do-not-auto-renew",
+    tone: "muted",
+  },
+  one_time_project: { label: "One-time project", tone: "muted" },
+  no_close_date: { label: "No close date", tone: "warning" },
+  archived: { label: "Archived", tone: "muted" },
+  not_test_account: { label: "Not test account", tone: "muted" },
+};
+
+function PreviewStatusBadge({ status }: { status: RenewalPreviewRow["status"] }) {
+  const meta = PREVIEW_STATUS_META[status];
+  const cls =
+    meta.tone === "success"
+      ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
+      : meta.tone === "warning"
+        ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
+        : "bg-muted text-muted-foreground";
+  return <Badge className={`text-xs ${cls}`}>{meta.label}</Badge>;
+}
+
 export function RenewalAutomationCard() {
   const { data: config, isLoading: loadingConfig } = useRenewalAutomationConfig();
   const { data: runs, isLoading: loadingRuns } = useRenewalAutomationRuns(10);
   const { data: audit, isLoading: loadingAudit } = useRenewalAudit();
+  const {
+    data: preview,
+    isLoading: loadingPreview,
+    isFetching: fetchingPreview,
+    refetch: refetchPreview,
+  } = useRenewalPreview();
   const { data: accounts, isLoading: loadingAccounts } = useAccountsForPicker();
   const updateConfig = useUpdateRenewalAutomationConfig();
   const runNow = useRunRenewalAutomationNow();
+  const qc = useQueryClient();
 
   const [lookahead, setLookahead] = useState<string>("");
   const [pullAuto, setPullAuto] = useState<string>("");
@@ -224,11 +266,20 @@ export function RenewalAutomationCard() {
             ? `Created ${created} renewal opportunit${created === 1 ? "y" : "ies"}`
             : "Run complete — no new renewals needed",
         );
+        qc.invalidateQueries({ queryKey: ["renewal_preview"] });
       },
       onError: (err: Error) =>
         toast.error("Run failed", { description: err.message }),
     });
   }
+
+  const previewWillCreate = (preview ?? []).filter(
+    (row) => row.status === "will_create",
+  );
+  const previewFilteredOut = (preview ?? []).filter(
+    (row) => row.status !== "will_create",
+  );
+  const previewLookahead = preview?.[0]?.lookahead_days ?? config?.lookahead_days;
 
   const inTestMode = !!config?.test_account_id;
   const willCreateCount = auditCounts.missing_renewal ?? 0;
@@ -671,6 +722,125 @@ export function RenewalAutomationCard() {
           </p>
         </div>
       )}
+
+      <div className="space-y-2 mb-6">
+        <CardHeader className="p-0">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <CardTitle className="text-sm">
+                Preview — what the next run will touch
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Mirrors the function's filter exactly. Anniversary anchor =
+                parent <code>close_date</code> + 12 months. Lookahead{" "}
+                {previewLookahead ?? "?"}d. Hidden when test mode is on: every
+                other account's closed-won opps.
+              </CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetchPreview()}
+              disabled={fetchingPreview}
+            >
+              {fetchingPreview ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : null}
+              Refresh
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0 pt-2">
+          {loadingPreview ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            </div>
+          ) : preview && preview.length > 0 ? (
+            <>
+              <div className="flex items-center gap-4 text-xs text-muted-foreground mb-2">
+                <span>
+                  <span className="font-semibold text-foreground">
+                    {previewWillCreate.length}
+                  </span>{" "}
+                  will create on next run
+                </span>
+                <span>
+                  <span className="font-semibold text-foreground">
+                    {previewFilteredOut.length}
+                  </span>{" "}
+                  filtered out (see reason)
+                </span>
+              </div>
+              <div className="rounded-md border max-h-[480px] overflow-auto">
+                <Table>
+                  <TableHeader className="sticky top-0 bg-background z-10">
+                    <TableRow>
+                      <TableHead className="w-[160px]">Status</TableHead>
+                      <TableHead>Parent opportunity</TableHead>
+                      <TableHead>Account</TableHead>
+                      <TableHead>Close date</TableHead>
+                      <TableHead>Anniversary</TableHead>
+                      <TableHead className="text-right">Days away</TableHead>
+                      <TableHead>Reason</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {preview.map((row) => (
+                      <TableRow key={row.parent_opportunity_id}>
+                        <TableCell>
+                          <PreviewStatusBadge status={row.status} />
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          <Link
+                            to={`/opportunities/${row.parent_opportunity_id}`}
+                            className="text-primary hover:underline"
+                          >
+                            {row.parent_opportunity_name}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          <Link
+                            to={`/accounts/${row.account_id}`}
+                            className="text-primary hover:underline"
+                          >
+                            {row.account_name}
+                          </Link>
+                          {row.account_status &&
+                          row.account_status !== "active" ? (
+                            <span className="text-muted-foreground">
+                              {" "}
+                              ({row.account_status})
+                            </span>
+                          ) : null}
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          {formatDate(row.close_date)}
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          {formatDate(row.computed_anniversary)}
+                        </TableCell>
+                        <TableCell className="text-right text-xs">
+                          {row.days_until_anniversary ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground max-w-[420px]">
+                          {row.reason}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground text-center py-4">
+              No closed-won opps match the current scope.
+              {inTestMode
+                ? " Test mode is on — only the configured test account is shown."
+                : ""}
+            </p>
+          )}
+        </CardContent>
+      </div>
 
       <div className="space-y-2">
         <CardHeader className="p-0">
