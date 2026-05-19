@@ -561,9 +561,14 @@ export function RenewalAutomationCard() {
                             <span className="text-foreground">
                               contract_end_date
                             </span>
-                          ) : row.anchor_field === "close_date_plus_12mo" ? (
+                          ) : row.anchor_field ===
+                            "contract_signed_date_plus_length" ? (
+                            <span className="text-foreground">
+                              signed_date + length
+                            </span>
+                          ) : row.anchor_field === "close_date_plus_length" ? (
                             <span className="text-amber-700 dark:text-amber-400">
-                              close_date + 12mo
+                              close_date + length
                             </span>
                           ) : (
                             <span className="text-muted-foreground">—</span>

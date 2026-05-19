@@ -323,6 +323,7 @@ export interface RenewalPreviewRow {
   account_name: string;
   account_status: string | null;
   close_date: string | null;
+  contract_signed_date: string | null;
   contract_end_date: string | null;
   contract_length_months: number | null;
   contract_year: number | null;
@@ -331,7 +332,11 @@ export interface RenewalPreviewRow {
   do_not_auto_renew: boolean;
   archived: boolean;
   computed_anniversary: string | null;
-  anchor_field: "contract_end_date" | "close_date_plus_12mo" | "none";
+  anchor_field:
+    | "contract_end_date"
+    | "contract_signed_date_plus_length"
+    | "close_date_plus_length"
+    | "none";
   days_until_anniversary: number | null;
   lookahead_days: number;
   test_account_id: string | null;

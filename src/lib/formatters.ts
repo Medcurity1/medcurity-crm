@@ -275,7 +275,18 @@ const INDUSTRY_CATEGORY_LABELS: Record<IndustryCategory, string> = {
 
 export function industryCategoryLabel(v: IndustryCategory | null | undefined): string {
   if (!v) return "—";
-  return INDUSTRY_CATEGORY_LABELS[v] ?? v;
+  // Safety net: if a new enum value is added to the DB but not yet to
+  // INDUSTRY_CATEGORY_LABELS (or bad data sneaks in via raw SQL),
+  // title-case the snake_case value so the UI never shows
+  // "rural_hospital" raw.
+  return INDUSTRY_CATEGORY_LABELS[v] ?? titleCaseSnake(v);
+}
+
+function titleCaseSnake(v: string): string {
+  return v
+    .split("_")
+    .map((p) => (p.length ? p[0].toUpperCase() + p.slice(1) : p))
+    .join(" ");
 }
 
 const PROJECT_SEGMENT_LABELS: Record<ProjectSegment, string> = {
