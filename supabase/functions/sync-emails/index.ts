@@ -302,7 +302,25 @@ async function fetchGmailEmails(
 /**
  * Fetch new emails from Microsoft Graph since `sinceDate`.
  *
- * Uses the /me/messages endpoint with a $filter on receivedDateTime.
+ * Queries the Inbox and Sent Items folders specifically — NOT the
+ * mailbox-wide /me/messages endpoint. This deliberately excludes
+ * messages in the Drafts and Outbox folders.
+ *
+ * Why this matters (2026-05-19 incident): prior versions hit
+ * /me/messages, which returns every message in the mailbox including
+ * drafts. Outlook auto-saves drafts as the user types in a compose
+ * window, and those saved drafts carry a receivedDateTime that the
+ * date filter doesn't exclude. The CRM was logging "sent" emails for
+ * compose windows that were never actually sent (e.g., a rep opened
+ * a Reply window, typed a sentence, closed it without sending — that
+ * became a fake outbound activity on a contact). Querying Inbox and
+ * SentItems by folder bypasses this entirely: a message only lands
+ * in SentItems once Outlook confirms transmission to the server, and
+ * Outbox messages (awaiting send) stay out of SentItems.
+ *
+ * Direction is now implied by which folder produced the message
+ * (Inbox = received, SentItems = sent) instead of being inferred
+ * from the From header.
  */
 async function fetchOutlookEmails(
   accessToken: string,
@@ -311,71 +329,83 @@ async function fetchOutlookEmails(
   untilDate?: string
 ): Promise<ParsedEmail[]> {
   const isoSince = new Date(sinceDate).toISOString();
-  // Graph supports compound $filter on receivedDateTime; the chunked-backfill
-  // driver passes both bounds so each call only pulls a ~7-day slice.
   const filter = untilDate
     ? `receivedDateTime ge ${isoSince} and receivedDateTime lt ${new Date(untilDate).toISOString()}`
     : `receivedDateTime ge ${isoSince}`;
 
-  // Walk @odata.nextLink until no more pages. Bumped from 30 → 200
-  // (≈20,000 emails) to handle high-volume reps doing the 90-day
-  // backfill (Brayden 2026-04-28: Summer was hitting the ceiling).
+  // Walk @odata.nextLink until no more pages. Same per-folder cap as
+  // before (≈20k emails per folder) — preserves backfill capacity.
   const MAX_PAGES = 200;
-  const emails: ParsedEmail[] = [];
-  let url: string | null =
-    `https://graph.microsoft.com/v1.0/me/messages?$filter=${encodeURIComponent(filter)}&$top=100&$select=id,subject,bodyPreview,body,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,conversationId&$orderby=receivedDateTime desc`;
-  let pageCount = 0;
+  const SELECT =
+    "id,subject,bodyPreview,body,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,conversationId";
 
-  while (url && pageCount < MAX_PAGES) {
-    const res: Response = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Outlook fetch failed: ${res.status} ${text}`);
+  // userEmail is intentionally unused now that direction comes from
+  // the folder. Keep it in the signature so callers don't need to
+  // change, and reference it here to dodge unused-arg lint rules.
+  void userEmail;
+
+  async function fetchFolder(
+    folder: "Inbox" | "SentItems",
+    direction: "sent" | "received"
+  ): Promise<ParsedEmail[]> {
+    const out: ParsedEmail[] = [];
+    let url: string | null =
+      `https://graph.microsoft.com/v1.0/me/mailFolders/${folder}/messages` +
+      `?$filter=${encodeURIComponent(filter)}` +
+      `&$top=100&$select=${SELECT}&$orderby=receivedDateTime desc`;
+    let pageCount = 0;
+
+    while (url && pageCount < MAX_PAGES) {
+      const res: Response = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(
+          `Outlook fetch failed (${folder}): ${res.status} ${text}`
+        );
+      }
+      const data = await res.json();
+      for (const msg of data.value ?? []) {
+        const from = msg.from?.emailAddress?.address ?? "";
+        const to = (msg.toRecipients ?? []).map(
+          (r: { emailAddress: { address: string } }) =>
+            r.emailAddress?.address ?? ""
+        );
+        const cc = (msg.ccRecipients ?? []).map(
+          (r: { emailAddress: { address: string } }) =>
+            r.emailAddress?.address ?? ""
+        );
+        const bodyContentType: string = msg.body?.contentType ?? "text";
+        const bodyContent: string = msg.body?.content ?? "";
+        const htmlBody =
+          bodyContentType.toLowerCase() === "html" ? bodyContent : null;
+
+        out.push({
+          messageId: msg.id,
+          subject: msg.subject ?? "(no subject)",
+          body: msg.bodyPreview ?? "",
+          htmlBody,
+          from,
+          to,
+          cc,
+          date:
+            msg.receivedDateTime ?? msg.sentDateTime ?? new Date().toISOString(),
+          direction,
+          threadId: msg.conversationId ?? null,
+        });
+      }
+      url = (data["@odata.nextLink"] as string | undefined) ?? null;
+      pageCount++;
     }
-    const data = await res.json();
-    for (const msg of data.value ?? []) {
-    const from =
-      msg.from?.emailAddress?.address ?? "";
-    const to = (msg.toRecipients ?? []).map(
-      (r: { emailAddress: { address: string } }) =>
-        r.emailAddress?.address ?? ""
-    );
-    const cc = (msg.ccRecipients ?? []).map(
-      (r: { emailAddress: { address: string } }) =>
-        r.emailAddress?.address ?? ""
-    );
-
-    const direction =
-      from.toLowerCase() === userEmail.toLowerCase() ? "sent" : "received";
-
-    // Outlook body.contentType is either "html" or "text". We keep the
-    // plain preview for activities.body (used in search/previews) and
-    // separately preserve the HTML for high-fidelity rendering.
-    const bodyContentType: string = msg.body?.contentType ?? "text";
-    const bodyContent: string = msg.body?.content ?? "";
-    const htmlBody =
-      bodyContentType.toLowerCase() === "html" ? bodyContent : null;
-
-    emails.push({
-      messageId: msg.id,
-      subject: msg.subject ?? "(no subject)",
-      body: msg.bodyPreview ?? "",
-      htmlBody,
-      from,
-      to,
-      cc,
-      date: msg.receivedDateTime ?? msg.sentDateTime ?? new Date().toISOString(),
-      direction,
-      threadId: msg.conversationId ?? null,
-    });
-    }
-    url = (data["@odata.nextLink"] as string | undefined) ?? null;
-    pageCount++;
+    return out;
   }
 
-  return emails;
+  const [inbox, sent] = await Promise.all([
+    fetchFolder("Inbox", "received"),
+    fetchFolder("SentItems", "sent"),
+  ]);
+  return [...inbox, ...sent];
 }
 
 // ---------------------------------------------------------------------------
