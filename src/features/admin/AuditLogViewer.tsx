@@ -81,7 +81,90 @@ const ENTITY_ROUTES: Record<string, string> = {
   contacts: "/contacts",
   opportunities: "/opportunities",
   leads: "/leads",
+  activities: "/activities",
+  products: "/products",
 };
+
+/**
+ * Capitalize a single token (e.g. "call" → "Call", "MEETING" → "Meeting").
+ * Used for the activity-type badge so "logged a call" reads nicely.
+ */
+function titleCase(s: string): string {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
+/**
+ * Pull a human-readable name out of an audit row's payload so the
+ * viewer can show "Acme Hospital" instead of just `f1a2b3c4...`.
+ * Falls back to a truncated UUID when no name field is available.
+ *
+ * Prefers `new_data` (post-change state) over `old_data` (pre-change)
+ * so renames show their new label. For DELETE rows new_data is null,
+ * so we naturally fall back to old_data — which is the right name
+ * (the one the record had at the moment it was deleted).
+ */
+function getRecordName(log: AuditLogRow): string | null {
+  const d = (log.new_data ?? log.old_data) as Record<string, unknown> | null;
+  if (!d) return null;
+  const str = (k: string): string | null => {
+    const v = d[k];
+    return typeof v === "string" && v.trim() ? v.trim() : null;
+  };
+  switch (log.table_name) {
+    case "accounts":
+      return str("name");
+    case "opportunities":
+      return str("name");
+    case "products":
+      return str("name") ?? str("code");
+    case "contacts": {
+      const first = str("first_name");
+      const last = str("last_name");
+      const joined = [first, last].filter(Boolean).join(" ");
+      return joined || str("email");
+    }
+    case "leads": {
+      const first = str("first_name");
+      const last = str("last_name");
+      const person = [first, last].filter(Boolean).join(" ");
+      const company = str("company");
+      if (person && company) return `${person} (${company})`;
+      return person || company || str("email");
+    }
+    case "activities":
+      return str("subject");
+    case "user_profiles":
+      return str("full_name") ?? str("email");
+    case "email_templates":
+    case "automation_rules":
+    case "price_books":
+      return str("name");
+    case "price_book_entries":
+      // Composite — no single "name" column. Best effort.
+      return str("name");
+    default:
+      return null;
+  }
+}
+
+/**
+ * For audit rows that aren't first-class records with their own detail
+ * page (opportunity_products), resolve a route to the parent entity
+ * that DOES have one (the parent opportunity). Returns null if no
+ * route is available — caller falls back to plain text.
+ */
+function getRecordHref(log: AuditLogRow): string | null {
+  const base = ENTITY_ROUTES[log.table_name];
+  if (base) return `${base}/${log.record_id}`;
+  if (log.table_name === "opportunity_products") {
+    const d = (log.new_data ?? log.old_data) as Record<string, unknown> | null;
+    const oppId =
+      d && typeof d.opportunity_id === "string" ? d.opportunity_id : null;
+    if (oppId) return `/opportunities/${oppId}`;
+  }
+  return null;
+}
 
 /** Fields to skip when showing changes */
 const SKIP_FIELDS = new Set(["updated_at", "created_at"]);
@@ -240,19 +323,49 @@ function useAuditLogs(filters: {
 }
 
 /**
- * Pulls the list of (user, source) tuples that actually appear in
- * audit_logs so the "Changed By" dropdown only offers values that
- * will yield matches.
+ * Pulls the list of (user, source) tuples that appear in audit_logs
+ * MATCHING the current filters (entity / action / date / record /
+ * related account / search). The dropdown shows entry counts next to
+ * each option, so the counts need to reflect whatever the user has
+ * narrowed the view to — otherwise "Brayden (151,949)" stays at the
+ * lifetime total even when the view is scoped to "Last 7 days".
+ *
+ * IMPORTANT: we deliberately do NOT pass the changer/source filter
+ * itself. The dropdown shows everyone matching the OTHER filters; if
+ * we filtered by the currently-selected user, every option would
+ * collapse to its own total and the rest would read 0.
  */
-function useChangerOptions() {
+function useChangerOptions(filters: {
+  entity: string;
+  action: string;
+  dateRange: string;
+  rangeFrom: string;
+  rangeUntil: string;
+  search: string;
+  recordId: string;
+  relatedAccountId: string;
+}) {
   return useQuery({
-    queryKey: ["audit_log_changers"],
+    queryKey: ["audit_log_changers", filters],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("audit_log_changers");
+      const { from, until } = getDateBounds(
+        filters.dateRange,
+        filters.rangeFrom,
+        filters.rangeUntil
+      );
+      const { data, error } = await supabase.rpc("audit_log_changers", {
+        entity_filter: filters.entity === "all" ? null : filters.entity,
+        action_filter: filters.action === "all" ? null : filters.action,
+        date_cutoff: from,
+        date_until: until,
+        record_id_filter: filters.recordId || null,
+        related_account_id: filters.relatedAccountId || null,
+        search_term: filters.search || null,
+      });
       if (error) throw error;
       return (data ?? []) as ChangerOption[];
     },
-    staleTime: 5 * 60_000, // dropdown contents change slowly
+    staleTime: 60_000,
   });
 }
 
@@ -512,7 +625,16 @@ export function AuditLogViewer() {
     page,
   });
 
-  const { data: changerOptions = [] } = useChangerOptions();
+  const { data: changerOptions = [] } = useChangerOptions({
+    entity,
+    action,
+    dateRange,
+    rangeFrom,
+    rangeUntil,
+    search,
+    recordId,
+    relatedAccountId,
+  });
 
   const logs = data?.logs ?? [];
   const totalCount = data?.totalCount ?? 0;
@@ -847,14 +969,31 @@ export function AuditLogViewer() {
                 <TableHead>Entity</TableHead>
                 <TableHead>Action</TableHead>
                 <TableHead>Changed By</TableHead>
-                <TableHead>Record ID</TableHead>
+                <TableHead>Record</TableHead>
                 <TableHead>Changes</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {logs.map((log) => {
                 const isExpanded = expandedId === log.id;
-                const route = ENTITY_ROUTES[log.table_name];
+                const recordName = getRecordName(log);
+                const recordHref = getRecordHref(log);
+                // For activities, surface the activity_type ("Call",
+                // "Meeting", etc.) so a row reads "Activity — Call"
+                // instead of just "Activity". Pull from new_data first
+                // then old_data so DELETE rows still show the type.
+                let entityLabel =
+                  ENTITY_LABELS[log.table_name] ?? log.table_name;
+                if (log.table_name === "activities") {
+                  const d = (log.new_data ?? log.old_data) as
+                    | Record<string, unknown>
+                    | null;
+                  const t =
+                    d && typeof d.activity_type === "string"
+                      ? d.activity_type
+                      : null;
+                  if (t) entityLabel = `Activity — ${titleCase(t)}`;
+                }
 
                 return (
                   <Fragment key={log.id}>
@@ -877,9 +1016,7 @@ export function AuditLogViewer() {
                           {formatRelativeDate(log.changed_at)}
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm">
-                        {ENTITY_LABELS[log.table_name] ?? log.table_name}
-                      </TableCell>
+                      <TableCell className="text-sm">{entityLabel}</TableCell>
                       <TableCell>
                         <ActionBadge action={log.action} />
                       </TableCell>
@@ -897,17 +1034,41 @@ export function AuditLogViewer() {
                           </span>
                         )}
                       </TableCell>
-                      <TableCell className="text-sm font-mono">
-                        {route ? (
+                      <TableCell className="text-sm">
+                        {recordHref ? (
                           <Link
-                            to={`${route}/${log.record_id}`}
+                            to={recordHref}
                             className="text-primary hover:underline"
                             onClick={(e) => e.stopPropagation()}
+                            title={log.record_id}
                           >
-                            {truncateUUID(log.record_id)}
+                            {recordName ? (
+                              <>
+                                <div className="font-medium">{recordName}</div>
+                                <div className="text-[10px] text-muted-foreground font-mono">
+                                  {truncateUUID(log.record_id)}
+                                </div>
+                              </>
+                            ) : (
+                              <span className="font-mono">
+                                {truncateUUID(log.record_id)}
+                              </span>
+                            )}
                           </Link>
+                        ) : recordName ? (
+                          <>
+                            <div className="font-medium">{recordName}</div>
+                            <div
+                              className="text-[10px] text-muted-foreground font-mono"
+                              title={log.record_id}
+                            >
+                              {truncateUUID(log.record_id)}
+                            </div>
+                          </>
                         ) : (
-                          truncateUUID(log.record_id)
+                          <span className="font-mono" title={log.record_id}>
+                            {truncateUUID(log.record_id)}
+                          </span>
                         )}
                       </TableCell>
                       <TableCell>

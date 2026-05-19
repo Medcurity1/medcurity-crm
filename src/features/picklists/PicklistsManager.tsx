@@ -48,13 +48,19 @@ const FIELDS: { key: string; label: string; entity: string; help?: string }[] = 
     key: "opportunities.contract_length_months",
     label: "Contract Length",
     entity: "Opportunity",
-    help: "Stored as months (12, 36). Display labels are admin-editable.",
+    help: "Displayed as '1 Year Contract' / '3 Year Contract'. Labels are admin-editable; the underlying value (12 or 36) drives renewal date math.",
   },
   { key: "opportunities.contract_year",     label: "Contract Year",     entity: "Opportunity" },
   { key: "opportunities.payment_frequency", label: "Payment Frequency", entity: "Opportunity" },
   { key: "opportunities.lead_source",       label: "Lead Source",       entity: "Opportunity" },
   // Account
   { key: "accounts.account_type",           label: "Account Type",      entity: "Account" },
+  {
+    key: "accounts.current_contract_length_months",
+    label: "Contract Length (current)",
+    entity: "Account",
+    help: "Current-contract length on Account detail. Same two options as the Opportunity-level field.",
+  },
   { key: "accounts.industry",               label: "Industry",          entity: "Account" },
   { key: "accounts.renewal_type",           label: "Renewal Type",      entity: "Account" },
   // Contact

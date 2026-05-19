@@ -825,8 +825,21 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                   <Input id="current_contract_end_date" type="date" {...register("current_contract_end_date")} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="current_contract_length_months">Contract Length (months)<RequiredIndicator fieldKey="current_contract_length_months" requiredFields={requiredKeys} /></Label>
-                  <Input id="current_contract_length_months" type="number" {...register("current_contract_length_months")} />
+                  <Label htmlFor="current_contract_length_months">Contract Length<RequiredIndicator fieldKey="current_contract_length_months" requiredFields={requiredKeys} /></Label>
+                  <PicklistSelect
+                    id="current_contract_length_months"
+                    fieldKey="accounts.current_contract_length_months"
+                    value={watch("current_contract_length_months") as number | null | undefined}
+                    onChange={(v) =>
+                      setValue(
+                        "current_contract_length_months",
+                        v == null || v === "" ? "" : Number(v),
+                        { shouldDirty: true },
+                      )
+                    }
+                    allowClear
+                    placeholder="Select length…"
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="acv">ACV<RequiredIndicator fieldKey="acv" requiredFields={requiredKeys} /></Label>
