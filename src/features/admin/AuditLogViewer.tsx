@@ -58,6 +58,7 @@ const DATE_RANGE_OPTIONS = [
   { value: "7d", label: "Last 7 days" },
   { value: "30d", label: "Last 30 days" },
   { value: "all", label: "All time" },
+  { value: "custom", label: "Custom range…" },
 ] as const;
 
 const ENTITY_LABELS: Record<string, string> = {
@@ -127,17 +128,51 @@ function formatSourceLabel(source: string | null): string {
   return map[source] ?? `System (${source})`;
 }
 
-function getDateCutoff(range: string): string | null {
+/**
+ * Resolve the active date filter into a (from, until) pair of ISO
+ * timestamps for the RPC. `from`/`until` can each be null for an
+ * open-ended side. Custom range uses the rangeFrom/rangeUntil URL
+ * params (yyyy-MM-dd); preset ranges are computed off now().
+ *
+ * For the custom range, the "to" date is treated as inclusive at the
+ * user level (a user picks Aug 5, they expect to see everything from
+ * that day). We do that by passing `until = nextDay(to)` since the
+ * RPC uses `< date_until`.
+ */
+function getDateBounds(
+  range: string,
+  rangeFrom: string,
+  rangeUntil: string
+): { from: string | null; until: string | null } {
   const now = new Date();
   switch (range) {
     case "24h":
-      return subHours(now, 24).toISOString();
+      return { from: subHours(now, 24).toISOString(), until: null };
     case "7d":
-      return subDays(now, 7).toISOString();
+      return { from: subDays(now, 7).toISOString(), until: null };
     case "30d":
-      return subDays(now, 30).toISOString();
+      return { from: subDays(now, 30).toISOString(), until: null };
+    case "custom": {
+      let from: string | null = null;
+      let until: string | null = null;
+      if (rangeFrom) {
+        const d = parseISO(rangeFrom);
+        if (!isNaN(d.getTime())) from = d.toISOString();
+      }
+      if (rangeUntil) {
+        const d = parseISO(rangeUntil);
+        if (!isNaN(d.getTime())) {
+          // Push to end-of-day exclusive (start of next day) so the
+          // picked "to" date is inclusive in the results.
+          const next = new Date(d);
+          next.setDate(next.getDate() + 1);
+          until = next.toISOString();
+        }
+      }
+      return { from, until };
+    }
     default:
-      return null;
+      return { from: null, until: null };
   }
 }
 
@@ -162,6 +197,8 @@ function useAuditLogs(filters: {
   entity: string;
   action: string;
   dateRange: string;
+  rangeFrom: string;
+  rangeUntil: string;
   search: string;
   recordId: string;
   relatedAccountId: string;
@@ -172,13 +209,19 @@ function useAuditLogs(filters: {
     queryKey: ["audit_logs_search", filters],
     queryFn: async () => {
       const { changedBy, source } = decodeChangerFilter(filters.changer);
+      const { from, until } = getDateBounds(
+        filters.dateRange,
+        filters.rangeFrom,
+        filters.rangeUntil
+      );
       const { data, error } = await supabase.rpc("search_audit_logs", {
         search_term: filters.search || null,
         entity_filter: filters.entity === "all" ? null : filters.entity,
         action_filter: filters.action === "all" ? null : filters.action,
         record_id_filter: filters.recordId || null,
         related_account_id: filters.relatedAccountId || null,
-        date_cutoff: getDateCutoff(filters.dateRange),
+        date_cutoff: from,
+        date_until: until,
         page_offset: filters.page * PAGE_SIZE,
         page_limit: PAGE_SIZE,
         include_count: true,
@@ -233,12 +276,19 @@ async function fetchAllForExport(filters: {
   entity: string;
   action: string;
   dateRange: string;
+  rangeFrom: string;
+  rangeUntil: string;
   search: string;
   recordId: string;
   relatedAccountId: string;
   changer: string;
 }): Promise<AuditLogRow[]> {
   const { changedBy, source } = decodeChangerFilter(filters.changer);
+  const { from, until } = getDateBounds(
+    filters.dateRange,
+    filters.rangeFrom,
+    filters.rangeUntil
+  );
   const all: AuditLogRow[] = [];
   const EXPORT_PAGE = 500;
   const MAX = 2000;
@@ -250,7 +300,8 @@ async function fetchAllForExport(filters: {
       action_filter: filters.action === "all" ? null : filters.action,
       record_id_filter: filters.recordId || null,
       related_account_id: filters.relatedAccountId || null,
-      date_cutoff: getDateCutoff(filters.dateRange),
+      date_cutoff: from,
+      date_until: until,
       page_offset: offset,
       page_limit: EXPORT_PAGE,
       include_count: pageIdx === 0,
@@ -419,6 +470,10 @@ export function AuditLogViewer() {
   const relatedAccountId = searchParams.get("related_account_id") ?? "";
   const dateRange =
     searchParams.get("range") ?? (relatedAccountId ? "all" : "7d");
+  // Custom-range params. yyyy-MM-dd format from <input type="date">.
+  // Only consulted when dateRange === "custom".
+  const rangeFrom = searchParams.get("range_from") ?? "";
+  const rangeUntil = searchParams.get("range_until") ?? "";
   const search = searchParams.get("q") ?? "";
   const recordId = searchParams.get("record_id") ?? "";
   const changer = searchParams.get("changer") ?? "all";
@@ -448,6 +503,8 @@ export function AuditLogViewer() {
     entity,
     action,
     dateRange,
+    rangeFrom,
+    rangeUntil,
     search,
     recordId,
     relatedAccountId,
@@ -465,12 +522,24 @@ export function AuditLogViewer() {
       entity,
       action,
       dateRange,
+      rangeFrom,
+      rangeUntil,
       search,
       recordId,
       relatedAccountId,
       changer,
     }),
-    [entity, action, dateRange, search, recordId, relatedAccountId, changer]
+    [
+      entity,
+      action,
+      dateRange,
+      rangeFrom,
+      rangeUntil,
+      search,
+      recordId,
+      relatedAccountId,
+      changer,
+    ]
   );
 
   function handleSearchSubmit(e: React.FormEvent) {
@@ -650,7 +719,16 @@ export function AuditLogViewer() {
 
           <Select
             value={dateRange}
-            onValueChange={(v) => updateParam("range", v)}
+            onValueChange={(v) => {
+              // When leaving "custom", clear the From/To params so
+              // subsequent loads don't carry stale dates. When entering
+              // it, leave whatever's there (lets the user toggle back).
+              if (v !== "custom") {
+                updateParam("range_from", null);
+                updateParam("range_until", null);
+              }
+              updateParam("range", v);
+            }}
           >
             <SelectTrigger className="w-[170px]">
               <SelectValue placeholder="Date Range" />
@@ -663,6 +741,26 @@ export function AuditLogViewer() {
               ))}
             </SelectContent>
           </Select>
+
+          {dateRange === "custom" && (
+            <>
+              <Input
+                type="date"
+                value={rangeFrom}
+                onChange={(e) => updateParam("range_from", e.target.value)}
+                className="w-[150px]"
+                aria-label="From date"
+              />
+              <span className="text-muted-foreground text-sm">to</span>
+              <Input
+                type="date"
+                value={rangeUntil}
+                onChange={(e) => updateParam("range_until", e.target.value)}
+                className="w-[150px]"
+                aria-label="To date"
+              />
+            </>
+          )}
 
           <Select
             value={changer}
