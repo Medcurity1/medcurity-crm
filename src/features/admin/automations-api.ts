@@ -331,6 +331,7 @@ export interface RenewalPreviewRow {
   do_not_auto_renew: boolean;
   archived: boolean;
   computed_anniversary: string | null;
+  anchor_field: "contract_end_date" | "close_date_plus_12mo" | "none";
   days_until_anniversary: number | null;
   lookahead_days: number;
   test_account_id: string | null;
