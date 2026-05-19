@@ -95,7 +95,36 @@ interface AuditLogRow {
   old_data: Record<string, unknown> | null;
   new_data: Record<string, unknown> | null;
   changer_full_name: string | null;
+  change_source: string | null;
   total_count: number;
+}
+
+interface ChangerOption {
+  changed_by: string | null;
+  full_name: string;
+  is_system: boolean;
+  change_source: string | null;
+  entry_count: number;
+}
+
+/**
+ * Friendly label for system/source rows that the trigger captured
+ * without an authenticated user. Maps the raw GUC value (or
+ * 'service_role' fallback) to something readable.
+ */
+function formatSourceLabel(source: string | null): string {
+  if (!source) return "System";
+  const map: Record<string, string> = {
+    service_role: "System (backend)",
+    sf_import: "Salesforce Import",
+    outlook_sync: "Outlook Sync",
+    pandadoc_sync: "PandaDoc Sync",
+    clickup_sync: "ClickUp Sync",
+    inbound_lead: "Website / Inbound Lead",
+    nexus_activity: "Nexus Activity",
+    task_reminders: "Task Reminders",
+  };
+  return map[source] ?? `System (${source})`;
 }
 
 function getDateCutoff(range: string): string | null {
@@ -112,6 +141,23 @@ function getDateCutoff(range: string): string | null {
   }
 }
 
+/**
+ * Decode the viewer's `changer` filter param into the two RPC inputs.
+ * - "all"             → no filter
+ * - "user:<uuid>"     → changed_by = uuid
+ * - "src:<source>"    → change_source = source (or "__system__" for
+ *                       the legacy NULL+NULL bucket)
+ */
+function decodeChangerFilter(v: string): {
+  changedBy: string | null;
+  source: string | null;
+} {
+  if (!v || v === "all") return { changedBy: null, source: null };
+  if (v.startsWith("user:")) return { changedBy: v.slice(5), source: null };
+  if (v.startsWith("src:")) return { changedBy: null, source: v.slice(4) };
+  return { changedBy: null, source: null };
+}
+
 function useAuditLogs(filters: {
   entity: string;
   action: string;
@@ -119,11 +165,13 @@ function useAuditLogs(filters: {
   search: string;
   recordId: string;
   relatedAccountId: string;
+  changer: string;
   page: number;
 }) {
   return useQuery({
     queryKey: ["audit_logs_search", filters],
     queryFn: async () => {
+      const { changedBy, source } = decodeChangerFilter(filters.changer);
       const { data, error } = await supabase.rpc("search_audit_logs", {
         search_term: filters.search || null,
         entity_filter: filters.entity === "all" ? null : filters.entity,
@@ -135,6 +183,8 @@ function useAuditLogs(filters: {
         page_limit: PAGE_SIZE,
         include_count: true,
         include_data: true,
+        changed_by_filter: changedBy,
+        source_filter: source,
       });
       if (error) throw error;
       const rows = (data ?? []) as AuditLogRow[];
@@ -143,6 +193,23 @@ function useAuditLogs(filters: {
         totalCount: rows[0]?.total_count ?? 0,
       };
     },
+  });
+}
+
+/**
+ * Pulls the list of (user, source) tuples that actually appear in
+ * audit_logs so the "Changed By" dropdown only offers values that
+ * will yield matches.
+ */
+function useChangerOptions() {
+  return useQuery({
+    queryKey: ["audit_log_changers"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("audit_log_changers");
+      if (error) throw error;
+      return (data ?? []) as ChangerOption[];
+    },
+    staleTime: 5 * 60_000, // dropdown contents change slowly
   });
 }
 
@@ -169,7 +236,9 @@ async function fetchAllForExport(filters: {
   search: string;
   recordId: string;
   relatedAccountId: string;
+  changer: string;
 }): Promise<AuditLogRow[]> {
+  const { changedBy, source } = decodeChangerFilter(filters.changer);
   const all: AuditLogRow[] = [];
   const EXPORT_PAGE = 500;
   const MAX = 2000;
@@ -184,8 +253,10 @@ async function fetchAllForExport(filters: {
       date_cutoff: getDateCutoff(filters.dateRange),
       page_offset: offset,
       page_limit: EXPORT_PAGE,
-      include_count: pageIdx === 0, // count once on page 0, skip thereafter
+      include_count: pageIdx === 0,
       include_data: true,
+      changed_by_filter: changedBy,
+      source_filter: source,
     });
     if (error) throw error;
     const rows = (data ?? []) as AuditLogRow[];
@@ -350,6 +421,7 @@ export function AuditLogViewer() {
     searchParams.get("range") ?? (relatedAccountId ? "all" : "7d");
   const search = searchParams.get("q") ?? "";
   const recordId = searchParams.get("record_id") ?? "";
+  const changer = searchParams.get("changer") ?? "all";
   const page = Number(searchParams.get("page") ?? "0");
 
   const [searchInput, setSearchInput] = useState(search);
@@ -379,15 +451,26 @@ export function AuditLogViewer() {
     search,
     recordId,
     relatedAccountId,
+    changer,
     page,
   });
+
+  const { data: changerOptions = [] } = useChangerOptions();
 
   const logs = data?.logs ?? [];
   const totalCount = data?.totalCount ?? 0;
 
   const filters = useMemo(
-    () => ({ entity, action, dateRange, search, recordId, relatedAccountId }),
-    [entity, action, dateRange, search, recordId, relatedAccountId]
+    () => ({
+      entity,
+      action,
+      dateRange,
+      search,
+      recordId,
+      relatedAccountId,
+      changer,
+    }),
+    [entity, action, dateRange, search, recordId, relatedAccountId, changer]
   );
 
   function handleSearchSubmit(e: React.FormEvent) {
@@ -415,7 +498,8 @@ export function AuditLogViewer() {
         Timestamp: formatTimestamp(r.changed_at),
         Entity: ENTITY_LABELS[r.table_name] ?? r.table_name,
         Action: r.action,
-        "Changed By": r.changer_full_name ?? "System",
+        "Changed By":
+          r.changer_full_name ?? formatSourceLabel(r.change_source),
         "Record ID": r.record_id,
         Changes: changesSummaryText(r),
         "Old Data": r.old_data ? JSON.stringify(r.old_data) : "",
@@ -580,6 +664,45 @@ export function AuditLogViewer() {
             </SelectContent>
           </Select>
 
+          <Select
+            value={changer}
+            onValueChange={(v) => updateParam("changer", v)}
+          >
+            <SelectTrigger className="w-[220px]">
+              <SelectValue placeholder="Changed By" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Changes</SelectItem>
+              {/* People who have actually edited records */}
+              {changerOptions
+                .filter((o) => !o.is_system)
+                .map((o) => (
+                  <SelectItem
+                    key={`user:${o.changed_by}`}
+                    value={`user:${o.changed_by}`}
+                  >
+                    {o.full_name} ({o.entry_count.toLocaleString()})
+                  </SelectItem>
+                ))}
+              {/* System sources (imports, syncs, edge functions) */}
+              {changerOptions
+                .filter((o) => o.is_system)
+                .map((o) => {
+                  const key = o.change_source ?? "__system__";
+                  return (
+                    <SelectItem key={`src:${key}`} value={`src:${key}`}>
+                      {formatSourceLabel(
+                        o.change_source === "__system__"
+                          ? null
+                          : o.change_source
+                      )}{" "}
+                      ({o.entry_count.toLocaleString()})
+                    </SelectItem>
+                  );
+                })}
+            </SelectContent>
+          </Select>
+
           <div className="ml-auto flex gap-2">
             <Button
               type="button"
@@ -663,7 +786,18 @@ export function AuditLogViewer() {
                         <ActionBadge action={log.action} />
                       </TableCell>
                       <TableCell className="text-sm">
-                        {log.changer_full_name ?? "System"}
+                        {log.changer_full_name ?? (
+                          <span
+                            className="text-muted-foreground"
+                            title={
+                              log.change_source
+                                ? `Backend caller stamped this row with source = "${log.change_source}". No authenticated user — typical of edge functions, sync jobs, and migration scripts.`
+                                : "No authenticated user when this row was written (e.g. legacy import, service-role write before source tagging existed)."
+                            }
+                          >
+                            {formatSourceLabel(log.change_source)}
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell className="text-sm font-mono">
                         {route ? (
