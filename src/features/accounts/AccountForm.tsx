@@ -435,27 +435,12 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                   </Select>
                 </div>
 
-                {/* Customer Type (lifecycle_status) — moved here from Company
-                    Details so it sits next to Status, matching the detail
-                    page layout (page_layouts seed has it in Basic Info). */}
-                <div className="space-y-2">
-                  <Label>Customer Type<RequiredIndicator fieldKey="lifecycle_status" requiredFields={requiredKeys} /></Label>
-                  <Select
-                    value={watch("lifecycle_status")}
-                    onValueChange={(v) =>
-                      setValue("lifecycle_status", v as AccountFormValues["lifecycle_status"])
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="prospect">Prospect</SelectItem>
-                      <SelectItem value="customer">Customer</SelectItem>
-                      <SelectItem value="former_customer">Former Customer</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                {/* "Customer Type" (lifecycle_status) intentionally removed
+                    from the UI. The SF-imported `status` field (Active /
+                    Inactive / Pending / Discovery / Churned) is the single
+                    source of truth. lifecycle_status remains on the column
+                    so existing dashboard/ARR/churn views don't break — it
+                    will be retired in a follow-up once views migrate. */}
 
                 <div className="space-y-2">
                   <Label>Industry<RequiredIndicator fieldKey="industry_category" requiredFields={requiredKeys} /></Label>

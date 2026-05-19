@@ -904,11 +904,11 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                       <SelectItem value="existing_business">Existing Business</SelectItem>
                       <SelectItem value="existing_business_new_product">Existing Business — New Product</SelectItem>
                       <SelectItem value="existing_business_new_service">Existing Business — New Service</SelectItem>
-                      <SelectItem value="opportunity">Opportunity (in-flight / unclassified)</SelectItem>
+                      <SelectItem value="opportunity">Opportunity</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Revenue-reporting category. Use "Opportunity" for in-flight deals or sales-team closed_lost so a single product loss doesn't roll up as losing a customer.
+                    Revenue-reporting category. Use "Opportunity" for deals still being qualified or where a sales-team closed_lost shouldn't roll up as losing a customer.
                   </p>
                 </div>
 
