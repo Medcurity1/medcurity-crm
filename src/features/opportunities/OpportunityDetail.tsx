@@ -17,6 +17,7 @@ import { RecordId } from "@/components/RecordId";
 import { InlineEdit, type InlineEditProps } from "@/components/InlineEdit";
 import { HelpTooltip } from "@/components/ui/help-tooltip";
 import { useFieldHelpMap } from "@/features/layouts/api";
+import { usePicklistOptionsFor } from "@/features/picklists/api";
 import { OpportunityContacts } from "./OpportunityContacts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -244,6 +245,26 @@ export function OpportunityDetail() {
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { addRecent } = useRecentRecords();
   const helpMap = useFieldHelpMap("opportunities");
+  // Contract Length and Contract Year are picklist-managed (admin-editable
+  // labels in PicklistsManager). The DB stores the raw value (e.g. 12, 36
+  // for length; 1, 2, 3 for year) but UI must show the human label
+  // ("1 Year Contract", "Year 1"). Lookup by string-comparing the value.
+  const { options: contractLengthOptions } = usePicklistOptionsFor(
+    "opportunities.contract_length_months",
+  );
+  const { options: contractYearOptions } = usePicklistOptionsFor(
+    "opportunities.contract_year",
+  );
+  const contractLengthLabel = (v: number | null | undefined): string | null => {
+    if (v == null) return null;
+    const hit = contractLengthOptions.find((o) => o.value === String(v));
+    return hit ? hit.label : String(v);
+  };
+  const contractYearLabel = (v: number | null | undefined): string | null => {
+    if (v == null) return null;
+    const hit = contractYearOptions.find((o) => o.value === String(v));
+    return hit ? hit.label : String(v);
+  };
 
   useEffect(() => {
     if (opp) {
@@ -590,11 +611,11 @@ export function OpportunityDetail() {
           <Field label="Contract Signed" value={formatDate(opp.contract_signed_date)} />
           <Field
             label="Contract Length"
-            value={opp.contract_length_months != null ? `${opp.contract_length_months} months` : null}
+            value={contractLengthLabel(opp.contract_length_months)}
           />
           <Field
             label="Contract Year"
-            value={opp.contract_year != null ? String(opp.contract_year) : null}
+            value={contractYearLabel(opp.contract_year)}
           />
           <Field
             label="Cycle Count"

@@ -1745,7 +1745,7 @@ const FIELD_LABEL_OVERRIDES: Record<string, string> = {
   service_description: "Service Description",
   service_amount: "Service Amount",
   product_amount: "Product Amount",
-  contract_length_months: "Contract Length (Months)",
+  contract_length_months: "Contract Length",
   payment_frequency: "Payment Frequency",
   auto_renewal: "Auto Renewal",
   one_time_project: "One-Time Project",

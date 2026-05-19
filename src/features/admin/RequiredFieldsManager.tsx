@@ -83,7 +83,7 @@ const LABEL_OVERRIDES: Record<string, string> = {
   partner_id: "Partner",
   parent_account_id: "Parent Account",
   primary_contact_id: "Primary Contact",
-  current_contract_length_months: "Contract Length (months)",
+  current_contract_length_months: "Contract Length",
   current_contract_start_date: "Contract Start Date",
   current_contract_end_date: "Contract End Date",
 };
