@@ -5,6 +5,7 @@ import type {
   AccountLifecycle,
   AccountStatus,
   OpportunityKind,
+  OpportunityBusinessType,
   LeadStatus,
   LeadSource,
   LeadQualification,
@@ -45,6 +46,14 @@ const kindColors: Record<OpportunityKind, string> = {
   renewal: "bg-teal-100 text-teal-700",
 };
 
+const businessTypeColors: Record<OpportunityBusinessType, string> = {
+  new_business: "bg-violet-100 text-violet-700",
+  existing_business: "bg-teal-100 text-teal-700",
+  existing_business_new_product: "bg-indigo-100 text-indigo-700",
+  existing_business_new_service: "bg-cyan-100 text-cyan-700",
+  opportunity: "bg-slate-100 text-slate-700",
+};
+
 const leadStatusColors: Record<LeadStatus, string> = {
   new: "bg-blue-100 text-blue-700",
   contacted: "bg-amber-100 text-amber-700",
@@ -76,7 +85,7 @@ const qualificationColors: Record<LeadQualification, string> = {
   sal: "bg-amber-100 text-amber-700",
 };
 
-type BadgeVariant = "stage" | "lifecycle" | "kind" | "status" | "leadStatus" | "leadSource" | "qualification";
+type BadgeVariant = "stage" | "lifecycle" | "kind" | "businessType" | "status" | "leadStatus" | "leadSource" | "qualification";
 
 interface StatusBadgeProps {
   value: string;
@@ -90,6 +99,7 @@ export function StatusBadge({ value, variant, label }: StatusBadgeProps) {
   if (variant === "lifecycle") colorClass = lifecycleColors[value as AccountLifecycle] ?? "";
   if (variant === "status") colorClass = statusColors[value as AccountStatus] ?? "";
   if (variant === "kind") colorClass = kindColors[value as OpportunityKind] ?? "";
+  if (variant === "businessType") colorClass = businessTypeColors[value as OpportunityBusinessType] ?? "";
   if (variant === "leadStatus") colorClass = leadStatusColors[value as LeadStatus] ?? "";
   if (variant === "leadSource") colorClass = leadSourceColors[value as LeadSource] ?? "";
   if (variant === "qualification") colorClass = qualificationColors[value as LeadQualification] ?? "";

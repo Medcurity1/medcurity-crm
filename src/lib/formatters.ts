@@ -1,5 +1,5 @@
 import { format, formatDistanceToNow, parseISO, differenceInDays } from "date-fns";
-import type { OpportunityStage, AccountLifecycle, AccountStatus, RenewalType, ActivityType, OpportunityKind, OpportunityTeam, LeadStatus, LeadSource, PaymentFrequency, LeadQualification, IndustryCategory, ProjectSegment } from "@/types/crm";
+import type { OpportunityStage, AccountLifecycle, AccountStatus, RenewalType, ActivityType, OpportunityKind, OpportunityBusinessType, OpportunityTeam, LeadStatus, LeadSource, PaymentFrequency, LeadQualification, IndustryCategory, ProjectSegment } from "@/types/crm";
 
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -93,6 +93,26 @@ const kindLabels: Record<OpportunityKind, string> = {
 
 export function kindLabel(kind: OpportunityKind): string {
   return kindLabels[kind];
+}
+
+// business_type is the user-facing classification. `kind` was the
+// Claude-era binary (new_business vs renewal) — still populated by
+// triggers for the Sales/Renewals pipeline buckets, but no longer
+// shown to users. business_type carries the richer distinction
+// (existing-business expansions, in-flight "Opportunity", etc.).
+const businessTypeLabels: Record<OpportunityBusinessType, string> = {
+  new_business: "New Business",
+  existing_business: "Existing Business",
+  existing_business_new_product: "Existing Business — New Product",
+  existing_business_new_service: "Existing Business — New Service",
+  opportunity: "Opportunity",
+};
+
+export function businessTypeLabel(
+  bt: OpportunityBusinessType | null | undefined,
+): string {
+  if (!bt) return "—";
+  return businessTypeLabels[bt] ?? bt;
 }
 
 const teamLabels: Record<OpportunityTeam, string> = {

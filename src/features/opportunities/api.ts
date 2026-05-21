@@ -7,6 +7,7 @@ interface OppFilters {
   stage?: string | string[];
   team?: string | string[];
   kind?: string | string[];
+  business_type?: string | string[];
   account_id?: string;
   ownerId?: string | "mine" | string[];
   verified?: "true" | "false";
@@ -106,6 +107,14 @@ export function useOpportunities(filters?: OppFilters) {
           if (filters.kind.length > 0) query = query.in("kind", filters.kind);
         } else {
           query = query.eq("kind", filters.kind);
+        }
+      }
+      if (filters?.business_type) {
+        if (Array.isArray(filters.business_type)) {
+          if (filters.business_type.length > 0)
+            query = query.in("business_type", filters.business_type);
+        } else {
+          query = query.eq("business_type", filters.business_type);
         }
       }
       if (filters?.account_id) query = query.eq("account_id", filters.account_id);
@@ -231,6 +240,14 @@ export function useOpportunitiesTotals(filters?: Omit<OppFilters, "page" | "page
             if (filters.kind.length > 0) q = q.in("kind", filters.kind);
           } else {
             q = q.eq("kind", filters.kind);
+          }
+        }
+        if (filters?.business_type) {
+          if (Array.isArray(filters.business_type)) {
+            if (filters.business_type.length > 0)
+              q = q.in("business_type", filters.business_type);
+          } else {
+            q = q.eq("business_type", filters.business_type);
           }
         }
         if (filters?.account_id) q = q.eq("account_id", filters.account_id);
