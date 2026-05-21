@@ -36,7 +36,7 @@ import { cn } from "@/lib/utils";
 import type { OpportunityStage } from "@/types/crm";
 import {
   stageLabel,
-  kindLabel,
+  businessTypeLabel,
   teamLabel,
   formatCurrency,
   formatCurrencyDetailed,
@@ -349,7 +349,13 @@ export function OpportunityDetail() {
               invalidateKeys={[["opportunity", opp.id]]}
             />
             <StatusBadge value={opp.stage} variant="stage" label={stageLabel(opp.stage)} />
-            <StatusBadge value={opp.kind} variant="kind" label={kindLabel(opp.kind)} />
+            {opp.business_type ? (
+              <StatusBadge
+                value={opp.business_type}
+                variant="businessType"
+                label={businessTypeLabel(opp.business_type)}
+              />
+            ) : null}
             <Button variant="outline" size="sm" onClick={() => setShowChangeOwner(true)}>
               <UserRoundCog className="h-4 w-4 mr-1" />
               Change Owner

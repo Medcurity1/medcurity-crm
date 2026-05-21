@@ -36,7 +36,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { stageLabel, kindLabel, formatCurrency, formatDate } from "@/lib/formatters";
+import { stageLabel, businessTypeLabel, formatCurrency, formatDate } from "@/lib/formatters";
 
 const PAGE_SIZE = 25;
 
@@ -47,7 +47,11 @@ export function OpportunitiesList() {
   const [search, setSearch] = useDebouncedUrlState("q", "");
   const [stageFilter, setStageFilter] = useUrlArrayState("stage");
   const [teamFilter, setTeamFilter] = useUrlArrayState("team");
-  const [kindFilter, setKindFilter] = useUrlArrayState("kind");
+  // Filter by business_type (5-value richer classification). The
+  // legacy `kind` (new_business / renewal) is still used internally
+  // by PipelineBoard to bucket Sales vs Renewals tabs, but no longer
+  // exposed to users in the list view or detail badge.
+  const [businessTypeFilter, setBusinessTypeFilter] = useUrlArrayState("business_type");
   const [ownerFilter, setOwnerFilter] = useUrlArrayState("owner");
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
   // Date-range filter: ISO YYYY-MM-DD on close_date. Set by KPI
@@ -72,7 +76,7 @@ export function OpportunitiesList() {
     search: search || undefined,
     stage: stageFilter.length ? stageFilter : undefined,
     team: teamFilter.length ? teamFilter : undefined,
-    kind: kindFilter.length ? kindFilter : undefined,
+    business_type: businessTypeFilter.length ? businessTypeFilter : undefined,
     ownerId: ownerFilter.length > 0 ? ownerFilter : undefined,
     verified:
       verifiedFilter === "verified"
@@ -199,13 +203,16 @@ export function OpportunitiesList() {
           ]}
         />
         <MultiSelect
-          value={kindFilter}
-          onChange={(v) => { setKindFilter(v); setPage(0); }}
-          placeholder="All Types"
-          triggerClassName="w-36"
+          value={businessTypeFilter}
+          onChange={(v) => { setBusinessTypeFilter(v); setPage(0); }}
+          placeholder="All Business Types"
+          triggerClassName="w-44"
           options={[
             { value: "new_business", label: "New Business" },
-            { value: "renewal", label: "Renewal" },
+            { value: "existing_business", label: "Existing Business" },
+            { value: "existing_business_new_product", label: "Existing Business — New Product" },
+            { value: "existing_business_new_service", label: "Existing Business — New Service" },
+            { value: "opportunity", label: "Opportunity" },
           ]}
         />
         <MultiSelect
@@ -253,10 +260,10 @@ export function OpportunitiesList() {
         <EmptyState
           icon={Target}
           title="No opportunities found"
-          description={search || stageFilter.length || teamFilter.length || kindFilter.length
+          description={search || stageFilter.length || teamFilter.length || businessTypeFilter.length
             ? "Try adjusting your filters"
             : "Create your first opportunity"}
-          action={!search && !stageFilter.length && !teamFilter.length && !kindFilter.length ? {
+          action={!search && !stageFilter.length && !teamFilter.length && !businessTypeFilter.length ? {
             label: "New Opportunity",
             onClick: () => navigate("/opportunities/new"),
           } : undefined}
@@ -342,7 +349,7 @@ export function OpportunitiesList() {
                   <SortableHeader column="name" sort={sort} onSort={handleSort}>Name</SortableHeader>
                   <SortableHeader column="account.name" sort={sort} onSort={handleSort}>Account</SortableHeader>
                   <SortableHeader column="stage" sort={sort} onSort={handleSort}>Stage</SortableHeader>
-                  <SortableHeader column="kind" sort={sort} onSort={handleSort}>Kind</SortableHeader>
+                  <SortableHeader column="business_type" sort={sort} onSort={handleSort}>Business Type</SortableHeader>
                   <SortableHeader column="amount" sort={sort} onSort={handleSort} className="text-right">Amount</SortableHeader>
                   <SortableHeader column="expected_close_date" sort={sort} onSort={handleSort}>Expected Close</SortableHeader>
                   <SortableHeader column="close_date" sort={sort} onSort={handleSort}>Close Date</SortableHeader>
@@ -383,7 +390,15 @@ export function OpportunitiesList() {
                       <StatusBadge value={opp.stage} variant="stage" label={stageLabel(opp.stage)} />
                     </TableCell>
                     <TableCell>
-                      <StatusBadge value={opp.kind} variant="kind" label={kindLabel(opp.kind)} />
+                      {opp.business_type ? (
+                        <StatusBadge
+                          value={opp.business_type}
+                          variant="businessType"
+                          label={businessTypeLabel(opp.business_type)}
+                        />
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right font-medium">
                       {formatCurrency(opp.amount)}
