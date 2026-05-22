@@ -30,7 +30,34 @@ type LeadResult = Pick<Lead, "id" | "first_name" | "last_name" | "email" | "comp
 
 const DEBOUNCE_MS = 300;
 const MIN_SEARCH_LENGTH = 2;
-const RESULTS_PER_ENTITY = 5;
+// Per-entity cap shown in the dropdown after re-ranking.
+const RESULTS_PER_ENTITY = 10;
+// Fetch a wider net from the DB so we can re-rank prefix matches
+// above substring matches. With the old limit=5 and no order, an
+// arbitrary 5 substring matches could come back and bury the
+// actual prefix match (e.g. "entre" returned "Endoscopic Surgical
+// Centre of Maryland" before "Entre Technology Services").
+const FETCH_LIMIT = 40;
+
+/**
+ * Re-rank server results so prefix matches on the displayed label
+ * float to the top, then case-insensitive alphabetical. The DB
+ * uses plain ilike '%q%' which doesn't distinguish prefix from
+ * mid-string matches; this is the cheapest fix that doesn't
+ * require a pg_trgm/ts_vector migration.
+ */
+function rankResults<T>(rows: T[] | undefined, query: string, labelOf: (row: T) => string): T[] {
+  if (!rows) return [];
+  const q = query.toLowerCase();
+  return [...rows].sort((a, b) => {
+    const la = labelOf(a).toLowerCase();
+    const lb = labelOf(b).toLowerCase();
+    const aPrefix = la.startsWith(q) ? 0 : 1;
+    const bPrefix = lb.startsWith(q) ? 0 : 1;
+    if (aPrefix !== bPrefix) return aPrefix - bPrefix;
+    return la.localeCompare(lb);
+  });
+}
 
 const lifecycleLabels: Record<AccountLifecycle, string> = {
   prospect: "Prospect",
@@ -106,7 +133,7 @@ export function GlobalSearch() {
         .select("id, name, lifecycle_status")
         .is("archived_at", null)
         .ilike("name", searchPattern)
-        .limit(RESULTS_PER_ENTITY);
+        .limit(FETCH_LIMIT);
       if (error) throw error;
       return data as AccountResult[];
     },
@@ -126,7 +153,7 @@ export function GlobalSearch() {
         .select("id, first_name, last_name, email")
         .is("archived_at", null);
       if (orClause) q = q.or(orClause);
-      const { data, error } = await q.limit(RESULTS_PER_ENTITY);
+      const { data, error } = await q.limit(FETCH_LIMIT);
       if (error) throw error;
       return data as ContactResult[];
     },
@@ -141,7 +168,7 @@ export function GlobalSearch() {
         .select("id, name, stage, amount")
         .is("archived_at", null)
         .ilike("name", searchPattern)
-        .limit(RESULTS_PER_ENTITY);
+        .limit(FETCH_LIMIT);
       if (error) throw error;
       return data as OpportunityResult[];
     },
@@ -161,7 +188,7 @@ export function GlobalSearch() {
         .from("leads")
         .select("id, first_name, last_name, email, company, status");
       if (orClause) q = q.or(orClause);
-      const { data, error } = await q.limit(RESULTS_PER_ENTITY);
+      const { data, error } = await q.limit(FETCH_LIMIT);
       if (error) throw error;
       return data as LeadResult[];
     },
@@ -173,11 +200,32 @@ export function GlobalSearch() {
     navigate(path);
   }
 
+  // Re-rank: prefix matches first, then alphabetical. Capped at
+  // RESULTS_PER_ENTITY per group after ranking.
+  const rankedAccounts = rankResults(accounts, debouncedQuery, (r) => r.name).slice(
+    0,
+    RESULTS_PER_ENTITY,
+  );
+  const rankedContacts = rankResults(
+    contacts,
+    debouncedQuery,
+    (r) => `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(),
+  ).slice(0, RESULTS_PER_ENTITY);
+  const rankedOpportunities = rankResults(opportunities, debouncedQuery, (r) => r.name).slice(
+    0,
+    RESULTS_PER_ENTITY,
+  );
+  const rankedLeads = rankResults(
+    leads,
+    debouncedQuery,
+    (r) => `${r.first_name ?? ""} ${r.last_name ?? ""} ${r.company ?? ""}`.trim(),
+  ).slice(0, RESULTS_PER_ENTITY);
+
   const hasResults =
-    (accounts && accounts.length > 0) ||
-    (contacts && contacts.length > 0) ||
-    (opportunities && opportunities.length > 0) ||
-    (leads && leads.length > 0);
+    rankedAccounts.length > 0 ||
+    rankedContacts.length > 0 ||
+    rankedOpportunities.length > 0 ||
+    rankedLeads.length > 0;
 
   return (
     <>
@@ -222,9 +270,9 @@ export function GlobalSearch() {
             </div>
           )}
 
-          {accounts && accounts.length > 0 && (
+          {rankedAccounts.length > 0 && (
             <CommandGroup heading="Accounts">
-              {accounts.map((account) => (
+              {rankedAccounts.map((account) => (
                 <CommandItem
                   key={account.id}
                   value={`account-${account.name}`}
@@ -240,9 +288,9 @@ export function GlobalSearch() {
             </CommandGroup>
           )}
 
-          {contacts && contacts.length > 0 && (
+          {rankedContacts.length > 0 && (
             <CommandGroup heading="Contacts">
-              {contacts.map((contact) => (
+              {rankedContacts.map((contact) => (
                 <CommandItem
                   key={contact.id}
                   value={`contact-${contact.first_name} ${contact.last_name}`}
@@ -262,9 +310,9 @@ export function GlobalSearch() {
             </CommandGroup>
           )}
 
-          {opportunities && opportunities.length > 0 && (
+          {rankedOpportunities.length > 0 && (
             <CommandGroup heading="Opportunities">
-              {opportunities.map((opp) => (
+              {rankedOpportunities.map((opp) => (
                 <CommandItem
                   key={opp.id}
                   value={`opportunity-${opp.name}`}
@@ -282,9 +330,9 @@ export function GlobalSearch() {
             </CommandGroup>
           )}
 
-          {leads && leads.length > 0 && (
+          {rankedLeads.length > 0 && (
             <CommandGroup heading="Leads">
-              {leads.map((lead) => (
+              {rankedLeads.map((lead) => (
                 <CommandItem
                   key={lead.id}
                   value={`lead-${lead.first_name} ${lead.last_name}`}
