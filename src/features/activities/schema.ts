@@ -11,6 +11,14 @@ export const activityFormSchema = z.object({
   }),
   subject: z.string().min(1, "Subject is required"),
   body: z.string().optional(),
+  /**
+   * When the interaction happened (or was logged). Applies to all
+   * activity types. Defaults to today at form open.
+   */
+  activity_date: z.string().optional(),
+  /**
+   * Only meaningful for tasks. When the task is due.
+   */
   due_at: z.string().optional(),
   /**
    * Which contact this interaction was with. Optional — activities

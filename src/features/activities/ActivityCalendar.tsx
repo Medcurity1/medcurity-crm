@@ -83,11 +83,13 @@ function useMonthActivities(year: number, month: number) {
 
 /**
  * Pick the date the user actually cares about for calendar placement.
- *   - Tasks + meetings: due_at (when it's scheduled to happen)
- *   - Completed items: completed_at (when it actually happened)
- *   - Everything else: created_at (when it was logged)
+ *   - Tasks: due_at (when it's scheduled to happen)
+ *   - Everything else: activity_date (when the interaction happened)
+ *   - Fallbacks: completed_at, created_at for legacy rows
  */
 function activityCalendarDate(a: CalendarActivity): string {
+  if (a.activity_type === "task" && a.due_at) return a.due_at;
+  if (a.activity_date) return a.activity_date;
   if (a.due_at) return a.due_at;
   if (a.completed_at) return a.completed_at;
   return a.created_at;

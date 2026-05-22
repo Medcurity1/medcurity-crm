@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -7,6 +7,7 @@ import type { Contact } from "@/types/crm";
 import { PicklistSelect } from "@/features/picklists/PicklistSelect";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { US_STATES } from "@/lib/us-states";
+import { looksLikeUsZip, zipToTimeZone } from "@/lib/us-zip";
 import { PhoneInput } from "@/components/PhoneInput";
 import { useAccountsList } from "@/features/accounts/api";
 import { useUsers } from "@/features/accounts/api";
@@ -470,7 +471,26 @@ function ContactFormInner({
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="mailing_zip">Postal Code</Label>
-                  <Input id="mailing_zip" {...register("mailing_zip")} />
+                  <Input
+                    id="mailing_zip"
+                    {...register("mailing_zip", {
+                      // Auto-fill country and time_zone when the rep
+                      // types a US zip and tabs out — only fills in
+                      // empty fields so we never overwrite a manual
+                      // selection.
+                      onBlur: (e) => {
+                        const zip = e.target.value;
+                        if (!zip) return;
+                        if (looksLikeUsZip(zip) && !watch("mailing_country")) {
+                          setValue("mailing_country", "United States");
+                        }
+                        const tz = zipToTimeZone(zip);
+                        if (tz && !watch("time_zone")) {
+                          setValue("time_zone", tz as never);
+                        }
+                      },
+                    })}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="mailing_country">Country</Label>
@@ -498,24 +518,11 @@ function ContactFormInner({
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="events_attended">Events Attended</Label>
-              <Input
-                id="events_attended"
-                placeholder="HIMSS 2026, RSA 2025, ..."
-                value={(watch("events_attended") ?? []).join(", ")}
-                onChange={(e) => {
-                  const parts = e.target.value
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean);
-                  setValue("events_attended", parts.length > 0 ? parts : null);
-                }}
-              />
-              <p className="text-xs text-muted-foreground">
-                Comma-separated list of conferences or events this contact has attended.
-              </p>
-            </div>
+            <EventsAttendedField
+              value={watch("events_attended") ?? null}
+              onChange={(next) => setValue("events_attended", next)}
+            />
+
 
             <div className="space-y-2">
               <Label htmlFor="notes">Notes</Label>
@@ -541,3 +548,64 @@ function ContactFormInner({
     </div>
   );
 }
+
+/**
+ * Events Attended is conceptually an array of strings (one per event)
+ * but the friendliest UI is a single comma-separated text field. The
+ * earlier implementation parsed + re-joined on every keystroke, which
+ * stripped trailing/leading whitespace mid-typing — so typing a space
+ * after "HIMSS" got eaten before the user could finish "HIMSS 2026".
+ *
+ * Fix: track the raw input string locally and only normalize to the
+ * array form when the user blurs the field (or the parent resets the
+ * value externally). The form submit still receives the canonical
+ * array, but the keystrokes feel like a normal text input.
+ */
+function EventsAttendedField({
+  value,
+  onChange,
+}: {
+  value: string[] | null;
+  onChange: (next: string[] | null) => void;
+}) {
+  const [raw, setRaw] = useState(() => (value ?? []).join(", "));
+
+  // If the form is reset externally (e.g. switching from one contact
+  // to another in edit mode) and our locally-tracked text no longer
+  // matches the canonical array, re-sync. Compare by canonicalized
+  // representation so we don't clobber mid-typing punctuation.
+  useEffect(() => {
+    const canonical = (value ?? []).join(", ");
+    setRaw((prev) => {
+      const prevTokens = prev
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .join(", ");
+      return prevTokens === canonical ? prev : canonical;
+    });
+  }, [value]);
+
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="events_attended">Events Attended</Label>
+      <Input
+        id="events_attended"
+        placeholder="HIMSS 2026, RSA 2025, ..."
+        value={raw}
+        onChange={(e) => setRaw(e.target.value)}
+        onBlur={() => {
+          const parts = raw
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+          onChange(parts.length > 0 ? parts : null);
+        }}
+      />
+      <p className="text-xs text-muted-foreground">
+        Comma-separated list of conferences or events this contact has attended.
+      </p>
+    </div>
+  );
+}
+

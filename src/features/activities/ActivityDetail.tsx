@@ -150,13 +150,19 @@ export function ActivityDetail() {
               Owner: <span className="text-foreground">{activity.owner.full_name}</span>
             </div>
           )}
-          {activity.due_at && (
+          {activity.activity_type === "task" && activity.due_at && (
             <div className="text-muted-foreground inline-flex items-center gap-1">
               <Clock className="h-3.5 w-3.5" /> Due {formatDate(activity.due_at)}
             </div>
           )}
-          <div className="text-muted-foreground">
-            Created {formatRelativeDate(activity.created_at)} ·{" "}
+          {activity.activity_date && (
+            <div className="text-muted-foreground">
+              Activity Date {formatRelativeDate(activity.activity_date)} ·{" "}
+              {formatDate(activity.activity_date)}
+            </div>
+          )}
+          <div className="text-muted-foreground text-xs">
+            Logged {formatRelativeDate(activity.created_at)} ·{" "}
             {formatDate(activity.created_at)}
           </div>
           {/* Related record links */}

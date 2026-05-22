@@ -549,6 +549,11 @@ export interface Activity {
   subject: string;
   body: string | null;
   due_at: string | null;
+  // When the interaction actually happened (or was logged). For
+  // tasks this is the create date; for calls/meetings/emails it's
+  // the date the rep selected. Distinct from due_at which is task-
+  // specific. See migration 20260522000002.
+  activity_date: string | null;
   completed_at: string | null;
   created_at: string;
   updated_at: string;

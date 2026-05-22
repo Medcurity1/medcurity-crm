@@ -220,6 +220,28 @@ export function useArchiveAccount() {
   });
 }
 
+/**
+ * Hard-delete an account. Admin-only. Mirrors useDeleteOpportunity:
+ * prefer Archive for "I might want this back" — Delete is irreversible
+ * and cascades through related records via existing FK on-delete
+ * rules.
+ */
+export function useDeleteAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id }: { id: string }) => {
+      const { error } = await supabase.from("accounts").delete().eq("id", id);
+      if (error) throw error;
+      return id;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+    },
+  });
+}
+
 export function useAccountContracts(accountId: string | undefined) {
   return useQuery({
     queryKey: ["account_contracts", accountId],

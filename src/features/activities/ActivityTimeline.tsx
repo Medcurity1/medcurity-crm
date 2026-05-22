@@ -307,12 +307,13 @@ function renderGroupedByMonth(
     onEdit: (a: Activity) => void;
   }
 ) {
-  // Pick the sort-key date for each entry. Emails / notes / calls use
-  // created_at; tasks/meetings prefer due_at when set since that's
-  // what the user actually scheduled it for.
+  // Sort key — prefer activity_date (when the interaction happened)
+  // over created_at (when it was logged). Falls back through due_at
+  // for legacy rows where activity_date hasn't been backfilled yet
+  // (the migration covers existing rows, but in-flight rows may lag).
   const keyDate = (e: Activity | ThreadGroup): string => {
     const a = (e as ThreadGroup).threadKey ? (e as ThreadGroup).primary : (e as Activity);
-    return a.due_at || a.created_at;
+    return a.activity_date || a.due_at || a.created_at;
   };
 
   // Group by "YYYY-MM". Keeps insertion order since entries are already
@@ -481,12 +482,21 @@ function ActivityEntry({
           {isCompleted && (
             <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
           )}
-          <span
-            className="text-xs text-muted-foreground whitespace-nowrap shrink-0"
-            title={formatDate(activity.created_at)}
-          >
-            {formatRelativeDate(activity.created_at)} · {formatDate(activity.created_at)}
-          </span>
+          {(() => {
+            // Show activity_date (when it actually happened) rather
+            // than created_at (when the row was inserted). Falls back
+            // to created_at for legacy rows that haven't been
+            // backfilled yet.
+            const displayDate = activity.activity_date || activity.created_at;
+            return (
+              <span
+                className="text-xs text-muted-foreground whitespace-nowrap shrink-0"
+                title={formatDate(displayDate)}
+              >
+                {formatRelativeDate(displayDate)} · {formatDate(displayDate)}
+              </span>
+            );
+          })()}
           {/* Explicit edit button. Kept small + at the right edge
               so it doesn't compete with the subject click target.
               Only shown when onEdit is provided by the parent
