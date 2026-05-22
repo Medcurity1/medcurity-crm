@@ -552,7 +552,10 @@ async function createEmailActivity(
     activity_type: "email",
     subject: `${dirLabel}: ${email.subject}`,
     body: email.body,
-    completed_at: new Date(email.date).toISOString(),
+    // Write the email's sent/received date to activity_date so the
+    // timeline shows the real send time, not the sync time. Emails
+    // are not tasks and shouldn't be marked "completed".
+    activity_date: new Date(email.date).toISOString(),
     external_message_id: externalId,
     email_direction: email.direction,
     email_from: email.from || null,

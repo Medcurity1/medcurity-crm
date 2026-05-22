@@ -53,6 +53,7 @@ interface CreateActivityInput {
   activity_type: string;
   subject: string;
   body?: string;
+  activity_date?: string | null;
   due_at?: string | null;
   reminder_schedule?: "none" | "once" | "daily" | "weekdays" | "weekly";
   reminder_at?: string | null;
@@ -178,6 +179,7 @@ export function useUpdateActivity() {
       activity_type?: "call" | "email" | "meeting" | "note" | "task";
       subject?: string;
       body?: string | null;
+      activity_date?: string | null;
       due_at?: string | null;
       // Allow re-attributing the contact on an existing activity. Reps
       // sometimes log an interaction before they remember which contact

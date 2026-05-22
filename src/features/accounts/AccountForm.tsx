@@ -11,6 +11,7 @@ import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { accountSchema, type AccountFormValues } from "./schema";
 import { FTE_RANGES, employeesToFteRange } from "@/lib/formatters";
 import { US_STATES } from "@/lib/us-states";
+import { looksLikeUsZip, zipToTimeZone } from "@/lib/us-zip";
 import { PhoneInput } from "@/components/PhoneInput";
 import { errorMessage } from "@/lib/errors";
 import { PageHeader } from "@/components/PageHeader";
@@ -235,6 +236,35 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
           custom_fields: {},
         },
   });
+
+  // When the rep types a US zip and tabs out, auto-fill country and
+  // timezone if those fields are still blank. We never overwrite a
+  // value the user already typed — this only fills in the empties.
+  // The timezone field on Account is a free-text string (free-form so
+  // it can hold IANA names for foreign offices later), so we use the
+  // common US/* labels.
+  const TIMEZONE_LABELS: Record<string, string> = {
+    eastern: "US/Eastern",
+    central: "US/Central",
+    mountain: "US/Mountain",
+    pacific: "US/Pacific",
+    alaska: "US/Alaska",
+    hawaii: "US/Hawaii",
+    arizona_no_dst: "US/Arizona",
+  };
+  function autofillFromZip(
+    zip: string,
+    countryField: "billing_country" | "shipping_country",
+  ) {
+    if (!zip) return;
+    if (looksLikeUsZip(zip) && !watch(countryField)) {
+      setValue(countryField, "United States");
+    }
+    const tz = zipToTimeZone(zip);
+    if (tz && !watch("timezone")) {
+      setValue("timezone", TIMEZONE_LABELS[tz]);
+    }
+  }
 
   // Copy billing -> shipping when checkbox toggled
   useEffect(() => {
@@ -645,7 +675,13 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="billing_zip">Zip</Label>
-                  <Input id="billing_zip" {...register("billing_zip")} />
+                  <Input
+                    id="billing_zip"
+                    {...register("billing_zip", {
+                      onBlur: (e) =>
+                        autofillFromZip(e.target.value, "billing_country"),
+                    })}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="billing_country">Country</Label>
@@ -698,7 +734,14 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="shipping_zip">Zip</Label>
-                  <Input id="shipping_zip" disabled={sameAsBilling} {...register("shipping_zip")} />
+                  <Input
+                    id="shipping_zip"
+                    disabled={sameAsBilling}
+                    {...register("shipping_zip", {
+                      onBlur: (e) =>
+                        autofillFromZip(e.target.value, "shipping_country"),
+                    })}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="shipping_country">Country</Label>

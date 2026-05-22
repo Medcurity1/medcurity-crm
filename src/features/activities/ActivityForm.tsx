@@ -146,7 +146,8 @@ export function ActivityForm({
       activity_type: "call",
       subject: "",
       body: "",
-      due_at: todayLocalISO(),
+      activity_date: todayLocalISO(),
+      due_at: "",
       contact_id: contactId ?? null,
       reminder_schedule: "none",
       reminder_at: "",
@@ -186,6 +187,11 @@ export function ActivityForm({
         activity_type: activity.activity_type,
         subject: activity.subject ?? "",
         body: activity.body ?? "",
+        activity_date: activity.activity_date
+          ? activity.activity_date.slice(0, 10)
+          : activity.created_at
+            ? activity.created_at.slice(0, 10)
+            : todayLocalISO(),
         due_at: activity.due_at ? activity.due_at.slice(0, 10) : "",
         contact_id: activity.contact_id ?? null,
         reminder_schedule:
@@ -200,7 +206,8 @@ export function ActivityForm({
         activity_type: "call",
         subject: "",
         body: "",
-        due_at: todayLocalISO(),
+        activity_date: todayLocalISO(),
+        due_at: "",
         contact_id: contactId ?? null,
         reminder_schedule: "none",
         reminder_at: "",
@@ -224,7 +231,12 @@ export function ActivityForm({
         : ["in_app"]
     ) as Array<"in_app" | "email">;
 
-    const dueAtIso = dateToLocalNoonISO(values.due_at ?? "");
+    // Activity date applies to every type; falls back to "today" if
+    // the user cleared the field. Due date only applies to tasks.
+    const activityDateIso =
+      dateToLocalNoonISO(values.activity_date ?? "") ??
+      dateToLocalNoonISO(todayLocalISO())!;
+    const dueAtIso = isTask ? dateToLocalNoonISO(values.due_at ?? "") : null;
     // Prop wins when the form was opened from a contact's own page
     // (locked picker); otherwise honor whatever the user picked, which
     // may legitimately be "no contact" (null) for account-level logs.
@@ -238,6 +250,7 @@ export function ActivityForm({
           activity_type: values.activity_type,
           subject: values.subject,
           body: values.body || null,
+          activity_date: activityDateIso,
           due_at: dueAtIso,
           contact_id: resolvedContactId,
           reminder_schedule: reminderSchedule,
@@ -262,6 +275,7 @@ export function ActivityForm({
         activity_type: values.activity_type,
         subject: values.subject,
         body: values.body || undefined,
+        activity_date: activityDateIso,
         due_at: dueAtIso ?? undefined,
         account_id: accountId,
         contact_id: resolvedContactId ?? undefined,
@@ -413,19 +427,32 @@ export function ActivityForm({
             />
           </div>
 
-          {/* Date / Due date — tasks get a FUTURE due-date, other types
-              log the date the interaction happened. Default to today on
-              non-task creation so reps don't need to pick anything. */}
-          <div className="space-y-2">
-            <Label htmlFor="due_at">
-              {selectedType === "task" ? "Due Date" : "Date"}
+          {/* Due Date — tasks only. This is the main scheduling input
+              for a task and what the timeline displays prominently. */}
+          {selectedType === "task" && (
+            <div className="space-y-2">
+              <Label htmlFor="due_at">Due Date</Label>
+              <Input id="due_at" type="date" {...form.register("due_at")} />
+            </div>
+          )}
+
+          {/* Activity Date — when this interaction actually happened
+              (or was logged). Defaults to today. Reps can backdate
+              when they're catching up on logging from earlier in the
+              week. Applies to every activity type, including tasks
+              (separate from when the task is due). */}
+          <div className="space-y-1">
+            <Label htmlFor="activity_date" className="text-xs text-muted-foreground">
+              Activity Date {selectedType === "task" && "(when logged — optional)"}
             </Label>
-            <Input id="due_at" type="date" {...form.register("due_at")} />
-            {selectedType !== "task" && (
-              <p className="text-xs text-muted-foreground">
-                Leave blank to use today.
-              </p>
-            )}
+            <Input
+              id="activity_date"
+              type="date"
+              {...form.register("activity_date")}
+            />
+            <p className="text-xs text-muted-foreground">
+              Defaults to today. Change to backdate.
+            </p>
           </div>
 
           {/* Reminder controls — only for tasks. When schedule != none,

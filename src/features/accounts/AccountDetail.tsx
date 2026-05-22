@@ -2,8 +2,8 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Pencil, Archive, ExternalLink, ChevronDown, Phone, UserRoundCog, Plus, MapPin, History } from "lucide-react";
-import { useAccount, useUpdateAccount, useArchiveAccount, useAccountContracts } from "./api";
+import { Pencil, Archive, ExternalLink, ChevronDown, Phone, UserRoundCog, Plus, MapPin, History, Trash2 } from "lucide-react";
+import { useAccount, useUpdateAccount, useArchiveAccount, useDeleteAccount, useAccountContracts } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
 import { formatPhone } from "@/components/PhoneInput";
@@ -146,6 +146,7 @@ export function AccountDetail() {
   const { data: customFieldDefs } = useCustomFieldDefinitions("accounts");
   const updateMutation = useUpdateAccount();
   const archiveMutation = useArchiveAccount();
+  const deleteMutation = useDeleteAccount();
   const [showArchive, setShowArchive] = useState(false);
   const [showChangeOwner, setShowChangeOwner] = useState(false);
   const { addRecent } = useRecentRecords();
@@ -232,6 +233,31 @@ export function AccountDetail() {
               <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>
                 <Archive className="h-4 w-4 mr-1" />
                 Archive
+              </Button>
+            )}
+            {isAdmin && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                onClick={async () => {
+                  if (
+                    !window.confirm(
+                      `Permanently delete "${account.name}"? This cannot be undone and will remove related opportunities, contacts, and activities. Use Archive if you might need to restore it later.`,
+                    )
+                  ) return;
+                  try {
+                    await deleteMutation.mutateAsync({ id: account.id });
+                    toast.success("Account deleted");
+                    navigate("/accounts");
+                  } catch (err) {
+                    toast.error("Failed to delete: " + (err as Error).message);
+                  }
+                }}
+                disabled={deleteMutation.isPending}
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                Delete
               </Button>
             )}
           </div>

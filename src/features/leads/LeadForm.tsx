@@ -28,6 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { DuplicateWarning } from "@/components/DuplicateWarning";
 import { US_STATES } from "@/lib/us-states";
+import { looksLikeUsZip, zipToTimeZone } from "@/lib/us-zip";
 import { PhoneInput } from "@/components/PhoneInput";
 import type { CustomFieldDefinition } from "@/types/crm";
 
@@ -637,7 +638,22 @@ function LeadFormInner({ lead }: { lead: Lead | undefined }) {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="zip">Zip</Label>
-                  <Input id="zip" {...register("zip")} />
+                  <Input
+                    id="zip"
+                    {...register("zip", {
+                      onBlur: (e) => {
+                        const zip = e.target.value;
+                        if (!zip) return;
+                        if (looksLikeUsZip(zip) && !watch("country")) {
+                          setValue("country", "United States");
+                        }
+                        const tz = zipToTimeZone(zip);
+                        if (tz && !watch("time_zone")) {
+                          setValue("time_zone", tz as never);
+                        }
+                      },
+                    })}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="country">Country</Label>
