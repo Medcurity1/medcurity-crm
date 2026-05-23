@@ -124,6 +124,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
     handleSubmit,
     setValue,
     watch,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm<AccountFormValues>({
     resolver: zodResolver(accountSchema),
@@ -256,13 +257,19 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
     zip: string,
     countryField: "billing_country" | "shipping_country",
   ) {
-    if (!zip) return;
-    if (looksLikeUsZip(zip) && !watch(countryField)) {
-      setValue(countryField, "United States");
+    if (!looksLikeUsZip(zip)) return;
+    if (!getValues(countryField)) {
+      setValue(countryField, "United States", {
+        shouldDirty: true,
+        shouldTouch: true,
+      });
     }
     const tz = zipToTimeZone(zip);
-    if (tz && !watch("timezone")) {
-      setValue("timezone", TIMEZONE_LABELS[tz]);
+    if (tz && !getValues("timezone")) {
+      setValue("timezone", TIMEZONE_LABELS[tz], {
+        shouldDirty: true,
+        shouldTouch: true,
+      });
     }
   }
 
@@ -678,7 +685,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                   <Input
                     id="billing_zip"
                     {...register("billing_zip", {
-                      onBlur: (e) =>
+                      onChange: (e) =>
                         autofillFromZip(e.target.value, "billing_country"),
                     })}
                   />
@@ -738,7 +745,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                     id="shipping_zip"
                     disabled={sameAsBilling}
                     {...register("shipping_zip", {
-                      onBlur: (e) =>
+                      onChange: (e) =>
                         autofillFromZip(e.target.value, "shipping_country"),
                     })}
                   />
