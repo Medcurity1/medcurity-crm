@@ -99,6 +99,7 @@ function LeadFormInner({ lead }: { lead: Lead | undefined }) {
     handleSubmit,
     setValue,
     watch,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm<LeadFormValues>({
     resolver: zodResolver(leadSchema),
@@ -641,15 +642,21 @@ function LeadFormInner({ lead }: { lead: Lead | undefined }) {
                   <Input
                     id="zip"
                     {...register("zip", {
-                      onBlur: (e) => {
+                      onChange: (e) => {
                         const zip = e.target.value;
-                        if (!zip) return;
-                        if (looksLikeUsZip(zip) && !watch("country")) {
-                          setValue("country", "United States");
+                        if (!looksLikeUsZip(zip)) return;
+                        if (!getValues("country")) {
+                          setValue("country", "United States", {
+                            shouldDirty: true,
+                            shouldTouch: true,
+                          });
                         }
                         const tz = zipToTimeZone(zip);
-                        if (tz && !watch("time_zone")) {
-                          setValue("time_zone", tz as never);
+                        if (tz && !getValues("time_zone")) {
+                          setValue("time_zone", tz as never, {
+                            shouldDirty: true,
+                            shouldTouch: true,
+                          });
                         }
                       },
                     })}

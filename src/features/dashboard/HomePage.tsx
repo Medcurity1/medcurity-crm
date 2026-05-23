@@ -89,6 +89,15 @@ interface TaskItem {
   subject: string;
   due_at: string | null;
   completed_at: string | null;
+  priority: "high" | "normal" | "low" | null;
+  account_id: string | null;
+  contact_id: string | null;
+  opportunity_id: string | null;
+  lead_id: string | null;
+  account: { id: string; name: string } | null;
+  contact: { id: string; first_name: string | null; last_name: string | null } | null;
+  opportunity: { id: string; name: string } | null;
+  lead: { id: string; first_name: string | null; last_name: string | null; company: string | null } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,13 +144,15 @@ function useMyTasks(userId: string) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("activities")
-        .select("id, subject, due_at, completed_at")
+        .select(
+          "id, subject, due_at, completed_at, priority, account_id, contact_id, opportunity_id, lead_id, account:accounts(id, name), contact:contacts(id, first_name, last_name), opportunity:opportunities(id, name), lead:leads(id, first_name, last_name, company)",
+        )
         .eq("activity_type", "task")
         .eq("owner_user_id", userId)
         .is("archived_at", null)
         .order("due_at", { ascending: true, nullsFirst: false });
       if (error) throw error;
-      return (data ?? []) as TaskItem[];
+      return (data ?? []) as unknown as TaskItem[];
     },
     enabled: !!userId,
   });
@@ -262,6 +273,66 @@ function getDueDateColor(dueAt: string | null): string {
   return "text-muted-foreground";
 }
 
+/**
+ * Human-friendly due-date label for the My Tasks widget. We want the
+ * common cases ("Due today", "Overdue 3d") to stand out at a glance so
+ * the rep doesn't have to mentally subtract a date — bare formatDate
+ * was readable but too quiet for an action surface.
+ */
+function formatDueLabel(dueAt: string | null): string {
+  if (!dueAt) return "";
+  const due = new Date(dueAt);
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const dueMidnight = new Date(due);
+  dueMidnight.setHours(0, 0, 0, 0);
+  const diffDays = Math.round(
+    (dueMidnight.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
+  );
+  if (diffDays < 0) return `Overdue ${Math.abs(diffDays)}d`;
+  if (diffDays === 0) return "Due today";
+  if (diffDays === 1) return "Due tomorrow";
+  if (diffDays < 7) return `Due in ${diffDays}d`;
+  return `Due ${formatDate(dueAt)}`;
+}
+
+/**
+ * Build (label, href) for a task's related record so the widget can
+ * show "Acme Co" or "Mari Harris" inline + link straight to the parent.
+ * Order mirrors the task-reminders Edge Function (opp > contact >
+ * account > lead) so deep-links stay consistent across the app.
+ */
+function getTaskRelated(
+  task: TaskItem,
+): { label: string; href: string } | null {
+  if (task.opportunity?.id && task.opportunity?.name) {
+    return { label: task.opportunity.name, href: `/opportunities/${task.opportunity.id}` };
+  }
+  if (task.contact?.id) {
+    const name = [task.contact.first_name, task.contact.last_name]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    return { label: name || "Contact", href: `/contacts/${task.contact.id}` };
+  }
+  if (task.account?.id && task.account?.name) {
+    return { label: task.account.name, href: `/accounts/${task.account.id}` };
+  }
+  if (task.lead?.id) {
+    const name = [task.lead.first_name, task.lead.last_name]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    const label = task.lead.company
+      ? name
+        ? `${name} · ${task.lead.company}`
+        : task.lead.company
+      : name || "Lead";
+    return { label, href: `/leads/${task.lead.id}` };
+  }
+  return null;
+}
+
 function MyTasksSection({ userId }: { userId: string }) {
   const { data: tasks, isLoading } = useMyTasks(userId);
   const qc = useQueryClient();
@@ -312,27 +383,43 @@ function MyTasksSection({ userId }: { userId: string }) {
           <p className="text-sm text-muted-foreground">No tasks assigned to you.</p>
         ) : (
           <div className="space-y-2">
-            {displayOpen.map((task) => (
-              <div
-                key={task.id}
-                className="flex items-center gap-3 py-1"
-              >
-                <Checkbox
-                  checked={false}
-                  onCheckedChange={() => completeMutation.mutate(task.id)}
-                  disabled={completeMutation.isPending}
-                  className="shrink-0"
-                />
-                <span className="flex-1 text-sm truncate">{task.subject}</span>
-                {task.due_at && (
-                  <span
-                    className={`text-xs shrink-0 ${getDueDateColor(task.due_at)}`}
-                  >
-                    Due: {formatDate(task.due_at)}
-                  </span>
-                )}
-              </div>
-            ))}
+            {displayOpen.map((task) => {
+              const related = getTaskRelated(task);
+              const dueColor = getDueDateColor(task.due_at);
+              const dueLabel = formatDueLabel(task.due_at);
+              return (
+                <div key={task.id} className="flex items-start gap-3 py-1.5">
+                  <Checkbox
+                    checked={false}
+                    onCheckedChange={() => completeMutation.mutate(task.id)}
+                    disabled={completeMutation.isPending}
+                    className="shrink-0 mt-0.5"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-sm font-medium truncate">
+                        {task.subject}
+                      </span>
+                      {dueLabel && (
+                        <span
+                          className={`text-xs shrink-0 font-medium ${dueColor}`}
+                        >
+                          {dueLabel}
+                        </span>
+                      )}
+                    </div>
+                    {related && (
+                      <Link
+                        to={related.href}
+                        className="text-xs text-muted-foreground hover:text-primary hover:underline truncate block mt-0.5"
+                      >
+                        {related.label}
+                      </Link>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
 
             {displayCompleted.length > 0 && (
               <>

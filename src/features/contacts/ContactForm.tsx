@@ -103,6 +103,7 @@ function ContactFormInner({
     handleSubmit,
     setValue,
     watch,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm<ContactFormValues>({
     resolver: zodResolver(contactSchema),
@@ -474,19 +475,26 @@ function ContactFormInner({
                   <Input
                     id="mailing_zip"
                     {...register("mailing_zip", {
-                      // Auto-fill country and time_zone when the rep
-                      // types a US zip and tabs out — only fills in
-                      // empty fields so we never overwrite a manual
-                      // selection.
-                      onBlur: (e) => {
+                      // Auto-fill country + time_zone when the rep
+                      // types a US zip — fires on every change so users
+                      // see the fields populate as soon as they finish
+                      // the 5th digit (no need to tab out). Only fills
+                      // empties so we never overwrite a manual entry.
+                      onChange: (e) => {
                         const zip = e.target.value;
-                        if (!zip) return;
-                        if (looksLikeUsZip(zip) && !watch("mailing_country")) {
-                          setValue("mailing_country", "United States");
+                        if (!looksLikeUsZip(zip)) return;
+                        if (!getValues("mailing_country")) {
+                          setValue("mailing_country", "United States", {
+                            shouldDirty: true,
+                            shouldTouch: true,
+                          });
                         }
                         const tz = zipToTimeZone(zip);
-                        if (tz && !watch("time_zone")) {
-                          setValue("time_zone", tz as never);
+                        if (tz && !getValues("time_zone")) {
+                          setValue("time_zone", tz as never, {
+                            shouldDirty: true,
+                            shouldTouch: true,
+                          });
                         }
                       },
                     })}
