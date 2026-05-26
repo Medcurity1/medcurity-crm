@@ -375,7 +375,10 @@ function MyTasksSection({ userId }: { userId: string }) {
 
   const openTasks = (tasks ?? []).filter((t) => !t.completed_at);
   const completedTasks = (tasks ?? []).filter((t) => t.completed_at);
-  const displayOpen = openTasks.slice(0, 5);
+  // 2-column grid on lg → show 10 so each column has 5 rows. Reclaims
+  // the empty right-half of the card and lets reps triage twice as
+  // many tasks before clicking "View All".
+  const displayOpen = openTasks.slice(0, 10);
   const displayCompleted = completedTasks.slice(0, 2);
   const totalCount = openTasks.length;
 
@@ -406,6 +409,7 @@ function MyTasksSection({ userId }: { userId: string }) {
           <p className="text-sm text-muted-foreground">No tasks assigned to you.</p>
         ) : (
           <div className="space-y-2">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-1">
             {displayOpen.map((task) => {
               const related = getTaskRelated(task);
               const accountLink = getTaskAccount(task);
@@ -459,6 +463,7 @@ function MyTasksSection({ userId }: { userId: string }) {
                 </div>
               );
             })}
+            </div>
 
             {displayCompleted.length > 0 && (
               <>

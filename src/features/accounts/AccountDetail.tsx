@@ -225,6 +225,14 @@ export function AccountDetail() {
         const tz = zipToTimeZone(zip);
         if (tz) patch.timezone = TIMEZONE_LABELS[tz];
       }
+    } else if (zipField === "shipping_zip" && zip === "") {
+      // Shipping cleared — fall back to billing's tz so the account
+      // doesn't keep a stale shipping-derived timezone.
+      const billingZip = (account.billing_zip ?? "").trim();
+      if (looksLikeUsZip(billingZip)) {
+        const tz = zipToTimeZone(billingZip);
+        if (tz) patch.timezone = TIMEZONE_LABELS[tz];
+      }
     }
     await updateMutation.mutateAsync(
       patch as Parameters<typeof updateMutation.mutateAsync>[0],
