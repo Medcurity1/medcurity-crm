@@ -854,8 +854,15 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                   <Input id="annual_revenue" type="number" step="0.01" {...register("annual_revenue")} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="timezone">Timezone<RequiredIndicator fieldKey="timezone" requiredFields={requiredKeys} /></Label>
-                  <Input id="timezone" placeholder="US/Eastern" {...register("timezone")} />
+                  <Label htmlFor="timezone">Timezone</Label>
+                  <Input
+                    id="timezone"
+                    placeholder="Derived from zip"
+                    {...register("timezone")}
+                    readOnly
+                    className="bg-muted cursor-not-allowed"
+                    title="Timezone is derived from the shipping (or billing) zip code automatically — it can't be edited directly."
+                  />
                 </div>
               </div>
             </CollapsibleFormSection>

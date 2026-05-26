@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   Building2,
   Users,
@@ -360,6 +361,23 @@ function MyTasksSection({ userId }: { userId: string }) {
   const { data: tasks, isLoading } = useMyTasks(userId);
   const qc = useQueryClient();
 
+  // Two paired mutations so an accidental check-off has a one-click
+  // undo path (toast Undo button + clickable green check on the
+  // completed row). The check is sensitive on touchpads — we got
+  // bitten by reps marking tasks done they hadn't actually finished.
+  const uncompleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from("activities")
+        .update({ completed_at: null })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["dashboard", "my-tasks"] });
+    },
+  });
+
   const completeMutation = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase
@@ -368,8 +386,14 @@ function MyTasksSection({ userId }: { userId: string }) {
         .eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
       qc.invalidateQueries({ queryKey: ["dashboard", "my-tasks"] });
+      toast.success("Task completed", {
+        action: {
+          label: "Undo",
+          onClick: () => uncompleteMutation.mutate(id),
+        },
+      });
     },
   });
 
@@ -475,7 +499,16 @@ function MyTasksSection({ userId }: { userId: string }) {
                     key={task.id}
                     className="flex items-center gap-3 py-1 opacity-60"
                   >
-                    <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+                    <button
+                      type="button"
+                      onClick={() => uncompleteMutation.mutate(task.id)}
+                      disabled={uncompleteMutation.isPending}
+                      className="shrink-0 hover:opacity-70 disabled:opacity-50"
+                      title="Mark incomplete"
+                      aria-label="Mark task incomplete"
+                    >
+                      <CheckCircle2 className="h-4 w-4 text-green-600" />
+                    </button>
                     <span className="flex-1 text-sm truncate line-through">
                       {task.subject}
                     </span>
