@@ -772,7 +772,7 @@ export function OpportunityDetail() {
                 ? (() => {
                     const src = (opp as { automation_source?: string | null }).automation_source;
                     if (src === "sf_import") return "✓ Yes — Salesforce (imported)";
-                    if (src === "crm_renewal_v1") return "✓ Yes — Medcurity CRM";
+                    if (src === "crm_renewal_v1") return "✓ Yes — PulsePoint";
                     return "✓ Yes";
                   })()
                 : "✗ No"

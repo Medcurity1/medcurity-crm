@@ -109,7 +109,7 @@ export function SystemInfo() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">v{APP_VERSION}</div>
-            <p className="text-xs text-muted-foreground">Medcurity CRM</p>
+            <p className="text-xs text-muted-foreground">PulsePoint</p>
           </CardContent>
         </Card>
 

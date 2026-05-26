@@ -178,11 +178,27 @@ export function ActivityForm({
   // picker — a raw lead doesn't have related contacts yet.
   const showContactPicker = !contactId && !!effectiveAccountId;
 
-  // Pre-fill when editing an existing activity. We only take the YYYY-MM-DD
-  // prefix off the due_at ISO timestamp since the input is type="date".
+  // Pre-fill when editing an existing activity. activity_date input is
+  // type="date" so we slice to YYYY-MM-DD. due_at is type="datetime-local"
+  // (users pick a specific time so the calendar event lands at the right
+  // hour, not forced to noon), so we slice to YYYY-MM-DDTHH:mm in the
+  // user's local time.
   useEffect(() => {
     if (!open) return;
     if (activity) {
+      // datetime-local needs LOCAL time, not the raw UTC ISO. Convert the
+      // stored UTC timestamp by adjusting for the user's timezone offset
+      // before slicing — otherwise users in negative-UTC zones see the
+      // due time shifted hours earlier than what they originally picked.
+      const dueLocal = activity.due_at
+        ? (() => {
+            const d = new Date(activity.due_at);
+            const tzOffsetMs = d.getTimezoneOffset() * 60 * 1000;
+            return new Date(d.getTime() - tzOffsetMs)
+              .toISOString()
+              .slice(0, 16);
+          })()
+        : "";
       form.reset({
         activity_type: activity.activity_type,
         subject: activity.subject ?? "",
@@ -192,7 +208,7 @@ export function ActivityForm({
           : activity.created_at
             ? activity.created_at.slice(0, 10)
             : todayLocalISO(),
-        due_at: activity.due_at ? activity.due_at.slice(0, 10) : "",
+        due_at: dueLocal,
         contact_id: activity.contact_id ?? null,
         reminder_schedule:
           (activity.reminder_schedule as ActivityFormValues["reminder_schedule"]) ??
@@ -236,7 +252,12 @@ export function ActivityForm({
     const activityDateIso =
       dateToLocalNoonISO(values.activity_date ?? "") ??
       dateToLocalNoonISO(todayLocalISO())!;
-    const dueAtIso = isTask ? dateToLocalNoonISO(values.due_at ?? "") : null;
+    // datetime-local returns "YYYY-MM-DDTHH:mm" with no timezone.
+    // new Date(value) interprets it as local time, which is what users
+    // expect — picking 2:30 PM should put the calendar event at 2:30 PM
+    // local, not at noon.
+    const dueAtIso =
+      isTask && values.due_at ? new Date(values.due_at).toISOString() : null;
     // Prop wins when the form was opened from a contact's own page
     // (locked picker); otherwise honor whatever the user picked, which
     // may legitimately be "no contact" (null) for account-level logs.
@@ -432,8 +453,16 @@ export function ActivityForm({
               for a task and what the timeline displays prominently. */}
           {selectedType === "task" && (
             <div className="space-y-2">
-              <Label htmlFor="due_at">Due Date</Label>
-              <Input id="due_at" type="date" {...form.register("due_at")} />
+              <Label htmlFor="due_at">Due Date &amp; Time</Label>
+              <Input
+                id="due_at"
+                type="datetime-local"
+                {...form.register("due_at")}
+              />
+              <p className="text-xs text-muted-foreground">
+                Used for the Outlook calendar event. Leave blank for no
+                calendar item.
+              </p>
             </div>
           )}
 
