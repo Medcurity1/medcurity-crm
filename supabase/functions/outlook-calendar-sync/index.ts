@@ -52,19 +52,19 @@ function taskToEventBody(task: TaskRow) {
   const start = new Date(task.due_at!);
   const end = new Date(start.getTime() + 30 * 60 * 1000);
   return {
-    subject: `[CRM] ${task.subject}`,
+    subject: `[PulsePoint] ${task.subject}`,
     body: {
       contentType: "HTML",
       content: task.body
         ? `<p>${task.body.replace(/\n/g, "<br>")}</p>` +
-          `<p style="color:#999;font-size:12px">Synced from Medcurity CRM</p>`
-        : `<p style="color:#999;font-size:12px">Synced from Medcurity CRM</p>`,
+          `<p style="color:#999;font-size:12px">Synced from PulsePoint</p>`
+        : `<p style="color:#999;font-size:12px">Synced from PulsePoint</p>`,
     },
     start: { dateTime: start.toISOString(), timeZone: "UTC" },
     end: { dateTime: end.toISOString(), timeZone: "UTC" },
     reminderMinutesBeforeStart: 15,
     isReminderOn: true,
-    categories: ["Medcurity CRM"],
+    categories: ["PulsePoint"],
   };
 }
 

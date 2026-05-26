@@ -10,16 +10,16 @@ export const branding = {
   companyName: "Medcurity",
 
   /** Product name shown next to company name */
-  productName: "CRM",
+  productName: "PulsePoint",
 
   /** Full product title (sidebar header) */
-  fullTitle: "Medcurity CRM",
+  fullTitle: "PulsePoint",
 
   /** Login page subtitle */
   loginSubtitle: "Sign in to your account",
 
   /** Short company name for collapsed sidebar */
-  shortName: "M",
+  shortName: "P",
 
   /** Industry context — affects default field labels and terminology */
   industry: "healthcare" as "healthcare" | "saas" | "finance" | "consulting" | "general",
