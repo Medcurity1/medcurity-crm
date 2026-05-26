@@ -333,6 +333,29 @@ function getTaskRelated(
   return null;
 }
 
+/**
+ * Account link shown on every task that has one, so reps don't have to
+ * click in just to see which account they're acting on. Returns null
+ * when the primary related record is already the account (would be
+ * duplicate) or when no account is attached (lead-only tasks).
+ * Mirrors how ActivitiesList ("view all activities") surfaces the
+ * account alongside the primary record.
+ */
+function getTaskAccount(
+  task: TaskItem,
+): { label: string; href: string } | null {
+  if (!task.account?.id || !task.account?.name) return null;
+  // Primary already IS the account — don't show twice.
+  if (
+    !task.opportunity?.id &&
+    !task.contact?.id &&
+    !task.lead?.id
+  ) {
+    return null;
+  }
+  return { label: task.account.name, href: `/accounts/${task.account.id}` };
+}
+
 function MyTasksSection({ userId }: { userId: string }) {
   const { data: tasks, isLoading } = useMyTasks(userId);
   const qc = useQueryClient();
@@ -385,6 +408,7 @@ function MyTasksSection({ userId }: { userId: string }) {
           <div className="space-y-2">
             {displayOpen.map((task) => {
               const related = getTaskRelated(task);
+              const accountLink = getTaskAccount(task);
               const dueColor = getDueDateColor(task.due_at);
               const dueLabel = formatDueLabel(task.due_at);
               return (
@@ -414,6 +438,14 @@ function MyTasksSection({ userId }: { userId: string }) {
                         className="text-xs text-muted-foreground hover:text-primary hover:underline truncate block mt-0.5"
                       >
                         {related.label}
+                      </Link>
+                    )}
+                    {accountLink && (
+                      <Link
+                        to={accountLink.href}
+                        className="text-xs text-muted-foreground hover:text-primary hover:underline truncate block"
+                      >
+                        {accountLink.label}
                       </Link>
                     )}
                   </div>

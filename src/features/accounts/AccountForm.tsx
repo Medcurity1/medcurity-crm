@@ -253,13 +253,17 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
     hawaii: "US/Hawaii",
     arizona_no_dst: "US/Arizona",
   };
-  function autofillFromZip(
-    zip: string,
-    countryField: "billing_country" | "shipping_country",
-  ) {
+  // We previously chained this via register('billing_zip', { onChange })
+  // but the RHF option-callback path proved unreliable in production
+  // (silently dropped the update under some re-render timings on
+  // staging). useEffect + watch is strictly more robust and matches
+  // the sameAsBilling pattern just below.
+  const watchedBillingZip = watch("billing_zip");
+  useEffect(() => {
+    const zip = (watchedBillingZip ?? "").trim();
     if (!looksLikeUsZip(zip)) return;
-    if (!getValues(countryField)) {
-      setValue(countryField, "United States", {
+    if (!getValues("billing_country")) {
+      setValue("billing_country", "United States", {
         shouldDirty: true,
         shouldTouch: true,
       });
@@ -271,7 +275,28 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
         shouldTouch: true,
       });
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedBillingZip]);
+
+  const watchedShippingZip = watch("shipping_zip");
+  useEffect(() => {
+    const zip = (watchedShippingZip ?? "").trim();
+    if (!looksLikeUsZip(zip)) return;
+    if (!getValues("shipping_country")) {
+      setValue("shipping_country", "United States", {
+        shouldDirty: true,
+        shouldTouch: true,
+      });
+    }
+    const tz = zipToTimeZone(zip);
+    if (tz && !getValues("timezone")) {
+      setValue("timezone", TIMEZONE_LABELS[tz], {
+        shouldDirty: true,
+        shouldTouch: true,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedShippingZip]);
 
   // Copy billing -> shipping when checkbox toggled
   useEffect(() => {
@@ -682,13 +707,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="billing_zip">Zip</Label>
-                  <Input
-                    id="billing_zip"
-                    {...register("billing_zip", {
-                      onChange: (e) =>
-                        autofillFromZip(e.target.value, "billing_country"),
-                    })}
-                  />
+                  <Input id="billing_zip" {...register("billing_zip")} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="billing_country">Country</Label>
@@ -744,10 +763,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                   <Input
                     id="shipping_zip"
                     disabled={sameAsBilling}
-                    {...register("shipping_zip", {
-                      onChange: (e) =>
-                        autofillFromZip(e.target.value, "shipping_country"),
-                    })}
+                    {...register("shipping_zip")}
                   />
                 </div>
                 <div className="space-y-2">

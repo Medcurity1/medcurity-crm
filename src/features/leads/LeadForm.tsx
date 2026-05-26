@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -195,6 +196,32 @@ function LeadFormInner({ lead }: { lead: Lead | undefined }) {
     if (v === "" || v === undefined) return null;
     return v;
   }
+
+  // Auto-fill country + time_zone from US ZIP. We previously tried
+  // chaining this via register('zip', { onChange }) but the RHF
+  // option-callback path proved unreliable in production (silently
+  // dropped the update under some re-render timings on staging), so
+  // we watch the value via useEffect instead — strictly more robust
+  // and matches the pattern other autofills in this codebase use.
+  const watchedZip = watch("zip");
+  useEffect(() => {
+    const zip = (watchedZip ?? "").trim();
+    if (!looksLikeUsZip(zip)) return;
+    if (!getValues("country")) {
+      setValue("country", "United States", {
+        shouldDirty: true,
+        shouldTouch: true,
+      });
+    }
+    const tz = zipToTimeZone(zip);
+    if (tz && !getValues("time_zone")) {
+      setValue("time_zone", tz as never, {
+        shouldDirty: true,
+        shouldTouch: true,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedZip]);
 
   // Surface zod validation failures as a toast. Without this, fields
   // that don't render their own `errors.*` message (most enum/picklist
@@ -639,28 +666,7 @@ function LeadFormInner({ lead }: { lead: Lead | undefined }) {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="zip">Zip</Label>
-                  <Input
-                    id="zip"
-                    {...register("zip", {
-                      onChange: (e) => {
-                        const zip = e.target.value;
-                        if (!looksLikeUsZip(zip)) return;
-                        if (!getValues("country")) {
-                          setValue("country", "United States", {
-                            shouldDirty: true,
-                            shouldTouch: true,
-                          });
-                        }
-                        const tz = zipToTimeZone(zip);
-                        if (tz && !getValues("time_zone")) {
-                          setValue("time_zone", tz as never, {
-                            shouldDirty: true,
-                            shouldTouch: true,
-                          });
-                        }
-                      },
-                    })}
-                  />
+                  <Input id="zip" {...register("zip")} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="country">Country</Label>
