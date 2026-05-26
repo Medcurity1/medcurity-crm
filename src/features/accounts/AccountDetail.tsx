@@ -109,30 +109,6 @@ function EditableField({
   );
 }
 
-/* ---------- Address helper ---------- */
-
-function AddressBlock({
-  street,
-  city,
-  state,
-  zip,
-  country,
-}: {
-  street: string | null;
-  city: string | null;
-  state: string | null;
-  zip: string | null;
-  country: string | null;
-}) {
-  const parts = [street, [city, state, zip].filter(Boolean).join(", "), country].filter(Boolean);
-  if (!parts.length) return <p className="text-sm text-muted-foreground">No address on file</p>;
-  return (
-    <p className="text-sm font-medium whitespace-pre-line">
-      {parts.join("\n")}
-    </p>
-  );
-}
-
 /* ---------- Main component ---------- */
 
 export function AccountDetail() {
@@ -532,6 +508,10 @@ export function AccountDetail() {
           "churn_amount",
           "churn_date",
           "lead_source",
+          // Timezone is always derived from billing/shipping zip — letting
+          // reps edit it directly breaks the "consistent US/{Region}"
+          // formatting and lets the value drift from the real address.
+          "timezone",
           // FTE Range is auto-derived from `employees` — locking
           // inline edit avoids users typing "small" / "10ish" /
           // anything outside the bucket enum that breaks downstream.
@@ -601,27 +581,27 @@ export function AccountDetail() {
               <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                 Shipping Address
               </h4>
-              <AddressBlock
-                street={account.shipping_street}
-                city={account.shipping_city}
-                state={account.shipping_state}
-                zip={account.shipping_zip}
-                country={account.shipping_country}
-              />
-              {(account.shipping_street || account.shipping_city) && (
-                <a
-                  href={account.shipping_latitude && account.shipping_longitude
-                    ? `https://www.google.com/maps?q=${account.shipping_latitude},${account.shipping_longitude}`
-                    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                        [account.shipping_street, account.shipping_city, account.shipping_state, account.shipping_zip].filter(Boolean).join(", ")
-                      )}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-600 hover:underline text-sm flex items-center gap-1 mt-2"
-                >
-                  <MapPin className="h-3 w-3" /> View on Map
-                </a>
-              )}
+              <div className="space-y-3">
+                <EditableField label="Street" value={account.shipping_street} onSave={saveField("shipping_street")} />
+                <EditableField label="City" value={account.shipping_city} onSave={saveField("shipping_city")} />
+                <EditableField label="State" value={account.shipping_state} onSave={saveField("shipping_state")} />
+                <EditableField label="Zip" value={account.shipping_zip} onSave={saveZipField("shipping_zip", "shipping_country")} />
+                <EditableField label="Country" value={account.shipping_country} onSave={saveField("shipping_country")} />
+                {(account.shipping_street || account.shipping_city) && (
+                  <a
+                    href={account.shipping_latitude && account.shipping_longitude
+                      ? `https://www.google.com/maps?q=${account.shipping_latitude},${account.shipping_longitude}`
+                      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                          [account.shipping_street, account.shipping_city, account.shipping_state, account.shipping_zip].filter(Boolean).join(", ")
+                        )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline text-sm flex items-center gap-1"
+                  >
+                    <MapPin className="h-3 w-3" /> View on Map
+                  </a>
+                )}
+              </div>
             </div>
           ),
         }}

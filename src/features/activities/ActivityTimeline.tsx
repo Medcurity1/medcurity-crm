@@ -428,7 +428,14 @@ function ActivityEntry({
   const Icon = typeIcons[activity.activity_type];
   const colorClass = typeColors[activity.activity_type];
   const isCompleted = !!activity.completed_at;
-  const isDue = !!activity.due_at && !isCompleted;
+  // Only tasks have a meaningful due date. Calls / emails / meetings
+  // sometimes carry a due_at value (e.g. from QuickTaskDialog or legacy
+  // log flows) but it shouldn't be surfaced — those activities already
+  // logged represent something that happened.
+  const isDue =
+    activity.activity_type === "task" &&
+    !!activity.due_at &&
+    !isCompleted;
   // subjectLink kept for parity with older timelines that might want
   // the related-record shortcut — currently unused because we navigate
   // to /activities/:id on click. Leaving for now in case a consumer
