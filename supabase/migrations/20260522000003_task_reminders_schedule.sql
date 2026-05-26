@@ -24,8 +24,10 @@ do $$
 declare
   v_url text;
   v_key text;
+  v_jobid bigint;
 begin
   if not exists (select 1 from pg_extension where extname = 'pg_cron') then
+    raise notice '[task-reminders] pg_cron extension not installed — skipping schedule install';
     return;
   end if;
 
@@ -59,6 +61,7 @@ begin
     end;
     if v_url is not null and v_url <> '' then
       v_url := replace(v_url, '/sync-emails', '/task-reminders');
+      raise notice '[task-reminders] derived url from app.email_sync_url: %', v_url;
     end if;
   end if;
   if (v_key is null or v_key = '') then
@@ -69,12 +72,16 @@ begin
     end;
   end if;
 
-  if v_url is null or v_key is null or v_url = '' or v_key = '' then
-    -- Project has not configured function-invocation secrets yet; skip.
+  if v_url is null or v_url = '' then
+    raise warning '[task-reminders] no task_reminders_url or email_sync_url GUC found — schedule NOT installed. Set with: alter database postgres set app.task_reminders_url = ''https://<project>.supabase.co/functions/v1/task-reminders'';';
+    return;
+  end if;
+  if v_key is null or v_key = '' then
+    raise warning '[task-reminders] no task_reminders_key or email_sync_key GUC found — schedule NOT installed. Set with: alter database postgres set app.task_reminders_key = ''<service_role_key>'';';
     return;
   end if;
 
-  perform cron.schedule(
+  v_jobid := cron.schedule(
     'task_reminders_every_5_min',
     '*/5 * * * *',
     format(
@@ -90,4 +97,48 @@ begin
       v_key
     )
   );
+  raise notice '[task-reminders] scheduled successfully — jobid=%, url=%', v_jobid, v_url;
 end $$;
+
+-- Diagnostic view: shows whether the schedule is installed and when it
+-- last ran. After deploy, an admin can run:
+--   select * from public.v_task_reminders_schedule_status;
+-- to confirm the cron is set up + see the most recent invocation.
+create or replace view public.v_task_reminders_schedule_status as
+select
+  j.jobid,
+  j.jobname,
+  j.schedule,
+  j.active,
+  (
+    select max(start_time) from cron.job_run_details d
+    where d.jobid = j.jobid
+  ) as last_run_at,
+  (
+    select status from cron.job_run_details d
+    where d.jobid = j.jobid
+    order by start_time desc
+    limit 1
+  ) as last_run_status,
+  (
+    select return_message from cron.job_run_details d
+    where d.jobid = j.jobid
+    order by start_time desc
+    limit 1
+  ) as last_run_message
+from cron.job j
+where j.jobname = 'task_reminders_every_5_min';
+
+comment on view public.v_task_reminders_schedule_status is
+  'Health check for task-reminders pg_cron schedule. Returns 0 rows if not installed (check GUCs app.task_reminders_url / app.task_reminders_key, or fallback app.email_sync_url / app.email_sync_key).';
+
+-- Run the view with the privileges of its creator (postgres) so the
+-- underlying cron.* tables — which are restricted to the postgres role
+-- by default — are still readable through this admin diagnostic.
+alter view public.v_task_reminders_schedule_status set (security_invoker = false);
+
+-- Read access for any authenticated user is fine — it returns
+-- non-sensitive scheduling metadata (no service-role key, no email
+-- bodies). Restrict insert/update/delete by default (view is implicitly
+-- read-only anyway).
+grant select on public.v_task_reminders_schedule_status to authenticated;

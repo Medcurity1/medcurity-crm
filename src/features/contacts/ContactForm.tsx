@@ -172,6 +172,32 @@ function ContactFormInner({
         },
   });
 
+  // Auto-fill country + time_zone from US ZIP. We previously tried
+  // chaining this via register('mailing_zip', { onChange }) but the
+  // RHF option-callback path proved unreliable in production
+  // (different RHF re-render timing between dev / staging), so we
+  // watch the value via a useEffect instead — strictly more robust
+  // and matches the pattern other autofills in this file use.
+  const watchedMailingZip = watch("mailing_zip");
+  useEffect(() => {
+    const zip = (watchedMailingZip ?? "").trim();
+    if (!looksLikeUsZip(zip)) return;
+    if (!getValues("mailing_country")) {
+      setValue("mailing_country", "United States", {
+        shouldDirty: true,
+        shouldTouch: true,
+      });
+    }
+    const tz = zipToTimeZone(zip);
+    if (tz && !getValues("time_zone")) {
+      setValue("time_zone", tz as never, {
+        shouldDirty: true,
+        shouldTouch: true,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedMailingZip]);
+
   // Surface zod failures (most picklist fields don't render their own
   // error message — without this the click looks like a no-op).
   function onInvalid(formErrors: typeof errors) {
@@ -472,33 +498,7 @@ function ContactFormInner({
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="mailing_zip">Postal Code</Label>
-                  <Input
-                    id="mailing_zip"
-                    {...register("mailing_zip", {
-                      // Auto-fill country + time_zone when the rep
-                      // types a US zip — fires on every change so users
-                      // see the fields populate as soon as they finish
-                      // the 5th digit (no need to tab out). Only fills
-                      // empties so we never overwrite a manual entry.
-                      onChange: (e) => {
-                        const zip = e.target.value;
-                        if (!looksLikeUsZip(zip)) return;
-                        if (!getValues("mailing_country")) {
-                          setValue("mailing_country", "United States", {
-                            shouldDirty: true,
-                            shouldTouch: true,
-                          });
-                        }
-                        const tz = zipToTimeZone(zip);
-                        if (tz && !getValues("time_zone")) {
-                          setValue("time_zone", tz as never, {
-                            shouldDirty: true,
-                            shouldTouch: true,
-                          });
-                        }
-                      },
-                    })}
-                  />
+                  <Input id="mailing_zip" {...register("mailing_zip")} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="mailing_country">Country</Label>
