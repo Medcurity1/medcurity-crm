@@ -420,33 +420,40 @@ function MyTasksSection({ userId }: { userId: string }) {
                     className="shrink-0 mt-0.5"
                   />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-baseline justify-between gap-2">
+                    <div className="flex items-baseline gap-2 flex-wrap">
                       <span className="text-sm font-medium truncate">
                         {task.subject}
                       </span>
                       {dueLabel && (
                         <span
-                          className={`text-xs shrink-0 font-medium ${dueColor}`}
+                          className={`text-xs font-medium ${dueColor}`}
                         >
                           {dueLabel}
                         </span>
                       )}
                     </div>
-                    {related && (
-                      <Link
-                        to={related.href}
-                        className="text-xs text-muted-foreground hover:text-primary hover:underline truncate block mt-0.5"
-                      >
-                        {related.label}
-                      </Link>
-                    )}
-                    {accountLink && (
-                      <Link
-                        to={accountLink.href}
-                        className="text-xs text-muted-foreground hover:text-primary hover:underline truncate block"
-                      >
-                        {accountLink.label}
-                      </Link>
+                    {(accountLink || related) && (
+                      <div className="flex items-center gap-1.5 mt-0.5 text-xs text-muted-foreground min-w-0">
+                        {accountLink && (
+                          <Link
+                            to={accountLink.href}
+                            className="hover:text-primary hover:underline truncate"
+                          >
+                            {accountLink.label}
+                          </Link>
+                        )}
+                        {accountLink && related && (
+                          <span className="shrink-0">·</span>
+                        )}
+                        {related && (
+                          <Link
+                            to={related.href}
+                            className="hover:text-primary hover:underline truncate"
+                          >
+                            {related.label}
+                          </Link>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
