@@ -87,6 +87,10 @@ interface ContactMatch {
   is_primary: boolean;
 }
 
+interface LeadMatch {
+  lead_id: string;
+}
+
 // ---------------------------------------------------------------------------
 // Token refresh helpers
 // ---------------------------------------------------------------------------
@@ -463,6 +467,55 @@ async function matchContactsByEmail(
 }
 
 /**
+ * Look up CRM leads by email address. Used as a fallback when no
+ * contact matches an address on the email — lets reps see emails to
+ * leads (e.g., Dewey Gibson before he converts) on the lead's
+ * activity timeline.
+ *
+ * IMPORTANT: filters out converted and archived leads. A converted
+ * lead is a tombstone; the person now lives as a contact and that
+ * contact will (or should) match in matchContactsByEmail. Skipping
+ * them here prevents double-logging onto a stale lead row.
+ */
+async function matchLeadsByEmail(
+  supabase: SupabaseClient,
+  emailAddresses: string[]
+): Promise<Map<string, LeadMatch>> {
+  if (emailAddresses.length === 0) return new Map();
+
+  const lower = emailAddresses.map((e) => e.toLowerCase());
+
+  // Same ilike-OR batching pattern as matchContactsByEmail — Postgres
+  // .in() is case-sensitive, ilike isn't, and reps' lead imports often
+  // have mixed-case emails.
+  const map = new Map<string, LeadMatch>();
+  const BATCH = 100;
+  for (let i = 0; i < lower.length; i += BATCH) {
+    const batch = lower.slice(i, i + BATCH);
+    const orFilter = batch
+      .map((e) => `email.ilike.${e.replace(/[(),]/g, "")}`)
+      .join(",");
+    const { data, error } = await supabase
+      .from("leads")
+      .select("id, email")
+      .or(orFilter)
+      .is("archived_at", null)
+      .is("converted_at", null);
+
+    if (error) {
+      console.error("Lead lookup error:", error.message);
+      continue;
+    }
+    for (const lead of data ?? []) {
+      if (lead.email) {
+        map.set(lead.email.toLowerCase(), { lead_id: lead.id });
+      }
+    }
+  }
+  return map;
+}
+
+/**
  * Auto-attribute an email to an opportunity using the "actively worked"
  * heuristic.
  *
@@ -577,6 +630,67 @@ async function createEmailActivity(
   return true;
 }
 
+/**
+ * Create an activity record for an email matched against a LEAD (not
+ * a contact). Writes lead_id with contact_id + account_id null. The
+ * carry_lead_activities_to_contact trigger (migration
+ * 20260417000009) will backfill contact_id + account_id on these
+ * rows once the lead converts, so the email shows up on the contact's
+ * timeline automatically post-conversion.
+ *
+ * Dedup uses (owner_user_id, external_message_id, lead_id) — see the
+ * ux_activities_external_message_lead unique index added in
+ * migration 20260526000002. The presence check matches that scope
+ * exactly so we don't trip over the existing contact-row dedup
+ * (where contact_id is set and lead_id may be null).
+ */
+async function createLeadEmailActivity(
+  supabase: SupabaseClient,
+  conn: EmailSyncConnection,
+  email: ParsedEmail,
+  match: LeadMatch
+): Promise<boolean> {
+  const dirLabel = email.direction === "sent" ? "Sent" : "Received";
+  const externalId = `${conn.provider}:${email.messageId}`;
+
+  const { data: existing } = await supabase
+    .from("activities")
+    .select("id")
+    .eq("owner_user_id", conn.user_id)
+    .eq("external_message_id", externalId)
+    .eq("lead_id", match.lead_id)
+    .is("contact_id", null)
+    .maybeSingle();
+
+  if (existing) return false;
+
+  const { error } = await supabase.from("activities").insert({
+    lead_id: match.lead_id,
+    owner_user_id: conn.user_id,
+    activity_type: "email",
+    subject: `${dirLabel}: ${email.subject}`,
+    body: email.body,
+    activity_date: new Date(email.date).toISOString(),
+    external_message_id: externalId,
+    email_direction: email.direction,
+    email_from: email.from || null,
+    email_to: email.to.length > 0 ? email.to : null,
+    email_cc: email.cc.length > 0 ? email.cc : null,
+    email_html_body: email.htmlBody,
+    email_thread_id: email.threadId,
+  });
+
+  if (error) {
+    if (error.code === "23505") return false;
+    console.error(
+      `Failed to create lead activity for message ${email.messageId}:`,
+      error.message
+    );
+    return false;
+  }
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Sync orchestration for a single connection
 // ---------------------------------------------------------------------------
@@ -674,6 +788,17 @@ async function syncConnection(
       Array.from(externalAddresses)
     );
 
+    // 6b. For any address that DIDN'T match a contact, try matching
+    //     against (non-converted, non-archived) leads. This is what
+    //     surfaces email traffic with a lead on the lead's activity
+    //     timeline. We only check leads for unmatched addresses so a
+    //     duplicate row in `leads` for someone already converted to a
+    //     contact doesn't double-log — the contact path always wins.
+    const unmatchedAddresses = Array.from(externalAddresses).filter(
+      (a) => !contactMap.has(a)
+    );
+    const leadMap = await matchLeadsByEmail(supabase, unmatchedAddresses);
+
     // 7. Create activities for matched emails (dedup aware).
     //    Per Brayden 2026-04-17: when multiple contacts on the same account
     //    are on an email, create one activity row per contact so the email
@@ -689,35 +814,63 @@ async function syncConnection(
       // Skip entirely if every candidate is internal.
       if (addressesToCheck.every((a) => isInternalAddress(a))) continue;
 
-      // Deduplicate by contact_id within this email so CC'ing the same
-      // person twice doesn't double-write.
+      // Deduplicate by contact_id / lead_id within this email so CC'ing
+      // the same person twice doesn't double-write.
       const contactsSeen = new Set<string>();
+      const leadsSeen = new Set<string>();
 
       for (const addr of addressesToCheck) {
         if (isInternalAddress(addr)) continue;
-        const match = contactMap.get(addr.toLowerCase());
-        if (!match) continue;
-        if (contactsSeen.has(match.contact_id)) continue;
-        contactsSeen.add(match.contact_id);
+        const lower = addr.toLowerCase();
 
-        // Skip non-primary contacts if the config requires it
-        if (conn.config.primary_only && !match.is_primary) continue;
+        // Contact match wins. If the address is a known contact, log
+        // the activity against the contact and move on.
+        const contactMatch = contactMap.get(lower);
+        if (contactMatch) {
+          if (contactsSeen.has(contactMatch.contact_id)) continue;
+          contactsSeen.add(contactMatch.contact_id);
 
-        // Optionally auto-link to an open opportunity
-        let opportunityId: string | null = null;
-        if (conn.config.auto_link_opps) {
-          opportunityId = await findOpenOpportunity(supabase, match.account_id);
+          // Skip non-primary contacts if the config requires it
+          if (conn.config.primary_only && !contactMatch.is_primary) continue;
+
+          // Optionally auto-link to an open opportunity
+          let opportunityId: string | null = null;
+          if (conn.config.auto_link_opps) {
+            opportunityId = await findOpenOpportunity(
+              supabase,
+              contactMatch.account_id
+            );
+          }
+
+          const inserted = await createEmailActivity(
+            supabase,
+            conn,
+            email,
+            contactMatch,
+            opportunityId
+          );
+          if (inserted) created++;
+          continue;
         }
 
-        const inserted = await createEmailActivity(
-          supabase,
-          conn,
-          email,
-          match,
-          opportunityId
-        );
-        if (inserted) created++;
-        // IMPORTANT: do NOT break — continue through every matched contact.
+        // Fallback: no contact, try a lead. Honors primary_only only
+        // for contacts — leads don't have an is_primary concept, so a
+        // lead match is always logged regardless of that flag.
+        const leadMatch = leadMap.get(lower);
+        if (leadMatch) {
+          if (leadsSeen.has(leadMatch.lead_id)) continue;
+          leadsSeen.add(leadMatch.lead_id);
+
+          const inserted = await createLeadEmailActivity(
+            supabase,
+            conn,
+            email,
+            leadMatch
+          );
+          if (inserted) created++;
+        }
+
+        // IMPORTANT: do NOT break — continue through every address.
       }
     }
 

@@ -184,9 +184,16 @@ export function GlobalSearch() {
         "email",
         "company",
       ]);
+      // Hide converted + archived leads from global search.
+      // A converted lead is a tombstone — the person now lives as a
+      // contact, and surfacing both in search makes reps think the
+      // conversion didn't take. Archived leads are user-archived and
+      // intentionally out of working views.
       let q = supabase
         .from("leads")
-        .select("id, first_name, last_name, email, company, status");
+        .select("id, first_name, last_name, email, company, status")
+        .is("archived_at", null)
+        .is("converted_at", null);
       if (orClause) q = q.or(orClause);
       const { data, error } = await q.limit(FETCH_LIMIT);
       if (error) throw error;
