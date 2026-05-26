@@ -131,6 +131,19 @@ export function LeadDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lead?.id]);
 
+  // Silent redirect: if the lead has been converted, the person now
+  // lives as a Contact. We always send users to the contact page —
+  // never let them land on the stale lead. This catches the edge cases
+  // that GlobalSearch's filter can't (direct URL, bookmarks, old links
+  // in emails / notifications). Conversion is one-way; no banner
+  // needed because there's nothing the rep can do on the lead page
+  // that they can't do better on the contact page.
+  useEffect(() => {
+    if (lead?.converted_at && lead.converted_contact_id) {
+      navigate(`/contacts/${lead.converted_contact_id}`, { replace: true });
+    }
+  }, [lead?.id, lead?.converted_at, lead?.converted_contact_id, navigate]);
+
   if (isLoading) {
     return (
       <div className="space-y-4">

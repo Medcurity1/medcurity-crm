@@ -343,15 +343,29 @@ export function useConvertLead() {
         opportunity = opp;
       }
 
-      // 4. Update lead as converted
+      // 4. Update lead as converted AND soft-archive it.
+      //
+      // The lead row is preserved (we don't delete) so its provenance
+      // — original source, created_at, owner, lead score history — stays
+      // queryable for audit. But it's also flipped to archived_at = now
+      // so every "user-facing" lookup in the app (GlobalSearch, leads
+      // list, sync-emails lead matcher) hides it. Without the archive
+      // flag, a rep typing the person's name in global search still
+      // sees the lead alongside the contact and assumes the conversion
+      // didn't work (real complaint 2026-05-26). The contact has
+      // original_lead_id pointing back, so the link is preserved.
+      const nowIso = new Date().toISOString();
+      const { data: authData } = await supabase.auth.getUser();
       const { error: updateError } = await supabase
         .from("leads")
         .update({
           status: "converted",
-          converted_at: new Date().toISOString(),
+          converted_at: nowIso,
           converted_account_id: account.id,
           converted_contact_id: contact.id,
           converted_opportunity_id: opportunity?.id ?? null,
+          archived_at: nowIso,
+          archived_by: authData.user?.id ?? null,
         })
         .eq("id", input.leadId);
       if (updateError) throw updateError;
