@@ -27,8 +27,25 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+// Scopes we request on the OAuth consent screen.
+//
+// SAFETY NOTES:
+// - These are all DELEGATED scopes — the function only ever acts as the
+//   signed-in user, never as the tenant. There is no app-only / application
+//   permission here, so the function literally cannot touch mailboxes or
+//   calendars belonging to anyone who hasn't completed the consent flow.
+// - Mail.Send + Calendars.ReadWrite are additive: existing users keep their
+//   old tokens (with the old scopes) until they re-authorize. Graph returns
+//   403 for the new endpoints on old tokens, which downstream callers
+//   (task-reminders, outlook-calendar-sync) already treat as "skip and
+//   record the error" rather than throwing. Nothing crashes; nothing
+//   touches a mailbox without permission.
+// - We do NOT request Mail.ReadWrite or Mail.Send.Shared — strictly
+//   read-own-mail + send-as-self + own-calendar.
 const SCOPES = [
   "https://graph.microsoft.com/Mail.Read",
+  "https://graph.microsoft.com/Mail.Send",
+  "https://graph.microsoft.com/Calendars.ReadWrite",
   "https://graph.microsoft.com/User.Read",
   "offline_access",
 ].join(" ");
