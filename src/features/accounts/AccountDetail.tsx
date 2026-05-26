@@ -14,6 +14,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
 import { RecordId } from "@/components/RecordId";
 import { InlineEdit, type InlineEditProps } from "@/components/InlineEdit";
+import { looksLikeUsZip, zipToTimeZone } from "@/lib/us-zip";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CollapsibleTabs } from "@/components/CollapsibleTabs";
@@ -176,6 +177,59 @@ export function AccountDetail() {
     async (newValue: string) => {
       await updateMutation.mutateAsync({ id: accountId, [field]: parser(newValue) } as Parameters<typeof updateMutation.mutateAsync>[0]);
     };
+
+  // Inline-edit save for a zip field that should ALSO autofill country
+  // + timezone when the user types a US zip. Mirrors AccountForm's
+  // shipping-vs-billing tz precedence:
+  //   - shipping_zip: drives shipping_country + timezone (always)
+  //   - billing_zip:  drives billing_country always; only drives
+  //     timezone when shipping_zip is currently empty.
+  // The detail page only renders an EditableField for billing_zip
+  // right now (shipping is read-only), but this helper handles both
+  // so it doesn't break the day shipping becomes inline-editable.
+  const TIMEZONE_LABELS: Record<string, string> = {
+    eastern: "US/Eastern",
+    central: "US/Central",
+    mountain: "US/Mountain",
+    pacific: "US/Pacific",
+    alaska: "US/Alaska",
+    hawaii: "US/Hawaii",
+    arizona_no_dst: "US/Arizona",
+  };
+  const saveZipField = (
+    zipField: "billing_zip" | "shipping_zip",
+    countryField: "billing_country" | "shipping_country",
+  ) => async (newValue: string) => {
+    const zip = (newValue ?? "").trim();
+    const patch: Record<string, unknown> = {
+      id: accountId,
+      [zipField]: zip === "" ? null : zip,
+    };
+    if (looksLikeUsZip(zip)) {
+      // Country: only fill if currently empty (don't clobber a manual
+      // "USA" / etc.)
+      const currentCountry =
+        zipField === "billing_zip"
+          ? account.billing_country
+          : account.shipping_country;
+      if (!currentCountry) {
+        patch[countryField] = "United States";
+      }
+      // Timezone: shipping is the source of truth. Only let billing
+      // touch tz when shipping_zip is empty.
+      const shouldDriveTz =
+        zipField === "shipping_zip" ||
+        !account.shipping_zip ||
+        account.shipping_zip.trim() === "";
+      if (shouldDriveTz) {
+        const tz = zipToTimeZone(zip);
+        if (tz) patch.timezone = TIMEZONE_LABELS[tz];
+      }
+    }
+    await updateMutation.mutateAsync(
+      patch as Parameters<typeof updateMutation.mutateAsync>[0],
+    );
+  };
 
   function handleArchive() {
     if (!id) return;
@@ -515,7 +569,7 @@ export function AccountDetail() {
                 <EditableField label="Street" value={account.billing_street} onSave={saveField("billing_street")} />
                 <EditableField label="City" value={account.billing_city} onSave={saveField("billing_city")} />
                 <EditableField label="State" value={account.billing_state} onSave={saveField("billing_state")} />
-                <EditableField label="Zip" value={account.billing_zip} onSave={saveField("billing_zip")} />
+                <EditableField label="Zip" value={account.billing_zip} onSave={saveZipField("billing_zip", "billing_country")} />
                 <EditableField label="Country" value={account.billing_country} onSave={saveField("billing_country")} />
                 {(account.billing_street || account.billing_city) && (
                   <a

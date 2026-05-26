@@ -253,11 +253,19 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
     hawaii: "US/Hawaii",
     arizona_no_dst: "US/Arizona",
   };
-  // We previously chained this via register('billing_zip', { onChange })
-  // but the RHF option-callback path proved unreliable in production
-  // (silently dropped the update under some re-render timings on
-  // staging). useEffect + watch is strictly more robust and matches
-  // the sameAsBilling pattern just below.
+  // Zip → country + timezone autofill. The timezone we care about is
+  // the account's physical location, which is the SHIPPING address
+  // (billing may be a corporate HQ in a different region). So:
+  //   - shipping_zip drives both shipping_country and timezone, and
+  //     overwrites timezone on every change so a corrected zip
+  //     updates the tz (previously we only filled empty tz, which
+  //     made later corrections silent no-ops).
+  //   - billing_zip only fills billing_country. We fall back to
+  //     letting billing drive timezone *only* when shipping_zip is
+  //     empty, so accounts that haven't bothered to set a shipping
+  //     address still get a sensible tz from billing.
+  // Country keeps the empty-check (we don't want to clobber a manual
+  // "USA" / "United States of America" / etc. once the rep set it).
   const watchedBillingZip = watch("billing_zip");
   useEffect(() => {
     const zip = (watchedBillingZip ?? "").trim();
@@ -268,12 +276,15 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
         shouldTouch: true,
       });
     }
-    const tz = zipToTimeZone(zip);
-    if (tz && !getValues("timezone")) {
-      setValue("timezone", TIMEZONE_LABELS[tz], {
-        shouldDirty: true,
-        shouldTouch: true,
-      });
+    const shippingZip = (getValues("shipping_zip") ?? "").trim();
+    if (!shippingZip) {
+      const tz = zipToTimeZone(zip);
+      if (tz) {
+        setValue("timezone", TIMEZONE_LABELS[tz], {
+          shouldDirty: true,
+          shouldTouch: true,
+        });
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchedBillingZip]);
@@ -289,7 +300,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
       });
     }
     const tz = zipToTimeZone(zip);
-    if (tz && !getValues("timezone")) {
+    if (tz) {
       setValue("timezone", TIMEZONE_LABELS[tz], {
         shouldDirty: true,
         shouldTouch: true,

@@ -26,6 +26,7 @@ import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
 import { TasksPanel } from "@/features/activities/TasksPanel";
 import { SequencesTab } from "@/features/sequences/SequencesTab";
 import { LayoutDrivenDetail } from "@/features/layouts/LayoutDrivenDetail";
+import { looksLikeUsZip, zipToTimeZone } from "@/lib/us-zip";
 
 /* ---------- Collapsible section ---------- */
 
@@ -324,10 +325,26 @@ export function ContactDetail() {
         entity="contacts"
         record={contact as unknown as Record<string, unknown>}
         onInlineSave={async (fieldKey, newValue) => {
-          await updateMutation.mutateAsync({
+          const patch: Record<string, unknown> = {
             id: contactId,
             [fieldKey]: newValue === "" ? null : newValue,
-          } as Parameters<typeof updateMutation.mutateAsync>[0]);
+          };
+          // When the rep inline-edits the mailing zip, also bump
+          // country (if empty) and time_zone (always — corrections
+          // should update the tz, not be silently ignored).
+          if (fieldKey === "mailing_zip") {
+            const zip = (newValue ?? "").trim();
+            if (looksLikeUsZip(zip)) {
+              if (!contact.mailing_country) {
+                patch.mailing_country = "United States";
+              }
+              const tz = zipToTimeZone(zip);
+              if (tz) patch.time_zone = tz;
+            }
+          }
+          await updateMutation.mutateAsync(
+            patch as Parameters<typeof updateMutation.mutateAsync>[0],
+          );
         }}
         inlineEditExcluded={[
           "account_id",
