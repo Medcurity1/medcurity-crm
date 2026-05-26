@@ -188,8 +188,12 @@ function ContactFormInner({
         shouldTouch: true,
       });
     }
+    // Always overwrite time_zone when the zip resolves — previously
+    // we only filled empties, which meant correcting a typo'd zip
+    // didn't update the tz. Country keeps the empty check so we
+    // don't clobber a manual "USA" / etc. value.
     const tz = zipToTimeZone(zip);
-    if (tz && !getValues("time_zone")) {
+    if (tz) {
       setValue("time_zone", tz as never, {
         shouldDirty: true,
         shouldTouch: true,

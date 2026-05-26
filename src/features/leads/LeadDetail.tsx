@@ -35,6 +35,7 @@ import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
 import { SequencesTab } from "@/features/sequences/SequencesTab";
 import type { LeadSource, LeadQualification } from "@/types/crm";
 import { LayoutDrivenDetail } from "@/features/layouts/LayoutDrivenDetail";
+import { looksLikeUsZip, zipToTimeZone } from "@/lib/us-zip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -426,10 +427,26 @@ export function LeadDetail() {
         // omitting onInlineSave. Reps can still see all fields but
         // can't modify them.
         onInlineSave={isConverted ? undefined : async (fieldKey, newValue) => {
-          await updateMutation.mutateAsync({
+          const patch: Record<string, unknown> = {
             id: lead.id,
             [fieldKey]: newValue === "" ? null : newValue,
-          } as Parameters<typeof updateMutation.mutateAsync>[0]);
+          };
+          // When the rep inline-edits the zip, also bump country (if
+          // empty) and time_zone (always — corrections should update
+          // the tz, not be silently ignored).
+          if (fieldKey === "zip") {
+            const zip = (newValue ?? "").trim();
+            if (looksLikeUsZip(zip)) {
+              if (!lead.country) {
+                patch.country = "United States";
+              }
+              const tz = zipToTimeZone(zip);
+              if (tz) patch.time_zone = tz;
+            }
+          }
+          await updateMutation.mutateAsync(
+            patch as Parameters<typeof updateMutation.mutateAsync>[0],
+          );
         }}
         inlineEditExcluded={[
           "first_name",
