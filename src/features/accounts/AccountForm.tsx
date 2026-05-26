@@ -292,19 +292,36 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
   const watchedShippingZip = watch("shipping_zip");
   useEffect(() => {
     const zip = (watchedShippingZip ?? "").trim();
-    if (!looksLikeUsZip(zip)) return;
-    if (!getValues("shipping_country")) {
-      setValue("shipping_country", "United States", {
-        shouldDirty: true,
-        shouldTouch: true,
-      });
+    if (looksLikeUsZip(zip)) {
+      if (!getValues("shipping_country")) {
+        setValue("shipping_country", "United States", {
+          shouldDirty: true,
+          shouldTouch: true,
+        });
+      }
+      const tz = zipToTimeZone(zip);
+      if (tz) {
+        setValue("timezone", TIMEZONE_LABELS[tz], {
+          shouldDirty: true,
+          shouldTouch: true,
+        });
+      }
+      return;
     }
-    const tz = zipToTimeZone(zip);
-    if (tz) {
-      setValue("timezone", TIMEZONE_LABELS[tz], {
-        shouldDirty: true,
-        shouldTouch: true,
-      });
+    // Shipping cleared (or invalid) — fall BACK to billing's tz so the
+    // account doesn't keep a stale shipping-derived value after the
+    // rep removes the shipping address.
+    if (!zip) {
+      const billingZip = (getValues("billing_zip") ?? "").trim();
+      if (looksLikeUsZip(billingZip)) {
+        const tz = zipToTimeZone(billingZip);
+        if (tz) {
+          setValue("timezone", TIMEZONE_LABELS[tz], {
+            shouldDirty: true,
+            shouldTouch: true,
+          });
+        }
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchedShippingZip]);

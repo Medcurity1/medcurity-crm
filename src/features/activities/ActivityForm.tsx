@@ -405,6 +405,7 @@ export function ActivityForm({
                 <option value="">Select meeting type...</option>
                 <option value="Demo">Demo</option>
                 <option value="Proposal conversation">Proposal conversation</option>
+                <option value="Partner Meeting">Partner Meeting</option>
               </select>
             ) : (
               <Input id="subject" {...form.register("subject")} placeholder="Activity subject" />

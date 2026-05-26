@@ -348,7 +348,8 @@ export function ActivitiesListPage() {
                   <TableHead>Subject</TableHead>
                   <TableHead>Owner</TableHead>
                   <TableHead>Related</TableHead>
-                  <TableHead>{filters.type === "task" ? "Due" : "Date"}</TableHead>
+                  {filters.type === "task" && <TableHead>Due</TableHead>}
+                  <TableHead>Created</TableHead>
                   <TableHead className="w-20 text-center">Done</TableHead>
                 </TableRow>
               </TableHeader>
@@ -393,10 +394,13 @@ export function ActivitiesListPage() {
                           </span>
                         )}
                       </TableCell>
+                      {filters.type === "task" && (
+                        <TableCell className="text-muted-foreground text-sm">
+                          {a.due_at ? formatDate(a.due_at) : "\u2014"}
+                        </TableCell>
+                      )}
                       <TableCell className="text-muted-foreground text-sm">
-                        {filters.type === "task"
-                          ? (a.due_at ? formatDate(a.due_at) : "\u2014")
-                          : formatDate(a.created_at)}
+                        {formatDate(a.created_at)}
                       </TableCell>
                       <TableCell className="text-center">
                         {a.completed_at ? (
