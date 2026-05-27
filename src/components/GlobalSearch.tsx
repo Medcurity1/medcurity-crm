@@ -282,7 +282,7 @@ export function GlobalSearch() {
               {rankedAccounts.map((account) => (
                 <CommandItem
                   key={account.id}
-                  value={`account-${account.name}`}
+                  value={`account-${account.name}-${account.id}`}
                   onSelect={() => handleSelect(`/accounts/${account.id}`)}
                 >
                   <Building2 className="h-4 w-4 text-muted-foreground" />
@@ -300,7 +300,7 @@ export function GlobalSearch() {
               {rankedContacts.map((contact) => (
                 <CommandItem
                   key={contact.id}
-                  value={`contact-${contact.first_name} ${contact.last_name}`}
+                  value={`contact-${contact.first_name} ${contact.last_name}-${contact.id}`}
                   onSelect={() => handleSelect(`/contacts/${contact.id}`)}
                 >
                   <Users className="h-4 w-4 text-muted-foreground" />
@@ -322,7 +322,7 @@ export function GlobalSearch() {
               {rankedOpportunities.map((opp) => (
                 <CommandItem
                   key={opp.id}
-                  value={`opportunity-${opp.name}`}
+                  value={`opportunity-${opp.name}-${opp.id}`}
                   onSelect={() =>
                     handleSelect(`/opportunities/${opp.id}`)
                   }
@@ -342,7 +342,7 @@ export function GlobalSearch() {
               {rankedLeads.map((lead) => (
                 <CommandItem
                   key={lead.id}
-                  value={`lead-${lead.first_name} ${lead.last_name}`}
+                  value={`lead-${lead.first_name} ${lead.last_name}-${lead.id}`}
                   onSelect={() => handleSelect(`/leads/${lead.id}`)}
                 >
                   <UserPlus className="h-4 w-4 text-muted-foreground" />
