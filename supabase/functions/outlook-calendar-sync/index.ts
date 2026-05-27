@@ -31,6 +31,17 @@ interface TaskRow {
   completed_at: string | null;
   archived_at: string | null;
   outlook_event_id: string | null;
+  account_id: string | null;
+  contact_id: string | null;
+  opportunity_id: string | null;
+  lead_id: string | null;
+  // Joined display names + a per-record deep link. Populated by the
+  // SELECT below so calendar attendees can see at a glance what
+  // account/contact this task is for without opening the CRM first.
+  account?: { id: string; name: string | null } | null;
+  contact?: { id: string; first_name: string | null; last_name: string | null } | null;
+  opportunity?: { id: string; name: string | null } | null;
+  lead?: { id: string; first_name: string | null; last_name: string | null; company: string | null } | null;
 }
 
 interface EmailConn {
@@ -45,20 +56,68 @@ interface EmailConn {
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
 
+const APP_BASE = (Deno.env.get("APP_BASE_URL") ?? "https://crm.medcurity.com").replace(/\/+$/, "");
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+// Build the "Related to:" block users will see at the top of the
+// calendar event body, including deep links back to the CRM. Reps
+// repeatedly asked "what account is this for?" when an event landed
+// on their calendar with just a bare task subject — showing it here
+// removes that friction.
+function buildContextLines(task: TaskRow): string {
+  const lines: string[] = [];
+  if (task.account?.name) {
+    lines.push(
+      `<strong>Account:</strong> <a href="${APP_BASE}/accounts/${task.account.id}">${escapeHtml(task.account.name)}</a>`
+    );
+  }
+  if (task.contact) {
+    const name =
+      [task.contact.first_name, task.contact.last_name].filter(Boolean).join(" ") ||
+      "(unnamed)";
+    lines.push(
+      `<strong>Contact:</strong> <a href="${APP_BASE}/contacts/${task.contact.id}">${escapeHtml(name)}</a>`
+    );
+  }
+  if (task.opportunity?.name) {
+    lines.push(
+      `<strong>Opportunity:</strong> <a href="${APP_BASE}/opportunities/${task.opportunity.id}">${escapeHtml(task.opportunity.name)}</a>`
+    );
+  }
+  if (task.lead) {
+    const name =
+      [task.lead.first_name, task.lead.last_name].filter(Boolean).join(" ") || "(unnamed)";
+    const co = task.lead.company ? ` — ${escapeHtml(task.lead.company)}` : "";
+    lines.push(
+      `<strong>Lead:</strong> <a href="${APP_BASE}/leads/${task.lead.id}">${escapeHtml(name)}${co}</a>`
+    );
+  }
+  return lines.length ? `<p>${lines.join("<br>")}</p>` : "";
+}
+
 function taskToEventBody(task: TaskRow) {
   // Represent the task as a 30-min block starting at due_at. The rep can
   // move or extend it in Outlook without us overwriting since we only push
   // core fields (subject, body, start, end) on update.
   const start = new Date(task.due_at!);
   const end = new Date(start.getTime() + 30 * 60 * 1000);
+  const context = buildContextLines(task);
+  const notes = task.body
+    ? `<p>${task.body.replace(/\n/g, "<br>")}</p>`
+    : "";
+  const footer = `<p style="color:#999;font-size:12px">Synced from PulsePoint · <a href="${APP_BASE}/activities/${task.id}">Open task</a></p>`;
   return {
     subject: `[PulsePoint] ${task.subject}`,
     body: {
       contentType: "HTML",
-      content: task.body
-        ? `<p>${task.body.replace(/\n/g, "<br>")}</p>` +
-          `<p style="color:#999;font-size:12px">Synced from PulsePoint</p>`
-        : `<p style="color:#999;font-size:12px">Synced from PulsePoint</p>`,
+      content: `${context}${notes}${footer}`,
     },
     start: { dateTime: start.toISOString(), timeZone: "UTC" },
     end: { dateTime: end.toISOString(), timeZone: "UTC" },
@@ -262,7 +321,12 @@ serve(async (req) => {
     const { data: task, error } = await supabase
       .from("activities")
       .select(
-        "id, owner_user_id, subject, body, due_at, completed_at, archived_at, outlook_event_id"
+        `id, owner_user_id, subject, body, due_at, completed_at, archived_at, outlook_event_id,
+         account_id, contact_id, opportunity_id, lead_id,
+         account:accounts!account_id ( id, name ),
+         contact:contacts!contact_id ( id, first_name, last_name ),
+         opportunity:opportunities!opportunity_id ( id, name ),
+         lead:leads!lead_id ( id, first_name, last_name, company )`
       )
       .eq("id", id)
       .maybeSingle();
@@ -285,7 +349,12 @@ serve(async (req) => {
   const { data: tasks, error } = await supabase
     .from("activities")
     .select(
-      "id, owner_user_id, subject, body, due_at, completed_at, archived_at, outlook_event_id"
+      `id, owner_user_id, subject, body, due_at, completed_at, archived_at, outlook_event_id,
+       account_id, contact_id, opportunity_id, lead_id,
+       account:accounts!account_id ( id, name ),
+       contact:contacts!contact_id ( id, first_name, last_name ),
+       opportunity:opportunities!opportunity_id ( id, name ),
+       lead:leads!lead_id ( id, first_name, last_name, company )`
     )
     .eq("activity_type", "task")
     .gte("due_at", ninetyAgo)

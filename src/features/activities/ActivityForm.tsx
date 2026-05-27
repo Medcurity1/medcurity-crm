@@ -247,11 +247,17 @@ export function ActivityForm({
         : ["in_app"]
     ) as Array<"in_app" | "email">;
 
-    // Activity date applies to every type; falls back to "today" if
-    // the user cleared the field. Due date only applies to tasks.
+    // Activity date applies to every type. If the user picked today (or
+    // didn't touch the field), stamp it with the actual current time so
+    // the timeline reads "just now" instead of "X hours ago" (noon was
+    // anchoring it to mid-day and confusing reps who logged in the
+    // evening). For backdated activities, anchor at local noon to avoid
+    // any day-shift caused by UTC midnight in negative-UTC zones.
+    const picked = values.activity_date || todayLocalISO();
     const activityDateIso =
-      dateToLocalNoonISO(values.activity_date ?? "") ??
-      dateToLocalNoonISO(todayLocalISO())!;
+      picked === todayLocalISO()
+        ? new Date().toISOString()
+        : dateToLocalNoonISO(picked)!;
     // datetime-local returns "YYYY-MM-DDTHH:mm" with no timezone.
     // new Date(value) interprets it as local time, which is what users
     // expect — picking 2:30 PM should put the calendar event at 2:30 PM
