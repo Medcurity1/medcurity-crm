@@ -2,7 +2,8 @@ import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom"
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Pencil, Archive, ChevronDown, ChevronLeft, Phone, Mail, ArrowRightLeft, UserRoundCog, History } from "lucide-react";
+import { Pencil, Archive, ChevronDown, ChevronLeft, Phone, Mail, ArrowRightLeft, UserRoundCog, History, MapPin } from "lucide-react";
+import { InlineEdit } from "@/components/InlineEdit";
 import { useLead, useUpdateLead, useArchiveLead } from "./api";
 import { useLeadLists } from "@/features/lead-lists/lead-lists-api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
@@ -507,6 +508,103 @@ export function LeadDetail() {
           description: "textarea",
           employees: "number",
           annual_revenue: "currency",
+        }}
+        // Address is seeded as a single `__lead_address` custom block in
+        // the layout (one widget, five fields together) instead of five
+        // separate placements. Without a renderer it shows "Unrendered
+        // custom block" — fix is to mirror AccountDetail's billing-address
+        // pattern: stacked InlineEdits + a Maps link. Zip edits cascade
+        // country + time_zone via the same rules as the per-field inline
+        // edit handler above.
+        customBlocks={{
+          __lead_address: () => {
+            const save = (field: "street" | "city" | "state" | "country") =>
+              async (newValue: string) => {
+                await updateMutation.mutateAsync({
+                  id: lead.id,
+                  [field]: newValue === "" ? null : newValue,
+                } as Parameters<typeof updateMutation.mutateAsync>[0]);
+              };
+            const saveZip = async (newValue: string) => {
+              const zip = (newValue ?? "").trim();
+              const patch: Record<string, unknown> = {
+                id: lead.id,
+                zip: zip === "" ? null : zip,
+              };
+              if (looksLikeUsZip(zip)) {
+                if (!lead.country) patch.country = "United States";
+                const tz = zipToTimeZone(zip);
+                if (tz) patch.time_zone = tz;
+              }
+              await updateMutation.mutateAsync(
+                patch as Parameters<typeof updateMutation.mutateAsync>[0],
+              );
+            };
+            const Row = ({
+              label,
+              value,
+              onSave,
+            }: {
+              label: string;
+              value: unknown;
+              onSave?: (v: string) => Promise<void>;
+            }) => (
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground">{label}</span>
+                {onSave ? (
+                  <InlineEdit value={value as string | number | null} onSave={onSave} />
+                ) : (
+                  <span className="text-sm font-medium">
+                    {(value as string | null) ?? "\u2014"}
+                  </span>
+                )}
+              </div>
+            );
+            const hasAddress = lead.street || lead.city;
+            return (
+              <div className="space-y-3">
+                <Row
+                  label="Street"
+                  value={lead.street}
+                  onSave={isConverted ? undefined : save("street")}
+                />
+                <Row
+                  label="City"
+                  value={lead.city}
+                  onSave={isConverted ? undefined : save("city")}
+                />
+                <Row
+                  label="State"
+                  value={lead.state}
+                  onSave={isConverted ? undefined : save("state")}
+                />
+                <Row
+                  label="Zip"
+                  value={lead.zip}
+                  onSave={isConverted ? undefined : saveZip}
+                />
+                <Row
+                  label="Country"
+                  value={lead.country}
+                  onSave={isConverted ? undefined : save("country")}
+                />
+                {hasAddress && (
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                      [lead.street, lead.city, lead.state, lead.zip]
+                        .filter(Boolean)
+                        .join(", "),
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline text-sm flex items-center gap-1"
+                  >
+                    <MapPin className="h-3 w-3" /> View on Map
+                  </a>
+                )}
+              </div>
+            );
+          },
         }}
       />
 
