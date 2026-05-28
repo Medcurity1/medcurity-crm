@@ -270,8 +270,15 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
           ? `Lead converted into existing account "${result.account.name}"`
           : `Lead converted — new account "${result.account.name}" created`
       );
+      // Close dialog first, then navigate. Target is the new CONTACT —
+      // this is the "newly created record" the rep cares about, and it
+      // matches LeadDetail's converted-lead useEffect redirect target so
+      // both paths agree (otherwise the lead-query refetch triggered by
+      // useConvertLead.onSuccess could race this navigate and silently
+      // send the user to /contacts/X first, leaving the dialog in a
+      // half-unmounted state — observed 2026-05-26).
       onOpenChange(false);
-      navigate(`/accounts/${result.account.id}`);
+      navigate(`/contacts/${result.contact.id}`, { replace: true });
     } catch (err) {
       toast.error("Failed to convert lead: " + (err as Error).message);
     }
