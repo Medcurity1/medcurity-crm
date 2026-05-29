@@ -356,10 +356,11 @@ export function ArpcByQuarter() {
                       }
                     />
                     <Tooltip
-                      formatter={(value: number, name: string) => {
+                      formatter={(value, name) => {
+                        const n = Number(value) || 0;
                         if (name === "ARPC" || name === "Revenue")
-                          return formatCurrency(value);
-                        return value.toLocaleString();
+                          return formatCurrency(n);
+                        return n.toLocaleString();
                       }}
                     />
                     <Line

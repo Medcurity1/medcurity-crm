@@ -434,10 +434,11 @@ export function LostCustomersAccount() {
                     <XAxis dataKey="label" />
                     <YAxis allowDecimals={false} />
                     <Tooltip
-                      formatter={(value: number, name: string) => {
+                      formatter={(value, name) => {
+                        const n = Number(value) || 0;
                         if (name === "Amount lost")
-                          return formatCurrency(value);
-                        return value.toLocaleString();
+                          return formatCurrency(n);
+                        return n.toLocaleString();
                       }}
                     />
                     <Line
