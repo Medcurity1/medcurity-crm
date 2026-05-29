@@ -40,6 +40,8 @@ const ActivityDetail = lazy(() => import("@/features/activities/ActivityDetail")
 const ArrBaseDataset = lazy(() => import("@/features/reports/standard/ArrBaseDataset").then(m => ({ default: m.ArrBaseDataset })));
 const NewCustomers = lazy(() => import("@/features/reports/standard/NewCustomers").then(m => ({ default: m.NewCustomers })));
 const LostCustomers = lazy(() => import("@/features/reports/standard/LostCustomers").then(m => ({ default: m.LostCustomers })));
+const LostCustomersAccount = lazy(() => import("@/features/reports/standard/LostCustomersAccount").then(m => ({ default: m.LostCustomersAccount })));
+const ArpcByQuarter = lazy(() => import("@/features/reports/standard/ArpcByQuarter").then(m => ({ default: m.ArpcByQuarter })));
 const ActivePipeline = lazy(() => import("@/features/reports/standard/ActivePipeline").then(m => ({ default: m.ActivePipeline })));
 const RenewalsReport = lazy(() => import("@/features/reports/standard/RenewalsQueue").then(m => ({ default: m.RenewalsQueue })));
 const SqlAccounts = lazy(() => import("@/features/reports/standard/SqlAccounts").then(m => ({ default: m.SqlAccounts })));
@@ -119,6 +121,8 @@ export default function App() {
                   <Route path="reports/standard/arr-base-dataset" element={<ArrBaseDataset />} />
                   <Route path="reports/standard/new-customers" element={<NewCustomers />} />
                   <Route path="reports/standard/lost-customers" element={<LostCustomers />} />
+                  <Route path="reports/standard/lost-customers-account" element={<LostCustomersAccount />} />
+                  <Route path="reports/standard/arpc-by-quarter" element={<ArpcByQuarter />} />
                   <Route path="reports/standard/active-pipeline" element={<ActivePipeline />} />
                   <Route path="reports/standard/renewals" element={<RenewalsReport />} />
                   <Route path="reports/standard/sql" element={<SqlAccounts />} />

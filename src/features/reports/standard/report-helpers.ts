@@ -144,6 +144,58 @@ export function resolveRange(key: DateRangeKey): { start: string | null; end: st
   }
 }
 
+/**
+ * Quarter helpers — used by the historical (by-quarter) views on
+ * reports like ARPC and Lost Customers, both of which need to plot
+ * one data point per quarter on the team dashboard.
+ *
+ * Quarters are UTC-based to match `fiscalPeriod()` above so labels
+ * stay consistent across reports.
+ */
+export interface QuarterBucket {
+  /** ISO date of the first day of the quarter (UTC). yyyy-mm-dd. */
+  start: string;
+  /** ISO date of the last day of the quarter (UTC). yyyy-mm-dd. */
+  end: string;
+  /** "Q3-2026" — matches `fiscalPeriod()`'s format. */
+  label: string;
+  /** "2026-Q3" — sortable variant. */
+  sortKey: string;
+}
+
+/** Return the QuarterBucket containing the given date (UTC-based). */
+export function quarterOf(date: string | Date): QuarterBucket {
+  const d = typeof date === "string" ? new Date(date) : date;
+  const y = d.getUTCFullYear();
+  const q = Math.floor(d.getUTCMonth() / 3); // 0-3
+  const startD = new Date(Date.UTC(y, q * 3, 1));
+  const endD = new Date(Date.UTC(y, q * 3 + 3, 0));
+  const iso = (x: Date) => x.toISOString().slice(0, 10);
+  return {
+    start: iso(startD),
+    end: iso(endD),
+    label: `Q${q + 1}-${y}`,
+    sortKey: `${y}-Q${q + 1}`,
+  };
+}
+
+/**
+ * Return the N most-recent quarters ending with the current quarter.
+ * Earliest first → most recent last, so the array is dashboard-ready
+ * for a left-to-right line chart.
+ *
+ * @param count number of quarters to return (default 8 = 2 years).
+ */
+export function lastNQuarters(count = 8): QuarterBucket[] {
+  const today = new Date();
+  const buckets: QuarterBucket[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - i * 3, 15));
+    buckets.push(quarterOf(d));
+  }
+  return buckets;
+}
+
 export const DATE_RANGE_OPTIONS: { value: DateRangeKey; label: string }[] = [
   { value: "current_quarter", label: "Current Quarter" },
   { value: "last_quarter", label: "Last Quarter" },

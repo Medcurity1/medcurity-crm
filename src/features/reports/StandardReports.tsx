@@ -9,6 +9,7 @@ import {
   FileBarChart,
   UserCheck,
   UserPlus,
+  UserMinus,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -102,6 +103,24 @@ const REPORTS: ReportCard[] = [
       "Leads with MQL date this fiscal quarter, not yet converted. Grouped by Lead Source.",
     icon: Users,
     apiView: "v_mql_leads_qtd",
+    status: "live",
+  },
+  {
+    id: "arpc-by-quarter",
+    title: "Average Revenue Per Customer",
+    description:
+      "Closed-won revenue ÷ distinct customers in the same quarter. Includes an 8-quarter historical view for the team dashboard.",
+    icon: DollarSign,
+    apiView: "—",
+    status: "live",
+  },
+  {
+    id: "lost-customers-account",
+    title: "Lost Customers (Account-based)",
+    description:
+      "Accounts whose latest Closed-Won has lapsed — maturity date past, or close date older than 365 days when no maturity is set. Complements the opp-based Lost Customers report.",
+    icon: UserMinus,
+    apiView: "—",
     status: "live",
   },
   {
