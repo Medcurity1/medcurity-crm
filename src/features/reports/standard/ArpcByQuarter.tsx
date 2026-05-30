@@ -73,11 +73,26 @@ interface AccountRow {
 interface QuarterRow {
   quarter: QuarterBucket;
   total_revenue: number;
+  /** Distinct accounts with at least one closed-won in this quarter (ARPC divisor). */
   customer_count: number;
+  /**
+   * Distinct accounts considered "active" as of the END of this quarter.
+   * Active = at least one closed-won opp whose contract still covers Q.end,
+   * where the contract end is taken as `maturity_date` if set, else
+   * `close_date + 365 days` (the assumed 1-year contract length).
+   */
+  active_customer_count: number;
   arpc: number;
 }
 
-const HISTORY_QUARTERS = 8;
+const HISTORY_QUARTERS = 4;
+
+/** Add N days to a yyyy-mm-dd string (UTC math). */
+function addDaysIso(dateIso: string, days: number): string {
+  const d = new Date(dateIso);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
 
 export function ArpcByQuarter() {
   const allQuarters = useMemo(() => lastNQuarters(HISTORY_QUARTERS), []);
@@ -100,18 +115,27 @@ export function ArpcByQuarter() {
         id: string;
         amount: number | null;
         close_date: string | null;
+        maturity_date: string | null;
         account_id: string | null;
       };
-      // Pull every closed-won opp in the rolling 8-quarter window.
-      // close_date >= start of oldest quarter, <= end of newest.
+      // For ARPC we only need closed-wons whose close_date falls inside the
+      // 4-quarter window. But to compute Active Customers AS OF the end of
+      // each quarter we also need closed-wons that pre-date the window but
+      // are still in-contract (maturity_date in-window, or close_date+365
+      // when maturity is null). So pull back 365 extra days on the lower
+      // bound — that covers every opp that could still be "active" at the
+      // start of the oldest quarter.
+      const windowStart = allQuarters[0].start;
+      const windowEnd = allQuarters[allQuarters.length - 1].end;
+      const activeLookbackStart = addDaysIso(windowStart, -365);
       const opps = await fetchAllRows<OppRaw>(() =>
         supabase
           .from("opportunities")
-          .select("id, amount, close_date, account_id")
+          .select("id, amount, close_date, maturity_date, account_id")
           .eq("stage", "closed_won")
           .is("archived_at", null)
-          .gte("close_date", allQuarters[0].start)
-          .lte("close_date", allQuarters[allQuarters.length - 1].end)
+          .gte("close_date", activeLookbackStart)
+          .lte("close_date", windowEnd)
           .order("close_date", { ascending: true }),
       );
 
@@ -126,11 +150,12 @@ export function ArpcByQuarter() {
       const perAccountByQuarter = new Map<string, Map<string, AccountRow>>();
       for (const q of allQuarters) perAccountByQuarter.set(q.sortKey, new Map());
 
+      // Bucket revenue per quarter the opp closed in (ARPC numerator).
       for (const o of opps) {
         if (!o.close_date || !o.account_id) continue;
         const bucket = quarterOf(o.close_date);
         const slot = perAccountByQuarter.get(bucket.sortKey);
-        if (!slot) continue; // outside the rolling window
+        if (!slot) continue; // outside the rolling window (pre-window lookback)
         const existing = slot.get(o.account_id);
         const amount = Number(o.amount ?? 0);
         if (existing) {
@@ -146,6 +171,21 @@ export function ArpcByQuarter() {
         }
       }
 
+      // Active customers as-of end of each quarter: account counted if it
+      // has any closed-won opp whose contract still covers Q.end.
+      const activeByQuarter = new Map<string, Set<string>>();
+      for (const q of allQuarters) activeByQuarter.set(q.sortKey, new Set());
+      for (const o of opps) {
+        if (!o.close_date || !o.account_id) continue;
+        const effEnd = o.maturity_date ?? addDaysIso(o.close_date, 365);
+        for (const q of allQuarters) {
+          // Active at Q.end if it had closed by then AND contract still covers Q.end.
+          if (o.close_date <= q.end && effEnd >= q.end) {
+            activeByQuarter.get(q.sortKey)!.add(o.account_id);
+          }
+        }
+      }
+
       // Build the per-quarter aggregate row used by the historical view +
       // dashboard widget.
       const byQuarter: QuarterRow[] = allQuarters.map((q) => {
@@ -153,8 +193,15 @@ export function ArpcByQuarter() {
         const rows = Array.from(slot.values());
         const total_revenue = rows.reduce((s, r) => s + r.revenue, 0);
         const customer_count = rows.length;
+        const active_customer_count = activeByQuarter.get(q.sortKey)!.size;
         const arpc = customer_count > 0 ? total_revenue / customer_count : 0;
-        return { quarter: q, total_revenue, customer_count, arpc };
+        return {
+          quarter: q,
+          total_revenue,
+          customer_count,
+          active_customer_count,
+          arpc,
+        };
       });
 
       // Flatten the inner Map into an array so React Query memoizes it cheaply.
@@ -177,11 +224,18 @@ export function ArpcByQuarter() {
 
   function exportCsv() {
     if (view === "historical") {
-      const header = ["Quarter", "Total Revenue", "Customer Count", "ARPC"];
+      const header = [
+        "Quarter",
+        "New Customers",
+        "Active Customers",
+        "Total Revenue",
+        "ARPC",
+      ];
       const rows = (data?.byQuarter ?? []).map((q) => [
         q.quarter.label,
-        csvCurrency(q.total_revenue),
         q.customer_count,
+        q.active_customer_count,
+        csvCurrency(q.total_revenue),
         csvCurrency(q.arpc),
       ]);
       downloadCsv(`arpc-by-quarter-${todayStamp()}.csv`, [header, ...rows]);
@@ -203,7 +257,8 @@ export function ArpcByQuarter() {
   const chartData = (data?.byQuarter ?? []).map((q) => ({
     label: q.quarter.label,
     arpc: Math.round(q.arpc),
-    customers: q.customer_count,
+    new_customers: q.customer_count,
+    active_customers: q.active_customer_count,
     revenue: Math.round(q.total_revenue),
   }));
 
@@ -343,7 +398,8 @@ export function ArpcByQuarter() {
           <Card>
             <CardContent className="p-4">
               <p className="text-xs text-muted-foreground font-medium mb-2">
-                ARPC trend — last {HISTORY_QUARTERS} quarters
+                ARPC (left) + Active Customers (right) — last{" "}
+                {HISTORY_QUARTERS} quarters (rolling 365 days)
               </p>
               <div style={{ width: "100%", height: 260 }}>
                 <ResponsiveContainer>
@@ -351,6 +407,7 @@ export function ArpcByQuarter() {
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="label" />
                     <YAxis
+                      yAxisId="left"
                       tickFormatter={(v) =>
                         `$${(Number(v) / 1000).toFixed(0)}k`
                       }
@@ -363,11 +420,26 @@ export function ArpcByQuarter() {
                         return n.toLocaleString();
                       }}
                     />
+                    <YAxis
+                      yAxisId="right"
+                      orientation="right"
+                      allowDecimals={false}
+                    />
                     <Line
+                      yAxisId="left"
                       type="monotone"
                       dataKey="arpc"
                       name="ARPC"
                       stroke="#3b82f6"
+                      strokeWidth={2}
+                      dot={{ r: 4 }}
+                    />
+                    <Line
+                      yAxisId="right"
+                      type="monotone"
+                      dataKey="active_customers"
+                      name="Active Customers"
+                      stroke="#10b981"
                       strokeWidth={2}
                       dot={{ r: 4 }}
                     />
@@ -384,7 +456,12 @@ export function ArpcByQuarter() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Quarter</TableHead>
-                      <TableHead className="text-right">Customers</TableHead>
+                      <TableHead className="text-right">
+                        New Customers
+                      </TableHead>
+                      <TableHead className="text-right">
+                        Active Customers
+                      </TableHead>
                       <TableHead className="text-right">
                         Total Revenue
                       </TableHead>
@@ -394,7 +471,7 @@ export function ArpcByQuarter() {
                   <TableBody>
                     {isLoading ? (
                       <TableRow>
-                        <TableCell colSpan={4} className="p-4">
+                        <TableCell colSpan={5} className="p-4">
                           <Skeleton className="h-48 w-full" />
                         </TableCell>
                       </TableRow>
@@ -406,6 +483,9 @@ export function ArpcByQuarter() {
                           </TableCell>
                           <TableCell className="text-right">
                             {q.customer_count.toLocaleString()}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {q.active_customer_count.toLocaleString()}
                           </TableCell>
                           <TableCell className="text-right">
                             {formatCurrency(q.total_revenue)}
