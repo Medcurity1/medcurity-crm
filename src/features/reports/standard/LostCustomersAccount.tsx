@@ -89,7 +89,7 @@ interface QuarterAggRow {
   lost_amount: number;
 }
 
-const HISTORY_QUARTERS = 8;
+const HISTORY_QUARTERS = 4;
 
 /** Add `days` to an ISO date string (yyyy-mm-dd), UTC-based. */
 function addDaysIso(iso: string, days: number): string {
@@ -425,7 +425,7 @@ export function LostCustomersAccount() {
           <Card>
             <CardContent className="p-4">
               <p className="text-xs text-muted-foreground font-medium mb-2">
-                Accounts lost per quarter — last {HISTORY_QUARTERS} quarters
+                Accounts lost per quarter — last {HISTORY_QUARTERS} quarters (rolling 365 days)
               </p>
               <div style={{ width: "100%", height: 260 }}>
                 <ResponsiveContainer>
