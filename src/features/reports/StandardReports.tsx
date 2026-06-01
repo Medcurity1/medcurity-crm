@@ -132,6 +132,15 @@ const REPORTS: ReportCard[] = [
     apiView: "v_dashboard_metrics",
     status: "live",
   },
+  {
+    id: "financial-saas-metrics",
+    title: "Financial & SaaS Metrics",
+    description:
+      "Consolidated quarterly Revenue / Churn / Rolling 12-month grid. Mirrors the legacy financial spreadsheet's Summary sheet, with a single-click .xlsx export (Summary + Raw Data + Definitions tabs).",
+    icon: TrendingUp,
+    apiView: "f_financial_saas_metrics_quarterly()",
+    status: "live",
+  },
 ];
 
 export function StandardReports() {
