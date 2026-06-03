@@ -37,9 +37,24 @@ export const opportunitySchema = z.object({
   close_date: z.string().optional().or(z.literal("")),
   contract_start_date: z.string().optional().or(z.literal("")),
   contract_end_date: z.string().optional().or(z.literal("")),
-  contract_length_months: z.coerce.number().int().positive().optional().or(z.literal(0)),
+  // Optional numeric picklist fields — must accept undefined / null /
+  // empty string. Using `.optional().nullable()` and `.min(0)` (not
+  // `.positive()`) matches the pattern of every other optional numeric
+  // field on this form (probability, cycle_count, fte_count) so the
+  // page-layout "Required" toggle is the only thing that gates them.
+  contract_length_months: z
+    .preprocess(
+      (v) => (v === "" || v === undefined || v === null ? null : v),
+      z.coerce.number().int().min(0).nullable(),
+    )
+    .optional(),
   contract_signed_date: z.string().optional().or(z.literal("")),
-  contract_year: z.coerce.number().int().positive().optional().or(z.literal(0)),
+  contract_year: z
+    .preprocess(
+      (v) => (v === "" || v === undefined || v === null ? null : v),
+      z.coerce.number().int().min(0).nullable(),
+    )
+    .optional(),
   loss_reason: z.string().optional().or(z.literal("")),
   notes: z.string().optional().or(z.literal("")),
   // New fields
