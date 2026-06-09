@@ -136,7 +136,7 @@ const REPORTS: ReportCard[] = [
     id: "financial-saas-metrics",
     title: "Financial & SaaS Metrics",
     description:
-      "Consolidated quarterly Revenue / Churn / Rolling 12-month grid. Mirrors the legacy financial spreadsheet's Summary sheet, with a single-click .xlsx export (Summary + Raw Data + Definitions tabs).",
+      "Consolidated quarterly Revenue / Churn / Rolling 12-month grid. Mirrors the legacy financial spreadsheet's Summary sheet, with one-click Excel (Summary + Raw Data + Definitions tabs) and PDF exports.",
     icon: TrendingUp,
     apiView: "f_financial_saas_metrics_quarterly()",
     status: "live",

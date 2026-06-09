@@ -303,8 +303,9 @@ function drawChart(doc: import("jspdf").jsPDF, quarters: QuarterMetrics[]) {
 /**
  * Smallest "clean" axis ceiling >= max. Candidates are chosen so that
  * ceiling/4 also reads cleanly (1.2M -> 300K ticks, 800K -> 200K ticks).
+ * Shared with the on-screen chart so the page and the PDF scale alike.
  */
-function niceCeiling(max: number): number {
+export function niceCeiling(max: number): number {
   const mag = Math.pow(10, Math.floor(Math.log10(Math.max(max, 1))));
   for (const c of [1, 1.2, 1.6, 2, 2.4, 3, 4, 5, 6, 8, 10]) {
     if (c * mag >= max) return c * mag;

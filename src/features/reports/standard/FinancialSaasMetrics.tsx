@@ -45,17 +45,17 @@ import {
   downloadFinancialSaasMetricsWorkbook,
   type RawDatasetRow,
 } from "./financialSaasMetricsExport";
-import { downloadFinancialSaasMetricsPdf } from "./financialSaasMetricsPdf";
+import { downloadFinancialSaasMetricsPdf, niceCeiling } from "./financialSaasMetricsPdf";
 
 /**
  * Financial & SaaS Metrics — consolidated quarterly report.
  *
  * Mirrors the Summary sheet of the legacy
  * "Medcurity Financial and SaaS Metrics - James.numbers" workbook,
- * with a modernized UI: KPI strip, combined revenue+churn chart
- * (churn pinned to 0-100% for honest scale), year-banded quarterly
- * grid, and an .xlsx export with Summary / Raw Data / Definitions
- * tabs.
+ * with a modernized UI: KPI strip (period-aware for bounded windows),
+ * combined revenue+churn chart (churn axis scales to the tallest bar
+ * in steps of 100), year-banded quarterly grid, a styled .xlsx export
+ * with Summary / Raw Data / Definitions tabs, and a one-page PDF.
  *
  * Time window selector lets the user pick:
  *   - All history (default — first opp to current quarter)
@@ -445,29 +445,51 @@ function ComboChartCard({ quarters }: { quarters: QuarterMetrics[] }) {
     ttm_revenue: Math.round(q.ttm_revenue),
     churn_pct: Number((q.churn_pct_dollars * 100).toFixed(2)),
   }));
+
+  // Churn axis scales to the tallest bar in steps of 100 once churn
+  // exceeds 100% (e.g. 0/100/200/300/400); quarters of 100 otherwise.
+  const maxChurn = Math.max(...quarters.map((q) => q.churn_pct_dollars * 100), 1);
+  const pctMax = maxChurn > 100 ? Math.ceil(maxChurn / 100) * 100 : 100;
+  const segments = maxChurn > 100 ? pctMax / 100 : 4;
+  const pctTicks = Array.from({ length: segments + 1 }, (_, i) => (pctMax * i) / segments);
+
+  // The $ axis uses the SAME number of segments so every horizontal
+  // gridline marks both a $ value and a clean % value (like the PDF).
+  const maxRev = Math.max(...quarters.map((q) => q.ttm_revenue), 1);
+  const revMax = niceCeiling(maxRev);
+  const revTicks = Array.from({ length: segments + 1 }, (_, i) => (revMax * i) / segments);
+
   return (
     <Card>
       <CardContent className="p-4">
         <div className="flex items-baseline justify-between mb-2">
           <p className="text-sm font-medium">Trailing 12-month revenue vs. quarterly churn</p>
           <p className="text-xs text-muted-foreground">
-            Revenue on left axis · Churn % on right axis (0–100%)
+            Revenue on left axis · Churn % on right axis
           </p>
         </div>
         <div style={{ width: "100%", height: 260 }}>
           <ResponsiveContainer>
             <ComposedChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke="#94a3b8"
+                strokeOpacity={0.45}
+                vertical={false}
+              />
               <XAxis dataKey="label" tick={{ fontSize: 11 }} />
               <YAxis
                 yAxisId="left"
+                domain={[0, revMax]}
+                ticks={revTicks}
                 tickFormatter={(v) => `$${Math.round(Number(v) / 1000)}K`}
                 tick={{ fontSize: 11 }}
               />
               <YAxis
                 yAxisId="right"
                 orientation="right"
-                domain={[0, 100]}
+                domain={[0, pctMax]}
+                ticks={pctTicks}
                 tickFormatter={(v) => `${v}%`}
                 tick={{ fontSize: 11 }}
               />
