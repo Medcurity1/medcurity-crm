@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Download, TrendingUp, TrendingDown } from "lucide-react";
+import { ArrowLeft, Download, FileText, TrendingUp, TrendingDown } from "lucide-react";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -37,12 +37,15 @@ import { formatCurrency } from "@/lib/formatters";
 import {
   fetchQuarterlyMetrics,
   fetchRawDataset,
+  fetchWindowTotals,
   type QuarterMetrics,
+  type WindowTotals,
 } from "./financialSaasMetricsApi";
 import {
   downloadFinancialSaasMetricsWorkbook,
   type RawDatasetRow,
 } from "./financialSaasMetricsExport";
+import { downloadFinancialSaasMetricsPdf } from "./financialSaasMetricsPdf";
 
 /**
  * Financial & SaaS Metrics — consolidated quarterly report.
@@ -110,6 +113,7 @@ export function FinancialSaasMetrics() {
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   const window = useMemo(
     () => resolveWindow(preset, customStart, customEnd),
@@ -121,14 +125,29 @@ export function FinancialSaasMetrics() {
     queryFn: () => fetchQuarterlyMetrics(window.start, window.end),
   });
 
-  const headline = useMemo(() => computeHeadline(quarters ?? []), [quarters]);
+  // A bounded window means the KPI cards describe the selected PERIOD
+  // (distinct customers, revenue, churn across it) instead of the
+  // current trailing-12-month snapshot. "All history" keeps the
+  // snapshot behavior — that's what "where are we today" should show.
+  const periodMode = window.start !== null || window.end !== null;
+
+  const { data: windowTotals } = useQuery({
+    queryKey: ["report", "financial-saas-metrics-totals", window.start, window.end],
+    queryFn: () => fetchWindowTotals(window.start, window.end),
+    enabled: periodMode,
+  });
+
+  const headline = useMemo(
+    () => computeHeadline(quarters ?? [], periodMode ? windowTotals ?? null : null),
+    [quarters, periodMode, windowTotals],
+  );
 
   async function handleExport() {
     if (!quarters || quarters.length === 0) return;
     setExporting(true);
     try {
       const rawData = await fetchRawDataset(window.start, window.end);
-      downloadFinancialSaasMetricsWorkbook({
+      await downloadFinancialSaasMetricsWorkbook({
         quarters,
         rawData,
         windowLabel: window.label,
@@ -136,6 +155,21 @@ export function FinancialSaasMetrics() {
       });
     } finally {
       setExporting(false);
+    }
+  }
+
+  async function handleExportPdf() {
+    if (!quarters || quarters.length === 0) return;
+    setExportingPdf(true);
+    try {
+      await downloadFinancialSaasMetricsPdf({
+        quarters,
+        headline,
+        windowLabel: window.label,
+        generatedAt: new Date(),
+      });
+    } finally {
+      setExportingPdf(false);
     }
   }
 
@@ -193,6 +227,15 @@ export function FinancialSaasMetrics() {
               <Download className="h-4 w-4 mr-1" />
               {exporting ? "Building…" : "Export .xlsx"}
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportPdf}
+              disabled={isLoading || exportingPdf || !quarters || quarters.length === 0}
+            >
+              <FileText className="h-4 w-4 mr-1" />
+              {exportingPdf ? "Building…" : "Export PDF"}
+            </Button>
           </div>
         }
       />
@@ -226,41 +269,86 @@ export function FinancialSaasMetrics() {
 // Headline KPI computation
 // ---------------------------------------------------------------------
 
-interface Headline {
-  currentArr: number;
-  arrYoyPct: number | null;
+export interface Headline {
+  /** "snapshot" = current TTM state (All history). "period" = totals over the selected window. */
+  mode: "snapshot" | "period";
+  revenueLabel: string;
+  customersLabel: string;
+  deltaSuffix: string;        // "YoY" or "vs prior period"
+
+  revenue: number;
+  revenueDeltaPct: number | null;
   customers: number;
-  customersYoyDelta: number | null;
+  customersDelta: number | null;
   avgRevPerCust: number;
-  avgRevYoyPct: number | null;
-  ttmChurn: number;
-  ttmChurnPrevYear: number | null;
+  avgRevDeltaPct: number | null;
+  churn: number;
+  churnPrev: number | null;
 }
 
-function computeHeadline(quarters: QuarterMetrics[]): Headline {
-  if (quarters.length === 0) {
+const EMPTY_HEADLINE: Headline = {
+  mode: "snapshot",
+  revenueLabel: "ARR (TTM)",
+  customersLabel: "Active Customers",
+  deltaSuffix: "YoY",
+  revenue: 0, revenueDeltaPct: null,
+  customers: 0, customersDelta: null,
+  avgRevPerCust: 0, avgRevDeltaPct: null,
+  churn: 0, churnPrev: null,
+};
+
+/**
+ * Two modes:
+ *  - Snapshot (All history): the business as of today — trailing-12-month
+ *    revenue, active customers, churn — compared year over year.
+ *  - Period (any bounded window): totals across the SELECTED period,
+ *    with distinct-customer counting done server-side, compared against
+ *    the equal-length period immediately before it.
+ */
+function computeHeadline(
+  quarters: QuarterMetrics[],
+  totals: WindowTotals | null,
+): Headline {
+  const pct = (curr: number, prev: number | null) =>
+    prev !== null && prev > 0 ? (curr - prev) / prev : null;
+
+  if (totals) {
     return {
-      currentArr: 0, arrYoyPct: null,
-      customers: 0, customersYoyDelta: null,
-      avgRevPerCust: 0, avgRevYoyPct: null,
-      ttmChurn: 0, ttmChurnPrevYear: null,
+      mode: "period",
+      revenueLabel: "Revenue (Period)",
+      customersLabel: "Customers (Period)",
+      deltaSuffix: "vs prior period",
+      revenue: totals.total_revenue,
+      revenueDeltaPct: pct(totals.total_revenue, totals.prior_total_revenue),
+      customers: totals.customer_count,
+      customersDelta: totals.prior_customer_count !== null
+        ? totals.customer_count - totals.prior_customer_count
+        : null,
+      avgRevPerCust: totals.avg_rev_per_customer,
+      avgRevDeltaPct: pct(totals.avg_rev_per_customer, totals.prior_avg_rev_per_customer),
+      churn: totals.churn_pct_dollars,
+      churnPrev: totals.prior_churn_pct_dollars,
     };
   }
+
+  if (quarters.length === 0) return EMPTY_HEADLINE;
+
   const last = quarters[quarters.length - 1];
   const yoy  = quarters.length >= 5 ? quarters[quarters.length - 5] : null;
 
-  const pct = (curr: number, prev: number) =>
-    prev > 0 ? (curr - prev) / prev : null;
-
   return {
-    currentArr: last.ttm_revenue,
-    arrYoyPct: yoy ? pct(last.ttm_revenue, yoy.ttm_revenue) : null,
+    mode: "snapshot",
+    revenueLabel: "ARR (TTM)",
+    customersLabel: "Active Customers",
+    deltaSuffix: "YoY",
+    revenue: last.ttm_revenue,
+    revenueDeltaPct: yoy ? pct(last.ttm_revenue, yoy.ttm_revenue) : null,
     customers: last.ttm_customer_count,
-    customersYoyDelta: yoy ? last.ttm_customer_count - yoy.ttm_customer_count : null,
+    customersDelta: yoy ? last.ttm_customer_count - yoy.ttm_customer_count : null,
     avgRevPerCust: last.ttm_avg_rev_per_customer,
-    avgRevYoyPct: yoy ? pct(last.ttm_avg_rev_per_customer, yoy.ttm_avg_rev_per_customer) : null,
-    ttmChurn: last.ttm_churn_pct_dollars,
-    ttmChurnPrevYear: yoy ? yoy.ttm_churn_pct_dollars : null,
+    avgRevDeltaPct: yoy ? pct(last.ttm_avg_rev_per_customer, yoy.ttm_avg_rev_per_customer) : null,
+    churn: last.ttm_churn_pct_dollars,
+    churnPrev: yoy ? yoy.ttm_churn_pct_dollars : null,
   };
 }
 
@@ -269,38 +357,40 @@ function computeHeadline(quarters: QuarterMetrics[]): Headline {
 // ---------------------------------------------------------------------
 
 function KpiStrip({ headline }: { headline: Headline }) {
-  const arrLabel = headline.arrYoyPct === null
-    ? "—"
-    : `${(headline.arrYoyPct * 100).toFixed(1)}% YoY`;
-  const arrUp = (headline.arrYoyPct ?? 0) >= 0;
+  const sfx = headline.deltaSuffix;
 
-  const custLabel = headline.customersYoyDelta === null
+  const revLabel = headline.revenueDeltaPct === null
     ? "—"
-    : `${headline.customersYoyDelta >= 0 ? "+" : ""}${headline.customersYoyDelta} YoY`;
-  const custUp = (headline.customersYoyDelta ?? 0) >= 0;
+    : `${(headline.revenueDeltaPct * 100).toFixed(1)}% ${sfx}`;
+  const revUp = (headline.revenueDeltaPct ?? 0) >= 0;
 
-  const avgLabel = headline.avgRevYoyPct === null
+  const custLabel = headline.customersDelta === null
     ? "—"
-    : `${(headline.avgRevYoyPct * 100).toFixed(1)}% YoY`;
-  const avgUp = (headline.avgRevYoyPct ?? 0) >= 0;
+    : `${headline.customersDelta >= 0 ? "+" : ""}${headline.customersDelta} ${sfx}`;
+  const custUp = (headline.customersDelta ?? 0) >= 0;
 
-  const churnLabel = headline.ttmChurnPrevYear === null
+  const avgLabel = headline.avgRevDeltaPct === null
     ? "—"
-    : `from ${(headline.ttmChurnPrevYear * 100).toFixed(1)}%`;
+    : `${(headline.avgRevDeltaPct * 100).toFixed(1)}% ${sfx}`;
+  const avgUp = (headline.avgRevDeltaPct ?? 0) >= 0;
+
+  const churnLabel = headline.churnPrev === null
+    ? "—"
+    : `from ${(headline.churnPrev * 100).toFixed(1)}% ${headline.mode === "period" ? "prior period" : "last year"}`;
   // For churn, lower = better, so "up" arrow when churn dropped.
-  const churnImproved = headline.ttmChurnPrevYear !== null
-    && headline.ttmChurn < headline.ttmChurnPrevYear;
+  const churnImproved = headline.churnPrev !== null
+    && headline.churn < headline.churnPrev;
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       <Kpi
-        label="ARR (TTM)"
-        value={formatCurrency(headline.currentArr)}
-        deltaLabel={arrLabel}
-        deltaUp={arrUp}
+        label={headline.revenueLabel}
+        value={formatCurrency(headline.revenue)}
+        deltaLabel={revLabel}
+        deltaUp={revUp}
       />
       <Kpi
-        label="Active Customers"
+        label={headline.customersLabel}
         value={headline.customers.toLocaleString()}
         deltaLabel={custLabel}
         deltaUp={custUp}
@@ -312,8 +402,8 @@ function KpiStrip({ headline }: { headline: Headline }) {
         deltaUp={avgUp}
       />
       <Kpi
-        label="Churn (TTM $)"
-        value={`${(headline.ttmChurn * 100).toFixed(2)}%`}
+        label={headline.mode === "period" ? "Churn % ($, Period)" : "Churn (TTM $)"}
+        value={`${(headline.churn * 100).toFixed(2)}%`}
         deltaLabel={churnLabel}
         deltaUp={churnImproved}
       />

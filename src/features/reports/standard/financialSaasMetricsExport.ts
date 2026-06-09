@@ -5,8 +5,9 @@
 // "Medcurity Financial and SaaS Metrics - James.numbers" workbook):
 //
 //   1. "Summary"     — per-quarter Revenue / Churn / Rolling 12mo grid.
-//                      One column per quarter, year band headers,
-//                      currency / percent formatting baked in.
+//                      INVESTOR-FACING: fully styled (year color bands,
+//                      section headers, churn heat colors, highlighted
+//                      current quarter, frozen panes).
 //   2. "Raw Data"    — full v_arr_base_dataset rows with the SF column
 //                      set, untransformed. This is the auditable
 //                      source for everything in the Summary tab.
@@ -14,12 +15,14 @@
 //                      lifted from the Definitions sheet of the
 //                      original Numbers workbook.
 //
-// All numeric values are written as raw numbers (not pre-formatted
-// strings), with cell-level number formats applied via SheetJS's
-// `z` property so Excel/Numbers display them correctly.
+// Built with exceljs (NOT SheetJS): the community edition of SheetJS
+// silently drops all styling, which is why the first version of this
+// export came out unformatted. exceljs writes real fills, fonts,
+// borders, and number formats. It's dynamically imported so the
+// report page doesn't pay its bundle cost until export is clicked.
 // ---------------------------------------------------------------------
 
-import * as XLSX from "xlsx";
+import type ExcelJSNS from "exceljs";
 import type { QuarterMetrics } from "./financialSaasMetricsApi";
 
 /** One row from v_arr_base_dataset. Matches the SF column set. */
@@ -51,182 +54,294 @@ interface BuildArgs {
   generatedAt: Date;
 }
 
+// Number formats
 const CURRENCY_FMT = '"$"#,##0';
+const COUNT_FMT    = "#,##0";
 const PERCENT_FMT  = "0.00%";
-const DATE_FMT     = "yyyy-mm-dd";
+
+// Palette (ARGB)
+const C_NAVY        = "FF0F213C";
+const C_SLATE       = "FF334155";
+const C_WHITE       = "FFFFFFFF";
+const C_TEXT        = "FF111827";
+const C_GRAY        = "FF6B7280";
+const C_BORDER      = "FFE5E7EB";
+const C_ROW_SOFT    = "FFF8FAFC";
+const C_LATEST_BG   = "FFEFF6FF";   // light blue: current quarter column
+const C_LATEST_HDR  = "FFDBEAFE";
+const C_QTR_HDR_BG  = "FFF3F4F6";
+
+// Churn heat colors (match the on-screen thresholds)
+const C_CHURN_GOOD  = "FF059669";   // < 10%
+const C_CHURN_WARN  = "FFD97706";   // < 20%
+const C_CHURN_BAD   = "FFDC2626";   // >= 20%
+
+// Year band palette — same family as the on-screen year banding
+const YEAR_BANDS: { fill: string; text: string }[] = [
+  { fill: "FFE7F6EC", text: "FF065F46" },  // emerald
+  { fill: "FFFEF3DD", text: "FF92400E" },  // amber
+  { fill: "FFF3EEFB", text: "FF5B21B6" },  // violet
+  { fill: "FFE3F2FD", text: "FF075985" },  // sky
+  { fill: "FFFDE8EE", text: "FF9F1239" },  // rose
+];
+
+type Ws = ExcelJSNS.Worksheet;
+type CellValue = string | number | boolean | null;
+
+const thinBorder = { style: "thin" as const, color: { argb: C_BORDER } };
+const mediumBorder = { style: "medium" as const, color: { argb: "FFCBD5E1" } };
 
 // ---------------------------------------------------------------------
-// Tab 1: Summary
+// Tab 1: Summary (the investor-facing tab)
 // ---------------------------------------------------------------------
 
-/**
- * Build the Summary tab as an Array-of-Arrays (AoA). Layout mirrors
- * the original Numbers workbook: metric labels in column A, one
- * column per quarter, three section dividers (Revenue / Churn /
- * Rolling 12 months), with a year band header row above the quarter
- * row.
- */
-function buildSummaryAoA(quarters: QuarterMetrics[], windowLabel: string, generatedAt: Date) {
-  const headerYearRow: (string | null)[] = ["Medcurity"];
-  const headerQuarterRow: (string | null)[] = ["Annual Recurring Revenue · Consolidated"];
-
-  // Year band: collapse consecutive quarters with the same year into
-  // one cell. We'll merge those cells after the fact.
-  let prevYear: number | null = null;
-  for (const q of quarters) {
-    headerYearRow.push(q.year !== prevYear ? String(q.year) : null);
-    headerQuarterRow.push(q.quarter_label);
-    prevYear = q.year;
-  }
-
-
-  const rev = quarters.map(q => q);
-
-  type Row = {
-    label: string;
-    values: (number | string | null)[];
-    fmt?: string;
-    bold?: boolean;
-    section?: boolean;
-  };
-
-  const rows: Row[] = [
-    { label: "Revenue", values: quarters.map(() => null), section: true },
-    { label: "New $",                values: rev.map(q => Number(q.new_dollars)),         fmt: CURRENCY_FMT },
-    { label: "# of New Customers",   values: rev.map(q => q.new_count) },
-    { label: "Renewed $",            values: rev.map(q => Number(q.renewed_dollars)),     fmt: CURRENCY_FMT },
-    { label: "# of Renewed Customers", values: rev.map(q => q.renewed_count) },
-    { label: "Total Revenue $",      values: rev.map(q => Number(q.total_revenue)),       fmt: CURRENCY_FMT, bold: true },
-    { label: "# of Customers (N+R)", values: rev.map(q => q.customer_count),              bold: true },
-    { label: "Avg Rev/Customer",     values: rev.map(q => Number(q.avg_rev_per_customer)), fmt: CURRENCY_FMT },
-
-    { label: "Churn", values: quarters.map(() => null), section: true },
-    { label: "Lost Revenue $",       values: rev.map(q => Number(q.lost_revenue)),        fmt: CURRENCY_FMT },
-    { label: "Churn % ($)",          values: rev.map(q => Number(q.churn_pct_dollars)),   fmt: PERCENT_FMT },
-    { label: "# of Lost Customers",  values: rev.map(q => q.lost_count) },
-    { label: "Churn % (#)",          values: rev.map(q => Number(q.churn_pct_customers)), fmt: PERCENT_FMT },
-
-    { label: "Rolling 12 months", values: quarters.map(() => null), section: true },
-    { label: "Revenue (TTM)",        values: rev.map(q => Number(q.ttm_revenue)),         fmt: CURRENCY_FMT, bold: true },
-    { label: "# of Customers (TTM)", values: rev.map(q => q.ttm_customer_count),          bold: true },
-    { label: "Avg Rev/Customer (TTM)", values: rev.map(q => Number(q.ttm_avg_rev_per_customer)), fmt: CURRENCY_FMT },
-    { label: "Lost Revenue (TTM)",   values: rev.map(q => Number(q.ttm_lost_revenue)),    fmt: CURRENCY_FMT },
-    { label: "Churn % ($) (TTM)",    values: rev.map(q => Number(q.ttm_churn_pct_dollars)), fmt: PERCENT_FMT },
-    { label: "# Lost Customers (TTM)", values: rev.map(q => q.ttm_lost_count) },
-    { label: "Churn % (#) (TTM)",    values: rev.map(q => Number(q.ttm_churn_pct_customers)), fmt: PERCENT_FMT },
-  ];
-
-  const aoa: (string | number | null)[][] = [];
-  aoa.push(["Medcurity Financial & SaaS Metrics"]);
-  aoa.push([`Window: ${windowLabel}`]);
-  aoa.push([`Generated: ${generatedAt.toISOString()}`]);
-  aoa.push([]);
-  aoa.push(headerYearRow);
-  aoa.push(headerQuarterRow);
-
-  for (const r of rows) {
-    aoa.push([r.label, ...r.values]);
-  }
-
-  return { aoa, rows };
+interface MetricRow {
+  label: string;
+  get: (q: QuarterMetrics) => number;
+  fmt: string;
+  bold?: boolean;
+  churnHeat?: boolean;
 }
 
-/** Apply per-cell number formats and bolding after the sheet is built. */
-function applyFormatting(
-  ws: XLSX.WorkSheet,
-  rows: { fmt?: string; bold?: boolean; section?: boolean }[],
-  quarterCount: number,
+interface SectionDef {
+  title: string;
+  rows: MetricRow[];
+}
+
+const SECTIONS: SectionDef[] = [
+  {
+    title: "REVENUE",
+    rows: [
+      { label: "New $",                  get: (q) => q.new_dollars,            fmt: CURRENCY_FMT },
+      { label: "# of New Customers",     get: (q) => q.new_count,              fmt: COUNT_FMT },
+      { label: "Renewed $",              get: (q) => q.renewed_dollars,        fmt: CURRENCY_FMT },
+      { label: "# of Renewed Customers", get: (q) => q.renewed_count,          fmt: COUNT_FMT },
+      { label: "Total Revenue $",        get: (q) => q.total_revenue,          fmt: CURRENCY_FMT, bold: true },
+      { label: "# of Customers (N+R)",   get: (q) => q.customer_count,         fmt: COUNT_FMT,    bold: true },
+      { label: "Avg Rev/Customer",       get: (q) => q.avg_rev_per_customer,   fmt: CURRENCY_FMT },
+    ],
+  },
+  {
+    title: "CHURN",
+    rows: [
+      { label: "Lost Revenue $",         get: (q) => q.lost_revenue,           fmt: CURRENCY_FMT },
+      { label: "Churn % ($)",            get: (q) => q.churn_pct_dollars,      fmt: PERCENT_FMT, churnHeat: true },
+      { label: "# of Lost Customers",    get: (q) => q.lost_count,             fmt: COUNT_FMT },
+      { label: "Churn % (#)",            get: (q) => q.churn_pct_customers,    fmt: PERCENT_FMT, churnHeat: true },
+    ],
+  },
+  {
+    title: "ROLLING 12 MONTHS",
+    rows: [
+      { label: "Revenue (TTM)",          get: (q) => q.ttm_revenue,            fmt: CURRENCY_FMT, bold: true },
+      { label: "# of Customers (TTM)",   get: (q) => q.ttm_customer_count,     fmt: COUNT_FMT,    bold: true },
+      { label: "Avg Rev/Customer (TTM)", get: (q) => q.ttm_avg_rev_per_customer, fmt: CURRENCY_FMT },
+      { label: "Lost Revenue (TTM)",     get: (q) => q.ttm_lost_revenue,       fmt: CURRENCY_FMT },
+      { label: "Churn % ($) (TTM)",      get: (q) => q.ttm_churn_pct_dollars,  fmt: PERCENT_FMT, churnHeat: true },
+      { label: "# Lost Customers (TTM)", get: (q) => q.ttm_lost_count,         fmt: COUNT_FMT },
+      { label: "Churn % (#) (TTM)",      get: (q) => q.ttm_churn_pct_customers, fmt: PERCENT_FMT, churnHeat: true },
+    ],
+  },
+];
+
+function churnColor(v: number): string {
+  if (v < 0.10) return C_CHURN_GOOD;
+  if (v < 0.20) return C_CHURN_WARN;
+  return C_CHURN_BAD;
+}
+
+function buildSummarySheet(
+  ws: Ws,
+  quarters: QuarterMetrics[],
+  windowLabel: string,
+  generatedAt: Date,
 ) {
-  // Row indices: 0=title, 1=window, 2=generated, 3=blank, 4=year band,
-  // 5=quarter labels, 6..=data rows.
-  const DATA_START = 6;
+  const qn = quarters.length;
+  const lastCol = qn + 1;             // col 1 = labels, cols 2..qn+1 = quarters
+  const latestColIdx = lastCol;       // current quarter column
 
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i];
-    const sheetRow = DATA_START + i;
+  // --- Title block (rows 1-3) ---
+  ws.mergeCells(1, 1, 1, Math.max(2, lastCol));
+  const title = ws.getCell(1, 1);
+  title.value = "Medcurity — Financial & SaaS Metrics";
+  title.font = { name: "Calibri", size: 16, bold: true, color: { argb: C_NAVY } };
+  ws.getRow(1).height = 24;
 
-    // Bold label cell on totals / TTM rollups
-    const labelAddr = XLSX.utils.encode_cell({ r: sheetRow, c: 0 });
-    if (ws[labelAddr] && (r.bold || r.section)) {
-      ws[labelAddr].s = { font: { bold: true } };
-    }
+  ws.mergeCells(2, 1, 2, Math.max(2, lastCol));
+  const sub = ws.getCell(2, 1);
+  sub.value = windowLabel;
+  sub.font = { name: "Calibri", size: 10, color: { argb: C_GRAY } };
 
-    if (!r.fmt) continue;
-    for (let c = 1; c <= quarterCount; c++) {
-      const addr = XLSX.utils.encode_cell({ r: sheetRow, c });
-      const cell = ws[addr];
-      if (cell && typeof cell.v === "number") {
-        cell.z = r.fmt;
-      }
-    }
-  }
+  ws.mergeCells(3, 1, 3, Math.max(2, lastCol));
+  const gen = ws.getCell(3, 1);
+  gen.value = `Generated ${generatedAt.toLocaleString("en-US")} · PulsePoint CRM · Confidential`;
+  gen.font = { name: "Calibri", size: 9, italic: true, color: { argb: C_GRAY } };
 
-  // Year band + quarter labels — bold + centered.
-  for (let c = 1; c <= quarterCount; c++) {
-    const yAddr = XLSX.utils.encode_cell({ r: 4, c });
-    const qAddr = XLSX.utils.encode_cell({ r: 5, c });
-    if (ws[yAddr]) ws[yAddr].s = { font: { bold: true }, alignment: { horizontal: "center" } };
-    if (ws[qAddr]) ws[qAddr].s = { font: { bold: true }, alignment: { horizontal: "center" } };
-  }
+  // Row 4 left blank as a spacer.
 
-  // Title cell — bold + larger.
-  if (ws["A1"]) ws["A1"].s = { font: { bold: true, sz: 14 } };
-}
-
-/** Merge consecutive same-year cells in the year band row. */
-function buildYearMerges(quarters: QuarterMetrics[]): XLSX.Range[] {
-  const merges: XLSX.Range[] = [];
-  if (quarters.length === 0) return merges;
-
+  // --- Year band (row 5) ---
+  const YEAR_ROW = 5;
   let runStart = 0;
-  for (let i = 1; i <= quarters.length; i++) {
-    const isBoundary = i === quarters.length || quarters[i].year !== quarters[runStart].year;
-    if (isBoundary) {
-      if (i - runStart > 1) {
-        // Year band lives on row index 4 (0-based). Columns are 1..quarterCount.
-        merges.push({
-          s: { r: 4, c: runStart + 1 },
-          e: { r: 4, c: i },
-        });
+  let bandIdx = 0;
+  for (let i = 1; i <= qn; i++) {
+    const boundary = i === qn || quarters[i].year !== quarters[runStart].year;
+    if (!boundary) continue;
+    const c1 = runStart + 2;
+    const c2 = i + 1;
+    if (c2 > c1) ws.mergeCells(YEAR_ROW, c1, YEAR_ROW, c2);
+    const cell = ws.getCell(YEAR_ROW, c1);
+    const band = YEAR_BANDS[bandIdx % YEAR_BANDS.length];
+    cell.value = quarters[runStart].year;
+    cell.alignment = { horizontal: "center", vertical: "middle" };
+    cell.font = { name: "Calibri", size: 10, bold: true, color: { argb: band.text } };
+    for (let c = c1; c <= c2; c++) {
+      const bc = ws.getCell(YEAR_ROW, c);
+      bc.fill = { type: "pattern", pattern: "solid", fgColor: { argb: band.fill } };
+      bc.border = { top: thinBorder, bottom: thinBorder, left: c === c1 ? mediumBorder : thinBorder, right: thinBorder };
+    }
+    runStart = i;
+    bandIdx++;
+  }
+  ws.getRow(YEAR_ROW).height = 16;
+
+  // --- Quarter labels (row 6) ---
+  const QTR_ROW = 6;
+  const metricHdr = ws.getCell(QTR_ROW, 1);
+  metricHdr.value = "Metric";
+  metricHdr.font = { name: "Calibri", size: 9.5, bold: true, color: { argb: C_SLATE } };
+  metricHdr.fill = { type: "pattern", pattern: "solid", fgColor: { argb: C_QTR_HDR_BG } };
+  metricHdr.border = { bottom: mediumBorder, top: thinBorder, left: thinBorder, right: thinBorder };
+
+  for (let i = 0; i < qn; i++) {
+    const c = i + 2;
+    const cell = ws.getCell(QTR_ROW, c);
+    const isLatest = c === latestColIdx;
+    const isYearStart = i === 0 || quarters[i - 1].year !== quarters[i].year;
+    cell.value = `Q${quarters[i].quarter_num}`;
+    cell.alignment = { horizontal: "right" };
+    cell.font = {
+      name: "Calibri", size: 9.5, bold: true,
+      color: { argb: isLatest ? "FF1D4ED8" : C_SLATE },
+    };
+    cell.fill = {
+      type: "pattern", pattern: "solid",
+      fgColor: { argb: isLatest ? C_LATEST_HDR : C_QTR_HDR_BG },
+    };
+    cell.border = {
+      bottom: mediumBorder, top: thinBorder, right: thinBorder,
+      left: isYearStart ? mediumBorder : thinBorder,
+    };
+  }
+  ws.getRow(QTR_ROW).height = 15;
+
+  // --- Data rows (sections + metrics) ---
+  let r = QTR_ROW + 1;
+  for (const section of SECTIONS) {
+    // Section band
+    ws.mergeCells(r, 1, r, lastCol);
+    const sc = ws.getCell(r, 1);
+    sc.value = section.title;
+    sc.font = { name: "Calibri", size: 9, bold: true, color: { argb: C_WHITE } };
+    sc.fill = { type: "pattern", pattern: "solid", fgColor: { argb: C_SLATE } };
+    sc.alignment = { vertical: "middle" };
+    ws.getRow(r).height = 14;
+    r++;
+
+    for (const m of section.rows) {
+      const labelCell = ws.getCell(r, 1);
+      labelCell.value = m.label;
+      labelCell.font = {
+        name: "Calibri", size: 9.5,
+        bold: !!m.bold,
+        color: { argb: m.bold ? C_TEXT : C_GRAY },
+      };
+      labelCell.border = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder };
+      if (m.bold) {
+        labelCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: C_ROW_SOFT } };
       }
-      runStart = i;
+
+      for (let i = 0; i < qn; i++) {
+        const c = i + 2;
+        const q = quarters[i];
+        const v = m.get(q);
+        const isLatest = c === latestColIdx;
+        const isYearStart = i === 0 || quarters[i - 1].year !== quarters[i].year;
+
+        const cell = ws.getCell(r, c);
+        cell.value = v;
+        cell.numFmt = m.fmt;
+        cell.alignment = { horizontal: "right" };
+
+        let fontColor = m.bold ? C_TEXT : "FF374151";
+        if (m.churnHeat) fontColor = churnColor(v);
+        cell.font = { name: "Calibri", size: 9.5, bold: !!m.bold, color: { argb: fontColor } };
+
+        if (isLatest) {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: C_LATEST_BG } };
+        } else if (m.bold) {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: C_ROW_SOFT } };
+        }
+        cell.border = {
+          top: thinBorder, bottom: thinBorder, right: thinBorder,
+          left: isYearStart ? mediumBorder : thinBorder,
+        };
+      }
+      r++;
     }
   }
-  return merges;
+
+  // --- Column sizing + frozen panes ---
+  ws.getColumn(1).width = 28;
+  for (let c = 2; c <= lastCol; c++) ws.getColumn(c).width = 12.5;
+  ws.views = [{ state: "frozen", xSplit: 1, ySplit: QTR_ROW }];
 }
 
 // ---------------------------------------------------------------------
 // Tab 2: Raw Data
 // ---------------------------------------------------------------------
 
-function buildRawSheet(rows: RawDatasetRow[]): XLSX.WorkSheet {
-  const headers = [
-    "Account Name",
-    "Account Number",
-    "Opportunity Name",
-    "Opportunity Owner",
-    "Created Date",
-    "Close Date",
-    "Age (days)",
-    "Amount",
-    "Fiscal Period",
-    "Payment Frequency",
-    "One Time Project",
-    "Stage",
-    "Type",
-    "Account Type",
-    "Primary Partner",
-    "Lead Source",
-    "Probability",
-    "Next Step",
-  ];
-  const aoa: (string | number | boolean | null)[][] = [headers];
+const RAW_HEADERS: { title: string; width: number; numFmt?: string }[] = [
+  { title: "Account Name", width: 30 },
+  { title: "Account Number", width: 14 },
+  { title: "Opportunity Name", width: 36 },
+  { title: "Opportunity Owner", width: 18 },
+  { title: "Created Date", width: 12 },
+  { title: "Close Date", width: 12 },
+  { title: "Age (days)", width: 10, numFmt: COUNT_FMT },
+  { title: "Amount", width: 12, numFmt: CURRENCY_FMT },
+  { title: "Fiscal Period", width: 12 },
+  { title: "Payment Frequency", width: 14 },
+  { title: "One Time Project", width: 14 },
+  { title: "Stage", width: 14 },
+  { title: "Type", width: 18 },
+  { title: "Account Type", width: 14 },
+  { title: "Primary Partner", width: 22 },
+  { title: "Lead Source", width: 20 },
+  { title: "Probability", width: 12, numFmt: COUNT_FMT },
+  { title: "Next Step", width: 30 },
+];
+
+function buildRawSheet(ws: Ws, rows: RawDatasetRow[]) {
+  // Header row
+  const header = ws.getRow(1);
+  RAW_HEADERS.forEach((h, i) => {
+    const cell = header.getCell(i + 1);
+    cell.value = h.title;
+    cell.font = { name: "Calibri", size: 9.5, bold: true, color: { argb: C_WHITE } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: C_SLATE } };
+    cell.border = { bottom: mediumBorder };
+    ws.getColumn(i + 1).width = h.width;
+    if (h.numFmt) ws.getColumn(i + 1).numFmt = h.numFmt;
+  });
+  header.height = 16;
+
+  // Data
   for (const r of rows) {
-    aoa.push([
+    ws.addRow([
       r.account_name,
       r.account_number === null || r.account_number === undefined
         ? null
-        : (typeof r.account_number === "number" ? r.account_number : Number(r.account_number)),
+        : Number(r.account_number),
       r.opportunity_name,
       r.opportunity_owner,
       r.created_date,
@@ -243,124 +358,120 @@ function buildRawSheet(rows: RawDatasetRow[]): XLSX.WorkSheet {
       r.lead_source,
       r.probability === null ? null : Number(r.probability),
       r.next_step,
-    ]);
-  }
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-
-  // Format Amount + Probability columns.
-  const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
-  for (let r = 1; r <= range.e.r; r++) {
-    const amtAddr  = XLSX.utils.encode_cell({ r, c: 7 });   // H
-    const dateAddr = XLSX.utils.encode_cell({ r, c: 4 });   // E
-    const closeAddr = XLSX.utils.encode_cell({ r, c: 5 });  // F
-    if (ws[amtAddr]  && typeof ws[amtAddr].v  === "number") ws[amtAddr].z  = CURRENCY_FMT;
-    if (ws[dateAddr])  ws[dateAddr].z  = DATE_FMT;
-    if (ws[closeAddr]) ws[closeAddr].z = DATE_FMT;
+    ] as CellValue[]);
   }
 
-  ws["!cols"] = [
-    { wch: 30 }, { wch: 14 }, { wch: 36 }, { wch: 18 }, { wch: 12 },
-    { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 14 },
-    { wch: 14 }, { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 22 },
-    { wch: 20 }, { wch: 12 }, { wch: 30 },
-  ];
-  ws["!freeze"] = { xSplit: 0, ySplit: 1 };
-
-  return ws;
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: RAW_HEADERS.length } };
+  ws.views = [{ state: "frozen", xSplit: 0, ySplit: 1 }];
 }
 
 // ---------------------------------------------------------------------
 // Tab 3: Definitions
 // ---------------------------------------------------------------------
 
-/**
- * Definitions tab — mirrors the legacy Numbers workbook's
- * "Definitions" sheet. Hardcoded; we don't expect these to change
- * often, and they're authoritative when finance asks "what is NRR
- * in this workbook?"
- */
-function buildDefinitionsSheet(): XLSX.WorkSheet {
-  const aoa: (string | null)[][] = [
-    ["Metric / Term",         "Definition",                                                                              "Source / Formula"],
-    [],
-    ["ARR (Annual Recurring Revenue)",
-                              "Sum of closed-won amount over the trailing 365 days. One-time projects excluded.",
-                              "v_dashboard_arr_financial.arr; f_financial_saas_metrics_quarterly.ttm_revenue"],
-    ["NRR (Net Revenue Retention)",
-                              "1 - (lost renewal revenue / ARR). Time window: trailing 12 months.",
-                              "v_dashboard_arr_financial.nrr_dollar_pct"],
-    ["Gross Retention Rate",  "Annual revenue retained from existing customer base; always ≤ 100%.",                     "Derived: 1 - churn_pct_dollars"],
-    ["Churn",                 "# of customers lost in last 12 months ÷ # at the beginning of the period (logo churn).",  "f_financial_saas_metrics_quarterly.ttm_churn_pct_customers"],
-    ["Avg Revenue / Customer","Total quarterly revenue ÷ distinct customers closed-won in that quarter.",                "f_financial_saas_metrics_quarterly.avg_rev_per_customer"],
-    ["LCV (Lifetime Value)",  "Avg revenue/customer × 8 years (Medcurity assumption).",                                   "Derived: avg_rev_per_customer * 8"],
-    ["CAC (Customer Acquisition Cost)",
-                              "(Sales & marketing salaries + marketing expenses) ÷ new customers acquired in period.",
-                              "QuickBooks; excludes exec time"],
-    [],
-    ["Stage taxonomy",        null,                                                                                       null],
-    ["Closed Won",            "Signed/paid contract. Counted in Revenue block (New if Type=New Business, Renewed if Type=Renewal).", "opportunities.stage='closed_won'"],
-    ["Closed Lost",           "Existing customer chose not to renew. Pure churn. Counted in Churn block.",                "opportunities.stage='closed_lost'"],
-    ["Opportunity Lost",      "Prospect didn't buy, OR upsell/additional service declined by existing customer. NOT churn, NOT revenue. Excluded from Summary math.", "opportunities.stage='opportunity_lost'"],
-    [],
-    ["Inclusion rules",       null,                                                                                       null],
-    ["Archived",              "Opportunities with archived_at NOT NULL are excluded.",                                    null],
-    ["One-Time Projects",     "Opportunities with one_time_project=true are excluded (no recurring revenue).",            null],
-    ["Customer Service",      "Opportunities named exactly 'Customer Service' are excluded (operational, not sales).",    null],
-    [],
-    ["Quarter convention",    "Calendar quarters (Jan-Mar, Apr-Jun, Jul-Sep, Oct-Dec). 'Q3-2025' = Jul 1 - Sep 30 2025.", null],
-    ["TTM window",            "Trailing 365 days ending on the last day of the quarter.",                                 null],
-  ];
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [{ wch: 32 }, { wch: 70 }, { wch: 50 }];
-  ws["!freeze"] = { xSplit: 0, ySplit: 1 };
-  return ws;
+const DEFINITIONS: [string, string | null, string | null][] = [
+  ["ARR (Annual Recurring Revenue)",
+    "Sum of closed-won amount over the trailing 365 days. One-time projects excluded.",
+    "v_dashboard_arr_financial.arr; f_financial_saas_metrics_quarterly.ttm_revenue"],
+  ["NRR (Net Revenue Retention)",
+    "1 - (lost renewal revenue / ARR). Time window: trailing 12 months.",
+    "v_dashboard_arr_financial.nrr_dollar_pct"],
+  ["Gross Retention Rate",
+    "Annual revenue retained from existing customer base; always ≤ 100%.",
+    "Derived: 1 - churn_pct_dollars"],
+  ["Churn",
+    "# of customers lost in last 12 months ÷ # at the beginning of the period (logo churn).",
+    "f_financial_saas_metrics_quarterly.ttm_churn_pct_customers"],
+  ["Avg Revenue / Customer",
+    "Total quarterly revenue ÷ distinct customers closed-won in that quarter.",
+    "f_financial_saas_metrics_quarterly.avg_rev_per_customer"],
+  ["LCV (Lifetime Value)",
+    "Avg revenue/customer × 8 years (Medcurity assumption).",
+    "Derived: avg_rev_per_customer * 8"],
+  ["CAC (Customer Acquisition Cost)",
+    "(Sales & marketing salaries + marketing expenses) ÷ new customers acquired in period.",
+    "QuickBooks; excludes exec time"],
+  ["", null, null],
+  ["Stage taxonomy", null, null],
+  ["Closed Won",
+    "Signed/paid contract. Counted in Revenue block (New if Type=New Business, Renewed if Type=Renewal).",
+    "opportunities.stage='closed_won'"],
+  ["Closed Lost",
+    "Existing customer chose not to renew. Pure churn. Counted in Churn block.",
+    "opportunities.stage='closed_lost'"],
+  ["Opportunity Lost",
+    "Prospect didn't buy, OR upsell/additional service declined by existing customer. NOT churn, NOT revenue. Excluded from Summary math.",
+    "opportunities.stage='opportunity_lost'"],
+  ["", null, null],
+  ["Inclusion rules", null, null],
+  ["Archived", "Opportunities with archived_at NOT NULL are excluded.", null],
+  ["One-Time Projects", "Opportunities with one_time_project=true are excluded (no recurring revenue).", null],
+  ["Customer Service", "Opportunities named exactly 'Customer Service' are excluded (operational, not sales).", null],
+  ["", null, null],
+  ["Quarter convention", "Calendar quarters (Jan-Mar, Apr-Jun, Jul-Sep, Oct-Dec). 'Q3-2025' = Jul 1 - Sep 30 2025.", null],
+  ["TTM window", "Trailing 365 days ending on the last day of the quarter.", null],
+];
+
+function buildDefinitionsSheet(ws: Ws) {
+  const header = ws.getRow(1);
+  ["Metric / Term", "Definition", "Source / Formula"].forEach((t, i) => {
+    const cell = header.getCell(i + 1);
+    cell.value = t;
+    cell.font = { name: "Calibri", size: 9.5, bold: true, color: { argb: C_WHITE } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: C_SLATE } };
+    cell.border = { bottom: mediumBorder };
+  });
+
+  for (const [term, def, src] of DEFINITIONS) {
+    const row = ws.addRow([term, def, src]);
+    const isSection = def === null && term !== "";
+    row.getCell(1).font = { name: "Calibri", size: 9.5, bold: isSection, color: { argb: isSection ? C_NAVY : C_TEXT } };
+    row.getCell(2).font = { name: "Calibri", size: 9.5, color: { argb: "FF374151" } };
+    row.getCell(3).font = { name: "Calibri", size: 8.5, color: { argb: C_GRAY } };
+    row.getCell(2).alignment = { wrapText: true, vertical: "top" };
+    if (isSection) {
+      row.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: C_QTR_HDR_BG } };
+    }
+  }
+
+  ws.getColumn(1).width = 32;
+  ws.getColumn(2).width = 70;
+  ws.getColumn(3).width = 50;
+  ws.views = [{ state: "frozen", xSplit: 0, ySplit: 1 }];
 }
 
 // ---------------------------------------------------------------------
-// Top-level builder
+// Top-level builder + download
 // ---------------------------------------------------------------------
 
-export function buildFinancialSaasMetricsWorkbook(args: BuildArgs): XLSX.WorkBook {
+export async function downloadFinancialSaasMetricsWorkbook(
+  args: BuildArgs,
+  filename?: string,
+): Promise<void> {
   const { quarters, rawData, windowLabel, generatedAt } = args;
 
-  const wb = XLSX.utils.book_new();
+  const mod = await import("exceljs");
+  const ExcelJS = (mod as { default?: typeof ExcelJSNS }).default ?? (mod as typeof ExcelJSNS);
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "PulsePoint CRM";
+  wb.created = generatedAt;
 
-  // ----- Summary tab -----
-  const { aoa: summaryAoA, rows: summaryRows } = buildSummaryAoA(
-    quarters,
-    windowLabel,
-    generatedAt,
-  );
-  const summaryWs = XLSX.utils.aoa_to_sheet(summaryAoA);
-  applyFormatting(summaryWs, summaryRows, quarters.length);
-  summaryWs["!merges"] = [
-    // Title + subtitle bars merged across the data columns for readability.
-    { s: { r: 0, c: 0 }, e: { r: 0, c: Math.max(1, quarters.length) } },
-    { s: { r: 1, c: 0 }, e: { r: 1, c: Math.max(1, quarters.length) } },
-    { s: { r: 2, c: 0 }, e: { r: 2, c: Math.max(1, quarters.length) } },
-    ...buildYearMerges(quarters),
-  ];
-  summaryWs["!cols"] = [
-    { wch: 28 },
-    ...quarters.map(() => ({ wch: 14 })),
-  ];
-  summaryWs["!freeze"] = { xSplit: 1, ySplit: 6 };
-  XLSX.utils.book_append_sheet(wb, summaryWs, "Summary");
+  buildSummarySheet(wb.addWorksheet("Summary"), quarters, windowLabel, generatedAt);
+  buildRawSheet(wb.addWorksheet("Raw Data"), rawData);
+  buildDefinitionsSheet(wb.addWorksheet("Definitions"));
 
-  // ----- Raw Data tab -----
-  const rawWs = buildRawSheet(rawData);
-  XLSX.utils.book_append_sheet(wb, rawWs, "Raw Data");
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
 
-  // ----- Definitions tab -----
-  const defWs = buildDefinitionsSheet();
-  XLSX.utils.book_append_sheet(wb, defWs, "Definitions");
-
-  return wb;
-}
-
-/** Trigger a browser download of the built workbook. */
-export function downloadFinancialSaasMetricsWorkbook(args: BuildArgs, filename?: string) {
-  const wb = buildFinancialSaasMetricsWorkbook(args);
-  const stamp = args.generatedAt.toISOString().slice(0, 10);
-  XLSX.writeFile(wb, filename ?? `medcurity-financial-saas-metrics-${stamp}.xlsx`);
+  const stamp = generatedAt.toISOString().slice(0, 10);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename ?? `medcurity-financial-saas-metrics-${stamp}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }

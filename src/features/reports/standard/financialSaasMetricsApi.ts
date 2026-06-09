@@ -94,6 +94,74 @@ function coerceQuarterRow(row: Record<string, unknown>): QuarterMetrics {
   };
 }
 
+/** Shape returned by f_financial_saas_metrics_window_totals. */
+export interface WindowTotals {
+  window_start: string;
+  window_end: string;
+
+  new_dollars: number;
+  new_count: number;
+  renewed_dollars: number;
+  renewed_count: number;
+  total_revenue: number;
+  customer_count: number;
+  avg_rev_per_customer: number;
+  lost_revenue: number;
+  lost_count: number;
+  churn_pct_dollars: number;
+  churn_pct_customers: number;
+
+  prior_start: string | null;
+  prior_end: string | null;
+  prior_total_revenue: number | null;
+  prior_customer_count: number | null;
+  prior_avg_rev_per_customer: number | null;
+  prior_churn_pct_dollars: number | null;
+}
+
+/**
+ * Whole-window aggregates for the headline KPI cards. Unlike summing
+ * the quarterly rows client-side, this counts DISTINCT customers
+ * across the window (a customer who bought in two quarters counts
+ * once), and returns the equal-length prior period for deltas.
+ */
+export async function fetchWindowTotals(
+  startDate: string | null,
+  endDate: string | null,
+): Promise<WindowTotals | null> {
+  const { data, error } = await supabase.rpc("f_financial_saas_metrics_window_totals", {
+    p_start_date: startDate,
+    p_end_date: endDate,
+  });
+  if (error) throw error;
+  const row = (data ?? [])[0] as Record<string, unknown> | undefined;
+  if (!row) return null;
+
+  const n = (v: unknown) => (v === null || v === undefined ? 0 : Number(v));
+  const nOrNull = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+  return {
+    window_start: row.window_start as string,
+    window_end: row.window_end as string,
+    new_dollars: n(row.new_dollars),
+    new_count: n(row.new_count),
+    renewed_dollars: n(row.renewed_dollars),
+    renewed_count: n(row.renewed_count),
+    total_revenue: n(row.total_revenue),
+    customer_count: n(row.customer_count),
+    avg_rev_per_customer: n(row.avg_rev_per_customer),
+    lost_revenue: n(row.lost_revenue),
+    lost_count: n(row.lost_count),
+    churn_pct_dollars: n(row.churn_pct_dollars),
+    churn_pct_customers: n(row.churn_pct_customers),
+    prior_start: (row.prior_start as string | null) ?? null,
+    prior_end: (row.prior_end as string | null) ?? null,
+    prior_total_revenue: nOrNull(row.prior_total_revenue),
+    prior_customer_count: nOrNull(row.prior_customer_count),
+    prior_avg_rev_per_customer: nOrNull(row.prior_avg_rev_per_customer),
+    prior_churn_pct_dollars: nOrNull(row.prior_churn_pct_dollars),
+  };
+}
+
 /**
  * Pull the full raw dataset (one row per ARR-relevant opportunity)
  * from v_arr_base_dataset for the .xlsx Raw Data tab. Filtered to the
