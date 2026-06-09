@@ -235,11 +235,10 @@ function drawChart(doc: import("jspdf").jsPDF, quarters: QuarterMetrics[]) {
   const plotBottom = plotY + plotH;
 
   const maxRev = Math.max(...quarters.map((q) => q.ttm_revenue), 1);
-  // Axis ceilings: smallest "clean" number >= max so tick labels divide nicely.
-  // The churn axis scales to the tallest bar so every bar is fully visible.
+  // $ axis: smallest "clean" ceiling >= max so tick labels divide nicely.
+  // Churn is a share of the renewal cohort, so it is always 0-100%.
   const revMax = niceCeiling(maxRev);
-  const maxChurnPct = Math.max(...quarters.map((q) => q.churn_pct_dollars * 100), 1);
-  const pctMax = Math.max(100, niceCeiling(maxChurnPct));
+  const pctMax = 100;
 
   // Gridlines + left ($) and right (%) tick labels, 5 ticks
   doc.setFontSize(6.5);
@@ -251,15 +250,15 @@ function drawChart(doc: import("jspdf").jsPDF, quarters: QuarterMetrics[]) {
 
     doc.setTextColor(...GRAY);
     doc.text(fmtMoneyCompact((revMax * i) / 4), plotX - 2, y + 1, { align: "right" });
-    doc.text(`${Math.round((pctMax * i) / 4)}%`, plotX + plotW + 2, y + 1);
+    doc.text(`${(pctMax * i) / 4}%`, plotX + plotW + 2, y + 1);
   }
 
   const n = quarters.length;
   const slot = plotW / n;
   const xCenter = (i: number) => plotX + slot * i + slot / 2;
 
-  // Churn bars (right axis, scaled so the tallest bar fits fully).
-  // Soft red so the revenue line stays the visual lead of the chart.
+  // Churn bars (right axis, 0-100%). Soft red so the revenue line
+  // stays the visual lead of the chart.
   const barW = Math.min(slot * 0.42, 4);
   for (let i = 0; i < n; i++) {
     const churnPct = quarters[i].churn_pct_dollars * 100;
@@ -331,7 +330,7 @@ function drawFooter(doc: import("jspdf").jsPDF) {
     MARGIN, y,
   );
   doc.text(
-    "Churn % ($) = lost revenue ÷ closed-won revenue per quarter. The right axis is scaled to the highest quarter; exact values are in the Excel export.",
+    "Churn % ($) = renewal revenue lost ÷ (renewed + lost) for the period — the share of the renewal cohort that churned. Exact values are in the Excel export.",
     MARGIN, y + 3.6,
   );
   doc.setFont("helvetica", "bold");

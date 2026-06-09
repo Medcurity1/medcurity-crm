@@ -53,9 +53,10 @@ import { downloadFinancialSaasMetricsPdf, niceCeiling } from "./financialSaasMet
  * Mirrors the Summary sheet of the legacy
  * "Medcurity Financial and SaaS Metrics - James.numbers" workbook,
  * with a modernized UI: KPI strip (period-aware for bounded windows),
- * combined revenue+churn chart (churn axis scales to the tallest bar
- * in steps of 100), year-banded quarterly grid, a styled .xlsx export
- * with Summary / Raw Data / Definitions tabs, and a one-page PDF.
+ * combined revenue+churn chart (churn axis fixed 0-100%, since churn
+ * is a share of the renewal cohort), year-banded quarterly grid, a
+ * styled .xlsx export with Summary / Raw Data / Definitions tabs, and
+ * a one-page PDF.
  *
  * Time window selector lets the user pick:
  *   - All history (default — first opp to current quarter)
@@ -449,18 +450,13 @@ function ComboChartCard({ quarters }: { quarters: QuarterMetrics[] }) {
     churn_pct: Number((q.churn_pct_dollars * 100).toFixed(2)),
   }));
 
-  // Churn axis scales to the tallest bar using round-number steps
-  // (multiples of 100 once churn exceeds 100%), capped at 5 segments
-  // so the axis stays readable even when an outlier quarter spikes.
-  const maxChurn = Math.max(...quarters.map((q) => q.churn_pct_dollars * 100), 1);
-  const PCT_STEPS = [25, 50, 100, 200, 250, 500, 1000, 2000, 5000];
-  const pctStep = PCT_STEPS.find((s) => Math.ceil(maxChurn / s) <= 5) ?? 5000;
-  const segments = Math.max(2, Math.ceil(maxChurn / pctStep));
-  const pctMax = pctStep * segments;
-  const pctTicks = Array.from({ length: segments + 1 }, (_, i) => pctStep * i);
+  // Churn is a share of the renewal cohort, so it is always 0-100%.
+  // Fixed right axis 0/25/50/75/100; the $ axis uses the same 4 segments
+  // so every horizontal gridline marks both a clean $ and a clean %.
+  const segments = 4;
+  const pctMax = 100;
+  const pctTicks = [0, 25, 50, 75, 100];
 
-  // The $ axis uses the SAME number of segments so every horizontal
-  // gridline marks both a $ value and a clean % value (like the PDF).
   const maxRev = Math.max(...quarters.map((q) => q.ttm_revenue), 1);
   const revMax = niceCeiling(maxRev);
   const revTicks = Array.from({ length: segments + 1 }, (_, i) => (revMax * i) / segments);
