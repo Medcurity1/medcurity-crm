@@ -26,6 +26,7 @@ const NAVY: [number, number, number]      = [15, 33, 60];
 const NAVY_SOFT: [number, number, number] = [148, 178, 215];
 const BLUE: [number, number, number]      = [55, 138, 221];
 const RED: [number, number, number]       = [226, 75, 74];
+const RED_SOFT: [number, number, number]  = [243, 178, 177];   // churn bars: soft so the revenue line leads
 const GREEN: [number, number, number]     = [5, 150, 105];
 const TEXT: [number, number, number]      = [17, 24, 39];
 const GRAY: [number, number, number]      = [107, 114, 128];
@@ -206,7 +207,7 @@ function drawChart(doc: import("jspdf").jsPDF, quarters: QuarterMetrics[]) {
   doc.setFontSize(7);
   // Legend (right-aligned, drawn back to front)
   const legend: { label: string; color: [number, number, number]; kind: "line" | "box" }[] = [
-    { label: "Churn % ($) — right axis", color: RED, kind: "box" },
+    { label: "Churn % ($) — right axis", color: RED_SOFT, kind: "box" },
     { label: "TTM Revenue — left axis", color: BLUE, kind: "line" },
   ];
   for (const item of legend) {
@@ -234,9 +235,8 @@ function drawChart(doc: import("jspdf").jsPDF, quarters: QuarterMetrics[]) {
   const plotBottom = plotY + plotH;
 
   const maxRev = Math.max(...quarters.map((q) => q.ttm_revenue), 1);
-  // Round the revenue axis ceiling up to a clean step
-  const revStep = niceStep(maxRev / 4);
-  const revMax = revStep * Math.ceil(maxRev / revStep);
+  // Axis ceiling: smallest "clean" number >= max so tick labels divide nicely
+  const revMax = niceCeiling(maxRev);
 
   // Gridlines + left ($) and right (%) tick labels, 5 ticks
   doc.setFontSize(6.5);
@@ -255,14 +255,15 @@ function drawChart(doc: import("jspdf").jsPDF, quarters: QuarterMetrics[]) {
   const slot = plotW / n;
   const xCenter = (i: number) => plotX + slot * i + slot / 2;
 
-  // Churn bars (right axis, capped at 100% for honest scale)
+  // Churn bars (right axis, capped at 100% for honest scale). Soft red
+  // so the revenue line stays the visual lead of the chart.
   const barW = Math.min(slot * 0.42, 4);
   for (let i = 0; i < n; i++) {
     const churnPct = quarters[i].churn_pct_dollars * 100;
     const clamped = Math.min(churnPct, 100);
     const barH = (plotH * clamped) / 100;
     const x = xCenter(i) - barW / 2;
-    doc.setFillColor(...RED);
+    doc.setFillColor(...RED_SOFT);
     doc.rect(x, plotBottom - barH, barW, barH, "F");
     // Mark capped bars so a >100% quarter is visibly flagged
     if (churnPct > 100) {
@@ -296,9 +297,7 @@ function drawChart(doc: import("jspdf").jsPDF, quarters: QuarterMetrics[]) {
     doc.setFontSize(7);
     doc.setTextColor(...BLUE);
     const lastLabel = fmtMoneyCompact(quarters[n - 1].ttm_revenue);
-    doc.text(lastLabel, Math.min(prev[0] + 2, plotX + plotW - 2), prev[1] - 2, {
-      align: prev[0] > plotX + plotW - 16 ? "right" : "left",
-    });
+    doc.text(lastLabel, prev[0] - 2.5, prev[1] - 3, { align: "right" });
   }
 
   // X labels: at most ~14 to stay readable
@@ -311,12 +310,16 @@ function drawChart(doc: import("jspdf").jsPDF, quarters: QuarterMetrics[]) {
   }
 }
 
-/** Round a raw step up to a clean 1/2/2.5/5 × 10^k value. */
-function niceStep(raw: number): number {
-  const mag = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1))));
-  const norm = raw / mag;
-  const nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10;
-  return nice * mag;
+/**
+ * Smallest "clean" axis ceiling >= max. Candidates are chosen so that
+ * ceiling/4 also reads cleanly (1.2M -> 300K ticks, 800K -> 200K ticks).
+ */
+function niceCeiling(max: number): number {
+  const mag = Math.pow(10, Math.floor(Math.log10(Math.max(max, 1))));
+  for (const c of [1, 1.2, 1.6, 2, 2.4, 3, 4, 5, 6, 8, 10]) {
+    if (c * mag >= max) return c * mag;
+  }
+  return 10 * mag;
 }
 
 // ---------------------------------------------------------------------
@@ -324,20 +327,22 @@ function niceStep(raw: number): number {
 // ---------------------------------------------------------------------
 
 function drawFooter(doc: import("jspdf").jsPDF) {
-  const y = PAGE_H - 11;
+  const y = PAGE_H - 12;
   doc.setFillColor(...PANEL_BG);
-  doc.rect(0, y - 5, PAGE_W, 16, "F");
+  doc.rect(0, y - 4.5, PAGE_W, 17, "F");
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(6.5);
   doc.setTextColor(...GRAY);
+  // Two short lines, kept clear of the right-aligned confidential tag.
   doc.text(
-    "Excludes archived records, one-time projects, and operational 'Customer Service' entries. " +
-    "Churn % ($) = lost revenue ÷ closed-won revenue per quarter; bars are capped at 100% for scale (capped quarters flagged ▲) — exact values in the Excel export.",
+    "Excludes archived records, one-time projects, and operational 'Customer Service' entries.",
     MARGIN, y,
   );
   doc.text(
-    "Medcurity · Confidential",
-    PAGE_W - MARGIN, y, { align: "right" },
+    "Churn % ($) = lost revenue ÷ closed-won revenue per quarter. Bars capped at 100% for scale; capped quarters are flagged. Exact values in the Excel export.",
+    MARGIN, y + 3.6,
   );
+  doc.setFont("helvetica", "bold");
+  doc.text("Medcurity · Confidential", PAGE_W - MARGIN, y, { align: "right" });
 }
