@@ -482,6 +482,15 @@ function ComboChartCard({ quarters }: { quarters: QuarterMetrics[] }) {
                 stroke="#94a3b8"
                 strokeOpacity={0.45}
                 vertical={false}
+                // Recharts doesn't derive grid lines from custom `ticks`
+                // arrays, so position one line per axis segment manually.
+                horizontalCoordinatesGenerator={({ offset }) => {
+                  const o = offset as { top: number; height: number };
+                  return Array.from(
+                    { length: segments + 1 },
+                    (_, i) => o.top + (o.height * i) / segments,
+                  );
+                }}
               />
               <XAxis dataKey="label" tick={{ fontSize: 11 }} />
               <YAxis
