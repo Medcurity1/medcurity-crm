@@ -84,10 +84,13 @@ function resolveWindow(preset: WindowPreset, customStart: string, customEnd: str
     return { start: null, end: null, label: "All history through current quarter" };
   }
   if (preset === "current_fy") {
+    // End at today, not Dec 31 — otherwise the chart renders empty
+    // future quarters that drag the TTM line and churn bars into
+    // misleading territory.
     return {
       start: `${year}-01-01`,
-      end: `${year}-12-31`,
-      label: `Current fiscal year (${year})`,
+      end: iso(today),
+      label: `Fiscal year ${year} to date`,
     };
   }
   if (preset === "past_3yr") {
@@ -446,12 +449,15 @@ function ComboChartCard({ quarters }: { quarters: QuarterMetrics[] }) {
     churn_pct: Number((q.churn_pct_dollars * 100).toFixed(2)),
   }));
 
-  // Churn axis scales to the tallest bar in steps of 100 once churn
-  // exceeds 100% (e.g. 0/100/200/300/400); quarters of 100 otherwise.
+  // Churn axis scales to the tallest bar using round-number steps
+  // (multiples of 100 once churn exceeds 100%), capped at 5 segments
+  // so the axis stays readable even when an outlier quarter spikes.
   const maxChurn = Math.max(...quarters.map((q) => q.churn_pct_dollars * 100), 1);
-  const pctMax = maxChurn > 100 ? Math.ceil(maxChurn / 100) * 100 : 100;
-  const segments = maxChurn > 100 ? pctMax / 100 : 4;
-  const pctTicks = Array.from({ length: segments + 1 }, (_, i) => (pctMax * i) / segments);
+  const PCT_STEPS = [25, 50, 100, 200, 250, 500, 1000, 2000, 5000];
+  const pctStep = PCT_STEPS.find((s) => Math.ceil(maxChurn / s) <= 5) ?? 5000;
+  const segments = Math.max(2, Math.ceil(maxChurn / pctStep));
+  const pctMax = pctStep * segments;
+  const pctTicks = Array.from({ length: segments + 1 }, (_, i) => pctStep * i);
 
   // The $ axis uses the SAME number of segments so every horizontal
   // gridline marks both a $ value and a clean % value (like the PDF).
