@@ -197,11 +197,11 @@ function buildSummarySheet(
     cell.value = quarters[runStart].year;
     cell.alignment = { horizontal: "center", vertical: "middle" };
     cell.font = { name: "Calibri", size: 10, bold: true, color: { argb: band.text } };
-    for (let c = c1; c <= c2; c++) {
-      const bc = ws.getCell(YEAR_ROW, c);
-      bc.fill = { type: "pattern", pattern: "solid", fgColor: { argb: band.fill } };
-      bc.border = { top: thinBorder, bottom: thinBorder, left: c === c1 ? yearDivider : thinBorder, right: thinBorder };
-    }
+    // Merged cells share one style object in exceljs, so style the range
+    // ONCE via the master cell — per-cell writes would overwrite each other
+    // (the last cell's thin left border used to erase the year divider).
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: band.fill } };
+    cell.border = { top: thinBorder, bottom: thinBorder, left: yearDivider, right: thinBorder };
     runStart = i;
     bandIdx++;
   }
