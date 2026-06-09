@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git push origin main*)",
+      "Bash(git push -u origin main*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(gh pr merge*)",
+      "Bash(gh workflow run*)",
+      "Bash(gh run rerun*)",
+      "Bash(supabase *)",
+      "Bash(npx supabase *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/production-guard.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Production guard check"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/production-guard.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Production guard check"
+          }
+        ]
+      }
+    ]
+  }
+}
