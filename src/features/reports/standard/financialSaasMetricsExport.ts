@@ -90,6 +90,9 @@ type CellValue = string | number | boolean | null;
 
 const thinBorder = { style: "thin" as const, color: { argb: C_BORDER } };
 const mediumBorder = { style: "medium" as const, color: { argb: "FFCBD5E1" } };
+// Vertical divider at each year boundary — dark + medium so the year
+// groups read clearly when scanning across the grid.
+const yearDivider = { style: "medium" as const, color: { argb: C_SLATE } };
 
 // ---------------------------------------------------------------------
 // Tab 1: Summary (the investor-facing tab)
@@ -197,7 +200,7 @@ function buildSummarySheet(
     for (let c = c1; c <= c2; c++) {
       const bc = ws.getCell(YEAR_ROW, c);
       bc.fill = { type: "pattern", pattern: "solid", fgColor: { argb: band.fill } };
-      bc.border = { top: thinBorder, bottom: thinBorder, left: c === c1 ? mediumBorder : thinBorder, right: thinBorder };
+      bc.border = { top: thinBorder, bottom: thinBorder, left: c === c1 ? yearDivider : thinBorder, right: thinBorder };
     }
     runStart = i;
     bandIdx++;
@@ -229,7 +232,7 @@ function buildSummarySheet(
     };
     cell.border = {
       bottom: mediumBorder, top: thinBorder, right: thinBorder,
-      left: isYearStart ? mediumBorder : thinBorder,
+      left: isYearStart ? yearDivider : thinBorder,
     };
   }
   ws.getRow(QTR_ROW).height = 15;
@@ -283,7 +286,7 @@ function buildSummarySheet(
         }
         cell.border = {
           top: thinBorder, bottom: thinBorder, right: thinBorder,
-          left: isYearStart ? mediumBorder : thinBorder,
+          left: isYearStart ? yearDivider : thinBorder,
         };
       }
       r++;
