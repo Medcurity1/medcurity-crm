@@ -9,3 +9,6 @@ coverage/
 vite.config.js
 vite.config.d.ts
 supabase/.temp/
+
+# Personal planning docs (never commit)
+PULSE-GAME-PLAN/
