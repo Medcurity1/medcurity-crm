@@ -1,6 +1,6 @@
 {
   "permissions": {
-    "deny": [
+    "ask": [
       "Bash(git push origin main*)",
       "Bash(git push -u origin main*)",
       "Bash(git push --force*)",
