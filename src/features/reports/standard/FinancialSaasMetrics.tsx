@@ -480,7 +480,7 @@ function ComboChartCard({ quarters }: { quarters: QuarterMetrics[] }) {
               <CartesianGrid
                 strokeDasharray="3 3"
                 stroke="#94a3b8"
-                strokeOpacity={0.45}
+                strokeOpacity={0.7}
                 vertical={false}
                 // Recharts doesn't derive grid lines from custom `ticks`
                 // arrays, so position one line per axis segment manually.
