@@ -25,7 +25,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { branding } from "@/lib/branding";
+import { PulseLogo } from "@/components/PulseLogo";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -119,15 +119,21 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
         isMobile && collapsed && "-translate-x-full"
       )}
     >
-      {/* Logo */}
-      <div className="flex items-center h-14 px-4 border-b border-border shrink-0">
-        {!collapsed && (
-          <span className="text-lg font-bold text-primary tracking-tight">
-            {branding.fullTitle}
-          </span>
-        )}
-        {collapsed && (
-          <span className="text-lg font-bold text-primary mx-auto">{branding.shortName}</span>
+      {/* Logo — mirror-chrome Pulse on a dark stage. The reflection fades
+          out at the block's bottom edge, so the "floor" visually ends
+          right where the search section starts. */}
+      <div
+        className="shrink-0 overflow-hidden border-b border-border"
+        style={{ background: "linear-gradient(180deg, #14181f 0%, #1b212d 100%)" }}
+      >
+        {!collapsed ? (
+          <div className="flex h-16 items-end px-4 pb-0">
+            <PulseLogo variant="full" className="h-14 w-auto" />
+          </div>
+        ) : (
+          <div className="flex h-16 items-end justify-center pb-0">
+            <PulseLogo variant="mark" className="h-14 w-auto" />
+          </div>
         )}
       </div>
 

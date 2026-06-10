@@ -17,6 +17,7 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { IdleWarningDialog } from "@/components/IdleWarningDialog";
 import { AnnouncementBanner } from "@/components/AnnouncementBanner";
+import { NewYearCelebration } from "@/components/seasonal/NewYearCelebration";
 
 const pathMap: Record<string, string> = {
   "": "Home",
@@ -225,6 +226,9 @@ export function AppLayout() {
         open={showShortcutsHelp}
         onOpenChange={setShowShortcutsHelp}
       />
+
+      {/* One-time January fireworks (first login of the new year). */}
+      <NewYearCelebration />
     </div>
   );
 }

@@ -4,8 +4,10 @@ import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { branding } from "@/lib/branding";
+import { PulseLogo } from "@/components/PulseLogo";
+import { SeasonalBackdrop } from "@/components/seasonal/SeasonalBackdrop";
 import { useAuth } from "./AuthProvider";
 
 export function LoginPage() {
@@ -37,13 +39,22 @@ export function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">{branding.fullTitle}</CardTitle>
-          <CardDescription>{branding.loginSubtitle}</CardDescription>
-        </CardHeader>
-        <CardContent>
+    <div className="relative min-h-screen flex items-center justify-center bg-background p-4 overflow-hidden">
+      {/* Seasonal backdrop — month-aware, decoration only. */}
+      <SeasonalBackdrop />
+      <Card className="relative z-10 w-full max-w-sm overflow-hidden shadow-xl">
+        {/* Chrome wordmark on its dark stage; reflection fades into the
+            banner's bottom edge. */}
+        <div
+          className="flex flex-col items-center px-6 pt-6 pb-3"
+          style={{ background: "linear-gradient(180deg, #14181f 0%, #1b212d 100%)" }}
+        >
+          <PulseLogo variant="login" className="h-24 w-auto" />
+          <p className="pb-1 text-sm" style={{ color: "#8d99ad" }}>
+            {branding.loginSubtitle}
+          </p>
+        </div>
+        <CardContent className="pt-6">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
