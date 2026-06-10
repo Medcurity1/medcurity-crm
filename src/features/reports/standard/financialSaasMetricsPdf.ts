@@ -330,7 +330,7 @@ function drawFooter(doc: import("jspdf").jsPDF) {
     MARGIN, y,
   );
   doc.text(
-    "Churn % ($) = renewal revenue lost ÷ (renewed + lost) for the period — the share of the renewal cohort that churned. Exact values are in the Excel export.",
+    "Churn % ($) = revenue lost ÷ (active revenue + lost) for the period — losses as a share of the whole client book. Exact values are in the Excel export.",
     MARGIN, y + 3.6,
   );
   doc.setFont("helvetica", "bold");
