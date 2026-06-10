@@ -274,9 +274,30 @@ export function useConvertLead() {
         throw new Error("Convert lead got both existingAccountId and accountName — pick one.");
       }
 
+      // 0. Pull the source lead's owner + qualification so we can carry
+      // them onto the records we create (previously dropped on the floor,
+      // so converted accounts had no owner and contacts lost MQL/SQL).
+      const { data: sourceLead } = await supabase
+        .from("leads")
+        .select("owner_user_id, mql_date, qualification, qualification_date")
+        .eq("id", input.leadId)
+        .single();
+      const leadOwnerId = sourceLead?.owner_user_id ?? null;
+      const convertDate = new Date().toISOString().slice(0, 10);
+      const mqlDate = sourceLead?.mql_date ?? null;
+      // SQL date: if the lead already reached SQL/SAL, carry that date;
+      // otherwise the conversion itself is the SQL event (per the data
+      // model: "conversion to contact = SQL event").
+      const sqlDate =
+        sourceLead?.qualification === "sql" || sourceLead?.qualification === "sal"
+          ? (sourceLead?.qualification_date
+              ? String(sourceLead.qualification_date).slice(0, 10)
+              : convertDate)
+          : convertDate;
+
       // 1. Account: pick existing OR create new. The existing-account
       // path leaves the account untouched (we don't overwrite address /
-      // industry from a lead — the account is the system of record).
+      // industry / owner from a lead — the account is the system of record).
       let account: { id: string; name: string } | null = null;
       if (input.existingAccountId) {
         const { data, error } = await supabase
@@ -291,6 +312,7 @@ export function useConvertLead() {
           .from("accounts")
           .insert({
             name: input.accountName!,
+            owner_user_id: leadOwnerId,
             industry: input.industry,
             website: input.website,
             billing_street: input.street,
@@ -318,6 +340,9 @@ export function useConvertLead() {
           is_primary: true,
           lead_source: input.leadSource ?? null,
           original_lead_id: input.leadId,
+          owner_user_id: leadOwnerId,
+          mql_date: mqlDate,
+          sql_date: sqlDate,
         })
         .select()
         .single();
@@ -336,6 +361,7 @@ export function useConvertLead() {
             stage: input.opportunityStage ?? "details_analysis",
             team: "sales",
             kind: "new_business",
+            owner_user_id: leadOwnerId,
           })
           .select()
           .single();
