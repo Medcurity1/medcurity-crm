@@ -8,8 +8,14 @@
       "Bash(gh pr merge*)",
       "Bash(gh workflow run*)",
       "Bash(gh run rerun*)",
-      "Bash(supabase *)",
-      "Bash(npx supabase *)"
+      "Bash(supabase db push*)",
+      "Bash(supabase db reset*)",
+      "Bash(supabase functions deploy*)",
+      "Bash(supabase link*)",
+      "Bash(npx supabase db push*)",
+      "Bash(npx supabase db reset*)",
+      "Bash(npx supabase functions deploy*)",
+      "Bash(npx supabase link*)"
     ]
   },
   "hooks": {
