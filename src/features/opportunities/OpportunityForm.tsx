@@ -730,7 +730,18 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           onOpenChange={setShowAddProduct}
           accountId={watchedAccountId ?? null}
           fteRange={null}
-          onStage={(rows) => setStagedProducts((prev) => [...prev, ...rows])}
+          onStage={(rows) =>
+            // Dedupe by product_id (last write wins) — the DB has a unique
+            // (opportunity_id, product_id) and upserts on it, so staging the
+            // same product twice would silently collapse on save and the
+            // preview total would overstate what's persisted. Merge here so
+            // the preview always matches the saved result.
+            setStagedProducts((prev) => {
+              const byId = new Map(prev.map((p) => [p.product_id, p]));
+              for (const r of rows) byId.set(r.product_id, r);
+              return [...byId.values()];
+            })
+          }
         />
 
         {/* Confirm-remove dialog (in case user picks then removes) */}
@@ -1633,7 +1644,18 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           onOpenChange={setShowAddProduct}
           fteRange={(watch("fte_range") as string | undefined) || null}
           accountId={watchedAccountId || null}
-          onStage={(rows) => setStagedProducts((prev) => [...prev, ...rows])}
+          onStage={(rows) =>
+            // Dedupe by product_id (last write wins) — the DB has a unique
+            // (opportunity_id, product_id) and upserts on it, so staging the
+            // same product twice would silently collapse on save and the
+            // preview total would overstate what's persisted. Merge here so
+            // the preview always matches the saved result.
+            setStagedProducts((prev) => {
+              const byId = new Map(prev.map((p) => [p.product_id, p]));
+              for (const r of rows) byId.set(r.product_id, r);
+              return [...byId.values()];
+            })
+          }
         />
       )}
 

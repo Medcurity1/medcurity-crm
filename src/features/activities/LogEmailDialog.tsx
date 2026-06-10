@@ -155,8 +155,10 @@ export function LogEmailDialog({
                   queryKey: ["sequence-enrollment-counts"],
                 });
               }
-            } catch {
-              // Non-fatal
+            } catch (err) {
+              // Non-fatal to the email log, but surface it so a failed
+              // sequence auto-pause isn't completely invisible.
+              console.error("Failed to auto-pause sequences on engagement:", err);
             }
           }
           form.reset();

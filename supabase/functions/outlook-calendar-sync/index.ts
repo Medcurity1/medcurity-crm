@@ -303,7 +303,7 @@ async function syncTask(supabase: SupabaseClient, task: TaskRow): Promise<void> 
           .eq("id", task.id);
         return;
       }
-      await supabase
+      const { error: writeErr } = await supabase
         .from("activities")
         .update({
           outlook_event_id: created.id,
@@ -311,6 +311,16 @@ async function syncTask(supabase: SupabaseClient, task: TaskRow): Promise<void> 
           outlook_synced_at: new Date().toISOString(),
         })
         .eq("id", task.id);
+      if (writeErr) {
+        // We created the event but couldn't record its id. Delete it now,
+        // otherwise the next reconcile sees a null id and creates a
+        // DUPLICATE. Flag the row so the failure is visible.
+        await deleteEvent(conn as EmailConn, created.id);
+        await supabase
+          .from("activities")
+          .update({ outlook_sync_error: `event id write failed: ${writeErr.message}` })
+          .eq("id", task.id);
+      }
     }
   } catch (e) {
     console.error(`outlook-calendar-sync task ${task.id}:`, e);
