@@ -192,6 +192,16 @@ export function useCreateRequest() {
         .select()
         .single();
       if (error) throw error;
+
+      // Fire the email notice (one email from marketing@ to all routed
+      // recipients). Best-effort: the in-app bell is the reliable channel,
+      // so an email failure must never fail the submission. The function
+      // is idempotent server-side (email_notified_at CAS), so repeats are
+      // harmless.
+      void supabase.functions
+        .invoke("request-email-notify", { body: { requestId: data.id } })
+        .catch(() => {});
+
       return data as CrmRequest;
     },
     onSuccess: () => {
