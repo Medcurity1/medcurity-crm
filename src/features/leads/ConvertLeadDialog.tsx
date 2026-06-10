@@ -47,6 +47,36 @@ interface AccountSuggestion {
 
 type AccountMode = "existing" | "new";
 
+// Normalize a company name for duplicate detection: fold "&"/"and", drop
+// common legal suffixes, strip punctuation/spacing, lowercase. Collapses
+// "Smith & Sons" / "Smith and Sons" / "Smith and Sons, LLC" to one key.
+// Conservative — only merges punctuation/suffix/and variants, never
+// distinct names.
+function normCompany(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/\b(inc|incorporated|llc|llp|ltd|co|corp|corporation|company)\b/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+// The most distinctive word in a company name (longest, ignoring filler),
+// used to broaden the dup search so "&"/"and"/suffix variants surface.
+function distinctiveToken(s: string): string | null {
+  const stop = new Set([
+    "and", "the", "inc", "llc", "llp", "ltd", "co", "corp",
+    "corporation", "company", "of", "for",
+  ]);
+  const words = s
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !stop.has(w));
+  if (words.length === 0) return null;
+  return words.sort((a, b) => b.length - a.length)[0];
+}
+
 /**
  * Convert lead → account + contact + (optional) opportunity.
  *
@@ -178,12 +208,30 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
       // This is the main duplicate-prevention guardrail — reps can
       // still flip back to "new" if the match is wrong.
       if (!hasOpenedOnce && lead.company) {
-        const exact = rows.find(
-          (r) => r.name.toLowerCase().trim() === lead.company!.toLowerCase().trim()
-        );
-        if (exact) {
+        const target = normCompany(lead.company);
+        // Normalized match within the already-fetched suggestions...
+        let match = rows.find((r) => normCompany(r.name) === target);
+        // ...else broaden by the most distinctive token so "&"/"and"/suffix
+        // variants (e.g. "Smith & Sons" vs "Smith and Sons") surface, then
+        // normalized-match. Normalized equality is safe — it only collapses
+        // punctuation/suffix/and variants, never distinct companies.
+        if (!match) {
+          const token = distinctiveToken(lead.company);
+          if (token) {
+            const { data: extra } = await supabase
+              .from("accounts")
+              .select("id, name, lifecycle_status")
+              .ilike("name", `%${token}%`)
+              .is("archived_at", null)
+              .limit(25);
+            match = ((extra ?? []) as AccountSuggestion[]).find(
+              (r) => normCompany(r.name) === target,
+            );
+          }
+        }
+        if (match) {
           setMode("existing");
-          setSelectedAccount(exact);
+          setSelectedAccount(match);
         }
         setHasOpenedOnce(true);
       }
@@ -212,6 +260,14 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
         return;
       }
 
+      // Seed the opp with the staged products' total so it never lands at
+      // $0 if the post-convert product attach fails. On success the bulk
+      // attach recomputes the amount server-side, overwriting this.
+      const stagedTotal = stagedProducts.reduce(
+        (sum, sp) => sum + (Number(sp.arr_amount) || 0),
+        0,
+      );
+
       const result = await convertMutation.mutateAsync({
         leadId: lead.id,
         existingAccountId: mode === "existing" ? selectedAccount!.id : undefined,
@@ -238,6 +294,7 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
           ? (derivedOpportunityName || "New Opportunity")
           : undefined,
         opportunityStage: createOpportunity ? opportunityStage : undefined,
+        opportunityAmount: createOpportunity ? stagedTotal : undefined,
       });
 
       // Attach staged products. useAddOpportunityProductsBulk also
