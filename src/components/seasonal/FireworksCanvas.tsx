@@ -76,7 +76,7 @@ export function FireworksCanvas({ mode = "ambient", className }: FireworksCanvas
     resize();
 
     function explode(x: number, y: number, color: string) {
-      const n = mode === "show" ? Math.floor(rand(55, 85)) : Math.floor(rand(38, 60));
+      const n = mode === "show" ? Math.floor(rand(55, 85)) : Math.floor(rand(50, 75));
       // Mostly single-color bursts with the occasional multicolor one
       const multi = Math.random() < 0.25;
       for (let i = 0; i < n; i++) {
@@ -114,7 +114,7 @@ export function FireworksCanvas({ mode = "ambient", className }: FireworksCanvas
         launch();
         if (mode === "show" && Math.random() < 0.5) launch();
         nextLaunch =
-          now + (mode === "show" ? rand(280, 650) : rand(2600, 5200));
+          now + (mode === "show" ? rand(280, 650) : rand(2100, 4200));
       }
 
       rockets = rockets.filter((r) => {

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,9 +18,17 @@ export function LoginPage() {
   const navigate = useNavigate();
   const { session } = useAuth();
 
-  if (session) {
-    navigate("/", { replace: true });
-    return null;
+  // Scene preview (?preview_date=...) stays viewable even while signed
+  // in, so seasonal backdrops can be toured without logging out.
+  const previewingScene = new URLSearchParams(window.location.search).has(
+    "preview_date",
+  );
+
+  // Render-safe redirect. The previous navigate()-during-render could be
+  // silently dropped by React Router, leaving a permanently blank page
+  // for signed-in users landing on /login.
+  if (session && !previewingScene) {
+    return <Navigate to="/" replace />;
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -46,15 +54,15 @@ export function LoginPage() {
         {/* Chrome wordmark on its dark stage; reflection fades into the
             banner's bottom edge. */}
         <div
-          className="flex flex-col items-center px-6 pt-6 pb-3"
+          className="flex items-center justify-center px-6 py-3"
           style={{ background: "linear-gradient(180deg, #14181f 0%, #1b212d 100%)" }}
         >
-          <PulseLogo variant="login" className="h-24 w-auto" />
-          <p className="pb-1 text-sm" style={{ color: "#8d99ad" }}>
+          <PulseLogo variant="login" className="h-20 w-auto" />
+        </div>
+        <CardContent className="pt-5">
+          <p className="mb-4 text-center text-sm text-muted-foreground">
             {branding.loginSubtitle}
           </p>
-        </div>
-        <CardContent className="pt-6">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>

@@ -5,13 +5,28 @@ import { useEffect, useRef } from "react";
  * backdrops. All purely decorative, pointer-events none.
  */
 
+/** Soft golden sun glow for summer scenes (pure CSS, no animation). */
+export function SunGlow({ corner = "top-right" }: { corner?: "top-left" | "top-right" }) {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        position: "absolute",
+        inset: 0,
+        pointerEvents: "none",
+        background: `radial-gradient(circle at ${corner === "top-right" ? "88% -6%" : "12% -6%"}, rgba(255, 205, 92, 0.55) 0%, rgba(255, 220, 130, 0.25) 24%, rgba(255, 230, 160, 0.08) 42%, transparent 60%)`,
+      }}
+    />
+  );
+}
+
 export function PumpkinCorners() {
   return (
     <>
       <svg
         viewBox="0 0 120 80"
         aria-hidden="true"
-        style={{ position: "absolute", left: 8, bottom: 0, width: 130, pointerEvents: "none" }}
+        style={{ position: "absolute", left: 8, bottom: 0, width: 170, pointerEvents: "none" }}
       >
         <g transform="translate(36 46)">
           <path d="M-3 -22 q2 -8 9 -9 q-3 6 -2 10 z" fill="#5a7a36" />
@@ -30,7 +45,7 @@ export function PumpkinCorners() {
       <svg
         viewBox="0 0 90 70"
         aria-hidden="true"
-        style={{ position: "absolute", right: 10, bottom: 0, width: 95, pointerEvents: "none" }}
+        style={{ position: "absolute", right: 10, bottom: 0, width: 125, pointerEvents: "none" }}
       >
         <g transform="translate(45 44) rotate(-6)">
           <path d="M-2 -19 q1 -7 8 -8 q-3 5 -2 9 z" fill="#5a7a36" />

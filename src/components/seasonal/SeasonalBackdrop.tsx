@@ -7,6 +7,7 @@ import {
   FlowerCorners,
   ChristmasCorners,
   BatFlyby,
+  SunGlow,
 } from "./decorations";
 
 /**
@@ -96,9 +97,18 @@ export function getSeasonalScene(now: Date): Scene {
       };
     case 5: // June
       return {
-        background: "linear-gradient(180deg, #fdf9ec 0%, #f8eed7 100%)",
+        background: "linear-gradient(180deg, #fdf3d3 0%, #f7e3ae 100%)",
         dark: false,
-        layers: <ParticleCanvas kind="motes" colors={["#f5d98e", "#fae8b8", "#ffffff"]} count={22} />,
+        layers: (
+          <>
+            <SunGlow corner="top-right" />
+            <ParticleCanvas
+              kind="motes"
+              colors={["#e8b54a", "#f2cf7e", "#dba12f"]}
+              count={32}
+            />
+          </>
+        ),
       };
     case 6: // July
       return {
