@@ -9,9 +9,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 const ReportBuilder = lazy(() =>
   import("./ReportBuilder").then((m) => ({ default: m.ReportBuilder }))
 );
-const DashboardsTab = lazy(() =>
-  import("./DashboardsTab").then((m) => ({ default: m.DashboardsTab }))
-);
 const StandardReports = lazy(() =>
   import("./StandardReports").then((m) => ({ default: m.StandardReports }))
 );
@@ -23,7 +20,6 @@ const VALID_TABS = [
   "standard",
   "team-dashboard",
   "reports",
-  "dashboards",
 ] as const;
 type TabValue = (typeof VALID_TABS)[number];
 
@@ -71,7 +67,7 @@ export function ReportsHub() {
     <div className="space-y-4">
       <PageHeader
         title="Reports"
-        description="Build reports, watch dashboards, run forecasts, and analyze win/loss."
+        description="Standard reports, the team dashboard, and a custom report builder."
       />
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -79,7 +75,6 @@ export function ReportsHub() {
           <TabsTrigger value="standard">Standard</TabsTrigger>
           <TabsTrigger value="team-dashboard">Team Dashboard</TabsTrigger>
           <TabsTrigger value="reports">Custom Builder</TabsTrigger>
-          <TabsTrigger value="dashboards">Dashboards</TabsTrigger>
         </TabsList>
 
         <TabsContent value="standard" className="mt-4">
@@ -97,12 +92,6 @@ export function ReportsHub() {
         <TabsContent value="reports" className="mt-4">
           <LazyPanel>
             <ReportBuilder />
-          </LazyPanel>
-        </TabsContent>
-
-        <TabsContent value="dashboards" className="mt-4">
-          <LazyPanel>
-            <DashboardsTab />
           </LazyPanel>
         </TabsContent>
       </Tabs>
