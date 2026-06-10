@@ -275,7 +275,16 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   // Driving from business_type means there's a single source of
   // truth for "is this a renewal or a new sale" — which the pipeline
   // and KPI views can rely on.
+  // In EDIT mode, skip the initial mount run: imported renewals can have a
+  // null business_type, and deriving on mount would silently flip them to
+  // new_business/sales (knocking them out of the renewals queue) just by
+  // opening + saving. Only respond to a genuine user change of Business Type.
+  const businessTypeDerivationReady = useRef(!isEditing);
   useEffect(() => {
+    if (!businessTypeDerivationReady.current) {
+      businessTypeDerivationReady.current = true;
+      return;
+    }
     const bt = (watchedBusinessType ?? null) as string | null;
     const isExisting = !!bt && bt.startsWith("existing_business");
     const targetKind = isExisting ? "renewal" : "new_business";
@@ -409,10 +418,23 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       // If existing probability doesn't match the stage default, the user
       // explicitly set it. Don't auto-overwrite on edit.
       const stageDefault = STAGE_PROBABILITY[opp.stage as string];
-      return stageDefault !== undefined && opp.probability !== stageDefault;
+      // Treat a null/blank probability as NOT user-overridden — many
+      // imported opps have no probability and should still auto-manage.
+      return (
+        opp.probability != null &&
+        stageDefault !== undefined &&
+        opp.probability !== stageDefault
+      );
     },
   );
+  // Skip the mount run in edit mode so opening an opp never stamps/dirties
+  // probability; only a real stage change auto-fills it.
+  const probabilityAutoFillReady = useRef(!isEditing);
   useEffect(() => {
+    if (!probabilityAutoFillReady.current) {
+      probabilityAutoFillReady.current = true;
+      return;
+    }
     if (!watchedStage) return;
     if (probabilityUserOverridden) return;
     const next = STAGE_PROBABILITY[watchedStage as string];
