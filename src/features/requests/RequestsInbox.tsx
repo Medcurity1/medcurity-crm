@@ -82,9 +82,9 @@ export function RequestsInbox() {
           description="No requests match these filters yet."
         />
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {data.map((r) => (
-            <RequestCard key={r.id} request={r} />
+            <RequestCard key={r.id} request={r} showType />
           ))}
         </div>
       )}

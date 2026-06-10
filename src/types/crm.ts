@@ -886,6 +886,16 @@ export interface CrmRequest {
   requester?: { id: string; full_name: string | null } | null;
 }
 
+export interface RequestAttachment {
+  id: string;
+  request_id: string;
+  original_filename: string;
+  storage_path: string;
+  mimetype: string | null;
+  size_bytes: number | null;
+  created_at: string;
+}
+
 // Dashboard widgets
 export interface DashboardWidget {
   id: string;

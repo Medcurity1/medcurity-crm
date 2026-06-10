@@ -111,6 +111,35 @@ async function transitionJiraIssue(issueKey: string) {
   }
 }
 
+/**
+ * Upload one stored attachment to the Jira issue (ported from Nexus's
+ * uploadJiraAttachment). Non-fatal: failures are logged, never thrown —
+ * a missing attachment shouldn't unwind an approval.
+ */
+async function uploadJiraAttachment(
+  issueKey: string,
+  blob: Blob,
+  originalFilename: string,
+) {
+  const auth = jiraAuth();
+  const base = jiraBaseUrl();
+  if (!auth || !base) return;
+  try {
+    const form = new FormData();
+    form.append("file", blob, originalFilename);
+    const res = await fetch(`${base}/rest/api/3/issue/${issueKey}/attachments`, {
+      method: "POST",
+      headers: { Authorization: auth, "X-Atlassian-Token": "no-check" },
+      body: form,
+    });
+    if (!res.ok) {
+      console.log(`[jira] attachment upload failed (${res.status}): ${originalFilename}`);
+    }
+  } catch (e) {
+    console.log("[jira] attachment upload error:", (e as Error).message);
+  }
+}
+
 async function moveToBoard(issueKey: string) {
   const auth = jiraAuth();
   const base = jiraBaseUrl();
@@ -266,6 +295,23 @@ serve(async (req) => {
               .eq("id", requestId);
             await transitionJiraIssue(jiraKey);
             await moveToBoard(jiraKey);
+
+            // Push the request's attachments onto the ticket (best-effort,
+            // mirrors Nexus). Files live in the request-attachments bucket.
+            const { data: atts } = await svc
+              .from("request_attachments")
+              .select("original_filename, storage_path")
+              .eq("request_id", requestId);
+            for (const a of atts ?? []) {
+              const { data: blob } = await svc.storage
+                .from("request-attachments")
+                .download(a.storage_path);
+              if (blob) {
+                await uploadJiraAttachment(jiraKey, blob, a.original_filename);
+              } else {
+                console.log(`[jira] attachment missing in storage: ${a.storage_path}`);
+              }
+            }
           }
         } catch (e) {
           // Jira creation failed — roll the claim back to pending so the

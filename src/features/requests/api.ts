@@ -5,6 +5,7 @@ import type {
   RequestType,
   RequestStatus,
   RequestPriority,
+  RequestAttachment,
 } from "@/types/crm";
 
 // ── Shared option lists / labels ─────────────────────────────────────
@@ -162,6 +163,73 @@ export function useRemoveRouting() {
   });
 }
 
+// ── Attachments ──────────────────────────────────────────────────────
+const ATTACHMENTS_BUCKET = "request-attachments";
+
+function sanitizeFilename(name: string): string {
+  return name.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(-120);
+}
+
+/**
+ * Upload the submitted files to storage + record metadata rows.
+ * Best-effort per file: returns the names that failed so the form can
+ * warn without failing the whole request.
+ */
+async function uploadRequestAttachments(
+  requestId: string,
+  files: File[],
+): Promise<string[]> {
+  const failed: string[] = [];
+  for (const f of files) {
+    const path = `${requestId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${sanitizeFilename(f.name)}`;
+    const { error: upErr } = await supabase.storage
+      .from(ATTACHMENTS_BUCKET)
+      .upload(path, f, { contentType: f.type || "application/octet-stream" });
+    if (upErr) {
+      failed.push(f.name);
+      continue;
+    }
+    const { error: rowErr } = await supabase.from("request_attachments").insert({
+      request_id: requestId,
+      original_filename: f.name,
+      storage_path: path,
+      mimetype: f.type || null,
+      size_bytes: f.size,
+    });
+    if (rowErr) failed.push(f.name);
+  }
+  return failed;
+}
+
+export function useRequestAttachments(requestId: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ["request-attachments", requestId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("request_attachments")
+        .select("*")
+        .eq("request_id", requestId!)
+        .order("created_at");
+      if (error) throw error;
+      return data as RequestAttachment[];
+    },
+    enabled: !!requestId && enabled,
+  });
+}
+
+/** Open a short-lived signed download URL for an attachment. */
+export async function downloadAttachment(att: RequestAttachment) {
+  const { data, error } = await supabase.storage
+    .from(ATTACHMENTS_BUCKET)
+    .createSignedUrl(att.storage_path, 3600, {
+      download: att.original_filename,
+    });
+  if (error || !data?.signedUrl) {
+    throw new Error(error?.message ?? "Could not create download link");
+  }
+  window.open(data.signedUrl, "_blank", "noopener");
+}
+
 // ── Mutations ────────────────────────────────────────────────────────
 interface CreateRequestInput {
   type: RequestType;
@@ -170,12 +238,19 @@ interface CreateRequestInput {
   priority: RequestPriority;
   details?: Record<string, unknown>;
   requesterName?: string | null;
+  files?: File[];
+}
+
+export interface CreateRequestResult {
+  request: CrmRequest;
+  /** Names of any files that failed to upload (request itself succeeded). */
+  failedUploads: string[];
 }
 
 export function useCreateRequest() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: CreateRequestInput) => {
+    mutationFn: async (input: CreateRequestInput): Promise<CreateRequestResult> => {
       const { data: u } = await supabase.auth.getUser();
       const uid = u.user?.id ?? null;
       const { data, error } = await supabase
@@ -193,6 +268,12 @@ export function useCreateRequest() {
         .single();
       if (error) throw error;
 
+      // Attachments go up BEFORE the email notice so reviewers never get
+      // a notification for a request whose files are still missing.
+      const failedUploads = input.files?.length
+        ? await uploadRequestAttachments(data.id, input.files)
+        : [];
+
       // Fire the email notice (one email from marketing@ to all routed
       // recipients). Best-effort: the in-app bell is the reliable channel,
       // so an email failure must never fail the submission. The function
@@ -202,7 +283,7 @@ export function useCreateRequest() {
         .invoke("request-email-notify", { body: { requestId: data.id } })
         .catch(() => {});
 
-      return data as CrmRequest;
+      return { request: data as CrmRequest, failedUploads };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["requests"] });

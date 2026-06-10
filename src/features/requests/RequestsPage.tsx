@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Palette, Package, Wrench, Send, Check, Plus } from "lucide-react";
+import { useRef, useState } from "react";
+import { Palette, Package, Wrench, Send, Check, Plus, Paperclip, X } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Card } from "@/components/ui/card";
@@ -60,6 +60,93 @@ function FromLine() {
   );
 }
 
+/**
+ * Attachment field (ports OG Nexus's uploads): up to `maxFiles` files,
+ * each capped at `maxSizeMB`. Files upload when the request is submitted.
+ */
+function AttachmentPicker({
+  files,
+  onChange,
+  maxFiles = 5,
+  maxSizeMB,
+}: {
+  files: File[];
+  onChange: (files: File[]) => void;
+  maxFiles?: number;
+  maxSizeMB: number;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function addFiles(list: FileList | null) {
+    if (!list) return;
+    const next = [...files];
+    for (const f of Array.from(list)) {
+      if (next.length >= maxFiles) {
+        toast.error(`Up to ${maxFiles} files per request.`);
+        break;
+      }
+      if (f.size > maxSizeMB * 1024 * 1024) {
+        toast.error(`${f.name} is over the ${maxSizeMB} MB limit.`);
+        continue;
+      }
+      next.push(f);
+    }
+    onChange(next);
+    if (inputRef.current) inputRef.current.value = "";
+  }
+
+  return (
+    <div className="space-y-2">
+      <Label>Attachments</Label>
+      {files.length > 0 && (
+        <div className="space-y-1.5">
+          {files.map((f, i) => (
+            <div
+              key={`${f.name}-${i}`}
+              className="flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm"
+            >
+              <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate">{f.name}</span>
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {(f.size / (1024 * 1024)).toFixed(1)} MB
+              </span>
+              <button
+                type="button"
+                aria-label={`Remove ${f.name}`}
+                className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                onClick={() => onChange(files.filter((_, idx) => idx !== i))}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => addFiles(e.target.files)}
+      />
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="gap-2"
+        onClick={() => inputRef.current?.click()}
+        disabled={files.length >= maxFiles}
+      >
+        <Paperclip className="h-3.5 w-3.5" />
+        Attach files
+      </Button>
+      <p className="text-xs text-muted-foreground">
+        Up to {maxFiles} files, {maxSizeMB} MB each. Optional.
+      </p>
+    </div>
+  );
+}
+
 function SubmittedPanel({ onAnother }: { onAnother: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center py-10 text-center">
@@ -89,6 +176,7 @@ function CollateralForm() {
   const [partnerOrEvent, setPartnerOrEvent] = useState("");
   const [usage, setUsage] = useState("");
   const [priority, setPriority] = useState<RequestPriority>("medium");
+  const [files, setFiles] = useState<File[]>([]);
 
   function reset() {
     setTitle("");
@@ -98,6 +186,7 @@ function CollateralForm() {
     setPartnerOrEvent("");
     setUsage("");
     setPriority("medium");
+    setFiles([]);
   }
 
   function submit() {
@@ -118,10 +207,17 @@ function CollateralForm() {
           partner_or_event: partnerOrEvent.trim() || null,
           usage: usage.trim() || null,
         },
+        files,
       },
       {
-        onSuccess: () => {
-          toast.success("Request submitted");
+        onSuccess: (res) => {
+          if (res.failedUploads.length > 0) {
+            toast.warning(
+              `Request submitted, but these files failed to upload: ${res.failedUploads.join(", ")}`,
+            );
+          } else {
+            toast.success("Request submitted");
+          }
           setSubmitted(true);
         },
         onError: (e) => toast.error("Could not submit: " + (e as Error).message),
@@ -183,6 +279,7 @@ function CollateralForm() {
         <Label htmlFor="c-usage">How will you use it?</Label>
         <Input id="c-usage" maxLength={200} value={usage} onChange={(e) => setUsage(e.target.value)} placeholder="Optional" />
       </div>
+      <AttachmentPicker files={files} onChange={setFiles} maxSizeMB={5} />
       <PrioritySelect value={priority} onChange={setPriority} />
       <div className="flex justify-end pt-2">
         <Button onClick={submit} disabled={create.isPending} className="gap-2">
@@ -202,11 +299,13 @@ function ProductForm() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<RequestPriority>("medium");
+  const [files, setFiles] = useState<File[]>([]);
 
   function reset() {
     setTitle("");
     setDescription("");
     setPriority("medium");
+    setFiles([]);
   }
 
   function submit() {
@@ -221,10 +320,17 @@ function ProductForm() {
         description: description.trim(),
         priority,
         requesterName: profile?.full_name ?? null,
+        files,
       },
       {
-        onSuccess: () => {
-          toast.success("Request submitted");
+        onSuccess: (res) => {
+          if (res.failedUploads.length > 0) {
+            toast.warning(
+              `Request submitted, but these files failed to upload: ${res.failedUploads.join(", ")}`,
+            );
+          } else {
+            toast.success("Request submitted");
+          }
           setSubmitted(true);
         },
         onError: (e) => toast.error("Could not submit: " + (e as Error).message),
@@ -254,9 +360,11 @@ function ProductForm() {
         <Label htmlFor="p-desc">Description <span className="text-destructive">*</span></Label>
         <Textarea id="p-desc" rows={5} maxLength={4000} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What's the idea, the problem it solves, and any detail that helps the reviewer decide..." />
       </div>
+      <AttachmentPicker files={files} onChange={setFiles} maxSizeMB={25} />
       <PrioritySelect value={priority} onChange={setPriority} />
       <p className="text-xs text-muted-foreground">
-        Product requests are reviewed inside the CRM. If approved, the request is filed to the product team's Jira board.
+        Product requests are reviewed inside the CRM. If approved, the request is filed
+        to the product team's Jira board, attachments included.
       </p>
       <div className="flex justify-end pt-2">
         <Button onClick={submit} disabled={create.isPending} className="gap-2">

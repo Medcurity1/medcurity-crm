@@ -33,7 +33,7 @@ function TypeBox({ type }: { type: RequestType }) {
       ) : (
         <div className="space-y-2">
           {items.map((r) => (
-            <RequestCard key={r.id} request={r} compact />
+            <RequestCard key={r.id} request={r} />
           ))}
         </div>
       )}
