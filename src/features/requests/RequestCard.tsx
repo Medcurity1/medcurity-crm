@@ -2,9 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import {
   Check,
   Clock,
+  Copy,
   Download,
   ExternalLink,
   Paperclip,
+  RefreshCw,
+  Sparkles,
   ThumbsDown,
   ThumbsUp,
 } from "lucide-react";
@@ -29,6 +32,7 @@ import {
   useApproveProductRequest,
   useDenyProductRequest,
   useSummarizeProductRequest,
+  useGenerateDesignPrompt,
   useRequestAttachments,
   downloadAttachment,
 } from "./api";
@@ -110,13 +114,41 @@ function RequestDetailDialog({
   const approve = useApproveProductRequest();
   const deny = useDenyProductRequest();
   const summarize = useSummarizeProductRequest();
+  const designPromptMutation = useGenerateDesignPrompt();
   const { data: attachments } = useRequestAttachments(request.id, open);
   const [note, setNote] = useState("");
   const [summary, setSummary] = useState<string | null>(request.ai_summary);
+  const [designPrompt, setDesignPrompt] = useState<string | null>(
+    request.design_prompt,
+  );
+  const [designUploadFiles, setDesignUploadFiles] = useState<string[]>([]);
   const triedSummarize = useRef(false);
   const busy = approve.isPending || deny.isPending || complete.isPending;
   const isPending = request.status === "pending";
   const isProduct = request.type === "product";
+  const isCollateral = request.type === "collateral";
+
+  function runDesignPrompt(regenerate: boolean) {
+    designPromptMutation.mutate(
+      { id: request.id, regenerate },
+      {
+        onSuccess: (res) => {
+          setDesignPrompt(res.prompt);
+          setDesignUploadFiles(res.uploadFiles ?? []);
+        },
+        onError: (e) =>
+          toast.error("Could not generate the design prompt: " + (e as Error).message),
+      },
+    );
+  }
+
+  function copyDesignPrompt() {
+    if (!designPrompt) return;
+    navigator.clipboard
+      .writeText(designPrompt)
+      .then(() => toast.success("Design prompt copied. Paste it into Claude design."))
+      .catch(() => toast.error("Could not copy to clipboard."));
+  }
 
   // Product only: generate the AI one-liner on first open (cached on the
   // request after that; ref stops re-calls when no summary comes back).
@@ -202,6 +234,64 @@ function RequestDetailDialog({
                   </button>
                 ))}
               </div>
+            </div>
+          )}
+
+          {isCollateral && (
+            <div className="space-y-2">
+              {!designPrompt ? (
+                <Button
+                  type="button"
+                  disabled={designPromptMutation.isPending}
+                  onClick={() => runDesignPrompt(false)}
+                  className="w-full gap-2 border-0 bg-gradient-to-r from-violet-600 via-blue-600 to-cyan-500 text-white shadow-md transition-all hover:opacity-90 hover:shadow-lg"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  {designPromptMutation.isPending
+                    ? "Generating design prompt..."
+                    : "Generate design prompt"}
+                </Button>
+              ) : (
+                <div className="overflow-hidden rounded-lg border border-violet-500/40">
+                  <div className="flex items-center justify-between gap-2 bg-gradient-to-r from-violet-600 via-blue-600 to-cyan-500 px-3 py-1.5">
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-white">
+                      <Sparkles className="h-3.5 w-3.5" /> Design prompt for Claude design
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        title="Regenerate"
+                        disabled={designPromptMutation.isPending}
+                        onClick={() => runDesignPrompt(true)}
+                        className="rounded p-1 text-white/85 transition-colors hover:bg-white/20 hover:text-white"
+                      >
+                        <RefreshCw
+                          className={cn(
+                            "h-3.5 w-3.5",
+                            designPromptMutation.isPending && "animate-spin",
+                          )}
+                        />
+                      </button>
+                      <button
+                        type="button"
+                        title="Copy prompt"
+                        onClick={copyDesignPrompt}
+                        className="rounded p-1 text-white/85 transition-colors hover:bg-white/20 hover:text-white"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  </div>
+                  <p className="max-h-52 overflow-y-auto whitespace-pre-wrap bg-muted/40 px-3 py-2 text-xs leading-relaxed">
+                    {designPrompt}
+                  </p>
+                  {designUploadFiles.length > 0 && (
+                    <p className="border-t border-border bg-muted/60 px-3 py-1.5 text-[11px] text-muted-foreground">
+                      Also upload to Claude design: {designUploadFiles.join(", ")}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

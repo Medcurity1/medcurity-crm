@@ -877,6 +877,7 @@ export interface CrmRequest {
   jira_issue_key: string | null;
   jira_issue_url: string | null;
   ai_summary: string | null;
+  design_prompt: string | null;
   completed_at: string | null;
   completed_by: string | null;
   decision_note: string | null;

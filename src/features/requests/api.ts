@@ -328,9 +328,10 @@ export function useCompleteRequest() {
  * generic "non-2xx" string).
  */
 async function invokeRequestAction(payload: {
-  action: "approve" | "summarize";
+  action: "approve" | "summarize" | "design_prompt";
   requestId: string;
   note?: string | null;
+  regenerate?: boolean;
 }) {
   const { data, error } = await supabase.functions.invoke("product-request-action", {
     body: payload,
@@ -367,6 +368,27 @@ export function useApproveProductRequest() {
         jiraKey: string | null;
         jiraUrl: string | null;
       }>,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["requests"] }),
+  });
+}
+
+/**
+ * Generate the Claude-design collateral prompt for a collateral request
+ * (ported from OG Nexus). Cached on the request; pass regenerate to
+ * produce a fresh one. Returns the prompt plus any files that should be
+ * uploaded to Claude Design alongside it.
+ */
+export function useGenerateDesignPrompt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, regenerate }: { id: string; regenerate?: boolean }) => {
+      const data = await invokeRequestAction({
+        action: "design_prompt",
+        requestId: id,
+        regenerate: regenerate ?? false,
+      });
+      return data as { prompt: string; uploadFiles: string[]; cached?: boolean };
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["requests"] }),
   });
 }

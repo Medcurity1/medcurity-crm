@@ -1,5 +1,11 @@
 // product-request-action Edge Function
 //
+// Server-side request actions that need secrets. Despite the historical
+// name it now serves PRODUCT requests (approve/summarize) AND COLLATERAL
+// requests (action "design_prompt": generates a Claude-design collateral
+// prompt — ported from OG Nexus's design-prompt generator, upgraded to
+// let Claude actually read attached PDFs/images via the Messages API).
+//
 // Handles the server-side actions on a PRODUCT request that need secrets:
 //   - action "approve": files a Jira ticket (ported verbatim from Nexus —
 //     create issue, resolve issue-type id, transition to the "Nexus Drops"
@@ -192,6 +198,211 @@ async function summarize(title: string, priority: string, description: string) {
   }
 }
 
+// ── Collateral design-prompt generator (ported from OG Nexus) ────────
+// The system prompt below is the trained OG Nexus prompt (brand palette,
+// fonts, tone, reference-file analysis rules) adapted for one upgrade:
+// PDFs and images are passed as real content blocks so Claude SEES them
+// instead of working from extracted text only.
+
+const DESIGN_SYSTEM_PROMPT = `You are a marketing collateral prompt generator for Medcurity, a healthcare HIPAA compliance software company. You generate detailed prompts that will be pasted into Claude Design to create professional marketing collateral.
+
+Medcurity Brand:
+- Colors: Dark Blue #123854, Accent Blue #127EBF, Light Blue #68ADDE, Light Background #EEF6FC, Body Text #5F5F5F, Accent Red #CC3333, Page Titles #121212, Light Background alt #FAFAFA
+- Fonts: Open Sans Bold (headings), Open Sans Semibold (subheadings), Open Sans Regular (body)
+- Tone: Professional, approachable, empowering. We help healthcare organizations, not scare them.
+- Never use em dashes in any generated copy. Never use the word 'actually'.
+
+Your job is to analyze the collateral request and any attached files, then write a prompt specific to THIS request. Every request is different. Adapt your prompt based on what's being asked for.
+
+When a reference file is attached (an example to match or build from):
+- Describe its visual structure in detail: layout, spacing, element positions, decorative elements (quotation marks, icons, dividers, borders), color usage, typography hierarchy
+- Note specific details like: where logos are positioned, how text is aligned, what decorative elements exist and their exact colors/opacity/positioning
+- Be explicit about what to replicate and what to change based on the request
+- If the reference has elements from a specific client (their logo, their name), note what those are so Design knows which elements are from the reference vs what should change
+
+When source files are attached (content to use, logos to incorporate, documents to reference):
+- Describe what each file contains and how it should be used in the design
+- If a logo file is attached, instruct Design to use it and specify where to place it
+- If a document is attached for content extraction, pull the key content and include it in the prompt
+
+When NO reference is attached:
+- Provide detailed layout and design direction based on the document type requested
+- Be specific about visual hierarchy, section structure, and Medcurity brand application
+
+Always include in your prompt:
+1. Exact document type and dimensions/format
+2. Complete content that should appear on the document (all text, all headings)
+3. Detailed visual layout description (positions, sizes, spacing, alignment)
+4. Color application (which colors go where, backgrounds, text colors, accent usage)
+5. Typography specifications (which font weights for which elements, approximate sizes)
+6. Decorative element descriptions (borders, dividers, icons, shapes, their colors and opacity)
+7. File-specific instructions for any attached files
+
+Write the prompt as a direct instruction to Claude Design. Be extremely specific about visual details. The goal is a near-final output on the first try with minimal refinement needed.`;
+
+function bufToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
+const IMAGE_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+};
+
+interface DesignPromptResult {
+  prompt: string;
+  uploadFiles: string[];
+}
+
+// deno-lint-ignore no-explicit-any
+async function generateDesignPrompt(svc: any, reqRow: any): Promise<DesignPromptResult> {
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured");
+
+  const d = (reqRow.details ?? {}) as Record<string, unknown>;
+  const detailLines = [
+    `- Title: ${reqRow.title}`,
+    d.format ? `- Requested format: ${d.format}` : null,
+    d.audience ? `- Audience: ${d.audience}` : null,
+    d.partner_or_event ? `- Partner/event: ${d.partner_or_event}` : null,
+    d.usage ? `- How it will be used: ${d.usage}` : null,
+    `- Priority: ${reqRow.priority}`,
+    `- Requested by: ${reqRow.requester_name ?? "Unknown"}`,
+    `- Description:\n${reqRow.description ?? "(none)"}`,
+  ].filter(Boolean);
+
+  // Build the user content: request details first, then each attachment
+  // as a real content block where the API supports it (PDF document
+  // blocks, image blocks, inline text). Unsupported/oversized files are
+  // flagged for manual upload alongside the prompt — same as OG Nexus.
+  // deno-lint-ignore no-explicit-any
+  const content: any[] = [
+    { type: "text", text: `Collateral Request Details:\n${detailLines.join("\n")}` },
+  ];
+  const uploadFiles: string[] = [];
+  let budget = 18 * 1024 * 1024; // total raw bytes we'll inline
+
+  const { data: atts } = await svc
+    .from("request_attachments")
+    .select("original_filename, storage_path, mimetype, size_bytes")
+    .eq("request_id", reqRow.id)
+    .order("created_at");
+
+  for (const a of atts ?? []) {
+    const ext = (a.original_filename.split(".").pop() ?? "").toLowerCase();
+    const size = Number(a.size_bytes ?? 0);
+    const isPdf = ext === "pdf" || a.mimetype === "application/pdf";
+    const imgType = IMAGE_TYPES[ext];
+    const isText =
+      ["txt", "md", "csv"].includes(ext) || (a.mimetype ?? "").startsWith("text/");
+
+    if (!isPdf && !imgType && !isText) {
+      uploadFiles.push(a.original_filename);
+      content.push({
+        type: "text",
+        text: `--- FILE: ${a.original_filename} ---\n[binary file - upload to Claude Design alongside the prompt]`,
+      });
+      continue;
+    }
+    if ((isPdf || imgType) && (size > 8 * 1024 * 1024 || size > budget)) {
+      uploadFiles.push(a.original_filename);
+      content.push({
+        type: "text",
+        text: `--- FILE: ${a.original_filename} ---\n[file too large to analyze here - upload to Claude Design alongside the prompt]`,
+      });
+      continue;
+    }
+
+    const { data: blob } = await svc.storage
+      .from("request-attachments")
+      .download(a.storage_path);
+    if (!blob) {
+      content.push({
+        type: "text",
+        text: `--- FILE: ${a.original_filename} ---\n[file not found]`,
+      });
+      continue;
+    }
+
+    if (isText) {
+      const text = (await blob.text()).slice(0, 10000);
+      content.push({
+        type: "text",
+        text: `--- FILE: ${a.original_filename} (text) ---\n${text}`,
+      });
+      continue;
+    }
+
+    const b64 = bufToBase64(await blob.arrayBuffer());
+    budget -= size;
+    content.push({ type: "text", text: `--- FILE: ${a.original_filename} ---` });
+    if (isPdf) {
+      content.push({
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: b64 },
+      });
+    } else {
+      // Visual reference — Claude sees it, but the actual file still goes
+      // to Claude Design with the prompt.
+      uploadFiles.push(a.original_filename);
+      content.push({
+        type: "image",
+        source: { type: "base64", media_type: imgType, data: b64 },
+      });
+    }
+  }
+
+  if (uploadFiles.length) {
+    content.push({
+      type: "text",
+      text:
+        "Note: The following files should be uploaded to Claude Design alongside this prompt: " +
+        uploadFiles.join(", "),
+    });
+  }
+
+  const abort = new AbortController();
+  const timeout = setTimeout(() => abort.abort(), 60_000);
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-opus-4-8",
+        max_tokens: 4096,
+        system: DESIGN_SYSTEM_PROMPT,
+        messages: [{ role: "user", content }],
+      }),
+      signal: abort.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Anthropic API ${res.status}: ${text.slice(0, 300)}`);
+    }
+    const data = await res.json();
+    const prompt = data?.content?.find(
+      (b: { type: string }) => b.type === "text",
+    )?.text;
+    if (!prompt) throw new Error("No prompt text in API response");
+    return { prompt, uploadFiles };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Use POST" }, 405);
@@ -217,10 +428,11 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { action, requestId, note } = body as {
+    const { action, requestId, note, regenerate } = body as {
       action?: string;
       requestId?: string;
       note?: string;
+      regenerate?: boolean;
     };
     if (!requestId) return json({ error: "Missing requestId" }, 400);
 
@@ -230,6 +442,23 @@ serve(async (req) => {
       .eq("id", requestId)
       .single();
     if (loadErr || !reqRow) return json({ error: "Request not found" }, 404);
+
+    // ── design prompt (collateral) ──
+    if (action === "design_prompt") {
+      if (reqRow.type !== "collateral") {
+        return json({ error: "Design prompts are for collateral requests" }, 400);
+      }
+      if (reqRow.design_prompt && !regenerate) {
+        return json({ prompt: reqRow.design_prompt, uploadFiles: [], cached: true });
+      }
+      const result = await generateDesignPrompt(svc, reqRow);
+      await svc
+        .from("requests")
+        .update({ design_prompt: result.prompt })
+        .eq("id", requestId);
+      return json({ prompt: result.prompt, uploadFiles: result.uploadFiles });
+    }
+
     if (reqRow.type !== "product") {
       return json({ error: "Not a product request" }, 400);
     }
