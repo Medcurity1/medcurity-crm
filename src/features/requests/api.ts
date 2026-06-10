@@ -203,6 +203,8 @@ export function useCreateRequest() {
 
 async function setOutcome(id: string, patch: Partial<CrmRequest>) {
   const { data: u } = await supabase.auth.getUser();
+  // Compare-and-swap on status='pending' so we can't complete/deny a
+  // request that was already handled (e.g. acting on a stale list).
   const { data, error } = await supabase
     .from("requests")
     .update({
@@ -211,10 +213,13 @@ async function setOutcome(id: string, patch: Partial<CrmRequest>) {
       completed_at: new Date().toISOString(),
     })
     .eq("id", id)
-    .select()
-    .single();
+    .eq("status", "pending")
+    .select();
   if (error) throw error;
-  return data as CrmRequest;
+  if (!data || data.length === 0) {
+    throw new Error("This request was already handled.");
+  }
+  return data[0] as CrmRequest;
 }
 
 /** Collateral / CRM requests: check off as done. */

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, ExternalLink, Clock, ThumbsUp, ThumbsDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -69,12 +69,16 @@ function ProductReviewDialog({
   const summarize = useSummarizeProductRequest();
   const [note, setNote] = useState("");
   const [summary, setSummary] = useState<string | null>(request.ai_summary);
+  const triedSummarize = useRef(false);
   const busy = approve.isPending || deny.isPending;
 
-  // Generate the AI one-liner the first time the dialog opens (cached
-  // on the request after that). No-ops gracefully if no Anthropic key.
+  // Generate the AI one-liner the first time the dialog opens (cached on
+  // the request after that). The ref stops it from re-calling Anthropic on
+  // every reopen when no summary comes back (no key / API error). No-ops
+  // gracefully without an Anthropic key.
   useEffect(() => {
-    if (open && !summary && !summarize.isPending) {
+    if (open && !summary && !summarize.isPending && !triedSummarize.current) {
+      triedSummarize.current = true;
       summarize.mutate(request.id, { onSuccess: (s) => setSummary(s) });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

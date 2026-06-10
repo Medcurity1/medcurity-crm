@@ -228,34 +228,68 @@ serve(async (req) => {
       const descText =
         `Requester: ${requesterName}\nPriority: ${reqRow.priority}\n\n${reqRow.description ?? ""}`;
 
-      let jiraKey: string | null = null;
-      let jiraUrl: string | null = null;
-      let jiraConfigured = false;
-      if (jiraAuth() && jiraBaseUrl()) {
-        jiraConfigured = true;
-        const jira = await createJiraIssue(reqRow.title, descText);
-        jiraKey = jira.key;
-        jiraUrl = jira.url;
-        await transitionJiraIssue(jira.key);
-        await moveToBoard(jira.key);
-      }
-
-      const { data: updated, error: updErr } = await svc
+      // Claim the row FIRST with a compare-and-swap (status='pending'), so
+      // two concurrent approvals can't both proceed and file two Jira
+      // tickets. Only the winner gets a row back.
+      const { data: claimed, error: claimErr } = await svc
         .from("requests")
         .update({
           status: "approved",
-          jira_issue_key: jiraKey,
-          jira_issue_url: jiraUrl,
           decision_note: note ?? null,
           completed_at: new Date().toISOString(),
           completed_by: caller.id,
         })
         .eq("id", requestId)
+        .eq("status", "pending")
         .select()
-        .single();
-      if (updErr) return json({ error: updErr.message }, 500);
+        .maybeSingle();
+      if (claimErr) return json({ error: claimErr.message }, 500);
+      if (!claimed) return json({ error: "Request is no longer pending" }, 409);
 
-      return json({ request: updated, jiraConfigured, jiraKey, jiraUrl });
+      // Reuse a Jira key from a prior partial attempt if present, so a
+      // retry never files a duplicate ticket.
+      let jiraKey: string | null = reqRow.jira_issue_key ?? null;
+      let jiraUrl: string | null = reqRow.jira_issue_url ?? null;
+      let jiraConfigured = false;
+      if (jiraAuth() && jiraBaseUrl()) {
+        jiraConfigured = true;
+        try {
+          if (!jiraKey) {
+            const jira = await createJiraIssue(reqRow.title, descText);
+            jiraKey = jira.key;
+            jiraUrl = jira.url;
+            // Persist the key immediately so any later failure can't cause
+            // a re-file on retry. (transition/board are non-throwing.)
+            await svc
+              .from("requests")
+              .update({ jira_issue_key: jiraKey, jira_issue_url: jiraUrl })
+              .eq("id", requestId);
+            await transitionJiraIssue(jiraKey);
+            await moveToBoard(jiraKey);
+          }
+        } catch (e) {
+          // Jira creation failed — roll the claim back to pending so the
+          // admin can retry (matches the "stays pending on Jira failure"
+          // contract). Keep any key we did persist.
+          await svc
+            .from("requests")
+            .update({
+              status: "pending",
+              completed_at: null,
+              completed_by: null,
+              decision_note: null,
+            })
+            .eq("id", requestId);
+          return json({ error: `Jira filing failed: ${(e as Error).message}` }, 502);
+        }
+      }
+
+      const { data: finalRow } = await svc
+        .from("requests")
+        .select("*")
+        .eq("id", requestId)
+        .maybeSingle();
+      return json({ request: finalRow ?? claimed, jiraConfigured, jiraKey, jiraUrl });
     }
 
     return json({ error: "Unknown action" }, 400);

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Palette, Package, Wrench, Send } from "lucide-react";
+import { Palette, Package, Wrench, Send, Check, Plus } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Card } from "@/components/ui/card";
@@ -60,10 +60,28 @@ function FromLine() {
   );
 }
 
+function SubmittedPanel({ onAnother }: { onAnother: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-10 text-center">
+      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-500/20">
+        <Check className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
+      </div>
+      <h3 className="text-lg font-semibold">Request submitted</h3>
+      <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+        Thanks! The right team has been notified and will take it from here.
+      </p>
+      <Button variant="outline" className="mt-5 gap-2" onClick={onAnother}>
+        <Plus className="h-4 w-4" /> Submit another
+      </Button>
+    </div>
+  );
+}
+
 // ── Collateral ───────────────────────────────────────────────────────
 function CollateralForm() {
   const { profile } = useAuth();
   const create = useCreateRequest();
+  const [submitted, setSubmitted] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [audience, setAudience] = useState("");
@@ -103,11 +121,22 @@ function CollateralForm() {
       },
       {
         onSuccess: () => {
-          toast.success("Collateral request submitted. Jordan and Nathan have been notified.");
-          reset();
+          toast.success("Request submitted");
+          setSubmitted(true);
         },
         onError: (e) => toast.error("Could not submit: " + (e as Error).message),
       },
+    );
+  }
+
+  if (submitted) {
+    return (
+      <SubmittedPanel
+        onAnother={() => {
+          reset();
+          setSubmitted(false);
+        }}
+      />
     );
   }
 
@@ -116,11 +145,11 @@ function CollateralForm() {
       <FromLine />
       <div className="space-y-2">
         <Label htmlFor="c-title">What do you need? <span className="text-destructive">*</span></Label>
-        <Input id="c-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. One-pager on phishing services" />
+        <Input id="c-title" maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. One-pager on phishing services" />
       </div>
       <div className="space-y-2">
         <Label htmlFor="c-desc">Describe what you need <span className="text-destructive">*</span></Label>
-        <Textarea id="c-desc" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What should it cover, any must-haves, references..." />
+        <Textarea id="c-desc" rows={3} maxLength={4000} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What should it cover, any must-haves, references..." />
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
@@ -148,11 +177,11 @@ function CollateralForm() {
       </div>
       <div className="space-y-2">
         <Label htmlFor="c-partner">Specific partner or event?</Label>
-        <Input id="c-partner" value={partnerOrEvent} onChange={(e) => setPartnerOrEvent(e.target.value)} placeholder="Optional" />
+        <Input id="c-partner" maxLength={200} value={partnerOrEvent} onChange={(e) => setPartnerOrEvent(e.target.value)} placeholder="Optional" />
       </div>
       <div className="space-y-2">
         <Label htmlFor="c-usage">How will you use it?</Label>
-        <Input id="c-usage" value={usage} onChange={(e) => setUsage(e.target.value)} placeholder="Optional" />
+        <Input id="c-usage" maxLength={200} value={usage} onChange={(e) => setUsage(e.target.value)} placeholder="Optional" />
       </div>
       <PrioritySelect value={priority} onChange={setPriority} />
       <div className="flex justify-end pt-2">
@@ -169,9 +198,16 @@ function CollateralForm() {
 function ProductForm() {
   const { profile } = useAuth();
   const create = useCreateRequest();
+  const [submitted, setSubmitted] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<RequestPriority>("medium");
+
+  function reset() {
+    setTitle("");
+    setDescription("");
+    setPriority("medium");
+  }
 
   function submit() {
     if (!title.trim() || !description.trim()) {
@@ -188,13 +224,22 @@ function ProductForm() {
       },
       {
         onSuccess: () => {
-          toast.success("Product request submitted. Rachel will review it.");
-          setTitle("");
-          setDescription("");
-          setPriority("medium");
+          toast.success("Request submitted");
+          setSubmitted(true);
         },
         onError: (e) => toast.error("Could not submit: " + (e as Error).message),
       },
+    );
+  }
+
+  if (submitted) {
+    return (
+      <SubmittedPanel
+        onAnother={() => {
+          reset();
+          setSubmitted(false);
+        }}
+      />
     );
   }
 
@@ -207,11 +252,11 @@ function ProductForm() {
       </div>
       <div className="space-y-2">
         <Label htmlFor="p-desc">Description <span className="text-destructive">*</span></Label>
-        <Textarea id="p-desc" rows={5} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What's the idea, the problem it solves, and any detail that helps Rachel decide..." />
+        <Textarea id="p-desc" rows={5} maxLength={4000} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What's the idea, the problem it solves, and any detail that helps the reviewer decide..." />
       </div>
       <PrioritySelect value={priority} onChange={setPriority} />
       <p className="text-xs text-muted-foreground">
-        Rachel reviews each product request inside the CRM. If approved, it's filed to the product team's Jira board.
+        Product requests are reviewed inside the CRM. If approved, the request is filed to the product team's Jira board.
       </p>
       <div className="flex justify-end pt-2">
         <Button onClick={submit} disabled={create.isPending} className="gap-2">
@@ -227,10 +272,18 @@ function ProductForm() {
 function CrmForm() {
   const { profile } = useAuth();
   const create = useCreateRequest();
+  const [submitted, setSubmitted] = useState(false);
   const [changeType, setChangeType] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<RequestPriority>("medium");
+
+  function reset() {
+    setChangeType("");
+    setTitle("");
+    setDescription("");
+    setPriority("medium");
+  }
 
   function submit() {
     if (!title.trim() || !description.trim()) {
@@ -248,14 +301,22 @@ function CrmForm() {
       },
       {
         onSuccess: () => {
-          toast.success("CRM request submitted. Jordan and Nathan have been notified.");
-          setChangeType("");
-          setTitle("");
-          setDescription("");
-          setPriority("medium");
+          toast.success("Request submitted");
+          setSubmitted(true);
         },
         onError: (e) => toast.error("Could not submit: " + (e as Error).message),
       },
+    );
+  }
+
+  if (submitted) {
+    return (
+      <SubmittedPanel
+        onAnother={() => {
+          reset();
+          setSubmitted(false);
+        }}
+      />
     );
   }
 
@@ -275,11 +336,11 @@ function CrmForm() {
       </div>
       <div className="space-y-2">
         <Label htmlFor="r-title">Summary <span className="text-destructive">*</span></Label>
-        <Input id="r-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Add a 'last contacted' column to the leads list" />
+        <Input id="r-title" maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Add a 'last contacted' column to the leads list" />
       </div>
       <div className="space-y-2">
         <Label htmlFor="r-desc">Details <span className="text-destructive">*</span></Label>
-        <Textarea id="r-desc" rows={5} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Describe the update, edit, addition, removal, or bug as clearly as you can..." />
+        <Textarea id="r-desc" rows={5} maxLength={4000} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Describe the update, edit, addition, removal, or bug as clearly as you can..." />
       </div>
       <PrioritySelect value={priority} onChange={setPriority} />
       <div className="flex justify-end pt-2">
