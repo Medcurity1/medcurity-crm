@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   DndContext,
@@ -27,6 +27,15 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -92,6 +101,36 @@ function PipelineKanban({
 }: PipelineKanbanProps) {
   const navigate = useNavigate();
   const updateMutation = useUpdateOpportunity();
+  // Drag-to-Closed-Lost prompts for a reason first. X / Escape / outside
+  // click still moves the card, just without a reason. movingRef stops the
+  // close handler from double-firing after an explicit "save reason & move".
+  const [lossPrompt, setLossPrompt] = useState<{ id: string; name: string } | null>(null);
+  const [lossReason, setLossReason] = useState("");
+  const movingRef = useRef(false);
+
+  function doMove(id: string, newStage: OpportunityStage, reason?: string) {
+    updateMutation.mutate(
+      {
+        id,
+        stage: newStage,
+        ...(newStage === "closed_lost" && reason?.trim()
+          ? { loss_reason: reason.trim() }
+          : {}),
+      },
+      {
+        onSuccess: () => toast.success(`Moved to ${stageLabel(newStage)}`),
+        onError: (err) =>
+          toast.error("Failed to update stage: " + (err as Error).message),
+      }
+    );
+  }
+
+  function resolveLoss(withReason: boolean) {
+    if (!lossPrompt || movingRef.current) return;
+    movingRef.current = true;
+    doMove(lossPrompt.id, "closed_lost", withReason ? lossReason : undefined);
+    setLossPrompt(null);
+  }
   const [activeItem, setActiveItem] = useState<ActivePipelineRow | null>(null);
 
   const sensors = useSensors(
@@ -124,19 +163,15 @@ function PipelineKanban({
     const item = pipeline?.find((p) => p.id === active.id);
     if (!item || item.stage === newStage) return;
 
-    updateMutation.mutate(
-      { id: item.id, stage: newStage },
-      {
-        onSuccess: () => {
-          toast.success(
-            `Moved to ${stageLabel(newStage)}`
-          );
-        },
-        onError: (err) => {
-          toast.error("Failed to update stage: " + (err as Error).message);
-        },
-      }
-    );
+    if (newStage === "closed_lost") {
+      // Ask why it's lost before moving. Skipping still moves the card.
+      movingRef.current = false;
+      setLossReason("");
+      setLossPrompt({ id: item.id, name: item.name });
+      return;
+    }
+
+    doMove(item.id, newStage);
   }
 
   if (isLoading) {
@@ -157,6 +192,7 @@ function PipelineKanban({
   }
 
   return (
+    <>
     <DndContext
       sensors={sensors}
       collisionDetection={closestCorners}
@@ -184,6 +220,36 @@ function PipelineKanban({
         {activeItem ? <PipelineCard item={activeItem} isDragging /> : null}
       </DragOverlay>
     </DndContext>
+
+    <Dialog open={!!lossPrompt} onOpenChange={(o) => { if (!o) resolveLoss(false); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Why is this deal lost?</DialogTitle>
+          <DialogDescription>
+            Moving{" "}
+            {lossPrompt?.name ? <strong>{lossPrompt.name}</strong> : "this deal"}{" "}
+            to Closed Lost. Add a reason if you have one — it helps win/loss
+            reporting. You can skip it and the deal still moves.
+          </DialogDescription>
+        </DialogHeader>
+        <Textarea
+          autoFocus
+          rows={3}
+          value={lossReason}
+          onChange={(e) => setLossReason(e.target.value)}
+          placeholder="e.g. Went with a competitor, budget, timing, no decision..."
+        />
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button variant="outline" onClick={() => resolveLoss(false)}>
+            Move without a reason
+          </Button>
+          <Button onClick={() => resolveLoss(true)} disabled={updateMutation.isPending}>
+            Save reason & move
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }
 
