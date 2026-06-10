@@ -27,7 +27,7 @@ export function DashboardOverview() {
     <main className="page-shell">
       <section className="hero">
         <div className="hero-copy">
-          <span className="eyebrow">PulsePoint MVP</span>
+          <span className="eyebrow">Pulse MVP</span>
           <h1>Backend-first CRM foundation for sales and renewals.</h1>
           <p>
             This starter is intentionally opinionated: reliable data model first,

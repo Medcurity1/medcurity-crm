@@ -113,9 +113,9 @@ function taskToEventBody(task: TaskRow) {
   const notes = task.body
     ? `<p>${task.body.replace(/\n/g, "<br>")}</p>`
     : "";
-  const footer = `<p style="color:#999;font-size:12px">Synced from PulsePoint · <a href="${APP_BASE}/activities/${task.id}">Open task</a></p>`;
+  const footer = `<p style="color:#999;font-size:12px">Synced from Pulse · <a href="${APP_BASE}/activities/${task.id}">Open task</a></p>`;
   return {
-    subject: `[PulsePoint] ${task.subject}`,
+    subject: `[Pulse] ${task.subject}`,
     body: {
       contentType: "HTML",
       content: `${context}${notes}${footer}`,
@@ -127,7 +127,7 @@ function taskToEventBody(task: TaskRow) {
     // Show the rep as Free, not Busy — a CRM task on the calendar
     // shouldn't block their availability (Brayden flagged this).
     showAs: "free",
-    categories: ["PulsePoint"],
+    categories: ["Pulse"],
   };
 }
 

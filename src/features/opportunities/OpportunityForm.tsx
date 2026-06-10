@@ -44,6 +44,7 @@ import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { opportunitySchema, type OpportunityFormValues } from "./schema";
 import { FTE_RANGES, employeesToFteRange } from "@/lib/formatters";
+import { celebrateClosedWon } from "@/lib/confetti";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -592,6 +593,11 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           return;
         }
         toast.success("Opportunity updated");
+        // Celebrate only a genuine transition INTO Closed Won (not a
+        // re-save of an already-won deal).
+        if (values.stage === "closed_won" && opp?.stage !== "closed_won") {
+          celebrateClosedWon();
+        }
         navigate(`/opportunities/${id}`);
       } else {
         const result = await createMutation.mutateAsync(payload as Parameters<typeof createMutation.mutateAsync>[0]);

@@ -177,7 +177,7 @@ function buildSummarySheet(
 
   ws.mergeCells(3, 1, 3, Math.max(2, lastCol));
   const gen = ws.getCell(3, 1);
-  gen.value = `Generated ${generatedAt.toLocaleString("en-US")} · PulsePoint CRM · Confidential`;
+  gen.value = `Generated ${generatedAt.toLocaleString("en-US")} · Pulse CRM · Confidential`;
   gen.font = { name: "Calibri", size: 9, italic: true, color: { argb: C_GRAY } };
 
   // Row 4 left blank as a spacer.
@@ -459,7 +459,7 @@ export async function downloadFinancialSaasMetricsWorkbook(
   const mod = await import("exceljs");
   const ExcelJS = (mod as { default?: typeof ExcelJSNS }).default ?? (mod as typeof ExcelJSNS);
   const wb = new ExcelJS.Workbook();
-  wb.creator = "PulsePoint CRM";
+  wb.creator = "Pulse CRM";
   wb.created = generatedAt;
 
   buildSummarySheet(wb.addWorksheet("Summary"), quarters, windowLabel, generatedAt);

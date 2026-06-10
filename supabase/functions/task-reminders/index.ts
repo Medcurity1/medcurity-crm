@@ -100,7 +100,7 @@ async function sendEmailReminder(
     `<p><strong>Reminder:</strong> ${escapeHtml(task.subject)}</p>`,
     task.body ? `<p>${escapeHtml(task.body).replace(/\n/g, "<br>")}</p>` : "",
     `<p style="color:#666"><em>Due: ${escapeHtml(dueStr)}</em></p>`,
-    `<p style="color:#999;font-size:12px">From PulsePoint</p>`,
+    `<p style="color:#999;font-size:12px">From Pulse</p>`,
   ].join("");
 
   const res = await fetch(

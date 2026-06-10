@@ -46,6 +46,7 @@ import {
   leadSourceLabel,
   paymentFrequencyLabel,
 } from "@/lib/formatters";
+import { celebrateClosedWon } from "@/lib/confetti";
 import { toast } from "sonner";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
 import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
@@ -772,7 +773,7 @@ export function OpportunityDetail() {
                 ? (() => {
                     const src = (opp as { automation_source?: string | null }).automation_source;
                     if (src === "sf_import") return "✓ Yes — Salesforce (imported)";
-                    if (src === "crm_renewal_v1") return "✓ Yes — PulsePoint";
+                    if (src === "crm_renewal_v1") return "✓ Yes — Pulse";
                     return "✓ Yes";
                   })()
                 : "✗ No"
@@ -1136,6 +1137,7 @@ export function OpportunityDetail() {
             {
               onSuccess: () => {
                 toast.success(`Stage changed to ${stageLabel(pendingStage)}`);
+                if (pendingStage === "closed_won") celebrateClosedWon();
                 setPendingStage(null);
               },
               onError: (err) => {

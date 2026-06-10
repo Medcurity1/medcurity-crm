@@ -53,6 +53,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { Plus, MoreVertical, Pencil, Trash2 } from "lucide-react";
 import { OPEN_STAGES, formatCurrency, stageLabel } from "@/lib/formatters";
+import { celebrateClosedWon } from "@/lib/confetti";
 import type {
   ActivePipelineRow,
   OpportunityStage,
@@ -118,7 +119,10 @@ function PipelineKanban({
           : {}),
       },
       {
-        onSuccess: () => toast.success(`Moved to ${stageLabel(newStage)}`),
+        onSuccess: () => {
+          toast.success(`Moved to ${stageLabel(newStage)}`);
+          if (newStage === "closed_won") celebrateClosedWon();
+        },
         onError: (err) =>
           toast.error("Failed to update stage: " + (err as Error).message),
       }

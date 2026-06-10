@@ -10,10 +10,10 @@ export const branding = {
   companyName: "Medcurity",
 
   /** Product name shown next to company name */
-  productName: "PulsePoint",
+  productName: "Pulse",
 
   /** Full product title (sidebar header) */
-  fullTitle: "PulsePoint",
+  fullTitle: "Pulse",
 
   /** Login page subtitle */
   loginSubtitle: "Sign in to your account",
