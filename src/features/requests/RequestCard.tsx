@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, ExternalLink, Clock, ThumbsUp, ThumbsDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import {
   useCompleteRequest,
   useApproveProductRequest,
   useDenyProductRequest,
+  useSummarizeProductRequest,
 } from "./api";
 
 const PRIORITY_BADGE: Record<RequestPriority, string> = {
@@ -65,8 +66,19 @@ function ProductReviewDialog({
 }) {
   const approve = useApproveProductRequest();
   const deny = useDenyProductRequest();
+  const summarize = useSummarizeProductRequest();
   const [note, setNote] = useState("");
+  const [summary, setSummary] = useState<string | null>(request.ai_summary);
   const busy = approve.isPending || deny.isPending;
+
+  // Generate the AI one-liner the first time the dialog opens (cached
+  // on the request after that). No-ops gracefully if no Anthropic key.
+  useEffect(() => {
+    if (open && !summary && !summarize.isPending) {
+      summarize.mutate(request.id, { onSuccess: (s) => setSummary(s) });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -81,9 +93,13 @@ function ProductReviewDialog({
               From {request.requester_name ?? request.requester?.full_name ?? "Unknown"} · {fmtDate(request.created_at)}
             </p>
           </div>
-          {request.ai_summary && (
-            <p className="rounded-md bg-muted px-3 py-2 text-sm italic">{request.ai_summary}</p>
-          )}
+          {summary ? (
+            <p className="rounded-md bg-muted px-3 py-2 text-sm italic">{summary}</p>
+          ) : summarize.isPending ? (
+            <p className="rounded-md bg-muted px-3 py-2 text-sm italic text-muted-foreground">
+              Generating summary…
+            </p>
+          ) : null}
           {request.description && (
             <p className="whitespace-pre-wrap text-sm text-muted-foreground">{request.description}</p>
           )}
@@ -128,8 +144,14 @@ function ProductReviewDialog({
               approve.mutate(
                 { id: request.id, note: note.trim() || undefined },
                 {
-                  onSuccess: () => {
-                    toast.success("Request approved.");
+                  onSuccess: (res) => {
+                    toast.success(
+                      res?.jiraKey
+                        ? `Approved — filed ${res.jiraKey} in Jira.`
+                        : res && res.jiraConfigured === false
+                          ? "Approved. (Jira isn't connected yet, so no ticket was filed.)"
+                          : "Request approved.",
+                    );
                     onOpenChange(false);
                   },
                   onError: (e) => toast.error((e as Error).message),

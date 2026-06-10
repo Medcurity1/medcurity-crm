@@ -114,6 +114,54 @@ export function useMyRequestTypes() {
   });
 }
 
+export interface RoutingRow {
+  type: RequestType;
+  user_id: string;
+  user?: { id: string; full_name: string | null } | null;
+}
+
+/** All routing rows (admin editor). */
+export function useRequestRouting() {
+  return useQuery({
+    queryKey: ["request-routing", "all"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("request_routing")
+        .select("type, user_id, user:user_profiles!user_id(id, full_name)");
+      if (error) throw error;
+      return data as unknown as RoutingRow[];
+    },
+  });
+}
+
+export function useAddRouting() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ type, userId }: { type: RequestType; userId: string }) => {
+      const { error } = await supabase
+        .from("request_routing")
+        .insert({ type, user_id: userId });
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["request-routing"] }),
+  });
+}
+
+export function useRemoveRouting() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ type, userId }: { type: RequestType; userId: string }) => {
+      const { error } = await supabase
+        .from("request_routing")
+        .delete()
+        .eq("type", type)
+        .eq("user_id", userId);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["request-routing"] }),
+  });
+}
+
 // ── Mutations ────────────────────────────────────────────────────────
 interface CreateRequestInput {
   type: RequestType;
@@ -179,15 +227,62 @@ export function useCompleteRequest() {
 }
 
 /**
- * Product request — approve. For now this records the approval in the CRM.
- * Filing the Jira ticket is wired in a later step once the Jira API keys
- * are configured (see the Requests build plan, step 5).
+ * Calls the product-request-action edge function and surfaces the
+ * function's own error message (supabase-js otherwise hides it behind a
+ * generic "non-2xx" string).
+ */
+async function invokeRequestAction(payload: {
+  action: "approve" | "summarize";
+  requestId: string;
+  note?: string | null;
+}) {
+  const { data, error } = await supabase.functions.invoke("product-request-action", {
+    body: payload,
+  });
+  if (error) {
+    let msg = error.message;
+    try {
+      const ctx = (error as { context?: Response }).context;
+      if (ctx && typeof ctx.json === "function") {
+        const j = await ctx.json();
+        if (j?.error) msg = j.error;
+      }
+    } catch {
+      /* keep generic message */
+    }
+    throw new Error(msg);
+  }
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
+/**
+ * Product request — approve. Runs server-side: files the Jira ticket
+ * (when Jira is configured) and marks the request approved. If the Jira
+ * call fails, the request stays pending so it can be retried.
  */
 export function useApproveProductRequest() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, note }: { id: string; note?: string }) =>
-      setOutcome(id, { status: "approved", decision_note: note ?? null }),
+      invokeRequestAction({ action: "approve", requestId: id, note: note ?? null }) as Promise<{
+        request: CrmRequest;
+        jiraConfigured: boolean;
+        jiraKey: string | null;
+        jiraUrl: string | null;
+      }>,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["requests"] }),
+  });
+}
+
+/** Generate (and cache) the AI one-liner for a product request. */
+export function useSummarizeProductRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const data = await invokeRequestAction({ action: "summarize", requestId: id });
+      return (data?.summary ?? null) as string | null;
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["requests"] }),
   });
 }

@@ -21,6 +21,7 @@ import { AutomationsManager } from "./AutomationsManager";
 import { SystemInfo } from "./SystemInfo";
 import { DataHealthDashboard } from "./DataHealthDashboard";
 import { RequestsInbox } from "@/features/requests/RequestsInbox";
+import { RoutingEditor } from "@/features/requests/RoutingEditor";
 import { Loader2 } from "lucide-react";
 
 /**
@@ -274,7 +275,17 @@ export function AdminSettings() {
         </TabsContent>
 
         {/* ---------- REQUESTS ---------- */}
-        <TabsContent value="requests">
+        <TabsContent value="requests" className="space-y-6">
+          <Card className="p-6">
+            <div className="space-y-1 mb-4">
+              <h2 className="text-lg font-semibold">Request routing</h2>
+              <p className="text-sm text-muted-foreground">
+                Choose who gets notified and sees each request type on their
+                Nexus dashboard. Saved per person, so it never depends on names.
+              </p>
+            </div>
+            <RoutingEditor />
+          </Card>
           <Card className="p-6">
             <div className="space-y-1 mb-6">
               <h2 className="text-lg font-semibold">Requests</h2>
