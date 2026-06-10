@@ -1,15 +1,24 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { branding } from "@/lib/branding";
 import { PulseLogo } from "@/components/PulseLogo";
-import { SeasonalBackdrop } from "@/components/seasonal/SeasonalBackdrop";
+import {
+  SeasonalBackdrop,
+  getSeasonalScene,
+  resolveSceneDate,
+} from "@/components/seasonal/SeasonalBackdrop";
 import { useAuth } from "./AuthProvider";
 
+/**
+ * Floating login — no card. The form sits directly on the seasonal
+ * backdrop and its colors adapt to the scene (light text on dark scenes,
+ * dark text on light ones) so everything stays readable year-round.
+ */
 export function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -17,6 +26,10 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
   const { session } = useAuth();
+
+  // Resolve the scene once per mount (supports ?preview_date=YYYY-MM-DD).
+  const scene = useMemo(() => getSeasonalScene(resolveSceneDate()), []);
+  const dark = scene.dark;
 
   // Scene preview (?preview_date=...) stays viewable even while signed
   // in, so seasonal backdrops can be toured without logging out.
@@ -46,63 +59,78 @@ export function LoginPage() {
     }
   }
 
+  const labelCls = dark ? "text-white/85" : "text-slate-800";
+  const inputCls = dark
+    ? "border-white/25 bg-white/10 text-white placeholder:text-white/40 focus-visible:ring-white/50"
+    : "border-slate-900/25 bg-white/60 text-slate-900 placeholder:text-slate-500 focus-visible:ring-slate-500/40";
+
   return (
     <div className="relative min-h-screen flex items-center justify-center bg-background p-4 overflow-hidden">
       {/* Seasonal backdrop — month-aware, decoration only. */}
-      <SeasonalBackdrop />
-      <Card className="relative z-10 w-full max-w-sm overflow-hidden shadow-xl">
-        {/* Chrome wordmark on its dark stage; reflection fades into the
-            banner's bottom edge. */}
-        <div
-          className="flex items-center justify-center px-6 py-3"
-          style={{ background: "linear-gradient(180deg, #14181f 0%, #1b212d 100%)" }}
-        >
-          <PulseLogo variant="login" className="h-20 w-auto" />
+      <SeasonalBackdrop scene={scene} />
+
+      <div className="relative z-10 w-full max-w-sm">
+        <div className="mb-1 flex justify-center">
+          <PulseLogo
+            variant="login"
+            tone={dark ? "silver" : "graphite"}
+            className="h-24 w-auto"
+          />
         </div>
-        <CardContent className="pt-5">
-          <p className="mb-4 text-center text-sm text-muted-foreground">
-            {branding.loginSubtitle}
-          </p>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="you@medcurity.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                autoFocus
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
-            {error && (
-              <p className="text-sm text-destructive">{error}</p>
-            )}
-            <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? "Signing in..." : "Sign In"}
-            </Button>
-            <div className="text-center">
-              <Link
-                to="/forgot-password"
-                className="text-sm text-muted-foreground hover:underline"
-              >
-                Forgot password?
-              </Link>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+        <p className={cn("mb-6 text-center text-sm", dark ? "text-white/65" : "text-slate-600")}>
+          {branding.loginSubtitle}
+        </p>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="email" className={labelCls}>
+              Email
+            </Label>
+            <Input
+              id="email"
+              type="email"
+              placeholder="you@medcurity.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              autoFocus
+              className={inputCls}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="password" className={labelCls}>
+              Password
+            </Label>
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              className={inputCls}
+            />
+          </div>
+          {error && (
+            <p className={cn("text-sm", dark ? "text-red-300" : "text-destructive")}>
+              {error}
+            </p>
+          )}
+          <Button type="submit" className="w-full shadow-lg" disabled={submitting}>
+            {submitting ? "Signing in..." : "Sign In"}
+          </Button>
+          <div className="text-center">
+            <Link
+              to="/forgot-password"
+              className={cn(
+                "text-sm hover:underline",
+                dark ? "text-white/60 hover:text-white" : "text-slate-600 hover:text-slate-900",
+              )}
+            >
+              Forgot password?
+            </Link>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

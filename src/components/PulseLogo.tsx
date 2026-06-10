@@ -18,36 +18,66 @@ import { useId } from "react";
  */
 interface PulseLogoProps {
   variant?: "full" | "mark" | "login";
+  /**
+   * silver — mirror chrome for dark surfaces (default).
+   * graphite — dark polished chrome for light backgrounds (e.g. light
+   * seasonal login scenes) so the wordmark still pops.
+   */
+  tone?: "silver" | "graphite";
   className?: string;
 }
 
 const FONT = "'Archivo Black', system-ui, sans-serif";
 
-const CHROME_STOPS = [
-  { offset: "0", color: "#fafcff" },
-  { offset: "0.35", color: "#cdd5e0" },
-  { offset: "0.5", color: "#69758a" },
-  { offset: "0.56", color: "#aab4c2" },
-  { offset: "0.8", color: "#eef2f7" },
-  { offset: "1", color: "#96a1b2" },
-];
+const TONES = {
+  silver: {
+    stroke: "#20242e",
+    stops: [
+      { offset: "0", color: "#fafcff" },
+      { offset: "0.35", color: "#cdd5e0" },
+      { offset: "0.5", color: "#69758a" },
+      { offset: "0.56", color: "#aab4c2" },
+      { offset: "0.8", color: "#eef2f7" },
+      { offset: "1", color: "#96a1b2" },
+    ],
+    // Reflection fill: mirrored chrome stops with opacity fading out. The
+    // reflected glyphs are flipped, so bounding-box offset 0 is the visual
+    // BOTTOM — opacity therefore ramps 0 -> 0.5 across the stops.
+    reflection: [
+      { offset: "0", color: "#96a1b2", opacity: 0 },
+      { offset: "0.45", color: "#eef2f7", opacity: 0.05 },
+      { offset: "0.62", color: "#aab4c2", opacity: 0.14 },
+      { offset: "0.75", color: "#69758a", opacity: 0.26 },
+      { offset: "0.88", color: "#cdd5e0", opacity: 0.38 },
+      { offset: "1", color: "#fafcff", opacity: 0.5 },
+    ],
+  },
+  graphite: {
+    stroke: "#0c0f15",
+    stops: [
+      { offset: "0", color: "#5a6678" },
+      { offset: "0.35", color: "#2c333f" },
+      { offset: "0.5", color: "#0e1218" },
+      { offset: "0.56", color: "#3a4350" },
+      { offset: "0.8", color: "#67748a" },
+      { offset: "1", color: "#272e3a" },
+    ],
+    reflection: [
+      { offset: "0", color: "#272e3a", opacity: 0 },
+      { offset: "0.45", color: "#67748a", opacity: 0.06 },
+      { offset: "0.62", color: "#3a4350", opacity: 0.16 },
+      { offset: "0.75", color: "#0e1218", opacity: 0.28 },
+      { offset: "0.88", color: "#2c333f", opacity: 0.4 },
+      { offset: "1", color: "#5a6678", opacity: 0.52 },
+    ],
+  },
+} as const;
 
-// Reflection fill: mirrored chrome stops with opacity fading out. The
-// reflected glyphs are flipped, so bounding-box offset 0 is the visual
-// BOTTOM — opacity therefore ramps 0 -> 0.5 across the stops.
-const REFLECTION_STOPS = [
-  { offset: "0", color: "#96a1b2", opacity: 0 },
-  { offset: "0.45", color: "#eef2f7", opacity: 0.05 },
-  { offset: "0.62", color: "#aab4c2", opacity: 0.14 },
-  { offset: "0.75", color: "#69758a", opacity: 0.26 },
-  { offset: "0.88", color: "#cdd5e0", opacity: 0.38 },
-  { offset: "1", color: "#fafcff", opacity: 0.5 },
-];
-
-export function PulseLogo({ variant = "full", className }: PulseLogoProps) {
+export function PulseLogo({ variant = "full", tone = "silver", className }: PulseLogoProps) {
   const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
   const gradId = `chrome-${uid}`;
   const reflId = `refl-${uid}`;
+  const t = TONES[tone];
 
   const cfg =
     variant === "login"
@@ -68,12 +98,12 @@ export function PulseLogo({ variant = "full", className }: PulseLogoProps) {
     >
       <defs>
         <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-          {CHROME_STOPS.map((s) => (
+          {t.stops.map((s) => (
             <stop key={s.offset} offset={s.offset} stopColor={s.color} />
           ))}
         </linearGradient>
         <linearGradient id={reflId} x1="0" y1="0" x2="0" y2="1">
-          {REFLECTION_STOPS.map((s) => (
+          {t.reflection.map((s) => (
             <stop
               key={s.offset}
               offset={s.offset}
@@ -91,7 +121,7 @@ export function PulseLogo({ variant = "full", className }: PulseLogoProps) {
         fontFamily={FONT}
         fontSize={cfg.size}
         fill={`url(#${gradId})`}
-        stroke="#20242e"
+        stroke={t.stroke}
         strokeWidth="0.6"
       >
         {cfg.text}

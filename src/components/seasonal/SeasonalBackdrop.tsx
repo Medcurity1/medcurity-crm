@@ -11,33 +11,32 @@ import {
 } from "./decorations";
 
 /**
- * Seasonal login backdrop (Nathan's approved 2026-06-10 timeline).
- * Every month has an ambient vibe; holiday windows layer specials on top.
- * Login page only — switches automatically by date, pure decoration, no
- * functional impact. The one-time January post-login fireworks live in
- * NewYearCelebration, not here.
+ * Seasonal login backdrop (Nathan's approved 2026-06-10 timeline, palettes
+ * boldened per his 2026-06-10 review — "hint of hint of color" months got
+ * real color, September went dark, October separated from November).
+ * Login page only — pure decoration, switches by date.
  *
- *  Jan        light wintry bg, gentle snow
- *  Feb        cozy warm tones; Feb 10-16 floating hearts
- *  Mar        first-green freshness; Mar 13-17 shamrocks
- *  Apr        pastel spring, petals all month
- *  May        full bloom, flowers in the corners
- *  Jun        warm summer light
+ *  Jan        icy morning blues, gentle snow
+ *  Feb        lavender dusk; Feb 10-16 soft pink + floating hearts
+ *  Mar        deep emerald; Mar 13-17 shamrocks
+ *  Apr        spring sky over meadow, petals all month
+ *  May        lush garden green, flowers in the corners
+ *  Jun        bold summer sky with sun glow
  *  Jul        dusk sky; Jul 1-10 ambient fireworks; stars after
  *  Aug        late-summer dusk, fireflies
- *  Sep        early autumn warmth, sparse leaves
- *  Oct        autumn, pumpkins all month + unpredictable bat
- *  Nov        harvest, leaves all month
+ *  Sep        burnt golden-hour dusk, sparse leaves
+ *  Oct        Halloween twilight, pumpkins + unpredictable bat
+ *  Nov        saturated harvest gold, leaves all month
  *  Dec 1-21   dark winter night, light snow
- *  Dec 22-26  Christmas: festive colors, tree + presents corners
- *  Dec 27-28  back to winter night snow
+ *  Dec 22-26  Christmas: deep green, tree + presents corners
+ *  Dec 27-28  winter night snow
  *  Dec 29-31  winter night + New Year fireworks lead-in
  */
 
-interface Scene {
+export interface Scene {
   /** CSS background for the full-bleed backdrop layer. */
   background: string;
-  /** True when the backdrop is dark (login card pops on its own). */
+  /** True when the backdrop is dark — the floating login flips to light text. */
   dark: boolean;
   layers: ReactNode;
 }
@@ -49,64 +48,72 @@ export function getSeasonalScene(now: Date): Scene {
   switch (m) {
     case 0: // January
       return {
-        background: "linear-gradient(180deg, #eef4fb 0%, #dce8f5 100%)",
+        background: "linear-gradient(180deg, #cfe2f4 0%, #9fc2e4 100%)",
         dark: false,
-        layers: <ParticleCanvas kind="snow" colors={["#b8cde8", "#cfdef2", "#a3bcdd"]} />,
+        layers: <ParticleCanvas kind="snow" colors={["#ffffff", "#e4eefa", "#7ba3cf"]} />,
       };
     case 1: // February
+      if (d >= 10 && d <= 16) {
+        return {
+          background: "linear-gradient(180deg, #f7d4dc 0%, #eba8bc 100%)",
+          dark: false,
+          layers: <ParticleCanvas kind="hearts" />,
+        };
+      }
       return {
-        background: "linear-gradient(180deg, #fdf4ee 0%, #f8e8e4 100%)",
-        dark: false,
-        layers:
-          d >= 10 && d <= 16 ? (
-            <ParticleCanvas kind="hearts" />
-          ) : (
-            <ParticleCanvas kind="motes" colors={["#f0c4b8", "#f5d8cc"]} count={16} />
-          ),
+        background:
+          "linear-gradient(180deg, #5d5aa8 0%, #8f7cc4 55%, #d9a8c0 100%)",
+        dark: true,
+        layers: (
+          <ParticleCanvas kind="motes" colors={["#f2d8e8", "#cfc4f0", "#ffffff"]} count={24} />
+        ),
       };
     case 2: // March
       return {
-        background: "linear-gradient(180deg, #f1f8ef 0%, #e2f0e1 100%)",
-        dark: false,
+        background: "linear-gradient(180deg, #175c39 0%, #2f8a57 60%, #57ab74 100%)",
+        dark: true,
         layers:
           d >= 13 && d <= 17 ? (
             <>
               <ShamrockCorners />
-              <ParticleCanvas kind="motes" colors={["#9fce8f", "#c2e0b4"]} count={14} />
+              <ParticleCanvas kind="motes" colors={["#bfe8b0", "#e4f5d8", "#8fd49a"]} count={20} />
             </>
           ) : (
-            <ParticleCanvas kind="motes" colors={["#b4d6a8", "#d4e8ca"]} count={14} />
+            <ParticleCanvas kind="motes" colors={["#bfe8b0", "#e4f5d8"]} count={18} />
           ),
       };
     case 3: // April
       return {
-        background: "linear-gradient(180deg, #fbf3f7 0%, #edf2fa 100%)",
+        background: "linear-gradient(180deg, #8ec6ea 0%, #b8e0d8 55%, #cfe9c0 100%)",
         dark: false,
-        layers: <ParticleCanvas kind="petals" />,
+        layers: (
+          <ParticleCanvas
+            kind="petals"
+            colors={["#f06ba0", "#f48cb2", "#e85d8a", "#fbc0d4"]}
+            count={30}
+          />
+        ),
       };
     case 4: // May
       return {
-        background: "linear-gradient(180deg, #f5faee 0%, #e9f4e2 100%)",
+        background: "linear-gradient(180deg, #a3d683 0%, #6cb35a 60%, #4f9a48 100%)",
         dark: false,
         layers: (
           <>
             <FlowerCorners />
-            <ParticleCanvas kind="motes" colors={["#f5dc9e", "#fcefc4"]} count={14} />
+            <ParticleCanvas kind="motes" colors={["#fff3b8", "#ffe27a", "#ffffff"]} count={20} />
           </>
         ),
       };
     case 5: // June
       return {
-        background: "linear-gradient(180deg, #fdf3d3 0%, #f7e3ae 100%)",
+        background:
+          "linear-gradient(180deg, #3f97e0 0%, #8fc8f2 55%, #fbe3a3 100%)",
         dark: false,
         layers: (
           <>
             <SunGlow corner="top-right" />
-            <ParticleCanvas
-              kind="motes"
-              colors={["#e8b54a", "#f2cf7e", "#dba12f"]}
-              count={32}
-            />
+            <ParticleCanvas kind="motes" colors={["#fff6d8", "#ffe9a8", "#ffffff"]} count={26} />
           </>
         ),
       };
@@ -137,17 +144,20 @@ export function getSeasonalScene(now: Date): Scene {
       };
     case 8: // September
       return {
-        background: "linear-gradient(180deg, #faf4e9 0%, #f2e6d3 100%)",
-        dark: false,
-        layers: <ParticleCanvas kind="leaves" count={10} />,
+        background:
+          "linear-gradient(180deg, #4a1f10 0%, #8a3f1e 55%, #c2702f 100%)",
+        dark: true,
+        layers: <ParticleCanvas kind="leaves" count={12} />,
       };
     case 9: // October
       return {
-        background: "linear-gradient(180deg, #f8efe0 0%, #eeddc2 100%)",
-        dark: false,
+        background:
+          "linear-gradient(180deg, #1d1230 0%, #45203c 55%, #76341f 100%)",
+        dark: true,
         layers: (
           <>
-            <ParticleCanvas kind="leaves" count={16} />
+            <ParticleCanvas kind="stars" count={16} />
+            <ParticleCanvas kind="leaves" count={14} />
             <PumpkinCorners />
             <BatFlyby />
           </>
@@ -155,7 +165,7 @@ export function getSeasonalScene(now: Date): Scene {
       };
     case 10: // November
       return {
-        background: "linear-gradient(180deg, #f8f1e4 0%, #f0e2cc 100%)",
+        background: "linear-gradient(180deg, #f0dcae 0%, #e0b577 55%, #cf9a55 100%)",
         dark: false,
         layers: <ParticleCanvas kind="leaves" />,
       };
@@ -198,7 +208,7 @@ export function getSeasonalScene(now: Date): Scene {
  * append ?preview_date=2026-12-24 to the login URL. Harmless in normal
  * use; just lets us demo any month on demand.
  */
-function resolveDate(): Date {
+export function resolveSceneDate(): Date {
   try {
     const param = new URLSearchParams(window.location.search).get("preview_date");
     if (param) {
@@ -211,20 +221,20 @@ function resolveDate(): Date {
   return new Date();
 }
 
-export function SeasonalBackdrop() {
-  const scene = getSeasonalScene(resolveDate());
+export function SeasonalBackdrop({ scene }: { scene?: Scene }) {
+  const s = scene ?? getSeasonalScene(resolveSceneDate());
   return (
     <div
       aria-hidden="true"
       style={{
         position: "absolute",
         inset: 0,
-        background: scene.background,
+        background: s.background,
         overflow: "hidden",
         pointerEvents: "none",
       }}
     >
-      {scene.layers}
+      {s.layers}
     </div>
   );
 }
