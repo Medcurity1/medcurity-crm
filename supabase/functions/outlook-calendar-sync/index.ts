@@ -17,6 +17,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { ensureValidOutlookToken } from "../_shared/graph-token.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -204,15 +205,27 @@ async function syncTask(supabase: SupabaseClient, task: TaskRow): Promise<void> 
   // Pull the owner's Outlook connection (may not exist yet).
   const { data: conn } = await supabase
     .from("email_sync_connections")
-    .select("user_id, access_token, email_address")
+    .select(
+      "id, user_id, access_token, refresh_token, token_expires_at, email_address"
+    )
     .eq("user_id", task.owner_user_id)
     .eq("provider", "outlook")
     .eq("is_active", true)
     .maybeSingle();
 
-  if (!conn || !conn.access_token) {
+  if (!conn || (!conn.access_token && !conn.refresh_token)) {
     // Nothing to do until the owner connects Outlook. Leave outlook_event_id
     // alone — if they connect later we'll reconcile then.
+    return;
+  }
+
+  // Refresh the access token if it's stale, otherwise cron-time Graph
+  // calls 401 (the token expires ~1h after connect). Inherits all
+  // consented scopes so it stays valid for the other sync functions too.
+  try {
+    conn.access_token = await ensureValidOutlookToken(supabase, conn);
+  } catch (_e) {
+    // Can't get a valid token (e.g. refresh revoked) — skip this run.
     return;
   }
 

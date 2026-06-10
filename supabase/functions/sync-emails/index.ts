@@ -142,7 +142,10 @@ async function refreshOutlookToken(
         client_secret: clientSecret,
         refresh_token: refreshToken,
         grant_type: "refresh_token",
-        scope: "https://graph.microsoft.com/Mail.Read offline_access",
+        // No scope param: inherit ALL originally-consented scopes. This row
+        // is shared with task-reminders (Mail.Send) and calendar-sync
+        // (Calendars.ReadWrite); a Mail.Read-only token written back here
+        // would 403 those. Reading mail still works (Mail.Read is included).
       }),
     }
   );

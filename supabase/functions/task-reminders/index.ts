@@ -20,6 +20,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { ensureValidOutlookToken } from "../_shared/graph-token.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -87,12 +88,10 @@ function nextReminderAt(
 // ---------------------------------------------------------------------------
 
 async function sendEmailReminder(
-  conn: EmailSyncConnection,
+  accessToken: string,
   toAddress: string,
   task: ActivityRow
 ): Promise<{ ok: boolean; error?: string }> {
-  if (!conn.access_token) return { ok: false, error: "no access token" };
-
   const dueStr = task.due_at
     ? new Date(task.due_at).toLocaleString()
     : "no due date";
@@ -109,7 +108,7 @@ async function sendEmailReminder(
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${conn.access_token}`,
+        Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -189,15 +188,23 @@ async function processReminder(
       .eq("is_active", true)
       .maybeSingle();
 
-    if (conn?.access_token && conn.email_address) {
-      const result = await sendEmailReminder(
-        conn as EmailSyncConnection,
-        conn.email_address,
-        task
-      );
-      if (!result.ok) {
+    if (conn?.email_address && (conn.access_token || conn.refresh_token)) {
+      try {
+        // Refresh if the stored token is stale — without this, cron-time
+        // sends 401 because the access token expired ~1h after connect.
+        const token = await ensureValidOutlookToken(
+          supabase,
+          conn as EmailSyncConnection,
+        );
+        const result = await sendEmailReminder(token, conn.email_address, task);
+        if (!result.ok) {
+          console.warn(
+            `task-reminders: email failed for task ${task.id}: ${result.error}`
+          );
+        }
+      } catch (e) {
         console.warn(
-          `task-reminders: email failed for task ${task.id}: ${result.error}`
+          `task-reminders: token refresh/email failed for task ${task.id}: ${(e as Error).message}`
         );
       }
     }

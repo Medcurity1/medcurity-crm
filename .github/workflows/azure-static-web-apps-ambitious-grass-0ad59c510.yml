@@ -48,12 +48,18 @@ jobs:
           SUPABASE_PROJECT_REF: ${{ secrets.STAGING_SUPABASE_PROJECT_REF }}
 
       - name: Deploy Edge Functions (Staging)
-        # Staging previously deployed no edge functions; added so the
-        # Requests Jira/AI action ships to staging for testing. JWT
-        # verification stays ON (browser calls it with the user's token).
+        # Staging previously deployed no edge functions. Now mirrors the
+        # prod list so function changes are validated + testable on staging
+        # (and staging/prod function code stays in sync). outlook-oauth is
+        # called by Microsoft, so it needs --no-verify-jwt; the rest keep
+        # JWT verification.
         run: |
           set -e
           npx supabase link --project-ref $SUPABASE_PROJECT_REF
+          npx supabase functions deploy outlook-oauth --no-verify-jwt
+          npx supabase functions deploy sync-emails
+          npx supabase functions deploy outlook-calendar-sync
+          npx supabase functions deploy task-reminders
           npx supabase functions deploy product-request-action
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
