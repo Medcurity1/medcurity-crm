@@ -274,129 +274,47 @@ export function useConvertLead() {
         throw new Error("Convert lead got both existingAccountId and accountName — pick one.");
       }
 
-      // 0. Pull the source lead's owner + qualification so we can carry
-      // them onto the records we create (previously dropped on the floor,
-      // so converted accounts had no owner and contacts lost MQL/SQL).
-      const { data: sourceLead } = await supabase
-        .from("leads")
-        .select("owner_user_id, mql_date, qualification, qualification_date")
-        .eq("id", input.leadId)
-        .single();
-      const leadOwnerId = sourceLead?.owner_user_id ?? null;
-      const convertDate = new Date().toISOString().slice(0, 10);
-      const mqlDate = sourceLead?.mql_date ?? null;
-      // SQL date: if the lead already reached SQL/SAL, carry that date;
-      // otherwise the conversion itself is the SQL event (per the data
-      // model: "conversion to contact = SQL event").
-      const sqlDate =
-        sourceLead?.qualification === "sql" || sourceLead?.qualification === "sal"
-          ? (sourceLead?.qualification_date
-              ? String(sourceLead.qualification_date).slice(0, 10)
-              : convertDate)
-          : convertDate;
+      // One atomic, role-safe call. The convert_lead RPC (SECURITY DEFINER)
+      // creates the account/contact/optional-opp and marks the lead
+      // converted+archived in a single transaction — so non-admins can
+      // convert (the archive step is otherwise admin-only) and a failure
+      // can't leave half-made records behind. Owner + MQL/SQL carry-over
+      // happens inside the function.
+      const { data, error } = await supabase.rpc("convert_lead", {
+        p_lead_id: input.leadId,
+        p_first_name: input.firstName,
+        p_last_name: input.lastName,
+        p_existing_account_id: input.existingAccountId ?? null,
+        p_account_name: input.accountName ?? null,
+        p_industry: input.industry ?? null,
+        p_website: input.website ?? null,
+        p_street: input.street ?? null,
+        p_city: input.city ?? null,
+        p_state: input.state ?? null,
+        p_zip: input.zip ?? null,
+        p_country: input.country ?? null,
+        p_email: input.email ?? null,
+        p_phone: input.phone ?? null,
+        p_title: input.title ?? null,
+        p_lead_source: input.leadSource ?? null,
+        p_create_opportunity: input.createOpportunity ?? false,
+        p_opportunity_name: input.opportunityName ?? null,
+        p_opportunity_amount: input.opportunityAmount ?? 0,
+        p_opportunity_stage: input.opportunityStage ?? "details_analysis",
+      });
+      if (error) throw error;
 
-      // 1. Account: pick existing OR create new. The existing-account
-      // path leaves the account untouched (we don't overwrite address /
-      // industry / owner from a lead — the account is the system of record).
-      let account: { id: string; name: string } | null = null;
-      if (input.existingAccountId) {
-        const { data, error } = await supabase
-          .from("accounts")
-          .select("id, name")
-          .eq("id", input.existingAccountId)
-          .single();
-        if (error) throw error;
-        account = data as { id: string; name: string };
-      } else {
-        const { data, error: accountError } = await supabase
-          .from("accounts")
-          .insert({
-            name: input.accountName!,
-            owner_user_id: leadOwnerId,
-            industry: input.industry,
-            website: input.website,
-            billing_street: input.street,
-            billing_city: input.city,
-            billing_state: input.state,
-            billing_zip: input.zip,
-            billing_country: input.country,
-          })
-          .select()
-          .single();
-        if (accountError) throw accountError;
-        account = data as { id: string; name: string };
-      }
-
-      // 2. Create contact
-      const { data: contact, error: contactError } = await supabase
-        .from("contacts")
-        .insert({
-          account_id: account.id,
-          first_name: input.firstName,
-          last_name: input.lastName,
-          email: input.email,
-          phone: input.phone,
-          title: input.title,
-          is_primary: true,
-          lead_source: input.leadSource ?? null,
-          original_lead_id: input.leadId,
-          owner_user_id: leadOwnerId,
-          mql_date: mqlDate,
-          sql_date: sqlDate,
-        })
-        .select()
-        .single();
-      if (contactError) throw contactError;
-
-      // 3. Optionally create opportunity
-      let opportunity = null;
-      if (input.createOpportunity && input.opportunityName) {
-        const { data: opp, error: oppError } = await supabase
-          .from("opportunities")
-          .insert({
-            account_id: account.id,
-            primary_contact_id: contact.id,
-            name: input.opportunityName,
-            amount: input.opportunityAmount ?? 0,
-            stage: input.opportunityStage ?? "details_analysis",
-            team: "sales",
-            kind: "new_business",
-            owner_user_id: leadOwnerId,
-          })
-          .select()
-          .single();
-        if (oppError) throw oppError;
-        opportunity = opp;
-      }
-
-      // 4. Update lead as converted AND soft-archive it.
-      //
-      // The lead row is preserved (we don't delete) so its provenance
-      // — original source, created_at, owner, lead score history — stays
-      // queryable for audit. But it's also flipped to archived_at = now
-      // so every "user-facing" lookup in the app (GlobalSearch, leads
-      // list, sync-emails lead matcher) hides it. Without the archive
-      // flag, a rep typing the person's name in global search still
-      // sees the lead alongside the contact and assumes the conversion
-      // didn't work (real complaint 2026-05-26). The contact has
-      // original_lead_id pointing back, so the link is preserved.
-      const nowIso = new Date().toISOString();
-      const { data: authData } = await supabase.auth.getUser();
-      const { error: updateError } = await supabase
-        .from("leads")
-        .update({
-          status: "converted",
-          converted_at: nowIso,
-          converted_account_id: account.id,
-          converted_contact_id: contact.id,
-          converted_opportunity_id: opportunity?.id ?? null,
-          archived_at: nowIso,
-          archived_by: authData.user?.id ?? null,
-        })
-        .eq("id", input.leadId);
-      if (updateError) throw updateError;
-
-      return { account, contact, opportunity };
+      const r = data as {
+        account_id: string;
+        account_name: string;
+        contact_id: string;
+        opportunity_id: string | null;
+      };
+      return {
+        account: { id: r.account_id, name: r.account_name },
+        contact: { id: r.contact_id },
+        opportunity: r.opportunity_id ? { id: r.opportunity_id } : null,
+      };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["leads"] });
