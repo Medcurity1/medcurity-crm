@@ -117,6 +117,7 @@ export interface WindowTotals {
   prior_customer_count: number | null;
   prior_avg_rev_per_customer: number | null;
   prior_churn_pct_dollars: number | null;
+  prior_churn_pct_customers: number | null;
 }
 
 /**
@@ -159,6 +160,7 @@ export async function fetchWindowTotals(
     prior_customer_count: nOrNull(row.prior_customer_count),
     prior_avg_rev_per_customer: nOrNull(row.prior_avg_rev_per_customer),
     prior_churn_pct_dollars: nOrNull(row.prior_churn_pct_dollars),
+    prior_churn_pct_customers: nOrNull(row.prior_churn_pct_customers),
   };
 }
 

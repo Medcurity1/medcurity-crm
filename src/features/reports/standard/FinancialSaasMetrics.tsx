@@ -330,8 +330,9 @@ function computeHeadline(
         : null,
       avgRevPerCust: totals.avg_rev_per_customer,
       avgRevDeltaPct: pct(totals.avg_rev_per_customer, totals.prior_avg_rev_per_customer),
-      churn: totals.churn_pct_dollars,
-      churnPrev: totals.prior_churn_pct_dollars,
+      // Headline churn is CUSTOMER (client-count) churn.
+      churn: totals.churn_pct_customers,
+      churnPrev: totals.prior_churn_pct_customers,
     };
   }
 
@@ -351,8 +352,9 @@ function computeHeadline(
     customersDelta: yoy ? last.ttm_customer_count - yoy.ttm_customer_count : null,
     avgRevPerCust: last.ttm_avg_rev_per_customer,
     avgRevDeltaPct: yoy ? pct(last.ttm_avg_rev_per_customer, yoy.ttm_avg_rev_per_customer) : null,
-    churn: last.ttm_churn_pct_dollars,
-    churnPrev: yoy ? yoy.ttm_churn_pct_dollars : null,
+    // Headline churn is CUSTOMER (client-count) churn.
+    churn: last.ttm_churn_pct_customers,
+    churnPrev: yoy ? yoy.ttm_churn_pct_customers : null,
   };
 }
 
@@ -406,7 +408,7 @@ function KpiStrip({ headline }: { headline: Headline }) {
         deltaUp={avgUp}
       />
       <Kpi
-        label={headline.mode === "period" ? "Churn % ($, Period)" : "Churn (TTM $)"}
+        label={headline.mode === "period" ? "Client Churn (Period)" : "Client Churn (TTM)"}
         value={`${(headline.churn * 100).toFixed(2)}%`}
         deltaLabel={churnLabel}
         deltaUp={churnImproved}
@@ -447,7 +449,8 @@ function ComboChartCard({ quarters }: { quarters: QuarterMetrics[] }) {
   const data = quarters.map((q) => ({
     label: q.quarter_label,
     ttm_revenue: Math.round(q.ttm_revenue),
-    churn_pct: Number((q.churn_pct_dollars * 100).toFixed(2)),
+    // Headline churn is CUSTOMER (client-count) churn.
+    churn_pct: Number((q.churn_pct_customers * 100).toFixed(2)),
   }));
 
   // Churn is a share of the renewal cohort, so it is always 0-100%.
@@ -506,7 +509,7 @@ function ComboChartCard({ quarters }: { quarters: QuarterMetrics[] }) {
               />
               <Tooltip
                 formatter={(value, name) => {
-                  if (name === "Churn % ($)") return [`${Number(value).toFixed(2)}%`, name];
+                  if (name === "Client churn %") return [`${Number(value).toFixed(2)}%`, name];
                   return [formatCurrency(Number(value)), name];
                 }}
               />
@@ -514,7 +517,7 @@ function ComboChartCard({ quarters }: { quarters: QuarterMetrics[] }) {
               <Bar
                 yAxisId="right"
                 dataKey="churn_pct"
-                name="Churn % ($)"
+                name="Client churn %"
                 fill="#e24b4a"
                 fillOpacity={0.75}
                 barSize={10}

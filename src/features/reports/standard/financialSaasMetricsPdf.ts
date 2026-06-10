@@ -130,7 +130,7 @@ function drawKpiCards(doc: import("jspdf").jsPDF, h: Headline) {
       good: (h.avgRevDeltaPct ?? 0) >= 0,
     },
     {
-      label: h.mode === "period" ? "CHURN % ($, PERIOD)" : "CHURN (TTM $)",
+      label: h.mode === "period" ? "CLIENT CHURN (PERIOD)" : "CLIENT CHURN (TTM)",
       value: `${(h.churn * 100).toFixed(2)}%`,
       delta: h.churnPrev === null ? "—" : `from ${(h.churnPrev * 100).toFixed(1)}%`,
       good: h.churnPrev !== null && h.churn < h.churnPrev,
@@ -207,7 +207,7 @@ function drawChart(doc: import("jspdf").jsPDF, quarters: QuarterMetrics[]) {
   doc.setFontSize(7);
   // Legend (right-aligned, drawn back to front)
   const legend: { label: string; color: [number, number, number]; kind: "line" | "box" }[] = [
-    { label: "Churn % ($) — right axis", color: RED_SOFT, kind: "box" },
+    { label: "Client churn % — right axis", color: RED_SOFT, kind: "box" },
     { label: "TTM Revenue — left axis", color: BLUE, kind: "line" },
   ];
   for (const item of legend) {
@@ -261,7 +261,7 @@ function drawChart(doc: import("jspdf").jsPDF, quarters: QuarterMetrics[]) {
   // stays the visual lead of the chart.
   const barW = Math.min(slot * 0.42, 4);
   for (let i = 0; i < n; i++) {
-    const churnPct = quarters[i].churn_pct_dollars * 100;
+    const churnPct = quarters[i].churn_pct_customers * 100;
     const barH = (plotH * churnPct) / pctMax;
     const x = xCenter(i) - barW / 2;
     doc.setFillColor(...RED_SOFT);
@@ -330,7 +330,7 @@ function drawFooter(doc: import("jspdf").jsPDF) {
     MARGIN, y,
   );
   doc.text(
-    "Churn % ($) = revenue lost ÷ (active revenue + lost) for the period — losses as a share of the whole client book. Exact values are in the Excel export.",
+    "Client churn = clients lost ÷ (clients we have + lost) for the period — lost clients as a share of the whole client book. Exact values are in the Excel export.",
     MARGIN, y + 3.6,
   );
   doc.setFont("helvetica", "bold");
