@@ -55,7 +55,6 @@ const ReportsDiagnostic = lazy(() => import("@/features/reports/standard/Reports
 // WinLossAnalysis is now only reached via /reports?tab=analytics and
 // lazy-loaded inside ReportsHub.
 const SequencesPage = lazy(() => import("@/features/sequences/SequencesPage").then(m => ({ default: m.SequencesPage })));
-const LeadListsPage = lazy(() => import("@/features/lead-lists/LeadListsPage").then(m => ({ default: m.LeadListsPage })));
 const PartnersPage = lazy(() => import("@/features/partners/PartnersPage").then(m => ({ default: m.PartnersPage })));
 const ArchiveManager = lazy(() => import("@/features/archive/ArchiveManager").then(m => ({ default: m.ArchiveManager })));
 const AdminSettings = lazy(() => import("@/features/admin/AdminSettings").then(m => ({ default: m.AdminSettings })));
@@ -102,7 +101,6 @@ export default function App() {
                   <Route path="leads/new" element={<LeadForm />} />
                   <Route path="leads/:id" element={<LeadDetail />} />
                   <Route path="leads/:id/edit" element={<LeadForm />} />
-                  <Route path="lead-lists" element={<LeadListsPage />} />
                   <Route path="sequences" element={<SequencesPage />} />
                   <Route path="partners" element={<PartnersPage />} />
                   <Route path="contacts" element={<ContactsList />} />

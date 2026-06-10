@@ -100,7 +100,10 @@ function PipelineKanban({
     })
   );
 
-  const displayStages = stages ?? OPEN_STAGES;
+  // Hide the unused Lead + Qualified columns from the board (Brayden:
+  // "we'll never use those"). Custom saved views still show whatever
+  // stages they configured.
+  const displayStages = stages ?? OPEN_STAGES.filter((s) => s !== "lead" && s !== "qualified");
 
   const columns = displayStages.map((stage) => ({
     stage,

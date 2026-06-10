@@ -123,6 +123,9 @@ function taskToEventBody(task: TaskRow) {
     end: { dateTime: end.toISOString(), timeZone: "UTC" },
     reminderMinutesBeforeStart: 15,
     isReminderOn: true,
+    // Show the rep as Free, not Busy — a CRM task on the calendar
+    // shouldn't block their availability (Brayden flagged this).
+    showAs: "free",
     categories: ["PulsePoint"],
   };
 }

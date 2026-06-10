@@ -9,16 +9,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 const ReportBuilder = lazy(() =>
   import("./ReportBuilder").then((m) => ({ default: m.ReportBuilder }))
 );
-const ForecastPage = lazy(() =>
-  import("@/features/forecasting/ForecastPage").then((m) => ({
-    default: m.ForecastPage,
-  }))
-);
-const WinLossAnalysis = lazy(() =>
-  import("@/features/analytics/WinLossAnalysis").then((m) => ({
-    default: m.WinLossAnalysis,
-  }))
-);
 const DashboardsTab = lazy(() =>
   import("./DashboardsTab").then((m) => ({ default: m.DashboardsTab }))
 );
@@ -34,8 +24,6 @@ const VALID_TABS = [
   "team-dashboard",
   "reports",
   "dashboards",
-  "forecasting",
-  "analytics",
 ] as const;
 type TabValue = (typeof VALID_TABS)[number];
 
@@ -92,8 +80,6 @@ export function ReportsHub() {
           <TabsTrigger value="team-dashboard">Team Dashboard</TabsTrigger>
           <TabsTrigger value="reports">Custom Builder</TabsTrigger>
           <TabsTrigger value="dashboards">Dashboards</TabsTrigger>
-          <TabsTrigger value="forecasting">Forecasting</TabsTrigger>
-          <TabsTrigger value="analytics">Win/Loss</TabsTrigger>
         </TabsList>
 
         <TabsContent value="standard" className="mt-4">
@@ -117,18 +103,6 @@ export function ReportsHub() {
         <TabsContent value="dashboards" className="mt-4">
           <LazyPanel>
             <DashboardsTab />
-          </LazyPanel>
-        </TabsContent>
-
-        <TabsContent value="forecasting" className="mt-4">
-          <LazyPanel>
-            <ForecastPage />
-          </LazyPanel>
-        </TabsContent>
-
-        <TabsContent value="analytics" className="mt-4">
-          <LazyPanel>
-            <WinLossAnalysis />
           </LazyPanel>
         </TabsContent>
       </Tabs>
