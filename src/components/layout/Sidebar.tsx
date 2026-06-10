@@ -60,9 +60,11 @@ type NavItem = {
   badge?: { label: string; className: string };
 };
 
-// Badge color presets. Coming Soon = vibrant orange; Admin = cool sky blue.
+// Badge color presets. Coming Soon = vibrant orange; Admin = cool sky
+// blue; New = red (draws the eye to a freshly launched tab).
 const COMING_SOON_BADGE = "bg-orange-500 text-white";
 const ADMIN_BADGE = "bg-sky-500 text-white";
+const NEW_BADGE = "bg-red-500 text-white";
 
 const navItems: NavItem[] = [
   { to: "/", icon: Home, label: "Home" },
@@ -80,7 +82,7 @@ const navItems: NavItem[] = [
   { to: "/renewals", icon: RefreshCw, label: "Renewals" },
   { to: "/reports", icon: BarChart3, label: "Reports" },
   // Forecasting + Analytics moved into /reports as tabs (2026-04-17).
-  { to: "/requests", icon: MessageSquarePlus, label: "Requests" },
+  { to: "/requests", icon: MessageSquarePlus, label: "Requests", badge: { label: "New", className: NEW_BADGE } },
   // Nexus: future per-user command center. Lives at the bottom for now
   // with a Coming Soon badge; will eventually move up to replace Home.
   { to: "/nexus", icon: Sparkles, label: "Nexus", badge: { label: "Coming Soon", className: COMING_SOON_BADGE } },
