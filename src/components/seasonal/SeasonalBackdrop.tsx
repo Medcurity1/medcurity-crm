@@ -95,9 +95,11 @@ export function getSeasonalScene(now: Date): Scene {
         ),
       };
     case 4: // May
+      // Deepened + flipped to light text (Nathan: mid-tone green made
+      // dark text hard to read).
       return {
-        background: "linear-gradient(180deg, #a3d683 0%, #6cb35a 60%, #4f9a48 100%)",
-        dark: false,
+        background: "linear-gradient(180deg, #6fb554 0%, #459344 60%, #2e7a37 100%)",
+        dark: true,
         layers: (
           <>
             <FlowerCorners />
@@ -164,9 +166,10 @@ export function getSeasonalScene(now: Date): Scene {
         ),
       };
     case 10: // November
+      // Deepened to bronze + light text (same readability fix as May).
       return {
-        background: "linear-gradient(180deg, #f0dcae 0%, #e0b577 55%, #cf9a55 100%)",
-        dark: false,
+        background: "linear-gradient(180deg, #cf9d54 0%, #b07433 55%, #8e5a24 100%)",
+        dark: true,
         layers: <ParticleCanvas kind="leaves" />,
       };
     default: { // December
