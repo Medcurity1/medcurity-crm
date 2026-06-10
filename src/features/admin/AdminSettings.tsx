@@ -20,6 +20,7 @@ import { ClientErrorsViewer } from "./ClientErrorsViewer";
 import { AutomationsManager } from "./AutomationsManager";
 import { SystemInfo } from "./SystemInfo";
 import { DataHealthDashboard } from "./DataHealthDashboard";
+import { RequestsInbox } from "@/features/requests/RequestsInbox";
 import { Loader2 } from "lucide-react";
 
 /**
@@ -38,6 +39,7 @@ const TOP_TABS = [
   "integrations",
   "automations",
   "data-import",
+  "requests",
   "audit-log",
   "data-health",
   "system",
@@ -162,6 +164,7 @@ export function AdminSettings() {
           <TabsTrigger value="integrations">Integrations</TabsTrigger>
           <TabsTrigger value="automations">Automations</TabsTrigger>
           <TabsTrigger value="data-import">Data Import</TabsTrigger>
+          <TabsTrigger value="requests">Requests</TabsTrigger>
           <TabsTrigger value="audit-log">Audit Log</TabsTrigger>
           <TabsTrigger value="data-health">Data Health</TabsTrigger>
           <TabsTrigger value="system">System</TabsTrigger>
@@ -268,6 +271,20 @@ export function AdminSettings() {
           <DataExport />
           <SalesforceImport />
           <PartnerRelationshipsImport />
+        </TabsContent>
+
+        {/* ---------- REQUESTS ---------- */}
+        <TabsContent value="requests">
+          <Card className="p-6">
+            <div className="space-y-1 mb-6">
+              <h2 className="text-lg font-semibold">Requests</h2>
+              <p className="text-sm text-muted-foreground">
+                Every collateral, product, and CRM request submitted across the
+                team. Filter by type, status, and time window.
+              </p>
+            </div>
+            <RequestsInbox />
+          </Card>
         </TabsContent>
 
         {/* ---------- AUDIT / HEALTH / SYSTEM ---------- */}

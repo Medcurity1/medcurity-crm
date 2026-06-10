@@ -58,7 +58,6 @@ const EXPORT_TARGETS: ExportTarget[] = [
   { table: "lead_lists", label: "Lead Lists", filename: "lead_lists" },
   { table: "lead_list_members", label: "Lead List Members", filename: "lead_list_members" },
   { table: "sequences", label: "Sequences", filename: "sequences" },
-  { table: "email_templates", label: "Email Templates", filename: "email_templates" },
   { table: "audit_log", label: "Audit Log", filename: "audit_log" },
 ];
 

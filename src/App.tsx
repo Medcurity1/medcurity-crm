@@ -13,6 +13,8 @@ import { AppLayout } from "@/components/layout/AppLayout";
 
 // Lazy-loaded route components for code splitting
 const HomePage = lazy(() => import("@/features/dashboard/HomePage").then(m => ({ default: m.HomePage })));
+const NexusPage = lazy(() => import("@/features/nexus/NexusPage").then(m => ({ default: m.NexusPage })));
+const RequestsPage = lazy(() => import("@/features/requests/RequestsPage").then(m => ({ default: m.RequestsPage })));
 const NotFound = lazy(() => import("@/features/NotFound").then(m => ({ default: m.NotFound })));
 const AccountsList = lazy(() => import("@/features/accounts/AccountsList").then(m => ({ default: m.AccountsList })));
 const AccountDetail = lazy(() => import("@/features/accounts/AccountDetail").then(m => ({ default: m.AccountDetail })));
@@ -53,7 +55,6 @@ const ReportsDiagnostic = lazy(() => import("@/features/reports/standard/Reports
 // WinLossAnalysis is now only reached via /reports?tab=analytics and
 // lazy-loaded inside ReportsHub.
 const SequencesPage = lazy(() => import("@/features/sequences/SequencesPage").then(m => ({ default: m.SequencesPage })));
-const EmailTemplatesPage = lazy(() => import("@/features/email-templates/EmailTemplatesPage").then(m => ({ default: m.EmailTemplatesPage })));
 const LeadListsPage = lazy(() => import("@/features/lead-lists/LeadListsPage").then(m => ({ default: m.LeadListsPage })));
 const PartnersPage = lazy(() => import("@/features/partners/PartnersPage").then(m => ({ default: m.PartnersPage })));
 const ArchiveManager = lazy(() => import("@/features/archive/ArchiveManager").then(m => ({ default: m.ArchiveManager })));
@@ -91,6 +92,8 @@ export default function App() {
                 />
                 <Route element={<AppLayout />}>
                   <Route index element={<HomePage />} />
+                  <Route path="nexus" element={<NexusPage />} />
+                  <Route path="requests" element={<RequestsPage />} />
                   <Route path="accounts" element={<AccountsList />} />
                   <Route path="accounts/new" element={<AccountForm />} />
                   <Route path="accounts/:id" element={<AccountDetail />} />
@@ -101,7 +104,6 @@ export default function App() {
                   <Route path="leads/:id/edit" element={<LeadForm />} />
                   <Route path="lead-lists" element={<LeadListsPage />} />
                   <Route path="sequences" element={<SequencesPage />} />
-                  <Route path="email-templates" element={<EmailTemplatesPage />} />
                   <Route path="partners" element={<PartnersPage />} />
                   <Route path="contacts" element={<ContactsList />} />
                   <Route path="contacts/new" element={<ContactForm />} />

@@ -853,17 +853,37 @@ export interface Notification {
   created_at: string;
 }
 
-export interface EmailTemplate {
+// Requests (collateral / product / crm) — ported from Nexus
+export type RequestType = "collateral" | "product" | "crm";
+export type RequestStatus =
+  | "pending"
+  | "completed"
+  | "approved"
+  | "denied"
+  | "cancelled";
+export type RequestPriority = "low" | "medium" | "high";
+
+// Named CrmRequest (not Request) to avoid clashing with the DOM global.
+export interface CrmRequest {
   id: string;
-  name: string;
-  subject: string;
-  body: string;
-  category: string | null;
-  is_shared: boolean;
-  owner_user_id: string;
-  usage_count: number;
+  type: RequestType;
+  status: RequestStatus;
+  priority: RequestPriority;
+  title: string;
+  description: string | null;
+  details: Record<string, unknown>;
+  requester_user_id: string | null;
+  requester_name: string | null;
+  jira_issue_key: string | null;
+  jira_issue_url: string | null;
+  ai_summary: string | null;
+  completed_at: string | null;
+  completed_by: string | null;
+  decision_note: string | null;
   created_at: string;
   updated_at: string;
+  // joined
+  requester?: { id: string; full_name: string | null } | null;
 }
 
 // Dashboard widgets

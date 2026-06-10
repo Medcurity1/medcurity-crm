@@ -16,6 +16,7 @@ import { useNotificationToasts } from "@/hooks/useNotificationToasts";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { IdleWarningDialog } from "@/components/IdleWarningDialog";
+import { AnnouncementBanner } from "@/components/AnnouncementBanner";
 
 const pathMap: Record<string, string> = {
   "": "Home",
@@ -174,6 +175,10 @@ export function AppLayout() {
             <UserMenu />
           </div>
         </div>
+        {/* Product announcement nudge (e.g. new-feature launch). Lives in
+            the persistent shell so it stays until dismissed, even across
+            navigation. No-op when ACTIVE_ANNOUNCEMENT is null. */}
+        <AnnouncementBanner />
         {/* Widened content area: 2xl caps at 1536px (was 7xl=1280px) so
             data tables (opportunities list, reports, etc.) have more
             horizontal room without having to scroll. Brayden 2026-04-17. */}

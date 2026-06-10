@@ -42,7 +42,6 @@ const ENTITY_OPTIONS = [
   { value: "price_books", label: "Price Books" },
   { value: "price_book_entries", label: "Price Book Entries" },
   { value: "automation_rules", label: "Automation Rules" },
-  { value: "email_templates", label: "Email Templates" },
   { value: "user_profiles", label: "Users" },
 ] as const;
 

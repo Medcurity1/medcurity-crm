@@ -19,10 +19,10 @@ import {
   Search,
   PlayCircle,
   ListChecks,
-  Mail,
   Calendar as CalendarIcon,
   Clock,
-  Megaphone,
+  Sparkles,
+  MessageSquarePlus,
   ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -49,11 +49,20 @@ type NavItem = {
   label: string;
   /**
    * If set, the link opens in a new tab via a plain <a>. Used for tools
-   * that live outside the CRM (e.g. Nexus marketing outreach). Activity
-   * still flows back into the CRM via the nexus-activity webhook.
+   * that live outside the CRM. Activity still flows back into the CRM via
+   * the nexus-activity webhook.
    */
   external?: boolean;
+  /**
+   * Optional pill shown next to the label (e.g. "Coming Soon", "Admin").
+   * `className` carries the pill's color so each badge can look distinct.
+   */
+  badge?: { label: string; className: string };
 };
+
+// Badge color presets. Coming Soon = vibrant orange; Admin = cool sky blue.
+const COMING_SOON_BADGE = "bg-orange-500 text-white";
+const ADMIN_BADGE = "bg-sky-500 text-white";
 
 const navItems: NavItem[] = [
   { to: "/", icon: Home, label: "Home" },
@@ -65,27 +74,21 @@ const navItems: NavItem[] = [
   { to: "/leads", icon: UserPlus, label: "Leads" },
   { to: "/lead-lists", icon: ListChecks, label: "Lead Lists" },
   { to: "/sequences", icon: PlayCircle, label: "Sequences" },
-  { to: "/email-templates", icon: Mail, label: "Email Templates" },
   { to: "/calendar", icon: CalendarIcon, label: "Calendar" },
   { to: "/activities", icon: Clock, label: "Activities" },
   { to: "/products", icon: Package, label: "Products" },
   { to: "/renewals", icon: RefreshCw, label: "Renewals" },
   { to: "/reports", icon: BarChart3, label: "Reports" },
   // Forecasting + Analytics moved into /reports as tabs (2026-04-17).
+  { to: "/requests", icon: MessageSquarePlus, label: "Requests" },
+  // Nexus: future per-user command center. Lives at the bottom for now
+  // with a Coming Soon badge; will eventually move up to replace Home.
+  { to: "/nexus", icon: Sparkles, label: "Nexus", badge: { label: "Coming Soon", className: COMING_SOON_BADGE } },
 ];
 
-// Nexus is the in-house outreach tool — externally hosted but wired back
-// into the CRM via the nexus-activity webhook (logs every send/open/reply
-// as an activity on the matching contact or lead). Configure the URL via
-// VITE_NEXUS_URL; if unset the link doesn't render.
-const NEXUS_URL = import.meta.env.VITE_NEXUS_URL as string | undefined;
-const externalNavItems: NavItem[] = NEXUS_URL
-  ? [{ to: NEXUS_URL, icon: Megaphone, label: "Nexus", external: true }]
-  : [];
-
 const adminItems: NavItem[] = [
-  { to: "/archive", icon: Archive, label: "Archive" },
-  { to: "/admin", icon: Settings, label: "Admin Settings" },
+  { to: "/archive", icon: Archive, label: "Archive", badge: { label: "Admin", className: ADMIN_BADGE } },
+  { to: "/admin", icon: Settings, label: "Admin Settings", badge: { label: "Admin", className: ADMIN_BADGE } },
 ];
 
 export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps) {
@@ -94,8 +97,8 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
   const navigate = useNavigate();
 
   const allItems = profile?.role === "admin" || profile?.role === "super_admin"
-    ? [...navItems, ...externalNavItems, ...adminItems]
-    : [...navItems, ...externalNavItems];
+    ? [...navItems, ...adminItems]
+    : [...navItems];
 
   function roleColor(role: string) {
     switch (role) {
@@ -201,7 +204,21 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
           ) : (
             <NavLink key={item.to} to={item.to} className={linkClasses}>
               <item.icon className="h-5 w-5 shrink-0" />
-              {!collapsed && <span>{item.label}</span>}
+              {!collapsed && (
+                <span className="flex-1 flex items-center justify-between gap-2">
+                  <span className="truncate">{item.label}</span>
+                  {item.badge && (
+                    <Badge
+                      className={cn(
+                        "shrink-0 h-4 px-1.5 py-0 text-[9px] font-semibold uppercase tracking-wide border-transparent",
+                        item.badge.className,
+                      )}
+                    >
+                      {item.badge.label}
+                    </Badge>
+                  )}
+                </span>
+              )}
             </NavLink>
           );
 
