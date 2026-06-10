@@ -123,7 +123,11 @@ export function LogEmailDialog({
         activity_type: "email",
         subject: values.subject,
         body: values.body || undefined,
-        due_at: values.date ? new Date(values.date).toISOString() : undefined,
+        // The Date field is when the email happened, not a task due date.
+        // Store it in activity_date so the timeline shows it (the timeline
+        // displays activity_date||created_at and does NOT fall back to
+        // due_at). Emails carry no task due date.
+        activity_date: values.date ? new Date(values.date).toISOString() : undefined,
         account_id: accountId,
         contact_id: contactId,
         opportunity_id: values.opportunity_id || opportunityId,

@@ -332,6 +332,9 @@ serve(async (req) => {
          lead:leads!lead_id ( id, first_name, last_name, company )`
       )
       .eq("id", id)
+      // Only genuine tasks become calendar events. Emails/calls can carry a
+      // due_at but must never sync (mirrors the bulk path's filter).
+      .eq("activity_type", "task")
       .maybeSingle();
     if (error || !task) {
       return new Response(JSON.stringify({ ok: false, error: "not found" }), {
