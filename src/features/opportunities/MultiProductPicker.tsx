@@ -275,17 +275,30 @@ export function MultiProductPicker(props: Props) {
           (e) => e.product_id === productId && (e.fte_range == null || e.fte_range === ""),
         );
       }
-      // 3. Last resort within the price book: any entry for this product
-      //    (handles books that have only one tier configured)
+      // 3. Last resort: ONLY when the book genuinely has a single tier for
+      //    this product. With the real per-FTE seed data every book holds
+      //    all 11 tiers, so grabbing "any" entry would return an arbitrary
+      //    wrong-tier price (e.g. $500 vs $1,000). Leaving it unresolved
+      //    sends the row to the manual/$0 confirm instead of a silent wrong
+      //    price (this is the "products not linking to pricing" bug on
+      //    accounts whose FTE didn't match a tier).
       if (!entry) {
-        entry = priceBookEntries.find((e) => e.product_id === productId);
+        const forProduct = priceBookEntries.filter((e) => e.product_id === productId);
+        if (forProduct.length === 1) entry = forProduct[0];
       }
       if (entry && Number(entry.unit_price) > 0) {
         return { price: Number(entry.unit_price), source: "price_book" };
       }
     }
     const product = products?.find((p) => p.id === productId);
-    if (product?.default_arr != null && Number(product.default_arr) > 0) {
+    // Only flat-price products fall back to default_arr. A per-FTE product
+    // carrying a stray default_arr must NOT silently use it — let it hit the
+    // manual/$0 path so the rep confirms rather than getting a wrong price.
+    if (
+      product?.has_flat_price &&
+      product.default_arr != null &&
+      Number(product.default_arr) > 0
+    ) {
       return { price: Number(product.default_arr), source: "default" };
     }
     return { price: 0, source: "manual" };
@@ -302,8 +315,11 @@ export function MultiProductPicker(props: Props) {
         return { ...row, unit_price: price, unit_price_source: source };
       }),
     );
+    // Include oppFteRange so picked rows re-price when the account's FTE
+    // tier resolves/changes within the same book (manual rows are skipped
+    // above, so a hand-tweaked price is preserved).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [priceBookId, priceBookEntries]);
+  }, [priceBookId, priceBookEntries, oppFteRange]);
 
   // Group products by family.
   const grouped = useMemo(() => {
