@@ -5,6 +5,7 @@ import {
   Copy,
   Download,
   ExternalLink,
+  Loader2,
   Paperclip,
   RefreshCw,
   Sparkles,
@@ -164,12 +165,15 @@ function RequestDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+      {/* Scrolling lives on an inner wrapper, NOT on DialogContent: the
+          dialog is centered with a CSS transform, and a transformed
+          scroll container clips its right edge at non-100% page zoom. */}
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="pr-8 leading-snug">{request.title}</DialogTitle>
+          <DialogTitle className="pr-8 leading-snug break-words">{request.title}</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="max-h-[65vh] min-w-0 space-y-4 overflow-y-auto overflow-x-hidden break-words pr-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge variant="outline" className="text-[10px]">
               {REQUEST_TYPE_LABELS[request.type]}
@@ -244,12 +248,21 @@ function RequestDetailDialog({
                   type="button"
                   disabled={designPromptMutation.isPending}
                   onClick={() => runDesignPrompt(false)}
-                  className="w-full gap-2 border-0 bg-gradient-to-r from-violet-600 via-blue-600 to-cyan-500 text-white shadow-md transition-all hover:opacity-90 hover:shadow-lg"
+                  className="w-full gap-2 border-0 bg-gradient-to-r from-violet-600 via-blue-600 to-cyan-500 text-white shadow-md transition-all hover:opacity-90 hover:shadow-lg disabled:opacity-80"
                 >
-                  <Sparkles className="h-4 w-4" />
-                  {designPromptMutation.isPending
-                    ? "Generating design prompt..."
-                    : "Generate design prompt"}
+                  {designPromptMutation.isPending ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span className="animate-pulse">
+                        Generating design prompt… usually 15-30 seconds
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4" />
+                      Generate design prompt
+                    </>
+                  )}
                 </Button>
               ) : (
                 <div className="overflow-hidden rounded-lg border border-violet-500/40">
