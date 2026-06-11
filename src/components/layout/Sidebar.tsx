@@ -119,20 +119,22 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
         isMobile && collapsed && "-translate-x-full"
       )}
     >
-      {/* Logo — mirror-chrome Pulse on a dark stage. The reflection fades
-          out at the block's bottom edge, so the "floor" visually ends
-          right where the search section starts. */}
-      <div
-        className="shrink-0 overflow-hidden border-b border-border"
-        style={{ background: "linear-gradient(180deg, #14181f 0%, #1b212d 100%)" }}
-      >
+      {/* Logo — mirror-chrome Pulse. Theme-aware stage: dark mode keeps the
+          dark slate block with the silver chrome; light mode gets a light
+          block with the graphite chrome (same pairing the seasonal login
+          uses). Both tones render; CSS shows the one matching the theme.
+          The reflection fades out at the block's bottom edge, so the
+          "floor" visually ends right where the search section starts. */}
+      <div className="shrink-0 overflow-hidden border-b border-border bg-[linear-gradient(180deg,#eef1f6_0%,#e1e7f0_100%)] dark:bg-[linear-gradient(180deg,#14181f_0%,#1b212d_100%)]">
         {!collapsed ? (
           <div className="flex h-16 items-end px-4 pb-0">
-            <PulseLogo variant="full" className="h-14 w-auto" />
+            <PulseLogo variant="full" tone="graphite" className="block h-14 w-auto dark:hidden" />
+            <PulseLogo variant="full" tone="silver" className="hidden h-14 w-auto dark:block" />
           </div>
         ) : (
           <div className="flex h-16 items-end justify-center pb-0">
-            <PulseLogo variant="mark" className="h-14 w-auto" />
+            <PulseLogo variant="mark" tone="graphite" className="block h-14 w-auto dark:hidden" />
+            <PulseLogo variant="mark" tone="silver" className="hidden h-14 w-auto dark:block" />
           </div>
         )}
       </div>

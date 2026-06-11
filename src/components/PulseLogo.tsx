@@ -1,4 +1,5 @@
 import { useId } from "react";
+import { cn } from "@/lib/utils";
 
 /**
  * The Pulse wordmark — mirror-chrome lettering with a fading floor
@@ -91,10 +92,12 @@ export function PulseLogo({ variant = "full", tone = "silver", className }: Puls
   return (
     <svg
       viewBox={`0 0 ${cfg.vw} ${cfg.vh}`}
-      className={className}
+      // block by default (SVG inline display adds baseline gaps); as a
+      // CLASS, not an inline style, so callers' visibility classes (e.g.
+      // the sidebar's hidden/dark:block theme switch) can override it.
+      className={cn("block", className)}
       role="img"
       aria-label="Pulse"
-      style={{ display: "block" }}
     >
       <defs>
         <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
