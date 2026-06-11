@@ -116,6 +116,18 @@ export function AppLayout() {
   const handleToggle = useCallback(() => setCollapsed((c) => !c), []);
   const handleOverlayClick = useCallback(() => setCollapsed(true), []);
 
+  // Publish half the sidebar's current width as a CSS variable so dialogs
+  // (which portal to <body>) can center themselves over the CONTENT area
+  // rather than the full viewport. On mobile the sidebar overlays, so the
+  // content area IS the viewport and the offset is zero.
+  useEffect(() => {
+    const offset = isMobile ? "0px" : collapsed ? "32px" : "120px";
+    document.documentElement.style.setProperty("--dialog-x-offset", offset);
+    return () => {
+      document.documentElement.style.setProperty("--dialog-x-offset", "0px");
+    };
+  }, [isMobile, collapsed]);
+
   // Staging banner. Detect via hostname so we never accidentally show
   // it in production. Added 2026-05-12 after a user spent time editing
   // records on staging thinking it was prod and reported the data as

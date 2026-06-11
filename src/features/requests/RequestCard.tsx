@@ -168,7 +168,9 @@ function RequestDetailDialog({
       {/* Scrolling lives on an inner wrapper, NOT on DialogContent: the
           dialog is centered with a CSS transform, and a transformed
           scroll container clips its right edge at non-100% page zoom. */}
-      <DialogContent className="sm:max-w-lg">
+      {/* Wide on big windows, shrinks with the viewport; centered over the
+          content area (the --dialog-x-offset var tracks sidebar width). */}
+      <DialogContent className="sm:max-w-[min(50rem,calc(100vw-8rem))] left-[calc(50%+var(--dialog-x-offset,0px))]">
         <DialogHeader>
           <DialogTitle className="pr-8 leading-snug break-words">{request.title}</DialogTitle>
         </DialogHeader>
