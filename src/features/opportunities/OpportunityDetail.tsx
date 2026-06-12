@@ -229,6 +229,7 @@ export function OpportunityDetail() {
   const deleteMutation = useDeleteOpportunity();
   const removeProdMutation = useRemoveOpportunityProduct();
   const [showArchive, setShowArchive] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
   const [showChangeOwner, setShowChangeOwner] = useState(false);
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [pendingRemoveProduct, setPendingRemoveProduct] = useState<{ id: string; name: string } | null>(null);
@@ -244,6 +245,10 @@ export function OpportunityDetail() {
   const [pendingDeleteNoteIndex, setPendingDeleteNoteIndex] = useState<number | null>(null);
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
+  // Reps can delete opportunities too (Jordan S 2026-06-12) — mainly for
+  // invalid auto-generated renewals — but Closed Won deals are revenue
+  // history and stay admin-only. Mirrors the RLS delete policy.
+  const isRep = profile?.role === "sales" || profile?.role === "renewals";
   const { addRecent } = useRecentRecords();
   const helpMap = useFieldHelpMap("opportunities");
   // Contract Length and Contract Year are picklist-managed (admin-editable
@@ -371,25 +376,12 @@ export function OpportunityDetail() {
                 Archive
               </Button>
             )}
-            {isAdmin && (
+            {(isAdmin || (isRep && opp.stage !== "closed_won")) && (
               <Button
                 variant="outline"
                 size="sm"
                 className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                onClick={async () => {
-                  if (
-                    !window.confirm(
-                      `Permanently delete "${opp.name}"? This cannot be undone. Use Archive if you might need to restore it later.`,
-                    )
-                  ) return;
-                  try {
-                    await deleteMutation.mutateAsync({ id: opp.id });
-                    toast.success("Opportunity deleted");
-                    navigate("/opportunities");
-                  } catch (err) {
-                    toast.error("Failed to delete: " + (err as Error).message);
-                  }
-                }}
+                onClick={() => setShowDelete(true)}
                 disabled={deleteMutation.isPending}
               >
                 <Trash2 className="h-4 w-4 mr-1" />
@@ -1122,6 +1114,32 @@ export function OpportunityDetail() {
         confirmLabel="Archive"
         destructive
         onConfirm={handleArchive}
+      />
+
+      <ConfirmDialog
+        open={showDelete}
+        onOpenChange={setShowDelete}
+        title="Delete Opportunity"
+        description={
+          `Are you sure you want to delete "${opp.name}"? Once deleted, this ` +
+          `opportunity and its products cannot be recovered.` +
+          (opp.renewal_from_opportunity_id
+            ? " Pulse will not regenerate this renewal."
+            : "")
+        }
+        confirmLabel="Delete"
+        destructive
+        onConfirm={async () => {
+          try {
+            await deleteMutation.mutateAsync({ id: opp.id });
+            toast.success("Opportunity deleted");
+            navigate("/opportunities");
+          } catch (err) {
+            toast.error("Failed to delete: " + (err as Error).message);
+          } finally {
+            setShowDelete(false);
+          }
+        }}
       />
 
       <ConfirmDialog
