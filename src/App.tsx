@@ -15,6 +15,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 const HomePage = lazy(() => import("@/features/dashboard/HomePage").then(m => ({ default: m.HomePage })));
 const NexusPage = lazy(() => import("@/features/nexus/NexusPage").then(m => ({ default: m.NexusPage })));
 const RequestsPage = lazy(() => import("@/features/requests/RequestsPage").then(m => ({ default: m.RequestsPage })));
+const MeddyPage = lazy(() => import("@/features/meddy/MeddyPage").then(m => ({ default: m.MeddyPage })));
 const NotFound = lazy(() => import("@/features/NotFound").then(m => ({ default: m.NotFound })));
 const AccountsList = lazy(() => import("@/features/accounts/AccountsList").then(m => ({ default: m.AccountsList })));
 const AccountDetail = lazy(() => import("@/features/accounts/AccountDetail").then(m => ({ default: m.AccountDetail })));
@@ -93,6 +94,7 @@ export default function App() {
                   <Route index element={<HomePage />} />
                   <Route path="nexus" element={<NexusPage />} />
                   <Route path="requests" element={<RequestsPage />} />
+                  <Route path="meddy" element={<MeddyPage />} />
                   <Route path="accounts" element={<AccountsList />} />
                   <Route path="accounts/new" element={<AccountForm />} />
                   <Route path="accounts/:id" element={<AccountDetail />} />

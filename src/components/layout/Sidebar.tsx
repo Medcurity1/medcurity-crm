@@ -23,6 +23,7 @@ import {
   Sparkles,
   MessageSquarePlus,
   ExternalLink,
+  Bot,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PulseLogo } from "@/components/PulseLogo";
@@ -81,6 +82,9 @@ const navItems: NavItem[] = [
   { to: "/reports", icon: BarChart3, label: "Reports" },
   // Forecasting + Analytics moved into /reports as tabs (2026-04-17).
   { to: "/requests", icon: MessageSquarePlus, label: "Requests", badge: { label: "New", className: NEW_BADGE } },
+  // Meddy: website chat command center. Coming Soon until the website
+  // embed flips from Nexus to Pulse.
+  { to: "/meddy", icon: Bot, label: "Meddy", badge: { label: "Coming Soon", className: COMING_SOON_BADGE } },
   // Nexus: future per-user command center. Lives at the bottom for now
   // with a Coming Soon badge; will eventually move up to replace Home.
   { to: "/nexus", icon: Sparkles, label: "Nexus", badge: { label: "Coming Soon", className: COMING_SOON_BADGE } },

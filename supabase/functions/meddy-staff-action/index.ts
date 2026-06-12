@@ -270,6 +270,21 @@ Deno.serve(async (req) => {
         return json({ success: true });
       }
 
+      // ── Hide lead (admin; ports server.js:5817-5825) ─────────────
+      // Never deletes — only drops the row out of the leads filter.
+      case "hide_lead": {
+        if (profile.role !== "admin" && profile.role !== "super_admin") {
+          return json({ error: "Admins only" }, 403);
+        }
+        const conv = await loadConv();
+        if (!conv) return json({ error: "Conversation not found" }, 404);
+        await svc
+          .from("meddy_conversations")
+          .update({ hidden_from_leads: true })
+          .eq("id", conv.id);
+        return json({ success: true });
+      }
+
       // ── Availability toggle + heartbeat ──────────────────────────
       case "availability": {
         const available = !!body.available;
