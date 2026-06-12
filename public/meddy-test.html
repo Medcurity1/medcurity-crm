@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meddy Widget Test Page</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; color: #333; }
+    .nav {
+      background: #1B3A5C;
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .nav .logo {
+      color: #fff;
+      font-size: 22px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .nav-links { display: flex; gap: 24px; }
+    .nav-links a { color: rgba(255,255,255,0.8); text-decoration: none; font-size: 14px; }
+    .nav-links a:hover { color: #fff; }
+    .hero {
+      background: linear-gradient(135deg, #1B3A5C 0%, #2a5580 100%);
+      color: #fff;
+      padding: 80px 32px;
+      text-align: center;
+    }
+    .hero h1 { font-size: 42px; font-weight: 700; margin-bottom: 16px; }
+    .hero p { font-size: 18px; opacity: 0.85; max-width: 600px; margin: 0 auto 32px; line-height: 1.6; }
+    .hero-btn {
+      display: inline-block;
+      background: #C8102E;
+      color: #fff;
+      padding: 14px 32px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 16px;
+      font-weight: 600;
+    }
+    .content { max-width: 800px; margin: 0 auto; padding: 60px 32px; }
+    .content h2 { font-size: 28px; color: #1B3A5C; margin-bottom: 16px; }
+    .content p { font-size: 16px; line-height: 1.7; color: #555; margin-bottom: 20px; }
+    .content ul { padding-left: 24px; margin-bottom: 20px; }
+    .content li { font-size: 16px; line-height: 1.7; color: #555; margin-bottom: 8px; }
+    .section { margin-bottom: 48px; }
+    .test-info {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-bottom: 32px;
+      font-size: 14px;
+      color: #856404;
+    }
+    .page-links {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 12px;
+      margin-top: 20px;
+    }
+    .page-link {
+      display: block;
+      padding: 14px 18px;
+      background: #f8f9fa;
+      border: 1px solid #e5e5e5;
+      border-radius: 8px;
+      text-decoration: none;
+      color: #1B3A5C;
+      font-size: 14px;
+      transition: border-color 0.15s;
+    }
+    .page-link:hover { border-color: #1B3A5C; }
+    footer {
+      background: #f8f9fa;
+      padding: 32px;
+      text-align: center;
+      font-size: 13px;
+      color: #888;
+      border-top: 1px solid #e5e5e5;
+    }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <a href="/meddy-test.html" class="logo">Medcurity</a>
+    <div class="nav-links">
+      <a href="/meddy-test.html">Home</a>
+      <a href="/meddy-test.html#solutions">Solutions</a>
+      <a href="/meddy-test.html#resources">Resources</a>
+      <a href="/meddy-test.html#contact">Contact</a>
+    </div>
+  </nav>
+
+  <div class="hero">
+    <h1>HIPAA Compliance, Simplified.</h1>
+    <p>Medcurity helps healthcare organizations complete their Security Risk Analysis, manage policies, and maintain audit-ready documentation year-round.</p>
+    <a href="#solutions" class="hero-btn">Explore Solutions</a>
+  </div>
+
+  <div class="content">
+    <div class="test-info">
+      <strong>Test Page:</strong> This page simulates medcurity.com for testing the Meddy chat widget.
+      The chat bubble should appear in the bottom-right corner after the page loads. After 5 seconds,
+      you should see a greeting popup with a pulse animation. Click the bubble to open the chat panel.
+      <br><br><strong>Backend:</strong> This widget is connected to PULSE (Supabase edge functions + Realtime). The team side lives in the CRM's Meddy tab.
+    </div>
+
+    <div class="section" id="solutions">
+      <h2>What We Do</h2>
+      <p>Medcurity is a HIPAA compliance and cybersecurity platform built for healthcare organizations. We help clinics, hospitals, and health systems complete their annual HIPAA Security Risk Analysis, run Network Vulnerability Assessments, manage vendors and Business Associate Agreements, and maintain policies and documentation.</p>
+      <ul>
+        <li><strong>Security Risk Analysis (SRA)</strong> — Guided, AI-powered, audit-ready compliance documentation</li>
+        <li><strong>Network Vulnerability Assessment (NVA)</strong> — Scan your network for security weaknesses</li>
+        <li><strong>Medcurity Academy</strong> — HIPAA training for employees and compliance officers</li>
+        <li><strong>Vendor Management</strong> — Track BAAs and vendor compliance in one place</li>
+        <li><strong>PolicyScan</strong> — AI-powered policy review that auto-fills SRA questions</li>
+      </ul>
+    </div>
+
+    <div class="section" id="resources">
+      <h2>Resources</h2>
+      <p>Stay current with HIPAA requirements, security best practices, and compliance developments through our blog, podcast, and webinars.</p>
+    </div>
+
+    <div class="section" id="contact">
+      <h2>Get in Touch</h2>
+      <p>Ready to simplify your HIPAA compliance? Our team is available Monday through Friday, 8 AM to 5 PM Pacific.</p>
+      <p>Phone: (509) 867-3645 | Email: support@medcurity.com</p>
+    </div>
+
+    <div class="section">
+      <h2>Simulate Site</h2>
+      <p>Test the widget as if it were on different Medcurity sites:</p>
+      <div class="page-links">
+        <a class="page-link" href="/meddy-test.html?site=main" style="background:#2563eb;color:#fff;">Main Site (medcurity.com)</a>
+        <a class="page-link" href="/meddy-test.html?site=app" style="background:#16a34a;color:#fff;">App Site (app.medcurity.com)</a>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Test Different Page Contexts</h2>
+      <p>The widget shows different suggested messages depending on the page URL. Use these links to test:</p>
+      <div class="page-links">
+        <a class="page-link" href="/meddy-test.html">Homepage (default suggestions)</a>
+        <a class="page-link" href="/meddy-test.html?page=sra">SRA page suggestions</a>
+        <a class="page-link" href="/meddy-test.html?page=training">Training page suggestions</a>
+        <a class="page-link" href="/meddy-test.html?page=nva">Network Security suggestions</a>
+        <a class="page-link" href="/meddy-test.html?page=contact">Contact page suggestions</a>
+        <a class="page-link" href="/meddy-test.html?page=resources">Resources page suggestions</a>
+        <a class="page-link" href="/meddy-test.html?page=vendor">Vendor Management suggestions</a>
+        <a class="page-link" href="/meddy-test.html?page=small">Small Practice SRA suggestions</a>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    &copy; 2026 Medcurity. This is a test page for the Meddy chatbot widget connected to Pulse.
+  </footer>
+
+  <!-- Meddy Widget (Pulse edition) - environment-aware loader -->
+  <script>
+    (function() {
+      var STAGING = {
+        api: 'https://baekcgdyjedgxmejbytc.supabase.co',
+        anon: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhZWtjZ2R5amVkZ3htZWpieXRjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5ODMyMzIsImV4cCI6MjA5MDU1OTIzMn0.6-fakcGTClhcFDpn0XvR7oKncPjzpoEPpAck7_A8hHU'
+      };
+      var PROD = { api: '', anon: '' }; // filled at production launch
+      var isStaging = location.hostname.indexOf('staging.') === 0 || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+      var cfg = isStaging ? STAGING : (PROD.api ? PROD : STAGING);
+      var s = document.createElement('script');
+      s.defer = true;
+      s.src = '/widget/meddy-widget.js';
+      s.setAttribute('data-api', cfg.api);
+      s.setAttribute('data-anon', cfg.anon);
+      document.body.appendChild(s);
+    })();
+  </script>
+</body>
+</html>
