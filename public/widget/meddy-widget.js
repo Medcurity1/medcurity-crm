@@ -157,7 +157,6 @@
     injectStyles();
     createWidget();
     connectRealtime();
-    var isAppSite = window.location.hostname.indexOf('app.medcurity.com') !== -1;
     if (!isAppSite && !greetingDismissed && !isOpen) {
       try {
         setTimeout(function() { if (!isOpen && !greetingDismissed) showGreeting(); }, 5000);
@@ -270,6 +269,7 @@
       addMessageBubble(st, msg.content, msg.senderName || msg.sender_name);
       if (st === 'system' && (msg.content.indexOf('team know') !== -1 || msg.content.indexOf('will be with you') !== -1)) {
         humanRequested = true;
+        syncHumanLinkVisibility();
       }
       saveSession();
     }
@@ -283,7 +283,7 @@
       .on('broadcast', { event: 'new-message' }, function(e) { handleRtMessage(e.payload); })
       .on('broadcast', { event: 'taken-over' }, function() {
         isTakenOver = true; clearTimeout(humanRequestTimeout); humanRequestTimeout = null;
-        if (suggestionsEl) suggestionsEl.innerHTML = ''; saveSession();
+        if (suggestionsEl) suggestionsEl.innerHTML = ''; syncHumanLinkVisibility(); saveSession();
       })
       .on('broadcast', { event: 'show-form' }, function() {
         if (!contactInfo) { contactShown = false; showContactForm('agent_requested'); }
@@ -468,7 +468,11 @@
       '.meddy-send svg{width:16px;height:16px;fill:#fff;}' +
       // Footer - very muted
       '.meddy-footer{text-align:center;padding:4px;font-size:10px;color:#ccc;flex-shrink:0;}.meddy-footer a{color:#ccc;text-decoration:none;}.meddy-footer a:hover{color:#aaa;}' +
-      '.meddy-human-link{text-align:center;padding:2px 0 4px;font-size:11px;}' +
+      '.meddy-human-link{text-align:center;padding:2px 0 4px;font-size:11px;position:relative;}' +
+      '.meddy-confirm-up{bottom:calc(100% + 8px);top:auto;right:50%;transform:translateX(50%);}' +
+      '.meddy-confirm-up::before{top:auto;bottom:-6px;border-bottom:none;border-top:6px solid #fff;}' +
+      '.meddy-resize{position:absolute;top:0;left:0;width:20px;height:20px;cursor:nwse-resize;z-index:5;pointer-events:auto;}' +
+      '.meddy-resize::after{content:"";position:absolute;top:5px;left:5px;width:8px;height:8px;border-top:2px solid rgba(255,255,255,0.55);border-left:2px solid rgba(255,255,255,0.55);border-radius:2px 0 0 0;}' +
       '.meddy-human-link a{color:#888;cursor:pointer;text-decoration:underline;background:none;border:none;font-size:11px;font-family:system-ui,-apple-system,sans-serif;}.meddy-human-link a:hover{color:' + COLORS.dark + ';}' +
       // Typing indicator with red dots
       '.meddy-typing-wrap{align-self:flex-start;display:flex;flex-direction:column;gap:2px;}' +
@@ -490,7 +494,7 @@
       '.meddy-slim-send{background:#C8102E;border:none;width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background 0.15s;}.meddy-slim-send:hover{background:#a00d24;}.meddy-slim-send svg{width:13px;height:13px;fill:#fff;}' +
       '.meddy-slim-close{background:none;border:none;color:#bbb;font-size:16px;cursor:pointer;padding:0 2px;line-height:1;flex-shrink:0;transition:color 0.15s;}.meddy-slim-close:hover{color:#666;}' +
       '.meddy-slim-thanks{font-size:13px;color:#1B3A5C;font-weight:500;padding:2px 0;text-align:center;transition:opacity 0.5s ease;}' +
-      '@media(max-width:640px){.meddy-panel{width:100%;height:calc(100vh - 80px);bottom:0;right:0;border-radius:14px 14px 0 0;}.meddy-bubble{bottom:16px;right:16px;}.meddy-greeting{right:16px;bottom:88px;max-width:calc(100vw - 90px);}.meddy-human-link{padding:1px 0 2px;font-size:10px;}.meddy-human-link a{font-size:10px;}.meddy-footer{padding:2px;font-size:9px;}.meddy-footer a{font-size:9px;color:#ccc;}.meddy-slim-row{flex-wrap:wrap;}.meddy-slim-row input{flex:1 1 100%;}.meddy-slim-row .meddy-slim-send,.meddy-slim-row .meddy-slim-close{flex:0 0 auto;}}';
+      '@media(max-width:640px){.meddy-panel{width:100% !important;height:calc(100vh - 80px) !important;bottom:0;right:0;border-radius:14px 14px 0 0;}.meddy-resize{display:none;}.meddy-bubble{bottom:16px;right:16px;}.meddy-greeting{right:16px;bottom:88px;max-width:calc(100vw - 90px);}.meddy-human-link{padding:1px 0 2px;font-size:10px;}.meddy-human-link a{font-size:10px;}.meddy-footer{padding:2px;font-size:9px;}.meddy-footer a{font-size:9px;color:#ccc;}.meddy-slim-row{flex-wrap:wrap;}.meddy-slim-row input{flex:1 1 100%;}.meddy-slim-row .meddy-slim-send,.meddy-slim-row .meddy-slim-close{flex:0 0 auto;}}';
     shadowRoot.appendChild(style);
   }
 
@@ -517,13 +521,14 @@
     panelEl = document.createElement('div');
     panelEl.className = 'meddy-panel';
     panelEl.innerHTML = '' +
-      '<div class="meddy-header"><div class="meddy-header-text"><div class="meddy-header-icon"><img src="' + ASSETS_URL + '/meddy-logo-header.png?v=5" alt="Meddy"></div><div class="meddy-header-info"><h3>Meddy</h3><p>HIPAA Compliance Assistant</p></div></div><div class="meddy-header-actions"><a class="meddy-header-human" id="meddy-talk-human-header" title="Talk to a person"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="rgba(255,255,255,0.7)" d="M12 1C7.03 1 3 5.03 3 10v6c0 1.66 1.34 3 3 3h1v-7H5v-2c0-3.87 3.13-7 7-7s7 3.13 7 7v2h-2v7h1c1.66 0 3-1.34 3-3v-6c0-4.97-4.03-9-9-9z"/><path fill="rgba(255,255,255,0.7)" d="M5 12v5h2v-5H5zm12 0v5h2v-5h-2z"/><path fill="rgba(255,255,255,0.7)" d="M9 21v-1c0-.55.45-1 1-1h4c.55 0 1 .45 1 1v1h2v-1c0-1.66-1.34-3-3-3h-4c-1.66 0-3 1.34-3 3v1h2z"/></svg></a><button class="meddy-header-menu" id="meddy-menu-btn" title="Menu"><svg viewBox="0 0 24 24" width="16" height="16"><circle fill="rgba(255,255,255,0.7)" cx="12" cy="5" r="2"/><circle fill="rgba(255,255,255,0.7)" cx="12" cy="12" r="2"/><circle fill="rgba(255,255,255,0.7)" cx="12" cy="19" r="2"/></svg></button><button class="meddy-close">&times;</button></div></div>' +
+      '<div class="meddy-header"><div class="meddy-header-text"><div class="meddy-header-icon"><img src="' + ASSETS_URL + '/meddy-logo-header.png?v=5" alt="Meddy"></div><div class="meddy-header-info"><h3>Meddy</h3><p>HIPAA Compliance Assistant</p></div></div><div class="meddy-header-actions"><button class="meddy-header-menu" id="meddy-end-btn" title="End conversation"><svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="9" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="2"/><line x1="5.8" y1="5.8" x2="18.2" y2="18.2" stroke="rgba(255,255,255,0.7)" stroke-width="2"/></svg></button><button class="meddy-close" title="Minimize chat"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M5 9l7 7 7-7"/></svg></button></div></div>' +
       '<div class="meddy-messages"></div>' +
       '<div class="meddy-suggestions-wrap"></div>' +
       '<div class="meddy-contact-wrap"></div>' +
       '<div class="meddy-employee-typing" style="display:none;"></div>' +
       '<div class="meddy-char-count" id="meddy-char-count" style="display:none;"></div>' +
       '<div class="meddy-input-area"><textarea class="meddy-input" placeholder="Ask about HIPAA compliance..." rows="1"></textarea><button class="meddy-send" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button></div>' +
+      '<div class="meddy-human-link"><a id="meddy-talk-human-footer">Talk to a human</a></div>' +
       '<div class="meddy-footer"><a href="https://medcurity.com" target="_blank" rel="noopener">Powered by Medcurity</a></div>';
 
     panelEl.querySelector('.meddy-close').addEventListener('click', closePanel);
@@ -553,8 +558,10 @@
       visitorTypingTimeout = setTimeout(function() { rtSend('visitor-stop-typing', {}); }, 5000);
     });
     sendBtn.addEventListener('click', sendMessage);
-    panelEl.querySelector('#meddy-talk-human-header').addEventListener('click', function(e) { e.stopPropagation(); showHumanConfirm(); });
-    panelEl.querySelector('#meddy-menu-btn').addEventListener('click', function(e) { e.stopPropagation(); toggleMenu(); });
+    panelEl.querySelector('#meddy-end-btn').addEventListener('click', function(e) { e.stopPropagation(); showEndConfirm(); });
+    panelEl.querySelector('#meddy-talk-human-footer').addEventListener('click', function(e) { e.stopPropagation(); showHumanConfirm(); });
+    initResizeHandle();
+    syncHumanLinkVisibility();
     shadowRoot.appendChild(panelEl);
     renderMessages();
     renderSuggestions();
@@ -563,6 +570,54 @@
       inputEl.placeholder = 'Chat limit reached - contact us at medcurity.com/contact';
       panelEl.querySelector('.meddy-send').disabled = true;
     }
+  }
+
+  function initResizeHandle() {
+    var handle = document.createElement('div');
+    handle.className = 'meddy-resize';
+    handle.title = 'Drag to resize';
+    panelEl.appendChild(handle);
+    // Restore saved size (clamped to current viewport).
+    try {
+      var saved = JSON.parse(localStorage.getItem('meddy_panel_size') || 'null');
+      if (saved && saved.w && saved.h) applyPanelSize(saved.w, saved.h);
+    } catch (e) {}
+    var startX, startY, startW, startH, resizing = false;
+    handle.addEventListener('pointerdown', function(e) {
+      e.preventDefault();
+      resizing = true;
+      startX = e.clientX; startY = e.clientY;
+      startW = panelEl.offsetWidth; startH = panelEl.offsetHeight;
+      try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+    });
+    handle.addEventListener('pointermove', function(e) {
+      if (!resizing) return;
+      applyPanelSize(startW + (startX - e.clientX), startH + (startY - e.clientY));
+    });
+    function endResize() {
+      if (!resizing) return;
+      resizing = false;
+      try {
+        localStorage.setItem('meddy_panel_size', JSON.stringify({ w: panelEl.offsetWidth, h: panelEl.offsetHeight }));
+      } catch (e) {}
+    }
+    handle.addEventListener('pointerup', endResize);
+    handle.addEventListener('pointercancel', endResize);
+  }
+
+  function syncHumanLinkVisibility() {
+    if (!panelEl) return;
+    var link = panelEl.querySelector('.meddy-human-link');
+    if (link) link.style.display = (humanRequested || isTakenOver) ? 'none' : '';
+  }
+
+  function applyPanelSize(w, h) {
+    var maxW = Math.min(600, window.innerWidth - 48);
+    var maxH = Math.min(Math.round(window.innerHeight * 0.88), 780);
+    w = Math.max(300, Math.min(maxW, w));
+    h = Math.max(360, Math.min(maxH, h));
+    panelEl.style.width = w + 'px';
+    panelEl.style.height = h + 'px';
   }
 
   function showGreeting() {
@@ -932,7 +987,8 @@
     el.addEventListener('click', function(e) { e.stopPropagation(); });
     el.querySelector('.meddy-human-confirm-yes').addEventListener('click', function() { hideHumanConfirm(); requestHuman(); });
     el.querySelector('.meddy-human-confirm-cancel').addEventListener('click', function() { hideHumanConfirm(); });
-    var anchor = panelEl.querySelector('.meddy-header-human');
+    el.className = 'meddy-human-confirm meddy-confirm-up';
+    var anchor = panelEl.querySelector('.meddy-human-link');
     anchor.appendChild(el);
     humanConfirmEl = el;
     // Close on outside click
@@ -953,34 +1009,7 @@
     hideHumanConfirm();
   }
 
-  // ==================== MENU DROPDOWN ====================
-
-  var menuDropdownEl = null;
-
-  function toggleMenu() {
-    if (menuDropdownEl) { hideMenu(); return; }
-    var el = document.createElement('div');
-    el.className = 'meddy-menu-dropdown';
-    el.innerHTML = '<button class="meddy-menu-item">End conversation</button>';
-    el.addEventListener('click', function(e) { e.stopPropagation(); });
-    el.querySelector('.meddy-menu-item').addEventListener('click', function() { hideMenu(); showEndConfirm(); });
-    var anchor = panelEl.querySelector('#meddy-menu-btn');
-    anchor.appendChild(el);
-    menuDropdownEl = el;
-    setTimeout(function() { document.addEventListener('click', menuOutsideClick); }, 10);
-  }
-
-  function hideMenu() {
-    if (menuDropdownEl && menuDropdownEl.parentNode) menuDropdownEl.parentNode.removeChild(menuDropdownEl);
-    menuDropdownEl = null;
-    document.removeEventListener('click', menuOutsideClick);
-  }
-
-  function menuOutsideClick(e) {
-    var path = e.composedPath ? e.composedPath() : [];
-    if (menuDropdownEl && path.indexOf(menuDropdownEl) !== -1) return;
-    hideMenu();
-  }
+  // (Three-dot menu removed 2026-06-12: end-chat is now a header button.)
 
   function showEndConfirm() {
     var overlay = document.createElement('div');
@@ -1036,6 +1065,7 @@
       messageQueue = [];
       connectionLost = false;
       disconnectMsgShown = false;
+      syncHumanLinkVisibility();
       clearTimeout(humanRequestTimeout);
       humanRequestTimeout = null;
 
@@ -1060,6 +1090,7 @@
     if (humanRequested) return;
     humanRequested = true;
     if (suggestionsEl) suggestionsEl.innerHTML = '';
+    syncHumanLinkVisibility();
     saveSession();
 
     // Request human and check availability in one call
@@ -1154,6 +1185,7 @@
     messageQueue = [];
     connectionLost = false;
     disconnectMsgShown = false;
+    syncHumanLinkVisibility();
     clearTimeout(humanRequestTimeout);
     humanRequestTimeout = null;
     hideResetButton();
@@ -1302,8 +1334,8 @@
                   else if (parsed.type === 'show_lead_form') showLeadForm = true;
                   else if (parsed.type === 'state') {
                     // Server is telling us the conversation state — sync it
-                    if (parsed.taken_over) { isTakenOver = true; saveSession(); }
-                    if (parsed.human_requested) { humanRequested = true; saveSession(); }
+                    if (parsed.taken_over) { isTakenOver = true; syncHumanLinkVisibility(); saveSession(); }
+                    if (parsed.human_requested) { humanRequested = true; syncHumanLinkVisibility(); saveSession(); }
                   }
                   else if (parsed.type === 'error') fullText = parsed.text;
                 } catch (e) {}
