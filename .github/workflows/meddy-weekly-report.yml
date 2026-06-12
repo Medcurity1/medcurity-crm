@@ -1,0 +1,40 @@
+name: Meddy Weekly Report (cron)
+
+# Weekly AI recap of Meddy chat activity, Tuesdays 8 AM Pacific (Nexus
+# parity). GitHub cron runs in UTC: 15:00 UTC = 8 AM PDT (7 AM during
+# PST winter months — close enough for a weekly digest). Recipients are
+# users who opted in via My Settings → Notifications; the function
+# no-ops when nobody subscribed.
+#
+# Schedule targets PRODUCTION only (staging data would just be noise);
+# workflow_dispatch additionally hits staging for testing.
+
+on:
+  schedule:
+    - cron: "0 15 * * 2"
+  workflow_dispatch: {}
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send production report
+        if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        env:
+          URL: ${{ secrets.PRODUCTION_VITE_SUPABASE_URL }}
+          KEY: ${{ secrets.PRODUCTION_VITE_SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then echo "production secrets unset; skipping"; exit 0; fi
+          curl -s -X POST "$URL/functions/v1/meddy-weekly-report" \
+            -H "Authorization: Bearer $KEY" -H "apikey: $KEY" \
+            -H "Content-Type: application/json" -d '{}' | head -c 300
+      - name: Send staging report (manual runs only)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          URL: ${{ secrets.STAGING_VITE_SUPABASE_URL }}
+          KEY: ${{ secrets.STAGING_VITE_SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then echo "staging secrets unset; skipping"; exit 0; fi
+          curl -s -X POST "$URL/functions/v1/meddy-weekly-report" \
+            -H "Authorization: Bearer $KEY" -H "apikey: $KEY" \
+            -H "Content-Type: application/json" -d '{}' | head -c 300

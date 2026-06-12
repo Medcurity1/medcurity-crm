@@ -42,6 +42,8 @@ import {
   notifyUsers,
   getConversationSummary,
   pushoverAllKeyedUsers,
+  emailsForPref,
+  sendOutlookEmail,
 } from "../_shared/meddy-core.ts";
 
 const corsHeaders = {
@@ -765,17 +767,15 @@ async function handleContact(body: Record<string, unknown>) {
 }
 
 /** Ports sendFormAlertEmail (server.js:953-1034) onto the Outlook
- * sender used by request-email-notify. Recipients via MEDDY_ALERT_EMAILS
- * (comma-separated); silently skipped when unset or sender unconnected. */
+ * sender. Recipients = users who toggled "form alert emails" ON in My
+ * Settings → Notifications (per-user opt-in, no secrets — Nathan
+ * 2026-06-12). Silently skipped when nobody opted in. */
 async function sendFormAlertEmail(
   conversationId: string,
   c: { name: string; email: string; organization: string; phone: string },
 ) {
   try {
-    const recipients = (Deno.env.get("MEDDY_ALERT_EMAILS") ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const recipients = await emailsForPref(svc, "email_meddy_form_alert");
     if (recipients.length === 0) return;
 
     const { data: conv } = await svc
@@ -815,20 +815,6 @@ async function sendFormAlertEmail(
       timeoutMs: 10_000,
     });
 
-    // Send through the designated Outlook connection as marketing@.
-    const senderEmail = (Deno.env.get("REQUEST_NOTIFY_SENDER_EMAIL") ?? "nathang@medcurity.com").trim();
-    const fromAddress = (Deno.env.get("REQUEST_NOTIFY_FROM") ?? "marketing@medcurity.com").trim();
-    const { data: connRow } = await svc
-      .from("email_sync_connections")
-      .select("id, access_token, refresh_token, token_expires_at")
-      .ilike("email_address", senderEmail)
-      .eq("provider", "outlook")
-      .eq("is_active", true)
-      .maybeSingle();
-    if (!connRow) return;
-    const { ensureValidOutlookToken } = await import("../_shared/graph-token.ts");
-    const token = await ensureValidOutlookToken(svc, connRow);
-
     const appBase = (Deno.env.get("APP_BASE_URL") ?? "https://crm.medcurity.com").replace(/\/+$/, "");
     const headerColor = hot ? "#C8102E" : "#1B3A5C";
     const subject = hot
@@ -854,22 +840,7 @@ async function sendFormAlertEmail(
       `</div></div>`,
     ].join("");
 
-    await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        message: {
-          subject,
-          body: { contentType: "HTML", content: html },
-          from: { emailAddress: { address: fromAddress } },
-          toRecipients: recipients.map((address) => ({ emailAddress: { address } })),
-        },
-        saveToSentItems: true,
-      }),
-    });
+    await sendOutlookEmail(svc, recipients, subject, html);
   } catch (e) {
     console.warn("form alert email failed:", (e as Error).message);
   }

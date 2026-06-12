@@ -22,8 +22,9 @@ import {
   broadcast,
   notifyUsers,
   pushoverAllKeyedUsers,
+  emailsForPref,
+  sendOutlookEmail,
 } from "../_shared/meddy-core.ts";
-import { ensureValidOutlookToken } from "../_shared/graph-token.ts";
 
 const svc = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -128,14 +129,12 @@ Deno.serve(async () => {
 });
 
 /** Missed-chat email (ports server.js:1038-1108) via the Outlook sender.
- * Recipients: MEDDY_ALERT_EMAILS (comma-separated); silent skip if unset. */
+ * Recipients = users who toggled "missed chat emails" ON in My Settings
+ * → Notifications (per-user opt-in, no secrets). */
 // deno-lint-ignore no-explicit-any
 async function sendMissedChatEmail(conv: any) {
   try {
-    const recipients = (Deno.env.get("MEDDY_ALERT_EMAILS") ?? "")
-      .split(",")
-      .map((s: string) => s.trim())
-      .filter(Boolean);
+    const recipients = await emailsForPref(svc, "email_meddy_missed_chat");
     if (recipients.length === 0) return;
 
     // Re-check + dedup exactly like Nexus (1043-1047).
@@ -169,17 +168,6 @@ async function sendMissedChatEmail(conv: any) {
       })
       .join("");
 
-    const senderEmail = (Deno.env.get("REQUEST_NOTIFY_SENDER_EMAIL") ?? "nathang@medcurity.com").trim();
-    const fromAddress = (Deno.env.get("REQUEST_NOTIFY_FROM") ?? "marketing@medcurity.com").trim();
-    const { data: connRow } = await svc
-      .from("email_sync_connections")
-      .select("id, access_token, refresh_token, token_expires_at")
-      .ilike("email_address", senderEmail)
-      .eq("provider", "outlook")
-      .eq("is_active", true)
-      .maybeSingle();
-    if (!connRow) return;
-    const token = await ensureValidOutlookToken(svc, connRow);
     const appBase = (Deno.env.get("APP_BASE_URL") ?? "https://crm.medcurity.com").replace(/\/+$/, "");
 
     const afterHours = !isBusinessHours()
@@ -204,19 +192,12 @@ async function sendMissedChatEmail(conv: any) {
       `</div></div>`,
     ].join("");
 
-    await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: {
-          subject: "Missed Chat - Visitor waiting for a response",
-          body: { contentType: "HTML", content: html },
-          from: { emailAddress: { address: fromAddress } },
-          toRecipients: recipients.map((address: string) => ({ emailAddress: { address } })),
-        },
-        saveToSentItems: true,
-      }),
-    });
+    await sendOutlookEmail(
+      svc,
+      recipients,
+      "Missed Chat - Visitor waiting for a response",
+      html,
+    );
   } catch (e) {
     console.warn("missed chat email failed:", (e as Error).message);
   }

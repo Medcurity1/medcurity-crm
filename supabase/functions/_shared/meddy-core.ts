@@ -284,6 +284,61 @@ export async function getConversationSummary(
   return summary ?? "A visitor is requesting a human in Meddy chat.";
 }
 
+// ── Per-user email opt-ins (Nathan 2026-06-12: no recipient secrets;
+// users toggle Meddy emails in My Settings → Notifications) ──────────
+// Pref keys (all default OFF — absent key means not subscribed):
+//   email_meddy_form_alert | email_meddy_missed_chat | email_meddy_weekly_report
+export async function emailsForPref(svc: DbClient, prefKey: string): Promise<string[]> {
+  const { data: rows } = await svc
+    .from("user_notification_prefs")
+    .select("user_id")
+    .eq(`prefs->>${prefKey}`, "true");
+  const out: string[] = [];
+  for (const r of rows ?? []) {
+    const { data: u } = await svc.auth.admin.getUserById(r.user_id);
+    if (u?.user?.email) out.push(u.user.email);
+  }
+  return out;
+}
+
+/** Send one email to a recipient list from marketing@ via the designated
+ * Outlook connection (same plumbing as request-email-notify). Silently
+ * no-ops when there are no recipients or the sender isn't connected. */
+export async function sendOutlookEmail(
+  svc: DbClient,
+  recipients: string[],
+  subject: string,
+  html: string,
+): Promise<boolean> {
+  if (recipients.length === 0) return false;
+  const senderEmail = (Deno.env.get("REQUEST_NOTIFY_SENDER_EMAIL") ?? "nathang@medcurity.com").trim();
+  const fromAddress = (Deno.env.get("REQUEST_NOTIFY_FROM") ?? "marketing@medcurity.com").trim();
+  const { data: connRow } = await svc
+    .from("email_sync_connections")
+    .select("id, access_token, refresh_token, token_expires_at")
+    .ilike("email_address", senderEmail)
+    .eq("provider", "outlook")
+    .eq("is_active", true)
+    .maybeSingle();
+  if (!connRow) return false;
+  const { ensureValidOutlookToken } = await import("./graph-token.ts");
+  const token = await ensureValidOutlookToken(svc, connRow);
+  const res = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message: {
+        subject,
+        body: { contentType: "HTML", content: html },
+        from: { emailAddress: { address: fromAddress } },
+        toRecipients: recipients.map((address) => ({ emailAddress: { address } })),
+      },
+      saveToSentItems: true,
+    }),
+  });
+  return res.ok;
+}
+
 export async function pushoverAllKeyedUsers(
   svc: DbClient,
   title: string,
