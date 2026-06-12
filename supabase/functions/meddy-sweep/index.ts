@@ -7,10 +7,7 @@
 //      still unassigned, not closed → meddy_missed_chat notification to
 //      everyone + alert email. Idempotent via missed_chat_alerted /
 //      missed_chat_emailed columns.
-//   2. Pushover escalation (server.js:854-865): human requested >= 2 min
-//      ago, still unassigned → priority-2 emergency push. Idempotent via
-//      pushover_escalated.
-//   3. Stale agents: available but no heartbeat for 2+ min → marked
+//   2. Stale agents: available but no heartbeat for 2+ min → marked
 //      unavailable; if nobody is left, waiting visitors get the
 //      agents-unavailable notice (ports the WS presence close handler).
 //
@@ -21,7 +18,6 @@ import {
   isBusinessHours,
   broadcast,
   notifyUsers,
-  pushoverAllKeyedUsers,
   emailsForPref,
   sendOutlookEmail,
 } from "../_shared/meddy-core.ts";
@@ -33,7 +29,7 @@ const svc = createClient(
 );
 
 Deno.serve(async (req) => {
-  const out = { missed: 0, escalated: 0, agentsMarkedAway: 0, purged: 0 };
+  const out = { missed: 0, agentsMarkedAway: 0, purged: 0 };
   const now = Date.now();
 
   // ── 0. Retention purge (daily call with {"retention": true}) ─────
@@ -110,30 +106,12 @@ Deno.serve(async (req) => {
     out.missed++;
   }
 
-  // ── 2. Pushover escalation (priority 2) ──────────────────────────
-  const { data: waiting } = await svc
-    .from("meddy_conversations")
-    .select("id")
-    .eq("is_human_requested", true)
-    .is("assigned_to", null)
-    .neq("status", "closed")
-    .lte("human_requested_at", twoMinAgo)
-    .eq("pushover_escalated", false);
-  for (const conv of waiting ?? []) {
-    await svc
-      .from("meddy_conversations")
-      .update({ pushover_escalated: true })
-      .eq("id", conv.id);
-    await pushoverAllKeyedUsers(
-      svc,
-      "URGENT: Visitor Still Waiting",
-      "No agent has taken over. Visitor has been waiting 2 minutes.",
-      { priority: 2 },
-    );
-    out.escalated++;
-  }
+  // (The Nexus "URGENT: Visitor Still Waiting" priority-2 follow-up push
+  // was removed 2026-06-12 per Nathan: the instant human-request push,
+  // in-app notifications, and the missed-chat email cover it. The
+  // pushover_escalated column stays in the schema, unused.)
 
-  // ── 3. Stale agents ──────────────────────────────────────────────
+  // ── 2. Stale agents ──────────────────────────────────────────────
   const { data: stale } = await svc
     .from("meddy_agent_status")
     .select("user_id")
