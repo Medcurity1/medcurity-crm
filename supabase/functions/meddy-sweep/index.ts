@@ -32,9 +32,41 @@ const svc = createClient(
   { auth: { persistSession: false } },
 );
 
-Deno.serve(async () => {
-  const out = { missed: 0, escalated: 0, agentsMarkedAway: 0 };
+Deno.serve(async (req) => {
+  const out = { missed: 0, escalated: 0, agentsMarkedAway: 0, purged: 0 };
   const now = Date.now();
+
+  // ── 0. Retention purge (daily call with {"retention": true}) ─────
+  // 90-day purge, saved conversations exempt (saving = permanent keep).
+  // Ports Nexus cleanupOldConversations (server.js:1119-1135); contact
+  // PII lives on the CRM contact via the form handler, so only saved
+  // status pins the raw transcript.
+  let retention = false;
+  try {
+    const body = await req.json();
+    retention = !!body?.retention;
+  } catch {
+    // no body — regular sweep
+  }
+  if (retention) {
+    const cutoff = new Date(now - 90 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: old } = await svc
+      .from("meddy_conversations")
+      .select("id")
+      .lt("created_at", cutoff);
+    const { data: savedRows } = await svc
+      .from("meddy_saved_conversations")
+      .select("conversation_id");
+    const saved = new Set((savedRows ?? []).map((r) => r.conversation_id as string));
+    const purgeIds = (old ?? []).map((r) => r.id as string).filter((id) => !saved.has(id));
+    // Chunked deletes; messages/urls/agents cascade via FK.
+    for (let i = 0; i < purgeIds.length; i += 100) {
+      const chunk = purgeIds.slice(i, i + 100);
+      await svc.from("notifications").delete().in("conversation_id", chunk);
+      await svc.from("meddy_conversations").delete().in("id", chunk);
+    }
+    out.purged = purgeIds.length;
+  }
   const fiveMinAgo = new Date(now - 5 * 60 * 1000).toISOString();
   const twoMinAgo = new Date(now - 2 * 60 * 1000).toISOString();
 

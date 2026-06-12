@@ -22,6 +22,7 @@ import { SystemInfo } from "./SystemInfo";
 import { DataHealthDashboard } from "./DataHealthDashboard";
 import { RequestsInbox } from "@/features/requests/RequestsInbox";
 import { RoutingEditor } from "@/features/requests/RoutingEditor";
+import { MeddyAdminPanel } from "@/features/meddy/MeddyAdminPanel";
 import { Loader2 } from "lucide-react";
 
 /**
@@ -41,6 +42,7 @@ const TOP_TABS = [
   "automations",
   "data-import",
   "requests",
+  "meddy",
   "audit-log",
   "data-health",
   "system",
@@ -166,6 +168,7 @@ export function AdminSettings() {
           <TabsTrigger value="automations">Automations</TabsTrigger>
           <TabsTrigger value="data-import">Data Import</TabsTrigger>
           <TabsTrigger value="requests">Requests</TabsTrigger>
+          <TabsTrigger value="meddy">Meddy</TabsTrigger>
           <TabsTrigger value="audit-log">Audit Log</TabsTrigger>
           <TabsTrigger value="data-health">Data Health</TabsTrigger>
           <TabsTrigger value="system">System</TabsTrigger>
@@ -295,6 +298,20 @@ export function AdminSettings() {
               </p>
             </div>
             <RequestsInbox />
+          </Card>
+        </TabsContent>
+
+        {/* ---------- MEDDY (website chat assistant) ---------- */}
+        <TabsContent value="meddy">
+          <Card className="p-6">
+            <div className="space-y-1 mb-6">
+              <h2 className="text-lg font-semibold">Meddy</h2>
+              <p className="text-sm text-muted-foreground">
+                Quick replies, the website knowledge base, and team phone
+                notifications for the chat assistant.
+              </p>
+            </div>
+            <MeddyAdminPanel />
           </Card>
         </TabsContent>
 

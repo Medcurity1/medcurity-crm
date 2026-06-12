@@ -1,0 +1,52 @@
+name: Meddy Daily Jobs (cron)
+
+# Two Nexus-parity daily jobs (research: 10-build-plan.md decision 7):
+#   09:00 UTC (~2 AM Pacific) — 90-day conversation retention purge
+#                               (saved conversations exempt) via
+#                               meddy-sweep {"retention": true}
+#   10:00 UTC (~3 AM Pacific) — knowledge-base crawl of medcurity.com
+#                               via meddy-crawl
+# Which job runs is keyed off github.event.schedule; workflow_dispatch
+# runs both. Runs against BOTH environments (staging KB stays fresh,
+# staging test conversations age out too).
+
+on:
+  schedule:
+    - cron: "0 9 * * *"
+    - cron: "0 10 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  retention:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.schedule == '0 9 * * *' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        env: [PRODUCTION, STAGING]
+    steps:
+      - name: Run retention purge (${{ matrix.env }})
+        env:
+          URL: ${{ matrix.env == 'PRODUCTION' && secrets.PRODUCTION_VITE_SUPABASE_URL || secrets.STAGING_VITE_SUPABASE_URL }}
+          KEY: ${{ matrix.env == 'PRODUCTION' && secrets.PRODUCTION_VITE_SUPABASE_ANON_KEY || secrets.STAGING_VITE_SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then echo "${{ matrix.env }} secrets unset; skipping"; exit 0; fi
+          curl -s -X POST "$URL/functions/v1/meddy-sweep" \
+            -H "Authorization: Bearer $KEY" -H "apikey: $KEY" \
+            -H "Content-Type: application/json" -d '{"retention": true}' | head -c 300
+
+  crawl:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.schedule == '0 10 * * *' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        env: [PRODUCTION, STAGING]
+    steps:
+      - name: Run KB crawl (${{ matrix.env }})
+        env:
+          URL: ${{ matrix.env == 'PRODUCTION' && secrets.PRODUCTION_VITE_SUPABASE_URL || secrets.STAGING_VITE_SUPABASE_URL }}
+          KEY: ${{ matrix.env == 'PRODUCTION' && secrets.PRODUCTION_VITE_SUPABASE_ANON_KEY || secrets.STAGING_VITE_SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then echo "${{ matrix.env }} secrets unset; skipping"; exit 0; fi
+          curl -s -X POST "$URL/functions/v1/meddy-crawl" \
+            -H "Authorization: Bearer $KEY" -H "apikey: $KEY" \
+            -H "Content-Type: application/json" -d '{}' | head -c 300
