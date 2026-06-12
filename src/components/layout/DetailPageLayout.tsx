@@ -97,7 +97,23 @@ export function DetailPageLayout({
 }
 
 function SidePanelSwitcher({ panels }: { panels: DetailSidePanel[] }) {
-  const [active, setActive] = useState(panels[0].key);
+  const [active, setActive] = useState(() => {
+    // Reminder deep links carry ?open_task=<id>. The handler that pops
+    // the task open lives inside the Tasks panel, which doesn't mount
+    // until its tab is active — so land on Tasks when the param is
+    // present instead of making the user discover the tab switch.
+    try {
+      if (
+        new URLSearchParams(window.location.search).has("open_task") &&
+        panels.some((p) => p.key === "tasks")
+      ) {
+        return "tasks";
+      }
+    } catch {
+      /* fall through to default */
+    }
+    return panels[0].key;
+  });
   const current = panels.find((p) => p.key === active) ?? panels[0];
   return (
     <div>
