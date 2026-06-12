@@ -164,27 +164,28 @@ export function ConversationSidebar({ selectedId, onSelect, onBack, unreadIds }:
 }
 
 /** Manual Available/Away toggle. Lives here next to the Conversations
- * title (Nathan's call), not in the top bar like Nexus had it. */
+ * title (Nathan's call), not in the top bar like Nexus had it. The flip
+ * is optimistic (see useSetAvailability) so it reacts instantly. */
 function AvailabilityToggle() {
   const { data: available = false } = useMyAvailability();
   const setAvailability = useSetAvailability();
   return (
     <button
       type="button"
-      title="Toggle your chat availability"
+      title={available ? "Click to go Away" : "Click to go Available"}
       onClick={() => setAvailability.mutate(!available)}
-      disabled={setAvailability.isPending}
       className={cn(
-        "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+        "flex cursor-pointer select-none items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold shadow-sm transition-all duration-150",
+        "hover:shadow active:scale-95",
         available
-          ? "border-green-500/50 bg-green-500/10 text-green-600 dark:text-green-400"
-          : "border-border bg-muted text-muted-foreground hover:text-foreground",
+          ? "border-green-500/60 bg-green-500/15 text-green-600 hover:bg-green-500/25 dark:text-green-400"
+          : "border-border bg-muted text-muted-foreground hover:border-foreground/30 hover:bg-muted/70 hover:text-foreground",
       )}
     >
       <span
         className={cn(
-          "h-2 w-2 rounded-full",
-          available ? "bg-green-500" : "bg-muted-foreground/50",
+          "h-2 w-2 rounded-full transition-colors",
+          available ? "animate-pulse bg-green-500" : "bg-muted-foreground/50",
         )}
       />
       {available ? "Available" : "Away"}

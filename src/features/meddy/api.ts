@@ -257,11 +257,20 @@ export function useSetAvailability() {
   const { user } = useAuth();
   return useMutation({
     mutationFn: (available: boolean) => staffAction("availability", { available }),
-    onSuccess: (_d, available) => {
+    // Optimistic: flip the pill instantly, roll back if the server says no.
+    onMutate: async (available) => {
+      await qc.cancelQueries({ queryKey: ["meddy-availability", user?.id] });
+      const previous = qc.getQueryData<boolean>(["meddy-availability", user?.id]);
       qc.setQueryData(["meddy-availability", user?.id], available);
+      return { previous };
+    },
+    onError: (err, _vars, context) => {
+      qc.setQueryData(["meddy-availability", user?.id], context?.previous ?? false);
+      toast.error((err as Error).message);
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ["meddy-team"] });
     },
-    onError: (err) => toast.error((err as Error).message),
   });
 }
 

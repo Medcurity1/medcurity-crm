@@ -316,11 +316,13 @@ export function previewSound(soundType?: string, durationType?: string, onFinish
 /** Runtime fallback sound per type when the user never chose one
  * (Nexus MEDDY_NOTIF_SOUNDS, index.html:11309-11317). */
 export const NOTIF_TYPE_FALLBACK_SOUNDS: Record<string, string> = {
-  meddy_new_chat: "chime",
-  meddy_human_requested: "urgent",
-  meddy_buying_intent: "melody",
-  meddy_missed_chat: "bell",
-  meddy_contact_received: "soft",
+  meddy_new_chat: "bubble",
+  meddy_human_requested: "doorbell",
+  meddy_buying_intent: "glass",
+  meddy_missed_chat: "knock",
+  meddy_contact_received: "drop",
+  task_due: "marimba",
+  renewal_upcoming: "horn",
 };
 
 /** Saved seconds value → repeat-duration bucket (Nexus index.html:12239). */

@@ -22,24 +22,19 @@ import {
   type NotifTypeDef,
 } from "./prefs-api";
 
-// Full audition list (2026-06-12): the 4 Nexus originals plus 10 new
-// candidates. Nathan is picking a top 5 — trim this list once chosen.
+// Nathan's keepers from the 2026-06-12 audition (cut: Ding, Twinkle,
+// Echo, and the 4 Nexus originals). The engine still knows the retired
+// recipes so old saved prefs keep playing; the picker only offers these.
 const SOUND_OPTIONS = [
-  { value: "soft", label: "Soft (original)" },
-  { value: "melody", label: "Melody (original)" },
-  { value: "pulse", label: "Pulse (original)" },
-  { value: "chime", label: "Chime (original)" },
   { value: "bubble", label: "Bubble" },
   { value: "marimba", label: "Marimba" },
-  { value: "ding", label: "Ding" },
   { value: "doorbell", label: "Doorbell" },
   { value: "glass", label: "Glass" },
   { value: "drop", label: "Drop" },
   { value: "knock", label: "Knock" },
-  { value: "twinkle", label: "Twinkle" },
   { value: "horn", label: "Horn" },
-  { value: "echo", label: "Echo" },
 ];
+const SOUND_VALUES = new Set(SOUND_OPTIONS.map((o) => o.value));
 
 // Value 10 repeats for 15s (the engine's "long" cycle) — label says so.
 const DURATION_OPTIONS = [
@@ -132,9 +127,10 @@ function NotifRow({ def, prefs }: { def: NotifTypeDef; prefs: Record<string, unk
 
   const bannerOn = prefs[def.key] !== false;
   const soundOn = prefs[`sound_${def.key}`] !== false;
-  // Legacy 'alert' normalizes to 'chime' (Nexus index.html:10225).
+  // Saved prefs pointing at retired sounds fall back to the row default
+  // so the select never shows a blank value.
   const rawSoundType = (prefs[`soundtype_${def.key}`] as string) || def.defSound;
-  const soundType = rawSoundType === "alert" ? "chime" : rawSoundType;
+  const soundType = SOUND_VALUES.has(rawSoundType) ? rawSoundType : def.defSound;
   const duration = Number(prefs[`duration_${def.key}`] ?? def.defDuration);
 
   function setPref(patch: Record<string, unknown>) {

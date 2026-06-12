@@ -168,7 +168,10 @@
         api: 'https://baekcgdyjedgxmejbytc.supabase.co',
         anon: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhZWtjZ2R5amVkZ3htZWpieXRjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5ODMyMzIsImV4cCI6MjA5MDU1OTIzMn0.6-fakcGTClhcFDpn0XvR7oKncPjzpoEPpAck7_A8hHU'
       };
-      var PROD = { api: '', anon: '' }; // filled at production launch
+      var PROD = {
+        api: 'https://igmwomnkbbsytihtvhbp.supabase.co',
+        anon: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlnbXdvbW5rYmJzeXRpaHR2aGJwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5ODAzMjQsImV4cCI6MjA5MDU1NjMyNH0.TkdXW950_RUV8ZCaZYWMYaNU0ivJ-5XWKJqQkwDxxGU'
+      };
       var isStaging = location.hostname.indexOf('staging.') === 0 || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
       var cfg = isStaging ? STAGING : (PROD.api ? PROD : STAGING);
       var s = document.createElement('script');
