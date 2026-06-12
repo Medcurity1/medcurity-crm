@@ -297,7 +297,10 @@ export function ChatView({ conversation: c }: Props) {
             </button>
             <button
               type="button"
-              onClick={() => setWhisper(true)}
+              onClick={() => {
+                setWhisper(true);
+                setQuickOpen(false); // quick replies are visitor-facing only
+              }}
               className={cn(
                 "rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors",
                 whisper
@@ -332,7 +335,10 @@ export function ChatView({ conversation: c }: Props) {
               onChange={(e) => {
                 const v = e.target.value;
                 setInput(v);
-                if (v === "/") setQuickOpen(true);
+                // Quick replies are messages TO THE VISITOR — never
+                // available while composing a team-only whisper (sending
+                // [FORM] "as a whisper" actually pushed the real form).
+                if (v === "/" && !whisper) setQuickOpen(true);
                 emitEmployeeTyping();
               }}
               onKeyDown={(e) => {
@@ -351,8 +357,8 @@ export function ChatView({ conversation: c }: Props) {
           <Button
             variant="outline"
             size="icon"
-            title="Quick replies"
-            disabled={!canChat}
+            title={whisper ? "Quick replies go to the visitor — switch off Team only" : "Quick replies"}
+            disabled={!canChat || whisper}
             onClick={() => setQuickOpen((v) => !v)}
           >
             <Zap className="h-4 w-4" />

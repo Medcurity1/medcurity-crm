@@ -166,6 +166,51 @@ function playSoundOnce(ctx: AudioContext, soundType: string, offsetTime?: number
   } else if (soundType === "ringbell") {
     tone(t, 800, 1.2, 0.3, "sine");
     tone(t, 1600, 0.8, 0.1, "sine");
+    // ── 2026-06-12 candidates (Nathan auditioning a new top 5) ────────
+  } else if (soundType === "bubble") {
+    // quick rising blip, playful
+    tone(t, 520, 0.08, 0.25, "sine");
+    tone(t + 0.07, 780, 0.1, 0.28, "sine");
+    tone(t + 0.16, 1040, 0.16, 0.22, "sine");
+  } else if (soundType === "marimba") {
+    // two warm wooden notes
+    tone(t, 440, 0.25, 0.32, "triangle");
+    tone(t + 0.18, 660, 0.35, 0.26, "triangle");
+  } else if (soundType === "ding") {
+    // single clean strike with a shimmering overtone
+    tone(t, 1000, 0.7, 0.28, "sine");
+    tone(t, 2000, 0.35, 0.08, "sine");
+  } else if (soundType === "doorbell") {
+    // classic ding-dong
+    tone(t, 880, 0.45, 0.3, "sine");
+    tone(t + 0.4, 660, 0.6, 0.28, "sine");
+  } else if (soundType === "glass") {
+    // high glassy shimmer
+    tone(t, 1480, 0.5, 0.18, "sine");
+    tone(t, 2220, 0.4, 0.08, "sine");
+    tone(t + 0.06, 1976, 0.45, 0.1, "sine");
+  } else if (soundType === "drop") {
+    // gentle descending water drop
+    tone(t, 880, 0.12, 0.25, "sine");
+    tone(t + 0.12, 660, 0.12, 0.25, "sine");
+    tone(t + 0.24, 440, 0.25, 0.25, "sine");
+  } else if (soundType === "knock") {
+    // two low knocks, subtle and unintrusive
+    tone(t, 180, 0.09, 0.42, "triangle");
+    tone(t + 0.16, 180, 0.09, 0.42, "triangle");
+  } else if (soundType === "twinkle") {
+    // fast sparkly up-arpeggio
+    tone(t, 1319, 0.12, 0.2, "sine");
+    tone(t + 0.09, 1568, 0.12, 0.2, "sine");
+    tone(t + 0.18, 1976, 0.2, 0.2, "sine");
+  } else if (soundType === "horn") {
+    // soft two-note swell, calm and full
+    tone(t, 523, 0.5, 0.18, "triangle");
+    tone(t, 784, 0.5, 0.14, "triangle");
+  } else if (soundType === "echo") {
+    // one ping and its quieter echo
+    tone(t, 990, 0.25, 0.3, "sine");
+    tone(t + 0.35, 990, 0.25, 0.12, "sine");
   } else {
     // chime default
     tone(t, 880, 0.6, 0.3, "sine");
@@ -175,10 +220,26 @@ function playSoundOnce(ctx: AudioContext, soundType: string, offsetTime?: number
 
 function getSoundCycleMs(st: string): number {
   return (
-    ({ bell: 1500, urgent: 700, soft: 1200, melody: 1200, pulse: 600, ringbell: 1500 } as Record<
-      string,
-      number
-    >)[st] || 1500
+    (
+      {
+        bell: 1500,
+        urgent: 700,
+        soft: 1200,
+        melody: 1200,
+        pulse: 600,
+        ringbell: 1500,
+        bubble: 900,
+        marimba: 1300,
+        ding: 1200,
+        doorbell: 1600,
+        glass: 1100,
+        drop: 1000,
+        knock: 800,
+        twinkle: 900,
+        horn: 1200,
+        echo: 1300,
+      } as Record<string, number>
+    )[st] || 1500
   );
 }
 function getSoundDurationMs(dt: string): number {
@@ -186,12 +247,11 @@ function getSoundDurationMs(dt: string): number {
 }
 
 export function playScheduled(soundType: string, durationType: string, onFinish?: () => void) {
-  // Try HTML5 Audio first (works better in background tabs)
-  const audioPlayed = _playNotifAudio();
-  if (!audioPlayed && document.hidden) {
-    _soundQueue.push({ soundType, durationType });
-  }
-  // Also try AudioContext for richer sound (supplements Audio)
+  // Departure from Nexus (Nathan, 2026-06-12): the fixed WAV chime no
+  // longer layers UNDER every chosen sound in the foreground — it made
+  // all sound types feel samey. The oscillator plays clean when the
+  // AudioContext is running; the WAV chime is the background-tab
+  // fallback only (where oscillators can't run).
   try {
     const ctx = getAudioCtx();
     if (ctx.state !== "suspended") {
@@ -202,7 +262,6 @@ export function playScheduled(soundType: string, durationType: string, onFinish?
         const now = ctx.currentTime;
         for (let elapsed = cycleMs; elapsed < totalMs; elapsed += cycleMs) {
           playSoundOnce(ctx, soundType, now + elapsed / 1000);
-          setTimeout(() => _playNotifAudio(), elapsed);
         }
         if (onFinish) soundPlayingCallback = onFinish;
         activeSoundTimer = setTimeout(() => {
@@ -226,7 +285,12 @@ export function playScheduled(soundType: string, durationType: string, onFinish?
         }, finishMs);
       }
     } else {
-      // AudioContext suspended (background tab): HTML5 Audio repeats only
+      // AudioContext suspended (background tab): fall back to the WAV
+      // chime via HTML5 Audio, queueing if even that can't play yet.
+      const audioPlayed = _playNotifAudio();
+      if (!audioPlayed && document.hidden) {
+        _soundQueue.push({ soundType, durationType });
+      }
       const totalMs = getSoundDurationMs(durationType);
       if (totalMs > 0) {
         const cycleMs = getSoundCycleMs(soundType);

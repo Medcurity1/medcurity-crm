@@ -426,17 +426,17 @@
       '.meddy-header-icon img{width:28px;height:28px;border-radius:6px;object-fit:cover;}' +
       '.meddy-header-info h3{margin:0;font-size:16px;font-weight:600;}.meddy-header-info p{margin:2px 0 0;font-size:11px;opacity:0.7;}' +
       '.meddy-header-actions{display:flex;align-items:center;gap:4px;}' +
-      '.meddy-human-confirm{position:absolute;top:100%;right:0;margin-top:6px;background:#fff;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,0.15);padding:14px 16px;width:220px;z-index:10;color:#333;font-size:13px;line-height:1.4;}' +
+      '.meddy-human-confirm{position:absolute;top:100%;right:0;margin-top:6px;background:#fff;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,0.18);padding:14px 16px 12px;width:185px;z-index:10;color:#333;font-size:13px;line-height:1.45;text-align:center;}' +
       '.meddy-human-confirm::before{content:"";position:absolute;top:-6px;right:10px;width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:6px solid #fff;}' +
-      '.meddy-human-confirm p{margin:0 0 10px;font-weight:500;}' +
-      '.meddy-human-confirm-yes{background:#C8102E;color:#fff;border:none;padding:7px 0;border-radius:6px;font-size:13px;cursor:pointer;width:100%;font-family:system-ui,-apple-system,sans-serif;transition:background 0.15s;}.meddy-human-confirm-yes:hover{background:#a00d24;}' +
-      '.meddy-human-confirm-cancel{display:block;text-align:center;margin-top:6px;font-size:11px;color:#888;cursor:pointer;text-decoration:underline;background:none;border:none;font-family:system-ui,-apple-system,sans-serif;}' +
+      '.meddy-human-confirm p{margin:0 0 12px;font-weight:600;color:#1B3A5C;}' +
+      '.meddy-human-confirm-yes{background:#C8102E;color:#fff;border:none;padding:8px 0;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;width:100%;font-family:system-ui,-apple-system,sans-serif;transition:background 0.15s;box-shadow:0 2px 6px rgba(200,16,46,0.25);}.meddy-human-confirm-yes:hover{background:#a00d24;}' +
+      '.meddy-human-confirm-cancel{display:block;width:100%;text-align:center;margin-top:8px;padding:4px 0;font-size:12px;color:#999;cursor:pointer;background:none;border:none;font-family:system-ui,-apple-system,sans-serif;}.meddy-human-confirm-cancel:hover{color:#555;}' +
       '.meddy-close{background:none;border:none;color:#fff;font-size:20px;cursor:pointer;padding:4px 8px;opacity:0.7;transition:opacity 0.15s;}.meddy-close:hover{opacity:1;}' +
       '.meddy-header-menu{cursor:pointer;padding:6px;border-radius:50%;display:flex;align-items:center;justify-content:center;transition:background 0.15s;position:relative;background:none;border:none;}.meddy-header-menu:hover{background:rgba(255,255,255,0.15);}' +
       '.meddy-end-confirm-overlay{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.3);z-index:20;display:flex;align-items:center;justify-content:center;border-radius:14px;}' +
-      '.meddy-end-confirm-box{background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 8px 32px rgba(0,0,0,0.2);max-width:260px;width:90%;text-align:center;}' +
-      '.meddy-end-confirm-box p{margin:0 0 16px;font-size:14px;font-weight:500;color:#333;line-height:1.4;}' +
-      '.meddy-end-confirm-yes{background:#C8102E;color:#fff;border:none;padding:9px 0;border-radius:6px;font-size:13px;cursor:pointer;width:100%;font-family:system-ui,-apple-system,sans-serif;transition:background 0.15s;}.meddy-end-confirm-yes:hover{background:#a00d24;}' +
+      '.meddy-end-confirm-box{background:#fff;border-radius:14px;padding:20px 22px 16px;box-shadow:0 12px 36px rgba(0,0,0,0.22);max-width:225px;width:88%;text-align:center;}' +
+      '.meddy-end-confirm-box p{margin:0 0 14px;font-size:14px;font-weight:600;color:#1B3A5C;line-height:1.45;}' +
+      '.meddy-end-confirm-yes{background:#C8102E;color:#fff;border:none;padding:9px 0;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;width:100%;font-family:system-ui,-apple-system,sans-serif;transition:background 0.15s;box-shadow:0 2px 6px rgba(200,16,46,0.25);}.meddy-end-confirm-yes:hover{background:#a00d24;}' +
       '.meddy-end-confirm-cancel{display:block;text-align:center;margin-top:8px;font-size:12px;color:#888;cursor:pointer;background:none;border:none;font-family:system-ui,-apple-system,sans-serif;width:100%;padding:4px;}.meddy-end-confirm-cancel:hover{color:#555;}' +
       // Messages area with fade-in
       '.meddy-messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;scroll-behavior:smooth;animation:meddy-fade-in 0.15s ease;}' +
@@ -472,15 +472,16 @@
       '.meddy-send{background:' + COLORS.primary + ';border:none;width:36px;height:36px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background 0.2s,transform 0.15s;}.meddy-send:hover{background:#a00d24;transform:scale(1.05);}.meddy-send:disabled{background:#ccc;cursor:default;transform:none;}' +
       '.meddy-send svg{width:16px;height:16px;fill:#fff;}' +
       // Footer - very muted
-      '.meddy-footer{text-align:center;padding:4px;font-size:10px;color:#ccc;flex-shrink:0;}.meddy-footer a{color:#ccc;text-decoration:none;}.meddy-footer a:hover{color:#aaa;}' +
-      '.meddy-human-link{text-align:center;padding:2px 0 4px;font-size:11px;position:relative;}' +
+      '.meddy-footer-row{display:flex;align-items:center;justify-content:center;gap:8px;padding:3px 12px 7px;flex-shrink:0;position:relative;}' +
+      '.meddy-footer-human{color:#777;font-size:12px;cursor:pointer;text-decoration:underline;text-underline-offset:2px;font-family:system-ui,-apple-system,sans-serif;}.meddy-footer-human:hover{color:#1B3A5C;}' +
+      '.meddy-footer-dot{color:#ccc;font-size:12px;}' +
+      '.meddy-footer-credit{color:#b5b5b5;font-size:11px;text-decoration:none;font-family:system-ui,-apple-system,sans-serif;}.meddy-footer-credit:hover{color:#999;}' +
       '.meddy-confirm-up{bottom:calc(100% + 8px);top:auto;right:50%;transform:translateX(50%);}' +
       '.meddy-confirm-up::before{top:auto;bottom:-6px;right:50%;margin-right:-6px;border-bottom:none;border-top:6px solid #fff;}' +
       '.meddy-resize{position:absolute;top:0;left:0;width:20px;height:20px;cursor:nwse-resize;z-index:5;pointer-events:none;touch-action:none;}' +
       '.meddy-panel.meddy-open .meddy-resize{pointer-events:auto;}' +
       '.meddy-resize::after{content:"";position:absolute;top:5px;left:5px;width:8px;height:8px;border-top:2px solid rgba(255,255,255,0.55);border-left:2px solid rgba(255,255,255,0.55);border-radius:2px 0 0 0;}' +
-      '.meddy-human-link a{color:#888;cursor:pointer;text-decoration:underline;background:none;border:none;font-size:11px;font-family:system-ui,-apple-system,sans-serif;}.meddy-human-link a:hover{color:' + COLORS.dark + ';}' +
-      // Typing indicator with red dots
+            // Typing indicator with red dots
       '.meddy-typing-wrap{align-self:flex-start;display:flex;flex-direction:column;gap:2px;}' +
       '.meddy-typing-label{font-size:11px;color:#888;font-style:italic;padding-left:4px;}' +
       '.meddy-typing{display:flex;gap:5px;padding:10px 14px;background:' + COLORS.lightGray + ';border-radius:18px;border-bottom-left-radius:4px;box-shadow:0 1px 2px rgba(0,0,0,0.06);}' +
@@ -500,7 +501,7 @@
       '.meddy-slim-send{background:#C8102E;border:none;width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background 0.15s;}.meddy-slim-send:hover{background:#a00d24;}.meddy-slim-send svg{width:13px;height:13px;fill:#fff;}' +
       '.meddy-slim-close{background:none;border:none;color:#bbb;font-size:16px;cursor:pointer;padding:0 2px;line-height:1;flex-shrink:0;transition:color 0.15s;}.meddy-slim-close:hover{color:#666;}' +
       '.meddy-slim-thanks{font-size:13px;color:#1B3A5C;font-weight:500;padding:2px 0;text-align:center;transition:opacity 0.5s ease;}' +
-      '@media(max-width:640px){.meddy-panel{width:100% !important;height:calc(100vh - 80px) !important;bottom:0;right:0;border-radius:14px 14px 0 0;}.meddy-resize{display:none;}.meddy-bubble{bottom:16px;right:16px;}.meddy-greeting{right:16px;bottom:88px;max-width:calc(100vw - 90px);}.meddy-human-link{padding:1px 0 2px;font-size:10px;}.meddy-human-link a{font-size:10px;}.meddy-footer{padding:2px;font-size:9px;}.meddy-footer a{font-size:9px;color:#ccc;}.meddy-slim-row{flex-wrap:wrap;}.meddy-slim-row input{flex:1 1 100%;}.meddy-slim-row .meddy-slim-send,.meddy-slim-row .meddy-slim-close{flex:0 0 auto;}}';
+      '@media(max-width:640px){.meddy-panel{width:100% !important;height:calc(100vh - 80px) !important;bottom:0;right:0;border-radius:14px 14px 0 0;}.meddy-resize{display:none;}.meddy-bubble{bottom:16px;right:16px;}.meddy-greeting{right:16px;bottom:88px;max-width:calc(100vw - 90px);}.meddy-footer-row{padding:2px 10px 5px;gap:6px;}.meddy-footer-human{font-size:11px;}.meddy-footer-credit{font-size:10px;}.meddy-slim-row{flex-wrap:wrap;}.meddy-slim-row input{flex:1 1 100%;}.meddy-slim-row .meddy-slim-send,.meddy-slim-row .meddy-slim-close{flex:0 0 auto;}}';
     shadowRoot.appendChild(style);
   }
 
@@ -534,8 +535,7 @@
       '<div class="meddy-employee-typing" style="display:none;"></div>' +
       '<div class="meddy-char-count" id="meddy-char-count" style="display:none;"></div>' +
       '<div class="meddy-input-area"><textarea class="meddy-input" placeholder="Ask about HIPAA compliance..." rows="1"></textarea><button class="meddy-send" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button></div>' +
-      '<div class="meddy-human-link"><a id="meddy-talk-human-footer">Talk to a human</a></div>' +
-      '<div class="meddy-footer"><a href="https://medcurity.com" target="_blank" rel="noopener">Powered by Medcurity</a></div>';
+      '<div class="meddy-footer-row"><a id="meddy-talk-human-footer" class="meddy-footer-human">Talk to a human</a><span class="meddy-footer-dot">&middot;</span><a class="meddy-footer-credit" href="https://medcurity.com" target="_blank" rel="noopener">Powered by Medcurity</a></div>';
 
     panelEl.querySelector('.meddy-close').addEventListener('click', closePanel);
     messagesEl = panelEl.querySelector('.meddy-messages');
@@ -614,8 +614,12 @@
 
   function syncHumanLinkVisibility() {
     if (!panelEl) return;
-    var link = panelEl.querySelector('.meddy-human-link');
-    if (link) link.style.display = (humanRequested || isTakenOver) ? 'none' : '';
+    // Hide only the link + dot; "Powered by Medcurity" stays.
+    var display = (humanRequested || isTakenOver) ? 'none' : '';
+    var link = panelEl.querySelector('.meddy-footer-human');
+    var dot = panelEl.querySelector('.meddy-footer-dot');
+    if (link) link.style.display = display;
+    if (dot) dot.style.display = display;
   }
 
   function applyPanelSize(w, h) {
@@ -995,7 +999,7 @@
     el.querySelector('.meddy-human-confirm-yes').addEventListener('click', function() { hideHumanConfirm(); requestHuman(); });
     el.querySelector('.meddy-human-confirm-cancel').addEventListener('click', function() { hideHumanConfirm(); });
     el.className = 'meddy-human-confirm meddy-confirm-up';
-    var anchor = panelEl.querySelector('.meddy-human-link');
+    var anchor = panelEl.querySelector('.meddy-footer-row');
     anchor.appendChild(el);
     humanConfirmEl = el;
     // Close on outside click

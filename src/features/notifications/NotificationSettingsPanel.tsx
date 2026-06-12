@@ -22,12 +22,23 @@ import {
   type NotifTypeDef,
 } from "./prefs-api";
 
-// Nexus user-selectable set (urgent/bell/ringbell stay runtime-only).
+// Full audition list (2026-06-12): the 4 Nexus originals plus 10 new
+// candidates. Nathan is picking a top 5 — trim this list once chosen.
 const SOUND_OPTIONS = [
-  { value: "soft", label: "Soft" },
-  { value: "melody", label: "Melody" },
-  { value: "pulse", label: "Pulse" },
-  { value: "chime", label: "Chime" },
+  { value: "soft", label: "Soft (original)" },
+  { value: "melody", label: "Melody (original)" },
+  { value: "pulse", label: "Pulse (original)" },
+  { value: "chime", label: "Chime (original)" },
+  { value: "bubble", label: "Bubble" },
+  { value: "marimba", label: "Marimba" },
+  { value: "ding", label: "Ding" },
+  { value: "doorbell", label: "Doorbell" },
+  { value: "glass", label: "Glass" },
+  { value: "drop", label: "Drop" },
+  { value: "knock", label: "Knock" },
+  { value: "twinkle", label: "Twinkle" },
+  { value: "horn", label: "Horn" },
+  { value: "echo", label: "Echo" },
 ];
 
 // Value 10 repeats for 15s (the engine's "long" cycle) — label says so.

@@ -19,7 +19,7 @@
 // Pipeline parity notes are inline; research: PULSE-GAME-PLAN/meddy-port/.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { MEDDY_SYSTEM_PROMPT } from "../_shared/meddy-prompt.ts";
+import { MEDDY_PROMPT_ADDENDUM, MEDDY_SYSTEM_PROMPT } from "../_shared/meddy-prompt.ts";
 import {
   BUYING_KEYWORDS,
   HUMAN_REQUEST_PHRASES,
@@ -492,6 +492,7 @@ async function handleChat(req: Request, body: Record<string, unknown>) {
           .single();
         const systemPrompt =
           MEDDY_SYSTEM_PROMPT +
+          MEDDY_PROMPT_ADDENDUM +
           "\n\nCURRENT WEBSITE CONTENT (auto-updated daily):\n" +
           (kb?.content ?? "") +
           contextNote;

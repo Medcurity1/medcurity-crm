@@ -22,14 +22,11 @@ interface Announcement {
  * clicks the X or the call-to-action, the banner never reappears for
  * that announcement.
  */
-export const ACTIVE_ANNOUNCEMENT: Announcement | null = {
-  id: "requests-launch-2026-06",
-  title: "New: Requests",
-  message:
-    "Submit collateral, product, and CRM requests right inside the CRM — no more emails.",
-  ctaLabel: "Check it out",
-  ctaRoute: "/requests",
-};
+// Requests launch banner retired 2026-06-12 (Nathan). Next up, when
+// Meddy ships to everyone, something like:
+//   { id: "meddy-launch-2026-XX", title: "New: Meddy", message: "...",
+//     ctaLabel: "Meet Meddy", ctaRoute: "/meddy" }
+export const ACTIVE_ANNOUNCEMENT: Announcement | null = null;
 
 function storageKey(id: string) {
   return `announcement-dismissed:${id}`;
