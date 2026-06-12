@@ -215,7 +215,8 @@ export async function notifyUsers(
       type,
       title,
       message,
-      link: "/meddy",
+      // Deep-link straight to the conversation when we have one.
+      link: conversationId ? `/meddy?conversation=${conversationId}` : "/meddy",
       conversation_id: conversationId ?? null,
     })),
   );

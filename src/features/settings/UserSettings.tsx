@@ -3,9 +3,10 @@ import { useSearchParams } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/PageHeader";
 import { EmailIntegrationSettings } from "@/features/admin/EmailIntegrationSettings";
+import { NotificationSettingsPanel } from "@/features/notifications/NotificationSettingsPanel";
 import { PreferencesPanel } from "./PreferencesPanel";
 
-const VALID_TABS = ["preferences", "email"];
+const VALID_TABS = ["preferences", "email", "notifications"];
 
 /**
  * Self-service settings page available to every authenticated user,
@@ -52,6 +53,7 @@ export function UserSettings() {
         <TabsList>
           <TabsTrigger value="preferences">Preferences</TabsTrigger>
           <TabsTrigger value="email">My Email</TabsTrigger>
+          <TabsTrigger value="notifications">Notifications</TabsTrigger>
         </TabsList>
 
         <TabsContent value="preferences" className="mt-6">
@@ -60,6 +62,10 @@ export function UserSettings() {
 
         <TabsContent value="email" className="mt-6">
           <EmailIntegrationSettings />
+        </TabsContent>
+
+        <TabsContent value="notifications" className="mt-6">
+          <NotificationSettingsPanel />
         </TabsContent>
       </Tabs>
     </div>

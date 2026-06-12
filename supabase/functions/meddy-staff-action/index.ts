@@ -19,6 +19,7 @@ import {
   FORM_ALREADY_CAPTURED,
   FORM_SENT_MESSAGE,
   broadcast,
+  sendPushover,
 } from "../_shared/meddy-core.ts";
 
 const corsHeaders = {
@@ -311,6 +312,29 @@ Deno.serve(async (req) => {
         });
         return json({ success: true, available });
       }
+      // ── Pushover self-test (ports POST /api/pushover/test) ───────
+      // Admins may pass userId to test someone else's key.
+      case "pushover_test": {
+        const targetId =
+          body.userId &&
+          (profile.role === "admin" || profile.role === "super_admin")
+            ? String(body.userId)
+            : caller.id;
+        const { data: row } = await svc
+          .from("user_notification_prefs")
+          .select("pushover_key")
+          .eq("user_id", targetId)
+          .maybeSingle();
+        if (!row?.pushover_key) {
+          return json({ error: "No Pushover key on file" }, 400);
+        }
+        if (!(Deno.env.get("PUSHOVER_APP_TOKEN") ?? "").trim()) {
+          return json({ error: "Pushover app token not configured" }, 400);
+        }
+        await sendPushover(row.pushover_key, "Pulse Test", "Phone notifications are working!");
+        return json({ success: true });
+      }
+
       case "heartbeat": {
         // Bumps last_seen; flips Available back on unless manually Away
         // (ports the WS-connect behavior, server.js:6595-6596).
