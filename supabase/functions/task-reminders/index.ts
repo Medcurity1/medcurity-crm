@@ -38,6 +38,15 @@ interface ActivityRow {
   account_id: string | null;
   contact_id: string | null;
   opportunity_id: string | null;
+  lead_id: string | null;
+  // Joined display names so the reminder email can say WHAT the task is
+  // about and link straight to it (Molly 2026-06-11: "not super
+  // convenient to have to check back in the CRM and find what task this
+  // is"). Same join shape outlook-calendar-sync uses.
+  account?: { id: string; name: string | null } | null;
+  contact?: { id: string; first_name: string | null; last_name: string | null } | null;
+  opportunity?: { id: string; name: string | null } | null;
+  lead?: { id: string; first_name: string | null; last_name: string | null; company: string | null } | null;
 }
 
 interface EmailSyncConnection {
@@ -87,20 +96,82 @@ function nextReminderAt(
 // Graph email (best-effort; silently skipped on 403 / no connection)
 // ---------------------------------------------------------------------------
 
+const APP_BASE = (Deno.env.get("APP_BASE_URL") ?? "https://crm.medcurity.com")
+  .replace(/\/+$/, "");
+
+/** Medcurity works Pacific time; raw toLocaleString() renders UTC and
+ * showed times hours off (Molly's "3:36 PM" reminder). */
+function formatDuePacific(iso: string | null): string | null {
+  if (!iso) return null;
+  return new Date(iso).toLocaleString("en-US", {
+    timeZone: "America/Los_Angeles",
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+/** The records this task is about, with display names + CRM links. */
+function relatedRecords(task: ActivityRow): Array<{ label: string; name: string; url: string }> {
+  const out: Array<{ label: string; name: string; url: string }> = [];
+  if (task.account?.name) {
+    out.push({ label: "Account", name: task.account.name, url: `${APP_BASE}/accounts/${task.account.id}` });
+  }
+  if (task.contact) {
+    const name = [task.contact.first_name, task.contact.last_name].filter(Boolean).join(" ");
+    if (name) out.push({ label: "Contact", name, url: `${APP_BASE}/contacts/${task.contact.id}` });
+  }
+  if (task.opportunity?.name) {
+    out.push({ label: "Opportunity", name: task.opportunity.name, url: `${APP_BASE}/opportunities/${task.opportunity.id}` });
+  }
+  if (task.lead) {
+    const person = [task.lead.first_name, task.lead.last_name].filter(Boolean).join(" ");
+    const name = person && task.lead.company ? `${person} (${task.lead.company})` : person || task.lead.company || "";
+    if (name) out.push({ label: "Lead", name, url: `${APP_BASE}/leads/${task.lead.id}` });
+  }
+  return out;
+}
+
 async function sendEmailReminder(
   accessToken: string,
   toAddress: string,
-  task: ActivityRow
-): Promise<{ ok: boolean; error?: string }> {
-  const dueStr = task.due_at
-    ? new Date(task.due_at).toLocaleString()
-    : "no due date";
+  task: ActivityRow,
+  taskLink: string
+): Promise<{ ok: boolean; status?: number; error?: string }> {
+  const due = formatDuePacific(task.due_at);
+  const related = relatedRecords(task);
+  const primary = related[0]?.name;
 
-  const body = [
-    `<p><strong>Reminder:</strong> ${escapeHtml(task.subject)}</p>`,
-    task.body ? `<p>${escapeHtml(task.body).replace(/\n/g, "<br>")}</p>` : "",
-    `<p style="color:#666"><em>Due: ${escapeHtml(dueStr)}</em></p>`,
-    `<p style="color:#999;font-size:12px">From Pulse</p>`,
+  const relatedRows = related
+    .map(
+      (r) =>
+        `<tr><td style="padding:3px 14px 3px 0;color:#777;font-size:13px;vertical-align:top">${r.label}</td>` +
+        `<td style="padding:3px 0;font-size:13px"><a href="${r.url}" style="color:#127ebf;text-decoration:none;font-weight:bold">${escapeHtml(r.name)}</a></td></tr>`,
+    )
+    .join("");
+
+  const html = [
+    `<div style="margin:0 auto;max-width:560px;font-family:Arial,Helvetica,sans-serif">`,
+    `<div style="background:#14181f;border-radius:10px 10px 0 0;padding:13px 24px">`,
+    `<span style="font-size:19px;font-weight:bold;color:#dfe6ef;letter-spacing:1px">Pulse</span>`,
+    `<span style="float:right;color:#8d99ad;font-size:12px;line-height:23px">Task reminder</span>`,
+    `</div>`,
+    `<div style="border:1px solid #e2e6ec;border-top:0;border-radius:0 0 10px 10px;padding:22px 24px;background:#ffffff">`,
+    `<h2 style="margin:0 0 4px;font-size:18px;color:#121212">${escapeHtml(task.subject)}</h2>`,
+    due
+      ? `<p style="margin:0 0 14px;font-size:13px;color:#888">Due ${escapeHtml(due)} (Pacific)</p>`
+      : `<p style="margin:0 0 14px;font-size:13px;color:#888">No due date</p>`,
+    task.body
+      ? `<p style="margin:0 0 14px;font-size:14px;color:#444;white-space:pre-wrap">${escapeHtml(task.body)}</p>`
+      : "",
+    relatedRows
+      ? `<table style="border-collapse:collapse;margin:0 0 4px">${relatedRows}</table>`
+      : "",
+    `<a href="${taskLink}" style="display:inline-block;margin-top:14px;background:#1d4ed8;color:#ffffff;padding:10px 26px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:bold">Open task in Pulse</a>`,
+    `<p style="margin:18px 0 0;font-size:11px;color:#9aa3af">Sent automatically by Pulse task reminders.</p>`,
+    `</div></div>`,
   ].join("");
 
   const res = await fetch(
@@ -113,8 +184,10 @@ async function sendEmailReminder(
       },
       body: JSON.stringify({
         message: {
-          subject: `Reminder: ${task.subject}`,
-          body: { contentType: "HTML", content: body },
+          subject: primary
+            ? `Reminder: ${task.subject} · ${primary}`
+            : `Reminder: ${task.subject}`,
+          body: { contentType: "HTML", content: html },
           toRecipients: [{ emailAddress: { address: toAddress } }],
         },
         saveToSentItems: true,
@@ -124,7 +197,7 @@ async function sendEmailReminder(
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    return { ok: false, error: `${res.status}: ${text.slice(0, 200)}` };
+    return { ok: false, status: res.status, error: `${res.status}: ${text.slice(0, 200)}` };
   }
   return { ok: true };
 }
@@ -158,10 +231,16 @@ async function processReminder(
         ? `/contacts/${task.contact_id}`
         : task.account_id
           ? `/accounts/${task.account_id}`
-          : `/activities?type=task&owner=me`;
-  const link = task.opportunity_id || task.contact_id || task.account_id
+          : task.lead_id
+            ? `/leads/${task.lead_id}`
+            : `/activities?type=task&owner=me`;
+  const hasRecord =
+    task.opportunity_id || task.contact_id || task.account_id || task.lead_id;
+  const link = hasRecord
     ? `${base}?open_task=${task.id}`
     : `${base}&open_task=${task.id}`;
+  // Absolute version for the email button (in-app uses the relative link).
+  const fullLink = `${APP_BASE}${link}`;
 
   const wantInApp = task.reminder_channels.includes("in_app");
   const wantEmail = task.reminder_channels.includes("email");
@@ -196,7 +275,17 @@ async function processReminder(
           supabase,
           conn as EmailSyncConnection,
         );
-        const result = await sendEmailReminder(token, conn.email_address, task);
+        let result = await sendEmailReminder(token, conn.email_address, task, fullLink);
+        if (!result.ok && result.status === 401) {
+          // Token looked valid but Graph rejected it (e.g. revoked and
+          // reissued). Force one refresh and retry once.
+          const fresh = await ensureValidOutlookToken(
+            supabase,
+            conn as EmailSyncConnection,
+            true,
+          );
+          result = await sendEmailReminder(fresh, conn.email_address, task, fullLink);
+        }
         if (!result.ok) {
           console.warn(
             `task-reminders: email failed for task ${task.id}: ${result.error}`
@@ -253,7 +342,12 @@ serve(async () => {
   const { data: due, error } = await supabase
     .from("activities")
     .select(
-      "id, owner_user_id, subject, body, due_at, reminder_schedule, reminder_at, reminder_channels, account_id, contact_id, opportunity_id"
+      `id, owner_user_id, subject, body, due_at, reminder_schedule, reminder_at, reminder_channels,
+       account_id, contact_id, opportunity_id, lead_id,
+       account:accounts!account_id ( id, name ),
+       contact:contacts!contact_id ( id, first_name, last_name ),
+       opportunity:opportunities!opportunity_id ( id, name ),
+       lead:leads!lead_id ( id, first_name, last_name, company )`
     )
     .neq("reminder_schedule", "none")
     .is("completed_at", null)

@@ -64,8 +64,15 @@ async function refreshOutlookToken(
 export async function ensureValidOutlookToken(
   supabase: DbClient,
   conn: OutlookConn,
+  /**
+   * Skip the not-yet-expired shortcut and refresh unconditionally. Used
+   * to retry once after Graph returns 401 despite a future expiry (e.g.
+   * a revoked-and-reissued token).
+   */
+  force = false,
 ): Promise<string> {
   if (
+    !force &&
     conn.access_token &&
     conn.token_expires_at &&
     new Date(conn.token_expires_at) > new Date(Date.now() + 60_000)
