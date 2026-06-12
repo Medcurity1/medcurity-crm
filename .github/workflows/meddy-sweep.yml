@@ -1,0 +1,43 @@
+name: Meddy Sweep (cron)
+
+# Scheduled safety net for Meddy: missed-chat alerts (5 min), Pushover
+# escalation (2 min), stale-agent availability cleanup. Replaces OG
+# Nexus's in-memory timers (which died on restart). GitHub cron is
+# best-effort timing; */2 in practice fires every ~2-6 minutes, which is
+# acceptable for these windows. Same external-scheduler pattern as
+# sync-emails (pg_net is unreliable for HTTP from Postgres).
+#
+# Hits BOTH environments so staging Meddy testing behaves like prod.
+# The function no-ops cheaply when there's nothing to do.
+
+on:
+  schedule:
+    - cron: "*/2 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: meddy-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sweep staging
+        env:
+          URL: ${{ secrets.STAGING_VITE_SUPABASE_URL }}
+          KEY: ${{ secrets.STAGING_VITE_SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then echo "staging secrets unset; skipping"; exit 0; fi
+          curl -s -X POST "$URL/functions/v1/meddy-sweep" \
+            -H "Authorization: Bearer $KEY" -H "apikey: $KEY" \
+            -H "Content-Type: application/json" -d '{}' | head -c 300 || true
+      - name: Sweep production
+        env:
+          URL: ${{ secrets.PRODUCTION_VITE_SUPABASE_URL }}
+          KEY: ${{ secrets.PRODUCTION_VITE_SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then echo "production secrets unset; skipping"; exit 0; fi
+          curl -s -X POST "$URL/functions/v1/meddy-sweep" \
+            -H "Authorization: Bearer $KEY" -H "apikey: $KEY" \
+            -H "Content-Type: application/json" -d '{}' | head -c 300 || true
