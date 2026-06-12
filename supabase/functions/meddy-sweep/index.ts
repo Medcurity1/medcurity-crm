@@ -50,15 +50,26 @@ Deno.serve(async (req) => {
   }
   if (retention) {
     const cutoff = new Date(now - 90 * 24 * 60 * 60 * 1000).toISOString();
-    const { data: old } = await svc
-      .from("meddy_conversations")
-      .select("id")
-      .lt("created_at", cutoff);
-    const { data: savedRows } = await svc
-      .from("meddy_saved_conversations")
-      .select("conversation_id");
-    const saved = new Set((savedRows ?? []).map((r) => r.conversation_id as string));
-    const purgeIds = (old ?? []).map((r) => r.id as string).filter((id) => !saved.has(id));
+    // Page past PostgREST's 1000-row cap — a silently truncated saved-set
+    // would make saved transcripts purgeable.
+    const fetchAll = async (table: string, col: string, apply?: (q: any) => any) => {
+      const out: string[] = [];
+      for (let from = 0; ; from += 1000) {
+        let q = svc.from(table).select(col).order(col).range(from, from + 999);
+        if (apply) q = apply(q);
+        const { data, error } = await q;
+        if (error) throw error;
+        const rows = data ?? [];
+        for (const r of rows) out.push((r as Record<string, string>)[col]);
+        if (rows.length < 1000) break;
+      }
+      return out;
+    };
+    const oldIds = await fetchAll("meddy_conversations", "id", (q) =>
+      q.lt("created_at", cutoff),
+    );
+    const saved = new Set(await fetchAll("meddy_saved_conversations", "conversation_id"));
+    const purgeIds = oldIds.filter((id) => !saved.has(id));
     // Chunked deletes; messages/urls/agents cascade via FK.
     for (let i = 0; i < purgeIds.length; i += 100) {
       const chunk = purgeIds.slice(i, i + 100);

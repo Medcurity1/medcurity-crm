@@ -227,7 +227,14 @@
   }
 
   function renderLinks(text) {
-    return text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" style="color:#1B3A5C;text-decoration:underline;">$1</a>');
+    return text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(m, label, url) {
+      // Only explicit http(s)/mailto links become anchors; everything else
+      // stays literal text (blocks javascript: and attribute breakout).
+      var u = url.replace(/^[\s\u0000-\u001f]+/, '');
+      if (!/^(https?:|mailto:)/i.test(u)) return m;
+      var safeUrl = u.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return '<a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" style="color:#1B3A5C;text-decoration:underline;">' + label + '</a>';
+    });
   }
 
   function escapeHtml(text) {
@@ -278,8 +285,9 @@
   function subscribeChannel() {
     if (!sbClient) return;
     if (sbChannel) { try { sbClient.removeChannel(sbChannel); } catch (e) {} sbChannel = null; }
-    sbChannel = sbClient.channel('meddy:conv:' + sessionId, { config: { broadcast: { self: false } } });
-    sbChannel
+    var ch = sbClient.channel('meddy:conv:' + sessionId, { config: { broadcast: { self: false } } });
+    sbChannel = ch;
+    ch
       .on('broadcast', { event: 'new-message' }, function(e) { handleRtMessage(e.payload); })
       .on('broadcast', { event: 'taken-over' }, function() {
         isTakenOver = true; clearTimeout(humanRequestTimeout); humanRequestTimeout = null;
@@ -307,6 +315,7 @@
       .on('broadcast', { event: 'ai-typing' }, function() { showAiTypingIndicator(); })
       .on('broadcast', { event: 'ai-typing-stop' }, function() { hideAiTypingIndicator(); })
       .subscribe(function(status) {
+        if (ch !== sbChannel) return; // stale channel from an end/reset swap
         if (status === 'SUBSCRIBED') {
           if (disconnectTimer) { clearTimeout(disconnectTimer); disconnectTimer = null; }
           if (intentionalDisconnect) {
@@ -408,7 +417,7 @@
       '.meddy-greeting::after{content:"";position:absolute;bottom:-8px;right:30px;width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-top:8px solid #fff;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.06));}' +
       '.meddy-greeting-close{position:absolute;top:4px;right:4px;background:none;border:none;font-size:18px;cursor:pointer;color:#999;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:50%;transition:background 0.15s,color 0.15s;line-height:1;}.meddy-greeting-close:hover{background:#f0f0f0;color:#555;}' +
       // Panel
-      '.meddy-panel{position:fixed;bottom:24px;right:24px;width:380px;height:520px;background:#fff;border-radius:14px;box-shadow:0 8px 40px rgba(0,0,0,0.18);z-index:99999;display:flex;flex-direction:column;overflow:hidden;opacity:0;transform:translateY(20px) scale(0.95);transition:opacity 0.25s ease,transform 0.25s ease;pointer-events:none;font-family:system-ui,-apple-system,sans-serif;color:' + COLORS.text + ';font-size:14px;line-height:1.45;}' +
+      '.meddy-panel{position:fixed;bottom:24px;right:24px;width:380px;height:520px;max-width:calc(100vw - 48px);max-height:calc(100vh - 48px);background:#fff;border-radius:14px;box-shadow:0 8px 40px rgba(0,0,0,0.18);z-index:99999;display:flex;flex-direction:column;overflow:hidden;opacity:0;transform:translateY(20px) scale(0.95);transition:opacity 0.25s ease,transform 0.25s ease;pointer-events:none;font-family:system-ui,-apple-system,sans-serif;color:' + COLORS.text + ';font-size:14px;line-height:1.45;}' +
       '.meddy-panel.meddy-open{opacity:1;transform:translateY(0) scale(1);pointer-events:auto !important;}' +
       // Header with gradient
       '.meddy-header{background:linear-gradient(135deg,#1B3A5C 0%,#243f5f 100%);color:#fff;padding:10px 12px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}' +
@@ -417,7 +426,6 @@
       '.meddy-header-icon img{width:28px;height:28px;border-radius:6px;object-fit:cover;}' +
       '.meddy-header-info h3{margin:0;font-size:16px;font-weight:600;}.meddy-header-info p{margin:2px 0 0;font-size:11px;opacity:0.7;}' +
       '.meddy-header-actions{display:flex;align-items:center;gap:4px;}' +
-      '.meddy-header-human{cursor:pointer;padding:6px;border-radius:50%;display:flex;align-items:center;justify-content:center;transition:background 0.15s;position:relative;}.meddy-header-human:hover{background:rgba(255,255,255,0.15);}' +
       '.meddy-human-confirm{position:absolute;top:100%;right:0;margin-top:6px;background:#fff;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,0.15);padding:14px 16px;width:220px;z-index:10;color:#333;font-size:13px;line-height:1.4;}' +
       '.meddy-human-confirm::before{content:"";position:absolute;top:-6px;right:10px;width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:6px solid #fff;}' +
       '.meddy-human-confirm p{margin:0 0 10px;font-weight:500;}' +
@@ -425,9 +433,6 @@
       '.meddy-human-confirm-cancel{display:block;text-align:center;margin-top:6px;font-size:11px;color:#888;cursor:pointer;text-decoration:underline;background:none;border:none;font-family:system-ui,-apple-system,sans-serif;}' +
       '.meddy-close{background:none;border:none;color:#fff;font-size:20px;cursor:pointer;padding:4px 8px;opacity:0.7;transition:opacity 0.15s;}.meddy-close:hover{opacity:1;}' +
       '.meddy-header-menu{cursor:pointer;padding:6px;border-radius:50%;display:flex;align-items:center;justify-content:center;transition:background 0.15s;position:relative;background:none;border:none;}.meddy-header-menu:hover{background:rgba(255,255,255,0.15);}' +
-      '.meddy-menu-dropdown{position:absolute;top:100%;right:0;margin-top:6px;background:#fff;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.15);padding:4px 0;min-width:170px;z-index:10;}' +
-      '.meddy-menu-dropdown::before{content:"";position:absolute;top:-6px;right:10px;width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:6px solid #fff;}' +
-      '.meddy-menu-item{display:block;width:100%;padding:9px 14px;font-size:13px;color:#333;background:none;border:none;text-align:left;cursor:pointer;font-family:system-ui,-apple-system,sans-serif;transition:background 0.1s;}.meddy-menu-item:hover{background:#f5f5f5;}' +
       '.meddy-end-confirm-overlay{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.3);z-index:20;display:flex;align-items:center;justify-content:center;border-radius:14px;}' +
       '.meddy-end-confirm-box{background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 8px 32px rgba(0,0,0,0.2);max-width:260px;width:90%;text-align:center;}' +
       '.meddy-end-confirm-box p{margin:0 0 16px;font-size:14px;font-weight:500;color:#333;line-height:1.4;}' +
@@ -470,8 +475,9 @@
       '.meddy-footer{text-align:center;padding:4px;font-size:10px;color:#ccc;flex-shrink:0;}.meddy-footer a{color:#ccc;text-decoration:none;}.meddy-footer a:hover{color:#aaa;}' +
       '.meddy-human-link{text-align:center;padding:2px 0 4px;font-size:11px;position:relative;}' +
       '.meddy-confirm-up{bottom:calc(100% + 8px);top:auto;right:50%;transform:translateX(50%);}' +
-      '.meddy-confirm-up::before{top:auto;bottom:-6px;border-bottom:none;border-top:6px solid #fff;}' +
-      '.meddy-resize{position:absolute;top:0;left:0;width:20px;height:20px;cursor:nwse-resize;z-index:5;pointer-events:auto;}' +
+      '.meddy-confirm-up::before{top:auto;bottom:-6px;right:50%;margin-right:-6px;border-bottom:none;border-top:6px solid #fff;}' +
+      '.meddy-resize{position:absolute;top:0;left:0;width:20px;height:20px;cursor:nwse-resize;z-index:5;pointer-events:none;touch-action:none;}' +
+      '.meddy-panel.meddy-open .meddy-resize{pointer-events:auto;}' +
       '.meddy-resize::after{content:"";position:absolute;top:5px;left:5px;width:8px;height:8px;border-top:2px solid rgba(255,255,255,0.55);border-left:2px solid rgba(255,255,255,0.55);border-radius:2px 0 0 0;}' +
       '.meddy-human-link a{color:#888;cursor:pointer;text-decoration:underline;background:none;border:none;font-size:11px;font-family:system-ui,-apple-system,sans-serif;}.meddy-human-link a:hover{color:' + COLORS.dark + ';}' +
       // Typing indicator with red dots
@@ -584,6 +590,7 @@
     } catch (e) {}
     var startX, startY, startW, startH, resizing = false;
     handle.addEventListener('pointerdown', function(e) {
+      if (!isOpen) return;
       e.preventDefault();
       resizing = true;
       startX = e.clientX; startY = e.clientY;

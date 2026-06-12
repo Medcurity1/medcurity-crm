@@ -354,23 +354,24 @@ function PushoverTeamSection() {
 
   const saveKey = useMutation({
     mutationFn: async ({ userId, key }: { userId: string; key: string }) => {
-      const { data: existing } = await supabase
+      // UPDATE only the key column so a concurrent prefs save by that user
+      // is never clobbered with a stale snapshot; INSERT when no row yet.
+      const { data: updated, error: updErr } = await supabase
         .from("user_notification_prefs")
-        .select("prefs")
+        .update({ pushover_key: key.trim() || null })
         .eq("user_id", userId)
-        .maybeSingle();
-      const { error } = await supabase.from("user_notification_prefs").upsert(
-        {
-          user_id: userId,
-          prefs: existing?.prefs ?? {},
-          pushover_key: key.trim() || null,
-        },
-        { onConflict: "user_id" },
-      );
-      if (error) throw error;
+        .select("user_id");
+      if (updErr) throw updErr;
+      if ((updated ?? []).length === 0) {
+        const { error } = await supabase
+          .from("user_notification_prefs")
+          .insert({ user_id: userId, pushover_key: key.trim() || null });
+        if (error) throw error;
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["meddy-pushover-team"] });
+      qc.invalidateQueries({ queryKey: ["notif-prefs"] });
       toast.success("Key saved");
     },
     onError: (err) => toast.error((err as Error).message),

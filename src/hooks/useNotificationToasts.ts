@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { useNotifPrefs } from "@/features/notifications/prefs-api";
+import { DEFAULT_DURATIONS, useNotifPrefs } from "@/features/notifications/prefs-api";
 import {
   NOTIF_TYPE_FALLBACK_SOUNDS,
   durationTypeFromSeconds,
@@ -105,14 +105,13 @@ export function useNotificationToasts() {
         }
         return;
       }
+      const durVal = Number(prefs[`duration_${key}`] ?? DEFAULT_DURATIONS[key] ?? 5);
       if (soundOn) {
         const soundType =
           (prefs[`soundtype_${key}`] as string) || NOTIF_TYPE_FALLBACK_SOUNDS[key] || "chime";
-        const durVal = Number(prefs[`duration_${key}`] ?? 0);
         playScheduled(soundType, durationTypeFromSeconds(durVal));
       }
       if (bannerOn) {
-        const durVal = Number(prefs[`duration_${key}`] ?? 5);
         toast(n.title, {
           description: n.message ?? undefined,
           duration: (durVal > 0 ? durVal : 2) * 1000,

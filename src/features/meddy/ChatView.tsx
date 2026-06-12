@@ -95,6 +95,7 @@ export function ChatView({ conversation: c }: Props) {
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const typingSentRef = useRef(false);
+  const employeeTypingStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const channel = supabase.channel(`meddy:conv:${c.visitor_id}`, {
       config: { broadcast: { self: false } },
@@ -110,12 +111,15 @@ export function ChatView({ conversation: c }: Props) {
     channelRef.current = channel;
     return () => {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      // Reset employee-typing state so a conversation switch can't suppress
+      // the indicator on the new channel or fire a stale stop on the old one.
+      if (employeeTypingStopRef.current) clearTimeout(employeeTypingStopRef.current);
+      employeeTypingStopRef.current = null;
+      typingSentRef.current = false;
       channelRef.current = null;
       supabase.removeChannel(channel);
     };
   }, [c.visitor_id]);
-
-  const employeeTypingStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   function emitEmployeeTyping() {
     if (!canChat || whisper) return;
     const ch = channelRef.current;

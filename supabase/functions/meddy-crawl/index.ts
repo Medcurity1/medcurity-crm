@@ -67,14 +67,13 @@ async function fetchCrawlPage(
   url: string,
 ): Promise<{ html?: string; error?: string; url: string }> {
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    // AbortSignal.timeout covers the BODY read too — a server that sends
+    // headers then stalls the body can't hang the crawl loop.
     const res = await fetch(url, {
       headers: { "User-Agent": "MeddyCrawler/1.0 (Medcurity chatbot knowledge updater)" },
       redirect: "follow",
-      signal: controller.signal,
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    clearTimeout(timer);
     if (!res.ok) {
       await res.body?.cancel();
       return { error: `HTTP ${res.status}`, url };
@@ -91,7 +90,8 @@ async function fetchCrawlPage(
     }
     return { html: await res.text(), url };
   } catch (e) {
-    const msg = (e as Error).name === "AbortError" ? "Timeout" : (e as Error).message;
+    const name = (e as Error).name;
+    const msg = name === "AbortError" || name === "TimeoutError" ? "Timeout" : (e as Error).message;
     return { error: msg, url };
   }
 }
@@ -161,7 +161,12 @@ function getCrawlPriority(url: string): number {
   return PRIORITY_PATTERNS.length;
 }
 
-async function doCrawl() {
+// Hard wall-clock budget: finish packing + logging well before the edge
+// runtime's background-task kill (worst case 100 pages of slow fetches
+// would otherwise exceed it and lose the whole crawl).
+const CRAWL_BUDGET_MS = 240_000;
+
+async function doCrawl(logId: number) {
   const startTime = Date.now();
   const visited = new Set<string>();
   const queue: Array<{ url: string; depth: number }> = [
@@ -171,6 +176,10 @@ async function doCrawl() {
   const errors: Array<{ url: string; error: string }> = [];
 
   while (queue.length > 0 && visited.size < MAX_PAGES) {
+    if (Date.now() - startTime > CRAWL_BUDGET_MS) {
+      errors.push({ url: "(crawl)", error: "Stopped at time budget" });
+      break;
+    }
     const item = queue.shift()!;
     if (visited.has(item.url)) continue;
     if (item.depth > MAX_DEPTH) continue;
@@ -249,16 +258,19 @@ async function doCrawl() {
       .eq("id", 1);
   }
 
-  await svc.from("meddy_crawl_logs").insert({
-    pages_discovered: visited.size,
-    pages_crawled: pages.length,
-    pages_included: includedPages.length,
-    content_size: output.length,
-    estimated_tokens: sitemap.estimatedTokens,
-    errors: errors.length,
-    error_details: errors,
-    duration_seconds: Math.round(elapsed * 10) / 10,
-  });
+  await svc
+    .from("meddy_crawl_logs")
+    .update({
+      pages_discovered: visited.size,
+      pages_crawled: pages.length,
+      pages_included: includedPages.length,
+      content_size: output.length,
+      estimated_tokens: sitemap.estimatedTokens,
+      errors: errors.length,
+      error_details: errors,
+      duration_seconds: Math.round(elapsed * 10) / 10,
+    })
+    .eq("id", logId);
 
   console.log(
     `[crawler] Complete in ${elapsed.toFixed(1)}s. Discovered: ${visited.size}, ` +
@@ -278,7 +290,10 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Cooldown: skip if a crawl ran (or started) in the last 10 minutes.
+  // Cooldown: skip if a crawl ran OR STARTED in the last 10 minutes. The
+  // log row is inserted up-front (zeros, filled in on completion), so
+  // concurrent triggers see it immediately — this is the abuse control
+  // for the anon-invocable endpoint.
   const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   const { data: recent } = await svc
     .from("meddy_crawl_logs")
@@ -290,8 +305,19 @@ Deno.serve(async (req) => {
       headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
     });
   }
+  const { data: logRow, error: logErr } = await svc
+    .from("meddy_crawl_logs")
+    .insert({})
+    .select("id")
+    .single();
+  if (logErr || !logRow) {
+    return new Response(JSON.stringify({ error: "could not start crawl" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+    });
+  }
 
-  const work = doCrawl().catch((e) => console.error("[crawler] failed:", e));
+  const work = doCrawl(logRow.id).catch((e) => console.error("[crawler] failed:", e));
   if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) {
     EdgeRuntime.waitUntil(work);
   } else {

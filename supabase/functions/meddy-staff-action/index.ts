@@ -331,7 +331,14 @@ Deno.serve(async (req) => {
         if (!(Deno.env.get("PUSHOVER_APP_TOKEN") ?? "").trim()) {
           return json({ error: "Pushover app token not configured" }, 400);
         }
-        await sendPushover(row.pushover_key, "Pulse Test", "Phone notifications are working!");
+        const sent = await sendPushover(
+          row.pushover_key,
+          "Pulse Test",
+          "Phone notifications are working!",
+        );
+        if (!sent) {
+          return json({ error: "Pushover rejected the push - check the key" }, 400);
+        }
         return json({ success: true });
       }
 

@@ -113,6 +113,12 @@ export function defaultsFor(def: NotifTypeDef): NotifPrefs {
   };
 }
 
+/** Per-type default duration (seconds) — keeps the delivery engine's
+ * fallback in sync with what the settings rows display. */
+export const DEFAULT_DURATIONS: Record<string, number> = Object.fromEntries(
+  [...MEDDY_NOTIF_TYPES, ...CRM_NOTIF_TYPES].map((t) => [t.key, t.defDuration]),
+);
+
 export function useNotifPrefs() {
   const { user } = useAuth();
   return useQuery<{ prefs: NotifPrefs; pushover_key: string | null }>({
@@ -138,6 +144,9 @@ export function useUpdateNotifPrefs() {
   const qc = useQueryClient();
   const { user } = useAuth();
   return useMutation({
+    // Scope serializes prefs writes app-wide: a second toggle never reads
+    // the row before the first one's upsert commits (lost-update fix).
+    scope: { id: "notif-prefs" },
     mutationFn: async (patch: NotifPrefs) => {
       const { data: existing, error: readErr } = await supabase
         .from("user_notification_prefs")
@@ -169,22 +178,23 @@ export function useSavePushoverKey() {
   const qc = useQueryClient();
   const { user } = useAuth();
   return useMutation({
+    scope: { id: "notif-prefs" },
     mutationFn: async (key: string) => {
       const trimmed = key.trim();
-      const { data: existing } = await supabase
+      // UPDATE first so a concurrent prefs save is never overwritten with
+      // a stale snapshot; INSERT only when no row exists yet.
+      const { data: updated, error: updErr } = await supabase
         .from("user_notification_prefs")
-        .select("prefs")
+        .update({ pushover_key: trimmed || null })
         .eq("user_id", user!.id)
-        .maybeSingle();
-      const { error } = await supabase.from("user_notification_prefs").upsert(
-        {
-          user_id: user!.id,
-          prefs: (existing?.prefs ?? {}) as NotifPrefs,
-          pushover_key: trimmed || null,
-        },
-        { onConflict: "user_id" },
-      );
-      if (error) throw error;
+        .select("user_id");
+      if (updErr) throw updErr;
+      if ((updated ?? []).length === 0) {
+        const { error } = await supabase
+          .from("user_notification_prefs")
+          .insert({ user_id: user!.id, pushover_key: trimmed || null });
+        if (error) throw error;
+      }
       return trimmed || null;
     },
     onSuccess: () => {

@@ -27,9 +27,11 @@ function applyConvEmbedOptions<
   T extends {
     order: (col: string, opts: Record<string, unknown>) => T;
     limit: (n: number, opts: Record<string, unknown>) => T;
+    eq: (col: string, val: unknown) => T;
   },
 >(q: T): T {
   return q
+    .eq("last.is_internal", false) // previews never show whispers/alerts
     .order("created_at", { referencedTable: "last", ascending: false })
     .limit(1, { referencedTable: "last" });
 }
@@ -66,7 +68,8 @@ export async function staffAction(
 export function useMeddyConversations() {
   const { user } = useAuth();
   return useQuery<ConversationLists>({
-    queryKey: ["meddy-conversations"],
+    queryKey: ["meddy-conversations", user?.id],
+    enabled: !!user?.id,
     refetchInterval: 30_000, // safety net behind realtime
     queryFn: async () => {
       const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -85,7 +88,7 @@ export function useMeddyConversations() {
           supabase
             .from("meddy_saved_conversations")
             .select("conversation_id")
-            .eq("user_id", user?.id ?? ""),
+            .eq("user_id", user!.id),
         ]);
       if (dayErr) throw dayErr;
       if (savedErr) throw savedErr;
@@ -331,7 +334,7 @@ export function useReopenConversation() {
 export function useHideLead() {
   return useConvAction("hide_lead", {
     successToast: "Lead hidden",
-    extraKeys: () => [["meddy-history"], ["meddy-leads"]],
+    extraKeys: () => [["meddy-history"], ["meddy-stats"]],
   });
 }
 
@@ -368,6 +371,7 @@ export function useToggleSave() {
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ["meddy-conversations"] });
       qc.invalidateQueries({ queryKey: ["meddy-saved-ids"] });
+      qc.invalidateQueries({ queryKey: ["meddy-history"] });
       toast.success(vars.save ? "Conversation saved" : "Conversation unsaved");
     },
     onError: (err) => toast.error((err as Error).message),
@@ -381,7 +385,8 @@ export type HistoryFilter = "all" | "contact" | "today" | "week" | "takeover" | 
 export function useMeddyHistory(filter: HistoryFilter, search: string) {
   const { user } = useAuth();
   return useQuery<MeddyConversation[]>({
-    queryKey: ["meddy-history", filter, search],
+    queryKey: ["meddy-history", filter, search, user?.id],
+    enabled: !!user?.id,
     queryFn: async () => {
       let q = supabase.from("meddy_conversations").select(CONV_SELECT);
 
@@ -400,7 +405,7 @@ export function useMeddyHistory(filter: HistoryFilter, search: string) {
         const { data: savedRows, error: savedErr } = await supabase
           .from("meddy_saved_conversations")
           .select("conversation_id")
-          .eq("user_id", user?.id ?? "");
+          .eq("user_id", user!.id);
         if (savedErr) throw savedErr;
         const ids = (savedRows ?? []).map((r) => r.conversation_id as string);
         if (ids.length === 0) return [];
@@ -408,7 +413,9 @@ export function useMeddyHistory(filter: HistoryFilter, search: string) {
       }
       const s = search.trim();
       if (s) {
-        const esc = s.replace(/[%_,()]/g, "");
+        // Escape LIKE wildcards so "_" and "%" match literally; strip the
+        // characters PostgREST's or() syntax can't carry safely.
+        const esc = s.replace(/[\\%_]/g, (ch) => `\\${ch}`).replace(/[,()]/g, "");
         q = q.or(`visitor_name.ilike.%${esc}%,visitor_email.ilike.%${esc}%`);
       }
       const { data, error } = await applyConvEmbedOptions(

@@ -2,9 +2,12 @@ name: Meddy Sweep (cron)
 
 # Scheduled safety net for Meddy: missed-chat alerts (5 min), Pushover
 # escalation (2 min), stale-agent availability cleanup. Replaces OG
-# Nexus's in-memory timers (which died on restart). GitHub cron is
-# best-effort timing; */2 in practice fires every ~2-6 minutes, which is
-# acceptable for these windows. Same external-scheduler pattern as
+# Nexus's in-memory timers (which died on restart). NOTE on timing:
+# GitHub Actions' real scheduling floor is ~5 minutes with added jitter,
+# so these sweeps fire roughly every 5-15 minutes regardless of the cron
+# string — the "2 minute" escalation is therefore "2 minutes after the
+# request, checked at the next sweep". The sweep's DB-flag idempotency
+# is what makes that safe. Same external-scheduler pattern as
 # sync-emails (pg_net is unreliable for HTTP from Postgres).
 #
 # Hits BOTH environments so staging Meddy testing behaves like prod.
@@ -12,7 +15,7 @@ name: Meddy Sweep (cron)
 
 on:
   schedule:
-    - cron: "*/2 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
 concurrency:

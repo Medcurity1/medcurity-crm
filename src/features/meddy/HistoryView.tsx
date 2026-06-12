@@ -80,7 +80,18 @@ export function HistoryView() {
             {leads.length === 0 ? (
               <p className="py-1 text-xs text-muted-foreground">No leads captured yet.</p>
             ) : (
-              leads.slice(0, 20).map((c) => <LeadRow key={c.id} conversation={c} isAdmin={isAdmin} />)
+              <>
+                {leads.slice(0, 20).map((c) => (
+                  <LeadRow key={c.id} conversation={c} isAdmin={isAdmin} />
+                ))}
+                {leads.length > 20 && (
+                  <p className="py-1 text-[11px] text-muted-foreground">
+                    Showing the 20 most recent of {leads.length}
+                    {leads.length >= 200 ? "+" : ""} — use the Has Contact Info filter below for
+                    the full list.
+                  </p>
+                )}
+              </>
             )}
           </div>
         )}

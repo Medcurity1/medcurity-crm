@@ -228,9 +228,9 @@ export async function sendPushover(
   title: string,
   message: string,
   opts?: { priority?: number; url?: string },
-): Promise<void> {
+): Promise<boolean> {
   const token = (Deno.env.get("PUSHOVER_APP_TOKEN") ?? "").trim();
-  if (!token || !userKey) return;
+  if (!token || !userKey) return false;
   const priority = opts?.priority ?? 0;
   const body: Record<string, string | number> = {
     token,
@@ -247,13 +247,22 @@ export async function sendPushover(
     body.expire = 300;
   }
   try {
-    await fetch("https://api.pushover.net/1/messages.json", {
+    const res = await fetch("https://api.pushover.net/1/messages.json", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+    const data = await res.json().catch(() => null);
+    // Pushover returns {status: 1} on success; anything else (bad key,
+    // bad token) is a real failure callers may want to surface.
+    if (data?.status !== 1) {
+      console.warn("pushover rejected:", JSON.stringify(data?.errors ?? data));
+      return false;
+    }
+    return true;
   } catch (e) {
     console.warn("pushover failed:", (e as Error).message);
+    return false;
   }
 }
 
