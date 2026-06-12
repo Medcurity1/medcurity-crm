@@ -17,6 +17,7 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { IdleWarningDialog } from "@/components/IdleWarningDialog";
 import { AnnouncementBanner } from "@/components/AnnouncementBanner";
+import { NotificationPermissionPrompt } from "@/components/NotificationPermissionPrompt";
 import { NewYearCelebration } from "@/components/seasonal/NewYearCelebration";
 
 const pathMap: Record<string, string> = {
@@ -191,6 +192,9 @@ export function AppLayout() {
             the persistent shell so it stays until dismissed, even across
             navigation. No-op when ACTIVE_ANNOUNCEMENT is null. */}
         <AnnouncementBanner />
+        {/* One-time desktop-notification permission nudge (snoozes 14
+            days on "Not now"; disappears forever once answered). */}
+        <NotificationPermissionPrompt />
         {/* Widened content area: 2xl caps at 1536px (was 7xl=1280px) so
             data tables (opportunities list, reports, etc.) have more
             horizontal room without having to scroll. Brayden 2026-04-17. */}

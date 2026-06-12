@@ -1,7 +1,8 @@
-import type { ComponentType } from "react";
+import { useState, type ComponentType } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Bell,
+  Bot,
   CheckCheck,
   CheckSquare,
   Calendar,
@@ -9,11 +10,12 @@ import {
   AtSign,
   Mail,
   Info,
+  Trash2,
   X,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { formatRelativeDate } from "@/lib/formatters";
 import {
   useNotifications,
@@ -21,6 +23,7 @@ import {
   useMarkAsRead,
   useMarkAllAsRead,
   useDeleteNotification,
+  useClearAllNotifications,
 } from "@/features/notifications/notifications-api";
 import type { Notification } from "@/types/crm";
 
@@ -31,6 +34,11 @@ const typeIcon: Record<Notification["type"], ComponentType<{ className?: string 
   mention: AtSign,
   engagement: Mail,
   system: Info,
+  meddy_new_chat: Bot,
+  meddy_human_requested: Bot,
+  meddy_buying_intent: Bot,
+  meddy_missed_chat: Bot,
+  meddy_contact_received: Bot,
 };
 
 const typeColor: Record<Notification["type"], string> = {
@@ -40,15 +48,23 @@ const typeColor: Record<Notification["type"], string> = {
   mention: "text-purple-600",
   engagement: "text-indigo-600",
   system: "text-muted-foreground",
+  // Meddy dot colors carried over from Nexus (NOTIF_TYPE_COLORS).
+  meddy_new_chat: "text-sky-600",
+  meddy_human_requested: "text-red-600",
+  meddy_buying_intent: "text-amber-500",
+  meddy_missed_chat: "text-red-500",
+  meddy_contact_received: "text-green-600",
 };
 
 export function NotificationsDropdown() {
   const navigate = useNavigate();
-  const { data: notifications = [] } = useNotifications(10);
+  const { data: notifications = [] } = useNotifications(30);
   const { data: unreadCount = 0 } = useUnreadCount();
   const markAsRead = useMarkAsRead();
   const markAllAsRead = useMarkAllAsRead();
   const deleteNotification = useDeleteNotification();
+  const clearAll = useClearAllNotifications();
+  const [confirmClear, setConfirmClear] = useState(false);
 
   const handleClick = (n: Notification) => {
     if (!n.is_read) {
@@ -76,25 +92,40 @@ export function NotificationsDropdown() {
           )}
         </Button>
       </PopoverTrigger>
+      {/* Solid, opaque surface — readability beats see-through cool. */}
       <PopoverContent
         align="end"
         sideOffset={8}
-        className="w-[380px] p-0"
+        className="w-[380px] border-border bg-popover p-0 shadow-xl"
       >
-        <div className="flex items-center justify-between border-b border-border px-4 py-2">
+        <div className="flex items-center justify-between gap-1 border-b border-border bg-muted/40 px-4 py-2">
           <div className="text-sm font-semibold">Notifications</div>
-          {unreadCount > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1 text-xs"
-              onClick={() => markAllAsRead.mutate()}
-              disabled={markAllAsRead.isPending}
-            >
-              <CheckCheck className="h-3 w-3" />
-              Mark all as read
-            </Button>
-          )}
+          <div className="flex items-center gap-1">
+            {unreadCount > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 text-xs"
+                onClick={() => markAllAsRead.mutate()}
+                disabled={markAllAsRead.isPending}
+              >
+                <CheckCheck className="h-3 w-3" />
+                Mark all read
+              </Button>
+            )}
+            {notifications.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 text-xs text-muted-foreground"
+                onClick={() => setConfirmClear(true)}
+                disabled={clearAll.isPending}
+              >
+                <Trash2 className="h-3 w-3" />
+                Clear all
+              </Button>
+            )}
+          </div>
         </div>
 
         {notifications.length === 0 ? (
@@ -105,20 +136,23 @@ export function NotificationsDropdown() {
             </p>
           </div>
         ) : (
-          <ScrollArea className="max-h-[400px]">
+          // Plain overflow container: caps the dropdown height and scrolls
+          // inside the box (the old ScrollArea never actually constrained
+          // its viewport, so long lists ran off the screen).
+          <div className="max-h-[min(60vh,420px)] overflow-y-auto overscroll-contain">
             <ul className="divide-y divide-border">
               {notifications.map((n) => {
                 const Icon = typeIcon[n.type] ?? Info;
                 return (
                   <li
                     key={n.id}
-                    className={`group relative flex gap-3 px-4 py-3 hover:bg-accent/50 ${
-                      !n.is_read ? "bg-accent/20" : ""
+                    className={`group relative flex gap-3 px-4 py-3 transition-colors hover:bg-accent ${
+                      !n.is_read ? "bg-accent/40" : ""
                     } ${n.link ? "cursor-pointer" : ""}`}
                     onClick={() => handleClick(n)}
                   >
                     <div className="flex-shrink-0 pt-0.5">
-                      <Icon className={`h-4 w-4 ${typeColor[n.type]}`} />
+                      <Icon className={`h-4 w-4 ${typeColor[n.type] ?? "text-muted-foreground"}`} />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
@@ -141,7 +175,7 @@ export function NotificationsDropdown() {
                     <button
                       type="button"
                       aria-label="Delete notification"
-                      className="absolute right-2 top-2 rounded p-1 opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100"
+                      className="absolute right-2 top-2 rounded p-1 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
                       onClick={(e) => {
                         e.stopPropagation();
                         deleteNotification.mutate(n.id);
@@ -153,9 +187,22 @@ export function NotificationsDropdown() {
                 );
               })}
             </ul>
-          </ScrollArea>
+          </div>
         )}
       </PopoverContent>
+
+      <ConfirmDialog
+        open={confirmClear}
+        onOpenChange={setConfirmClear}
+        title="Clear All Notifications"
+        description="This removes your whole notification history. New notifications will keep arriving as usual."
+        confirmLabel="Clear all"
+        destructive
+        onConfirm={() => {
+          clearAll.mutate();
+          setConfirmClear(false);
+        }}
+      />
     </Popover>
   );
 }

@@ -845,10 +845,22 @@ export interface LeadListMember {
 export interface Notification {
   id: string;
   user_id: string;
-  type: "task_due" | "renewal_upcoming" | "deal_stage_change" | "mention" | "engagement" | "system";
+  type:
+    | "task_due"
+    | "renewal_upcoming"
+    | "deal_stage_change"
+    | "mention"
+    | "engagement"
+    | "system"
+    | "meddy_new_chat"
+    | "meddy_human_requested"
+    | "meddy_buying_intent"
+    | "meddy_missed_chat"
+    | "meddy_contact_received";
   title: string;
   message: string | null;
   link: string | null;
+  conversation_id: string | null;
   is_read: boolean;
   created_at: string;
 }

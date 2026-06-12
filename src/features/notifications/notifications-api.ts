@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/features/auth/AuthProvider";
 import type { Notification } from "@/types/crm";
 
 export function useNotifications(limit = 20) {
@@ -72,6 +73,27 @@ export function useDeleteNotification() {
         .from("notifications")
         .delete()
         .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+    },
+  });
+}
+
+
+/** Deletes the caller's entire notification history (RLS keeps the
+ * delete scoped to their own rows; the user_id filter is belt and
+ * suspenders). New notifications keep arriving normally. */
+export function useClearAllNotifications() {
+  const qc = useQueryClient();
+  const { user } = useAuth();
+  return useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase
+        .from("notifications")
+        .delete()
+        .eq("user_id", user!.id);
       if (error) throw error;
     },
     onSuccess: () => {
