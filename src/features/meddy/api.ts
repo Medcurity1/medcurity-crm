@@ -256,12 +256,21 @@ export function useSetAvailability() {
   const qc = useQueryClient();
   const { user } = useAuth();
   return useMutation({
+    // The key lets realtime/heartbeat invalidations skip while a toggle
+    // is in flight (see useMeddyRealtime); scope serializes rapid
+    // opposite clicks so the last click always wins server-side.
+    mutationKey: ["meddy-set-availability"],
+    scope: { id: "meddy-availability" },
     mutationFn: (available: boolean) => staffAction("availability", { available }),
     // Optimistic: flip the pill instantly, roll back if the server says no.
     onMutate: async (available) => {
       await qc.cancelQueries({ queryKey: ["meddy-availability", user?.id] });
       const previous = qc.getQueryData<boolean>(["meddy-availability", user?.id]);
       qc.setQueryData(["meddy-availability", user?.id], available);
+      // Keep the Team panel's own row in step with the pill.
+      qc.setQueryData<TeamMember[] | undefined>(["meddy-team"], (team) =>
+        team?.map((m) => (m.id === user?.id ? { ...m, available } : m)),
+      );
       return { previous };
     },
     onError: (err, _vars, context) => {
@@ -269,7 +278,9 @@ export function useSetAvailability() {
       toast.error((err as Error).message);
     },
     onSettled: () => {
+      // Self-correcting on success too — never depend on the broadcast.
       qc.invalidateQueries({ queryKey: ["meddy-team"] });
+      qc.invalidateQueries({ queryKey: ["meddy-availability", user?.id] });
     },
   });
 }

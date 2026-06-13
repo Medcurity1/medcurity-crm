@@ -1,5 +1,5 @@
 // meddy-sweep Edge Function — scheduled safety net (GitHub Actions cron,
-// every ~2 min). Replaces OG Nexus's IN-MEMORY timers, which silently
+// every ~5-15 min in practice). Replaces OG Nexus's IN-MEMORY timers, which silently
 // died on every server restart (a known Nexus weakness — this is the
 // durable version):
 //

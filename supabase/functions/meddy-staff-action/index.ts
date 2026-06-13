@@ -345,16 +345,20 @@ Deno.serve(async (req) => {
       case "heartbeat": {
         // Bumps last_seen; flips Available back on unless manually Away
         // (ports the WS-connect behavior, server.js:6595-6596).
-        const { data: cur } = await svc
-          .from("meddy_agent_status")
-          .select("away_manual")
-          .eq("user_id", caller.id)
-          .maybeSingle();
+        // Two individually-atomic statements instead of read-then-upsert:
+        // the old version could interleave with a concurrent Away toggle
+        // and leave available=true + away_manual=true (a stuck Available
+        // that every later beat skipped). The UPDATE re-checks
+        // away_manual in its own WHERE, so any interleaving converges.
         await svc.from("meddy_agent_status").upsert({
           user_id: caller.id,
           last_seen: new Date().toISOString(),
-          ...(cur?.away_manual ? {} : { available: true }),
         });
+        await svc
+          .from("meddy_agent_status")
+          .update({ available: true })
+          .eq("user_id", caller.id)
+          .eq("away_manual", false);
         return json({ success: true });
       }
 

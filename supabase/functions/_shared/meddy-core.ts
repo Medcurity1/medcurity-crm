@@ -230,7 +230,11 @@ export async function sendPushover(
   opts?: { priority?: number; url?: string },
 ): Promise<boolean> {
   const token = (Deno.env.get("PUSHOVER_APP_TOKEN") ?? "").trim();
-  if (!token || !userKey) return false;
+  if (!token) {
+    console.warn("PUSHOVER_APP_TOKEN not set - push skipped");
+    return false;
+  }
+  if (!userKey) return false;
   const priority = opts?.priority ?? 0;
   const body: Record<string, string | number> = {
     token,

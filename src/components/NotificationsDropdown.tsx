@@ -42,18 +42,18 @@ const typeIcon: Record<Notification["type"], ComponentType<{ className?: string 
 };
 
 const typeColor: Record<Notification["type"], string> = {
-  task_due: "text-amber-600",
-  renewal_upcoming: "text-blue-600",
-  deal_stage_change: "text-green-600",
-  mention: "text-purple-600",
-  engagement: "text-indigo-600",
+  task_due: "text-amber-600 dark:text-amber-400",
+  renewal_upcoming: "text-blue-600 dark:text-blue-400",
+  deal_stage_change: "text-green-600 dark:text-green-400",
+  mention: "text-purple-600 dark:text-purple-400",
+  engagement: "text-indigo-600 dark:text-indigo-400",
   system: "text-muted-foreground",
   // Meddy dot colors carried over from Nexus (NOTIF_TYPE_COLORS).
-  meddy_new_chat: "text-sky-600",
-  meddy_human_requested: "text-red-600",
-  meddy_buying_intent: "text-amber-500",
-  meddy_missed_chat: "text-red-500",
-  meddy_contact_received: "text-green-600",
+  meddy_new_chat: "text-sky-600 dark:text-sky-400",
+  meddy_human_requested: "text-red-600 dark:text-red-400",
+  meddy_buying_intent: "text-amber-500 dark:text-amber-400",
+  meddy_missed_chat: "text-red-500 dark:text-red-400",
+  meddy_contact_received: "text-green-600 dark:text-green-400",
 };
 
 export function NotificationsDropdown() {
@@ -175,7 +175,7 @@ export function NotificationsDropdown() {
                     <button
                       type="button"
                       aria-label="Delete notification"
-                      className="absolute right-2 top-2 rounded p-1 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
+                      className="absolute right-2 top-2 rounded p-1 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
                       onClick={(e) => {
                         e.stopPropagation();
                         deleteNotification.mutate(n.id);

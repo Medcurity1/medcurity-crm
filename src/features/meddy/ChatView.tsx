@@ -354,15 +354,18 @@ export function ChatView({ conversation: c }: Props) {
               )}
             />
           </div>
-          <Button
-            variant="outline"
-            size="icon"
-            title={whisper ? "Quick replies go to the visitor — switch off Team only" : "Quick replies"}
-            disabled={!canChat || whisper}
-            onClick={() => setQuickOpen((v) => !v)}
-          >
-            <Zap className="h-4 w-4" />
-          </Button>
+          {/* title lives on the wrapper: disabled buttons swallow pointer
+              events, so a title on the button itself never shows */}
+          <span title={whisper ? "Quick replies go to the visitor — switch off Team only" : "Quick replies"}>
+            <Button
+              variant="outline"
+              size="icon"
+              disabled={!canChat || whisper}
+              onClick={() => setQuickOpen((v) => !v)}
+            >
+              <Zap className="h-4 w-4" />
+            </Button>
+          </span>
           <Button
             size="icon"
             title="Send"

@@ -291,6 +291,7 @@
       .on('broadcast', { event: 'new-message' }, function(e) { handleRtMessage(e.payload); })
       .on('broadcast', { event: 'taken-over' }, function() {
         isTakenOver = true; clearTimeout(humanRequestTimeout); humanRequestTimeout = null;
+        hideHumanConfirm();
         if (suggestionsEl) suggestionsEl.innerHTML = ''; syncHumanLinkVisibility(); saveSession();
       })
       .on('broadcast', { event: 'show-form' }, function() {
@@ -501,7 +502,7 @@
       '.meddy-slim-send{background:#C8102E;border:none;width:30px;height:30px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background 0.15s;}.meddy-slim-send:hover{background:#a00d24;}.meddy-slim-send svg{width:13px;height:13px;fill:#fff;}' +
       '.meddy-slim-close{background:none;border:none;color:#bbb;font-size:16px;cursor:pointer;padding:0 2px;line-height:1;flex-shrink:0;transition:color 0.15s;}.meddy-slim-close:hover{color:#666;}' +
       '.meddy-slim-thanks{font-size:13px;color:#1B3A5C;font-weight:500;padding:2px 0;text-align:center;transition:opacity 0.5s ease;}' +
-      '@media(max-width:640px){.meddy-panel{width:100% !important;height:calc(100vh - 80px) !important;bottom:0;right:0;border-radius:14px 14px 0 0;}.meddy-resize{display:none;}.meddy-bubble{bottom:16px;right:16px;}.meddy-greeting{right:16px;bottom:88px;max-width:calc(100vw - 90px);}.meddy-footer-row{padding:2px 10px 5px;gap:6px;}.meddy-footer-human{font-size:11px;}.meddy-footer-credit{font-size:10px;}.meddy-slim-row{flex-wrap:wrap;}.meddy-slim-row input{flex:1 1 100%;}.meddy-slim-row .meddy-slim-send,.meddy-slim-row .meddy-slim-close{flex:0 0 auto;}}';
+      '@media(max-width:640px){.meddy-panel{width:100% !important;height:calc(100vh - 80px) !important;bottom:0;right:0;border-radius:14px 14px 0 0;}.meddy-resize{display:none;}.meddy-end-confirm-overlay{border-radius:14px 14px 0 0;}.meddy-bubble{bottom:16px;right:16px;}.meddy-greeting{right:16px;bottom:88px;max-width:calc(100vw - 90px);}.meddy-footer-row{padding:2px 10px 5px;gap:6px;}.meddy-footer-human{font-size:11px;}.meddy-footer-dot{font-size:11px;}.meddy-footer-credit{font-size:10px;}.meddy-slim-row{flex-wrap:wrap;}.meddy-slim-row input{flex:1 1 100%;}.meddy-slim-row .meddy-slim-send,.meddy-slim-row .meddy-slim-close{flex:0 0 auto;}}';
     shadowRoot.appendChild(style);
   }
 
@@ -990,10 +991,9 @@
   var humanConfirmEl = null;
 
   function showHumanConfirm() {
-    if (humanRequested) return;
+    if (humanRequested || isTakenOver) return;
     if (humanConfirmEl) { hideHumanConfirm(); return; }
     var el = document.createElement('div');
-    el.className = 'meddy-human-confirm';
     el.innerHTML = '<p>Talk to a Medcurity team member?</p><button class="meddy-human-confirm-yes">Yes, connect me</button><button class="meddy-human-confirm-cancel">Cancel</button>';
     el.addEventListener('click', function(e) { e.stopPropagation(); });
     el.querySelector('.meddy-human-confirm-yes').addEventListener('click', function() { hideHumanConfirm(); requestHuman(); });
@@ -1098,7 +1098,7 @@
   }
 
   function requestHuman() {
-    if (humanRequested) return;
+    if (humanRequested || isTakenOver) return;
     humanRequested = true;
     if (suggestionsEl) suggestionsEl.innerHTML = '';
     syncHumanLinkVisibility();
@@ -1345,7 +1345,7 @@
                   else if (parsed.type === 'show_lead_form') showLeadForm = true;
                   else if (parsed.type === 'state') {
                     // Server is telling us the conversation state — sync it
-                    if (parsed.taken_over) { isTakenOver = true; syncHumanLinkVisibility(); saveSession(); }
+                    if (parsed.taken_over) { isTakenOver = true; hideHumanConfirm(); syncHumanLinkVisibility(); saveSession(); }
                     if (parsed.human_requested) { humanRequested = true; syncHumanLinkVisibility(); saveSession(); }
                   }
                   else if (parsed.type === 'error') fullText = parsed.text;

@@ -61,7 +61,7 @@ export function NotificationSettingsPanel() {
       <Section
         icon={<Bell className="h-4 w-4" />}
         title="Meddy notifications"
-        desc="Alerts from the website chat assistant. Banner shows the in-app popup; Sound plays the chosen tone."
+        desc="Alerts from the website chat assistant. Banner shows the in-app popup (and the desktop alert when you're in another tab); Sound plays the chosen tone."
       >
         {meddyTypes.map((def) => (
           <NotifRow key={def.key} def={def} prefs={prefs} />
@@ -273,13 +273,17 @@ function PushoverRow({ savedKey }: { savedKey: string | null }) {
       >
         Save
       </Button>
-      <Button size="sm" variant="outline" disabled={!savedKey || testing} onClick={testPush}>
-        {testing ? "Sending…" : "Test"}
-      </Button>
-      {savedKey && (
+      <span title={!savedKey ? "Save your key first, then send a test push" : undefined}>
+        <Button size="sm" variant="outline" disabled={!savedKey || testing} onClick={testPush}>
+          {testing ? "Sending…" : "Test"}
+        </Button>
+      </span>
+      {savedKey ? (
         <span className="text-xs text-muted-foreground">
           Key on file ending in …{savedKey.slice(-4)}
         </span>
+      ) : (
+        <span className="text-xs text-muted-foreground">Save your key, then hit Test</span>
       )}
     </div>
   );

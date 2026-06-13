@@ -64,7 +64,11 @@ export function useMeddyRealtime(handlers: Handlers = {}) {
       })
       .on("broadcast", { event: "team_status_changed" }, () => {
         qc.invalidateQueries({ queryKey: ["meddy-team"] });
-        qc.invalidateQueries({ queryKey: ["meddy-availability"] });
+        // Skip while our own toggle is mid-flight — a refetch here would
+        // briefly snap the pill back to the old server value.
+        if (qc.isMutating({ mutationKey: ["meddy-set-availability"] }) === 0) {
+          qc.invalidateQueries({ queryKey: ["meddy-availability"] });
+        }
       })
       .on("broadcast", { event: "visitor_url" }, ({ payload }) => {
         const p = (payload ?? {}) as DashboardEvent;
@@ -110,7 +114,9 @@ export function useMeddyRealtime(handlers: Handlers = {}) {
         .then(() => {
           if (!cancelled) {
             qc.invalidateQueries({ queryKey: ["meddy-team"] });
-            qc.invalidateQueries({ queryKey: ["meddy-availability"] });
+            if (qc.isMutating({ mutationKey: ["meddy-set-availability"] }) === 0) {
+              qc.invalidateQueries({ queryKey: ["meddy-availability"] });
+            }
           }
         })
         .catch(() => {

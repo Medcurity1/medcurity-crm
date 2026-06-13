@@ -6,9 +6,9 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { DEFAULT_DURATIONS, useNotifPrefs } from "@/features/notifications/prefs-api";
 import {
-  NOTIF_TYPE_FALLBACK_SOUNDS,
   durationTypeFromSeconds,
   playScheduled,
+  resolveNotifSound,
 } from "@/lib/notification-sounds";
 
 /**
@@ -107,9 +107,12 @@ export function useNotificationToasts() {
       }
       const durVal = Number(prefs[`duration_${key}`] ?? DEFAULT_DURATIONS[key] ?? 5);
       if (soundOn) {
-        const soundType =
-          (prefs[`soundtype_${key}`] as string) || NOTIF_TYPE_FALLBACK_SOUNDS[key] || "chime";
-        playScheduled(soundType, durationTypeFromSeconds(durVal));
+        // resolveNotifSound retires old saved sound names the same way the
+        // settings picker does, so what plays always matches what's shown.
+        playScheduled(
+          resolveNotifSound(key, prefs[`soundtype_${key}`] as string | undefined),
+          durationTypeFromSeconds(durVal),
+        );
       }
       if (bannerOn) {
         toast(n.title, {
@@ -211,7 +214,15 @@ export function useNotificationToasts() {
               false,
             );
           } else {
-            if (prefs["sound_meddy_new_chat"] !== false) playScheduled("chime", "short");
+            if (prefs["sound_meddy_new_chat"] !== false) {
+              playScheduled(
+                resolveNotifSound(
+                  "meddy_new_chat",
+                  prefs["soundtype_meddy_new_chat"] as string | undefined,
+                ),
+                "short",
+              );
+            }
             toast("New visitor message", {
               description: m.content.slice(0, 120),
               duration: 3000,

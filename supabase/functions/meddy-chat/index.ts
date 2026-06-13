@@ -454,6 +454,7 @@ async function handleChat(req: Request, body: Record<string, unknown>) {
       }
 
       if (!Deno.env.get("ANTHROPIC_API_KEY")) {
+        console.error("[meddy-chat] ANTHROPIC_API_KEY missing - serving NO_KEY_REPLY");
         send({ type: "text", text: NO_KEY_REPLY });
         return done();
       }

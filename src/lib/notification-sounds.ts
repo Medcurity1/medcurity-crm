@@ -329,3 +329,21 @@ export const NOTIF_TYPE_FALLBACK_SOUNDS: Record<string, string> = {
 export function durationTypeFromSeconds(durVal: number): string {
   return durVal >= 30 ? "persistent" : durVal >= 10 ? "long" : durVal >= 5 ? "medium" : "short";
 }
+
+/** The audition keepers (2026-06-12). Saved prefs pointing at retired
+ * sounds resolve to the per-type fallback so the engine plays the same
+ * thing the settings picker displays. */
+export const KEPT_SOUNDS = new Set([
+  "bubble",
+  "marimba",
+  "doorbell",
+  "glass",
+  "drop",
+  "knock",
+  "horn",
+]);
+
+export function resolveNotifSound(typeKey: string, savedSound: string | undefined): string {
+  if (savedSound && KEPT_SOUNDS.has(savedSound)) return savedSound;
+  return NOTIF_TYPE_FALLBACK_SOUNDS[typeKey] || "marimba";
+}
