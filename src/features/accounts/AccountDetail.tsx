@@ -535,6 +535,8 @@ export function AccountDetail() {
           "do_not_contact",
           "partner_prospect",
           "priority_account",
+          // Picklist — edited via the main Edit form, not inline.
+          "partnership_status",
         ]}
         inlineEditTypes={{
           fte_count: "number",
@@ -546,6 +548,7 @@ export function AccountDetail() {
           description: "textarea",
           notes: "textarea",
           next_steps: "textarea",
+          relationship_notes: "textarea",
         }}
         customBlocks={{
           __billing_address: () => (

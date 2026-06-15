@@ -230,6 +230,8 @@ export interface Account {
   lead_source_detail: string | null;
   partner_account: string | null;
   partner_prospect: boolean;
+  partnership_status: string | null;
+  relationship_notes: string | null;
   // Custom
   custom_fields: Record<string, unknown>;
   // System

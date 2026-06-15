@@ -172,6 +172,8 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
           shipping_country: account.shipping_country ?? "",
           partner_account: account.partner_account ?? "",
           partner_prospect: account.partner_prospect ?? false,
+          partnership_status: account.partnership_status ?? "",
+          relationship_notes: account.relationship_notes ?? "",
           lead_source: account.lead_source ?? "",
           lead_source_detail: account.lead_source_detail ?? "",
           priority_account: account.priority_account ?? false,
@@ -226,6 +228,8 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
           shipping_country: "",
           partner_account: "",
           partner_prospect: false,
+          partnership_status: "",
+          relationship_notes: "",
           lead_source: "",
           lead_source_detail: "",
           priority_account: false,
@@ -399,6 +403,8 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
       shipping_country: emptyToNull(values.shipping_country),
       partner_account: emptyToNull(values.partner_account),
       partner_prospect: values.partner_prospect ?? false,
+      partnership_status: emptyToNull(values.partnership_status),
+      relationship_notes: emptyToNull(values.relationship_notes),
       lead_source: emptyToNull(values.lead_source),
       lead_source_detail: emptyToNull(values.lead_source_detail),
       priority_account: values.priority_account ?? false,
@@ -993,6 +999,26 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                   <Label htmlFor="lead_source_detail">Lead Source Detail<RequiredIndicator fieldKey="lead_source_detail" requiredFields={requiredKeys} /></Label>
                   <Input id="lead_source_detail" {...register("lead_source_detail")} />
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="partnership_status">Partnership Status</Label>
+                  <PicklistSelect
+                    id="partnership_status"
+                    fieldKey="accounts.partnership_status"
+                    value={watch("partnership_status") ?? ""}
+                    onChange={(v) => setValue("partnership_status", v ?? "")}
+                    allowClear
+                    placeholder="Select status…"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2 mt-4">
+                <Label htmlFor="relationship_notes">Relationship Notes</Label>
+                <Textarea
+                  id="relationship_notes"
+                  rows={4}
+                  placeholder="Partnership plan, history, and next steps with this partner…"
+                  {...register("relationship_notes")}
+                />
               </div>
             </CollapsibleFormSection>
 

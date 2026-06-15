@@ -50,6 +50,7 @@ export function PartnersPage() {
   const partners = result?.data;
   const totalCount = result?.count ?? 0;
   const memberCount = result?.memberCount;
+  const lastContact = result?.lastContact;
 
   const handleSearchChange = (value: string) => {
     setSearch(value);
@@ -151,6 +152,7 @@ export function PartnersPage() {
                   <SortableHeader column="status" sort={sort} onSort={handleSort}>Status</SortableHeader>
                   <SortableHeader column="lead_source" sort={sort} onSort={handleSort}>Lead Source</SortableHeader>
                   <SortableHeader column="active_since" sort={sort} onSort={handleSort}>Active Since</SortableHeader>
+                  <TableHead>Last Contact</TableHead>
                   <TableHead>Account Owner</TableHead>
                 </TableRow>
               </TableHeader>
@@ -191,6 +193,11 @@ export function PartnersPage() {
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {formatDate(account.active_since)}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {lastContact?.get(account.id)
+                        ? formatDate(lastContact.get(account.id)!)
+                        : "—"}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {account.owner?.full_name ?? "Unassigned"}

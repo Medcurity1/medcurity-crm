@@ -145,7 +145,26 @@ export function usePartners(filters?: PartnerFilters) {
         AbortSignal.timeout(15000),
       );
       if (error) throw error;
-      return { data: data as Account[], count: count ?? 0, memberCount };
+
+      // Last Contact date per partner (request #3) — pull the most-recent
+      // activity for just this page's accounts from v_account_last_activity
+      // and hand back a Map for the list column.
+      const accountsPage = (data ?? []) as Account[];
+      const lastContact = new Map<string, string>();
+      const pageIds = accountsPage.map((a) => a.id);
+      if (pageIds.length > 0) {
+        const { data: la } = await supabase
+          .from("v_account_last_activity")
+          .select("account_id, last_activity_at")
+          .in("account_id", pageIds)
+          .abortSignal(AbortSignal.timeout(15000));
+        for (const r of la ?? []) {
+          if (r.last_activity_at) {
+            lastContact.set(r.account_id as string, r.last_activity_at as string);
+          }
+        }
+      }
+      return { data: accountsPage, count: count ?? 0, memberCount, lastContact };
     },
   });
 }
