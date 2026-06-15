@@ -283,6 +283,7 @@ export function AccountsList() {
                   <TableHead>Owner</TableHead>
                   <SortableHeader column="industry" sort={sort} onSort={setSort}>Industry</SortableHeader>
                   <SortableHeader column="current_contract_end_date" sort={sort} onSort={setSort}>Contract End</SortableHeader>
+                  <TableHead>Notes</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -319,6 +320,12 @@ export function AccountsList() {
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {formatDate(account.current_contract_end_date)}
+                    </TableCell>
+                    <TableCell
+                      className="max-w-[240px] truncate text-muted-foreground"
+                      title={account.notes ?? undefined}
+                    >
+                      {account.notes || "—"}
                     </TableCell>
                   </TableRow>
                 ))}

@@ -353,6 +353,7 @@ export function OpportunitiesList() {
                   <SortableHeader column="expected_close_date" sort={sort} onSort={handleSort}>Expected Close</SortableHeader>
                   <SortableHeader column="close_date" sort={sort} onSort={handleSort}>Close Date</SortableHeader>
                   <SortableHeader column="owner.full_name" sort={sort} onSort={handleSort}>Owner</SortableHeader>
+                  <TableHead>Next Step</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -412,6 +413,12 @@ export function OpportunitiesList() {
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {opp.owner?.full_name ?? "Unassigned"}
+                    </TableCell>
+                    <TableCell
+                      className="max-w-[240px] truncate text-muted-foreground"
+                      title={opp.next_step ?? undefined}
+                    >
+                      {opp.next_step || "—"}
                     </TableCell>
                   </TableRow>
                 ))}

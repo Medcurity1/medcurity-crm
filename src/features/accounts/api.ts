@@ -32,6 +32,10 @@ export function useAccounts(filters?: AccountFilters) {
         .from("accounts")
         .select("*, owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
         .order(sortCol, { ascending: sortAsc, nullsFirst: false })
+        // Stable tiebreaker so offset paging is deterministic — without a
+        // unique final sort key, rows tied on sortCol can repeat at page
+        // boundaries (the "same record on two pages" bug).
+        .order("id", { ascending: true })
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (filters?.search) {

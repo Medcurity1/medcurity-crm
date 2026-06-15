@@ -215,6 +215,7 @@ export function ContactsList() {
                   <SortableHeader column="title" sort={sort} onSort={setSort}>Title</SortableHeader>
                   <SortableHeader column="email" sort={sort} onSort={setSort}>Email</SortableHeader>
                   <TableHead>Phone</TableHead>
+                  <TableHead>Notes</TableHead>
                   <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
@@ -251,6 +252,12 @@ export function ContactsList() {
                     <TableCell className="text-muted-foreground">{contact.title ?? "\u2014"}</TableCell>
                     <TableCell className="text-muted-foreground">{contact.email ?? "\u2014"}</TableCell>
                     <TableCell className="text-muted-foreground">{contact.phone ? formatPhone(contact.phone) : "\u2014"}</TableCell>
+                    <TableCell
+                      className="max-w-[240px] truncate text-muted-foreground"
+                      title={contact.notes ?? undefined}
+                    >
+                      {contact.notes || "\u2014"}
+                    </TableCell>
                     <TableCell>
                       {contact.is_primary && (
                         <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">

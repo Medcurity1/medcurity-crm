@@ -19,6 +19,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { Pagination } from "@/components/Pagination";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -69,6 +70,9 @@ interface ListFilters {
   startDate: string;
   endDate: string;
   page: number;
+  // When false (default), completed TASKS are hidden from the feed.
+  // Completed calls/emails/meetings/notes still show — they're history.
+  showCompletedTasks: boolean;
   // Optional record-scope filters from URL params (account_id, contact_id,
   // opportunity_id) so /activities?account_id=X shows only that account.
   scopeAccountId?: string;
@@ -129,6 +133,12 @@ function useActivitiesList(filters: ListFilters) {
       }
       if (filters.scopeLeadId) {
         query = query.eq("lead_id", filters.scopeLeadId);
+      }
+      if (!filters.showCompletedTasks) {
+        // Hide completed tasks only: keep a row if it's NOT a task, OR it
+        // has no completion timestamp (open task / logged-but-not-"done"
+        // activity). Logged calls/emails stay visible.
+        query = query.or("activity_type.neq.task,completed_at.is.null");
       }
 
       const from = filters.page * PAGE_SIZE;
@@ -200,6 +210,7 @@ export function ActivitiesListPage() {
   const [owner, setOwner] = useState<string>(initialOwner);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [showCompletedTasks, setShowCompletedTasks] = useState(false);
   const [page, setPage] = useState(0);
 
   const scopeAccountId = urlParams.get("account_id") || undefined;
@@ -215,6 +226,7 @@ export function ActivitiesListPage() {
       startDate,
       endDate,
       page,
+      showCompletedTasks,
       scopeAccountId,
       scopeContactId,
       scopeOpportunityId,
@@ -227,6 +239,7 @@ export function ActivitiesListPage() {
       startDate,
       endDate,
       page,
+      showCompletedTasks,
       scopeAccountId,
       scopeContactId,
       scopeOpportunityId,
@@ -320,6 +333,16 @@ export function ActivitiesListPage() {
           className="w-40"
           aria-label="End date"
         />
+        <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none">
+          <Checkbox
+            checked={showCompletedTasks}
+            onCheckedChange={(v) => {
+              setShowCompletedTasks(!!v);
+              resetPage();
+            }}
+          />
+          Show completed tasks
+        </label>
       </div>
 
       {isLoading ? (

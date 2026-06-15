@@ -37,6 +37,9 @@ export function useContacts(filters?: ContactFilters) {
       } else {
         query = query.order(sortCol, { ascending: sortAsc, nullsFirst: false });
       }
+      // Stable tiebreaker so offset paging can't duplicate/skip rows that
+      // tie on sortCol at page boundaries.
+      query = query.order("id", { ascending: true });
 
       if (filters?.search) {
         // Search contact fields AND parent account name. Multi-word

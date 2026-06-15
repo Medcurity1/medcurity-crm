@@ -64,6 +64,9 @@ export function useOpportunities(filters?: OppFilters) {
       } else {
         query = query.order(sortCol, { ascending: sortAsc, nullsFirst: false });
       }
+      // Stable tiebreaker so offset paging can't duplicate/skip rows that
+      // tie on sortCol at page boundaries.
+      query = query.order("id", { ascending: true });
 
       if (filters?.search) {
         // Search across opp name AND account name. PostgREST can't filter

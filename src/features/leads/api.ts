@@ -38,6 +38,9 @@ export function useLeads(filters?: LeadFilters) {
         .select("*, owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
         .is("archived_at", null)
         .order(sortCol, { ascending: sortAsc, nullsFirst: false })
+        // Stable tiebreaker so offset paging can't duplicate/skip rows
+        // that tie on sortCol at page boundaries.
+        .order("id", { ascending: true })
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (filters?.search) {
