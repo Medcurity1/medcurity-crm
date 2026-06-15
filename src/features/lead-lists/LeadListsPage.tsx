@@ -5,7 +5,6 @@ import {
   Plus,
   Trash2,
   UserPlus,
-  PlayCircle,
   ArrowLeft,
   Filter,
   Sparkles,
@@ -16,7 +15,6 @@ import {
   Columns3,
   Mail,
   Phone,
-  Send,
   X,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -76,7 +74,6 @@ import {
   type LeadListFilterConfig,
 } from "./lead-lists-api";
 import { useUpdateLead, useBulkUpdateOwner } from "@/features/leads/api";
-import { useSequences, useEnrollInSequence } from "@/features/sequences/sequences-api";
 import { useUsers } from "@/features/accounts/api";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { formatDate } from "@/lib/formatters";
@@ -219,7 +216,7 @@ type ColumnKey =
   | "name" | "company" | "title" | "email" | "phone" | "status"
   | "qualification" | "rating" | "owner" | "source" | "industry"
   | "state" | "city" | "employees" | "score" | "last_activity"
-  | "in_sequence" | "created_at";
+  | "created_at";
 
 const ALL_COLUMNS: { key: ColumnKey; label: string; sortable?: boolean }[] = [
   { key: "name", label: "Name", sortable: true },
@@ -238,13 +235,12 @@ const ALL_COLUMNS: { key: ColumnKey; label: string; sortable?: boolean }[] = [
   { key: "employees", label: "Employees", sortable: true },
   { key: "score", label: "Score", sortable: true },
   { key: "last_activity", label: "Last Contacted", sortable: true },
-  { key: "in_sequence", label: "In Sequence" },
   { key: "created_at", label: "Created", sortable: true },
 ];
 
 const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = [
   "name", "company", "title", "status", "qualification", "rating",
-  "owner", "email", "phone", "state", "last_activity", "in_sequence",
+  "owner", "email", "phone", "state", "last_activity",
 ];
 
 const COLUMNS_LS_KEY = "lead_list_visible_columns_v1";
@@ -604,7 +600,6 @@ function FilterForm({
               onChange={(e) => update("last_activity_before", e.target.value || undefined)}
             />
           </div>
-          {triState("in_sequence", "Currently in sequence")}
           {triState("exclude_in_other_lists", "Exclude leads already on other lists")}
         </div>
       </FilterSection>
@@ -1033,78 +1028,6 @@ function AddLeadsDialog({
 }
 
 // ---------------------------------------------------------------------------
-// Enroll in sequence dialog
-// ---------------------------------------------------------------------------
-
-function EnrollSequenceDialog({
-  open,
-  onOpenChange,
-  leadIds,
-}: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  leadIds: string[];
-}) {
-  const { data: sequences } = useSequences();
-  const enrollMutation = useEnrollInSequence();
-  const { profile } = useAuth();
-
-  async function handleEnroll(sequenceId: string) {
-    let count = 0;
-    for (const id of leadIds) {
-      try {
-        await enrollMutation.mutateAsync({
-          sequence_id: sequenceId,
-          lead_id: id,
-          contact_id: null,
-          owner_user_id: profile?.id ?? null,
-        });
-        count++;
-      } catch {
-        // Skip duplicates / RLS misses
-      }
-    }
-    toast.success(`Enrolled ${count} lead(s) in sequence`);
-    onOpenChange(false);
-  }
-
-  const activeSequences = (sequences ?? []).filter((s) => s.is_active);
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Enroll in Sequence</DialogTitle>
-          <DialogDescription>
-            Enroll all {leadIds.length} lead(s) in a sales sequence.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-2">
-          {!activeSequences.length ? (
-            <p className="text-sm text-muted-foreground">
-              No active sequences. Create one first.
-            </p>
-          ) : (
-            activeSequences.map((seq) => (
-              <Button
-                key={seq.id}
-                variant="outline"
-                className="w-full justify-start"
-                onClick={() => handleEnroll(seq.id)}
-                disabled={enrollMutation.isPending}
-              >
-                <PlayCircle className="h-4 w-4 mr-2" />
-                {seq.name} ({seq.steps.length} steps)
-              </Button>
-            ))
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Choose-list dialog — used by /leads bulk action ("Add to list…") and by
 // the in-list bulk action ("Copy to another list…"). Static lists only.
 // ---------------------------------------------------------------------------
@@ -1323,7 +1246,6 @@ function exportRowsToCSV(rows: Array<Record<string, unknown>>, filename: string)
 
 type EnrichedLead = Lead & {
   last_activity_at?: string | null;
-  in_active_sequence?: boolean;
 };
 
 function ListDetailView({
@@ -1349,7 +1271,6 @@ function ListDetailView({
   const updateLead = useUpdateLead();
 
   const [showAddLeads, setShowAddLeads] = useState(false);
-  const [showEnroll, setShowEnroll] = useState(false);
   const [showEditFilters, setShowEditFilters] = useState(false);
   const [showCopyToList, setShowCopyToList] = useState(false);
 
@@ -1636,14 +1557,6 @@ function ListDetailView({
             <Download className="h-4 w-4 mr-2" />
             Export CSV
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => setShowEnroll(true)}
-            disabled={!leadIds.length}
-          >
-            <PlayCircle className="h-4 w-4 mr-2" />
-            Enroll in Sequence
-          </Button>
           {list.is_dynamic ? (
             <Button onClick={() => setShowEditFilters(true)}>
               <Filter className="h-4 w-4 mr-2" />
@@ -1788,11 +1701,6 @@ function ListDetailView({
         list={list}
       />
 
-      <EnrollSequenceDialog
-        open={showEnroll}
-        onOpenChange={setShowEnroll}
-        leadIds={selectedIds.length ? selectedIds : leadIds}
-      />
 
       <ChooseListDialog
         open={showCopyToList}
@@ -1832,10 +1740,6 @@ function ListDetailView({
           <Button variant="outline" size="sm" onClick={() => setShowCopyToList(true)}>
             <Plus className="h-4 w-4 mr-1" />
             Add to list…
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setShowEnroll(true)}>
-            <Send className="h-4 w-4 mr-1" />
-            Enroll in sequence
           </Button>
           <Button variant="outline" size="sm" onClick={handleBulkOptOut}>
             Mark do-not-market
@@ -1956,10 +1860,6 @@ function renderCell(
       return l.last_activity_at ? formatDate(l.last_activity_at) : (
         <span className="text-xs italic">never</span>
       );
-    case "in_sequence":
-      return l.in_active_sequence ? (
-        <Badge variant="secondary" className="text-[10px]">in sequence</Badge>
-      ) : "—";
     case "created_at": return formatDate(l.created_at);
     default: return "";
   }

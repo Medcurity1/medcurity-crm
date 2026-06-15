@@ -25,7 +25,6 @@ import { AccountOpportunities } from "@/features/accounts/AccountOpportunities";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
 import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
 import { TasksPanel } from "@/features/activities/TasksPanel";
-import { SequencesTab } from "@/features/sequences/SequencesTab";
 import { LayoutDrivenDetail } from "@/features/layouts/LayoutDrivenDetail";
 import { looksLikeUsZip, zipToTimeZone } from "@/lib/us-zip";
 
@@ -312,11 +311,6 @@ export function ContactDetail() {
             value: "tasks",
             label: "Tasks",
             content: <TasksPanel contactId={contact.id} />,
-          },
-          {
-            value: "sequences",
-            label: "Sequences",
-            content: <SequencesTab contactId={contact.id} accountId={contact.account_id} />,
           },
         ]}
       />

@@ -23,7 +23,7 @@ const FEATURES = [
   {
     icon: Send,
     title: "Campaign hand-offs",
-    desc: "Know the moment an outreach sequence reaches your step, so the call happens at the right time.",
+    desc: "Know the moment an outreach campaign reaches your step, so the call happens at the right time.",
   },
   {
     icon: LayoutDashboard,

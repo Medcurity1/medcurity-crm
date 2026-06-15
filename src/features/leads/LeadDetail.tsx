@@ -19,7 +19,6 @@ import { formatPhone } from "@/components/PhoneInput";
 import { ConvertLeadDialog } from "./ConvertLeadDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { CollapsibleTabs } from "@/components/CollapsibleTabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   leadStatusLabel,
@@ -33,7 +32,6 @@ import { toast } from "sonner";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
 import { TasksPanel } from "@/features/activities/TasksPanel";
 import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
-import { SequencesTab } from "@/features/sequences/SequencesTab";
 import type { LeadSource, LeadQualification } from "@/types/crm";
 import { LayoutDrivenDetail } from "@/features/layouts/LayoutDrivenDetail";
 import { looksLikeUsZip, zipToTimeZone } from "@/lib/us-zip";
@@ -413,18 +411,6 @@ export function LeadDetail() {
           },
         ]}
       >
-
-      <CollapsibleTabs
-        className="mt-2"
-        defaultValue="sequences"
-        items={[
-          {
-            value: "sequences",
-            label: "Sequences",
-            content: <SequencesTab leadId={lead.id} />,
-          },
-        ]}
-      />
 
       {/* --------- Lead Details Section ---------
           Full field surface so reps can see everything that's on the

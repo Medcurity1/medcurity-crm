@@ -687,7 +687,6 @@ const WIDGET_DEFS: WidgetDef[] = [
   { key: "recent_records", label: "Recent Records", defaultVisible: true },
   { key: "pipeline_summary", label: "Pipeline Summary", defaultVisible: false },
   { key: "upcoming_renewals", label: "Upcoming Renewals", defaultVisible: false },
-  { key: "call_list", label: "Call List (from Sequences)", defaultVisible: false },
   { key: "saved_report", label: "Saved Report", defaultVisible: false },
   { key: "team_activity_feed", label: "Team Activity Feed", defaultVisible: false },
   { key: "my_accounts", label: "My Accounts", defaultVisible: false },
@@ -869,85 +868,6 @@ function UpcomingRenewalsWidget() {
                 </div>
               </div>
             ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Call List widget (from sequences)
-// ---------------------------------------------------------------------------
-
-function CallListWidget() {
-  const { data, isLoading } = useQuery({
-    queryKey: ["dashboard", "call-list-widget"],
-    queryFn: async () => {
-      const now = new Date();
-      now.setHours(23, 59, 59, 999);
-      const { data: enrollments, error } = await supabase
-        .from("sequence_enrollments")
-        .select(
-          "id, current_step, next_touch_at, sequence:sequences(steps), lead:leads(first_name, last_name, company, phone), contact:contacts(first_name, last_name, phone)"
-        )
-        .eq("status", "active")
-        .lte("next_touch_at", now.toISOString())
-        .limit(10);
-      if (error) throw error;
-
-      // Filter to call steps
-      return (enrollments ?? []).filter((e) => {
-        const seq = e.sequence as unknown as { steps: Array<{ step_number: number; type: string }> } | null;
-        if (!seq?.steps) return false;
-        const step = seq.steps.find(
-          (s: { step_number: number; type: string }) => s.step_number === e.current_step
-        );
-        return step?.type === "call";
-      });
-    },
-  });
-
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center gap-2">
-        <GripVertical className="h-4 w-4 text-muted-foreground" />
-        <CardTitle className="text-base flex items-center gap-2">
-          <Phone className="h-4 w-4 text-green-600" />
-          Call List
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {isLoading ? (
-          <Skeleton className="h-24 w-full" />
-        ) : !data?.length ? (
-          <p className="text-sm text-muted-foreground">No calls due today.</p>
-        ) : (
-          <div className="space-y-2">
-            {data.map((e) => {
-              const lead = (e.lead as unknown) as Record<string, string> | null;
-              const contact = (e.contact as unknown) as Record<string, string> | null;
-              const name = lead
-                ? `${lead.first_name ?? ""} ${lead.last_name ?? ""}`.trim()
-                : contact
-                  ? `${contact.first_name ?? ""} ${contact.last_name ?? ""}`.trim()
-                  : "Unknown";
-              const phone = lead?.phone ?? contact?.phone ?? "";
-              const company = lead?.company ?? "";
-              return (
-                <div key={e.id} className="flex items-center justify-between text-sm">
-                  <div>
-                    <span className="font-medium">{name}</span>
-                    {company && (
-                      <span className="text-muted-foreground ml-2">
-                        {company}
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-muted-foreground">{phone || "No phone"}</span>
-                </div>
-              );
-            })}
           </div>
         )}
       </CardContent>
@@ -1164,7 +1084,6 @@ export function HomePage() {
         {isWidgetVisible("upcoming_renewals") && <UpcomingRenewalsWidget />}
       </div>
 
-      {isWidgetVisible("call_list") && <CallListWidget />}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {isWidgetVisible("team_activity_feed") && <TeamActivityFeed />}

@@ -781,45 +781,6 @@ export interface SavedReport {
   updated_at: string;
 }
 
-// Sales sequences / cadences
-export interface Sequence {
-  id: string;
-  name: string;
-  description: string | null;
-  is_active: boolean;
-  owner_user_id: string | null;
-  steps: SequenceStep[];
-  created_at: string;
-  updated_at: string;
-}
-
-export interface SequenceStep {
-  step_number: number;
-  type: "email" | "call" | "task";
-  delay_days: number;
-  subject: string;
-  body?: string;
-}
-
-export interface SequenceEnrollment {
-  id: string;
-  sequence_id: string;
-  lead_id: string | null;
-  contact_id: string | null;
-  account_id: string | null;
-  owner_user_id: string | null;
-  current_step: number;
-  status: "active" | "paused" | "completed" | "replied" | "bounced";
-  next_touch_at: string | null;
-  enrolled_at: string;
-  completed_at: string | null;
-  paused_reason: string | null;
-  created_at: string;
-  updated_at: string;
-  sequence?: Sequence;
-  lead?: Lead;
-  contact?: Contact;
-}
 
 // Lead lists
 export interface LeadList {

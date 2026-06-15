@@ -54,8 +54,6 @@ export interface LeadListFilterConfig {
   has_email?: boolean;
   has_phone?: boolean;
   has_linkedin?: boolean;
-  /** true = lead is currently in an active sequence (joins v_lead_active_sequence) */
-  in_sequence?: boolean;
   /** true = exclude leads that are members of any other lead_list. */
   exclude_in_other_lists?: boolean;
 
@@ -190,16 +188,11 @@ function postFilter(
   lead: Lead,
   fc: LeadListFilterConfig | null | undefined,
   lookups: {
-    inActiveSequence: Set<string>;
     lastActivityByLead: Map<string, string>;
     leadsInOtherLists: Set<string>;
   },
 ): boolean {
   if (!fc) return true;
-  if (typeof fc.in_sequence === "boolean") {
-    const has = lookups.inActiveSequence.has(lead.id);
-    if (has !== fc.in_sequence) return false;
-  }
   if (fc.last_activity_after) {
     const ts = lookups.lastActivityByLead.get(lead.id);
     if (!ts || ts < fc.last_activity_after) return false;
@@ -219,28 +212,13 @@ async function fetchLookups(
   fc: LeadListFilterConfig | null | undefined,
   excludingListId: string | undefined,
 ): Promise<{
-  inActiveSequence: Set<string>;
   lastActivityByLead: Map<string, string>;
   leadsInOtherLists: Set<string>;
 }> {
-  const inActiveSequence = new Set<string>();
   const lastActivityByLead = new Map<string, string>();
   const leadsInOtherLists = new Set<string>();
   if (!fc) {
-    return { inActiveSequence, lastActivityByLead, leadsInOtherLists };
-  }
-
-  // in_sequence — one round trip if the filter is set.
-  if (typeof fc.in_sequence === "boolean") {
-    const { data } = await supabase
-      .from("v_lead_active_sequence")
-      .select("lead_id, in_active_sequence")
-      .eq("in_active_sequence", true);
-    for (const row of data ?? []) {
-      if ((row as { lead_id: string | null }).lead_id) {
-        inActiveSequence.add((row as { lead_id: string }).lead_id);
-      }
-    }
+    return { lastActivityByLead, leadsInOtherLists };
   }
 
   // last_activity range — pull the whole map; small per-tenant.
@@ -270,7 +248,7 @@ async function fetchLookups(
       if (row.lead_id) leadsInOtherLists.add(row.lead_id);
     }
   }
-  return { inActiveSequence, lastActivityByLead, leadsInOtherLists };
+  return { lastActivityByLead, leadsInOtherLists };
 }
 
 // ---------------------------------------------------------------------------
@@ -493,18 +471,15 @@ export function useSmartListLeads(
       ]);
       if (error) throw error;
       const rows = (data ?? []) as unknown as Lead[];
-      // Annotate with last_activity_at + in_active_sequence so the table
-      // can render those columns without each row triggering its own
-      // round-trip.
+      // Annotate with last_activity_at so the table can render that
+      // column without each row triggering its own round-trip.
       return rows
         .filter((l) => postFilter(l, filterConfig, lookups))
         .map((l) => ({
           ...l,
           last_activity_at: lookups.lastActivityByLead.get(l.id) ?? null,
-          in_active_sequence: lookups.inActiveSequence.has(l.id),
         })) as Array<Lead & {
         last_activity_at: string | null;
-        in_active_sequence: boolean;
       }>;
     },
     enabled: !!listId,
