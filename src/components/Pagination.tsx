@@ -2,13 +2,33 @@ import { useState, useEffect } from "react";
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface PaginationProps {
   page: number;
   pageSize: number;
   totalCount: number;
   onPageChange: (page: number) => void;
+  /**
+   * When provided, a "Rows" selector is shown so the user can change how
+   * many records load per page. Omit it to keep the control hidden
+   * (back-compatible with pages that use a fixed page size).
+   */
+  onPageSizeChange?: (size: number) => void;
+  /** Page-size options offered in the selector. */
+  pageSizeOptions?: number[];
 }
+
+// 200 is the ceiling on purpose: a literal "show all" would try to render
+// tens of thousands of rows (accounts/leads), which freezes the browser.
+// 200 covers a rep's full working list while staying snappy.
+const DEFAULT_PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 
 /**
  * Pagination control. For tables that span thousands of rows, click-by-click
@@ -17,10 +37,23 @@ interface PaginationProps {
  *   • A typed page jump ("Page __ of N", press Enter to go there)
  *   • Comma-formatted counts everywhere
  */
-export function Pagination({ page, pageSize, totalCount, onPageChange }: PaginationProps) {
+export function Pagination({
+  page,
+  pageSize,
+  totalCount,
+  onPageChange,
+  onPageSizeChange,
+  pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS,
+}: PaginationProps) {
   const from = page * pageSize + 1;
   const to = Math.min((page + 1) * pageSize, totalCount);
   const lastPage = Math.max(0, Math.ceil(totalCount / pageSize) - 1);
+
+  // Always include the current pageSize as an option so the selector can
+  // reflect a value passed in from a URL even if it's off the default list.
+  const options = pageSizeOptions.includes(pageSize)
+    ? pageSizeOptions
+    : [...pageSizeOptions, pageSize].sort((a, b) => a - b);
 
   // Local input state so user can type a multi-digit page number
   // before we commit it (typing "2" then "5" shouldn't snap to page 2).
@@ -44,9 +77,31 @@ export function Pagination({ page, pageSize, totalCount, onPageChange }: Paginat
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 pt-4">
-      <p className="text-sm text-muted-foreground">
-        Showing {from.toLocaleString()}-{to.toLocaleString()} of {totalCount.toLocaleString()} result{totalCount !== 1 ? "s" : ""}
-      </p>
+      <div className="flex items-center gap-3">
+        <p className="text-sm text-muted-foreground">
+          Showing {from.toLocaleString()}-{to.toLocaleString()} of {totalCount.toLocaleString()} result{totalCount !== 1 ? "s" : ""}
+        </p>
+        {onPageSizeChange && (
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <span>Rows</span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(v) => onPageSizeChange(Number(v))}
+            >
+              <SelectTrigger className="h-8 w-20">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {options.map((opt) => (
+                  <SelectItem key={opt} value={String(opt)}>
+                    {opt}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+      </div>
       <div className="flex items-center gap-1">
         <Button
           variant="outline"

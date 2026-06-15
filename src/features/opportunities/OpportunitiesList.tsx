@@ -38,8 +38,6 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { stageLabel, businessTypeLabel, formatCurrency, formatDate } from "@/lib/formatters";
 
-const PAGE_SIZE = 25;
-
 export function OpportunitiesList() {
   const navigate = useNavigate();
   const { profile } = useAuth();
@@ -65,6 +63,7 @@ export function OpportunitiesList() {
   const [expectedAfter, setExpectedAfter] = useUrlState("expected_after", "");
   const [expectedBefore, setExpectedBefore] = useUrlState("expected_before", "");
   const [page, setPage] = useUrlNumberState("page", 0);
+  const [pageSize, setPageSize] = useUrlNumberState("size", 25);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sort, setSortState] = useUrlSortState("sort");
 
@@ -93,7 +92,7 @@ export function OpportunitiesList() {
   const { data: result, isLoading } = useOpportunities({
     ...totalsFilters,
     page,
-    pageSize: PAGE_SIZE,
+    pageSize,
     sortColumn: sort.column,
     sortDirection: sort.direction,
   });
@@ -421,9 +420,13 @@ export function OpportunitiesList() {
           </div>
           <Pagination
             page={page}
-            pageSize={PAGE_SIZE}
+            pageSize={pageSize}
             totalCount={totalCount}
             onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(0);
+            }}
           />
         </>
       )}

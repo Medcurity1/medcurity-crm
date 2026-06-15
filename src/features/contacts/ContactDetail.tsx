@@ -2,8 +2,9 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Pencil, Archive, ChevronDown, Phone, Mail, UserRoundCog, History } from "lucide-react";
+import { Pencil, Archive, ChevronDown, Phone, Mail, UserRoundCog, History, MapPin } from "lucide-react";
 import { formatPhone } from "@/components/PhoneInput";
+import { InlineEdit } from "@/components/InlineEdit";
 import { useContact, useUpdateContact, useArchiveContact, useOriginatingLead } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
@@ -369,6 +370,79 @@ export function ContactDetail() {
         inlineEditTypes={{
           notes: "textarea",
           next_steps: "textarea",
+        }}
+        // The contacts layout has a "Mailing Address" section backed by a
+        // single `__mailing_address` custom block. Without a renderer it
+        // showed "Unrendered custom block: __mailing_address". Mirror the
+        // Account/Lead address pattern: stacked inline-edit rows + a Maps
+        // link, with the zip edit cascading country + time zone.
+        customBlocks={{
+          __mailing_address: () => {
+            const saveField =
+              (field: "mailing_street" | "mailing_city" | "mailing_state" | "mailing_country") =>
+              async (newValue: string) => {
+                await updateMutation.mutateAsync({
+                  id: contactId,
+                  [field]: newValue === "" ? null : newValue,
+                } as Parameters<typeof updateMutation.mutateAsync>[0]);
+              };
+            const saveZip = async (newValue: string) => {
+              const zip = (newValue ?? "").trim();
+              const patch: Record<string, unknown> = {
+                id: contactId,
+                mailing_zip: zip === "" ? null : zip,
+              };
+              if (looksLikeUsZip(zip)) {
+                if (!contact.mailing_country) patch.mailing_country = "United States";
+                const tz = zipToTimeZone(zip);
+                if (tz) patch.time_zone = tz;
+              }
+              await updateMutation.mutateAsync(
+                patch as Parameters<typeof updateMutation.mutateAsync>[0],
+              );
+            };
+            const Row = ({
+              label,
+              value,
+              onSave,
+            }: {
+              label: string;
+              value: unknown;
+              onSave: (v: string) => Promise<void>;
+            }) => (
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground">{label}</span>
+                <InlineEdit value={value as string | number | null} onSave={onSave} />
+              </div>
+            );
+            const mapsQuery = [
+              contact.mailing_street,
+              contact.mailing_city,
+              contact.mailing_state,
+              contact.mailing_zip,
+            ]
+              .filter(Boolean)
+              .join(", ");
+            return (
+              <div className="space-y-3">
+                <Row label="Street" value={contact.mailing_street} onSave={saveField("mailing_street")} />
+                <Row label="City" value={contact.mailing_city} onSave={saveField("mailing_city")} />
+                <Row label="State" value={contact.mailing_state} onSave={saveField("mailing_state")} />
+                <Row label="Zip" value={contact.mailing_zip} onSave={saveZip} />
+                <Row label="Country" value={contact.mailing_country} onSave={saveField("mailing_country")} />
+                {(contact.mailing_street || contact.mailing_city) && (
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapsQuery)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline text-sm flex items-center gap-1"
+                  >
+                    <MapPin className="h-3 w-3" /> View on Map
+                  </a>
+                )}
+              </div>
+            );
+          },
         }}
       />
 

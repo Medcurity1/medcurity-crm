@@ -366,7 +366,7 @@ export function ArpcByQuarter() {
                       accountsThisQuarter.map((r) => (
                         <TableRow key={r.account_id}>
                           <TableCell className="font-medium">
-                            <Link
+                            <Link target="_blank" rel="noopener noreferrer"
                               to={`/accounts/${r.account_id}`}
                               className="text-primary hover:underline"
                             >

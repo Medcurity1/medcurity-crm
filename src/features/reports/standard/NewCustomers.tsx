@@ -250,7 +250,7 @@ export function NewCustomers() {
                     <TableCell>{r.opportunity_owner}</TableCell>
                     <TableCell className="font-medium">
                       {r.account_id ? (
-                        <Link
+                        <Link target="_blank" rel="noopener noreferrer"
                           to={`/accounts/${r.account_id}`}
                           className="text-primary hover:underline"
                         >
@@ -261,7 +261,7 @@ export function NewCustomers() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Link
+                      <Link target="_blank" rel="noopener noreferrer"
                         to={`/opportunities/${r.id}`}
                         className="text-primary hover:underline"
                       >

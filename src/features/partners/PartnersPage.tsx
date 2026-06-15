@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Handshake, Search } from "lucide-react";
+import { Handshake, Search, AlertTriangle } from "lucide-react";
 import { usePartners } from "./api";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
@@ -8,6 +8,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Pagination } from "@/components/Pagination";
 import { SortableHeader, type SortState } from "@/components/SortableHeader";
 import { MultiSelect } from "@/components/MultiSelect";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -27,22 +28,21 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { statusLabel, formatDate } from "@/lib/formatters";
 
-const PAGE_SIZE = 25;
-
 export function PartnersPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [roleFilter, setRoleFilter] = useState<"all" | "umbrella" | "member" | "top_level">("all");
   const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(25);
   const [sort, setSort] = useState<SortState>({ column: "name", direction: "asc" });
 
-  const { data: result, isLoading } = usePartners({
+  const { data: result, isLoading, isError, refetch, isFetching } = usePartners({
     search: search || undefined,
     status: statusFilter.length ? statusFilter : undefined,
     partnerRole: roleFilter,
     page,
-    pageSize: PAGE_SIZE,
+    pageSize,
     sortColumn: sort.column,
     sortDirection: sort.direction,
   });
@@ -120,6 +120,16 @@ export function PartnersPage() {
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
+      ) : isError ? (
+        <EmptyState
+          icon={AlertTriangle}
+          title="Couldn't load partners"
+          description="Something went wrong loading the partner list. This is usually a momentary hiccup — try again."
+        >
+          <Button onClick={() => refetch()} disabled={isFetching}>
+            {isFetching ? "Retrying…" : "Try again"}
+          </Button>
+        </EmptyState>
       ) : !partners?.length ? (
         <EmptyState
           icon={Handshake}
@@ -192,9 +202,13 @@ export function PartnersPage() {
           </div>
           <Pagination
             page={page}
-            pageSize={PAGE_SIZE}
+            pageSize={pageSize}
             totalCount={totalCount}
             onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(0);
+            }}
           />
         </>
       )}

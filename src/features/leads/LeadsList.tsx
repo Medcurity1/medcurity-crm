@@ -45,8 +45,6 @@ import {
 } from "@/features/lead-lists/LeadListsPage";
 import type { LeadListFilterConfig } from "@/features/lead-lists/lead-lists-api";
 
-const PAGE_SIZE = 25;
-
 function useLeadQuickStats() {
   return useQuery({
     queryKey: ["leads", "quick-stats"],
@@ -136,6 +134,7 @@ export function LeadsList() {
   // is bookmarkable.
   const [showConverted, setShowConverted] = useUrlState("show_converted", "false");
   const [page, setPage] = useUrlNumberState("page", 0);
+  const [pageSize, setPageSize] = useUrlNumberState("size", 25);
   const [sort, setSort] = useState<SortState>({ column: null, direction: "desc" });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showAddToList, setShowAddToList] = useState(false);
@@ -198,7 +197,7 @@ export function LeadsList() {
     sortColumn: sort.column,
     sortDirection: sort.direction,
     page,
-    pageSize: PAGE_SIZE,
+    pageSize,
   });
   const { data: users } = useUsers();
   const { data: quickStats } = useLeadQuickStats();
@@ -630,9 +629,13 @@ export function LeadsList() {
           </div>
           <Pagination
             page={page}
-            pageSize={PAGE_SIZE}
+            pageSize={pageSize}
             totalCount={totalCount}
             onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(0);
+            }}
           />
         </>
       )}

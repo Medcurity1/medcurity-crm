@@ -223,19 +223,19 @@ export function MqlContacts() {
                   rows.slice(0, PREVIEW_LIMIT).map((r) => (
                     <TableRow key={r.contact_id}>
                       <TableCell>
-                        <Link to={`/contacts/${r.contact_id}`} className="text-primary hover:underline">
+                        <Link target="_blank" rel="noopener noreferrer" to={`/contacts/${r.contact_id}`} className="text-primary hover:underline">
                           {r.first_name}
                         </Link>
                       </TableCell>
                       <TableCell>
-                        <Link to={`/contacts/${r.contact_id}`} className="text-primary hover:underline">
+                        <Link target="_blank" rel="noopener noreferrer" to={`/contacts/${r.contact_id}`} className="text-primary hover:underline">
                           {r.last_name}
                         </Link>
                       </TableCell>
                       <TableCell>{r.title}</TableCell>
                       <TableCell>
                         {r.account_id ? (
-                          <Link to={`/accounts/${r.account_id}`} className="text-primary hover:underline">
+                          <Link target="_blank" rel="noopener noreferrer" to={`/accounts/${r.account_id}`} className="text-primary hover:underline">
                             {r.account_name}
                           </Link>
                         ) : (

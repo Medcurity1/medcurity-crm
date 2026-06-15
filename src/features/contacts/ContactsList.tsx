@@ -36,8 +36,6 @@ import {
 } from "@/components/ui/select";
 import { formatName } from "@/lib/formatters";
 
-const PAGE_SIZE = 25;
-
 export function ContactsList() {
   const navigate = useNavigate();
   const { profile } = useAuth();
@@ -46,6 +44,7 @@ export function ContactsList() {
   const [ownerFilter, setOwnerFilter] = useUrlArrayState("owner");
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
   const [page, setPage] = useUrlNumberState("page", 0);
+  const [pageSize, setPageSize] = useUrlNumberState("size", 25);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<SortState>({ column: "last_name", direction: "asc" });
 
@@ -59,7 +58,7 @@ export function ContactsList() {
         ? "false"
         : undefined,
     page,
-    pageSize: PAGE_SIZE,
+    pageSize,
     sortColumn: sort.column,
     sortDirection: sort.direction,
   });
@@ -266,9 +265,13 @@ export function ContactsList() {
           </div>
           <Pagination
             page={page}
-            pageSize={PAGE_SIZE}
+            pageSize={pageSize}
             totalCount={totalCount}
             onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(0);
+            }}
           />
         </>
       )}

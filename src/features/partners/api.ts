@@ -35,10 +35,27 @@ export function usePartners(filters?: PartnerFilters) {
       // Fetch both sides of the join table so we know who's an
       // umbrella (has members) vs a member (is under someone) vs
       // top-level (umbrella AND not a member of anyone).
-      const { data: joinRows, error: joinErr } = await supabase
-        .from("account_partners")
-        .select("partner_account_id, member_account_id");
-      if (joinErr) throw joinErr;
+      // Page through the join table so a large partner graph can never
+      // be silently truncated at PostgREST's default 1000-row cap, and
+      // so a single unbounded scan can't stall the page. Each request
+      // also carries a 15s timeout — supabase-js has NO default timeout,
+      // so a hung request would otherwise leave React Query in `isLoading`
+      // forever (the root cause of the "Partners page stuck loading ~50%
+      // of the time" bug). A timeout turns a hang into a normal error
+      // that the page surfaces with a Retry button.
+      const joinRows: { partner_account_id: string; member_account_id: string }[] = [];
+      const JOIN_PAGE = 1000;
+      for (let from = 0; ; from += JOIN_PAGE) {
+        const { data: chunk, error: joinErr } = await supabase
+          .from("account_partners")
+          .select("partner_account_id, member_account_id")
+          .range(from, from + JOIN_PAGE - 1)
+          .abortSignal(AbortSignal.timeout(15000));
+        if (joinErr) throw joinErr;
+        const rows = chunk ?? [];
+        joinRows.push(...rows);
+        if (rows.length < JOIN_PAGE) break;
+      }
       const umbrellaIds = new Set<string>();
       const memberIds = new Set<string>();
       // memberCount is also useful for the list page table — we
@@ -121,7 +138,9 @@ export function usePartners(filters?: PartnerFilters) {
         }
       }
 
-      const { data, error, count } = await query;
+      const { data, error, count } = await query.abortSignal(
+        AbortSignal.timeout(15000),
+      );
       if (error) throw error;
       return { data: data as Account[], count: count ?? 0, memberCount };
     },

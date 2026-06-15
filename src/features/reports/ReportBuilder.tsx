@@ -1,5 +1,4 @@
 import { useState, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import {
   Play,
@@ -925,7 +924,6 @@ function ResultsTable({
   isLoading: boolean;
   count: number;
 }) {
-  const navigate = useNavigate();
   const entity = getEntityDef(entityKey);
   const visibleCols = columns
     .map((key) => entity.columns.find((c) => c.key === key))
@@ -1049,9 +1047,12 @@ function ResultsTable({
                     key={rowIdx}
                     className={detailUrl ? "cursor-pointer hover:bg-muted/50" : ""}
                     onClick={() => {
-                      if (detailUrl) navigate(detailUrl);
+                      // Open in a new tab so the report (and the user's
+                      // filters) stays put — they were losing their place
+                      // every time they clicked into a record (#24).
+                      if (detailUrl) window.open(detailUrl, "_blank", "noopener,noreferrer");
                     }}
-                    title={detailUrl ? "Click to open record" : undefined}
+                    title={detailUrl ? "Click to open record in a new tab" : undefined}
                   >
                     {visibleCols.map((col) => {
                       const rawValue = row[col.key];

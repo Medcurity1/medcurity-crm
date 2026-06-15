@@ -40,6 +40,7 @@ interface PipelineRow {
   probability: number | null;
   weighted_amount: number | null;
   opportunity_owner: string | null;
+  next_step: string | null;
 }
 
 export function ActivePipeline() {
@@ -59,12 +60,13 @@ export function ActivePipeline() {
         kind: string | null;
         account_id: string | null;
         owner_user_id: string | null;
+        next_step: string | null;
       };
       const opps = await fetchAllRows<OppRaw>(() =>
         supabase
           .from("opportunities")
           .select(
-            "id, name, stage, amount, probability, close_date, kind, account_id, owner_user_id",
+            "id, name, stage, amount, probability, close_date, kind, account_id, owner_user_id, next_step",
           )
           .not("stage", "in", "(closed_won,closed_lost)")
           .is("archived_at", null)
@@ -104,6 +106,7 @@ export function ActivePipeline() {
             (Number(amount ?? 0) * Number(probability ?? 0)) / 100,
           opportunity_owner:
             users.get(r.owner_user_id as string)?.full_name ?? "Unassigned",
+          next_step: (r.next_step as string | null) ?? null,
         };
       }) as PipelineRow[];
     },
@@ -140,6 +143,7 @@ export function ActivePipeline() {
       "Close Date",
       "Amount",
       "Opportunity Owner",
+      "Next Step",
     ];
     const data = (rows ?? []).map((r) => [
       r.stage ? stageLabel(r.stage) : "",
@@ -149,6 +153,7 @@ export function ActivePipeline() {
       r.close_date ?? "",
       csvCurrency(r.amount),
       r.opportunity_owner ?? "",
+      r.next_step ?? "",
     ]);
     downloadCsv(`active-pipeline-${todayStamp()}.csv`, [header, ...data]);
   }
@@ -257,6 +262,7 @@ function TypeGroup({ type, list }: { type: string; list: PipelineRow[] }) {
             <TableHead>Close Date</TableHead>
             <TableHead className="text-right">Amount</TableHead>
             <TableHead>Opportunity Owner</TableHead>
+            <TableHead>Next Step</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -265,6 +271,8 @@ function TypeGroup({ type, list }: { type: string; list: PipelineRow[] }) {
               <TableCell className="pl-12">
                 <Link
                   to={`/opportunities/${r.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="text-primary hover:underline"
                 >
                   {r.opportunity_name ?? "—"}
@@ -272,7 +280,12 @@ function TypeGroup({ type, list }: { type: string; list: PipelineRow[] }) {
               </TableCell>
               <TableCell>
                 {r.account_id ? (
-                  <Link to={`/accounts/${r.account_id}`} className="text-primary hover:underline">
+                  <Link
+                    to={`/accounts/${r.account_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline"
+                  >
                     {r.account_name ?? ""}
                   </Link>
                 ) : (
@@ -284,6 +297,12 @@ function TypeGroup({ type, list }: { type: string; list: PipelineRow[] }) {
                 {formatCurrency(Number(r.amount ?? 0))}
               </TableCell>
               <TableCell>{r.opportunity_owner ?? ""}</TableCell>
+              <TableCell
+                className="max-w-[260px] truncate text-muted-foreground"
+                title={r.next_step ?? undefined}
+              >
+                {r.next_step ?? "—"}
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>

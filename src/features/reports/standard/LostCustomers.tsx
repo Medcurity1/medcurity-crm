@@ -288,7 +288,7 @@ export function LostCustomers() {
                     <TableRow key={r.id}>
                       <TableCell className="font-medium">
                         {r.account_id ? (
-                          <Link to={`/accounts/${r.account_id}`} className="text-primary hover:underline">
+                          <Link target="_blank" rel="noopener noreferrer" to={`/accounts/${r.account_id}`} className="text-primary hover:underline">
                             {r.account_name}
                           </Link>
                         ) : (
@@ -296,7 +296,7 @@ export function LostCustomers() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <Link to={`/opportunities/${r.id}`} className="text-primary hover:underline">
+                        <Link target="_blank" rel="noopener noreferrer" to={`/opportunities/${r.id}`} className="text-primary hover:underline">
                           {r.opportunity_name}
                         </Link>
                       </TableCell>
