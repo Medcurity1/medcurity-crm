@@ -153,7 +153,7 @@ export function LeadDetail() {
   }
 
   if (!lead) {
-    return <div className="text-muted-foreground">Lead not found.</div>;
+    return <div className="text-muted-foreground">Import not found.</div>;
   }
 
   function handleArchive() {
@@ -273,7 +273,7 @@ export function LeadDetail() {
             {!isConverted && (
               <Button variant="default" size="sm" onClick={() => setShowConvert(true)}>
                 <ArrowRightLeft className="h-4 w-4 mr-1" />
-                Convert
+                Promote to Contact
               </Button>
             )}
             {canArchive && (

@@ -13,6 +13,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { formatCurrency } from "@/lib/formatters";
 import { buildPersonSearchClause } from "@/lib/search-clause";
+import { useAuth } from "@/features/auth/AuthProvider";
 import type {
   Account,
   Contact,
@@ -88,6 +89,8 @@ const leadStatusLabels: Record<LeadStatus, string> = {
 };
 
 export function GlobalSearch() {
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const [open, setOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -199,7 +202,8 @@ export function GlobalSearch() {
       if (error) throw error;
       return data as LeadResult[];
     },
-    enabled: searchEnabled,
+    // Imports are admin-only — don't surface them in non-admins' search.
+    enabled: searchEnabled && isAdmin,
   });
 
   function handleSelect(path: string) {
@@ -253,7 +257,7 @@ export function GlobalSearch() {
         open={open}
         onOpenChange={handleOpenChange}
         title="Global Search"
-        description="Search across accounts, contacts, opportunities, and leads"
+        description="Search across accounts, contacts, and opportunities"
         // cmdk filters items client-side by default (fuzzy-matching the `value`
         // attr against the typed query). Our results come back already
         // server-filtered via Supabase ilike, so cmdk's filter just hides most
@@ -262,7 +266,7 @@ export function GlobalSearch() {
         shouldFilter={false}
       >
         <CommandInput
-          placeholder="Search accounts, contacts, opportunities, leads..."
+          placeholder="Search accounts, contacts, opportunities..."
           value={inputValue}
           onValueChange={setInputValue}
         />
@@ -338,7 +342,7 @@ export function GlobalSearch() {
           )}
 
           {rankedLeads.length > 0 && (
-            <CommandGroup heading="Leads">
+            <CommandGroup heading="Imports">
               {rankedLeads.map((lead) => (
                 <CommandItem
                   key={lead.id}

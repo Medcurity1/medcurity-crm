@@ -1,10 +1,10 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { queryClient } from "@/lib/queryClient";
-import { AuthProvider } from "@/features/auth/AuthProvider";
+import { AuthProvider, useAuth } from "@/features/auth/AuthProvider";
 import { ProtectedRoute } from "@/features/auth/ProtectedRoute";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { ForgotPasswordPage } from "@/features/auth/ForgotPasswordPage";
@@ -63,6 +63,17 @@ const ImportRunDetail = lazy(() => import("@/features/admin/ImportRunDetail").th
 const UserSettings = lazy(() => import("@/features/settings/UserSettings").then(m => ({ default: m.UserSettings })));
 const ChangePasswordPage = lazy(() => import("@/features/auth/ChangePasswordPage").then(m => ({ default: m.ChangePasswordPage })));
 
+/** Route guard for admin-only pages (redirects non-admins to /accounts).
+ * RLS is the real enforcement; this just gives non-admins a clean redirect
+ * instead of an empty/not-found page on a deep link. */
+function AdminGate({ children }: { children: ReactNode }) {
+  const { profile } = useAuth();
+  if (profile?.role !== "admin" && profile?.role !== "super_admin") {
+    return <Navigate to="/accounts" replace />;
+  }
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -98,10 +109,11 @@ export default function App() {
                   <Route path="accounts/new" element={<AccountForm />} />
                   <Route path="accounts/:id" element={<AccountDetail />} />
                   <Route path="accounts/:id/edit" element={<AccountForm />} />
+                  {/* Imports tab (formerly Leads) — admin-only. */}
                   <Route path="leads" element={<LeadsList />} />
-                  <Route path="leads/new" element={<LeadForm />} />
-                  <Route path="leads/:id" element={<LeadDetail />} />
-                  <Route path="leads/:id/edit" element={<LeadForm />} />
+                  <Route path="leads/new" element={<AdminGate><LeadForm /></AdminGate>} />
+                  <Route path="leads/:id" element={<AdminGate><LeadDetail /></AdminGate>} />
+                  <Route path="leads/:id/edit" element={<AdminGate><LeadForm /></AdminGate>} />
                   <Route path="partners" element={<PartnersPage />} />
                   <Route path="contacts" element={<ContactsList />} />
                   <Route path="contacts/new" element={<ContactForm />} />

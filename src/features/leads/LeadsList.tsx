@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState, useUrlArrayState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
@@ -117,7 +117,17 @@ function StatCard({ label, value }: { label: string; value: number | string }) {
   );
 }
 
+// The Imports tab (formerly Leads) is admin-only. Guard wrapper keeps the
+// hooks in the inner component unconditional (rules-of-hooks safe).
 export function LeadsList() {
+  const { profile } = useAuth();
+  if (profile?.role !== "admin" && profile?.role !== "super_admin") {
+    return <Navigate to="/accounts" replace />;
+  }
+  return <ImportsList />;
+}
+
+function ImportsList() {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
@@ -285,8 +295,8 @@ export function LeadsList() {
   return (
     <div>
       <PageHeader
-        title="Leads"
-        description="Track and convert your sales leads"
+        title="Imports"
+        description="Admin-only drop zone for new and uncleaned contacts. Promote the good ones to Contacts; archive the rest."
         actions={
           <Button onClick={() => navigate("/leads/new")}>
             <Plus className="h-4 w-4 mr-2" />
@@ -517,16 +527,16 @@ export function LeadsList() {
       ) : !leads?.length ? (
         <EmptyState
           icon={UserPlus}
-          title="No leads found"
+          title="No imports found"
           description={
             search || statusFilter.length > 0 || sourceFilter.length > 0 || qualificationFilter.length > 0
               ? "Try adjusting your search or filters"
-              : "Create your first lead to get started"
+              : "Import a list to get started"
           }
           action={
             !search && !statusFilter.length && !sourceFilter.length && !qualificationFilter.length
               ? {
-                  label: "New Lead",
+                  label: "New Import",
                   onClick: () => navigate("/leads/new"),
                 }
               : undefined

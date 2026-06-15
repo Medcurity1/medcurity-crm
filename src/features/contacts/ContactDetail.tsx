@@ -179,7 +179,7 @@ export function ContactDetail() {
           row exists. */}
       {originatingLead && (
         <div className="mb-4 rounded-md border bg-muted/30 px-3 py-2 text-sm flex items-center gap-2">
-          <span className="text-muted-foreground">Converted from lead:</span>
+          <span className="text-muted-foreground">Promoted from import:</span>
           <Link
             to={`/leads/${originatingLead.id}`}
             className="text-primary hover:underline font-medium"
