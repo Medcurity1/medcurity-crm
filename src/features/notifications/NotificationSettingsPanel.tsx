@@ -89,6 +89,26 @@ export function NotificationSettingsPanel() {
       </Section>
 
       <Section
+        icon={<Mail className="h-4 w-4" />}
+        title="Task reminder emails"
+        desc="How you get reminded about your own tasks by email. Your in-app reminders aren't affected by these."
+      >
+        <EmailRow
+          optKey="email_task_digest"
+          label="Daily morning digest"
+          desc="One email each weekday morning listing your tasks due that day, plus anything overdue."
+          prefs={prefs}
+        />
+        <EmailRow
+          optKey="email_task_per_task"
+          label="Individual task reminders"
+          desc="A separate email when each task's reminder time hits. On by default."
+          prefs={prefs}
+          defaultOn
+        />
+      </Section>
+
+      <Section
         icon={<Smartphone className="h-4 w-4" />}
         title="Phone notifications (Pushover)"
         desc="Get instant phone alerts when a visitor requests a human. Requires the Pushover app ($4.99 one-time). Enter your Pushover user key below."
@@ -215,15 +235,21 @@ function EmailRow({
   label,
   desc,
   prefs,
+  defaultOn = false,
 }: {
   optKey: string;
   label: string;
   desc: string;
   prefs: Record<string, unknown>;
+  // Most email toggles are opt-IN (off unless explicitly true). Per-task
+  // reminder emails are the exception: they default ON (preserve today's
+  // behavior), so the switch reads "on unless explicitly turned off."
+  defaultOn?: boolean;
 }) {
   const update = useUpdateNotifPrefs();
-  // Opt-IN: only explicit true subscribes (edge functions match 'true').
-  const on = prefs[optKey] === true || prefs[optKey] === "true";
+  const on = defaultOn
+    ? prefs[optKey] !== false && prefs[optKey] !== "false"
+    : prefs[optKey] === true || prefs[optKey] === "true";
   return (
     <div className="flex items-start justify-between gap-4 px-4 py-3">
       <div className="min-w-0">

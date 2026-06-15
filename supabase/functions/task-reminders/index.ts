@@ -255,7 +255,22 @@ async function processReminder(
     });
   }
 
+  // Respect the per-user "individual task reminders" switch (default on):
+  // when a rep turns it off in My Settings, suppress the email but keep
+  // the in-app reminder above. The daily digest is the alternative.
+  let perTaskEmailOff = false;
   if (wantEmail) {
+    const { data: pref } = await supabase
+      .from("user_notification_prefs")
+      .select("prefs")
+      .eq("user_id", task.owner_user_id)
+      .maybeSingle();
+    const p = (pref?.prefs ?? {}) as Record<string, unknown>;
+    perTaskEmailOff =
+      p.email_task_per_task === false || p.email_task_per_task === "false";
+  }
+
+  if (wantEmail && !perTaskEmailOff) {
     // Look up the owner's Outlook connection + email to send from/to.
     const { data: conn } = await supabase
       .from("email_sync_connections")
