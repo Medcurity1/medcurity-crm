@@ -17,6 +17,7 @@ import { SortableHeader, type SortState } from "@/components/SortableHeader";
 // drill into a deal, then hit Back and find the list still sorted — the
 // previous useState-only version reset on every remount.
 import { MultiSelect } from "@/components/MultiSelect";
+import { SavedViews } from "@/features/saved-views/SavedViews";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -247,6 +248,8 @@ export function OpportunitiesList() {
             <SelectItem value="unverified">Unverified only</SelectItem>
           </SelectContent>
         </Select>
+
+        <SavedViews entity="opportunities" />
       </div>
 
       {isLoading ? (

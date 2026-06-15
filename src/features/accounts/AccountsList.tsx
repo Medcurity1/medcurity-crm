@@ -13,6 +13,7 @@ import { Pagination } from "@/components/Pagination";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { SortableHeader, type SortState } from "@/components/SortableHeader";
 import { MultiSelect } from "@/components/MultiSelect";
+import { SavedViews } from "@/features/saved-views/SavedViews";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -245,6 +246,8 @@ export function AccountsList() {
             <SelectItem value="unverified">Unverified only</SelectItem>
           </SelectContent>
         </Select>
+
+        <SavedViews entity="accounts" />
       </div>
 
       {isLoading ? (

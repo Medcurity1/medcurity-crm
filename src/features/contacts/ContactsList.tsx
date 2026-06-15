@@ -14,6 +14,7 @@ import { formatPhone } from "@/components/PhoneInput";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { SortableHeader, type SortState } from "@/components/SortableHeader";
 import { MultiSelect } from "@/components/MultiSelect";
+import { SavedViews } from "@/features/saved-views/SavedViews";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -179,6 +180,8 @@ export function ContactsList() {
             <SelectItem value="unverified">Unverified only</SelectItem>
           </SelectContent>
         </Select>
+
+        <SavedViews entity="contacts" />
       </div>
 
       {isLoading ? (
