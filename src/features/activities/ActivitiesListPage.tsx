@@ -153,7 +153,8 @@ function useActivitiesList(filters: ListFilters) {
 }
 
 function getRecordLink(
-  a: ListActivity
+  a: ListActivity,
+  isAdmin: boolean
 ): { to: string; label: string; sublabel?: string } | null {
   // Order matters: opp is most specific (it carries an account too),
   // then contact, then account, then lead.
@@ -179,10 +180,13 @@ function getRecordLink(
     };
   }
   if (a.lead_id) {
+    // Imports are admin-only — don't surface a (dead-end) import link to
+    // non-admins; the activity still shows, just without the related link.
+    if (!isAdmin) return null;
     const fn = a.lead?.first_name ?? "";
     const ln = a.lead?.last_name ?? "";
     const personName = `${fn} ${ln}`.trim();
-    const label = personName || a.lead?.company || "Lead";
+    const label = personName || a.lead?.company || "Import";
     return {
       to: `/leads/${a.lead_id}`,
       label,
@@ -193,7 +197,8 @@ function getRecordLink(
 }
 
 export function ActivitiesListPage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const [urlParams] = useSearchParams();
 
   // Allow the home "View All Tasks" link (and other deep links) to
@@ -379,7 +384,7 @@ export function ActivitiesListPage() {
               <TableBody>
                 {activities.map((a) => {
                   const Icon = ACTIVITY_ICONS[a.activity_type] ?? StickyNote;
-                  const link = getRecordLink(a);
+                  const link = getRecordLink(a, isAdmin);
                   return (
                     <TableRow key={a.id}>
                       <TableCell>

@@ -43,6 +43,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       setSession(session);
       if (session?.user) {
+        // Routine token refreshes (and user-updated events) fire with the
+        // profile already loaded — don't re-enter the loading state for
+        // those, or the whole app would blank for a moment every ~hour.
+        // For an actual sign-in we DO re-enter loading while the profile
+        // fetches, otherwise there's a brief render with a session but no
+        // profile yet, which flashed the "Account Not Provisioned" screen.
+        if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") return;
+        setLoading(true);
         fetchProfile(session.user.id);
       } else {
         setProfile(null);

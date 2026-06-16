@@ -323,7 +323,7 @@ function LeadFormInner({ lead }: { lead: Lead | undefined }) {
 
   return (
     <div>
-      <PageHeader title={isEditing ? "Edit Lead" : "New Lead"} />
+      <PageHeader title={isEditing ? "Edit Import" : "New Import"} />
 
       <Card>
         <CardContent className="pt-6">
@@ -708,7 +708,7 @@ function LeadFormInner({ lead }: { lead: Lead | undefined }) {
             {/* ---- Actions ---- */}
             <div className="flex items-center gap-3">
               <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? "Saving..." : isEditing ? "Save Changes" : "Create Lead"}
+                {isSubmitting ? "Saving..." : isEditing ? "Save Changes" : "Create Import"}
               </Button>
               <Button type="button" variant="outline" onClick={() => navigate(-1)}>
                 Cancel
