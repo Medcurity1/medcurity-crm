@@ -1,4 +1,4 @@
-import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom";
+import { useParams, useNavigate, Link, useSearchParams, Navigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
@@ -143,6 +143,12 @@ export function LeadDetail() {
       navigate(`/contacts/${lead.converted_contact_id}`, { replace: true });
     }
   }, [lead?.id, lead?.converted_at, lead?.converted_contact_id, navigate]);
+
+  // Leads are admin-only — a non-admin reaching a lead detail (old link,
+  // bookmark, search) is redirected, mirroring the list.
+  if (!isAdmin) {
+    return <Navigate to="/accounts" replace />;
+  }
 
   if (isLoading) {
     return (

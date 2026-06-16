@@ -11,6 +11,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { formatCurrency } from "@/lib/formatters";
 import { buildPersonSearchClause } from "@/lib/search-clause";
 import type {
@@ -88,6 +89,8 @@ const leadStatusLabels: Record<LeadStatus, string> = {
 };
 
 export function GlobalSearch() {
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const [open, setOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -199,8 +202,8 @@ export function GlobalSearch() {
       if (error) throw error;
       return data as LeadResult[];
     },
-    // TEMP: leads visible to reps again (Molly works campaign leads).
-    enabled: searchEnabled,
+    // Leads are admin-only — don't surface them in non-admins' search.
+    enabled: searchEnabled && isAdmin,
   });
 
   function handleSelect(path: string) {

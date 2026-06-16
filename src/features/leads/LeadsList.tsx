@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState, useUrlArrayState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
@@ -127,10 +127,13 @@ function StatCard({ label, value }: { label: string; value: number | string }) {
   );
 }
 
-// TEMP: the Imports/Leads tab is open to reps again (Molly still works
-// campaign leads), so no admin guard here. The admin-only power tools
-// inside (bulk promote, Mark Avoid) stay gated per-action.
+// The Leads tab is admin-only. Guard wrapper keeps the hooks in the inner
+// component unconditional (rules-of-hooks safe).
 export function LeadsList() {
+  const { profile } = useAuth();
+  if (profile?.role !== "admin" && profile?.role !== "super_admin") {
+    return <Navigate to="/accounts" replace />;
+  }
   return <ImportsList />;
 }
 
