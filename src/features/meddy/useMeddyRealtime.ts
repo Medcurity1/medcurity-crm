@@ -135,4 +135,68 @@ export function useMeddyRealtime(handlers: Handlers = {}) {
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [qc]);
+
+  // Live presence: the sturdy "who's online" signal.
+  //
+  // Each open Meddy tab rides a websocket presence channel. The server fires a
+  // `leave` within seconds when an agent's LAST tab drops off (closed tab,
+  // laptop sleep, lost network) — far faster than the 60s heartbeat going
+  // stale and the 2-min sweep noticing. A still-connected teammate reacts to
+  // that leave by marking the departed agent away (peer_offline). The heartbeat
+  // + sweep above stay as the fallback for the case where the departing tab is
+  // the only one open (nobody left to notice) or a deeply frozen tab.
+  useEffect(() => {
+    let cancelled = false;
+    let myId: string | null = null;
+    // Who we currently believe is present, so we can spot who dropped off.
+    let present = new Set<string>();
+
+    const presence = supabase.channel("meddy:presence");
+
+    const reconcile = () => {
+      if (cancelled) return;
+      const state = presence.presenceState() as Record<
+        string,
+        Array<{ user_id?: string }>
+      >;
+      const now = new Set<string>();
+      for (const entries of Object.values(state)) {
+        for (const e of entries) if (e.user_id) now.add(e.user_id);
+      }
+      // Anyone who was here and is now gone (and isn't us) dropped off — mark
+      // them away fast. Redundant calls from multiple peers are harmless (the
+      // server only flips a still-Available row, then no-ops).
+      for (const uid of present) {
+        if (!now.has(uid) && uid !== myId) {
+          staffAction("peer_offline", { user_id: uid }).catch(() => {});
+        }
+      }
+      present = now;
+      qc.invalidateQueries({ queryKey: ["meddy-team"] });
+    };
+
+    presence
+      .on("presence", { event: "sync" }, reconcile)
+      .on("presence", { event: "join" }, reconcile)
+      .on("presence", { event: "leave" }, reconcile);
+
+    supabase.auth.getUser().then(({ data }) => {
+      if (cancelled) return;
+      myId = data.user?.id ?? null;
+      if (!myId) return;
+      presence.subscribe((status) => {
+        if (status === "SUBSCRIBED" && myId) {
+          void presence.track({ user_id: myId });
+          // Re-affirm Available immediately on (re)connect so a brief network
+          // blip that dropped us from presence doesn't leave us stale.
+          staffAction("heartbeat").catch(() => {});
+        }
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(presence);
+    };
+  }, [qc]);
 }

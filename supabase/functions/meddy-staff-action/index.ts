@@ -362,6 +362,33 @@ Deno.serve(async (req) => {
         return json({ success: true });
       }
 
+      // ── Fast disconnect: a teammate's last tab dropped off presence ──
+      // The caller saw `user_id` leave the live presence channel (closed
+      // tab / sleep / lost network). Mark them away within seconds instead
+      // of waiting for the 2-min sweep. Only flips a row that is currently
+      // Available AND hasn't checked in within ~20s, so a fresh reconnect
+      // (their new tab just heartbeated) is never clobbered. Never touches
+      // away_manual. Idempotent — redundant calls from other peers no-op.
+      case "peer_offline": {
+        const targetId = typeof body.user_id === "string" ? body.user_id : "";
+        if (!targetId) return json({ error: "user_id required" }, 400);
+        const cutoff = new Date(Date.now() - 20_000).toISOString();
+        const { data: flipped } = await svc
+          .from("meddy_agent_status")
+          .update({ available: false, updated_at: new Date().toISOString() })
+          .eq("user_id", targetId)
+          .eq("available", true)
+          .lt("last_seen", cutoff)
+          .select("user_id");
+        if ((flipped ?? []).length > 0) {
+          await broadcast("meddy:dashboard", "team_status_changed", {
+            userId: targetId,
+            available: false,
+          });
+        }
+        return json({ success: true });
+      }
+
       default:
         return json({ error: `Unknown action: ${action}` }, 400);
     }
