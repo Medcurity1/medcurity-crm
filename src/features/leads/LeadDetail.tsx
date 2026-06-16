@@ -5,7 +5,6 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { Pencil, Archive, ChevronDown, ChevronLeft, Phone, Mail, ArrowRightLeft, UserRoundCog, History, MapPin, Ban } from "lucide-react";
 import { InlineEdit } from "@/components/InlineEdit";
 import { useLead, useUpdateLead, useArchiveLead, useMarkImportAvoid } from "./api";
-import { useLeadLists } from "@/features/lead-lists/lead-lists-api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
 import { VerifiedBadge } from "@/components/VerifiedBadge";
@@ -118,11 +117,6 @@ export function LeadDetail() {
   const fromListId = fromParam?.startsWith("list:")
     ? fromParam.slice("list:".length)
     : null;
-  const { data: leadLists } = useLeadLists();
-  const fromList = fromListId
-    ? leadLists?.find((l) => l.id === fromListId)
-    : undefined;
-
   useEffect(() => {
     if (lead) {
       const name = `${lead.first_name ?? ""} ${lead.last_name ?? ""}`.trim() || "Unknown";
@@ -190,11 +184,11 @@ export function LeadDetail() {
       {fromListId && (
         <button
           type="button"
-          onClick={() => navigate(`/lead-lists?list=${fromListId}`)}
+          onClick={() => navigate("/leads")}
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-3"
         >
           <ChevronLeft className="h-4 w-4" />
-          Back to {fromList?.name ?? "lead list"}
+          Back to Leads
         </button>
       )}
 

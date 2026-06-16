@@ -146,12 +146,19 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    // Deduplicate: check if a lead with this email already exists
+    // Deduplicate: check if a lead with this email already exists.
+    // Case-insensitive so a website resubmission with different casing —
+    // John@x.com vs john@x.com — doesn't slip through as a fresh duplicate.
+    // We use ILIKE for the case-fold, but escape LIKE metacharacters (% _ \)
+    // first so an email with a legal underscore (john_doe@x.com) matches
+    // literally instead of acting as a wildcard (which would false-positive
+    // and silently drop a real new lead).
     if (leadEmail) {
+      const emailPattern = leadEmail.replace(/[\\%_]/g, "\\$&");
       const { data: existing } = await supabase
         .from("leads")
         .select("id, email, status")
-        .eq("email", leadEmail)
+        .ilike("email", emailPattern)
         .neq("status", "converted")
         .limit(1)
         .maybeSingle();

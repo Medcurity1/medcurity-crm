@@ -48,14 +48,14 @@ export function DuplicateWarning({
     try {
       if (entity === "accounts" && name && name.trim().length >= 2) {
         const { data, error } = await supabase.rpc("find_duplicate_accounts", {
-          p_name: name.trim(),
+          account_name: name.trim(),
         });
         if (!error && data && data.length > 0) {
           results = data.map(
-            (d: { id: string; name: string; industry: string | null }) => ({
+            (d: { id: string; name: string; lifecycle_status: string | null }) => ({
               id: d.id,
               label: d.name,
-              detail: d.industry ?? "",
+              detail: d.lifecycle_status ?? "",
               href: `/accounts/${d.id}`,
             })
           );
@@ -91,9 +91,9 @@ export function DuplicateWarning({
           const { data, error } = await supabase.rpc(
             "find_duplicate_contacts",
             {
-              p_email: email?.trim() ?? "",
-              p_first_name: firstName?.trim() ?? "",
-              p_last_name: lastName?.trim() ?? "",
+              contact_email: email?.trim() ?? "",
+              contact_first_name: firstName?.trim() ?? "",
+              contact_last_name: lastName?.trim() ?? "",
             }
           );
           if (!error && data && data.length > 0) {
@@ -149,8 +149,8 @@ export function DuplicateWarning({
 
         if (hasEmail || hasCompany) {
           const { data, error } = await supabase.rpc("find_duplicate_leads", {
-            p_email: email?.trim() ?? "",
-            p_company: company?.trim() ?? "",
+            lead_email: email?.trim() ?? "",
+            lead_company: company?.trim() ?? "",
           });
           if (!error && data && data.length > 0) {
             results = data.map(

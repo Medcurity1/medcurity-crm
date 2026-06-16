@@ -180,9 +180,9 @@ function applyFilters<T>(
 
 /**
  * Returns true if `lead` should be kept after applying the filters that
- * can't be expressed in PostgREST directly: in_sequence, last_activity
- * range, exclude_in_other_lists. Pass pre-fetched lookup maps so the
- * hook only fires one supplemental query each.
+ * can't be expressed in PostgREST directly: last_activity range,
+ * exclude_in_other_lists. Pass pre-fetched lookup maps so the hook only
+ * fires one supplemental query each.
  */
 function postFilter(
   lead: Lead,

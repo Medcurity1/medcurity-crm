@@ -260,6 +260,10 @@ export interface BulkPromoteResult {
   skipped_ambiguous: number;
   skipped_other: number;
   errors: number;
+  /** First error message captured during the batch (null if none). The RPC
+   * returns this so the UI can surface WHY rows errored instead of a bare
+   * count. */
+  last_error: string | null;
 }
 export function useBulkPromoteImports() {
   const qc = useQueryClient();
@@ -315,9 +319,10 @@ export function useConvertLead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: ConvertLeadInput) => {
-      if (!input.existingAccountId && !input.accountName) {
-        throw new Error("Pick an existing account or provide a new account name.");
-      }
+      // Account is optional. A lead can be promoted to a standalone contact
+      // with no account (the "No account" mode) — the convert_lead RPC handles
+      // existing-account / new-account / no-account alike. Only guard against
+      // the contradiction of supplying BOTH an existing id and a new name.
       if (input.existingAccountId && input.accountName) {
         throw new Error("Convert lead got both existingAccountId and accountName — pick one.");
       }

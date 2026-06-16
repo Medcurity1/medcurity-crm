@@ -108,8 +108,10 @@ export default function App() {
                   <Route path="accounts/new" element={<AccountForm />} />
                   <Route path="accounts/:id" element={<AccountDetail />} />
                   <Route path="accounts/:id/edit" element={<AccountForm />} />
-                  {/* Imports tab (formerly Leads) — admin-only. */}
-                  <Route path="leads" element={<LeadsList />} />
+                  {/* Leads (admin-only working/import list). Gate the list
+                      route too, matching the other leads routes — the
+                      component also guards, this is belt-and-suspenders. */}
+                  <Route path="leads" element={<AdminGate><LeadsList /></AdminGate>} />
                   <Route path="leads/new" element={<AdminGate><LeadForm /></AdminGate>} />
                   <Route path="leads/:id" element={<AdminGate><LeadDetail /></AdminGate>} />
                   <Route path="leads/:id/edit" element={<AdminGate><LeadForm /></AdminGate>} />

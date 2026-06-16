@@ -47,17 +47,23 @@ interface AccountSuggestion {
 
 type AccountMode = "existing" | "new" | "none";
 
-// Normalize a company name for duplicate detection: fold "&"/"and", drop
-// common legal suffixes, strip punctuation/spacing, lowercase. Collapses
-// "Smith & Sons" / "Smith and Sons" / "Smith and Sons, LLC" to one key.
-// Conservative — only merges punctuation/suffix/and variants, never
-// distinct names.
+// Normalize a company name for the dialog's account auto-match. This MUST
+// mirror the DB norm_company() (20260616000001) exactly, or the dialog will
+// pre-select an "existing" account the server wouldn't actually match (false
+// merges). The DB rule: fold "&"->" and ", strip punctuation to spaces,
+// collapse whitespace, then strip ONLY a trailing legal suffix. It keeps
+// inner spaces and does NOT drop "co"/"company"/"group" — those genuinely
+// distinguish separate healthcare billing entities.
 function normCompany(s: string): string {
-  return s
+  const collapsed = (s ?? "")
     .toLowerCase()
-    .replace(/&/g, "and")
-    .replace(/\b(inc|incorporated|llc|llp|ltd|co|corp|corporation|company)\b/g, "")
-    .replace(/[^a-z0-9]+/g, "");
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return collapsed
+    .replace(/ (inc|llc|llp|ltd|corp|corporation|pllc|incorporated)$/, "")
+    .trim();
 }
 
 // The most distinctive word in a company name (longest, ignoring filler),

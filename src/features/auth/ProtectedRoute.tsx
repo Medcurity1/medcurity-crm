@@ -37,5 +37,27 @@ export function ProtectedRoute() {
     );
   }
 
+  // A deactivated profile still has a valid session token, so without this
+  // check a departed/disabled user would land in the app shell (every CRM
+  // query would come back empty because RLS — current_app_role()/is_admin()
+  // — already requires is_active, but the broken-but-loaded UI is confusing
+  // and a poor signal). Reject cleanly with a clear message instead.
+  if (profile.is_active === false) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="max-w-md text-center space-y-4">
+          <h2 className="text-xl font-semibold">Account Deactivated</h2>
+          <p className="text-muted-foreground">
+            Your account has been deactivated. If you think this is a mistake,
+            contact a Medcurity admin to have it re-enabled.
+          </p>
+          <Button variant="outline" onClick={() => signOut()}>
+            Sign Out
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return <Outlet />;
 }

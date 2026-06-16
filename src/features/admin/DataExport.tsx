@@ -10,7 +10,7 @@ import { supabase } from "@/lib/supabase";
  * the user might want a snapshot of (accounts, contacts, leads,
  * opportunities, opportunity_products, products, price_books,
  * price_book_entries, partners, account_partners, activities,
- * tasks, events, lead_lists, lead_list_members, sequences,
+ * tasks, events, lead_lists, lead_list_members,
  * email_templates, audit_log) and triggers one download per
  * entity. Mirrors the SF Data Export experience: full-fidelity
  * snapshot you can keep as a safety net before any destructive
