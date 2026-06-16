@@ -1,16 +1,16 @@
-// Realtime plumbing for the Meddy dashboard.
+// Realtime plumbing for the Meddy DASHBOARD UI (the /meddy page only).
 //
-// One broadcast channel ("meddy:dashboard") carries every staff-facing
-// event the edge functions emit (the Supabase replacement for Nexus's
-// dashboard WebSocket). A 60s heartbeat keeps meddy_agent_status.last_seen
-// fresh — the sweep marks agents away after 2 missed beats, and the beat
-// flips Available back on after a reconnect unless the user chose Away
-// (the away_manual design).
+// One broadcast channel ("meddy:dashboard") carries every staff-facing event
+// the edge functions emit (new messages, conversation updates, dings) and
+// refreshes the dashboard's queries. This mounts only while viewing Meddy.
+//
+// Availability (the heartbeat + presence that keep a user "available" for
+// website chats) is NOT here — it lives in useMeddyPresence, mounted app-wide
+// in AppLayout so a user stays available while working anywhere in the CRM.
 
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
-import { staffAction } from "./api";
 
 type DashboardEvent = {
   conversationId?: string;
@@ -103,130 +103,6 @@ export function useMeddyRealtime(handlers: Handlers = {}) {
     channel.subscribe();
     return () => {
       supabase.removeChannel(channel);
-    };
-  }, [qc]);
-
-  // Heartbeat while the Meddy tab is mounted.
-  useEffect(() => {
-    let cancelled = false;
-    const beat = () => {
-      staffAction("heartbeat")
-        .then(() => {
-          if (!cancelled) {
-            qc.invalidateQueries({ queryKey: ["meddy-team"] });
-            if (qc.isMutating({ mutationKey: ["meddy-set-availability"] }) === 0) {
-              qc.invalidateQueries({ queryKey: ["meddy-availability"] });
-            }
-          }
-        })
-        .catch(() => {
-          // transient network errors are fine; the next beat retries
-        });
-    };
-    beat();
-    const interval = setInterval(beat, 60_000);
-    const onVisible = () => {
-      if (!document.hidden) beat();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [qc]);
-
-  // Live presence: the sturdy "who's online" signal.
-  //
-  // Each open Meddy tab rides a websocket presence channel. The server fires a
-  // `leave` within seconds when an agent's LAST tab drops off (closed tab,
-  // laptop sleep, lost network) — far faster than the 60s heartbeat going
-  // stale and the 2-min sweep noticing. A still-connected teammate reacts to
-  // that leave by marking the departed agent away (peer_offline). The heartbeat
-  // + sweep above stay as the fallback for the case where the departing tab is
-  // the only one open (nobody left to notice) or a deeply frozen tab.
-  useEffect(() => {
-    let cancelled = false;
-    let myId: string | null = null;
-    // Who we currently believe is present, so we can spot who dropped off.
-    let present = new Set<string>();
-    // Pending "mark away" timers per user_id. We DEBOUNCE a presence `leave`:
-    // wait ~12s and only mark the agent away if they're STILL gone. A brief
-    // network flap rejoins within a second or two and cancels the timer, so a
-    // healthy agent is never knocked out of routing. A real disconnect stays
-    // gone and gets marked away ~12s later — still far faster than the 2-min
-    // sweep. (12s is longer than the 60s/20s mismatch the review flagged, so a
-    // healthy-but-not-just-beaten agent can't be wrongly flipped.)
-    const pending = new Map<string, number>();
-
-    const presence = supabase.channel("meddy:presence");
-
-    const currentSet = () => {
-      const state = presence.presenceState() as Record<
-        string,
-        Array<{ user_id?: string }>
-      >;
-      const s = new Set<string>();
-      for (const entries of Object.values(state)) {
-        for (const e of entries) if (e.user_id) s.add(e.user_id);
-      }
-      return s;
-    };
-
-    const reconcile = () => {
-      if (cancelled) return;
-      const now = currentSet();
-      // Present again -> cancel any pending away timer (it was a flap).
-      for (const uid of now) {
-        const t = pending.get(uid);
-        if (t !== undefined) {
-          window.clearTimeout(t);
-          pending.delete(uid);
-        }
-      }
-      // Dropped off (and isn't us) -> schedule a debounced away mark.
-      for (const uid of present) {
-        if (!now.has(uid) && uid !== myId && !pending.has(uid)) {
-          const t = window.setTimeout(() => {
-            pending.delete(uid);
-            if (cancelled) return;
-            // Only if STILL gone right now. Redundant calls from multiple
-            // peers are harmless (the server only flips a still-Available row).
-            if (!currentSet().has(uid)) {
-              staffAction("peer_offline", { user_id: uid }).catch(() => {});
-            }
-          }, 12_000);
-          pending.set(uid, t);
-        }
-      }
-      present = now;
-      qc.invalidateQueries({ queryKey: ["meddy-team"] });
-    };
-
-    presence
-      .on("presence", { event: "sync" }, reconcile)
-      .on("presence", { event: "join" }, reconcile)
-      .on("presence", { event: "leave" }, reconcile);
-
-    supabase.auth.getUser().then(({ data }) => {
-      if (cancelled) return;
-      myId = data.user?.id ?? null;
-      if (!myId) return;
-      presence.subscribe((status) => {
-        if (status === "SUBSCRIBED" && myId) {
-          void presence.track({ user_id: myId });
-          // Re-affirm Available immediately on (re)connect so a brief network
-          // blip that dropped us from presence doesn't leave us stale.
-          staffAction("heartbeat").catch(() => {});
-        }
-      });
-    });
-
-    return () => {
-      cancelled = true;
-      for (const t of pending.values()) window.clearTimeout(t);
-      pending.clear();
-      supabase.removeChannel(presence);
     };
   }, [qc]);
 }

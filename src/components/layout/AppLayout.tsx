@@ -13,6 +13,7 @@ import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useIdleLogout } from "@/hooks/useIdleLogout";
 import { useNotificationToasts } from "@/hooks/useNotificationToasts";
+import { useMeddyPresence } from "@/features/meddy/useMeddyPresence";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { IdleWarningDialog } from "@/components/IdleWarningDialog";
@@ -94,6 +95,11 @@ export function AppLayout() {
   // Poll for new in-app notifications and pop them as toasts (top-right).
   // Runs as long as the user is signed in.
   useNotificationToasts();
+
+  // Meddy availability, SITE-WIDE. Keeps the signed-in user "available" for
+  // website chats while they work anywhere in the CRM (not just the Meddy
+  // tab). They go unavailable only via the manual Away toggle or session end.
+  useMeddyPresence(!!profile);
 
   // Quick Create dialog
   const [showQuickCreate, setShowQuickCreate] = useState(false);
