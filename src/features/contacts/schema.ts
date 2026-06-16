@@ -1,7 +1,9 @@
 import { z } from "zod";
 
 export const contactSchema = z.object({
-  account_id: z.string().uuid("Account is required"),
+  // Optional: a contact may be account-less (individual, unknown company).
+  // The form's "no account" sentinel and "" both resolve to null on submit.
+  account_id: z.string().optional(),
   first_name: z.string().min(1, "First name is required"),
   last_name: z.string().min(1, "Last name is required"),
   email: z.string().email("Invalid email").optional().or(z.literal("")),

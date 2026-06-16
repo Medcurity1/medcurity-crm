@@ -283,7 +283,7 @@ export function ContactDetail() {
             content: (
               <ActivityTimeline
                 contactId={contact.id}
-                accountId={contact.account_id}
+                accountId={contact.account_id ?? undefined}
                 contactEmail={contact.email ?? undefined}
                 contactName={formatName(contact.first_name, contact.last_name)}
                 compact
@@ -305,7 +305,13 @@ export function ContactDetail() {
           {
             value: "opportunities",
             label: "Opportunities",
-            content: <AccountOpportunities accountId={contact.account_id} />,
+            content: contact.account_id ? (
+              <AccountOpportunities accountId={contact.account_id} />
+            ) : (
+              <p className="text-sm text-muted-foreground p-4">
+                No account linked — link this contact to an account to track opportunities.
+              </p>
+            ),
           },
           {
             value: "tasks",

@@ -253,7 +253,7 @@ export interface Contact {
   id: string;
   sf_id: string | null;
   contact_number: string | null;
-  account_id: string;
+  account_id: string | null;
   owner_user_id: string | null;
   verified: boolean;
   verified_at: string | null;

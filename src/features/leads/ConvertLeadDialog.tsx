@@ -45,7 +45,7 @@ interface AccountSuggestion {
   lifecycle_status: string | null;
 }
 
-type AccountMode = "existing" | "new";
+type AccountMode = "existing" | "new" | "none";
 
 // Normalize a company name for duplicate detection: fold "&"/"and", drop
 // common legal suffixes, strip punctuation/spacing, lowercase. Collapses
@@ -245,6 +245,7 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
   }, [accountQuery, open, lead.company]);
 
   const accountReady = useMemo(() => {
+    if (mode === "none") return true;
     if (mode === "existing") return !!selectedAccount;
     return accountName.trim().length > 0;
   }, [mode, selectedAccount, accountName]);
@@ -323,9 +324,11 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
       }
 
       toast.success(
-        mode === "existing"
-          ? `Lead converted into existing account "${result.account.name}"`
-          : `Lead converted — new account "${result.account.name}" created`
+        mode === "none"
+          ? "Lead promoted to a contact (no account)"
+          : mode === "existing"
+            ? `Lead converted into existing account "${result.account.name}"`
+            : `Lead converted — new account "${result.account.name}" created`
       );
       // Close dialog first, then navigate. Target is the new CONTACT —
       // this is the "newly created record" the rep cares about, and it
@@ -378,9 +381,27 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
               >
                 Create new account
               </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={mode === "none" ? "default" : "outline"}
+                onClick={() => {
+                  setMode("none");
+                  setCreateOpportunity(false); // an opp needs an account
+                }}
+                className="flex-1"
+              >
+                No account
+              </Button>
             </div>
 
-            {mode === "existing" ? (
+            {mode === "none" ? (
+              <p className="text-sm text-muted-foreground rounded-md border border-border p-3">
+                This person will become a contact with <strong>no account</strong> — use this
+                for an individual whose company you don't know yet. You can attach an account
+                later, and an opportunity can only be added once they have one.
+              </p>
+            ) : mode === "existing" ? (
               <div className="space-y-2">
                 <Label htmlFor="convert_account_search">
                   Find account
@@ -513,10 +534,16 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
               <Checkbox
                 id="create_opportunity"
                 checked={createOpportunity}
+                disabled={mode === "none"}
                 onCheckedChange={(v) => setCreateOpportunity(v === true)}
               />
               <Label htmlFor="create_opportunity" className="text-sm font-semibold text-muted-foreground uppercase tracking-wider cursor-pointer">
                 Create Opportunity
+                {mode === "none" && (
+                  <span className="ml-2 font-normal normal-case tracking-normal lowercase text-xs">
+                    (needs an account)
+                  </span>
+                )}
               </Label>
             </div>
 
@@ -643,9 +670,11 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
           >
             {convertMutation.isPending || addProductsBulkMutation.isPending
               ? "Converting..."
-              : mode === "existing"
-                ? "Convert into existing account"
-                : "Convert + create new account"}
+              : mode === "none"
+                ? "Promote to contact (no account)"
+                : mode === "existing"
+                  ? "Convert into existing account"
+                  : "Convert + create new account"}
           </Button>
         </DialogFooter>
       </DialogContent>

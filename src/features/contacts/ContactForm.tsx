@@ -62,6 +62,10 @@ export function ContactForm() {
 
 /* ---------- Inner form ---------- */
 
+// Radix Select can't use "" as a value, so this sentinel represents the
+// "no account" choice; it maps to null on submit.
+const NO_ACCOUNT = "__none__";
+
 interface AccountOption { id: string; name: string }
 
 function ContactFormInner({
@@ -109,7 +113,7 @@ function ContactFormInner({
     resolver: zodResolver(contactSchema),
     defaultValues: isEditing && contact
       ? {
-          account_id: contact.account_id,
+          account_id: contact.account_id ?? "",
           first_name: contact.first_name,
           last_name: contact.last_name,
           email: contact.email ?? "",
@@ -235,6 +239,10 @@ function ContactFormInner({
 
     const payload = {
       ...values,
+      // Account is optional now (e.g. a webinar contact with only an
+      // email and no known company). "" / the "no account" sentinel -> null.
+      account_id:
+        values.account_id && values.account_id !== NO_ACCOUNT ? values.account_id : null,
       email: values.email || null,
       title: values.title || null,
       phone: values.phone || null,
@@ -286,15 +294,16 @@ function ContactFormInner({
           <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2 md:col-span-2">
-                <Label>Account *<RequiredIndicator fieldKey="account_id" requiredFields={requiredKeys} /></Label>
+                <Label>Account</Label>
                 <Select
-                  value={watch("account_id")}
+                  value={watch("account_id") || NO_ACCOUNT}
                   onValueChange={(v) => setValue("account_id", v)}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select account" />
+                    <SelectValue placeholder="Select account (optional)" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value={NO_ACCOUNT}>No account (individual)</SelectItem>
                     {accountOptions.map((a) => (
                       <SelectItem key={a.id} value={a.id}>
                         {a.name}
@@ -302,6 +311,9 @@ function ContactFormInner({
                     ))}
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  Optional — leave as "No account" for an individual whose company you don't know yet.
+                </p>
                 {errors.account_id && <p className="text-sm text-destructive">{errors.account_id.message}</p>}
               </div>
 
