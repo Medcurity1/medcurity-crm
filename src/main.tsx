@@ -62,7 +62,8 @@ if (typeof window !== "undefined") {
 // BEFORE App — and therefore the Supabase client — loads and reads storage.
 // App is imported dynamically so its supabase client constructs only after
 // sessionStorage is populated. The wait is ~0ms for a tab that already has a
-// session and at most 300ms for a brand-new one.
+// session (or an existing user migrating from localStorage) and at most 600ms
+// for a brand-new tab borrowing from a sibling.
 void initCrossTabSession().then(async () => {
   const { default: App } = await import("./App");
   ReactDOM.createRoot(document.getElementById("root")!).render(

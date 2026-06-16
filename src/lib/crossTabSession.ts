@@ -76,6 +76,23 @@ function backing(): Storage {
 // back out and loop.
 const lastSeen: Record<string, string | null> = {};
 
+// expires_at (epoch seconds) of a serialized session, for recency checks.
+function sessionExpiresAt(value: string | null): number {
+  if (!value) return 0;
+  try {
+    return Number((JSON.parse(value) as { expires_at?: number })?.expires_at) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+// Wall-clock ms of the most recent sign-out this tab saw. A mirrored 'set' that
+// lands within the tombstone window right after a sign-out is ignored, so a
+// race between a sibling's in-flight refresh and a sign-out can't resurrect a
+// signed-out session. Cleared by a genuine local sign-in write.
+let signedOutAt = 0;
+const SIGNOUT_TOMBSTONE_MS = 2000;
+
 /** Supabase `auth.storage` adapter. */
 export const crossTabStorage = {
   getItem(key: string): string | null {
@@ -91,6 +108,7 @@ export const crossTabStorage = {
     } catch {
       /* storage blocked/full */
     }
+    if (key === AUTH_STORAGE_KEY) signedOutAt = 0; // a real local sign-in/refresh
     if (useSessionStore && lastSeen[key] !== value) {
       lastSeen[key] = value;
       channel?.postMessage({ type: "set", key, value });
@@ -102,6 +120,7 @@ export const crossTabStorage = {
     } catch {
       /* ignore */
     }
+    if (key === AUTH_STORAGE_KEY) signedOutAt = Date.now();
     if (useSessionStore) {
       lastSeen[key] = null;
       channel?.postMessage({ type: "remove", key });
@@ -124,6 +143,16 @@ channel?.addEventListener("message", (e: MessageEvent) => {
   }
 
   if (msg.type === "set" && msg.key) {
+    if (msg.key === AUTH_STORAGE_KEY) {
+      // Don't resurrect a session right after a sign-out, and never overwrite a
+      // newer session with an older one (a stale 'set' that raced a refresh).
+      if (Date.now() - signedOutAt < SIGNOUT_TOMBSTONE_MS) return;
+      if (
+        sessionExpiresAt(msg.value ?? null) <
+        sessionExpiresAt(sessionStorage.getItem(msg.key))
+      )
+        return;
+    }
     if (sessionStorage.getItem(msg.key) === msg.value) return; // already in sync
     lastSeen[msg.key] = msg.value ?? null; // suppress echo on the write below
     try {
@@ -135,6 +164,7 @@ channel?.addEventListener("message", (e: MessageEvent) => {
   }
 
   if (msg.type === "remove" && msg.key) {
+    if (msg.key === AUTH_STORAGE_KEY) signedOutAt = Date.now();
     lastSeen[msg.key] = null;
     try {
       sessionStorage.removeItem(msg.key);
