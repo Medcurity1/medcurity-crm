@@ -78,10 +78,15 @@ export function AppLayout() {
   const WIZARD_ENABLED = false;
   const showWizard = WIZARD_ENABLED && !!profile && !profile.onboarded_at;
 
-  // Auto-logout on inactivity. Defaults to 60 min idle; shows a 60s warning
-  // modal so the user can cancel before being booted.
+  // Inactivity auto-logout, now a long HIPAA backstop rather than a short
+  // timeout. Reps keep the CRM open all day to stay "available" for Meddy
+  // chats, so a 12h idle window never trips during a workday of just sitting
+  // available (availability runs off the Meddy heartbeat, not this timer),
+  // but an abandoned-yet-running machine still logs off overnight. The
+  // primary session control is now "close every tab => logged out"
+  // (crossTabSession.ts); this is the secondary safeguard.
   const idle = useIdleLogout({
-    idleMs: 60 * 60 * 1000,
+    idleMs: 12 * 60 * 60 * 1000,
     warnMs: 60 * 1000,
     enabled: !!profile,
   });

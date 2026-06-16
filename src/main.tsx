@@ -1,8 +1,8 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import App from "./App";
 import "./app.css";
 import { initTheme } from "./hooks/useTheme";
+import { initCrossTabSession } from "./lib/crossTabSession";
 
 // Apply saved light/dark theme before first paint to avoid flash.
 initTheme();
@@ -58,8 +58,16 @@ if (typeof window !== "undefined") {
   }, 10_000);
 }
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+// Adopt the session (from a sibling tab or the legacy localStorage migration)
+// BEFORE App — and therefore the Supabase client — loads and reads storage.
+// App is imported dynamically so its supabase client constructs only after
+// sessionStorage is populated. The wait is ~0ms for a tab that already has a
+// session and at most 300ms for a brand-new one.
+void initCrossTabSession().then(async () => {
+  const { default: App } = await import("./App");
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  );
+});

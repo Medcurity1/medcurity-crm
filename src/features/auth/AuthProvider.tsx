@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import type { UserProfile } from "@/types/crm";
@@ -18,6 +18,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  // The user id whose profile is currently loaded. Lets us skip the
+  // loading/re-fetch when an auth event resolves to the same user (e.g. a
+  // sibling tab syncing a refreshed session in), avoiding a screen flash.
+  const loadedUserId = useRef<string | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -49,10 +53,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // For an actual sign-in we DO re-enter loading while the profile
         // fetches, otherwise there's a brief render with a session but no
         // profile yet, which flashed the "Account Not Provisioned" screen.
-        if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") return;
+        if (
+          event === "TOKEN_REFRESHED" ||
+          event === "USER_UPDATED" ||
+          session.user.id === loadedUserId.current
+        )
+          return;
         setLoading(true);
         fetchProfile(session.user.id);
       } else {
+        loadedUserId.current = null;
         setProfile(null);
         setLoading(false);
       }
@@ -70,8 +80,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (error || !data) {
       console.error("Failed to fetch user profile:", error);
+      loadedUserId.current = null;
       setProfile(null);
     } else {
+      loadedUserId.current = userId;
       setProfile(data as UserProfile);
     }
     setLoading(false);
@@ -79,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signOut() {
     await supabase.auth.signOut();
+    loadedUserId.current = null;
     setSession(null);
     setProfile(null);
   }
