@@ -3,9 +3,9 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState, useUrlArrayState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { UserPlus, Plus, Search, X, ListChecks, Save } from "lucide-react";
+import { UserPlus, Plus, Search, X, ListChecks, Save, UserCheck } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { useLeads, useArchiveLead, useBulkUpdateOwner, useBulkDeleteLeads } from "./api";
+import { useLeads, useArchiveLead, useBulkUpdateOwner, useBulkDeleteLeads, useBulkPromoteImports } from "./api";
 import { useUsers } from "@/features/accounts/api";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent } from "@/components/ui/card";
@@ -54,34 +54,35 @@ function useLeadQuickStats() {
       // default, which is why the "Total Leads" card said 1000 when
       // the table actually has ~32k. Each count() is a single query
       // that returns just the count via Content-Range.
-      const [totalRes, mqlRes, qualifiedRes] = await Promise.all([
+      // Import-workflow stats (MQL/qualification is a Contact concept now,
+      // not an Import one): the active pile, plus cumulative promoted and
+      // avoided. head:true counts dodge PostgREST's 1000-row cap.
+      const [totalRes, promotedRes, avoidedRes] = await Promise.all([
+        // Active imports = the working pile (not yet promoted or archived).
         supabase
           .from("leads")
           .select("id", { count: "exact", head: true })
           .is("archived_at", null),
+        // Promoted to contacts (cumulative; promoted imports are archived).
         supabase
           .from("leads")
           .select("id", { count: "exact", head: true })
-          .is("archived_at", null)
-          .eq("qualification", "mql"),
-        // 'qualified' is the SF status that means "ready to convert"
-        // — closer in spirit to the old "converted" metric for migrated
-        // data, since converted leads aren't kept in the leads table.
+          .eq("status", "converted"),
+        // Marked Avoid (bounced/unsub/auto-reply/manual).
         supabase
           .from("leads")
           .select("id", { count: "exact", head: true })
-          .is("archived_at", null)
-          .eq("status", "qualified"),
+          .not("avoid_reason", "is", null),
       ]);
 
       if (totalRes.error) throw totalRes.error;
-      if (mqlRes.error) throw mqlRes.error;
-      if (qualifiedRes.error) throw qualifiedRes.error;
+      if (promotedRes.error) throw promotedRes.error;
+      if (avoidedRes.error) throw avoidedRes.error;
 
       return {
         total: totalRes.count ?? 0,
-        mql: mqlRes.count ?? 0,
-        qualified: qualifiedRes.count ?? 0,
+        promoted: promotedRes.count ?? 0,
+        avoided: avoidedRes.count ?? 0,
       };
     },
   });
@@ -214,6 +215,7 @@ function ImportsList() {
   const archiveMutation = useArchiveLead();
   const bulkOwnerMutation = useBulkUpdateOwner();
   const bulkDeleteMutation = useBulkDeleteLeads();
+  const bulkPromoteMutation = useBulkPromoteImports();
 
   const leads = result?.data;
   const totalCount = result?.count ?? 0;
@@ -289,6 +291,26 @@ function ImportsList() {
     setSelectedIds(new Set());
   };
 
+  const handleBulkPromote = async () => {
+    const n = selectedIds.size;
+    if (!confirm(
+      `Promote ${n} import(s) to Contacts?\n\n` +
+        `Each one is matched to an existing account by company name (or a new account is created), ` +
+        `and its history follows it. Duplicates of existing contacts are skipped automatically.`,
+    )) return;
+    try {
+      const r = await bulkPromoteMutation.mutateAsync(Array.from(selectedIds));
+      setSelectedIds(new Set());
+      const parts = [`${r.promoted} promoted`];
+      if (r.skipped_duplicate) parts.push(`${r.skipped_duplicate} skipped (already a contact)`);
+      if (r.skipped_other) parts.push(`${r.skipped_other} skipped`);
+      if (r.errors) parts.push(`${r.errors} error(s)`);
+      toast.success(parts.join(" · "));
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+
   const allChecked =
     !!leads?.length && leads.every((l) => selectedIds.has(l.id));
 
@@ -306,9 +328,9 @@ function ImportsList() {
       />
 
       <div className="grid grid-cols-3 gap-3 mb-4">
-        <StatCard label="Total Leads" value={quickStats?.total ?? 0} />
-        <StatCard label="MQL" value={quickStats?.mql ?? 0} />
-        <StatCard label="Qualified" value={quickStats?.qualified ?? 0} />
+        <StatCard label="Imports (pending)" value={quickStats?.total ?? 0} />
+        <StatCard label="Promoted to Contacts" value={quickStats?.promoted ?? 0} />
+        <StatCard label="Marked Avoid" value={quickStats?.avoided ?? 0} />
       </div>
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -658,6 +680,16 @@ function ImportsList() {
         onAssignOwner={handleBulkAssignOwner}
         users={users}
       >
+        {isAdmin && (
+          <Button
+            size="sm"
+            onClick={handleBulkPromote}
+            disabled={bulkPromoteMutation.isPending}
+          >
+            <UserCheck className="h-4 w-4 mr-1" />
+            {bulkPromoteMutation.isPending ? "Promoting…" : "Promote to Contacts"}
+          </Button>
+        )}
         <Button variant="outline" size="sm" onClick={() => setShowAddToList(true)}>
           <ListChecks className="h-4 w-4 mr-1" />
           Add to list…

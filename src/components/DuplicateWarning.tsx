@@ -197,6 +197,31 @@ export function DuplicateWarning({
           }
         }
       }
+
+      // Cross-table email check for new contacts: warn if this email is
+      // already a (pending) Import or was archived as Avoid, so a rep
+      // doesn't re-add someone the system deliberately set aside.
+      // email_dup_status returns only a category (RLS-safe).
+      if (entity === "contacts" && email && email.trim().length >= 3) {
+        const { data: status } = await supabase.rpc("email_dup_status", {
+          p_email: email.trim(),
+        });
+        if (status === "import") {
+          results.push({
+            id: "note-import",
+            label: "This email is already an Import (pending cleaning).",
+            detail: "",
+            href: "#",
+          });
+        } else if (status === "archived") {
+          results.push({
+            id: "note-archived",
+            label: "This email was archived (Avoid). Re-adding is discouraged.",
+            detail: "",
+            href: "#",
+          });
+        }
+      }
     } catch {
       // Silently ignore errors - duplicate detection is non-critical
     }
@@ -237,13 +262,17 @@ export function DuplicateWarning({
           <ul className="mt-2 space-y-1">
             {duplicates.map((dup) => (
               <li key={dup.id} className="text-sm">
-                <Link
-                  to={dup.href}
-                  className="text-yellow-700 underline hover:text-yellow-900 dark:text-yellow-300 dark:hover:text-yellow-100"
-                  target="_blank"
-                >
-                  {dup.label}
-                </Link>
+                {dup.href === "#" ? (
+                  <span className="text-yellow-800 dark:text-yellow-200">{dup.label}</span>
+                ) : (
+                  <Link
+                    to={dup.href}
+                    className="text-yellow-700 underline hover:text-yellow-900 dark:text-yellow-300 dark:hover:text-yellow-100"
+                    target="_blank"
+                  >
+                    {dup.label}
+                  </Link>
+                )}
                 {dup.detail && (
                   <span className="text-yellow-600 dark:text-yellow-400 ml-2">
                     {dup.detail}

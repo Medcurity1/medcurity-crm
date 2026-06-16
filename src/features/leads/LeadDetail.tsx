@@ -2,9 +2,9 @@ import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom"
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Pencil, Archive, ChevronDown, ChevronLeft, Phone, Mail, ArrowRightLeft, UserRoundCog, History, MapPin } from "lucide-react";
+import { Pencil, Archive, ChevronDown, ChevronLeft, Phone, Mail, ArrowRightLeft, UserRoundCog, History, MapPin, Ban } from "lucide-react";
 import { InlineEdit } from "@/components/InlineEdit";
-import { useLead, useUpdateLead, useArchiveLead } from "./api";
+import { useLead, useUpdateLead, useArchiveLead, useMarkImportAvoid } from "./api";
 import { useLeadLists } from "@/features/lead-lists/lead-lists-api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
@@ -104,6 +104,7 @@ export function LeadDetail() {
   const { data: customFieldDefs } = useCustomFieldDefinitions("leads");
   const updateMutation = useUpdateLead();
   const archiveMutation = useArchiveLead();
+  const markAvoid = useMarkImportAvoid();
   const [showArchive, setShowArchive] = useState(false);
   const [showConvert, setShowConvert] = useState(false);
   const [showChangeOwner, setShowChangeOwner] = useState(false);
@@ -275,6 +276,42 @@ export function LeadDetail() {
                 <ArrowRightLeft className="h-4 w-4 mr-1" />
                 Promote to Contact
               </Button>
+            )}
+            {!isConverted && canArchive && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Ban className="h-4 w-4 mr-1" />
+                    Mark Avoid
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {([
+                    ["bounced", "Bounced"],
+                    ["unsubscribed", "Unsubscribed"],
+                    ["auto_reply", "Auto-reply"],
+                    ["manual", "Other / manual"],
+                  ] as const).map(([val, label]) => (
+                    <DropdownMenuItem
+                      key={val}
+                      onSelect={() =>
+                        markAvoid.mutate(
+                          { id: lead.id, reason: val },
+                          {
+                            onSuccess: () => {
+                              toast.success("Marked Avoid and archived");
+                              navigate("/leads");
+                            },
+                            onError: (e) => toast.error((e as Error).message),
+                          },
+                        )
+                      }
+                    >
+                      {label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
             {canArchive && (
               <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>

@@ -234,6 +234,50 @@ export function useArchiveLead() {
   });
 }
 
+/** Mark an import "Avoid" (bounced/unsubscribed/auto_reply/manual): sets
+ * the reason and archives it, so dedup keeps it out of future imports. */
+export function useMarkImportAvoid() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason?: string }) => {
+      const { error } = await supabase.rpc("mark_import_avoid", {
+        p_lead_id: id,
+        p_reason: reason ?? "manual",
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    },
+  });
+}
+
+/** One-click bulk promotion of selected imports into Contacts. Returns a
+ * counts summary (promoted / skipped_duplicate / skipped_other / errors). */
+export interface BulkPromoteResult {
+  promoted: number;
+  skipped_duplicate: number;
+  skipped_other: number;
+  errors: number;
+}
+export function useBulkPromoteImports() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (ids: string[]): Promise<BulkPromoteResult> => {
+      const { data, error } = await supabase.rpc("bulk_promote_imports", {
+        p_lead_ids: ids,
+      });
+      if (error) throw error;
+      return data as BulkPromoteResult;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+    },
+  });
+}
+
 interface ConvertLeadInput {
   leadId: string;
   /**
