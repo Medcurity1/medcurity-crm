@@ -22,11 +22,17 @@ interface Announcement {
  * clicks the X or the call-to-action, the banner never reappears for
  * that announcement.
  */
-// Requests launch banner retired 2026-06-12 (Nathan). Next up, when
-// Meddy ships to everyone, something like:
-//   { id: "meddy-launch-2026-XX", title: "New: Meddy", message: "...",
-//     ctaLabel: "Meet Meddy", ctaRoute: "/meddy" }
-export const ACTIVE_ANNOUNCEMENT: Announcement | null = null;
+// Requests launch banner retired 2026-06-12 (Nathan). Meddy launch banner
+// turned on 2026-06-16 when Meddy went live (website chat now points at the
+// CRM). Bump the id if we ever want to re-show it.
+export const ACTIVE_ANNOUNCEMENT: Announcement | null = {
+  id: "meddy-launch-2026-06",
+  title: "New: Meddy is live",
+  message:
+    "Meddy, your website chat command center, is here. See website conversations as they come in, jump in to chat with a visitor, and review past chats — all inside the CRM.",
+  ctaLabel: "Meet Meddy",
+  ctaRoute: "/meddy",
+};
 
 function storageKey(id: string) {
   return `announcement-dismissed:${id}`;

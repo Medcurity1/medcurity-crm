@@ -67,6 +67,10 @@ const NEW_BADGE = "bg-red-500 text-white";
 
 const navItems: NavItem[] = [
   { to: "/", icon: Home, label: "Home" },
+  // Meddy: website chat command center. Live as of 2026-06-16 (the website
+  // chat now points at the CRM). Sits right under Home so reps catch incoming
+  // website chats first. "New" badge flags the freshly launched tab.
+  { to: "/meddy", icon: Bot, label: "Meddy", badge: { label: "New", className: NEW_BADGE } },
   { to: "/accounts", icon: Building2, label: "Accounts" },
   { to: "/contacts", icon: Users, label: "Contacts" },
   { to: "/opportunities", icon: Target, label: "Opportunities" },
@@ -79,9 +83,6 @@ const navItems: NavItem[] = [
   { to: "/reports", icon: BarChart3, label: "Reports" },
   // Forecasting + Analytics moved into /reports as tabs (2026-04-17).
   { to: "/requests", icon: MessageSquarePlus, label: "Requests", badge: { label: "New", className: NEW_BADGE } },
-  // Meddy: website chat command center. Coming Soon until the website
-  // embed flips from Nexus to Pulse.
-  { to: "/meddy", icon: Bot, label: "Meddy", badge: { label: "Coming Soon", className: COMING_SOON_BADGE } },
   // Nexus: future per-user command center. Lives at the bottom for now
   // with a Coming Soon badge; will eventually move up to replace Home.
   { to: "/nexus", icon: Sparkles, label: "Nexus", badge: { label: "Coming Soon", className: COMING_SOON_BADGE } },
