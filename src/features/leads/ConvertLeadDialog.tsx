@@ -32,6 +32,7 @@ import {
 } from "@/features/opportunities/MultiProductPicker";
 import { useAddOpportunityProductsBulk } from "@/features/opportunities/api";
 import { employeesToFteRange, formatCurrency } from "@/lib/formatters";
+import { DuplicateWarning } from "@/components/DuplicateWarning";
 
 interface ConvertLeadDialogProps {
   open: boolean;
@@ -505,6 +506,11 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
                   switch to "Existing account" to attach this lead to an
                   account that's already in the CRM.
                 </p>
+                {/* Non-blocking nudge: if a similarly-named account already
+                    exists, surface it so the rep can switch to "Existing
+                    account" instead of minting a duplicate. Never blocks —
+                    two real companies can share a name. */}
+                <DuplicateWarning entity="accounts" name={accountName} />
               </div>
             )}
           </div>

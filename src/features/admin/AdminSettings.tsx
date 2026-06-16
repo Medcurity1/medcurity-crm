@@ -20,6 +20,7 @@ import { ClientErrorsViewer } from "./ClientErrorsViewer";
 import { AutomationsManager } from "./AutomationsManager";
 import { SystemInfo } from "./SystemInfo";
 import { DataHealthDashboard } from "./DataHealthDashboard";
+import { DataCleanupManager } from "./DataCleanupManager";
 import { RequestsInbox } from "@/features/requests/RequestsInbox";
 import { RoutingEditor } from "@/features/requests/RoutingEditor";
 import { MeddyAdminPanel } from "@/features/meddy/MeddyAdminPanel";
@@ -45,6 +46,7 @@ const TOP_TABS = [
   "meddy",
   "audit-log",
   "data-health",
+  "data-cleanup",
   "system",
 ] as const;
 
@@ -171,6 +173,7 @@ export function AdminSettings() {
           <TabsTrigger value="meddy">Meddy</TabsTrigger>
           <TabsTrigger value="audit-log">Audit Log</TabsTrigger>
           <TabsTrigger value="data-health">Data Health</TabsTrigger>
+          <TabsTrigger value="data-cleanup">Data Cleanup</TabsTrigger>
           <TabsTrigger value="system">System</TabsTrigger>
         </TabsList>
 
@@ -351,6 +354,20 @@ export function AdminSettings() {
               </p>
             </div>
             <ClientErrorsViewer />
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="data-cleanup">
+          <Card className="p-6">
+            <div className="space-y-1 mb-6">
+              <h2 className="text-lg font-semibold">Data Cleanup</h2>
+              <p className="text-sm text-muted-foreground">
+                Find and fix duplicates: merge duplicate accounts, and retire
+                leads that already exist as a contact. Nothing here deletes data —
+                duplicates are archived and merges can be undone.
+              </p>
+            </div>
+            <DataCleanupManager />
           </Card>
         </TabsContent>
 
