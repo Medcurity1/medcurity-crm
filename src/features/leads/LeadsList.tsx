@@ -3,7 +3,7 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState, useUrlArrayState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { UserPlus, Plus, Search, X, ListChecks, Save, UserCheck } from "lucide-react";
+import { UserPlus, Plus, Search, X, ListChecks, Save, UserCheck, Upload } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useLeads, useArchiveLead, useBulkUpdateOwner, useBulkDeleteLeads, useBulkPromoteImports } from "./api";
 import { useUsers } from "@/features/accounts/api";
@@ -320,10 +320,16 @@ function ImportsList() {
         title="Imports"
         description="Admin-only drop zone for new and uncleaned contacts. Promote the good ones to Contacts; archive the rest."
         actions={
-          <Button onClick={() => navigate("/leads/new")}>
-            <Plus className="h-4 w-4 mr-2" />
-            New Lead
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={() => navigate("/admin?tab=data-import")}>
+              <Upload className="h-4 w-4 mr-2" />
+              Import a list
+            </Button>
+            <Button variant="outline" onClick={() => navigate("/leads/new")}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add one
+            </Button>
+          </div>
         }
       />
 

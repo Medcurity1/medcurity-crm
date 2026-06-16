@@ -32,11 +32,16 @@ function useArchivedRecords(table: string) {
   return useQuery({
     queryKey: ["archived", table],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from(table)
         .select("*")
-        .not("archived_at", "is", null)
-        .order("archived_at", { ascending: false });
+        .not("archived_at", "is", null);
+      // For imports (the leads table), hide promoted tombstones — a
+      // converted import lives on as its contact and shouldn't be
+      // "restored" from here. This tab is for avoided / manually-archived
+      // imports an admin might want back.
+      if (table === "leads") query = query.neq("status", "converted");
+      const { data, error } = await query.order("archived_at", { ascending: false });
       if (error) throw error;
       return data as ArchivedRecord[];
     },
@@ -153,6 +158,7 @@ export function ArchiveManager() {
           <TabsTrigger value="accounts">Accounts</TabsTrigger>
           <TabsTrigger value="contacts">Contacts</TabsTrigger>
           <TabsTrigger value="opportunities">Opportunities</TabsTrigger>
+          <TabsTrigger value="leads">Imports</TabsTrigger>
         </TabsList>
         <TabsContent value="accounts" className="mt-4">
           <ArchivedTable table="accounts" />
@@ -162,6 +168,9 @@ export function ArchiveManager() {
         </TabsContent>
         <TabsContent value="opportunities" className="mt-4">
           <ArchivedTable table="opportunities" />
+        </TabsContent>
+        <TabsContent value="leads" className="mt-4">
+          <ArchivedTable table="leads" />
         </TabsContent>
       </Tabs>
     </div>
