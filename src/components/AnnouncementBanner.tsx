@@ -29,7 +29,7 @@ export const ACTIVE_ANNOUNCEMENT: Announcement | null = {
   id: "meddy-launch-2026-06",
   title: "New: Meddy is live",
   message:
-    "Meddy, your website chat command center, is here. See website conversations as they come in, jump in to chat with a visitor, and review past chats — all inside the CRM.",
+    "Your website chat command center. Watch chats come in, jump in to help, and review past ones.",
   ctaLabel: "Meet Meddy",
   ctaRoute: "/meddy",
 };
