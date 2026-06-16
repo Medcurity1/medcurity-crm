@@ -209,14 +209,21 @@ export function DuplicateWarning({
         if (status === "import") {
           results.push({
             id: "note-import",
-            label: "This email is already an Import (pending cleaning).",
+            label: "This email is already in Imports, waiting to be cleaned.",
+            detail: "",
+            href: "#",
+          });
+        } else if (status === "avoid") {
+          results.push({
+            id: "note-avoid",
+            label: "This email was set to Avoid (it bounced or unsubscribed). Adding it back is discouraged.",
             detail: "",
             href: "#",
           });
         } else if (status === "archived") {
           results.push({
             id: "note-archived",
-            label: "This email was archived (Avoid). Re-adding is discouraged.",
+            label: "This email belongs to an archived record.",
             detail: "",
             href: "#",
           });

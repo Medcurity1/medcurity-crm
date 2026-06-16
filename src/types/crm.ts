@@ -470,6 +470,7 @@ export interface Lead {
   archived_at: string | null;
   archived_by: string | null;
   archive_reason: string | null;
+  avoid_reason: string | null;
   created_by: string | null;
   updated_by: string | null;
   created_at: string;

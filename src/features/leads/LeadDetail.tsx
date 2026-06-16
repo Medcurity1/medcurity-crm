@@ -1,4 +1,4 @@
-import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom";
+import { useParams, useNavigate, Link, useSearchParams, Navigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
@@ -144,6 +144,12 @@ export function LeadDetail() {
     }
   }, [lead?.id, lead?.converted_at, lead?.converted_contact_id, navigate]);
 
+  // Imports are admin-only — a non-admin reaching an import detail (e.g.
+  // via an old activity link) is redirected, mirroring the Imports list.
+  if (!isAdmin) {
+    return <Navigate to="/accounts" replace />;
+  }
+
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -163,17 +169,20 @@ export function LeadDetail() {
       { id },
       {
         onSuccess: () => {
-          toast.success("Lead archived");
+          toast.success("Import archived");
           navigate("/leads");
         },
         onError: (err) => {
-          toast.error("Failed to archive lead: " + (err as Error).message);
+          toast.error("Failed to archive import: " + (err as Error).message);
         },
       }
     );
   }
 
   const isConverted = lead.status === "converted";
+  // An Avoided/archived import is set aside on purpose — it must not be
+  // promotable or editable (the DB enforces this too), and we show why.
+  const isAvoided = !isConverted && (!!lead.archived_at || !!lead.avoid_reason);
 
   return (
     <div>
@@ -223,6 +232,11 @@ export function LeadDetail() {
             {lead.do_not_market_to && (
               <Badge variant="destructive">Do Not Market To</Badge>
             )}
+            {isAvoided && (
+              <Badge variant="destructive">
+                Avoided{lead.avoid_reason ? `: ${lead.avoid_reason.replace(/_/g, " ")}` : ""}
+              </Badge>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm">
@@ -265,19 +279,19 @@ export function LeadDetail() {
             {/* Converted leads are tombstones — read-only. Hide Edit
                 so reps can't accidentally rewrite history. The contact
                 that took over is the working record. */}
-            {!isConverted && (
+            {!isConverted && !isAvoided && (
               <Button variant="outline" size="sm" onClick={() => navigate(`/leads/${id}/edit`)}>
                 <Pencil className="h-4 w-4 mr-1" />
                 Edit
               </Button>
             )}
-            {!isConverted && (
+            {!isConverted && !isAvoided && (
               <Button variant="default" size="sm" onClick={() => setShowConvert(true)}>
                 <ArrowRightLeft className="h-4 w-4 mr-1" />
                 Promote to Contact
               </Button>
             )}
-            {!isConverted && canArchive && (
+            {!isConverted && !isAvoided && canArchive && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="sm">

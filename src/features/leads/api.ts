@@ -257,6 +257,7 @@ export function useMarkImportAvoid() {
 export interface BulkPromoteResult {
   promoted: number;
   skipped_duplicate: number;
+  skipped_ambiguous: number;
   skipped_other: number;
   errors: number;
 }

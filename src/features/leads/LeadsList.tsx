@@ -3,9 +3,15 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState, useUrlArrayState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { UserPlus, Plus, Search, X, ListChecks, Save, UserCheck, Upload } from "lucide-react";
+import { UserPlus, Plus, Search, X, ListChecks, Save, UserCheck, Upload, Ban } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { useLeads, useArchiveLead, useBulkUpdateOwner, useBulkDeleteLeads, useBulkPromoteImports } from "./api";
+import { useLeads, useArchiveLead, useBulkUpdateOwner, useBulkDeleteLeads, useBulkPromoteImports, useMarkImportAvoid } from "./api";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { useUsers } from "@/features/accounts/api";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent } from "@/components/ui/card";
@@ -68,11 +74,14 @@ function useLeadQuickStats() {
           .from("leads")
           .select("id", { count: "exact", head: true })
           .eq("status", "converted"),
-        // Marked Avoid (bounced/unsub/auto-reply/manual).
+        // Marked Avoid (bounced/unsub/auto-reply/manual). Require archived
+        // so a restored import (avoid_reason kept, un-archived) isn't
+        // double-counted here and in the pending pile.
         supabase
           .from("leads")
           .select("id", { count: "exact", head: true })
-          .not("avoid_reason", "is", null),
+          .not("avoid_reason", "is", null)
+          .not("archived_at", "is", null),
       ]);
 
       if (totalRes.error) throw totalRes.error;
@@ -216,6 +225,7 @@ function ImportsList() {
   const bulkOwnerMutation = useBulkUpdateOwner();
   const bulkDeleteMutation = useBulkDeleteLeads();
   const bulkPromoteMutation = useBulkPromoteImports();
+  const markAvoidMutation = useMarkImportAvoid();
 
   const leads = result?.data;
   const totalCount = result?.count ?? 0;
@@ -280,10 +290,10 @@ function ImportsList() {
   };
 
   const handleBulkDelete = async () => {
-    if (!confirm(`Permanently delete ${selectedIds.size} lead(s)? This cannot be undone.`)) return;
+    if (!confirm(`Permanently delete ${selectedIds.size} import(s)? This cannot be undone.`)) return;
     await bulkDeleteMutation.mutateAsync({ ids: Array.from(selectedIds) });
     setSelectedIds(new Set());
-    toast.success(`${selectedIds.size} lead(s) deleted.`);
+    toast.success(`${selectedIds.size} import(s) deleted.`);
   };
 
   const handleBulkAssignOwner = async (userId: string) => {
@@ -303,9 +313,25 @@ function ImportsList() {
       setSelectedIds(new Set());
       const parts = [`${r.promoted} promoted`];
       if (r.skipped_duplicate) parts.push(`${r.skipped_duplicate} skipped (already a contact)`);
+      if (r.skipped_ambiguous) parts.push(`${r.skipped_ambiguous} need a manual account (multiple matched)`);
       if (r.skipped_other) parts.push(`${r.skipped_other} skipped`);
       if (r.errors) parts.push(`${r.errors} error(s)`);
       toast.success(parts.join(" · "));
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+
+  const handleBulkAvoid = async (reason: string) => {
+    const n = selectedIds.size;
+    if (!confirm(
+      `Mark ${n} import(s) as Avoid (${reason.replace(/_/g, " ")})? They'll be archived and ` +
+        `kept out of any future import so they're never re-added.`,
+    )) return;
+    try {
+      await Promise.all(Array.from(selectedIds).map((id) => markAvoidMutation.mutateAsync({ id, reason })));
+      setSelectedIds(new Set());
+      toast.success(`${n} marked Avoid`);
     } catch (e) {
       toast.error((e as Error).message);
     }
@@ -343,7 +369,7 @@ function ImportsList() {
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search leads..."
+            placeholder="Search imports..."
             value={search}
             onChange={(e) => handleSearchChange(e.target.value)}
             className="pl-9"
@@ -469,7 +495,7 @@ function ImportsList() {
           value={showConverted}
           onValueChange={(v) => { setShowConverted(v); setPage(0); }}
         >
-          <SelectTrigger className="w-44" title="Converted leads are hidden by default">
+          <SelectTrigger className="w-44" title="Converted (promoted) imports are hidden by default">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -695,6 +721,28 @@ function ImportsList() {
             <UserCheck className="h-4 w-4 mr-1" />
             {bulkPromoteMutation.isPending ? "Promoting…" : "Promote to Contacts"}
           </Button>
+        )}
+        {isAdmin && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" disabled={markAvoidMutation.isPending}>
+                <Ban className="h-4 w-4 mr-1" />
+                Mark Avoid
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              {([
+                ["bounced", "Bounced"],
+                ["unsubscribed", "Unsubscribed"],
+                ["auto_reply", "Auto-reply"],
+                ["manual", "Other / manual"],
+              ] as const).map(([val, label]) => (
+                <DropdownMenuItem key={val} onSelect={() => handleBulkAvoid(val)}>
+                  {label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
         <Button variant="outline" size="sm" onClick={() => setShowAddToList(true)}>
           <ListChecks className="h-4 w-4 mr-1" />
