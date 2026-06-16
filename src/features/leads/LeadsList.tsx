@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState, useUrlArrayState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
@@ -127,13 +127,10 @@ function StatCard({ label, value }: { label: string; value: number | string }) {
   );
 }
 
-// The Imports tab (formerly Leads) is admin-only. Guard wrapper keeps the
-// hooks in the inner component unconditional (rules-of-hooks safe).
+// TEMP: the Imports/Leads tab is open to reps again (Molly still works
+// campaign leads), so no admin guard here. The admin-only power tools
+// inside (bulk promote, Mark Avoid) stay gated per-action.
 export function LeadsList() {
-  const { profile } = useAuth();
-  if (profile?.role !== "admin" && profile?.role !== "super_admin") {
-    return <Navigate to="/accounts" replace />;
-  }
   return <ImportsList />;
 }
 
@@ -343,8 +340,8 @@ function ImportsList() {
   return (
     <div>
       <PageHeader
-        title="Imports"
-        description="Admin-only drop zone for new and uncleaned contacts. Promote the good ones to Contacts; archive the rest."
+        title="Leads"
+        description="Leads and imported lists. Promote the good ones to Contacts; archive the rest."
         actions={
           <div className="flex items-center gap-2">
             <Button onClick={() => navigate("/admin?tab=data-import")}>

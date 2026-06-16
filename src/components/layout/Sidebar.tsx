@@ -3,7 +3,7 @@ import {
   Home,
   Building2,
   Users,
-  Inbox,
+  UserPlus,
   Handshake,
   Target,
   Kanban,
@@ -72,6 +72,9 @@ const navItems: NavItem[] = [
   { to: "/opportunities", icon: Target, label: "Opportunities" },
   { to: "/pipeline", icon: Kanban, label: "Pipeline" },
   { to: "/partners", icon: Handshake, label: "Partners" },
+  // Reps (Molly) still work campaign leads, so the Imports/Leads tab is
+  // temporarily back in the main nav for everyone, not admin-only.
+  { to: "/leads", icon: UserPlus, label: "Leads" },
   { to: "/calendar", icon: CalendarIcon, label: "Calendar" },
   { to: "/activities", icon: Clock, label: "Activities" },
   { to: "/products", icon: Package, label: "Products" },
@@ -88,10 +91,6 @@ const navItems: NavItem[] = [
 ];
 
 const adminItems: NavItem[] = [
-  // Imports = the admin-only drop zone for pre-cleaned contacts (the
-  // former Leads tab). Route stays /leads to keep existing deep links
-  // working; only the label + placement changed.
-  { to: "/leads", icon: Inbox, label: "Imports", badge: { label: "Admin", className: ADMIN_BADGE } },
   { to: "/archive", icon: Archive, label: "Archive", badge: { label: "Admin", className: ADMIN_BADGE } },
   { to: "/admin", icon: Settings, label: "Admin Settings", badge: { label: "Admin", className: ADMIN_BADGE } },
 ];

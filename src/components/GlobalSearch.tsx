@@ -13,7 +13,6 @@ import {
 import { supabase } from "@/lib/supabase";
 import { formatCurrency } from "@/lib/formatters";
 import { buildPersonSearchClause } from "@/lib/search-clause";
-import { useAuth } from "@/features/auth/AuthProvider";
 import type {
   Account,
   Contact,
@@ -89,8 +88,6 @@ const leadStatusLabels: Record<LeadStatus, string> = {
 };
 
 export function GlobalSearch() {
-  const { profile } = useAuth();
-  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const [open, setOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -202,8 +199,8 @@ export function GlobalSearch() {
       if (error) throw error;
       return data as LeadResult[];
     },
-    // Imports are admin-only — don't surface them in non-admins' search.
-    enabled: searchEnabled && isAdmin,
+    // TEMP: leads visible to reps again (Molly works campaign leads).
+    enabled: searchEnabled,
   });
 
   function handleSelect(path: string) {
@@ -342,7 +339,7 @@ export function GlobalSearch() {
           )}
 
           {rankedLeads.length > 0 && (
-            <CommandGroup heading="Imports">
+            <CommandGroup heading="Leads">
               {rankedLeads.map((lead) => (
                 <CommandItem
                   key={lead.id}
