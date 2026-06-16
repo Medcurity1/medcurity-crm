@@ -2,7 +2,6 @@ import { Link } from "react-router-dom";
 import {
   DollarSign,
   TrendingUp,
-  Users,
   Target,
   Activity,
   RefreshCw,
@@ -96,15 +95,9 @@ const REPORTS: ReportCard[] = [
     apiView: "v_mql_contacts",
     status: "live",
   },
-  {
-    id: "mql-leads",
-    title: "MQL (Leads)",
-    description:
-      "Leads with MQL date this fiscal quarter, not yet converted. Grouped by Lead Source.",
-    icon: Users,
-    apiView: "v_mql_leads_qtd",
-    status: "live",
-  },
+  // "MQL (Leads)" report retired 2026-06-16 (Nathan): qualification is a
+  // Contact concept now, not an Import one. The contact-based "MQL
+  // (Contacts)" report above (v_mql_contacts) is the replacement.
   {
     id: "arpc-by-quarter",
     title: "Average Revenue Per Customer",

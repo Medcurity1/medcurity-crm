@@ -50,7 +50,6 @@ const ActivePipeline = lazy(() => import("@/features/reports/standard/ActivePipe
 const RenewalsReport = lazy(() => import("@/features/reports/standard/RenewalsQueue").then(m => ({ default: m.RenewalsQueue })));
 const SqlAccounts = lazy(() => import("@/features/reports/standard/SqlAccounts").then(m => ({ default: m.SqlAccounts })));
 const MqlContacts = lazy(() => import("@/features/reports/standard/MqlContacts").then(m => ({ default: m.MqlContacts })));
-const MqlLeads = lazy(() => import("@/features/reports/standard/MqlLeads").then(m => ({ default: m.MqlLeads })));
 const DashboardMetrics = lazy(() => import("@/features/reports/standard/DashboardMetrics").then(m => ({ default: m.DashboardMetrics })));
 const ReportsDiagnostic = lazy(() => import("@/features/reports/standard/ReportsDiagnostic").then(m => ({ default: m.ReportsDiagnostic })));
 // WinLossAnalysis is now only reached via /reports?tab=analytics and
@@ -141,13 +140,15 @@ export default function App() {
                   <Route path="reports/standard/renewals" element={<RenewalsReport />} />
                   <Route path="reports/standard/sql" element={<SqlAccounts />} />
                   <Route path="reports/standard/mql-contacts" element={<MqlContacts />} />
-                  <Route path="reports/standard/mql-leads" element={<MqlLeads />} />
+                  {/* "MQL (Leads)" report retired 2026-06-16 — qualification is
+                      a Contact concept now. Old links redirect to MQL (Contacts). */}
+                  <Route path="reports/standard/mql-leads" element={<Navigate to="/reports/standard/mql-contacts" replace />} />
                   <Route path="reports/standard/dashboard-metrics" element={<DashboardMetrics />} />
                   <Route path="reports/standard/diagnostic" element={<ReportsDiagnostic />} />
                   {/* Legacy route aliases — keep old URLs working */}
                   <Route path="reports/standard/arr-rolling-365" element={<ArrBaseDataset />} />
                   <Route path="reports/standard/renewals-queue" element={<RenewalsReport />} />
-                  <Route path="reports/standard/mql-sql-counts" element={<MqlLeads />} />
+                  <Route path="reports/standard/mql-sql-counts" element={<Navigate to="/reports/standard/mql-contacts" replace />} />
                   {/* Legacy routes redirect into the reports hub tabs */}
                   <Route
                     path="forecasting"
