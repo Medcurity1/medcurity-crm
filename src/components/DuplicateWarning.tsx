@@ -91,9 +91,13 @@ export function DuplicateWarning({
           const { data, error } = await supabase.rpc(
             "find_duplicate_contacts",
             {
-              contact_email: email?.trim() ?? "",
-              contact_first_name: firstName?.trim() ?? "",
-              contact_last_name: lastName?.trim() ?? "",
+              // Pass null (not "") for blanks. The RPC's email match is exact
+              // and the name match needs both first+last, but an empty string
+              // would still match empty-valued rows — null cleanly no-ops the
+              // unused clause.
+              contact_email: email?.trim() || null,
+              contact_first_name: firstName?.trim() || null,
+              contact_last_name: lastName?.trim() || null,
             }
           );
           if (!error && data && data.length > 0) {
@@ -149,8 +153,11 @@ export function DuplicateWarning({
 
         if (hasEmail || hasCompany) {
           const { data, error } = await supabase.rpc("find_duplicate_leads", {
-            lead_email: email?.trim() ?? "",
-            lead_company: company?.trim() ?? "",
+            // Pass null (not "") for blanks. The company match uses LIKE, so an
+            // empty string becomes '%%' and matches EVERY lead with a company —
+            // showing a wall of false duplicates. null no-ops that clause.
+            lead_email: email?.trim() || null,
+            lead_company: company?.trim() || null,
           });
           if (!error && data && data.length > 0) {
             results = data.map(
