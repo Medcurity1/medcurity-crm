@@ -364,15 +364,16 @@ Deno.serve(async (req) => {
 
       // ── Fast disconnect: a teammate's last tab dropped off presence ──
       // The caller saw `user_id` leave the live presence channel (closed
-      // tab / sleep / lost network). Mark them away within seconds instead
-      // of waiting for the 2-min sweep. Only flips a row that is currently
-      // Available AND hasn't checked in within ~20s, so a fresh reconnect
-      // (their new tab just heartbeated) is never clobbered. Never touches
-      // away_manual. Idempotent — redundant calls from other peers no-op.
+      // tab / sleep / lost network) and confirmed they stayed gone through a
+      // ~12s client-side debounce. Mark them away now instead of waiting for
+      // the 2-min sweep. Server-side belt-and-suspenders: only flips a row
+      // that is currently Available AND hasn't checked in within ~10s, so a
+      // just-reconnected agent (their new tab heartbeated) is never clobbered.
+      // Never touches away_manual. Idempotent — redundant peer calls no-op.
       case "peer_offline": {
         const targetId = typeof body.user_id === "string" ? body.user_id : "";
         if (!targetId) return json({ error: "user_id required" }, 400);
-        const cutoff = new Date(Date.now() - 20_000).toISOString();
+        const cutoff = new Date(Date.now() - 10_000).toISOString();
         const { data: flipped } = await svc
           .from("meddy_agent_status")
           .update({ available: false, updated_at: new Date().toISOString() })

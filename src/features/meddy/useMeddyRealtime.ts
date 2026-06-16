@@ -150,25 +150,53 @@ export function useMeddyRealtime(handlers: Handlers = {}) {
     let myId: string | null = null;
     // Who we currently believe is present, so we can spot who dropped off.
     let present = new Set<string>();
+    // Pending "mark away" timers per user_id. We DEBOUNCE a presence `leave`:
+    // wait ~12s and only mark the agent away if they're STILL gone. A brief
+    // network flap rejoins within a second or two and cancels the timer, so a
+    // healthy agent is never knocked out of routing. A real disconnect stays
+    // gone and gets marked away ~12s later — still far faster than the 2-min
+    // sweep. (12s is longer than the 60s/20s mismatch the review flagged, so a
+    // healthy-but-not-just-beaten agent can't be wrongly flipped.)
+    const pending = new Map<string, number>();
 
     const presence = supabase.channel("meddy:presence");
 
-    const reconcile = () => {
-      if (cancelled) return;
+    const currentSet = () => {
       const state = presence.presenceState() as Record<
         string,
         Array<{ user_id?: string }>
       >;
-      const now = new Set<string>();
+      const s = new Set<string>();
       for (const entries of Object.values(state)) {
-        for (const e of entries) if (e.user_id) now.add(e.user_id);
+        for (const e of entries) if (e.user_id) s.add(e.user_id);
       }
-      // Anyone who was here and is now gone (and isn't us) dropped off — mark
-      // them away fast. Redundant calls from multiple peers are harmless (the
-      // server only flips a still-Available row, then no-ops).
+      return s;
+    };
+
+    const reconcile = () => {
+      if (cancelled) return;
+      const now = currentSet();
+      // Present again -> cancel any pending away timer (it was a flap).
+      for (const uid of now) {
+        const t = pending.get(uid);
+        if (t !== undefined) {
+          window.clearTimeout(t);
+          pending.delete(uid);
+        }
+      }
+      // Dropped off (and isn't us) -> schedule a debounced away mark.
       for (const uid of present) {
-        if (!now.has(uid) && uid !== myId) {
-          staffAction("peer_offline", { user_id: uid }).catch(() => {});
+        if (!now.has(uid) && uid !== myId && !pending.has(uid)) {
+          const t = window.setTimeout(() => {
+            pending.delete(uid);
+            if (cancelled) return;
+            // Only if STILL gone right now. Redundant calls from multiple
+            // peers are harmless (the server only flips a still-Available row).
+            if (!currentSet().has(uid)) {
+              staffAction("peer_offline", { user_id: uid }).catch(() => {});
+            }
+          }, 12_000);
+          pending.set(uid, t);
         }
       }
       present = now;
@@ -196,6 +224,8 @@ export function useMeddyRealtime(handlers: Handlers = {}) {
 
     return () => {
       cancelled = true;
+      for (const t of pending.values()) window.clearTimeout(t);
+      pending.clear();
       supabase.removeChannel(presence);
     };
   }, [qc]);
