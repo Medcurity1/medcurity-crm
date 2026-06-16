@@ -127,23 +127,40 @@
       messages.push({ role: 'assistant', content: WELCOME_MESSAGE, sender_type: 'welcome' });
     }
 
-    // Ping backend before showing widget - if it fails, don't show anything
+    // Show the bubble IMMEDIATELY so it appears as fast as the page can draw
+    // it, instead of waiting on a backend round-trip (which is slow when the
+    // edge function is cold — ~1-2s). The health check still runs, in the
+    // background, and tears the widget back down only if the backend is
+    // genuinely unreachable or misbehaving — preserving the original "don't
+    // show a broken bubble" intent without blocking the bubble on the wake-up.
+    startWidget();
+
     var controller = new AbortController();
     var healthTimeout = setTimeout(function() { controller.abort(); }, 5000);
     fetch(FN_URL, { method: 'POST', headers: fnHeaders(), body: JSON.stringify({ action: 'hours' }), signal: controller.signal })
       .then(function(r) { return r.json(); })
       .then(function(data) {
         clearTimeout(healthTimeout);
-        if (data && typeof data.open !== 'undefined') {
-          startWidget();
-        } else {
-          console.warn('Meddy: health check returned unexpected response, widget not loaded');
+        if (!(data && typeof data.open !== 'undefined')) {
+          console.warn('Meddy: health check returned unexpected response, removing widget');
+          teardownWidget();
         }
       })
-      .catch(function() {
+      .catch(function(e) {
         clearTimeout(healthTimeout);
-        console.warn('Meddy: backend unreachable, widget not loaded');
+        // Our own 5s abort just means the backend was slow to wake (cold
+        // start) — leave the bubble up, it'll work once warm. Only a real
+        // connection failure means the backend is genuinely down.
+        if (e && e.name === 'AbortError') return;
+        console.warn('Meddy: backend unreachable, removing widget');
+        teardownWidget();
       });
+  }
+
+  function teardownWidget() {
+    try {
+      if (shadowHost && shadowHost.parentNode) shadowHost.parentNode.removeChild(shadowHost);
+    } catch (e) {}
   }
 
   function startWidget() {
