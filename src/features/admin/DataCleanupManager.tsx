@@ -42,7 +42,9 @@ import {
   Undo2,
   Users,
   Briefcase,
+  Search,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/formatters";
 import {
   useLeadContactDuplicates,
@@ -110,6 +112,7 @@ function AccountDuplicatesPanel() {
   const [survivorByGroup, setSurvivorByGroup] = useState<Record<string, string>>({});
   // The group currently in the confirm dialog.
   const [confirmGroup, setConfirmGroup] = useState<string | null>(null);
+  const [q, setQ] = useState("");
 
   const groups = useMemo(() => {
     const map = new Map<string, AccountDuplicateGroupRow[]>();
@@ -120,6 +123,19 @@ function AccountDuplicatesPanel() {
     }
     return Array.from(map.entries());
   }, [rows]);
+
+  const visibleGroups = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return groups;
+    return groups.filter(([key, list]) =>
+      key.toLowerCase().includes(needle) ||
+      list.some(
+        (r) =>
+          (r.name ?? "").toLowerCase().includes(needle) ||
+          (r.account_number ?? "").toLowerCase().includes(needle),
+      ),
+    );
+  }, [groups, q]);
 
   function survivorFor(groupKey: string, list: AccountDuplicateGroupRow[]) {
     return survivorByGroup[groupKey] ?? list[0]?.account_id ?? "";
@@ -175,7 +191,23 @@ function AccountDuplicatesPanel() {
         move over, and the duplicates are archived (not deleted, so you can undo).
       </p>
 
-      {groups.map(([groupKey, list]) => {
+      <div className="relative max-w-sm">
+        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+        <Input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search by company name or account #…"
+          className="pl-8"
+        />
+      </div>
+
+      {visibleGroups.length === 0 && (
+        <div className="rounded-md border p-6 text-center text-sm text-muted-foreground">
+          No duplicate groups match "{q}".
+        </div>
+      )}
+
+      {visibleGroups.map(([groupKey, list]) => {
         const survivorId = survivorFor(groupKey, list);
         return (
           <Card key={groupKey} className="p-4">
@@ -343,6 +375,19 @@ function LeadDuplicatesPanel() {
 
   const [retireTarget, setRetireTarget] = useState<LeadContactDuplicate | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [q, setQ] = useState("");
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return rows ?? [];
+    return (rows ?? []).filter((d) =>
+      [
+        d.lead_first_name, d.lead_last_name, d.lead_email, d.lead_company,
+        d.contact_first_name, d.contact_last_name, d.contact_email,
+        d.contact_account_name,
+      ].some((v) => (v ?? "").toLowerCase().includes(needle)),
+    );
+  }, [rows, q]);
 
   function retire(d: LeadContactDuplicate) {
     archiveMutation.mutate(
@@ -356,7 +401,7 @@ function LeadDuplicatesPanel() {
 
   async function retireAllCertain() {
     setBulkOpen(false);
-    const list = rows ?? [];
+    const list = filtered;
     let ok = 0;
     let fail = 0;
     for (const d of list) {
@@ -385,7 +430,7 @@ function LeadDuplicatesPanel() {
         <SectionButton active={tier === "name"} onClick={() => setTier("name")}>
           Same name — review{counts ? ` (${counts.name_review})` : ""}
         </SectionButton>
-        {tier === "email" && (rows?.length ?? 0) > 0 && (
+        {tier === "email" && filtered.length > 0 && (
           <Button
             size="sm"
             variant="outline"
@@ -393,10 +438,22 @@ function LeadDuplicatesPanel() {
             onClick={() => setBulkOpen(true)}
             disabled={archiveMutation.isPending}
           >
-            Retire all {rows?.length} certain matches
+            Retire all {filtered.length} certain matches
           </Button>
         )}
       </div>
+
+      {(rows?.length ?? 0) > 0 && (
+        <div className="relative max-w-sm">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search by name, email, or company…"
+            className="pl-8"
+          />
+        </div>
+      )}
 
       {tier === "name" && (
         <div className="rounded-md border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-950/20 dark:text-yellow-200">
@@ -420,6 +477,10 @@ function LeadDuplicatesPanel() {
               : "No leads share a name with an existing contact."
           }
         />
+      ) : filtered.length === 0 ? (
+        <div className="rounded-md border p-6 text-center text-sm text-muted-foreground">
+          No matches for "{q}".
+        </div>
       ) : (
         <div className="overflow-x-auto">
           <Table>
@@ -432,7 +493,7 @@ function LeadDuplicatesPanel() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(rows ?? []).map((d) => (
+              {filtered.map((d) => (
                 <TableRow key={d.lead_id}>
                   <TableCell>
                     <Link to={`/leads/${d.lead_id}`} target="_blank" className="font-medium text-primary hover:underline">
@@ -489,7 +550,7 @@ function LeadDuplicatesPanel() {
       <ConfirmDialog
         open={bulkOpen}
         onOpenChange={setBulkOpen}
-        title={`Retire all ${rows?.length ?? 0} certain matches?`}
+        title={`Retire all ${filtered.length} certain matches?`}
         description="Each of these leads shares an email with an existing contact, so they're safe to retire. They'll be archived as duplicates and the contacts kept. Nothing is deleted."
         confirmLabel="Retire all"
         onConfirm={retireAllCertain}
