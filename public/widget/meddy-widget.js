@@ -460,7 +460,7 @@
       '.meddy-messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;scroll-behavior:smooth;animation:meddy-fade-in 0.15s ease;}' +
       '@keyframes meddy-fade-in{from{opacity:0;}to{opacity:1;}}' +
       // Message bubbles with shadows
-      '.meddy-msg{max-width:85%;padding:10px 14px;border-radius:18px;font-size:14px;line-height:1.45;word-wrap:break-word;box-shadow:0 1px 2px rgba(0,0,0,0.06);}' +
+      '.meddy-msg{max-width:85%;padding:10px 14px;border-radius:18px;font-size:14px;line-height:1.45;word-wrap:break-word;white-space:pre-wrap;box-shadow:0 1px 2px rgba(0,0,0,0.06);}' +
       '.meddy-msg-user{align-self:flex-end;background:' + COLORS.primary + ';color:#fff;border-bottom-right-radius:4px;}' +
       '.meddy-msg-assistant{align-self:flex-start;background:' + COLORS.lightGray + ';color:' + COLORS.text + ';border-bottom-left-radius:4px;}' +
       '.meddy-msg-assistant a{color:' + COLORS.dark + ';text-decoration:underline;}' +

@@ -15,6 +15,7 @@ import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
 import { RecordId } from "@/components/RecordId";
 import { InlineEdit, type InlineEditProps } from "@/components/InlineEdit";
 import { looksLikeUsZip, zipToTimeZone } from "@/lib/us-zip";
+import { normalizeUrl } from "@/lib/url-helpers";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CollapsibleTabs } from "@/components/CollapsibleTabs";
@@ -334,7 +335,7 @@ export function AccountDetail() {
           <CardContent className="px-4 pb-3">
             {account.website ? (
               <a
-                href={account.website}
+                href={normalizeUrl(account.website)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-sm text-primary hover:underline inline-flex items-center gap-1 truncate"

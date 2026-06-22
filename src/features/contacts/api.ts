@@ -8,6 +8,8 @@ interface ContactFilters {
   account_id?: string;
   ownerId?: string | "mine" | string[];
   verified?: "true" | "false";
+  /** Archive visibility. Omit to preserve legacy behavior (show all). */
+  archived?: "active" | "archived" | "all";
   page?: number;
   pageSize?: number;
   sortColumn?: string | null;
@@ -40,6 +42,15 @@ export function useContacts(filters?: ContactFilters) {
       // Stable tiebreaker so offset paging can't duplicate/skip rows that
       // tie on sortCol at page boundaries.
       query = query.order("id", { ascending: true });
+
+      // Archive visibility. Undefined => no filter (legacy: e.g. ReportBuilder
+      // wants every contact). The list passes "active" so archived contacts
+      // don't add noise; admins can switch to "archived"/"all".
+      if (filters?.archived === "active") {
+        query = query.is("archived_at", null);
+      } else if (filters?.archived === "archived") {
+        query = query.not("archived_at", "is", null);
+      }
 
       if (filters?.search) {
         // Search contact fields AND parent account name. Multi-word
@@ -234,6 +245,35 @@ export function useArchiveContact() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["account-contacts"] });
+    },
+  });
+}
+
+/**
+ * Mark a contact as the account's primary. One primary per account, so this
+ * demotes every other contact on the same account, then promotes this one.
+ */
+export function useSetPrimaryContact() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, accountId }: { id: string; accountId: string }) => {
+      const { error: demoteErr } = await supabase
+        .from("contacts")
+        .update({ is_primary: false })
+        .eq("account_id", accountId)
+        .neq("id", id);
+      if (demoteErr) throw demoteErr;
+      const { error: promoteErr } = await supabase
+        .from("contacts")
+        .update({ is_primary: true })
+        .eq("id", id);
+      if (promoteErr) throw promoteErr;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["contacts", vars.id] });
+      qc.invalidateQueries({ queryKey: ["account-contacts"] });
     },
   });
 }

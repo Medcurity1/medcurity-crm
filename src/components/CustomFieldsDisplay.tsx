@@ -1,5 +1,6 @@
 import type { CustomFieldDefinition } from "@/types/crm";
 import { formatCurrency, formatDate } from "@/lib/formatters";
+import { normalizeUrl } from "@/lib/url-helpers";
 
 interface CustomFieldsDisplayProps {
   customFields: Record<string, unknown>;
@@ -47,7 +48,7 @@ export function CustomFieldsDisplay({ customFields, definitions }: CustomFieldsD
             <span className="text-xs text-muted-foreground">{def.label}</span>
             {def.field_type === "url" && value ? (
               <a
-                href={String(value)}
+                href={normalizeUrl(String(value))}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-sm text-primary hover:underline truncate"

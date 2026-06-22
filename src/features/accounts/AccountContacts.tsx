@@ -1,8 +1,10 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Users } from "lucide-react";
+import { Plus, Users, Star } from "lucide-react";
+import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import type { Contact } from "@/types/crm";
+import { useSetPrimaryContact } from "@/features/contacts/api";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/EmptyState";
 import {
@@ -25,6 +27,7 @@ import { formatName } from "@/lib/formatters";
  */
 export function AccountContacts({ accountId }: { accountId: string }) {
   const navigate = useNavigate();
+  const setPrimary = useSetPrimaryContact();
   const { data: contacts, isLoading } = useQuery({
     queryKey: ["account-contacts", accountId],
     queryFn: async () => {
@@ -33,6 +36,8 @@ export function AccountContacts({ accountId }: { accountId: string }) {
         .select("*")
         .eq("account_id", accountId)
         .is("archived_at", null)
+        // Primary contact pinned to the top, then alphabetical by last name.
+        .order("is_primary", { ascending: false })
         .order("last_name");
       if (error) throw error;
       return (data ?? []) as Contact[];
@@ -93,14 +98,40 @@ export function AccountContacts({ accountId }: { accountId: string }) {
                   <TableCell className="text-muted-foreground">
                     {c.phone ?? "—"}
                   </TableCell>
-                  <TableCell>
-                    {c.is_primary && (
+                  <TableCell className="text-right">
+                    {c.is_primary ? (
                       <Badge
                         variant="secondary"
                         className="bg-emerald-100 text-emerald-700"
                       >
+                        <Star className="h-3 w-3 mr-1 fill-current" />
                         Primary
                       </Badge>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs text-muted-foreground"
+                        disabled={setPrimary.isPending}
+                        onClick={() =>
+                          setPrimary.mutate(
+                            { id: c.id, accountId },
+                            {
+                              onSuccess: () =>
+                                toast.success(
+                                  `${formatName(c.first_name, c.last_name)} is now the primary contact.`,
+                                ),
+                              onError: (err: Error) =>
+                                toast.error("Couldn't set primary", {
+                                  description: err.message,
+                                }),
+                            },
+                          )
+                        }
+                      >
+                        <Star className="h-3 w-3 mr-1" />
+                        Make primary
+                      </Button>
                     )}
                   </TableCell>
                 </TableRow>

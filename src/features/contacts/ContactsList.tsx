@@ -44,6 +44,7 @@ export function ContactsList() {
   const [search, setSearch] = useDebouncedUrlState("q", "");
   const [ownerFilter, setOwnerFilter] = useUrlArrayState("owner");
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
+  const [statusFilter, setStatusFilter] = useUrlState("status", "active");
   const [page, setPage] = useUrlNumberState("page", 0);
   const [pageSize, setPageSize] = useUrlNumberState("size", 25);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -58,6 +59,12 @@ export function ContactsList() {
         : verifiedFilter === "unverified"
         ? "false"
         : undefined,
+    archived:
+      statusFilter === "archived"
+        ? "archived"
+        : statusFilter === "all"
+        ? "all"
+        : "active",
     page,
     pageSize,
     sortColumn: sort.column,
@@ -180,6 +187,25 @@ export function ContactsList() {
             <SelectItem value="unverified">Unverified only</SelectItem>
           </SelectContent>
         </Select>
+
+        {isAdmin && (
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => {
+              setStatusFilter(v);
+              setPage(0);
+            }}
+          >
+            <SelectTrigger className="w-36">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="archived">Archived</SelectItem>
+              <SelectItem value="all">All</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
 
         <SavedViews entity="contacts" />
       </div>

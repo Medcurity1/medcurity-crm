@@ -6,7 +6,7 @@ import { GlobalSearch } from "@/components/GlobalSearch";
 import { NotificationsDropdown } from "@/components/NotificationsDropdown";
 import { AiAssistantDialog } from "@/components/AiAssistantDialog";
 import { Button } from "@/components/ui/button";
-import { Sparkles } from "lucide-react";
+import { Menu as MenuIcon, Sparkles } from "lucide-react";
 import { WelcomeWizard } from "@/features/auth/WelcomeWizard";
 import { QuickCreateDialog } from "@/components/QuickCreateDialog";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
@@ -119,10 +119,11 @@ export function AppLayout() {
   const section = location.pathname.split("/")[1] || "";
   const sectionName = pathMap[section] ?? section;
 
-  // Auto-collapse when switching to mobile
+  // Auto-collapse when switching to mobile, and close the mobile slide-out
+  // menu after navigating to a new tab (so tapping a tab dismisses it).
   useEffect(() => {
     if (isMobile) setCollapsed(true);
-  }, [isMobile]);
+  }, [isMobile, location.pathname]);
 
   const handleToggle = useCallback(() => setCollapsed((c) => !c), []);
   const handleOverlayClick = useCallback(() => setCollapsed(true), []);
@@ -180,7 +181,22 @@ export function AppLayout() {
         )}
         {/* Top bar */}
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-background/95 px-6 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <span className="text-sm font-medium text-muted-foreground">{sectionName}</span>
+          <div className="flex items-center gap-2 min-w-0">
+            {isMobile && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={handleToggle}
+                title="Menu"
+                aria-label="Open navigation menu"
+                className="h-8 w-8 shrink-0"
+              >
+                <MenuIcon className="h-5 w-5" />
+              </Button>
+            )}
+            <span className="text-sm font-medium text-muted-foreground truncate">{sectionName}</span>
+          </div>
           <div className="flex items-center gap-1">
             <GlobalSearch />
             <Button
