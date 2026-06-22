@@ -1,11 +1,13 @@
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Users, Star } from "lucide-react";
+import { Plus, Users, Star, Archive } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import type { Contact } from "@/types/crm";
-import { useSetPrimaryContact } from "@/features/contacts/api";
+import { useSetPrimaryContact, useArchiveContact } from "@/features/contacts/api";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EmptyState } from "@/components/EmptyState";
 import {
   Table,
@@ -28,6 +30,8 @@ import { formatName } from "@/lib/formatters";
 export function AccountContacts({ accountId }: { accountId: string }) {
   const navigate = useNavigate();
   const setPrimary = useSetPrimaryContact();
+  const archiveContact = useArchiveContact();
+  const [archiveTarget, setArchiveTarget] = useState<Contact | null>(null);
   const { data: contacts, isLoading } = useQuery({
     queryKey: ["account-contacts", accountId],
     queryFn: async () => {
@@ -99,6 +103,7 @@ export function AccountContacts({ accountId }: { accountId: string }) {
                     {c.phone ?? "—"}
                   </TableCell>
                   <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-1">
                     {c.is_primary ? (
                       <Badge
                         variant="secondary"
@@ -133,6 +138,17 @@ export function AccountContacts({ accountId }: { accountId: string }) {
                         Make primary
                       </Button>
                     )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                      title="Archive contact"
+                      aria-label="Archive contact"
+                      onClick={() => setArchiveTarget(c)}
+                    >
+                      <Archive className="h-4 w-4" />
+                    </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -140,6 +156,35 @@ export function AccountContacts({ accountId }: { accountId: string }) {
           </Table>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!archiveTarget}
+        onOpenChange={(o) => !o && setArchiveTarget(null)}
+        title="Archive this contact?"
+        description={
+          archiveTarget
+            ? `"${formatName(archiveTarget.first_name, archiveTarget.last_name)}" will be hidden from this account's contact list. Their emails and history are kept, and an admin can restore them.`
+            : ""
+        }
+        confirmLabel="Archive"
+        destructive
+        onConfirm={() => {
+          const t = archiveTarget;
+          setArchiveTarget(null);
+          if (!t) return;
+          archiveContact.mutate(
+            { id: t.id, reason: "Archived from account contacts" },
+            {
+              onSuccess: () =>
+                toast.success(`${formatName(t.first_name, t.last_name)} archived.`),
+              onError: (err: Error) =>
+                toast.error("Couldn't archive contact", {
+                  description: err.message,
+                }),
+            },
+          );
+        }}
+      />
     </div>
   );
 }
