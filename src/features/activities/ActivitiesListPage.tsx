@@ -11,6 +11,7 @@ import {
   CheckSquare,
   Search,
   Check,
+  Plus,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import type { Activity, ActivityType } from "@/types/crm";
@@ -18,8 +19,10 @@ import { useUsers } from "@/features/accounts/api";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { Pagination } from "@/components/Pagination";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
+import { QuickTaskDialog } from "./QuickTaskDialog";
 import {
   Select,
   SelectContent,
@@ -217,6 +220,7 @@ export function ActivitiesListPage() {
   const [endDate, setEndDate] = useState("");
   const [showCompletedTasks, setShowCompletedTasks] = useState(false);
   const [page, setPage] = useState(0);
+  const [showAddTask, setShowAddTask] = useState(false);
 
   const scopeAccountId = urlParams.get("account_id") || undefined;
   const scopeContactId = urlParams.get("contact_id") || undefined;
@@ -265,7 +269,17 @@ export function ActivitiesListPage() {
       <PageHeader
         title="Activities"
         description="All activity across your records"
+        actions={
+          <Button size="sm" onClick={() => setShowAddTask(true)}>
+            <Plus className="h-4 w-4 mr-1" />
+            Add Task
+          </Button>
+        }
       />
+
+      {/* Standalone task creation — no record context, so the dialog
+          shows its optional attach-to-record picker. */}
+      <QuickTaskDialog open={showAddTask} onOpenChange={setShowAddTask} />
 
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <div className="relative flex-1 min-w-[200px] max-w-sm">

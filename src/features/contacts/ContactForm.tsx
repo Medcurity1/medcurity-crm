@@ -124,6 +124,8 @@ function ContactFormInner({
           department: contact.department ?? "",
           linkedin_url: contact.linkedin_url ?? "",
           do_not_contact: contact.do_not_contact ?? false,
+          do_not_call: contact.do_not_call ?? false,
+          no_longer_employed: contact.no_longer_employed ?? false,
           mailing_street: contact.mailing_street ?? "",
           mailing_city: contact.mailing_city ?? "",
           mailing_state: contact.mailing_state ?? "",
@@ -156,6 +158,8 @@ function ContactFormInner({
           department: "",
           linkedin_url: "",
           do_not_contact: false,
+          do_not_call: false,
+          no_longer_employed: false,
           mailing_street: "",
           mailing_city: "",
           mailing_state: "",
@@ -561,6 +565,24 @@ function ContactFormInner({
                   onCheckedChange={(checked) => setValue("do_not_contact", !!checked)}
                 />
                 <Label htmlFor="do_not_contact" className="cursor-pointer">Do not contact</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="do_not_call"
+                  checked={watch("do_not_call")}
+                  onCheckedChange={(checked) => setValue("do_not_call", !!checked)}
+                />
+                <Label htmlFor="do_not_call" className="cursor-pointer">Do not call</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="no_longer_employed"
+                  checked={watch("no_longer_employed")}
+                  onCheckedChange={(checked) => setValue("no_longer_employed", !!checked)}
+                />
+                <Label htmlFor="no_longer_employed" className="cursor-pointer">
+                  No longer employed
+                </Label>
               </div>
             </div>
 

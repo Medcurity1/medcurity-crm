@@ -148,6 +148,23 @@ export function ContactDetail() {
                 Primary Contact
               </Badge>
             )}
+            {contact.no_longer_employed && (
+              <Badge
+                variant="secondary"
+                className="bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
+                title="No longer employed — excluded from outreach"
+              >
+                No Longer Employed
+              </Badge>
+            )}
+            {contact.do_not_call && (
+              <Badge
+                variant="secondary"
+                className="bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
+              >
+                Do Not Call
+              </Badge>
+            )}
             {contact.do_not_contact && (
               <Badge variant="destructive">Do Not Contact</Badge>
             )}

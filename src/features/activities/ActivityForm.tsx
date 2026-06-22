@@ -1,10 +1,18 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
 import { Phone, Mail, Calendar, CheckSquare } from "lucide-react";
 import { activityFormSchema, type ActivityFormValues } from "./schema";
 import { useCreateActivity, useUpdateActivity } from "./api";
+import { RecurrencePicker } from "./RecurrencePicker";
+import {
+  EMPTY_RECURRENCE,
+  NO_RECURRENCE,
+  buildRecurrenceFields,
+  recurrenceToUI,
+  type RecurrenceUI,
+} from "./recurrence";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { supabase } from "@/lib/supabase";
 import {
@@ -115,6 +123,8 @@ export function ActivityForm({
   const createMutation = useCreateActivity();
   const updateMutation = useUpdateActivity();
   const isEditing = !!activity;
+  // Recurrence lives outside react-hook-form (it's task-only + derived).
+  const [recur, setRecur] = useState<RecurrenceUI>(EMPTY_RECURRENCE);
 
   // Helper: today as YYYY-MM-DD in local time (HTML date inputs expect this).
   // Reps usually log an activity the day it happened; defaulting to today
@@ -149,6 +159,7 @@ export function ActivityForm({
       activity_date: todayLocalISO(),
       due_at: "",
       contact_id: contactId ?? null,
+      priority: "normal",
       reminder_schedule: "none",
       reminder_at: "",
       reminder_channels: ["in_app"],
@@ -189,16 +200,15 @@ export function ActivityForm({
       // datetime-local needs LOCAL time, not the raw UTC ISO. Convert the
       // stored UTC timestamp by adjusting for the user's timezone offset
       // before slicing — otherwise users in negative-UTC zones see the
-      // due time shifted hours earlier than what they originally picked.
-      const dueLocal = activity.due_at
-        ? (() => {
-            const d = new Date(activity.due_at);
-            const tzOffsetMs = d.getTimezoneOffset() * 60 * 1000;
-            return new Date(d.getTime() - tzOffsetMs)
-              .toISOString()
-              .slice(0, 16);
-          })()
-        : "";
+      // time shifted hours earlier than what they originally picked. The
+      // same conversion must apply to reminder_at, not just due_at — a raw
+      // .slice() there silently drifts the reminder by the offset on resave.
+      const toLocalSlice = (iso: string): string => {
+        const d = new Date(iso);
+        const tzOffsetMs = d.getTimezoneOffset() * 60 * 1000;
+        return new Date(d.getTime() - tzOffsetMs).toISOString().slice(0, 16);
+      };
+      const dueLocal = activity.due_at ? toLocalSlice(activity.due_at) : "";
       form.reset({
         activity_type: activity.activity_type,
         subject: activity.subject ?? "",
@@ -210,13 +220,15 @@ export function ActivityForm({
             : todayLocalISO(),
         due_at: dueLocal,
         contact_id: activity.contact_id ?? null,
+        priority: activity.priority ?? "normal",
         reminder_schedule:
           (activity.reminder_schedule as ActivityFormValues["reminder_schedule"]) ??
           "none",
-        reminder_at: activity.reminder_at ? activity.reminder_at.slice(0, 16) : "",
+        reminder_at: activity.reminder_at ? toLocalSlice(activity.reminder_at) : "",
         reminder_channels:
           (activity.reminder_channels as Array<"in_app" | "email">) ?? ["in_app"],
       });
+      setRecur(recurrenceToUI(activity));
     } else {
       form.reset({
         activity_type: "call",
@@ -225,15 +237,24 @@ export function ActivityForm({
         activity_date: todayLocalISO(),
         due_at: "",
         contact_id: contactId ?? null,
+        priority: "normal",
         reminder_schedule: "none",
         reminder_at: "",
         reminder_channels: ["in_app"],
       });
+      setRecur(EMPTY_RECURRENCE);
     }
   }, [open, activity, form, contactId]);
 
   function onSubmit(values: ActivityFormValues) {
     const isTask = values.activity_type === "task";
+    if (isTask && recur.mode !== "none" && !values.due_at) {
+      toast.error("Pick a due date for a repeating task");
+      return;
+    }
+    const recurFields = isTask
+      ? buildRecurrenceFields(recur, values.due_at || "")
+      : NO_RECURRENCE;
     const reminderSchedule = isTask
       ? (values.reminder_schedule ?? "none")
       : "none";
@@ -246,6 +267,11 @@ export function ActivityForm({
         ? values.reminder_channels ?? ["in_app"]
         : ["in_app"]
     ) as Array<"in_app" | "email">;
+    // Priority only applies to tasks; non-tasks stay null so a call/email
+    // never carries a spurious priority tier.
+    const taskPriority: "high" | "normal" | "low" | null = isTask
+      ? values.priority ?? "normal"
+      : null;
 
     // Activity date applies to every type. If the user picked today (or
     // didn't touch the field), stamp it with the actual current time so
@@ -280,6 +306,12 @@ export function ActivityForm({
           activity_date: activityDateIso,
           due_at: dueAtIso,
           contact_id: resolvedContactId,
+          priority: taskPriority,
+          recur_freq: recurFields.recur_freq,
+          recur_interval: recurFields.recur_interval,
+          recur_weekday: recurFields.recur_weekday,
+          recur_monthday: recurFields.recur_monthday,
+          recur_until: recurFields.recur_until,
           reminder_schedule: reminderSchedule,
           reminder_at: reminderAt,
           reminder_channels: reminderChannels,
@@ -309,6 +341,12 @@ export function ActivityForm({
         opportunity_id: opportunityId,
         lead_id: leadId,
         owner_user_id: user?.id,
+        priority: taskPriority,
+        recur_freq: recurFields.recur_freq,
+        recur_interval: recurFields.recur_interval,
+        recur_weekday: recurFields.recur_weekday,
+        recur_monthday: recurFields.recur_monthday,
+        recur_until: recurFields.recur_until,
         reminder_schedule: reminderSchedule,
         reminder_at: reminderAt,
         reminder_channels: reminderChannels,
@@ -470,6 +508,33 @@ export function ActivityForm({
                 calendar item.
               </p>
             </div>
+          )}
+
+          {/* Priority — tasks only. Medium by default (V2-A1). */}
+          {selectedType === "task" && (
+            <div className="space-y-2">
+              <Label htmlFor="activity-priority">Priority</Label>
+              <select
+                id="activity-priority"
+                className="w-full border rounded-md h-9 px-2 bg-background text-sm"
+                value={form.watch("priority") ?? "normal"}
+                onChange={(e) =>
+                  form.setValue(
+                    "priority",
+                    e.target.value as "high" | "normal" | "low",
+                  )
+                }
+              >
+                <option value="high">High</option>
+                <option value="normal">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+          )}
+
+          {/* Repeats — tasks only (V2-A3). */}
+          {selectedType === "task" && (
+            <RecurrencePicker value={recur} onChange={setRecur} />
           )}
 
           {/* Activity Date — when this interaction actually happened

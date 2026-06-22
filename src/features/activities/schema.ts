@@ -27,6 +27,9 @@ export const activityFormSchema = z.object({
    * too, so a rep doesn't have to remember to also log it there.
    */
   contact_id: z.string().nullable().optional(),
+  // Only surfaced for activity_type = 'task'. 'normal' is the Medium tier
+  // (the default); the enum has no 'medium' member by design (see taskOrder.ts).
+  priority: z.enum(["high", "normal", "low"]).optional(),
   // Only surfaced for activity_type = 'task'.
   reminder_schedule: z
     .enum(["none", "once", "daily", "weekdays", "weekly"])

@@ -28,9 +28,16 @@ import {
 import { useRecentRecords, type RecentRecord } from "@/hooks/useRecentRecords";
 import { TeamActivityFeed } from "./TeamActivityFeed";
 import { MyAccountsWidget } from "./MyAccountsWidget";
+import { ColdCallWidget } from "./ColdCallWidget";
 import { KpiCard } from "./KpiCard";
 import { KpiConfigDialog } from "./KpiConfigDialog";
 import { loadKpiConfig, getKpiById } from "./kpi-registry";
+import {
+  compareTasksByDueThenPriority,
+  priorityDotClass,
+  priorityLabel,
+} from "@/features/activities/taskOrder";
+import { describeRecurrence } from "@/features/activities/recurrence";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -91,6 +98,8 @@ interface TaskItem {
   due_at: string | null;
   completed_at: string | null;
   priority: "high" | "normal" | "low" | null;
+  recur_freq: "daily" | "weekly" | "monthly" | null;
+  recur_interval: number | null;
   account_id: string | null;
   contact_id: string | null;
   opportunity_id: string | null;
@@ -146,7 +155,7 @@ function useMyTasks(userId: string) {
       const { data, error } = await supabase
         .from("activities")
         .select(
-          "id, subject, due_at, completed_at, priority, account_id, contact_id, opportunity_id, lead_id, account:accounts(id, name), contact:contacts(id, first_name, last_name), opportunity:opportunities(id, name), lead:leads(id, first_name, last_name, company)",
+          "id, subject, due_at, completed_at, priority, recur_freq, recur_interval, account_id, contact_id, opportunity_id, lead_id, account:accounts(id, name), contact:contacts(id, first_name, last_name), opportunity:opportunities(id, name), lead:leads(id, first_name, last_name, company)",
         )
         .eq("activity_type", "task")
         .eq("owner_user_id", userId)
@@ -397,7 +406,12 @@ function MyTasksSection({ userId }: { userId: string }) {
     },
   });
 
-  const openTasks = (tasks ?? []).filter((t) => !t.completed_at);
+  // Due date first, then priority (High → Medium → Low) as the tiebreak.
+  // The query already returns ALL of the rep's tasks — record-linked and
+  // standalone alike — so this widget is the single "Up Next" surface.
+  const openTasks = (tasks ?? [])
+    .filter((t) => !t.completed_at)
+    .sort(compareTasksByDueThenPriority);
   const completedTasks = (tasks ?? []).filter((t) => t.completed_at);
   // 2-column grid on lg → show 10 so each column has 5 rows. Reclaims
   // the empty right-half of the card and lets reps triage twice as
@@ -449,6 +463,11 @@ function MyTasksSection({ userId }: { userId: string }) {
                   />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-baseline gap-2 flex-wrap">
+                      <span
+                        className={`shrink-0 h-2 w-2 rounded-full self-center ${priorityDotClass(task.priority)}`}
+                        title={`${priorityLabel(task.priority)} priority`}
+                        aria-label={`${priorityLabel(task.priority)} priority`}
+                      />
                       <span className="text-sm font-medium truncate">
                         {task.subject}
                       </span>
@@ -457,6 +476,15 @@ function MyTasksSection({ userId }: { userId: string }) {
                           className={`text-xs font-medium ${dueColor}`}
                         >
                           {dueLabel}
+                        </span>
+                      )}
+                      {describeRecurrence(task) && (
+                        <span
+                          className="text-xs text-muted-foreground"
+                          title={`Repeats: ${describeRecurrence(task)}`}
+                          aria-label={`Repeats ${describeRecurrence(task)}`}
+                        >
+                          ↻
                         </span>
                       )}
                     </div>
@@ -690,6 +718,7 @@ const WIDGET_DEFS: WidgetDef[] = [
   { key: "saved_report", label: "Saved Report", defaultVisible: false },
   { key: "team_activity_feed", label: "Team Activity Feed", defaultVisible: false },
   { key: "my_accounts", label: "My Accounts", defaultVisible: false },
+  { key: "cold_call", label: "Cold Call List", defaultVisible: false },
 ];
 
 function getDefaultConfig(): Record<string, boolean> {
@@ -1064,6 +1093,9 @@ export function HomePage() {
 
       {/* My Tasks */}
       {isWidgetVisible("tasks") && <MyTasksSection userId={userId} />}
+
+      {/* Cold Call List (Summer) — full-width row, default off. */}
+      {isWidgetVisible("cold_call") && <ColdCallWidget />}
 
       {/* My Open Opportunities gets its own full-width row so the
           stage + amount + close-date columns don't get squeezed.

@@ -40,6 +40,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatName } from "@/lib/formatters";
+import { ContactFlagBadges } from "./ContactFlagBadges";
 
 const CONTACTS_COLUMNS: ColumnDescriptor[] = [
   { key: "select", label: "Select", locked: true, headClassName: "w-10" },
@@ -157,13 +158,16 @@ export function ContactsList() {
       />
     ),
     name: (c) => (
-      <Link
-        to={`/contacts/${c.id}`}
-        className="font-medium text-primary hover:underline"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {formatName(c.first_name, c.last_name)}
-      </Link>
+      <span className="inline-flex items-center gap-2">
+        <Link
+          to={`/contacts/${c.id}`}
+          className="font-medium text-primary hover:underline"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {formatName(c.first_name, c.last_name)}
+        </Link>
+        <ContactFlagBadges contact={c} />
+      </span>
     ),
     account: (c) =>
       c.account ? (

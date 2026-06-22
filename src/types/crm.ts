@@ -278,6 +278,11 @@ export interface Contact {
   notes: string | null;
   next_steps: string | null;
   do_not_contact: boolean;
+  // Call-suppression preference + No-Longer-Employed flag (V3-B). NLE is
+  // excluded from outreach but stays visible/searchable (unlike archive).
+  do_not_call: boolean;
+  no_longer_employed: boolean;
+  no_longer_employed_at: string | null;
   mailing_street: string | null;
   mailing_city: string | null;
   mailing_state: string | null;
@@ -541,6 +546,7 @@ export type ReminderSchedule =
   | "none" | "once" | "daily" | "weekdays" | "weekly";
 export type ReminderChannel = "in_app" | "email";
 export type ActivityPriority = "high" | "normal" | "low";
+export type TaskRecurrenceFreq = "daily" | "weekly" | "monthly";
 export type LeadRating = "hot" | "warm" | "cold";
 
 export interface Activity {
@@ -575,6 +581,13 @@ export interface Activity {
   reminder_channels: ReminderChannel[];
   last_reminder_sent_at: string | null;
   priority: ActivityPriority | null;
+  // Live task recurrence (V2-A3) — null recur_freq = not recurring.
+  recur_freq: TaskRecurrenceFreq | null;
+  recur_interval: number;
+  recur_weekday: number | null;
+  recur_monthday: number | null;
+  recur_until: string | null;
+  recurrence_parent_id: string | null;
   // Outlook calendar sync (tasks)
   outlook_event_id: string | null;
   outlook_sync_error: string | null;

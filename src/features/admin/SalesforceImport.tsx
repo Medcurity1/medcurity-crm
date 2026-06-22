@@ -436,8 +436,11 @@ const CONTACT_FIELDS: Record<string, string> = {
   department: "department",
   description: "description",
   "contact description": "description",
-  "do not call": "do_not_contact",
-  donotcall: "do_not_contact",
+  // Call-suppression maps to the dedicated do_not_call column now that it
+  // exists (matches the leads importer). Email/fax opt-outs stay on
+  // do_not_contact below.
+  "do not call": "do_not_call",
+  donotcall: "do_not_call",
   "has opted out of email": "do_not_contact",
   hasoptedoutofemail: "do_not_contact",
   "email opt out": "do_not_contact",
@@ -1371,6 +1374,8 @@ function getCRMFields(entity: EntityType): string[] {
         "description",
         "linkedin_url",
         "do_not_contact",
+        "do_not_call",
+        "no_longer_employed",
         "lead_source",
         "lead_source_detail",
         "birthdate",

@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import type { Activity } from "@/types/crm";
+import { compareTasksByDueThenPriority } from "./taskOrder";
 
 interface ActivityFilters {
   account_id?: string;
@@ -59,6 +60,12 @@ interface CreateActivityInput {
   reminder_at?: string | null;
   reminder_channels?: Array<"in_app" | "email">;
   priority?: "high" | "normal" | "low" | null;
+  // Task recurrence (V2-A3)
+  recur_freq?: "daily" | "weekly" | "monthly" | null;
+  recur_interval?: number;
+  recur_weekday?: number | null;
+  recur_monthday?: number | null;
+  recur_until?: string | null;
 }
 
 export function useCreateActivity() {
@@ -189,6 +196,12 @@ export function useUpdateActivity() {
       reminder_at?: string | null;
       reminder_channels?: Array<"in_app" | "email">;
       priority?: "high" | "normal" | "low" | null;
+      // Task recurrence (V2-A3)
+      recur_freq?: "daily" | "weekly" | "monthly" | null;
+      recur_interval?: number;
+      recur_weekday?: number | null;
+      recur_monthday?: number | null;
+      recur_until?: string | null;
     }) => {
       const { data, error } = await supabase
         .from("activities")
@@ -261,13 +274,18 @@ export function useTasks(filters: TaskFilters) {
       if (error) throw error;
       const all = data as Activity[];
       return {
-        open: all.filter((t) => !t.completed_at),
+        // Open tasks: due date first, then priority (High → Medium → Low)
+        // as the tiebreak so same-day tasks surface in importance order.
+        open: all
+          .filter((t) => !t.completed_at)
+          .sort(compareTasksByDueThenPriority),
         completed: all.filter((t) => !!t.completed_at),
       };
     },
     enabled:
       !!filters.account_id ||
       !!filters.contact_id ||
-      !!filters.opportunity_id,
+      !!filters.opportunity_id ||
+      !!filters.lead_id,
   });
 }

@@ -12,6 +12,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useUpdateActivity } from "./api";
+import { RecurrencePicker } from "./RecurrencePicker";
+import {
+  EMPTY_RECURRENCE,
+  buildRecurrenceFields,
+  recurrenceToUI,
+  type RecurrenceUI,
+} from "./recurrence";
 import { errorMessage } from "@/lib/errors";
 import { toast } from "sonner";
 import type { Activity } from "@/types/crm";
@@ -49,7 +56,8 @@ export function EditTaskDialog({
   const [channels, setChannels] = useState<Array<"in_app" | "email">>([
     "in_app",
   ]);
-  const [priority, setPriority] = useState<"" | "high" | "normal" | "low">("");
+  const [priority, setPriority] = useState<"high" | "normal" | "low">("normal");
+  const [recur, setRecur] = useState<RecurrenceUI>(EMPTY_RECURRENCE);
 
   // Re-hydrate from the task when it changes.
   useEffect(() => {
@@ -68,7 +76,10 @@ export function EditTaskDialog({
         ? task.reminder_channels
         : ["in_app"]
     );
-    setPriority(task.priority ?? "");
+    // Legacy tasks may have a NULL priority — show them as Medium (the
+    // default tier), which is how they already sort/render elsewhere.
+    setPriority(task.priority ?? "normal");
+    setRecur(recurrenceToUI(task));
   }, [task]);
 
   function toggleChannel(ch: "in_app" | "email", checked: boolean) {
@@ -86,6 +97,11 @@ export function EditTaskDialog({
       toast.error("Subject is required");
       return;
     }
+    if (recur.mode !== "none" && !dueAt) {
+      toast.error("Pick a due date for a repeating task");
+      return;
+    }
+    const recurFields = buildRecurrenceFields(recur, dueAt);
     try {
       const dueIso = dueAt ? new Date(dueAt).toISOString() : null;
       const reminderIso =
@@ -102,7 +118,12 @@ export function EditTaskDialog({
         reminder_schedule: reminderSchedule,
         reminder_at: reminderIso,
         reminder_channels: reminderSchedule === "none" ? ["in_app"] : channels,
-        priority: priority || null,
+        priority,
+        recur_freq: recurFields.recur_freq,
+        recur_interval: recurFields.recur_interval,
+        recur_weekday: recurFields.recur_weekday,
+        recur_monthday: recurFields.recur_monthday,
+        recur_until: recurFields.recur_until,
       });
       toast.success("Task updated");
       onOpenChange(false);
@@ -151,15 +172,16 @@ export function EditTaskDialog({
               className="w-full border rounded-md h-9 px-2 bg-background text-sm"
               value={priority}
               onChange={(e) =>
-                setPriority(e.target.value as "" | "high" | "normal" | "low")
+                setPriority(e.target.value as "high" | "normal" | "low")
               }
             >
-              <option value="">No priority (use due date)</option>
               <option value="high">High</option>
-              <option value="normal">Normal</option>
+              <option value="normal">Medium</option>
               <option value="low">Low</option>
             </select>
           </div>
+
+          <RecurrencePicker value={recur} onChange={setRecur} />
 
           <div className="space-y-2 border rounded-md p-3">
             <Label className="text-sm font-semibold">Reminders</Label>

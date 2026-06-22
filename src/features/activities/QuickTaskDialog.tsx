@@ -12,6 +12,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useCreateActivity } from "./api";
+import {
+  TaskRecordPicker,
+  EMPTY_TASK_RECORD,
+  type TaskRecordSelection,
+} from "./TaskRecordPicker";
+import { RecurrencePicker } from "./RecurrencePicker";
+import {
+  EMPTY_RECURRENCE,
+  buildRecurrenceFields,
+  type RecurrenceUI,
+} from "./recurrence";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { errorMessage } from "@/lib/errors";
 import { toast } from "sonner";
@@ -48,10 +59,21 @@ export function QuickTaskDialog({
   const [channels, setChannels] = useState<Array<"in_app" | "email">>([
     "in_app",
   ]);
-  // Priority is optional. Null = use due_at as the implicit priority signal.
-  const [priority, setPriority] = useState<"high" | "normal" | "low" | "">("");
+  // Priority is required with a Medium default (V2-A1). 'normal' is the
+  // Medium tier — see taskOrder.ts.
+  const [priority, setPriority] = useState<"high" | "normal" | "low">("normal");
+  // Optional record attachment, only used in standalone mode (Activities
+  // tab) where no record context was passed in via props.
+  const [attach, setAttach] = useState<TaskRecordSelection>(EMPTY_TASK_RECORD);
+  const [recur, setRecur] = useState<RecurrenceUI>(EMPTY_RECURRENCE);
   const createMutation = useCreateActivity();
   const { user } = useAuth();
+
+  // Standalone = opened with no record context (the Activities tab). Only
+  // then do we offer the attach-to-record picker; from a record's Tasks
+  // panel the parent record is already implied by the props.
+  const isStandalone =
+    !accountId && !contactId && !opportunityId && !leadId;
 
   function reset() {
     setSubject("");
@@ -60,7 +82,9 @@ export function QuickTaskDialog({
     setReminderSchedule("none");
     setReminderAt("");
     setChannels(["in_app"]);
-    setPriority("");
+    setPriority("normal");
+    setAttach(EMPTY_TASK_RECORD);
+    setRecur(EMPTY_RECURRENCE);
   }
 
   function handleClose(nextOpen: boolean) {
@@ -81,6 +105,14 @@ export function QuickTaskDialog({
     e.preventDefault();
     if (!subject.trim()) return;
 
+    // Recurring tasks derive their weekday / day-of-month from the due
+    // date, so a due date is required when repeating.
+    if (recur.mode !== "none" && !dueAt) {
+      toast.error("Pick a due date for a repeating task");
+      return;
+    }
+    const recurFields = buildRecurrenceFields(recur, dueAt);
+
     // datetime-local returns "YYYY-MM-DDTHH:mm" with no timezone.
     // new Date(value) interprets as local time, which is what users expect.
     const dueIso = dueAt ? new Date(dueAt).toISOString() : null;
@@ -95,15 +127,18 @@ export function QuickTaskDialog({
           : dueIso
         : null;
 
+    // Record links: props win when opened from a record's Tasks panel;
+    // otherwise fall back to the standalone attach picker (which is all
+    // nulls unless the rep chose something).
     createMutation.mutate(
       {
         activity_type: "task",
         subject: subject.trim(),
         body: notes.trim() || undefined,
         due_at: dueIso,
-        account_id: accountId ?? null,
-        contact_id: contactId ?? null,
-        opportunity_id: opportunityId ?? null,
+        account_id: accountId ?? attach.accountId ?? null,
+        contact_id: contactId ?? attach.contactId ?? null,
+        opportunity_id: opportunityId ?? attach.opportunityId ?? null,
         lead_id: leadId ?? null,
         // owner_user_id MUST be set — the task-reminders function sends
         // reminders to this user, the home-page "My Tasks" widget filters
@@ -112,7 +147,12 @@ export function QuickTaskDialog({
         reminder_schedule: reminderSchedule,
         reminder_at: reminderIso,
         reminder_channels: reminderSchedule === "none" ? ["in_app"] : channels,
-        priority: priority || null,
+        priority,
+        recur_freq: recurFields.recur_freq,
+        recur_interval: recurFields.recur_interval,
+        recur_weekday: recurFields.recur_weekday,
+        recur_monthday: recurFields.recur_monthday,
+        recur_until: recurFields.recur_until,
       },
       {
         onSuccess: () => {
@@ -134,7 +174,9 @@ export function QuickTaskDialog({
         <DialogHeader>
           <DialogTitle>Add Task</DialogTitle>
           <DialogDescription>
-            Create a new task for this record.
+            {isStandalone
+              ? "Create a task for yourself. Optionally attach it to a record."
+              : "Create a new task for this record."}
           </DialogDescription>
         </DialogHeader>
 
@@ -165,21 +207,26 @@ export function QuickTaskDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="task-priority">Priority</Label>
+            <Label htmlFor="task-priority">Priority *</Label>
             <select
               id="task-priority"
               className="w-full border rounded-md h-9 px-2 bg-background text-sm"
               value={priority}
               onChange={(e) =>
-                setPriority(e.target.value as "" | "high" | "normal" | "low")
+                setPriority(e.target.value as "high" | "normal" | "low")
               }
             >
-              <option value="">No priority (use due date)</option>
               <option value="high">High</option>
-              <option value="normal">Normal</option>
+              <option value="normal">Medium</option>
               <option value="low">Low</option>
             </select>
           </div>
+
+          {isStandalone && (
+            <TaskRecordPicker value={attach} onChange={setAttach} />
+          )}
+
+          <RecurrencePicker value={recur} onChange={setRecur} />
 
           <div className="space-y-2 border rounded-md p-3">
             <Label className="text-sm font-semibold">Reminders</Label>

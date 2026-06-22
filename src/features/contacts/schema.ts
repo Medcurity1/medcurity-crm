@@ -18,6 +18,8 @@ export const contactSchema = z.object({
     .optional()
     .or(z.literal("")),
   do_not_contact: z.boolean(),
+  do_not_call: z.boolean(),
+  no_longer_employed: z.boolean(),
   mailing_street: z.string().optional().or(z.literal("")),
   mailing_city: z.string().optional().or(z.literal("")),
   mailing_state: z.string().optional().or(z.literal("")),

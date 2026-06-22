@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { formatName } from "@/lib/formatters";
+import { ContactFlagBadges } from "@/features/contacts/ContactFlagBadges";
 
 /**
  * Contacts homed at this account (contacts.account_id = X).
@@ -86,12 +87,15 @@ export function AccountContacts({ accountId }: { accountId: string }) {
               {contacts.map((c) => (
                 <TableRow key={c.id}>
                   <TableCell>
-                    <Link
-                      to={`/contacts/${c.id}`}
-                      className="font-medium text-primary hover:underline"
-                    >
-                      {formatName(c.first_name, c.last_name)}
-                    </Link>
+                    <span className="inline-flex items-center gap-2">
+                      <Link
+                        to={`/contacts/${c.id}`}
+                        className="font-medium text-primary hover:underline"
+                      >
+                        {formatName(c.first_name, c.last_name)}
+                      </Link>
+                      <ContactFlagBadges contact={c} />
+                    </span>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {c.title ?? "—"}
