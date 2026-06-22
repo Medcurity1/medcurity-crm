@@ -225,14 +225,21 @@ export function ContactDetail() {
             <CardTitle className="text-xs text-muted-foreground font-medium">Email</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
-            {contact.email ? (
-              <a
-                href={`mailto:${contact.email}`}
-                className="text-sm text-primary hover:underline inline-flex items-center gap-1 truncate"
-              >
-                <Mail className="h-3 w-3 shrink-0" />
-                {contact.email}
-              </a>
+            {contact.email || contact.email2 || contact.email3 ? (
+              <div className="flex flex-col gap-1">
+                {[contact.email, contact.email2, contact.email3]
+                  .filter((e): e is string => !!e)
+                  .map((e) => (
+                    <a
+                      key={e}
+                      href={`mailto:${e}`}
+                      className="text-sm text-primary hover:underline inline-flex items-center gap-1 truncate"
+                    >
+                      <Mail className="h-3 w-3 shrink-0" />
+                      {e}
+                    </a>
+                  ))}
+              </div>
             ) : (
               <p className="text-sm text-muted-foreground">{"\u2014"}</p>
             )}

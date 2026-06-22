@@ -117,6 +117,8 @@ function ContactFormInner({
           first_name: contact.first_name,
           last_name: contact.last_name,
           email: contact.email ?? "",
+          email2: contact.email2 ?? "",
+          email3: contact.email3 ?? "",
           title: contact.title ?? "",
           phone: contact.phone ?? "",
           department: contact.department ?? "",
@@ -147,6 +149,8 @@ function ContactFormInner({
           first_name: "",
           last_name: "",
           email: "",
+          email2: "",
+          email3: "",
           title: "",
           phone: "",
           department: "",
@@ -244,6 +248,10 @@ function ContactFormInner({
       account_id:
         values.account_id && values.account_id !== NO_ACCOUNT ? values.account_id : null,
       email: values.email || null,
+      email2: values.email2 ? values.email2.trim().toLowerCase() : null,
+      // email3 only counts when email2 is set (DB enforces the ordering too).
+      email3:
+        values.email2 && values.email3 ? values.email3.trim().toLowerCase() : null,
       title: values.title || null,
       phone: values.phone || null,
       department: values.department || null,
@@ -334,6 +342,20 @@ function ContactFormInner({
                 <Input id="email" type="email" {...register("email")} />
                 {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
               </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="email2">Additional Email</Label>
+                <Input id="email2" type="email" placeholder="Optional — a second address" {...register("email2")} />
+                {errors.email2 && <p className="text-sm text-destructive">{errors.email2.message}</p>}
+              </div>
+
+              {watch("email2") ? (
+                <div className="space-y-2">
+                  <Label htmlFor="email3">Additional Email</Label>
+                  <Input id="email3" type="email" placeholder="Optional — a third address" {...register("email3")} />
+                  {errors.email3 && <p className="text-sm text-destructive">{errors.email3.message}</p>}
+                </div>
+              ) : null}
 
               {!isEditing && (
                 <div className="md:col-span-2">

@@ -127,7 +127,10 @@ export function DuplicateWarning({
               .limit(5);
 
             if (hasEmail) {
-              query = query.ilike("email", `%${email!.trim()}%`);
+              const e = email!.trim();
+              query = query.or(
+                `email.ilike.%${e}%,email2.ilike.%${e}%,email3.ilike.%${e}%`,
+              );
             } else if (hasName) {
               query = query
                 .ilike("first_name", `%${firstName!.trim()}%`)

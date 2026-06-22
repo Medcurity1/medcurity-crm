@@ -261,6 +261,8 @@ export interface Contact {
   first_name: string;
   last_name: string;
   email: string | null;
+  email2: string | null;
+  email3: string | null;
   title: string | null;
   phone: string | null;
   phone_ext: string | null;

@@ -439,16 +439,23 @@ async function matchContactsByEmail(
   // 200-address ceiling per query keeps the URL under PostgREST limits;
   // batching handles larger inboxes.
   const map = new Map<string, ContactMatch>();
-  const BATCH = 100;
+  // A contact can hold up to 3 addresses (email, email2, email3), so each
+  // address expands to 3 ilike clauses — keep the batch ~3x smaller so the
+  // PostgREST `or` URL stays under length limits (was 100 for one clause each).
+  const BATCH = 33;
   for (let i = 0; i < lower.length; i += BATCH) {
     const batch = lower.slice(i, i + BATCH);
-    // Escape any commas/parens that would break PostgREST `or` parsing.
+    // Escape any commas/parens that would break PostgREST `or` parsing, then
+    // match the address against any of the contact's three email columns.
     const orFilter = batch
-      .map((e) => `email.ilike.${e.replace(/[(),]/g, "")}`)
+      .map((e) => {
+        const s = e.replace(/[(),]/g, "");
+        return `email.ilike.${s},email2.ilike.${s},email3.ilike.${s}`;
+      })
       .join(",");
     const { data, error } = await supabase
       .from("contacts")
-      .select("id, account_id, email, is_primary")
+      .select("id, account_id, email, email2, email3, is_primary")
       .or(orFilter)
       .is("archived_at", null);
 
@@ -457,12 +464,15 @@ async function matchContactsByEmail(
       continue;
     }
     for (const contact of data ?? []) {
-      if (contact.email) {
-        map.set(contact.email.toLowerCase(), {
-          contact_id: contact.id,
-          account_id: contact.account_id,
-          is_primary: contact.is_primary,
-        });
+      const match = {
+        contact_id: contact.id,
+        account_id: contact.account_id,
+        is_primary: contact.is_primary,
+      };
+      // Key the SAME contact under each of its addresses so mail to any one
+      // resolves to this contact (contactsSeen dedups by contact_id downstream).
+      for (const addr of [contact.email, contact.email2, contact.email3]) {
+        if (addr) map.set(addr.toLowerCase(), match);
       }
     }
   }

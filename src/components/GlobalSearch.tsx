@@ -150,6 +150,8 @@ export function GlobalSearch() {
         "first_name",
         "last_name",
         "email",
+        "email2",
+        "email3",
       ]);
       let q = supabase
         .from("contacts")

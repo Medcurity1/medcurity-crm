@@ -67,6 +67,8 @@ export function useContacts(filters?: ContactFilters) {
           "first_name",
           "last_name",
           "email",
+          "email2",
+          "email3",
           "title",
         ]);
         const parts: string[] = [];
