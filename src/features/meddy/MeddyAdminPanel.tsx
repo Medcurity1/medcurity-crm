@@ -2,7 +2,7 @@
 // controls + logs, and team Pushover key management (admin side of the
 // Nexus settings; per-user keys live in My Settings → Notifications).
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpen, Pencil, Plus, RefreshCw, Smartphone, Trash2, Zap } from "lucide-react";
 import { toast } from "sonner";
@@ -208,7 +208,7 @@ function KnowledgeBaseSection() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("meddy_kb_content")
-        .select("updated_at, content, manual_content")
+        .select("updated_at, content")
         .eq("id", 1)
         .single();
       if (error) throw error;
@@ -216,32 +216,8 @@ function KnowledgeBaseSection() {
         updated_at: data.updated_at as string,
         size: (data.content as string).length,
         tokens: Math.ceil((data.content as string).length / 4),
-        manual_content: (data.manual_content as string | null) ?? "",
       };
     },
-  });
-
-  // Team notes (manual_content) — editable knowledge that supplements the
-  // crawl and survives it. Seeded from the fetched value until the user edits.
-  const [notes, setNotes] = useState("");
-  const [notesDirty, setNotesDirty] = useState(false);
-  useEffect(() => {
-    if (kb && !notesDirty) setNotes(kb.manual_content);
-  }, [kb, notesDirty]);
-  const saveNotes = useMutation({
-    mutationFn: async () => {
-      const { error } = await supabase
-        .from("meddy_kb_content")
-        .update({ manual_content: notes, updated_at: new Date().toISOString() })
-        .eq("id", 1);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      setNotesDirty(false);
-      toast.success("Meddy team notes saved");
-      qc.invalidateQueries({ queryKey: ["meddy-kb-status"] });
-    },
-    onError: (err) => toast.error((err as Error).message),
   });
 
   const { data: logs = [] } = useQuery<CrawlLog[]>({
@@ -342,34 +318,6 @@ function KnowledgeBaseSection() {
             )}
           </tbody>
         </table>
-      </div>
-
-      <div className="mt-5 space-y-2">
-        <div>
-          <h4 className="text-sm font-semibold">Team notes (authoritative)</h4>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Extra facts Meddy should know that aren't on the public website — e.g. in-app
-            workflows. Meddy trusts these over the crawled site content, and they're kept
-            through the nightly crawl. Put a blank line between topics.
-          </p>
-        </div>
-        <Textarea
-          value={notes}
-          onChange={(e) => {
-            setNotes(e.target.value);
-            setNotesDirty(true);
-          }}
-          rows={10}
-          className="text-sm"
-          placeholder="e.g. To approve a policy: open it, make edits, click Save, then return to the policy dashboard and click Approve. Approval records who approved it and when."
-        />
-        <Button
-          size="sm"
-          disabled={saveNotes.isPending || !notesDirty}
-          onClick={() => saveNotes.mutate()}
-        >
-          {saveNotes.isPending ? "Saving…" : "Save team notes"}
-        </Button>
       </div>
     </section>
   );
