@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, Plus } from "lucide-react";
@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatName } from "@/lib/formatters";
+import { buildPersonSearchClause } from "@/lib/search-clause";
 
 interface ContactSearchResult {
   id: string;
@@ -24,6 +25,7 @@ interface ContactSearchResult {
   email: string | null;
   title: string | null;
   account_id: string | null;
+  account_name: string | null;
 }
 
 interface AddContactDialogProps {
@@ -31,24 +33,49 @@ interface AddContactDialogProps {
   onOpenChange: (open: boolean) => void;
   /** The opportunity we're attaching a contact to. */
   opportunityId: string;
-  /** The opp's home account_id — search results are restricted to
-   *  contacts homed at this account, and "Create new" defaults the new
-   *  contact's home account here. */
+  /** The opp's home account_id — used as the default list (the client's
+   *  contacts) and to default "Create new contact". Searching reaches any
+   *  account, so partner contacts can be attached too. */
   accountId: string;
 }
+
+// Shape the embedded account name into a flat field. PostgREST may type a
+// to-one embed as an array, so normalize either shape.
+type RawContactRow = {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  title: string | null;
+  account_id: string | null;
+  account?: { name: string | null } | { name: string | null }[] | null;
+};
+
+function mapRow(r: RawContactRow): ContactSearchResult {
+  const acct = Array.isArray(r.account) ? r.account[0] : r.account;
+  return {
+    id: r.id,
+    first_name: r.first_name,
+    last_name: r.last_name,
+    email: r.email,
+    title: r.title,
+    account_id: r.account_id,
+    account_name: acct?.name ?? null,
+  };
+}
+
+const CONTACT_SELECT =
+  "id, first_name, last_name, email, title, account_id, account:accounts!account_id(name)";
 
 /**
  * "Add Contact" dialog for an Opportunity's Contacts tab.
  *
- * Behavior (decided 2026-05-14): contacts are 1:1 with accounts, so
- * the only contacts that can be added to an opp are ones already homed
- * at the opp's account. The picker filters to those — no cross-account
- * search, no multi-account linkage. If the person doesn't exist at
- * this account yet, "Create new contact" routes to the contact form
- * with account_id pre-filled.
- *
- * Account-level Contacts tabs no longer use this dialog at all; they
- * just send the user to /contacts/new?account_id=X to create.
+ * Default view lists the opp's own account contacts (the common case — the
+ * client's people). Typing a search reaches ACROSS accounts so a partner's
+ * contact (whoever you're running the deal through) can be attached too. Each
+ * result shows its company so it's clear which side the person is on. Adding a
+ * contact inserts a `contact_opportunity_links` row; it never moves the
+ * contact's home account.
  */
 export function AddContactDialog({
   open,
@@ -68,21 +95,47 @@ export function AddContactDialog({
     }
   }, [open]);
 
-  // Every contact homed at this account — used as the picker source and
-  // to detect "already on this opp" by intersecting with existing links.
+  const searchActive = search.trim().length >= 2;
+
+  // Default list: the opp account's own (client) contacts.
   const { data: accountContacts } = useQuery({
     queryKey: ["account-home-contacts", accountId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("contacts")
-        .select("id, first_name, last_name, email, title, account_id")
+        .select(CONTACT_SELECT)
         .eq("account_id", accountId)
         .is("archived_at", null)
         .order("last_name");
       if (error) throw error;
-      return (data ?? []) as ContactSearchResult[];
+      return (data ?? []).map((r) => mapRow(r as unknown as RawContactRow));
     },
     enabled: open && !!accountId,
+  });
+
+  // Cross-account search (kicks in at 2+ chars) so partner contacts surface.
+  const { data: searchResults } = useQuery({
+    queryKey: ["contact-search-any", search.trim()],
+    queryFn: async () => {
+      const q = search.trim();
+      let query = supabase
+        .from("contacts")
+        .select(CONTACT_SELECT)
+        .is("archived_at", null)
+        .order("last_name")
+        .limit(25);
+      const orClause = buildPersonSearchClause(q, [
+        "first_name",
+        "last_name",
+        "email",
+        "title",
+      ]);
+      if (orClause) query = query.or(orClause);
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data ?? []).map((r) => mapRow(r as unknown as RawContactRow));
+    },
+    enabled: open && searchActive,
   });
 
   const { data: existingLinkIds } = useQuery({
@@ -98,25 +151,7 @@ export function AddContactDialog({
     enabled: open,
   });
 
-  // Local filter — accountContacts is bounded (one account's worth) so
-  // we don't need server-side search; this is faster and avoids hitting
-  // the DB on every keystroke.
-  const filtered = useMemo(() => {
-    const all = accountContacts ?? [];
-    const q = search.trim().toLowerCase();
-    if (!q) return all;
-    return all.filter((c) => {
-      const haystack = [
-        c.first_name ?? "",
-        c.last_name ?? "",
-        c.email ?? "",
-        c.title ?? "",
-      ]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [accountContacts, search]);
+  const displayed = searchActive ? searchResults ?? [] : accountContacts ?? [];
 
   const linkMutation = useMutation({
     mutationFn: async () => {
@@ -154,25 +189,20 @@ export function AddContactDialog({
         <DialogHeader>
           <DialogTitle>Add Contact to Opportunity</DialogTitle>
           <DialogDescription>
-            Pick a contact already at this account, or create a new one.
-            Only contacts homed at this account can be added.
+            Add a stakeholder on this deal. Search reaches any account, so you
+            can add a partner's contact too — their company is shown next to
+            each result.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-          Don't see who you're looking for? They need to be added to this
-          account first — open the account, add them under Contacts, then
-          come back here.
-        </div>
-
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="contact-search">Find contact at this account</Label>
+            <Label htmlFor="contact-search">Find a contact</Label>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 id="contact-search"
-                placeholder="Search by name, email, or title…"
+                placeholder="Search any contact by name, email, or title…"
                 value={search}
                 onChange={(e) => {
                   setSearch(e.target.value);
@@ -182,10 +212,16 @@ export function AddContactDialog({
                 autoFocus
               />
             </div>
+            {!searchActive && (
+              <p className="text-xs text-muted-foreground">
+                Showing this account's contacts. Type to search across all
+                accounts (including partners).
+              </p>
+            )}
 
-            {!selected && filtered.length > 0 && (
+            {!selected && displayed.length > 0 && (
               <div className="rounded-md border max-h-60 overflow-y-auto">
-                {filtered.map((r) => {
+                {displayed.map((r) => {
                   const name =
                     formatName(r.first_name ?? "", r.last_name ?? "").trim() ||
                     r.email ||
@@ -201,29 +237,27 @@ export function AddContactDialog({
                       <div className="flex justify-between items-center gap-2">
                         <span className="font-medium">{name}</span>
                         {alreadyHere && (
-                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">
                             already on opp
                           </span>
                         )}
                       </div>
                       <div className="text-xs text-muted-foreground truncate">
-                        {r.title ? r.title : (r.email ?? "—")}
+                        {[r.title || r.email, r.account_name]
+                          .filter(Boolean)
+                          .join(" · ") || "—"}
                       </div>
                     </button>
                   );
                 })}
               </div>
             )}
-            {!selected && (accountContacts?.length ?? 0) === 0 && (
+            {!selected && searchActive && displayed.length === 0 && (
               <p className="text-xs text-muted-foreground">
-                No contacts at this account yet. Use "Create new contact" below.
+                No contacts match. Add them to their account first, or create a
+                new one below.
               </p>
             )}
-            {!selected &&
-              (accountContacts?.length ?? 0) > 0 &&
-              filtered.length === 0 && (
-                <p className="text-xs text-muted-foreground">No matches.</p>
-              )}
 
             {selected && (
               <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm space-y-1">
@@ -238,7 +272,9 @@ export function AddContactDialog({
                         "(no name)"}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {selected.title ?? selected.email ?? "—"}
+                      {[selected.title || selected.email, selected.account_name]
+                        .filter(Boolean)
+                        .join(" · ") || "—"}
                     </div>
                   </div>
                   <Button
@@ -266,9 +302,7 @@ export function AddContactDialog({
               <div className="w-full border-t" />
             </div>
             <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-background px-2 text-muted-foreground">
-                or
-              </span>
+              <span className="bg-background px-2 text-muted-foreground">or</span>
             </div>
           </div>
 

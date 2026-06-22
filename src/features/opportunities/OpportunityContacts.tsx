@@ -15,11 +15,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatName } from "@/lib/formatters";
+import { formatName, formatDate } from "@/lib/formatters";
 import { AddContactDialog } from "@/features/accounts/AddContactDialog";
 
 interface OppContactRow extends Contact {
   added_at: string | null;
+  account_name: string | null;
 }
 
 /**
@@ -52,24 +53,66 @@ export function OpportunityContacts({
     queryFn: async () => {
       const { data, error } = await supabase
         .from("contact_opportunity_links")
-        .select("added_at, contact:contacts!contact_id(*)")
+        .select(
+          "added_at, contact:contacts!contact_id(*, account:accounts!account_id(name))",
+        )
         .eq("opportunity_id", opportunityId);
       if (error) throw error;
       const out: OppContactRow[] = [];
       for (const r of data ?? []) {
         const row = r as unknown as {
-          contact: Contact | null;
+          contact:
+            | (Contact & {
+                account?:
+                  | { name: string | null }
+                  | { name: string | null }[]
+                  | null;
+              })
+            | null;
           added_at: string | null;
         };
         const c = row.contact;
         if (!c || c.archived_at) continue;
-        out.push({ ...c, added_at: row.added_at });
+        const acct = Array.isArray(c.account) ? c.account[0] : c.account;
+        out.push({
+          ...c,
+          added_at: row.added_at,
+          account_name: acct?.name ?? null,
+        });
       }
       out.sort((a, b) =>
         (a.last_name ?? "").localeCompare(b.last_name ?? ""),
       );
       return out;
     },
+  });
+
+  // Latest activity per linked contact, so the rep can see the most recent
+  // correspondence at a glance (esp. for a partner contact they go through).
+  // One bounded query per contact (an opp has only a handful of stakeholders).
+  const contactIds = (rows ?? []).map((r) => r.id);
+  const { data: lastActivity } = useQuery<Record<string, string | null>>({
+    queryKey: [
+      "opp-contacts-last-activity",
+      opportunityId,
+      contactIds.slice().sort().join(","),
+    ],
+    queryFn: async () => {
+      const entries = await Promise.all(
+        contactIds.map(async (cid) => {
+          const { data } = await supabase
+            .from("activities")
+            .select("created_at")
+            .eq("contact_id", cid)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          return [cid, data?.created_at ?? null] as const;
+        }),
+      );
+      return Object.fromEntries(entries);
+    },
+    enabled: contactIds.length > 0,
   });
 
   const removeLink = useMutation({
@@ -131,14 +174,15 @@ export function OpportunityContacts({
           description="Add stakeholders involved in this deal."
         />
       ) : (
-        <div className="border rounded-lg">
+        <div className="border rounded-lg overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
+                <TableHead>Company</TableHead>
                 <TableHead>Title</TableHead>
                 <TableHead>Email</TableHead>
-                <TableHead>Phone</TableHead>
+                <TableHead>Last activity</TableHead>
                 <TableHead className="w-8"></TableHead>
               </TableRow>
             </TableHeader>
@@ -154,13 +198,25 @@ export function OpportunityContacts({
                     </Link>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
+                    {c.account_id ? (
+                      <Link
+                        to={`/accounts/${c.account_id}`}
+                        className="text-primary hover:underline"
+                      >
+                        {c.account_name ?? "—"}
+                      </Link>
+                    ) : (
+                      c.account_name ?? "—"
+                    )}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
                     {c.title ?? "—"}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {c.email ?? "—"}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {c.phone ?? "—"}
+                    {lastActivity?.[c.id] ? formatDate(lastActivity[c.id]!) : "—"}
                   </TableCell>
                   <TableCell>
                     <Button
