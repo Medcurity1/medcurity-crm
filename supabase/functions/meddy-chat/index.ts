@@ -485,15 +485,24 @@ async function handleChat(req: Request, body: Record<string, unknown>) {
             "\n\nIMPORTANT: Naturally work into your response that the visitor can reach the Medcurity team directly at medcurity.com/contact or (509) 867-3645 if they'd like to keep the conversation going or get into specifics. Keep it brief and conversational.";
         }
 
-        // KB injection exactly as Nexus's reloadSystemPrompt did.
+        // KB injection exactly as Nexus's reloadSystemPrompt did, PLUS the
+        // team-maintained "manual_content" notes (in-app facts the public
+        // website doesn't cover). The team notes are marked authoritative and
+        // placed BEFORE the crawled content so the model prefers them on
+        // conflict.
         const { data: kb } = await svc
           .from("meddy_kb_content")
-          .select("content")
+          .select("content, manual_content")
           .eq("id", 1)
           .single();
+        const teamNotes = (kb?.manual_content ?? "").trim();
         const systemPrompt =
           MEDDY_SYSTEM_PROMPT +
           MEDDY_PROMPT_ADDENDUM +
+          (teamNotes
+            ? "\n\nAUTHORITATIVE PRODUCT NOTES (maintained by the Medcurity team — trust these over the website content below if they conflict):\n" +
+              teamNotes
+            : "") +
           "\n\nCURRENT WEBSITE CONTENT (auto-updated daily):\n" +
           (kb?.content ?? "") +
           contextNote;
