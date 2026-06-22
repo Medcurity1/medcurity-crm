@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState, useUrlArrayState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
@@ -14,6 +14,10 @@ import { BulkActionBar } from "@/components/BulkActionBar";
 import { SortableHeader, type SortState } from "@/components/SortableHeader";
 import { MultiSelect } from "@/components/MultiSelect";
 import { SavedViews } from "@/features/saved-views/SavedViews";
+import { ColumnPicker } from "@/features/list-columns/ColumnPicker";
+import { useColumnPrefs } from "@/features/list-columns/useColumnPrefs";
+import type { ColumnDescriptor } from "@/features/list-columns/columns";
+import type { Account } from "@/types/crm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -35,6 +39,16 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { statusLabel, formatDate } from "@/lib/formatters";
 
+const ACCOUNTS_COLUMNS: ColumnDescriptor[] = [
+  { key: "select", label: "Select", locked: true, headClassName: "w-10" },
+  { key: "name", label: "Name", sortKey: "name", locked: true },
+  { key: "status", label: "Status", sortKey: "status" },
+  { key: "owner", label: "Owner" },
+  { key: "industry", label: "Industry", sortKey: "industry" },
+  { key: "contract_end", label: "Contract End", sortKey: "current_contract_end_date" },
+  { key: "notes", label: "Notes" },
+];
+
 export function AccountsList() {
   const navigate = useNavigate();
   const { profile } = useAuth();
@@ -52,6 +66,7 @@ export function AccountsList() {
   const [pageSize, setPageSize] = useUrlNumberState("size", 25);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<SortState>({ column: "name", direction: "asc" });
+  const cols = useColumnPrefs("accounts", ACCOUNTS_COLUMNS);
 
   const { data: result, isLoading } = useAccounts({
     search: search || undefined,
@@ -141,6 +156,45 @@ export function AccountsList() {
 
   const allChecked =
     !!accounts?.length && accounts.every((a) => selectedIds.has(a.id));
+
+  const cellRenderers: Record<string, (a: Account) => ReactNode> = {
+    select: (a) => (
+      <Checkbox
+        checked={selectedIds.has(a.id)}
+        onCheckedChange={() => toggleSelect(a.id)}
+        aria-label={`Select ${a.name}`}
+      />
+    ),
+    name: (a) => (
+      <Link
+        to={`/accounts/${a.id}`}
+        className="font-medium text-primary hover:underline"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {a.name}
+      </Link>
+    ),
+    status: (a) => (
+      <StatusBadge value={a.status} variant="status" label={statusLabel(a.status)} />
+    ),
+    owner: (a) => (
+      <span className="text-muted-foreground">{a.owner?.full_name ?? "Unassigned"}</span>
+    ),
+    industry: (a) => (
+      <span className="text-muted-foreground">{a.industry ?? "—"}</span>
+    ),
+    contract_end: (a) => (
+      <span className="text-muted-foreground">{formatDate(a.current_contract_end_date)}</span>
+    ),
+    notes: (a) => (
+      <span
+        className="block max-w-[240px] truncate text-muted-foreground"
+        title={a.notes ?? undefined}
+      >
+        {a.notes || "—"}
+      </span>
+    ),
+  };
 
   return (
     <div>
@@ -248,6 +302,7 @@ export function AccountsList() {
         </Select>
 
         <SavedViews entity="accounts" />
+        <ColumnPicker columns={ACCOUNTS_COLUMNS} prefs={cols} />
       </div>
 
       {isLoading ? (
@@ -274,62 +329,49 @@ export function AccountsList() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-10">
-                    <Checkbox
-                      checked={allChecked}
-                      onCheckedChange={toggleAll}
-                      aria-label="Select all"
-                    />
-                  </TableHead>
-                  <SortableHeader column="name" sort={sort} onSort={setSort}>Name</SortableHeader>
-                  <SortableHeader column="status" sort={sort} onSort={setSort}>Status</SortableHeader>
-                  <TableHead>Owner</TableHead>
-                  <SortableHeader column="industry" sort={sort} onSort={setSort}>Industry</SortableHeader>
-                  <SortableHeader column="current_contract_end_date" sort={sort} onSort={setSort}>Contract End</SortableHeader>
-                  <TableHead>Notes</TableHead>
+                  {cols.visibleColumns.map((c) => {
+                    if (c.key === "select") {
+                      return (
+                        <TableHead key="select" className="w-10">
+                          <Checkbox
+                            checked={allChecked}
+                            onCheckedChange={toggleAll}
+                            aria-label="Select all"
+                          />
+                        </TableHead>
+                      );
+                    }
+                    return c.sortKey ? (
+                      <SortableHeader
+                        key={c.key}
+                        column={c.sortKey}
+                        sort={sort}
+                        onSort={setSort}
+                        align={c.align}
+                        className={c.headClassName}
+                      >
+                        {c.label}
+                      </SortableHeader>
+                    ) : (
+                      <TableHead key={c.key} className={c.headClassName}>
+                        {c.label}
+                      </TableHead>
+                    );
+                  })}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {accounts.map((account) => (
                   <TableRow key={account.id} className="cursor-pointer" onClick={() => navigate(`/accounts/${account.id}`)}>
-                    <TableCell onClick={(e) => e.stopPropagation()}>
-                      <Checkbox
-                        checked={selectedIds.has(account.id)}
-                        onCheckedChange={() => toggleSelect(account.id)}
-                        aria-label={`Select ${account.name}`}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Link
-                        to={`/accounts/${account.id}`}
-                        className="font-medium text-primary hover:underline"
-                        onClick={(e) => e.stopPropagation()}
+                    {cols.visibleColumns.map((c) => (
+                      <TableCell
+                        key={c.key}
+                        className={c.align === "right" ? "text-right" : undefined}
+                        onClick={c.key === "select" ? (e) => e.stopPropagation() : undefined}
                       >
-                        {account.name}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge
-                        value={account.status}
-                        variant="status"
-                        label={statusLabel(account.status)}
-                      />
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {account.owner?.full_name ?? "Unassigned"}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {account.industry ?? "\u2014"}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatDate(account.current_contract_end_date)}
-                    </TableCell>
-                    <TableCell
-                      className="max-w-[240px] truncate text-muted-foreground"
-                      title={account.notes ?? undefined}
-                    >
-                      {account.notes || "—"}
-                    </TableCell>
+                        {cellRenderers[c.key]?.(account)}
+                      </TableCell>
+                    ))}
                   </TableRow>
                 ))}
               </TableBody>

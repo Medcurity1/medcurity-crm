@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useUrlNumberState, useUrlArrayState, useUrlState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
@@ -15,6 +15,10 @@ import { BulkActionBar } from "@/components/BulkActionBar";
 import { SortableHeader, type SortState } from "@/components/SortableHeader";
 import { MultiSelect } from "@/components/MultiSelect";
 import { SavedViews } from "@/features/saved-views/SavedViews";
+import { ColumnPicker } from "@/features/list-columns/ColumnPicker";
+import { useColumnPrefs } from "@/features/list-columns/useColumnPrefs";
+import type { ColumnDescriptor } from "@/features/list-columns/columns";
+import type { Contact } from "@/types/crm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -37,6 +41,17 @@ import {
 } from "@/components/ui/select";
 import { formatName } from "@/lib/formatters";
 
+const CONTACTS_COLUMNS: ColumnDescriptor[] = [
+  { key: "select", label: "Select", locked: true, headClassName: "w-10" },
+  { key: "name", label: "Name", sortKey: "last_name", locked: true },
+  { key: "account", label: "Account", sortKey: "account.name" },
+  { key: "title", label: "Title", sortKey: "title" },
+  { key: "email", label: "Email", sortKey: "email" },
+  { key: "phone", label: "Phone" },
+  { key: "notes", label: "Notes" },
+  { key: "primary", label: "Primary" },
+];
+
 export function ContactsList() {
   const navigate = useNavigate();
   const { profile } = useAuth();
@@ -49,6 +64,7 @@ export function ContactsList() {
   const [pageSize, setPageSize] = useUrlNumberState("size", 25);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<SortState>({ column: "last_name", direction: "asc" });
+  const cols = useColumnPrefs("contacts", CONTACTS_COLUMNS);
 
   const { data: result, isLoading } = useContacts({
     search: search || undefined,
@@ -132,6 +148,60 @@ export function ContactsList() {
   const allChecked =
     !!contacts?.length && contacts.every((c) => selectedIds.has(c.id));
 
+  const cellRenderers: Record<string, (c: Contact) => ReactNode> = {
+    select: (c) => (
+      <Checkbox
+        checked={selectedIds.has(c.id)}
+        onCheckedChange={() => toggleSelect(c.id)}
+        aria-label={`Select ${c.first_name} ${c.last_name}`}
+      />
+    ),
+    name: (c) => (
+      <Link
+        to={`/contacts/${c.id}`}
+        className="font-medium text-primary hover:underline"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {formatName(c.first_name, c.last_name)}
+      </Link>
+    ),
+    account: (c) =>
+      c.account ? (
+        <Link
+          to={`/accounts/${c.account.id}`}
+          className="text-primary hover:underline"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {c.account.name}
+        </Link>
+      ) : (
+        "—"
+      ),
+    title: (c) => (
+      <span className="text-muted-foreground">{c.title ?? "—"}</span>
+    ),
+    email: (c) => (
+      <span className="text-muted-foreground">{c.email ?? "—"}</span>
+    ),
+    phone: (c) => (
+      <span className="text-muted-foreground">{c.phone ? formatPhone(c.phone) : "—"}</span>
+    ),
+    notes: (c) => (
+      <span
+        className="block max-w-[240px] truncate text-muted-foreground"
+        title={c.notes ?? undefined}
+      >
+        {c.notes || "—"}
+      </span>
+    ),
+    primary: (c) =>
+      c.is_primary ? (
+        <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">
+          Primary
+        </Badge>
+      ) : null,
+  };
+
   return (
     <div>
       <PageHeader
@@ -208,6 +278,7 @@ export function ContactsList() {
         )}
 
         <SavedViews entity="contacts" />
+        <ColumnPicker columns={CONTACTS_COLUMNS} prefs={cols} />
       </div>
 
       {isLoading ? (
@@ -232,68 +303,49 @@ export function ContactsList() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-10">
-                    <Checkbox
-                      checked={allChecked}
-                      onCheckedChange={toggleAll}
-                      aria-label="Select all"
-                    />
-                  </TableHead>
-                  <SortableHeader column="last_name" sort={sort} onSort={setSort}>Name</SortableHeader>
-                  <SortableHeader column="account.name" sort={sort} onSort={setSort}>Account</SortableHeader>
-                  <SortableHeader column="title" sort={sort} onSort={setSort}>Title</SortableHeader>
-                  <SortableHeader column="email" sort={sort} onSort={setSort}>Email</SortableHeader>
-                  <TableHead>Phone</TableHead>
-                  <TableHead>Notes</TableHead>
-                  <TableHead></TableHead>
+                  {cols.visibleColumns.map((c) => {
+                    if (c.key === "select") {
+                      return (
+                        <TableHead key="select" className="w-10">
+                          <Checkbox
+                            checked={allChecked}
+                            onCheckedChange={toggleAll}
+                            aria-label="Select all"
+                          />
+                        </TableHead>
+                      );
+                    }
+                    return c.sortKey ? (
+                      <SortableHeader
+                        key={c.key}
+                        column={c.sortKey}
+                        sort={sort}
+                        onSort={setSort}
+                        align={c.align}
+                        className={c.headClassName}
+                      >
+                        {c.label}
+                      </SortableHeader>
+                    ) : (
+                      <TableHead key={c.key} className={c.headClassName}>
+                        {c.label}
+                      </TableHead>
+                    );
+                  })}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {contacts.map((contact) => (
                   <TableRow key={contact.id} className="cursor-pointer" onClick={() => navigate(`/contacts/${contact.id}`)}>
-                    <TableCell onClick={(e) => e.stopPropagation()}>
-                      <Checkbox
-                        checked={selectedIds.has(contact.id)}
-                        onCheckedChange={() => toggleSelect(contact.id)}
-                        aria-label={`Select ${contact.first_name} ${contact.last_name}`}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Link
-                        to={`/contacts/${contact.id}`}
-                        className="font-medium text-primary hover:underline"
-                        onClick={(e) => e.stopPropagation()}
+                    {cols.visibleColumns.map((c) => (
+                      <TableCell
+                        key={c.key}
+                        className={c.align === "right" ? "text-right" : undefined}
+                        onClick={c.key === "select" ? (e) => e.stopPropagation() : undefined}
                       >
-                        {formatName(contact.first_name, contact.last_name)}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      {contact.account ? (
-                        <Link
-                          to={`/accounts/${contact.account.id}`}
-                          className="text-primary hover:underline"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {contact.account.name}
-                        </Link>
-                      ) : "\u2014"}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{contact.title ?? "\u2014"}</TableCell>
-                    <TableCell className="text-muted-foreground">{contact.email ?? "\u2014"}</TableCell>
-                    <TableCell className="text-muted-foreground">{contact.phone ? formatPhone(contact.phone) : "\u2014"}</TableCell>
-                    <TableCell
-                      className="max-w-[240px] truncate text-muted-foreground"
-                      title={contact.notes ?? undefined}
-                    >
-                      {contact.notes || "\u2014"}
-                    </TableCell>
-                    <TableCell>
-                      {contact.is_primary && (
-                        <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">
-                          Primary
-                        </Badge>
-                      )}
-                    </TableCell>
+                        {cellRenderers[c.key]?.(contact)}
+                      </TableCell>
+                    ))}
                   </TableRow>
                 ))}
               </TableBody>

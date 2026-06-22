@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState, useUrlArrayState, useUrlSortState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
@@ -18,6 +18,10 @@ import { SortableHeader, type SortState } from "@/components/SortableHeader";
 // previous useState-only version reset on every remount.
 import { MultiSelect } from "@/components/MultiSelect";
 import { SavedViews } from "@/features/saved-views/SavedViews";
+import { ColumnPicker } from "@/features/list-columns/ColumnPicker";
+import { useColumnPrefs } from "@/features/list-columns/useColumnPrefs";
+import type { ColumnDescriptor } from "@/features/list-columns/columns";
+import type { Opportunity } from "@/types/crm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -38,6 +42,19 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { stageLabel, businessTypeLabel, formatCurrency, formatDate } from "@/lib/formatters";
+
+const OPPORTUNITIES_COLUMNS: ColumnDescriptor[] = [
+  { key: "select", label: "Select", locked: true, headClassName: "w-10" },
+  { key: "name", label: "Name", sortKey: "name", locked: true },
+  { key: "account", label: "Account", sortKey: "account.name" },
+  { key: "stage", label: "Stage", sortKey: "stage" },
+  { key: "business_type", label: "Business Type", sortKey: "business_type" },
+  { key: "amount", label: "Amount", sortKey: "amount", align: "right" },
+  { key: "expected_close", label: "Expected Close", sortKey: "expected_close_date" },
+  { key: "close_date", label: "Close Date", sortKey: "close_date" },
+  { key: "owner", label: "Owner", sortKey: "owner.full_name" },
+  { key: "next_step", label: "Next Step" },
+];
 
 export function OpportunitiesList() {
   const navigate = useNavigate();
@@ -67,6 +84,7 @@ export function OpportunitiesList() {
   const [pageSize, setPageSize] = useUrlNumberState("size", 25);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sort, setSortState] = useUrlSortState("sort");
+  const cols = useColumnPrefs("opportunities", OPPORTUNITIES_COLUMNS);
 
   // Totals query: same filter set as the visible list, but no
   // pagination/sort. Lets the user verify dashboard KPI numbers
@@ -165,6 +183,72 @@ export function OpportunitiesList() {
   const allChecked =
     !!opps?.length && opps.every((o) => selectedIds.has(o.id));
 
+  const cellRenderers: Record<string, (o: Opportunity) => ReactNode> = {
+    select: (o) => (
+      <Checkbox
+        checked={selectedIds.has(o.id)}
+        onCheckedChange={() => toggleSelect(o.id)}
+        aria-label={`Select ${o.name}`}
+      />
+    ),
+    name: (o) => (
+      <Link
+        to={`/opportunities/${o.id}`}
+        className="font-medium text-primary hover:underline"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {o.name}
+      </Link>
+    ),
+    account: (o) =>
+      o.account ? (
+        <Link
+          to={`/accounts/${o.account.id}`}
+          className="text-primary hover:underline"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {o.account.name}
+        </Link>
+      ) : (
+        "—"
+      ),
+    stage: (o) => (
+      <StatusBadge value={o.stage} variant="stage" label={stageLabel(o.stage)} />
+    ),
+    business_type: (o) =>
+      o.business_type ? (
+        <StatusBadge
+          value={o.business_type}
+          variant="businessType"
+          label={businessTypeLabel(o.business_type)}
+        />
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      ),
+    amount: (o) => <span className="font-medium">{formatCurrency(o.amount)}</span>,
+    expected_close: (o) => (
+      <span className="text-muted-foreground">{formatDate(o.expected_close_date)}</span>
+    ),
+    close_date: (o) => (
+      // close_date is only set by the trigger when stage
+      // hits closed_won/closed_lost. Empty otherwise.
+      <span className="text-muted-foreground">
+        {o.close_date ? formatDate(o.close_date) : "—"}
+      </span>
+    ),
+    owner: (o) => (
+      <span className="text-muted-foreground">{o.owner?.full_name ?? "Unassigned"}</span>
+    ),
+    next_step: (o) => (
+      <span
+        className="block max-w-[240px] truncate text-muted-foreground"
+        title={o.next_step ?? undefined}
+      >
+        {o.next_step || "—"}
+      </span>
+    ),
+  };
+
   return (
     <div>
       <PageHeader
@@ -250,6 +334,7 @@ export function OpportunitiesList() {
         </Select>
 
         <SavedViews entity="opportunities" />
+        <ColumnPicker columns={OPPORTUNITIES_COLUMNS} prefs={cols} />
       </div>
 
       {isLoading ? (
@@ -341,88 +426,49 @@ export function OpportunitiesList() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-10">
-                    <Checkbox
-                      checked={allChecked}
-                      onCheckedChange={toggleAll}
-                      aria-label="Select all"
-                    />
-                  </TableHead>
-                  <SortableHeader column="name" sort={sort} onSort={handleSort}>Name</SortableHeader>
-                  <SortableHeader column="account.name" sort={sort} onSort={handleSort}>Account</SortableHeader>
-                  <SortableHeader column="stage" sort={sort} onSort={handleSort}>Stage</SortableHeader>
-                  <SortableHeader column="business_type" sort={sort} onSort={handleSort}>Business Type</SortableHeader>
-                  <SortableHeader column="amount" sort={sort} onSort={handleSort} className="text-right">Amount</SortableHeader>
-                  <SortableHeader column="expected_close_date" sort={sort} onSort={handleSort}>Expected Close</SortableHeader>
-                  <SortableHeader column="close_date" sort={sort} onSort={handleSort}>Close Date</SortableHeader>
-                  <SortableHeader column="owner.full_name" sort={sort} onSort={handleSort}>Owner</SortableHeader>
-                  <TableHead>Next Step</TableHead>
+                  {cols.visibleColumns.map((c) => {
+                    if (c.key === "select") {
+                      return (
+                        <TableHead key="select" className="w-10">
+                          <Checkbox
+                            checked={allChecked}
+                            onCheckedChange={toggleAll}
+                            aria-label="Select all"
+                          />
+                        </TableHead>
+                      );
+                    }
+                    return c.sortKey ? (
+                      <SortableHeader
+                        key={c.key}
+                        column={c.sortKey}
+                        sort={sort}
+                        onSort={handleSort}
+                        align={c.align}
+                        className={c.headClassName}
+                      >
+                        {c.label}
+                      </SortableHeader>
+                    ) : (
+                      <TableHead key={c.key} className={c.headClassName}>
+                        {c.label}
+                      </TableHead>
+                    );
+                  })}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {opps.map((opp) => (
                   <TableRow key={opp.id} className="cursor-pointer" onClick={() => navigate(`/opportunities/${opp.id}`)}>
-                    <TableCell onClick={(e) => e.stopPropagation()}>
-                      <Checkbox
-                        checked={selectedIds.has(opp.id)}
-                        onCheckedChange={() => toggleSelect(opp.id)}
-                        aria-label={`Select ${opp.name}`}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Link
-                        to={`/opportunities/${opp.id}`}
-                        className="font-medium text-primary hover:underline"
-                        onClick={(e) => e.stopPropagation()}
+                    {cols.visibleColumns.map((c) => (
+                      <TableCell
+                        key={c.key}
+                        className={c.align === "right" ? "text-right" : undefined}
+                        onClick={c.key === "select" ? (e) => e.stopPropagation() : undefined}
                       >
-                        {opp.name}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      {opp.account ? (
-                        <Link
-                          to={`/accounts/${opp.account.id}`}
-                          className="text-primary hover:underline"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {opp.account.name}
-                        </Link>
-                      ) : "\u2014"}
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge value={opp.stage} variant="stage" label={stageLabel(opp.stage)} />
-                    </TableCell>
-                    <TableCell>
-                      {opp.business_type ? (
-                        <StatusBadge
-                          value={opp.business_type}
-                          variant="businessType"
-                          label={businessTypeLabel(opp.business_type)}
-                        />
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right font-medium">
-                      {formatCurrency(opp.amount)}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatDate(opp.expected_close_date)}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {/* close_date is only set by the trigger when stage
-                          hits closed_won/closed_lost. Empty otherwise. */}
-                      {opp.close_date ? formatDate(opp.close_date) : "\u2014"}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {opp.owner?.full_name ?? "Unassigned"}
-                    </TableCell>
-                    <TableCell
-                      className="max-w-[240px] truncate text-muted-foreground"
-                      title={opp.next_step ?? undefined}
-                    >
-                      {opp.next_step || "—"}
-                    </TableCell>
+                        {cellRenderers[c.key]?.(opp)}
+                      </TableCell>
+                    ))}
                   </TableRow>
                 ))}
               </TableBody>

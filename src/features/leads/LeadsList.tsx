@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState, useUrlArrayState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
@@ -41,8 +41,11 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { leadStatusLabel, leadSourceLabel, qualificationLabel } from "@/lib/formatters";
-import type { LeadSource } from "@/types/crm";
+import type { LeadSource, Lead } from "@/types/crm";
 import { SortableHeader, type SortState } from "@/components/SortableHeader";
+import { ColumnPicker } from "@/features/list-columns/ColumnPicker";
+import { useColumnPrefs } from "@/features/list-columns/useColumnPrefs";
+import type { ColumnDescriptor } from "@/features/list-columns/columns";
 import { MultiSelect } from "@/components/MultiSelect";
 import { formatPhone } from "@/components/PhoneInput";
 import {
@@ -50,6 +53,18 @@ import {
   CreateListDialog,
 } from "@/features/lead-lists/LeadListsPage";
 import type { LeadListFilterConfig } from "@/features/lead-lists/lead-lists-api";
+
+const LEADS_COLUMNS: ColumnDescriptor[] = [
+  { key: "select", label: "Select", locked: true, headClassName: "w-10" },
+  { key: "name", label: "Name", sortKey: "last_name", locked: true },
+  { key: "company", label: "Company", sortKey: "company" },
+  { key: "status", label: "Status", sortKey: "status" },
+  { key: "qualification", label: "Qualification", sortKey: "qualification" },
+  { key: "source", label: "Source", sortKey: "source" },
+  { key: "email", label: "Email", sortKey: "email" },
+  { key: "phone", label: "Phone", sortKey: "phone" },
+  { key: "owner", label: "Owner" },
+];
 
 function useLeadQuickStats() {
   return useQuery({
@@ -156,6 +171,7 @@ function ImportsList() {
   const [page, setPage] = useUrlNumberState("page", 0);
   const [pageSize, setPageSize] = useUrlNumberState("size", 25);
   const [sort, setSort] = useState<SortState>({ column: null, direction: "desc" });
+  const cols = useColumnPrefs("leads", LEADS_COLUMNS);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showAddToList, setShowAddToList] = useState(false);
   const [showSaveSmartList, setShowSaveSmartList] = useState(false);
@@ -339,6 +355,66 @@ function ImportsList() {
 
   const allChecked =
     !!leads?.length && leads.every((l) => selectedIds.has(l.id));
+
+  const cellRenderers: Record<string, (l: Lead) => ReactNode> = {
+    select: (lead) => (
+      <Checkbox
+        checked={selectedIds.has(lead.id)}
+        onCheckedChange={() => toggleSelect(lead.id)}
+        aria-label={`Select ${lead.first_name} ${lead.last_name}`}
+      />
+    ),
+    name: (lead) => (
+      <Link
+        to={`/leads/${lead.id}`}
+        className="font-medium text-primary hover:underline block truncate"
+        title={`${lead.first_name ?? ""} ${lead.last_name ?? ""}`.trim()}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {lead.first_name} {lead.last_name}
+      </Link>
+    ),
+    company: (lead) => (
+      <div className="truncate" title={lead.company ?? ""}>
+        {lead.company ?? "—"}
+      </div>
+    ),
+    status: (lead) => (
+      <StatusBadge
+        value={lead.status}
+        variant="leadStatus"
+        label={leadStatusLabel(lead.status)}
+      />
+    ),
+    qualification: (lead) => (
+      <StatusBadge
+        value={lead.qualification}
+        variant="qualification"
+        label={qualificationLabel(lead.qualification)}
+      />
+    ),
+    source: (lead) =>
+      lead.source ? (
+        <StatusBadge
+          value={lead.source}
+          variant="leadSource"
+          label={leadSourceLabel(lead.source as LeadSource)}
+        />
+      ) : (
+        <span className="text-muted-foreground">{"—"}</span>
+      ),
+    email: (lead) => (
+      <div className="truncate" title={lead.email ?? ""}>
+        {lead.email ?? "—"}
+      </div>
+    ),
+    phone: (lead) => (lead.phone ? formatPhone(lead.phone) : "—"),
+    owner: (lead) => (
+      <div className="truncate" title={lead.owner?.full_name ?? "Unassigned"}>
+        {lead.owner?.full_name ?? "Unassigned"}
+      </div>
+    ),
+  };
 
   return (
     <div>
@@ -524,6 +600,7 @@ function ImportsList() {
           <Save className="h-4 w-4 mr-1" />
           Save as smart list
         </Button>
+        <ColumnPicker columns={LEADS_COLUMNS} prefs={cols} />
       </div>
 
       {/* Applied-filter chip row. */}
@@ -602,21 +679,35 @@ function ImportsList() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-10">
-                    <Checkbox
-                      checked={allChecked}
-                      onCheckedChange={toggleAll}
-                      aria-label="Select all"
-                    />
-                  </TableHead>
-                  <SortableHeader column="last_name" sort={sort} onSort={handleSort}>Name</SortableHeader>
-                  <SortableHeader column="company" sort={sort} onSort={handleSort}>Company</SortableHeader>
-                  <SortableHeader column="status" sort={sort} onSort={handleSort}>Status</SortableHeader>
-                  <SortableHeader column="qualification" sort={sort} onSort={handleSort}>Qualification</SortableHeader>
-                  <SortableHeader column="source" sort={sort} onSort={handleSort}>Source</SortableHeader>
-                  <SortableHeader column="email" sort={sort} onSort={handleSort}>Email</SortableHeader>
-                  <SortableHeader column="phone" sort={sort} onSort={handleSort}>Phone</SortableHeader>
-                  <TableHead>Owner</TableHead>
+                  {cols.visibleColumns.map((c) => {
+                    if (c.key === "select") {
+                      return (
+                        <TableHead key="select" className="w-10">
+                          <Checkbox
+                            checked={allChecked}
+                            onCheckedChange={toggleAll}
+                            aria-label="Select all"
+                          />
+                        </TableHead>
+                      );
+                    }
+                    return c.sortKey ? (
+                      <SortableHeader
+                        key={c.key}
+                        column={c.sortKey}
+                        sort={sort}
+                        onSort={handleSort}
+                        align={c.align}
+                        className={c.headClassName}
+                      >
+                        {c.label}
+                      </SortableHeader>
+                    ) : (
+                      <TableHead key={c.key} className={c.headClassName}>
+                        {c.label}
+                      </TableHead>
+                    );
+                  })}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -626,66 +717,15 @@ function ImportsList() {
                     className="cursor-pointer"
                     onClick={() => navigate(`/leads/${lead.id}`)}
                   >
-                    <TableCell onClick={(e) => e.stopPropagation()}>
-                      <Checkbox
-                        checked={selectedIds.has(lead.id)}
-                        onCheckedChange={() => toggleSelect(lead.id)}
-                        aria-label={`Select ${lead.first_name} ${lead.last_name}`}
-                      />
-                    </TableCell>
-                    <TableCell className="max-w-[200px]">
-                      <Link
-                        to={`/leads/${lead.id}`}
-                        className="font-medium text-primary hover:underline block truncate"
-                        title={`${lead.first_name ?? ""} ${lead.last_name ?? ""}`.trim()}
-                        onClick={(e) => e.stopPropagation()}
+                    {cols.visibleColumns.map((c) => (
+                      <TableCell
+                        key={c.key}
+                        className={c.align === "right" ? "text-right" : undefined}
+                        onClick={c.key === "select" ? (e) => e.stopPropagation() : undefined}
                       >
-                        {lead.first_name} {lead.last_name}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground max-w-[260px]">
-                      <div className="truncate" title={lead.company ?? ""}>
-                        {lead.company ?? "\u2014"}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge
-                        value={lead.status}
-                        variant="leadStatus"
-                        label={leadStatusLabel(lead.status)}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge
-                        value={lead.qualification}
-                        variant="qualification"
-                        label={qualificationLabel(lead.qualification)}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      {lead.source ? (
-                        <StatusBadge
-                          value={lead.source}
-                          variant="leadSource"
-                          label={leadSourceLabel(lead.source as LeadSource)}
-                        />
-                      ) : (
-                        <span className="text-muted-foreground">{"\u2014"}</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground max-w-[240px]">
-                      <div className="truncate" title={lead.email ?? ""}>
-                        {lead.email ?? "\u2014"}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground whitespace-nowrap">
-                      {lead.phone ? formatPhone(lead.phone) : "\u2014"}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground max-w-[160px]">
-                      <div className="truncate" title={lead.owner?.full_name ?? "Unassigned"}>
-                        {lead.owner?.full_name ?? "Unassigned"}
-                      </div>
-                    </TableCell>
+                        {cellRenderers[c.key]?.(lead)}
+                      </TableCell>
+                    ))}
                   </TableRow>
                 ))}
               </TableBody>
