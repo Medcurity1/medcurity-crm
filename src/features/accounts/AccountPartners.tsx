@@ -14,7 +14,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/StatusBadge";
+import { statusLabel } from "@/lib/formatters";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { AddPartnerDialog } from "./AddPartnerDialog";
 
@@ -52,8 +53,8 @@ export function AccountPartners({ accountId }: { accountId: string }) {
         .from("account_partners")
         .select(
           "*, " +
-          "partner_account:accounts!partner_account_id(id, name, account_type, lifecycle_status), " +
-          "member_account:accounts!member_account_id(id, name, account_type, lifecycle_status)"
+          "partner_account:accounts!partner_account_id(id, name, account_type, status), " +
+          "member_account:accounts!member_account_id(id, name, account_type, status)"
         )
         .or(`partner_account_id.eq.${accountId},member_account_id.eq.${accountId}`)
         // Guard against PostgREST's default 1000-row cap silently
@@ -235,6 +236,7 @@ function PartnershipSection({
               <TableHead>Status</TableHead>
               <TableHead>Type</TableHead>
               <TableHead>Role</TableHead>
+              <TableHead>Notes</TableHead>
               <TableHead className="w-10" />
             </TableRow>
           </TableHeader>
@@ -254,10 +256,12 @@ function PartnershipSection({
                     </Link>
                   </TableCell>
                   <TableCell>
-                    {target.lifecycle_status ? (
-                      <Badge variant="outline" className="font-normal capitalize">
-                        {target.lifecycle_status.replace(/_/g, " ")}
-                      </Badge>
+                    {target.status ? (
+                      <StatusBadge
+                        value={target.status}
+                        variant="status"
+                        label={statusLabel(target.status)}
+                      />
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
@@ -267,6 +271,12 @@ function PartnershipSection({
                   </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
                     {p.role ?? "—"}
+                  </TableCell>
+                  <TableCell
+                    className="text-muted-foreground text-sm max-w-[16rem] truncate"
+                    title={p.notes ?? undefined}
+                  >
+                    {p.notes ?? "—"}
                   </TableCell>
                   <TableCell>
                     <Button

@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -68,6 +69,7 @@ export function AddPartnerDialog({
     "this_is_partner"
   );
   const [role, setRole] = useState("");
+  const [notes, setNotes] = useState("");
   const [searching, setSearching] = useState(false);
   // Accounts already linked to this one (either direction) so the search
   // results can mark them instead of dead-ending in an "already exists"
@@ -81,6 +83,7 @@ export function AddPartnerDialog({
       setSearch("");
       setSelected(null);
       setRole("");
+      setNotes("");
       setDirection("this_is_partner");
       setResults([]);
     }
@@ -158,6 +161,7 @@ export function AddPartnerDialog({
         partner_account_id,
         member_account_id,
         role: role.trim() || null,
+        notes: notes.trim() || null,
         created_by: userRes.user?.id ?? null,
       });
       if (error) {
@@ -325,6 +329,20 @@ export function AddPartnerDialog({
                 placeholder="e.g. Reseller, Co-marketing partner"
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
+              />
+            </div>
+          )}
+
+          {/* Optional relationship notes */}
+          {selected && (
+            <div className="space-y-1.5">
+              <Label htmlFor="partner-notes">Notes (optional)</Label>
+              <Textarea
+                id="partner-notes"
+                rows={2}
+                placeholder="Context about this partnership…"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
               />
             </div>
           )}

@@ -99,8 +99,8 @@ export interface AccountPartnership {
   created_at: string;
   updated_at: string;
   // Joined helpers (populated by the API layer)
-  partner_account?: { id: string; name: string; account_type: string | null; lifecycle_status: string | null } | null;
-  member_account?:  { id: string; name: string; account_type: string | null; lifecycle_status: string | null } | null;
+  partner_account?: { id: string; name: string; account_type: string | null; status: AccountStatus | null } | null;
+  member_account?:  { id: string; name: string; account_type: string | null; status: AccountStatus | null } | null;
 }
 
 /**
