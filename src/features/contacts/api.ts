@@ -26,9 +26,18 @@ export function useContacts(filters?: ContactFilters) {
       const pageSize = filters?.pageSize ?? 25;
       const sortCol = filters?.sortColumn ?? "last_name";
       const sortAsc = (filters?.sortDirection ?? "asc") === "asc";
+      const hasTagFilter = !!(filters?.tagIds && filters.tagIds.length > 0);
+      // Tag filter = "build a custom list". Use an INNER-JOIN embed on
+      // contact_tags so the filter runs server-side: no 1,000-row resolve
+      // cap, no giant id list in the URL, and an exact count for the list.
+      const tagJoin = hasTagFilter ? ", contact_tags!inner(tag_id)" : "";
       let query = supabase
         .from("contacts")
-        .select("*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
+        .select(
+          "*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)" +
+            tagJoin,
+          { count: hasTagFilter ? "exact" : "estimated" },
+        )
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (sortCol.startsWith("account.")) {
@@ -83,20 +92,12 @@ export function useContacts(filters?: ContactFilters) {
       if (filters?.account_id) {
         query = query.eq("account_id", filters.account_id);
       }
-      // Tag filter (custom lists): resolve the contact ids carrying any of
-      // the chosen tags, then constrain. An empty result forces zero rows.
-      if (filters?.tagIds && filters.tagIds.length > 0) {
-        const { data: tagged } = await supabase
-          .from("contact_tags")
-          .select("contact_id")
-          .in("tag_id", filters.tagIds);
-        const ids = Array.from(
-          new Set((tagged ?? []).map((r) => r.contact_id as string)),
-        );
-        query = query.in(
-          "id",
-          ids.length > 0 ? ids : ["00000000-0000-0000-0000-000000000000"],
-        );
+      // Constrain to contacts carrying ANY of the chosen tags via the
+      // inner-join embed declared above. Runs server-side; a real query
+      // error now surfaces (it used to be swallowed, masking failures as
+      // an empty list).
+      if (hasTagFilter) {
+        query = query.in("contact_tags.tag_id", filters!.tagIds!);
       }
       if (Array.isArray(filters?.ownerId)) {
         const ids = filters!.ownerId;
@@ -125,7 +126,9 @@ export function useContacts(filters?: ContactFilters) {
 
       const { data, error, count } = await query;
       if (error) throw error;
-      return { data: data as Contact[], count: count ?? 0 };
+      // `as unknown` first: the optional contact_tags!inner embed makes
+      // PostgREST's inferred row type diverge from Contact.
+      return { data: data as unknown as Contact[], count: count ?? 0 };
     },
   });
 }

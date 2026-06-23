@@ -95,10 +95,13 @@ export function useCreateTag() {
       if (error) {
         // 23505 = the case-insensitive unique index; reuse the existing tag.
         if (error.code === "23505") {
+          // Escape ilike wildcards so a name containing % or _ matches
+          // literally (case-insensitively), not as a pattern.
+          const pattern = trimmed.replace(/([\\%_])/g, "\\$1");
           const { data: existing } = await supabase
             .from("tags")
             .select("*")
-            .ilike("name", trimmed)
+            .ilike("name", pattern)
             .maybeSingle();
           if (existing) return existing as Tag;
         }

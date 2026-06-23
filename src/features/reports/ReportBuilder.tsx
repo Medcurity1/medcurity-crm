@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import * as XLSX from "xlsx";
 import {
   Play,
@@ -992,7 +992,9 @@ function ResultsTable({
         <p className="text-sm text-muted-foreground">
           {count.toLocaleString()} result{count !== 1 ? "s" : ""}
           {count > 1000
-            ? ` (showing first 1,000 — export includes all ${count.toLocaleString()})`
+            ? count > 100000
+              ? ` (showing first 1,000 — export capped at 100,000 of ${count.toLocaleString()})`
+              : ` (showing first 1,000 — export includes all ${count.toLocaleString()})`
             : ""}
         </p>
 
@@ -1235,16 +1237,21 @@ function SaveReportDialog({
   const [folder, setFolder] = useState(defaultFolder ?? "");
   const [showNewFolder, setShowNewFolder] = useState(false);
 
-  // Reset form when dialog opens with new defaults
-  const resetKey = `${defaultName}-${defaultFolder}-${defaultIsShared}-${open}`;
-  useState(() => {
-    setName(defaultName);
-    setIsShared(defaultIsShared);
-    setFolder(defaultFolder ?? "");
-  });
+  // Re-sync the form whenever the dialog opens or the target report
+  // changes. (The old code used useState(initFn), which runs ONCE on
+  // mount — so reopening for a different report kept the prior report's
+  // name/folder/shared and could overwrite the wrong report.)
+  useEffect(() => {
+    if (open) {
+      setName(defaultName);
+      setIsShared(defaultIsShared);
+      setFolder(defaultFolder ?? "");
+      setShowNewFolder(false);
+    }
+  }, [open, defaultName, defaultFolder, defaultIsShared]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} key={resetKey}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "Save Report" : "Update Report"}</DialogTitle>
@@ -1616,6 +1623,11 @@ export function ReportBuilder() {
           .map((key) => entity.columns.find((c) => c.key === key))
           .filter((c): c is ColumnDef => !!c);
         const rows = await fetchAllReportRows(config);
+        if (rows.length >= 100000) {
+          toast.warning(
+            "Export is capped at 100,000 rows — some rows were omitted. Add filters to narrow the report.",
+          );
+        }
         if (kind === "csv") exportToCSV(visibleCols, rows, config.entity);
         else exportToXLSX(visibleCols, rows, config.entity);
       } catch (err) {
