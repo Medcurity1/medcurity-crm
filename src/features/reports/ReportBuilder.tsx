@@ -55,6 +55,7 @@ import {
 } from "./report-api";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useUsers, useAccounts } from "@/features/accounts/api";
+import { RelationCombobox } from "./RelationCombobox";
 import { useContacts } from "@/features/contacts/api";
 import { useOpportunities } from "@/features/opportunities/api";
 import type { ReportConfig, ReportFilter, ReportSort, SavedReport } from "@/types/crm";
@@ -571,22 +572,12 @@ function FilterValueInput({
   onChange: (v: string) => void;
   lookups: RelationLookups;
 }) {
-  // Relation filter types: render a Select with lookup data
+  // Relation filter types: a type-to-search combobox (accounts are searched
+  // server-side; contacts/owners/opps filter over the loaded lookups).
   if (isRelationFilterType(filterCol.type)) {
     const options = getRelationOptions(filterCol.type, lookups);
     return (
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className="w-52">
-          <SelectValue placeholder="Select..." />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((opt) => (
-            <SelectItem key={opt.value} value={opt.value}>
-              {opt.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <RelationCombobox type={filterCol.type} value={value} onChange={onChange} options={options} />
     );
   }
 
