@@ -289,9 +289,10 @@ async function draft(type: "report" | "partner", userNotes: string) {
   // Timeout sits under the 150s edge cap, leaving room to parse + insert.
   const fullText = await callClaudeMessages({
     model: NEWSLETTER_DRAFT_MODEL,
-    maxTokens: 20000,
+    maxTokens: 32000, // real newsletters run ~18-22k tokens; headroom avoids truncation
     messages: [{ role: "user", content: prompt }],
-    timeoutMs: 125000,
+    timeoutMs: 140000, // just under the 150s edge limit -> clean error, not a hang
+    throwOnTruncate: true,
   });
 
   const parsed = parseDraftResult(fullText, useSplit, chrome);
@@ -335,8 +336,10 @@ async function revise(id: string, instruction: string) {
 
   const fullText = await callClaudeMessages({
     model: NEWSLETTER_REVISE_MODEL,
-    maxTokens: 16000,
+    maxTokens: 32000, // must re-emit the whole body; headroom avoids mid-HTML truncation
     messages: [{ role: "user", content: prompt }],
+    timeoutMs: 140000,
+    throwOnTruncate: true,
   });
 
   const parsed = parseReviseResult(fullText, useChromeSplit, chrome, {

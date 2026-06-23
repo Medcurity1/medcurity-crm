@@ -142,6 +142,12 @@ export async function callClaudeMessages(opts: {
   messages: Array<{ role: string; content: unknown }>;
   tools?: unknown[];
   timeoutMs?: number;
+  /**
+   * Throw if the model stopped because it hit max_tokens. Newsletters are
+   * large HTML; a truncated response is a corrupt, unclosed email. For
+   * draft/revise we'd rather fail loudly than save broken HTML.
+   */
+  throwOnTruncate?: boolean;
 }): Promise<string> {
   const key = Deno.env.get("ANTHROPIC_API_KEY");
   if (!key) throw new Error("ANTHROPIC_API_KEY not set");
@@ -168,6 +174,11 @@ export async function callClaudeMessages(opts: {
       throw new Error(`Anthropic API ${res.status}: ${(await res.text()).slice(0, 300)}`);
     }
     const data = await res.json();
+    if (opts.throwOnTruncate && data.stop_reason === "max_tokens") {
+      throw new Error(
+        "The newsletter was too long to finish in one pass (hit the length limit). Try a more targeted edit, or shorten the source newsletter.",
+      );
+    }
     let text = "";
     for (const block of (data.content ?? []) as Array<{ type: string; text?: string }>) {
       if (block.type === "text" && block.text) text += block.text;
