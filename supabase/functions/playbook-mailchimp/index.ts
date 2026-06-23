@@ -132,9 +132,13 @@ async function ingest() {
 }
 
 async function sync() {
+  // Only SENT campaigns have a Mailchimp /reports record. Pushed-but-unsent
+  // drafts (status 'mailchimp_draft') would just 404 and waste a rate-limited
+  // call each, so they're excluded.
   const { data: rows } = await svc
     .from("playbook_newsletters")
     .select("id, mailchimp_campaign_id, metrics")
+    .eq("status", "sent")
     .not("mailchimp_campaign_id", "is", null);
   let synced = 0;
   for (const r of rows ?? []) {
