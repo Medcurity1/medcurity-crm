@@ -1,15 +1,12 @@
 -- ============================================================
--- Partners audit fixes (SQL, part 3) — include pure members in the view
+-- Partners audit fixes (SQL, part 4) — re-assert v_partner_accounts
 -- ----------------------------------------------------------------
--- v_partner_accounts (from 20260623000001) missed accounts that are ONLY
--- a member of an umbrella (not themselves flagged a partner), so the
--- "Members (under a partner)" filter under-reported. Add the member case.
---
--- IMPORTANT: use DROP + CREATE, not CREATE OR REPLACE. 20260623000002
--- appended accounts.referring_partner, so `select a.*` now expands to a
--- different column order than the original view — CREATE OR REPLACE VIEW
--- forbids changing existing column positions and would fail. DROP+CREATE
--- sidesteps that entirely. (Safe: only the frontend reads this view.)
+-- Safety net: 20260623000003's original CREATE OR REPLACE VIEW form
+-- could no-op/fail silently on environments where its version was already
+-- recorded (the column-order conflict from the appended referring_partner
+-- column). This migration unconditionally rebuilds the view via DROP +
+-- CREATE so EVERY environment ends up with the member-inclusive definition.
+-- Idempotent and safe (only the frontend reads this view).
 -- ============================================================
 
 begin;
@@ -42,12 +39,12 @@ where a.archived_at is null
     a.account_type = 'Partner'
     or a.partner_account is not null
     or a.partner_prospect = true
-    or mc.account_id is not null    -- is an umbrella (has members)
-    or mem.account_id is not null   -- is a member (under an umbrella)
+    or mc.account_id is not null
+    or mem.account_id is not null
   );
 
 comment on view public.v_partner_accounts is
-  'Partner-flagged accounts (account_type=Partner, legacy partner_account text, partner_prospect, any account_partners umbrella, OR any account that is a member under an umbrella) with member_count + umbrella/member/top_level flags precomputed. Powers the /partners page server-side.';
+  'Partner-flagged accounts (account_type=Partner, legacy partner_account text, partner_prospect, any account_partners umbrella, OR any member under an umbrella) with member_count + umbrella/member/top_level flags. Powers /partners server-side.';
 
 grant select on public.v_partner_accounts to authenticated;
 
