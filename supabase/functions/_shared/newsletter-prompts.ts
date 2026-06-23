@@ -192,6 +192,10 @@ export function parseDraftResult(fullText: string, useSplit: boolean, chrome: Ch
     previewText = previewMatch ? previewMatch[1].trim() : "";
     let body = bodyMatch ? bodyMatch[1].trim() : fullText;
     body = body.replace(/^```html\s*\n?/i, "").replace(/\n?```\s*$/, "").trim();
+    // Clean the BODY only — the chrome is reattached byte-for-byte and must
+    // stay pristine, or a later revise can't match it (chrome-split breaks
+    // and revise has to regenerate the whole newsletter).
+    body = fixSpacing(stripEm(body));
     const safeBody =
       '<table border="0" cellpadding="0" cellspacing="0" width="100%" align="center" style="font-weight:400;"><tr><td style="font-weight:400;font-family:Helvetica,Arial,sans-serif;color:#3a3a3a;">' +
       body + "</td></tr></table>";
@@ -204,11 +208,12 @@ export function parseDraftResult(fullText: string, useSplit: boolean, chrome: Ch
     previewText = previewMatch ? previewMatch[1].trim() : "";
     html = htmlMatch ? htmlMatch[1].trim() : fullText;
     html = html.replace(/^```html\s*\n?/i, "").replace(/\n?```\s*$/, "").trim();
+    // No chrome here, so cleaning the whole thing is safe.
+    html = fixSpacing(stripEm(html));
   }
 
   subject = fixSpacing(stripEm(subject));
   previewText = fixSpacing(stripEm(previewText));
-  html = fixSpacing(stripEm(html));
 
   // Derive a preview from the body if the AI returned a stub.
   if (!previewText || previewText.length < 25 || /^\s*\S+\s*$/.test(previewText)) {
@@ -303,6 +308,9 @@ export function parseReviseResult(
     previewText = previewMatch ? previewMatch[1].trim() : previewText;
     let newBody = bodyMatch ? bodyMatch[1].trim() : fallback.bodyOnly;
     newBody = newBody.replace(/^```html\s*\n?/i, "").replace(/\n?```\s*$/, "").trim();
+    // Clean the BODY only; keep the reattached chrome pristine so the next
+    // revise can still chrome-match it.
+    newBody = stripEm(newBody);
     html = chrome.headerHtml + "\n" + newBody + "\n" + chrome.footerHtml;
   } else {
     const subjMatch = fullText.match(/\[SUBJECT\]\s*([\s\S]*?)\s*\[(?:PREVIEW|HTML)\]/);
@@ -312,10 +320,10 @@ export function parseReviseResult(
     previewText = previewMatch ? previewMatch[1].trim() : previewText;
     html = htmlMatch ? htmlMatch[1].trim() : html;
     html = html.replace(/^```html\s*\n?/i, "").replace(/\n?```\s*$/, "").trim();
+    html = stripEm(html);
   }
   subject = stripEm(subject);
   previewText = stripEm(previewText);
-  html = stripEm(html);
   return { subject, previewText, html };
 }
 
