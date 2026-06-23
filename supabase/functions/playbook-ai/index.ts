@@ -158,15 +158,32 @@ async function generateIdeas(force: boolean) {
 
   if (force) {
     await svc.from("playbook_ideas").delete().eq("week_date", monday);
+  } else {
+    // Re-check right before insert: the Claude call above is multi-second,
+    // so a concurrent run (cron + manual click) could have populated this
+    // week in the meantime. This narrows the duplicate-insert race window
+    // from seconds to milliseconds.
+    const { data: raced } = await svc
+      .from("playbook_ideas")
+      .select("*")
+      .eq("week_date", monday)
+      .order("created_at", { ascending: true });
+    if (raced && raced.length) {
+      return { success: true, ideas: raced, week_date: monday, cached: true };
+    }
   }
 
+  // Clamp the AI's enum fields so one off-template value (the columns are
+  // CHECK-constrained) can't make the whole weekly batch insert fail.
+  const ALLOWED_ACTION = new Set(["campaign", "content", "strategy", "outreach"]);
+  const ALLOWED_EFFORT = new Set(["quick", "medium", "big"]);
   const rows = ideas.map((idea) => ({
     week_date: monday,
     title: (idea.title as string) || "Untitled idea",
     description: (idea.description as string) || "",
     reasoning: (idea.reasoning as string) || "",
-    action_type: (idea.action_type as string) || "strategy",
-    effort: (idea.effort as string) || "medium",
+    action_type: ALLOWED_ACTION.has(idea.action_type as string) ? (idea.action_type as string) : "strategy",
+    effort: ALLOWED_EFFORT.has(idea.effort as string) ? (idea.effort as string) : "medium",
     campaign_prefill: idea.campaign_prefill ?? null,
   }));
   const { data: saved, error: insErr } = await svc

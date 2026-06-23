@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CampaignWizard } from "./CampaignWizard";
+import { LoadError } from "./LoadError";
 import {
   useCampaigns,
   useSmartleadStatus,
@@ -27,7 +28,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export function CampaignsTab() {
-  const { data: campaigns, isLoading } = useCampaigns();
+  const { data: campaigns, isLoading, isError, refetch } = useCampaigns();
   const { data: sl } = useSmartleadStatus();
   const importMut = useImportCampaigns();
   const syncMut = useSyncCampaigns();
@@ -72,6 +73,8 @@ export function CampaignsTab() {
         <div className="space-y-2">
           {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}
         </div>
+      ) : isError ? (
+        <LoadError what="campaigns" onRetry={() => refetch()} />
       ) : !campaigns?.length ? (
         <EmptyState
           icon={Megaphone}

@@ -86,6 +86,7 @@ async function ingest() {
   let skipped = 0;
   let skippedUnclassified = 0;
   let contentFailed = 0;
+  let insertFailed = 0;
   const classified = { report: 0, partner: 0 };
   const pageSize = 100;
   // Scan up to 5 pages (500 campaigns) to find the two newsletter types.
@@ -119,7 +120,10 @@ async function ingest() {
       let html = "";
       try { html = await fetchCampaignContent(mcId); } catch { contentFailed++; }
 
-      await svc.from("playbook_newsletters").insert({
+      // Upsert (ignore duplicates) so two overlapping ingest runs can't
+      // race past the existence check above, and check the error so a real
+      // failure is counted, not silently reported as ingested.
+      const { error: insErr } = await svc.from("playbook_newsletters").upsert({
         mailchimp_campaign_id: mcId,
         newsletter_type: type,
         subject: settings.subject_line ?? null,
@@ -131,8 +135,9 @@ async function ingest() {
         recipients_json: camp.recipients ?? null,
         metrics,
         source: "ingested",
-      });
-      ingested++;
+      }, { onConflict: "mailchimp_campaign_id", ignoreDuplicates: true });
+      if (insErr) insertFailed++;
+      else ingested++;
     }
     if (campaigns.length < pageSize) break;
   }
@@ -142,6 +147,7 @@ async function ingest() {
     skipped,
     skipped_unclassified: skippedUnclassified,
     content_failed: contentFailed,
+    insert_failed: insertFailed,
     classified,
   };
 }
@@ -378,13 +384,29 @@ async function pushToMailchimp(id: string) {
   }
 
   const templateCampaign = await fetchCampaign(tmpl.mailchimp_campaign_id);
-  const tcRecipients = templateCampaign.recipients as { list_id?: string; segment_opts?: { match?: string; conditions?: unknown[] } } | undefined;
+  const tcRecipients = templateCampaign.recipients as {
+    list_id?: string;
+    segment_opts?: { match?: string; conditions?: unknown[]; saved_segment_id?: number; prebuilt_segment_id?: string };
+  } | undefined;
   if (!tcRecipients?.list_id) throw new Error("Could not load template campaign audience from Mailchimp");
 
+  // Faithfully reproduce the template's audience. Mailchimp segments come in
+  // three flavors: a saved segment (saved_segment_id), a prebuilt segment
+  // (prebuilt_segment_id), or inline conditions. If we only copied inline
+  // conditions, a saved/prebuilt-segment template (common for the narrow
+  // Partner Exclusive list) would silently fall back to list_id only = the
+  // ENTIRE list. Copy whichever the template used; if it had a segment we
+  // can't reproduce, fail loudly rather than create a full-list draft.
   const recipients: Record<string, unknown> = { list_id: tcRecipients.list_id };
   const segOpts = tcRecipients.segment_opts;
-  if (segOpts && Array.isArray(segOpts.conditions) && segOpts.conditions.length) {
+  if (segOpts?.saved_segment_id != null) {
+    recipients.segment_opts = { saved_segment_id: segOpts.saved_segment_id };
+  } else if (segOpts?.prebuilt_segment_id) {
+    recipients.segment_opts = { prebuilt_segment_id: segOpts.prebuilt_segment_id };
+  } else if (Array.isArray(segOpts?.conditions) && segOpts.conditions.length) {
     recipients.segment_opts = { match: segOpts.match || "all", conditions: segOpts.conditions };
+  } else if (segOpts) {
+    throw new Error("The last sent newsletter targeted a segment that couldn't be copied — refusing to create a full-list draft. Push from a newsletter whose audience uses a saved segment or inline conditions.");
   }
 
   const ts = (templateCampaign.settings ?? {}) as { from_name?: string; reply_to?: string; from_email?: string; preview_text?: string; to_name?: string };

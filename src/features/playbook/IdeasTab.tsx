@@ -20,6 +20,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useIdeas, useIdeaWeeks, useGenerateIdeas, useIdeaFeedback } from "./api";
+import { LoadError } from "./LoadError";
 import type { PlaybookIdea } from "./types";
 
 function IdeaCard({ idea }: { idea: PlaybookIdea }) {
@@ -112,7 +113,7 @@ export function IdeasTab() {
   const { data: weeks } = useIdeaWeeks();
   const [week, setWeek] = useState<string | undefined>(undefined);
   const selectedWeek = week ?? weeks?.[0];
-  const { data: ideas, isLoading } = useIdeas(selectedWeek);
+  const { data: ideas, isLoading, isError, refetch } = useIdeas(selectedWeek);
   const generate = useGenerateIdeas();
 
   function handleGenerate(force: boolean) {
@@ -162,6 +163,8 @@ export function IdeasTab() {
         <div className="space-y-2">
           {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-28 w-full" />)}
         </div>
+      ) : isError ? (
+        <LoadError what="ideas" onRetry={() => refetch()} />
       ) : !ideas?.length ? (
         <EmptyState
           icon={Lightbulb}

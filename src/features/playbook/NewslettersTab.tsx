@@ -24,6 +24,7 @@ import {
   useDeleteNewsletter,
 } from "./api";
 import { NewsletterEditor } from "./NewsletterEditor";
+import { LoadError } from "./LoadError";
 import type { Newsletter, NewsletterType } from "./types";
 
 const TYPE_LABEL: Record<string, string> = {
@@ -41,7 +42,7 @@ type Filter = "all" | "report" | "partner";
 
 export function NewslettersTab() {
   const { data: mc } = useMailchimpStatus();
-  const { data: newsletters, isLoading } = useNewsletters("all");
+  const { data: newsletters, isLoading, isError, refetch } = useNewsletters("all");
   const ingest = useIngestNewsletters();
   const syncM = useSyncNewsletters();
   const genStyle = useGenerateStyle();
@@ -126,6 +127,8 @@ export function NewslettersTab() {
 
       {isLoading ? (
         <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}</div>
+      ) : isError ? (
+        <LoadError what="newsletters" onRetry={() => refetch()} />
       ) : !shown.length ? (
         <EmptyState
           icon={FileText}

@@ -63,6 +63,9 @@ export function useDeleteTrainingNote() {
 export function useIdeas(weekDate?: string) {
   return useQuery({
     queryKey: ["playbook", "ideas", weekDate ?? "latest"],
+    // Don't fire until a real week is known — avoids an unfiltered all-weeks
+    // fetch on first paint while the week list is still loading.
+    enabled: !!weekDate,
     queryFn: async () => {
       let q = supabase
         .from("playbook_ideas")
@@ -332,7 +335,7 @@ export function useLaunchCampaign() {
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-      return data as { smartlead_campaign_id: number; auto_started: boolean; leads_added: number };
+      return data as { smartlead_campaign_id: number; auto_started: boolean; leads_added: number; leads_failed: number };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] });

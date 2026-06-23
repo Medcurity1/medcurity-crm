@@ -4,7 +4,7 @@
 // Smartlead. autoStart defaults OFF so it lands as a DRAFT for review.
 
 import { useState } from "react";
-import { Loader2, Sparkles, Wand2, ArrowLeft, ArrowRight, Rocket, CheckCircle2 } from "lucide-react";
+import { Loader2, Sparkles, Wand2, ArrowLeft, ArrowRight, Rocket, CheckCircle2, AlertTriangle } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -61,7 +61,7 @@ export function CampaignWizard({
   const [inboxId, setInboxId] = useState<string>("");
   const [autoStart, setAutoStart] = useState(false);
   const [adaptive, setAdaptive] = useState(false);
-  const [launchResult, setLaunchResult] = useState<{ id: number; started: boolean; leads: number } | null>(null);
+  const [launchResult, setLaunchResult] = useState<{ id: number; started: boolean; leads: number; failed: number } | null>(null);
 
   const gen = useGenerateCampaign();
   const suggest = useSuggestCampaign();
@@ -130,8 +130,12 @@ export function CampaignWizard({
       },
       {
         onSuccess: (r) => {
-          setLaunchResult({ id: r.smartlead_campaign_id, started: r.auto_started, leads: r.leads_added });
-          toast.success(r.auto_started ? "Campaign launched and started." : "Campaign created as a draft in Smartlead.");
+          setLaunchResult({ id: r.smartlead_campaign_id, started: r.auto_started, leads: r.leads_added, failed: r.leads_failed ?? 0 });
+          if (r.leads_failed > 0) {
+            toast.warning(`${r.leads_added} recipients added, ${r.leads_failed} failed — review the audience in Smartlead before starting.`);
+          } else {
+            toast.success(r.auto_started ? "Campaign launched and started." : "Campaign created as a draft in Smartlead.");
+          }
         },
       },
     );
@@ -237,11 +241,23 @@ export function CampaignWizard({
           <div className="space-y-3">
             {launchResult ? (
               <div className="rounded-md border p-4 text-center space-y-2">
-                <CheckCircle2 className="h-8 w-8 mx-auto text-green-600" />
+                {launchResult.failed > 0 ? (
+                  <AlertTriangle className="h-8 w-8 mx-auto text-amber-500" />
+                ) : (
+                  <CheckCircle2 className="h-8 w-8 mx-auto text-green-600" />
+                )}
                 <p className="text-sm font-medium">
                   {launchResult.started ? "Campaign launched and started." : "Campaign created as a draft in Smartlead."}
                 </p>
-                <p className="text-xs text-muted-foreground">{launchResult.leads} leads added · Smartlead #{launchResult.id}</p>
+                <p className="text-xs text-muted-foreground">
+                  {launchResult.leads} added
+                  {launchResult.failed > 0 ? ` · ${launchResult.failed} failed` : ""} · Smartlead #{launchResult.id}
+                </p>
+                {launchResult.failed > 0 && (
+                  <p className="text-xs text-amber-600">
+                    Some recipients couldn't be added. Check the audience in Smartlead before you start the campaign.
+                  </p>
+                )}
                 {!launchResult.started && (
                   <p className="text-xs text-muted-foreground">Review and start it in Smartlead when you're ready.</p>
                 )}
