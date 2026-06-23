@@ -7,6 +7,7 @@ import type {
   PlaybookCampaign,
   Newsletter,
   NewsletterType,
+  CampaignTemplate,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -162,6 +163,22 @@ export function useIdeaFeedback() {
 // ---------------------------------------------------------------------------
 // Campaigns (read) — populated by the Smartlead sync in Phase C
 // ---------------------------------------------------------------------------
+
+/** Sequence templates (presets + any custom), newest preset categories first. */
+export function useCampaignTemplates() {
+  return useQuery({
+    queryKey: ["playbook", "campaign-templates"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("campaign_templates")
+        .select("*")
+        .order("is_preset", { ascending: false })
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as CampaignTemplate[];
+    },
+  });
+}
 
 export function useCampaigns() {
   return useQuery({

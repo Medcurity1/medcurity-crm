@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CampaignWizard } from "./CampaignWizard";
+import { TemplatesSection } from "./TemplatesSection";
 import { LoadError } from "./LoadError";
 import {
   useCampaigns,
@@ -38,7 +39,11 @@ export function CampaignsTab() {
   const [wizardOpen, setWizardOpen] = useState(false);
 
   return (
-    <div className="space-y-3 pt-4">
+    <div className="space-y-5 pt-4">
+      <TemplatesSection />
+
+      <div className="border-t pt-4 space-y-3">
+      <h3 className="text-sm font-semibold">Your campaigns</h3>
       <div className="flex items-center gap-2 flex-wrap">
         {sl?.configured && (
           <Button variant="ai" size="sm" onClick={() => setWizardOpen(true)}>
@@ -156,6 +161,7 @@ export function CampaignsTab() {
           );
         })
       )}
+      </div>
 
       <CampaignWizard open={wizardOpen} onOpenChange={setWizardOpen} />
     </div>

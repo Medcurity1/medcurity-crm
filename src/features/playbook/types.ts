@@ -1,5 +1,42 @@
 // Playbook types — mirror the playbook_* tables (20260624000001).
 
+// ── Campaigns sequence builder (20260625000001) ─────────────────────────────
+export type SequenceChannel = "EMAIL_AUTO" | "EMAIL_HYBRID" | "CALL" | "LINKEDIN";
+export type SequenceAutomation = "AUTO" | "HYBRID" | "MANUAL";
+
+export interface SequenceStep {
+  order: number;
+  day_offset: number;
+  channel: SequenceChannel;
+  weekday_target?: string;
+  send_window_start?: string;
+  send_window_end?: string;
+  automation: SequenceAutomation;
+  subject_template?: string;
+  body_template?: string;
+  content_ai_draft?: boolean;
+  manual_task_title_template?: string;
+  manual_task_priority?: string;
+  task_note_template?: string;
+  pause_on_reply?: boolean;
+  stop_on_unsubscribe?: boolean;
+}
+
+export interface CampaignTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  category: "flagship" | "warming" | "post_demo" | "re_engagement" | "event" | "custom";
+  is_preset: boolean;
+  owner_user_id: string | null;
+  duration_days: number | null;
+  step_count: number | null;
+  steps: SequenceStep[];
+  domain_rules: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 export type PlaybookActionType = "campaign" | "content" | "strategy" | "outreach";
 export type PlaybookEffort = "quick" | "medium" | "big";
 export type PlaybookIdeaStatus = "new" | "good" | "bad" | "booked" | "executed";
