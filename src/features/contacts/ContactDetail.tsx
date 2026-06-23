@@ -2,10 +2,13 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Pencil, Archive, ChevronDown, Phone, Mail, UserRoundCog, History, MapPin } from "lucide-react";
+import { Pencil, Archive, ChevronDown, Phone, Mail, UserRoundCog, History, MapPin, Plus } from "lucide-react";
 import { formatPhone } from "@/components/PhoneInput";
 import { InlineEdit } from "@/components/InlineEdit";
 import { useContact, useUpdateContact, useArchiveContact, useOriginatingLead } from "./api";
+import { useContactTags, useApplyTag, useRemoveTag } from "@/features/tags/api";
+import { TagChips } from "@/features/tags/TagChips";
+import { TagPicker } from "@/features/tags/TagPicker";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
 import { VerifiedBadge } from "@/components/VerifiedBadge";
@@ -81,6 +84,9 @@ export function ContactDetail() {
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { data: contact, isLoading } = useContact(id);
   const { data: originatingLead } = useOriginatingLead(id);
+  const { data: contactTags = [] } = useContactTags(id);
+  const applyTag = useApplyTag();
+  const removeTag = useRemoveTag();
   const { data: customFieldDefs } = useCustomFieldDefinitions("contacts");
   const updateMutation = useUpdateContact();
   const archiveMutation = useArchiveContact();
@@ -187,6 +193,31 @@ export function ContactDetail() {
       />
 
       <RecordId id={contact.id} sfId={contact.sf_id} />
+
+      {/* --------- Tags ---------
+          Self-serve custom tags. Applying a tag to a set of contacts IS a
+          custom list — filter the Contacts list by tag to recall it. */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-muted-foreground">Tags</span>
+        {contactTags.length > 0 ? (
+          <TagChips
+            tags={contactTags}
+            onRemove={(t) => id && removeTag.mutate({ contactIds: [id], tagId: t.id })}
+          />
+        ) : (
+          <span className="text-xs text-muted-foreground">None yet</span>
+        )}
+        <TagPicker
+          appliedTagIds={contactTags.map((t) => t.id)}
+          onPick={(t) => id && applyTag.mutate({ contactIds: [id], tagId: t.id })}
+          trigger={
+            <Button variant="ghost" size="sm" className="h-7 gap-1 text-muted-foreground">
+              <Plus className="h-3.5 w-3.5" />
+              Add tag
+            </Button>
+          }
+        />
+      </div>
 
       {/* --------- Converted-from-Lead callout ---------
           Mirrors Salesforce's affordance: this contact came from a

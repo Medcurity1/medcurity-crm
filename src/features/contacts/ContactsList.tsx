@@ -41,6 +41,9 @@ import {
 } from "@/components/ui/select";
 import { formatName } from "@/lib/formatters";
 import { ContactFlagBadges } from "./ContactFlagBadges";
+import { useTags, useApplyTag, useContactTagsMap } from "@/features/tags/api";
+import { TagChips } from "@/features/tags/TagChips";
+import { TagPicker } from "@/features/tags/TagPicker";
 
 const CONTACTS_COLUMNS: ColumnDescriptor[] = [
   { key: "select", label: "Select", locked: true, headClassName: "w-10" },
@@ -50,6 +53,7 @@ const CONTACTS_COLUMNS: ColumnDescriptor[] = [
   { key: "email", label: "Email", sortKey: "email" },
   { key: "phone", label: "Phone" },
   { key: "notes", label: "Notes" },
+  { key: "tags", label: "Tags" },
   { key: "primary", label: "Primary" },
 ];
 
@@ -61,6 +65,7 @@ export function ContactsList() {
   const [ownerFilter, setOwnerFilter] = useUrlArrayState("owner");
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
   const [statusFilter, setStatusFilter] = useUrlState("status", "active");
+  const [tagFilter, setTagFilter] = useUrlArrayState("tags");
   const [page, setPage] = useUrlNumberState("page", 0);
   const [pageSize, setPageSize] = useUrlNumberState("size", 25);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -82,18 +87,23 @@ export function ContactsList() {
         : statusFilter === "all"
         ? "all"
         : "active",
+    tagIds: tagFilter.length > 0 ? tagFilter : undefined,
     page,
     pageSize,
     sortColumn: sort.column,
     sortDirection: sort.direction,
   });
   const { data: users } = useUsers();
+  const { data: allTags } = useTags();
+  const applyTagMut = useApplyTag();
   const archiveMutation = useArchiveContact();
   const bulkOwnerMutation = useBulkUpdateOwner();
   const bulkDeleteMutation = useBulkDeleteContacts();
 
   const contacts = result?.data;
   const totalCount = result?.count ?? 0;
+  // Tags for just this page's contacts, for the Tags column.
+  const { data: tagsByContact } = useContactTagsMap((contacts ?? []).map((c) => c.id));
 
   const handleSearchChange = (value: string) => {
     setSearch(value);
@@ -198,6 +208,14 @@ export function ContactsList() {
         {c.notes || "—"}
       </span>
     ),
+    tags: (c) => {
+      const list = tagsByContact?.get(c.id) ?? [];
+      return list.length ? (
+        <TagChips tags={list} className="max-w-[260px]" />
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      );
+    },
     primary: (c) =>
       c.is_primary ? (
         <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">
@@ -280,6 +298,17 @@ export function ContactsList() {
             </SelectContent>
           </Select>
         )}
+
+        <MultiSelect
+          value={tagFilter}
+          onChange={(v) => {
+            setTagFilter(v);
+            setPage(0);
+          }}
+          placeholder="All Tags"
+          triggerClassName="w-36"
+          options={(allTags ?? []).map((t) => ({ value: t.id, label: t.name }))}
+        />
 
         <SavedViews entity="contacts" />
         <ColumnPicker columns={CONTACTS_COLUMNS} prefs={cols} />
@@ -375,7 +404,22 @@ export function ContactsList() {
         onDelete={isAdmin ? handleBulkDelete : undefined}
         onAssignOwner={handleBulkAssignOwner}
         users={users}
-      />
+      >
+        <TagPicker
+          align="end"
+          onPick={async (tag) => {
+            const ids = Array.from(selectedIds);
+            await applyTagMut.mutateAsync({ contactIds: ids, tagId: tag.id });
+            toast.success(`Tagged ${ids.length} contact${ids.length === 1 ? "" : "s"} "${tag.name}"`);
+            setSelectedIds(new Set());
+          }}
+          trigger={
+            <Button variant="outline" size="sm">
+              Add tag…
+            </Button>
+          }
+        />
+      </BulkActionBar>
     </div>
   );
 }

@@ -248,6 +248,25 @@ export interface Account {
   parent_account?: { id: string; name: string } | null;
 }
 
+export interface Tag {
+  id: string;
+  name: string;
+  color: string | null;
+  description: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContactTag {
+  contact_id: string;
+  tag_id: string;
+  tagged_by: string | null;
+  tagged_at: string;
+  // joined
+  tag?: Tag;
+}
+
 export interface Contact {
   id: string;
   sf_id: string | null;

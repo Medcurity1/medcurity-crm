@@ -10,6 +10,8 @@ interface ContactFilters {
   verified?: "true" | "false";
   /** Archive visibility. Omit to preserve legacy behavior (show all). */
   archived?: "active" | "archived" | "all";
+  /** Filter to contacts carrying ANY of these tag ids (custom lists). */
+  tagIds?: string[];
   page?: number;
   pageSize?: number;
   sortColumn?: string | null;
@@ -80,6 +82,21 @@ export function useContacts(filters?: ContactFilters) {
       }
       if (filters?.account_id) {
         query = query.eq("account_id", filters.account_id);
+      }
+      // Tag filter (custom lists): resolve the contact ids carrying any of
+      // the chosen tags, then constrain. An empty result forces zero rows.
+      if (filters?.tagIds && filters.tagIds.length > 0) {
+        const { data: tagged } = await supabase
+          .from("contact_tags")
+          .select("contact_id")
+          .in("tag_id", filters.tagIds);
+        const ids = Array.from(
+          new Set((tagged ?? []).map((r) => r.contact_id as string)),
+        );
+        query = query.in(
+          "id",
+          ids.length > 0 ? ids : ["00000000-0000-0000-0000-000000000000"],
+        );
       }
       if (Array.isArray(filters?.ownerId)) {
         const ids = filters!.ownerId;
