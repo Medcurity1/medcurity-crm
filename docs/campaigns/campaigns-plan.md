@@ -288,6 +288,33 @@ times (skip holidays/PTO); and a guardrailed **pre-flight check** before every l
 
 ---
 
+## Feedback round 1 (Nathan, 2026-06-23 — after seeing the gallery on staging)
+
+Reaction: "better than playbook ever was." Looks loved. Concrete asks:
+
+- **Stop & Edit a campaign mid-flight (NEW first-class requirement).** A rep must be able to:
+  (a) **Stop** a running sequence for a contact at any time (e.g., the prospect answered a call) —
+  halt remaining steps + cancel pending tasks. (b) **Edit** a not-yet-sent step before it goes out
+  (e.g., tweak the final email after a call that didn't land). Implication: enrollment-level
+  Stop/Pause controls in the manage view, and per-step edit for steps Smartlead hasn't sent yet
+  (confirm Smartlead allows editing upcoming steps via API, else clone-forward). Design the step
+  state machine so "scheduled, not yet sent" steps are editable + cancellable per-enrollment.
+- **"Custom sequence" replaces the "New Campaign" button** once the from-scratch builder is built.
+  The current New-Campaign (Smartlead wizard) button is interim.
+- **Campaigns list = Ongoing + Past (DONE).** Ongoing (planned + active) on top with Import/Sync;
+  divider; Past (complete) below, most-recent first. Import/Sync refresh both.
+- **8-Touch corrections (DONE + one open question).** All emails now AUTO (rep edits copy before
+  launch); only calls + LinkedIn are tasks. Preview derives weekdays from the day offset (Monday
+  start) so they're self-consistent. **OPEN — cadence decision:** from a Monday start the call days
+  (Day 8, Day 19) land **Mon/Fri**, not the doc's intended **Tue/Fri** (Day 8 is a Monday). Nudge
+  the call days (e.g. Day 8 → Day 9) to hit Tue/Fri, or keep the spacing? Same for LinkedIn days.
+- **Meddy slow first-load (DONE, separate).** Widget bubble + CRM-tab images were 2000×2000 PNGs
+  (896KB–2.3MB) shown at 28–96px. Resized to retina (16–84KB, ~40× smaller) + cache-version bump.
+- **Import button UI glitch** — reported (operationally fine). Needs a repro detail (layout jump?
+  flash?) to pin down; flagged.
+
+---
+
 ## Corrections to the research (for the record)
 - Old `sequences`/`sequence_enrollments`/`playbook_sequences` tables **do not exist** (dropped
   June 15). All sequence tables here are new. (Two agents missed the drop migration.)

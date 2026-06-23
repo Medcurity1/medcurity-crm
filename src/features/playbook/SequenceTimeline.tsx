@@ -14,7 +14,12 @@ const CHANNEL: Record<SequenceChannel, { icon: typeof Mail; label: string; badge
   LINKEDIN:     { icon: Users,     label: "LinkedIn",               badge: "bg-sky-500/15 text-sky-600 dark:text-sky-400",       line: "bg-sky-500/30" },
 };
 
-const DOW: Record<string, string> = { MON: "Mon", TUE: "Tue", WED: "Wed", THU: "Thu", FRI: "Fri", SAT: "Sat", SUN: "Sun" };
+// Weekday derived from the day-offset assuming a Monday start (Day 1 = Mon).
+// Templates are start-relative, so we compute the weekday from the offset rather
+// than trust a hardcoded label — that keeps "Day N · Weekday" always
+// self-consistent (the labels in the source doc were internally off).
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const weekdayForOffset = (dayOffset: number) => WEEKDAYS[(((dayOffset - 1) % 7) + 7) % 7];
 
 function whoBadge(s: SequenceStep): { text: string; cls: string } {
   if (s.automation === "AUTO") return { text: "Sends automatically", cls: "border-blue-500/30 text-blue-600 dark:text-blue-400" };
@@ -49,7 +54,7 @@ export function SequenceTimeline({ steps }: { steps: SequenceStep[] }) {
         const cfg = CHANNEL[s.channel] ?? CHANNEL.EMAIL_AUTO;
         const Icon = cfg.icon;
         const who = whoBadge(s);
-        const dow = s.weekday_target ? ` · ${DOW[s.weekday_target] ?? s.weekday_target}` : "";
+        const dow = ` · ${weekdayForOffset(s.day_offset)}`;
         const window =
           s.send_window_start ? ` · ${s.send_window_start}${s.send_window_end ? "–" + s.send_window_end : ""}` : "";
         return (

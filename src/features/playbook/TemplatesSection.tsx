@@ -109,6 +109,11 @@ export function TemplatesSection() {
                 <span className="inline-flex items-center gap-1"><Layers className="h-3.5 w-3.5" />{preview.step_count ?? preview.steps.length} touches</span>
                 <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" />{preview.duration_days ?? "—"} days</span>
               </div>
+              {preview.domain_rules?.start_anchor === "nearest_monday" && (
+                <p className="text-[11px] text-muted-foreground -mt-0.5 mb-1">
+                  Weekdays shown assume a Monday start (the actual dates are set when you launch).
+                </p>
+              )}
               <SequenceTimeline steps={preview.steps} />
               <DialogFooter className="flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
                 <p className="text-[11px] text-muted-foreground order-2 sm:order-1">
