@@ -1,8 +1,12 @@
-// Type-to-search picker for relation filters (Account / Contact / Owner /
-// Opportunity) in the Report Builder. Replaces a plain <Select> that both
-// couldn't be searched AND silently showed only the first ~25 accounts.
-// Accounts are searched SERVER-SIDE (the list is long); the others filter
-// client-side over the lookups they already have.
+// Type-to-search picker for relation filters (Account / Contact / Opportunity /
+// Owner) in the Report Builder. Replaces a plain <Select> that both couldn't be
+// searched AND silently showed only the first ~25 rows.
+//
+// Account, Contact, and Opportunity are searched SERVER-SIDE (those lists are
+// long — capping them at the ReportBuilder's 25-row lookup hid most records).
+// Owner/user (a short, fully-loaded list) filters client-side over the options
+// it's handed. Each relation type mounts exactly ONE data hook (via a dedicated
+// component) so we never fire queries for lists we aren't showing.
 
 import { useState } from "react";
 import { Check, ChevronsUpDown } from "lucide-react";
@@ -13,32 +17,82 @@ import {
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { useAccounts } from "@/features/accounts/api";
+import { useContacts } from "@/features/contacts/api";
+import { useOpportunities } from "@/features/opportunities/api";
 
-export function RelationCombobox({
-  type,
-  value,
-  onChange,
-  options,
-}: {
+type Opt = { value: string; label: string };
+
+export function RelationCombobox(props: {
   type: string;
   value: string;
   onChange: (v: string) => void;
-  options: Array<{ value: string; label: string }>;
+  options: Opt[];
+}) {
+  // Dispatch to a type-specific component so only the relevant data hook runs.
+  switch (props.type) {
+    case "account":
+      return <AccountCombo {...props} />;
+    case "contact":
+      return <ContactCombo {...props} />;
+    case "opportunity":
+      return <OpportunityCombo {...props} />;
+    default:
+      // Owner/user and anything else: client-side filter over the given options.
+      return <StaticCombo {...props} />;
+  }
+}
+
+// ── Server-searched variants ─────────────────────────────────────────────────
+
+function AccountCombo({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: Opt[] }) {
+  const [search, setSearch] = useState("");
+  const { data, isFetching } = useAccounts({ search: search.trim() || undefined, pageSize: 50 });
+  const items = (data?.data ?? []).map((a: { id: string; name: string }) => ({ value: a.id, label: a.name }));
+  return <Shell {...{ value, onChange, options, items, isFetching, search, setSearch, serverFiltered: true }} />;
+}
+
+function ContactCombo({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: Opt[] }) {
+  const [search, setSearch] = useState("");
+  const { data, isFetching } = useContacts({ search: search.trim() || undefined, pageSize: 50 });
+  const items = (data?.data ?? []).map((c: { id: string; first_name?: string | null; last_name?: string | null }) => ({
+    value: c.id,
+    label: [c.first_name, c.last_name].filter(Boolean).join(" ") || "(no name)",
+  }));
+  return <Shell {...{ value, onChange, options, items, isFetching, search, setSearch, serverFiltered: true }} />;
+}
+
+function OpportunityCombo({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: Opt[] }) {
+  const [search, setSearch] = useState("");
+  const { data, isFetching } = useOpportunities({ search: search.trim() || undefined, pageSize: 50 });
+  const items = (data?.data ?? []).map((o: { id: string; name?: string | null }) => ({ value: o.id, label: o.name || "(untitled)" }));
+  return <Shell {...{ value, onChange, options, items, isFetching, search, setSearch, serverFiltered: true }} />;
+}
+
+function StaticCombo({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: Opt[] }) {
+  const [search, setSearch] = useState("");
+  return <Shell {...{ value, onChange, options, items: options, isFetching: false, search, setSearch, serverFiltered: false }} />;
+}
+
+// ── Shared presentational shell ──────────────────────────────────────────────
+
+function Shell({
+  value, onChange, options, items, isFetching, search, setSearch, serverFiltered,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: Opt[];
+  items: Opt[];
+  isFetching: boolean;
+  search: string;
+  setSearch: (s: string) => void;
+  serverFiltered: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const [picked, setPicked] = useState<{ value: string; label: string } | null>(null);
-  const isAccount = type === "account";
+  const [picked, setPicked] = useState<Opt | null>(null);
 
-  // Accounts: server-side search (their ilike path covers name + parent-by-contact).
-  const { data: acctResult, isFetching } = useAccounts(
-    isAccount ? { search: search.trim() || undefined, pageSize: 50 } : undefined,
-  );
-  const items = isAccount
-    ? (acctResult?.data ?? []).map((a: { id: string; name: string }) => ({ value: a.id, label: a.name }))
-    : options;
-
-  // Keep the trigger label stable even after the search list changes/clears.
+  // Keep the trigger label stable even after the (search-narrowed) list changes:
+  // prefer what the user actually picked, then the current items, then the
+  // ReportBuilder-supplied options (label fallback), then a generic marker.
   const selectedLabel =
     (value && picked?.value === value && picked.label) ||
     items.find((o) => o.value === value)?.label ||
@@ -54,11 +108,11 @@ export function RelationCombobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-64 p-0" align="start">
-        {/* shouldFilter off for accounts (server-filtered); on for the rest. */}
-        <Command shouldFilter={!isAccount}>
+        {/* shouldFilter off for server-searched lists; on for static ones. */}
+        <Command shouldFilter={!serverFiltered}>
           <CommandInput placeholder="Search…" value={search} onValueChange={setSearch} />
           <CommandList>
-            <CommandEmpty>{isAccount && isFetching ? "Searching…" : "No matches."}</CommandEmpty>
+            <CommandEmpty>{serverFiltered && isFetching ? "Searching…" : "No matches."}</CommandEmpty>
             <CommandGroup>
               {items.map((o) => (
                 <CommandItem

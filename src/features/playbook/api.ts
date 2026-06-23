@@ -604,17 +604,27 @@ export function useInsertImage() {
   });
 }
 
-/** Recipients = the (non-archived, contactable) contacts carrying a tag. */
+/** Recipients = the (non-archived, contactable) contacts carrying a tag.
+ *  Paginates so a large tag (>1 page) returns EVERY member — a campaign must
+ *  never silently mail a truncated list. Hard-stops at 50k as a sanity cap. */
 export async function fetchRecipientsByTag(tagId: string): Promise<Recipient[]> {
-  const { data, error } = await supabase
-    .from("contacts")
-    .select("id, first_name, last_name, email, account_id, do_not_contact, no_longer_employed, account:accounts!account_id(name), contact_tags!inner(tag_id)")
-    .eq("contact_tags.tag_id", tagId)
-    .is("archived_at", null)
-    .not("email", "is", null)
-    .limit(5000);
-  if (error) throw error;
-  return (data ?? [])
+  const PAGE = 1000;
+  const all: Record<string, unknown>[] = [];
+  for (let page = 0; page < 50; page++) {
+    const { data, error } = await supabase
+      .from("contacts")
+      .select("id, first_name, last_name, email, account_id, do_not_contact, no_longer_employed, account:accounts!account_id(name), contact_tags!inner(tag_id)")
+      .eq("contact_tags.tag_id", tagId)
+      .is("archived_at", null)
+      .not("email", "is", null)
+      .order("id", { ascending: true }) // stable order so range paging can't skip/dupe
+      .range(page * PAGE, (page + 1) * PAGE - 1);
+    if (error) throw error;
+    const batch = data ?? [];
+    all.push(...batch);
+    if (batch.length < PAGE) break;
+  }
+  return all
     .filter((c: Record<string, unknown>) => !c.do_not_contact && !c.no_longer_employed && c.email)
     .map((c: Record<string, unknown>) => ({
       email: c.email as string,

@@ -74,6 +74,13 @@ export function ReminderFields({
             </div>
           )}
 
+          {value.timing === "custom" && !value.customAt && !hasDueDate && (
+            <p className="text-xs text-amber-600 flex items-center gap-1">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              Pick a date and time above (or add a due date), or you won't be reminded.
+            </p>
+          )}
+
           {isRepeat(value.timing) && !hasDueDate && (
             <p className="text-xs text-amber-600">Repeating reminders need a due date (they repeat until it).</p>
           )}

@@ -20,11 +20,12 @@ export function parseCsv(text: string): string[][] {
     } else {
       if (ch === '"') inQuotes = true;
       else if (ch === ",") { current.push(field.trim()); field = ""; }
-      else if (ch === "\n" || (ch === "\r" && text[i + 1] === "\n")) {
+      else if (ch === "\n" || ch === "\r") {
+        // Row terminator. Handles LF, CRLF, and bare-CR (old-Mac) endings.
         current.push(field.trim()); field = "";
         if (current.some((c) => c)) rows.push(current);
         current = [];
-        if (ch === "\r") i++;
+        if (ch === "\r" && text[i + 1] === "\n") i++; // consume the LF of a CRLF pair
       } else field += ch;
     }
   }

@@ -338,8 +338,9 @@ export function parseReviseResult(
     let newBody = bodyMatch ? bodyMatch[1].trim() : fallback.bodyOnly;
     newBody = newBody.replace(/^```html\s*\n?/i, "").replace(/\n?```\s*$/, "").trim();
     // Clean the BODY only; keep the reattached chrome pristine so the next
-    // revise can still chrome-match it.
-    newBody = stripEm(newBody);
+    // revise can still chrome-match it. Same pipeline as parseDraftResult
+    // (stripEm THEN fixSpacing) so revised issues read identically to drafts.
+    newBody = fixSpacing(stripEm(newBody));
     html = chrome.headerHtml + "\n" + newBody + "\n" + chrome.footerHtml;
   } else {
     const subjMatch = fullText.match(/\[SUBJECT\]\s*([\s\S]*?)\s*\[(?:PREVIEW|HTML)\]/);
@@ -349,10 +350,10 @@ export function parseReviseResult(
     previewText = previewMatch ? previewMatch[1].trim() : previewText;
     html = htmlMatch ? htmlMatch[1].trim() : html;
     html = html.replace(/^```html\s*\n?/i, "").replace(/\n?```\s*$/, "").trim();
-    html = stripEm(html);
+    html = fixSpacing(stripEm(html));
   }
-  subject = stripEm(subject);
-  previewText = stripEm(previewText);
+  subject = fixSpacing(stripEm(subject));
+  previewText = fixSpacing(stripEm(previewText));
   return { subject, previewText, html };
 }
 
