@@ -225,30 +225,42 @@ export async function callClaude(opts: {
   const key = Deno.env.get("ANTHROPIC_API_KEY");
   if (!key) throw new Error("ANTHROPIC_API_KEY not set");
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 60000);
+  const timer = setTimeout(() => controller.abort(), 90000);
   try {
-    const res = await fetch(ANTHROPIC_API, {
-      method: "POST",
-      headers: {
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: opts.model,
-        max_tokens: opts.maxTokens ?? 4000,
-        temperature: opts.temperature ?? 0.7,
-        system: opts.system,
-        messages: [{ role: "user", content: opts.user }],
-      }),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      throw new Error(`Anthropic API ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    // Anthropic returns 429 (rate limit) / 529 (overloaded) FAST, before any
+    // generation, so retrying a few times with backoff cheaply rides out the
+    // transient platform overloads that would otherwise fail the user instantly.
+    let lastErr = "";
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const res = await fetch(ANTHROPIC_API, {
+        method: "POST",
+        headers: {
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: opts.model,
+          max_tokens: opts.maxTokens ?? 4000,
+          temperature: opts.temperature ?? 0.7,
+          system: opts.system,
+          messages: [{ role: "user", content: opts.user }],
+        }),
+        signal: controller.signal,
+      });
+      if ((res.status === 429 || res.status === 529) && attempt < 3) {
+        lastErr = `Anthropic API ${res.status}: ${(await res.text()).slice(0, 200)}`;
+        await new Promise((r) => setTimeout(r, 800 * Math.pow(2, attempt)));
+        continue;
+      }
+      if (!res.ok) {
+        throw new Error(`Anthropic API ${res.status}: ${(await res.text()).slice(0, 300)}`);
+      }
+      const data = await res.json();
+      const block = (data.content ?? []).find((b: { type: string }) => b.type === "text");
+      return (block?.text ?? "").trim();
     }
-    const data = await res.json();
-    const block = (data.content ?? []).find((b: { type: string }) => b.type === "text");
-    return (block?.text ?? "").trim();
+    throw new Error(lastErr || "Anthropic API: overloaded after retries — please try again in a moment");
   } finally {
     clearTimeout(timer);
   }
