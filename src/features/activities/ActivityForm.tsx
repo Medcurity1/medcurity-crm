@@ -13,6 +13,14 @@ import {
   recurrenceToUI,
   type RecurrenceUI,
 } from "./recurrence";
+import { ReminderFields } from "./ReminderFields";
+import {
+  EMPTY_REMINDER,
+  buildReminderFields,
+  isRepeat,
+  reminderFromActivity,
+  type ReminderUI,
+} from "./reminder";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { supabase } from "@/lib/supabase";
 import {
@@ -123,8 +131,9 @@ export function ActivityForm({
   const createMutation = useCreateActivity();
   const updateMutation = useUpdateActivity();
   const isEditing = !!activity;
-  // Recurrence lives outside react-hook-form (it's task-only + derived).
+  // Recurrence + reminders live outside react-hook-form (task-only + derived).
   const [recur, setRecur] = useState<RecurrenceUI>(EMPTY_RECURRENCE);
+  const [reminder, setReminder] = useState<ReminderUI>(EMPTY_REMINDER);
 
   // Helper: today as YYYY-MM-DD in local time (HTML date inputs expect this).
   // Reps usually log an activity the day it happened; defaulting to today
@@ -229,6 +238,7 @@ export function ActivityForm({
           (activity.reminder_channels as Array<"in_app" | "email">) ?? ["in_app"],
       });
       setRecur(recurrenceToUI(activity));
+      setReminder(reminderFromActivity(activity));
     } else {
       form.reset({
         activity_type: "call",
@@ -243,6 +253,7 @@ export function ActivityForm({
         reminder_channels: ["in_app"],
       });
       setRecur(EMPTY_RECURRENCE);
+      setReminder(EMPTY_REMINDER);
     }
   }, [open, activity, form, contactId]);
 
@@ -252,21 +263,16 @@ export function ActivityForm({
       toast.error("Pick a due date for a repeating task");
       return;
     }
+    if (
+      isTask && isRepeat(reminder.timing) &&
+      (reminder.inApp || reminder.email) && !values.due_at
+    ) {
+      toast.error("Pick a due date for repeating reminders");
+      return;
+    }
     const recurFields = isTask
       ? buildRecurrenceFields(recur, values.due_at || "")
       : NO_RECURRENCE;
-    const reminderSchedule = isTask
-      ? (values.reminder_schedule ?? "none")
-      : "none";
-    const reminderAt =
-      isTask && reminderSchedule !== "none" && values.reminder_at
-        ? new Date(values.reminder_at).toISOString()
-        : null;
-    const reminderChannels = (
-      isTask && reminderSchedule !== "none"
-        ? values.reminder_channels ?? ["in_app"]
-        : ["in_app"]
-    ) as Array<"in_app" | "email">;
     // Priority only applies to tasks; non-tasks stay null so a call/email
     // never carries a spurious priority tier.
     const taskPriority: "high" | "normal" | "low" | null = isTask
@@ -290,6 +296,9 @@ export function ActivityForm({
     // local, not at noon.
     const dueAtIso =
       isTask && values.due_at ? new Date(values.due_at).toISOString() : null;
+    const reminderFields = isTask
+      ? buildReminderFields(reminder, dueAtIso)
+      : { reminder_schedule: "none" as const, reminder_at: null, reminder_channels: [] as Array<"in_app" | "email"> };
     // Prop wins when the form was opened from a contact's own page
     // (locked picker); otherwise honor whatever the user picked, which
     // may legitimately be "no contact" (null) for account-level logs.
@@ -312,9 +321,9 @@ export function ActivityForm({
           recur_weekday: recurFields.recur_weekday,
           recur_monthday: recurFields.recur_monthday,
           recur_until: recurFields.recur_until,
-          reminder_schedule: reminderSchedule,
-          reminder_at: reminderAt,
-          reminder_channels: reminderChannels,
+          reminder_schedule: reminderFields.reminder_schedule,
+          reminder_at: reminderFields.reminder_at,
+          reminder_channels: reminderFields.reminder_channels,
         },
         {
           onSuccess: () => {
@@ -347,9 +356,9 @@ export function ActivityForm({
         recur_weekday: recurFields.recur_weekday,
         recur_monthday: recurFields.recur_monthday,
         recur_until: recurFields.recur_until,
-        reminder_schedule: reminderSchedule,
-        reminder_at: reminderAt,
-        reminder_channels: reminderChannels,
+        reminder_schedule: reminderFields.reminder_schedule,
+        reminder_at: reminderFields.reminder_at,
+        reminder_channels: reminderFields.reminder_channels,
       },
       {
         onSuccess: () => {
@@ -556,75 +565,13 @@ export function ActivityForm({
             </p>
           </div>
 
-          {/* Reminder controls — only for tasks. When schedule != none,
-              we also show the exact first-fire datetime + channels. */}
+          {/* Reminder controls — only for tasks. */}
           {selectedType === "task" && (
-            <div className="space-y-2 border rounded-md p-3">
-              <Label className="text-sm font-semibold">Reminders</Label>
-              <select
-                className="w-full border rounded-md h-9 px-2 bg-background text-sm"
-                value={form.watch("reminder_schedule") ?? "none"}
-                onChange={(e) =>
-                  form.setValue(
-                    "reminder_schedule",
-                    e.target.value as "none" | "once" | "daily" | "weekdays" | "weekly"
-                  )
-                }
-              >
-                <option value="none">No reminder</option>
-                <option value="once">Once</option>
-                <option value="daily">Daily until due</option>
-                <option value="weekdays">Weekdays (M-F) until due</option>
-                <option value="weekly">Weekly until due</option>
-              </select>
-
-              {form.watch("reminder_schedule") !== "none" &&
-                form.watch("reminder_schedule") !== undefined && (
-                  <>
-                    <Label htmlFor="reminder_at" className="text-xs text-muted-foreground">
-                      First reminder at
-                    </Label>
-                    <Input
-                      id="reminder_at"
-                      type="datetime-local"
-                      {...form.register("reminder_at")}
-                    />
-                    <div className="flex flex-wrap gap-3 pt-1">
-                      {(["in_app", "email"] as const).map((ch) => {
-                        const channels = form.watch("reminder_channels") ?? [];
-                        const checked = channels.includes(ch);
-                        return (
-                          <label
-                            key={ch}
-                            className="flex items-center gap-1 text-xs cursor-pointer"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={(e) => {
-                                const next = e.target.checked
-                                  ? [...channels, ch].filter(
-                                      (v, i, a) => a.indexOf(v) === i
-                                    )
-                                  : channels.filter((v) => v !== ch);
-                                form.setValue(
-                                  "reminder_channels",
-                                  next as Array<"in_app" | "email">
-                                );
-                              }}
-                            />
-                            {ch === "in_app" ? "In-app" : "Email"}
-                          </label>
-                        );
-                      })}
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Email reminders require your Outlook integration to have
-                      Mail.Send permission (see admin).
-                    </p>
-                  </>
-                )}
-            </div>
+            <ReminderFields
+              value={reminder}
+              onChange={setReminder}
+              hasDueDate={!!form.watch("due_at")}
+            />
           )}
 
           <div className="flex justify-end gap-2 pt-2">
