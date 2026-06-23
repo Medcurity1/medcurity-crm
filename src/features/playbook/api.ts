@@ -171,3 +171,49 @@ export function useCampaigns() {
     },
   });
 }
+
+/** Whether the Smartlead integration is configured (API key present). */
+export function useSmartleadStatus() {
+  return useQuery({
+    queryKey: ["playbook", "smartlead-status"],
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "status" },
+      });
+      if (error) throw error;
+      return { configured: !!data?.configured };
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+function useSmartleadAction(action: "import" | "sync") {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as { created?: number; updated?: number; total?: number; synced?: number };
+    },
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] });
+      if (action === "import") {
+        toast.success(`Imported ${r.created ?? 0} new, refreshed ${r.updated ?? 0}.`);
+      } else {
+        toast.success(`Synced ${r.synced ?? 0} campaigns.`);
+      }
+    },
+    onError: (e) => toast.error(`Smartlead ${action} failed: ` + (e as Error).message),
+  });
+}
+
+export const useImportCampaigns = () => useSmartleadAction("import");
+export const useSyncCampaigns = () => useSmartleadAction("sync");
+
+/** Deep link to a campaign in the Smartlead app. */
+export function smartleadUrl(id: number | null): string | null {
+  return id ? `https://app.smartlead.ai/app/email-campaign/${id}/analytics` : null;
+}
