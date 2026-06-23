@@ -50,6 +50,23 @@ engine + Up Next widget. We are NOT rebuilding delivery; we are scheduling and c
 
 ---
 
+## 2.5 One builder for everything (Nathan's framing — the design north star)
+
+There is **ONE builder**, and everything is that builder in a different starting state:
+- **Templates** (8-Touch, Warming, …) are just the builder **pre-loaded with a setup** — use as-is
+  or edit before launch. A template is a saved starting point, nothing more.
+- **From scratch** = the same builder, empty (like today's Smartlead campaign wizard, but able to
+  hold non-email pieces too).
+- **From a contact** = the same builder, opened on that person with a template applied (e.g. "start
+  them in Warming" → builder opens pre-filled → edit or just launch).
+- Adding/removing/reordering pieces, editing copy, deciding reminders/notifications per step — **one
+  consistent flow** whether it's email, call, LinkedIn, or a wait. New templates are just builder
+  states someone chose to save.
+
+This is the simplifying insight: we build **one great builder + a launch path**, and the
+"template gallery / enrollment / quick-enroll" surfaces are all thin entry points into it. Design
+the builder once, beautifully; everything else is how you open it.
+
 ## 3. Information architecture
 
 The rename is **done** (shipped to staging): sidebar **Campaigns** (Megaphone icon, route stays
@@ -207,9 +224,9 @@ existing 12:30 UTC sync). v1 trigger engine, run in the daily job:
 1. **8-Touch Sales** (flagship) — the spec, verbatim: 28d, Days 1/5 email-auto, 8/19 call, 12/23
    LinkedIn, 15/26 hybrid email; Monday anchor; pause on reply/meeting; → Nurture after, re-enroll
    90d. (Molly's now; Summer's variant to follow — templates support per-rep variants.)
-2. **Warming / Nurture** — *undefined in any doc; proposed default:* gentler 14-day, 3-touch,
-   all HYBRID (rep reviews) for post-8-Touch re-engagement. **Needs Nathan's confirmation** of the
-   actual cadence (this is an open decision).
+2. **Warming / Nurture** — (Nathan 2026-06-23: no existing cadence to match.) **3–5 emails,
+   email-only to start**, editable to add calls/LinkedIn per use. A gentle email drip a rep can
+   launch on a contact as-is or tweak. (Exact copy/spacing TBD when we build the template.)
 3. **Post-Demo** — fast follow-up for demo attendees.
 4. **Re-Engagement** — dormant accounts (60+ days quiet).
 5. **Event / Webinar Follow-Up** — the use case from today's webinar-list workflow.
