@@ -98,6 +98,62 @@ export function useIdeaWeeks() {
   });
 }
 
+/** Generate (or regenerate) this week's ideas via the playbook-ai edge fn. */
+export function useGenerateIdeas() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ force = false }: { force?: boolean } = {}) => {
+      const { data, error } = await supabase.functions.invoke("playbook-ai", {
+        body: { action: "generate-ideas", force },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as { ideas: PlaybookIdea[]; week_date: string; cached?: boolean };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["playbook", "ideas"] });
+      qc.invalidateQueries({ queryKey: ["playbook", "idea-weeks"] });
+    },
+    onError: (e) => toast.error("Idea generation failed: " + (e as Error).message),
+  });
+}
+
+/**
+ * Record feedback on an idea: thumbs up (good), thumbs down (bad) +
+ * optional "what was wrong" note, book, or mark executed. A thumbs-down
+ * note also becomes a training note so the AI learns from it.
+ */
+export function useIdeaFeedback() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      status,
+      feedbackNote,
+    }: {
+      id: string;
+      status: PlaybookIdea["status"];
+      feedbackNote?: string;
+    }) => {
+      const { error } = await supabase
+        .from("playbook_ideas")
+        .update({ status, feedback_note: feedbackNote ?? null })
+        .eq("id", id);
+      if (error) throw error;
+      if (status === "bad" && feedbackNote && feedbackNote.trim()) {
+        await supabase
+          .from("playbook_training")
+          .insert({ note: feedbackNote.trim(), source: "thumbs_down", related_idea_id: id });
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["playbook", "ideas"] });
+      qc.invalidateQueries({ queryKey: ["playbook", "training"] });
+    },
+    onError: (e) => toast.error("Couldn't save feedback: " + (e as Error).message),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Campaigns (read) — populated by the Smartlead sync in Phase C
 // ---------------------------------------------------------------------------
