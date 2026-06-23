@@ -280,4 +280,15 @@ Share the support contact details (support@medcurity.com / (509) 867-3645) at mo
 
 POLICY APPROVAL WORKFLOW (Rachel via Nathan, 2026-06-22) — corrects the Policies notes above
 To adopt or approve a policy: open the policy, make any needed edits, and click Save. After saving, return to the main policy dashboard, where an "Approve" option appears for that policy. Saving a policy alone does NOT approve it; approval is a separate step on the dashboard. The "Archive" button only removes policies the org does not want to use; it is not how you adopt or approve a policy. When a policy is approved, the platform records who approved it and the date and time (the approver and an approval timestamp are saved). If asked for finer detail about what gets recorded, you may still offer to connect them with support.
+
+DOWNLOADING TRAINING CERTIFICATES (Rachel via Nathan, 2026-06-22) — corrects any "not yet / planned feature" answer
+Bulk download of completion certificates IS available TODAY in the Training module. Do NOT say it is a planned or future feature, and do NOT tell people to download certificates one at a time. There are two ways:
+- Option 1 — ALL certificates for the whole organization: Training Admin → Analytics → click "Completion Rate" → click "Download Certificates". This downloads certificates for all users across all courses; with ~70 certificates the download can take a few minutes.
+- Option 2 — certificates for ONE specific course: Training Admin → Manage → "Subscriptions" tab → select the course → click the "Users Completed" dropdown (the number shown in the bottom left) → click "Download Certificates" (top right). This downloads only the selected course; ~70 certificates can take a few minutes.
+
+MEDCURITY ACADEMY LOGIN — IN-APP USERS PASS THROUGH (Rachel via Nathan, 2026-06-22) — refines the "Medcurity Academy Access" notes above
+Whether someone needs separate Academy credentials depends on whether they are a user inside the Medcurity app (app.medcurity.com):
+- If they ARE an app user: they do NOT need separate Academy login credentials. They open the "HIPAA Training" tab inside the app and click "Launch" — their existing login passes through automatically and the training opens without entering any credentials. Point them there first.
+- If they are training-ONLY (a trainee who is not a user of the Medcurity app itself): then their Academy credentials are separate from any app.medcurity.com login, and the password-reset / support path applies.
+So when someone says their app credentials don't work on training.medcurity.com, first check whether they're an in-app user: if yes, steer them to HIPAA Training → Launch (no separate login needed) rather than a password reset; only fall back to separate-credentials / reset / support for training-only recipients.
 `;
