@@ -41,8 +41,8 @@ export function CampaignsTab() {
     <div className="space-y-3 pt-4">
       <div className="flex items-center gap-2 flex-wrap">
         {sl?.configured && (
-          <Button size="sm" onClick={() => setWizardOpen(true)}>
-            <Plus className="h-4 w-4 mr-1" /> New Campaign
+          <Button variant="ai" size="sm" onClick={() => setWizardOpen(true)}>
+            <span className="ai-icon mr-1"><Plus className="h-4 w-4" /></span> New Campaign
           </Button>
         )}
         {sl?.configured ? (
@@ -107,7 +107,7 @@ export function CampaignsTab() {
                   <div className="flex items-center gap-2 shrink-0">
                     {c.status === "complete" && !c.analyzed_at && (
                       <Button
-                        size="sm" variant="outline" className="h-7 text-xs"
+                        size="sm" variant="ai" className="h-7 text-xs"
                         disabled={analyze.isPending}
                         onClick={() => analyze.mutate(c.id)}
                       >

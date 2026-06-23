@@ -510,6 +510,113 @@ async function deleteNewsletter(id: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Rewrite a single field (subject / preview) — fast, body untouched
+// ---------------------------------------------------------------------------
+
+async function rewriteField(id: string, field: "subject" | "preview") {
+  const { data: d } = await svc
+    .from("playbook_newsletters")
+    .select("subject, preview_text, html_content")
+    .eq("id", id)
+    .maybeSingle();
+  if (!d) throw new Error("Draft not found");
+  const plain = htmlToPlain(d.html_content ?? "").slice(0, 2000);
+  const label = field === "subject" ? "subject line" : "inbox preview text";
+  const guide = field === "subject"
+    ? "Under 70 characters, specific and compelling, no clickbait."
+    : "A complete sentence 50-110 characters that complements (does not repeat) the subject.";
+  const prompt =
+    `You write Medcurity newsletter ${label}s. Given the newsletter body and the current ${label}, write ONE improved ${label}. ` +
+    `${guide} No em dashes. Output ONLY the new ${label}, nothing else.\n\n` +
+    `Current subject: ${d.subject ?? ""}\nCurrent preview: ${d.preview_text ?? ""}\n\nBody (plain text):\n${plain}`;
+  let val = (await callClaudeMessages({
+    model: NEWSLETTER_REVISE_MODEL,
+    maxTokens: 200,
+    messages: [{ role: "user", content: prompt }],
+    timeoutMs: 30000,
+  })).trim();
+  val = val.replace(/^["']+|["']+$/g, "").replace(/—/g, ", ").trim();
+  const col = field === "subject" ? "subject" : "preview_text";
+  await svc.from("playbook_newsletters").update({ [col]: val, updated_at: new Date().toISOString() }).eq("id", id);
+  return { field, value: val };
+}
+
+// ---------------------------------------------------------------------------
+// Style guide (view + manual edit)
+// ---------------------------------------------------------------------------
+
+async function getStyle(type: string) {
+  const { data } = await svc.from("newsletter_styles").select("*").eq("newsletter_type", type).maybeSingle();
+  return { style: data };
+}
+async function updateStyle(type: string, styleGuide: string) {
+  if (type !== "report" && type !== "partner") throw new Error("Invalid newsletter type");
+  await svc.from("newsletter_styles").upsert({
+    newsletter_type: type,
+    style_guide: styleGuide,
+    updated_at: new Date().toISOString(),
+  });
+  return { success: true };
+}
+
+// ---------------------------------------------------------------------------
+// Images — upload to Mailchimp's File Manager, splice into the newsletter HTML
+// ---------------------------------------------------------------------------
+
+async function uploadImage(name: string, fileData: string): Promise<string> {
+  // fileData = base64 (no data: prefix). Mailchimp returns a hosted URL.
+  const res = await mailchimpFetch("/file-manager/files", {
+    method: "POST",
+    body: { name: name || "image.png", file_data: fileData },
+  }) as { full_size_url?: string };
+  if (!res.full_size_url) throw new Error("Mailchimp did not return an image URL");
+  return res.full_size_url;
+}
+
+function imgTag(url: string, alt: string): string {
+  return `<img src="${url}" alt="${alt.replace(/"/g, "&quot;")}" style="max-width:100%;height:auto;display:block;margin:16px auto;border-radius:6px;" />`;
+}
+
+/** Replace the Nth (0-based) [GRAPHIC: ...] placeholder DIV with an uploaded image. */
+async function replacePlaceholder(id: string, index: number, name: string, fileData: string, alt: string) {
+  const { data: nl } = await svc.from("playbook_newsletters").select("html_content").eq("id", id).maybeSingle();
+  if (!nl?.html_content) throw new Error("Newsletter not found or has no HTML");
+  const url = await uploadImage(name, fileData);
+  // Match the dashed placeholder DIVs the draft prompt emits (contain "[GRAPHIC:").
+  const re = /<div[^>]*>\s*\[GRAPHIC:[\s\S]*?\]\s*<\/div>/gi;
+  let i = 0;
+  let replaced = false;
+  const html = (nl.html_content as string).replace(re, (m) => {
+    if (i++ === index && !replaced) { replaced = true; return imgTag(url, alt); }
+    return m;
+  });
+  if (!replaced) throw new Error("That graphic placeholder was not found (it may have already been filled)");
+  await svc.from("playbook_newsletters").update({ html_content: html, updated_at: new Date().toISOString() }).eq("id", id);
+  return { success: true, image_url: url, html };
+}
+
+/** Insert an uploaded image near the end of the body (before the footer/closing tags). */
+async function insertImage(id: string, name: string, fileData: string, alt: string) {
+  const { data: nl } = await svc.from("playbook_newsletters").select("html_content, newsletter_type").eq("id", id).maybeSingle();
+  if (!nl?.html_content) throw new Error("Newsletter not found or has no HTML");
+  const url = await uploadImage(name, fileData);
+  let html = nl.html_content as string;
+  const tag = imgTag(url, alt);
+  // Prefer inserting just before the footer chrome; else before </body>; else append.
+  const sent = await recentSentOfType(nl.newsletter_type, 3);
+  const chrome = detectChrome(sent.map((r) => r.html_content ?? ""));
+  if (chrome && html.endsWith(chrome.footerHtml)) {
+    html = html.slice(0, html.length - chrome.footerHtml.length) + "\n" + tag + "\n" + chrome.footerHtml;
+  } else if (/<\/body>/i.test(html)) {
+    html = html.replace(/<\/body>/i, tag + "\n</body>");
+  } else {
+    html = html + "\n" + tag;
+  }
+  await svc.from("playbook_newsletters").update({ html_content: html, updated_at: new Date().toISOString() }).eq("id", id);
+  return { success: true, image_url: url, html };
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
@@ -554,6 +661,15 @@ Deno.serve(async (req) => {
       if (body.preview_text !== undefined) patch.preview_text = body.preview_text;
       await svc.from("playbook_newsletters").update(patch).eq("id", body.id);
       return json({ success: true });
+    }
+    if (action === "rewrite-field") return json(await rewriteField(body.id, body.field === "preview" ? "preview" : "subject"));
+    if (action === "get-style") return json(await getStyle(body.type));
+    if (action === "update-style") return json(await updateStyle(body.type, body.style_guide ?? ""));
+    if (action === "replace-placeholder") {
+      return json(await replacePlaceholder(body.id, Number(body.index) || 0, body.name ?? "", body.file_data ?? "", body.alt ?? ""));
+    }
+    if (action === "insert-image") {
+      return json(await insertImage(body.id, body.name ?? "", body.file_data ?? "", body.alt ?? ""));
     }
     if (action === "push-to-mailchimp") return json(await pushToMailchimp(body.id));
     if (action === "delete") return json(await deleteNewsletter(body.id));

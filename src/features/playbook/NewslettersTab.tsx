@@ -11,6 +11,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
@@ -19,13 +24,18 @@ import {
   useNewsletters,
   useIngestNewsletters,
   useSyncNewsletters,
-  useGenerateStyle,
   useGenerateNewsletterDraft,
   useDeleteNewsletter,
 } from "./api";
 import { NewsletterEditor } from "./NewsletterEditor";
+import { StyleGuideDialog } from "./StyleGuideDialog";
 import { LoadError } from "./LoadError";
 import type { Newsletter, NewsletterType } from "./types";
+
+const TYPE_FULL: Record<string, string> = {
+  report: "The Medcurity Report",
+  partner: "Partner Exclusive",
+};
 
 const TYPE_LABEL: Record<string, string> = {
   report: "Report",
@@ -45,18 +55,28 @@ export function NewslettersTab() {
   const { data: newsletters, isLoading, isError, refetch } = useNewsletters("all");
   const ingest = useIngestNewsletters();
   const syncM = useSyncNewsletters();
-  const genStyle = useGenerateStyle();
   const genDraft = useGenerateNewsletterDraft();
   const del = useDeleteNewsletter();
 
   const [filter, setFilter] = useState<Filter>("all");
   const [editorId, setEditorId] = useState<string | null>(null);
+  const [composeType, setComposeType] = useState<NewsletterType | null>(null);
+  const [notes, setNotes] = useState("");
+  const [styleType, setStyleType] = useState<NewsletterType | null>(null);
   const busy = ingest.isPending || syncM.isPending;
 
   const shown = (newsletters ?? []).filter((n) => filter === "all" || n.newsletter_type === filter);
 
-  function newDraft(type: NewsletterType) {
-    genDraft.mutate({ type }, { onSuccess: (r) => setEditorId(r.draft_id) });
+  function openCompose(type: NewsletterType) {
+    setNotes("");
+    setComposeType(type);
+  }
+  function generateDraft() {
+    if (!composeType) return;
+    genDraft.mutate(
+      { type: composeType, user_notes: notes.trim() || undefined },
+      { onSuccess: (r) => { setComposeType(null); setEditorId(r.draft_id); } },
+    );
   }
 
   if (mc && !mc.configured) {
@@ -85,30 +105,62 @@ export function NewslettersTab() {
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" disabled={genDraft.isPending}>
-              {genDraft.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Plus className="h-4 w-4 mr-1" />}
+            <Button variant="ai" size="sm" disabled={genDraft.isPending}>
+              {genDraft.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <span className="ai-icon mr-1"><Plus className="h-4 w-4" /></span>}
               New draft
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
-            <DropdownMenuItem onClick={() => newDraft("report")}>The Medcurity Report</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => newDraft("partner")}>Partner Exclusive</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => openCompose("report")}>The Medcurity Report</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => openCompose("partner")}>Partner Exclusive</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" variant="outline" disabled={genStyle.isPending}>
-              {genStyle.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Sparkles className="h-4 w-4 mr-1" />}
-              Style guide
+            <Button size="sm" variant="outline">
+              <Sparkles className="h-4 w-4 mr-1" /> Style guide
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
-            <DropdownMenuItem onClick={() => genStyle.mutate("report")}>Generate for Report</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => genStyle.mutate("partner")}>Generate for Partner Exclusive</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setStyleType("report")}>Report style guide…</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setStyleType("partner")}>Partner Exclusive style guide…</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      {/* Compose — capture notes/topics BEFORE the AI drafts */}
+      <Dialog open={!!composeType} onOpenChange={(o) => !o && setComposeType(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>New {composeType ? TYPE_FULL[composeType] : "newsletter"} draft</DialogTitle>
+            <DialogDescription>
+              Add anything specific you want included — known events, webinar dates, news to cover, links, or notes
+              about graphics you'll add later. Leave it blank for a strong general edition.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1">
+            <Label htmlFor="nl-notes" className="text-xs">Topics & notes for this edition (optional)</Label>
+            <Textarea
+              id="nl-notes"
+              rows={7}
+              placeholder="e.g. Webinar on the HIPAA Security Rule update on July 24. Cover the recent OCR settlement with Cadence Health. I'll add a header graphic about our new analytics dashboard."
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setComposeType(null)} disabled={genDraft.isPending}>Cancel</Button>
+            <Button variant="ai" onClick={generateDraft} disabled={genDraft.isPending}>
+              {genDraft.isPending
+                ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Writing… (up to ~90s)</>
+                : <><span className="ai-icon mr-1"><Sparkles className="h-4 w-4" /></span> Generate draft</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <StyleGuideDialog type={styleType} open={!!styleType} onOpenChange={(o) => !o && setStyleType(null)} />
 
       {/* Type filter */}
       <div className="flex gap-1">

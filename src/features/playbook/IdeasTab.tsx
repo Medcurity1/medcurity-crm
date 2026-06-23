@@ -147,6 +147,7 @@ export function IdeasTab() {
           </Select>
         )}
         <Button
+          variant="ai"
           size="sm"
           onClick={() => handleGenerate(hasAny)}
           disabled={generate.isPending}
@@ -154,7 +155,7 @@ export function IdeasTab() {
           {generate.isPending ? (
             <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Generating…</>
           ) : (
-            <><Sparkles className="h-4 w-4 mr-1" /> {hasAny ? "Regenerate this week" : "Generate ideas"}</>
+            <><span className="ai-icon mr-1"><Sparkles className="h-4 w-4" /></span> {hasAny ? "Regenerate this week" : "Generate ideas"}</>
           )}
         </Button>
       </div>

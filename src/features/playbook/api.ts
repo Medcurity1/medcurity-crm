@@ -329,6 +329,7 @@ export function useLaunchCampaign() {
       autoStart?: boolean;
       adaptiveEnabled?: boolean;
       owner_id?: string;
+      schedule?: Record<string, unknown>;
     }) => {
       const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
         body: { action: "launch", ...p },
@@ -424,10 +425,14 @@ export const useIngestNewsletters = () => useMailchimpRead("ingest");
 export const useSyncNewsletters = () => useMailchimpRead("sync");
 
 export function useGenerateStyle() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (type: NewsletterType) =>
       invokeMailchimp<{ type: string; source_count: number; length: number }>({ action: "generate-style", type }),
-    onSuccess: (r) => toast.success(`Style guide ready (from ${r.source_count} past issues).`),
+    onSuccess: (r, type) => {
+      qc.invalidateQueries({ queryKey: ["playbook", "newsletter-style", type] });
+      toast.success(`Style guide ready (from ${r.source_count} past issues).`);
+    },
     onError: (e) => toast.error("Style guide failed: " + (e as Error).message),
   });
 }
@@ -502,6 +507,99 @@ export function useDeleteNewsletter() {
       toast.success("Draft deleted.");
     },
     onError: (e) => toast.error("Delete failed: " + (e as Error).message),
+  });
+}
+
+/** View the AI-learned style guide for a newsletter type (for the editor). */
+export function useNewsletterStyle(type: NewsletterType | null) {
+  return useQuery({
+    queryKey: ["playbook", "newsletter-style", type],
+    enabled: !!type,
+    queryFn: async () => {
+      const d = await invokeMailchimp<{ style: { style_guide: string; updated_at: string } | null }>({
+        action: "get-style",
+        type,
+      });
+      return d.style;
+    },
+  });
+}
+
+export function useUpdateNewsletterStyle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: { type: NewsletterType; style_guide: string }) =>
+      invokeMailchimp<{ success: boolean }>({ action: "update-style", ...p }),
+    onSuccess: (_r, p) => {
+      qc.invalidateQueries({ queryKey: ["playbook", "newsletter-style", p.type] });
+      toast.success("Style guide saved.");
+    },
+    onError: (e) => toast.error("Couldn't save style guide: " + (e as Error).message),
+  });
+}
+
+/** Add a newsletter-type-scoped training note (feeds future drafts of that type). */
+export function useAddNewsletterTraining() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: { type: NewsletterType; note: string }) => {
+      const { error } = await supabase
+        .from("playbook_training")
+        .insert({ note: p.note.trim(), source: `newsletter:${p.type}` });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["playbook", "training"] });
+      toast.success("Saved — the AI will use this on future newsletters.");
+    },
+    onError: (e) => toast.error("Couldn't save note: " + (e as Error).message),
+  });
+}
+
+/** Read a File as base64 (no data: prefix) for image upload. */
+export function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const res = String(reader.result);
+      resolve(res.includes(",") ? res.split(",")[1] : res);
+    };
+    reader.onerror = () => reject(new Error("Couldn't read the image file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+export function useRewriteField() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: { id: string; field: "subject" | "preview" }) =>
+      invokeMailchimp<{ field: string; value: string }>({ action: "rewrite-field", ...p }),
+    onSuccess: (_r, p) => qc.invalidateQueries({ queryKey: ["playbook", "newsletter", p.id] }),
+    onError: (e) => toast.error("Rewrite failed: " + (e as Error).message),
+  });
+}
+
+export function useReplacePlaceholder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: { id: string; index: number; name: string; file_data: string; alt: string }) =>
+      invokeMailchimp<{ success: boolean; image_url: string; html: string }>({ action: "replace-placeholder", ...p }),
+    onSuccess: (_r, p) => {
+      qc.invalidateQueries({ queryKey: ["playbook", "newsletter", p.id] });
+    },
+    onError: (e) => toast.error("Image upload failed: " + (e as Error).message),
+  });
+}
+
+export function useInsertImage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: { id: string; name: string; file_data: string; alt: string }) =>
+      invokeMailchimp<{ success: boolean; image_url: string; html: string }>({ action: "insert-image", ...p }),
+    onSuccess: (_r, p) => {
+      qc.invalidateQueries({ queryKey: ["playbook", "newsletter", p.id] });
+    },
+    onError: (e) => toast.error("Image upload failed: " + (e as Error).message),
   });
 }
 
