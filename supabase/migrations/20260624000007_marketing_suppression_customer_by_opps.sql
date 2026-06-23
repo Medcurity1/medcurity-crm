@@ -12,7 +12,7 @@
 -- today — a Closed-Won opportunity — using the same active-vs-lapsed rule the
 -- Lost Customers (Account-based) report uses (per Brayden 2026-05-29):
 --   currently a customer  ⟺  ≥1 closed_won opp whose contract is still live:
---                            maturity_date >= today  (if maturity set),
+--                            contract_end_date >= today  (if set),
 --                            else close_date >= today - 365  (assume 1-yr term).
 --   former customer        ⟺  had ≥1 closed_won ever, but none still live.
 --
@@ -34,8 +34,8 @@ with won as (
   -- closed-won deals is still in-contract (= the account is a current customer).
   select o.account_id,
          bool_or(
-           (o.maturity_date is not null and o.maturity_date >= current_date)
-           or (o.maturity_date is null and o.close_date is not null
+           (o.contract_end_date is not null and o.contract_end_date >= current_date)
+           or (o.contract_end_date is null and o.close_date is not null
                and o.close_date >= current_date - 365)
          ) as active_won
     from public.opportunities o
