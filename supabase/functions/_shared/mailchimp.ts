@@ -67,10 +67,26 @@ export async function mailchimpFetch(
   throw new Error("Mailchimp API rate limited after retries");
 }
 
-/** Sent regular campaigns, newest first (paginated). */
+/**
+ * Sent regular campaigns, newest first (paginated). Uses Mailchimp's
+ * `fields` filter to return only what ingest needs — the default full
+ * campaign objects are huge and make 5 list pages crawl (a heavy account
+ * pushed this past the 150s edge limit). Slim payloads make it fast.
+ */
 export function fetchSentCampaigns(count = 100, offset = 0) {
+  const fields = [
+    "campaigns.id",
+    "campaigns.send_time",
+    "campaigns.status",
+    "campaigns.settings.subject_line",
+    "campaigns.settings.title",
+    "campaigns.settings.from_name",
+    "campaigns.settings.preview_text",
+    "campaigns.recipients",
+    "total_items",
+  ].join(",");
   return mailchimpFetch(
-    `/campaigns?count=${count}&offset=${offset}&status=sent&type=regular&sort_field=send_time&sort_dir=DESC`,
+    `/campaigns?count=${count}&offset=${offset}&status=sent&type=regular&sort_field=send_time&sort_dir=DESC&fields=${encodeURIComponent(fields)}`,
   );
 }
 export function fetchCampaign(id: string) {
