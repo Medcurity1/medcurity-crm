@@ -167,8 +167,9 @@ function IdleState() {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
       <img
-        src="/widget/meddy-on-phone.png"
+        src="/widget/meddy-on-phone.png?v=2"
         alt=""
+        loading="eager"
         className="h-24 w-auto object-contain opacity-70"
       />
       <p className="text-sm">Select a conversation to view messages</p>

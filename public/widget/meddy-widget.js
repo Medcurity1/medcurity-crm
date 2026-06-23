@@ -532,7 +532,7 @@
     bubbleEl.className = 'meddy-bubble';
     bubbleEl.setAttribute('aria-label', 'Open chat');
     bubbleEl.setAttribute('title', 'Chat with us');
-    bubbleEl.innerHTML = '<img src="' + ASSETS_URL + '/meddy-logo.png?v=3" alt="Chat with Meddy">';
+    bubbleEl.innerHTML = '<img src="' + ASSETS_URL + '/meddy-logo.png?v=4" alt="Chat with Meddy" fetchpriority="high">';
     bubbleEl.addEventListener('click', togglePanel);
     shadowRoot.appendChild(bubbleEl);
 
@@ -546,7 +546,7 @@
     panelEl = document.createElement('div');
     panelEl.className = 'meddy-panel';
     panelEl.innerHTML = '' +
-      '<div class="meddy-header"><div class="meddy-header-text"><div class="meddy-header-icon"><img src="' + ASSETS_URL + '/meddy-logo-header.png?v=5" alt="Meddy"></div><div class="meddy-header-info"><h3>Meddy</h3><p>HIPAA Compliance Assistant</p></div></div><div class="meddy-header-actions"><button class="meddy-header-menu" id="meddy-end-btn" title="End conversation"><svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="9" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="2"/><line x1="5.8" y1="5.8" x2="18.2" y2="18.2" stroke="rgba(255,255,255,0.7)" stroke-width="2"/></svg></button><button class="meddy-close" title="Minimize chat"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M5 9l7 7 7-7"/></svg></button></div></div>' +
+      '<div class="meddy-header"><div class="meddy-header-text"><div class="meddy-header-icon"><img src="' + ASSETS_URL + '/meddy-logo-header.png?v=6" alt="Meddy"></div><div class="meddy-header-info"><h3>Meddy</h3><p>HIPAA Compliance Assistant</p></div></div><div class="meddy-header-actions"><button class="meddy-header-menu" id="meddy-end-btn" title="End conversation"><svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="9" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="2"/><line x1="5.8" y1="5.8" x2="18.2" y2="18.2" stroke="rgba(255,255,255,0.7)" stroke-width="2"/></svg></button><button class="meddy-close" title="Minimize chat"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M5 9l7 7 7-7"/></svg></button></div></div>' +
       '<div class="meddy-messages"></div>' +
       '<div class="meddy-suggestions-wrap"></div>' +
       '<div class="meddy-contact-wrap"></div>' +

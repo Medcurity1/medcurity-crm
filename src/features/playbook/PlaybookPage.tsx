@@ -1,6 +1,8 @@
-// Playbook — admin-only AI marketing co-pilot (ported from Nexus).
-// Two sub-tabs: Ideas (weekly AI suggestions) + Campaigns (Smartlead
-// cold-email campaigns). A Training slide-over feeds the AI.
+// Campaigns — admin-only AI marketing/outreach hub (ported from Nexus as
+// "Playbook"). Sub-tabs (in order): Campaigns (sequences — email + calls +
+// LinkedIn; the default), Playbook (weekly AI ideas), Newsletters (Mailchimp).
+// A Training slide-over feeds the AI.
+// (Tab `value`s stay campaigns/ideas/newsletters for stable deep-links.)
 
 import { useState } from "react";
 import { Brain } from "lucide-react";
@@ -18,8 +20,8 @@ export function PlaybookPage() {
   return (
     <div>
       <PageHeader
-        title="Playbook"
-        description="Your AI marketing co-pilot — weekly ideas, cold-email campaigns, and newsletters."
+        title="Campaigns"
+        description="Your outreach command center — AI campaign ideas, cold email, and newsletters."
         actions={
           <Button variant="outline" size="sm" onClick={() => setTrainingOpen(true)}>
             <Brain className="h-4 w-4 mr-2" />
@@ -28,17 +30,17 @@ export function PlaybookPage() {
         }
       />
 
-      <Tabs defaultValue="ideas">
+      <Tabs defaultValue="campaigns">
         <TabsList>
-          <TabsTrigger value="ideas">Ideas</TabsTrigger>
           <TabsTrigger value="campaigns">Campaigns</TabsTrigger>
+          <TabsTrigger value="ideas">Playbook</TabsTrigger>
           <TabsTrigger value="newsletters">Newsletters</TabsTrigger>
         </TabsList>
-        <TabsContent value="ideas">
-          <IdeasTab />
-        </TabsContent>
         <TabsContent value="campaigns">
           <CampaignsTab />
+        </TabsContent>
+        <TabsContent value="ideas">
+          <IdeasTab />
         </TabsContent>
         <TabsContent value="newsletters">
           <NewslettersTab />

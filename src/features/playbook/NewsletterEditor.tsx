@@ -57,7 +57,7 @@ export function NewsletterEditor({ id, open, onOpenChange }: Props) {
   const [view, setView] = useState<"preview" | "html">("preview");
   const [instruction, setInstruction] = useState("");
   const [trainNote, setTrainNote] = useState("");
-  const [pushed, setPushed] = useState<{ url: string; recipient_count: number | null; recommended_send: { label: string; time_label: string } | null; segment_warning?: boolean } | null>(null);
+  const [pushed, setPushed] = useState<{ url: string; recipient_count: number | null; audience_empty?: boolean; recommended_send: { label: string; time_label: string } | null; segment_warning?: boolean } | null>(null);
 
   // Hidden file input shared by all image uploads; pendingUpload says where it goes.
   const fileRef = useRef<HTMLInputElement>(null);
@@ -90,7 +90,7 @@ export function NewsletterEditor({ id, open, onOpenChange }: Props) {
     });
   }
   function onPush() {
-    if (id) push.mutate(id, { onSuccess: (r) => { if (r.success) setPushed({ url: r.url, recipient_count: r.recipient_count, recommended_send: r.recommended_send, segment_warning: r.segment_warning }); } });
+    if (id) push.mutate(id, { onSuccess: (r) => { if (r.success) setPushed({ url: r.url, recipient_count: r.recipient_count, audience_empty: r.audience_empty, recommended_send: r.recommended_send, segment_warning: r.segment_warning }); } });
   }
   function pickFile(target: NonNullable<typeof pendingUpload.current>) {
     pendingUpload.current = target;
@@ -274,7 +274,10 @@ export function NewsletterEditor({ id, open, onOpenChange }: Props) {
                 {pushed ? (
                   <div className="rounded-md bg-emerald-50 border border-emerald-200 p-3 text-xs space-y-1">
                     <p className="font-medium text-emerald-800">Pushed to Mailchimp as a draft.</p>
-                    {pushed.recipient_count != null && <p>Audience: ~{pushed.recipient_count} recipients.</p>}
+                    {pushed.recipient_count != null && pushed.recipient_count > 0 && <p>Audience: ~{pushed.recipient_count} recipients.</p>}
+                    {pushed.audience_empty && (
+                      <p className="text-amber-700">⚠ Mailchimp shows <strong>0 recipients</strong> for this draft — the audience didn't attach. Open it in Mailchimp and set the audience before sending.</p>
+                    )}
                     {pushed.segment_warning && (
                       <p className="text-amber-700">⚠ The original used an advanced Mailchimp segment we can't copy — the draft is on the full list. <strong>Set the audience in Mailchimp before sending.</strong></p>
                     )}

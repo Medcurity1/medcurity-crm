@@ -7,6 +7,7 @@ import type {
   PlaybookCampaign,
   Newsletter,
   NewsletterType,
+  CampaignTemplate,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -163,6 +164,22 @@ export function useIdeaFeedback() {
 // Campaigns (read) — populated by the Smartlead sync in Phase C
 // ---------------------------------------------------------------------------
 
+/** Sequence templates (presets + any custom), newest preset categories first. */
+export function useCampaignTemplates() {
+  return useQuery({
+    queryKey: ["playbook", "campaign-templates"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("campaign_templates")
+        .select("*")
+        .order("is_preset", { ascending: false })
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as CampaignTemplate[];
+    },
+  });
+}
+
 export function useCampaigns() {
   return useQuery({
     queryKey: ["playbook", "campaigns"],
@@ -170,7 +187,11 @@ export function useCampaigns() {
       const { data, error } = await supabase
         .from("playbook_campaigns")
         .select("*, owner:user_profiles!owner_id(id, full_name)")
-        .order("created_at", { ascending: false });
+        // Newest first. created_at alone ties for the whole bulk-import batch
+        // (all imported at once), which let Smartlead's oldest-first order leak
+        // through — so tiebreak by smartlead_campaign_id desc (newer = higher id).
+        .order("created_at", { ascending: false })
+        .order("smartlead_campaign_id", { ascending: false, nullsFirst: false });
       if (error) throw error;
       return data as (PlaybookCampaign & { owner?: { id: string; full_name: string | null } | null })[];
     },
@@ -412,11 +433,15 @@ export function useNewsletter(id: string | null) {
 function useMailchimpRead(action: "ingest" | "sync") {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => invokeMailchimp<Record<string, number>>({ action }),
+    mutationFn: () => invokeMailchimp<Record<string, number | boolean>>({ action }),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ["playbook", "newsletters"] });
-      if (action === "ingest") toast.success(`Ingested ${r.ingested ?? 0} new, skipped ${r.skipped ?? 0}.`);
-      else toast.success(`Synced ${r.synced ?? 0} newsletters.`);
+      if (action === "ingest") {
+        const more = r.more_remaining
+          ? " More remain — click Ingest again to continue."
+          : "";
+        toast.success(`Ingested ${r.ingested ?? 0} new, skipped ${r.skipped ?? 0}.${more}`);
+      } else toast.success(`Synced ${r.synced ?? 0} newsletters.`);
     },
     onError: (e) => toast.error(`Mailchimp ${action} failed: ` + (e as Error).message),
   });
@@ -489,6 +514,7 @@ export function usePushNewsletterToMailchimp() {
         campaign_id: string;
         url: string;
         recipient_count: number | null;
+        audience_empty?: boolean;
         audience_label: string;
         recommended_send: { date_iso: string; label: string; time_label: string } | null;
         segment_warning?: boolean;
