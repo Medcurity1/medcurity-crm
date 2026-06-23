@@ -390,15 +390,16 @@ async function pushToMailchimp(id: string) {
   } | undefined;
   if (!tcRecipients?.list_id) throw new Error("Could not load template campaign audience from Mailchimp");
 
-  // Faithfully reproduce the template's audience. Mailchimp segments come in
-  // three flavors: a saved segment (saved_segment_id), a prebuilt segment
-  // (prebuilt_segment_id), or inline conditions. If we only copied inline
-  // conditions, a saved/prebuilt-segment template (common for the narrow
-  // Partner Exclusive list) would silently fall back to list_id only = the
-  // ENTIRE list. Copy whichever the template used; if it had a segment we
-  // can't reproduce, fail loudly rather than create a full-list draft.
+  // Reproduce the template's audience. Mailchimp segments come in a few
+  // flavors: a saved segment (saved_segment_id), a prebuilt segment
+  // (prebuilt_segment_id), inline conditions, or an opaque "advanced" segment
+  // that the API returns as just {match:"all"} with NO conditions. We can copy
+  // the first three. We CANNOT reproduce an advanced segment, so for that case
+  // we create the draft on the list and warn the user to set the real audience
+  // in Mailchimp before sending (push only ever makes a draft — a human sends).
   const recipients: Record<string, unknown> = { list_id: tcRecipients.list_id };
   const segOpts = tcRecipients.segment_opts;
+  let segmentWarning = false;
   if (segOpts?.saved_segment_id != null) {
     recipients.segment_opts = { saved_segment_id: segOpts.saved_segment_id };
   } else if (segOpts?.prebuilt_segment_id) {
@@ -406,7 +407,8 @@ async function pushToMailchimp(id: string) {
   } else if (Array.isArray(segOpts?.conditions) && segOpts.conditions.length) {
     recipients.segment_opts = { match: segOpts.match || "all", conditions: segOpts.conditions };
   } else if (segOpts) {
-    throw new Error("The last sent newsletter targeted a segment that couldn't be copied — refusing to create a full-list draft. Push from a newsletter whose audience uses a saved segment or inline conditions.");
+    // Advanced/opaque segment we can't reproduce — draft on the list + warn.
+    segmentWarning = true;
   }
 
   const ts = (templateCampaign.settings ?? {}) as { from_name?: string; reply_to?: string; from_email?: string; preview_text?: string; to_name?: string };
@@ -494,6 +496,7 @@ async function pushToMailchimp(id: string) {
     recipient_count: recipientCount,
     audience_label: label,
     recommended_send: recommendedSend,
+    segment_warning: segmentWarning,
   };
 }
 

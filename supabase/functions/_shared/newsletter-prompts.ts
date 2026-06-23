@@ -27,24 +27,53 @@ export interface Chrome {
 }
 
 /**
- * Diff the most recent same-type sent HTMLs to recover the byte-for-byte
- * immutable header/footer chrome. Server (not the AI) owns chrome fidelity.
+ * Gap-tolerant common prefix of a vs b, in a's coordinates. A plain common
+ * prefix is cut short by any per-send variable bit (a tracking <link>, a date,
+ * an image cache-buster). Real newsletters keep the masthead/header static but
+ * sprinkle a few of these, so we resync past short divergences (up to maxGap)
+ * and only stop at the first LARGE divergence (the real body). The gap bytes
+ * are taken from the reference (a), which is correct for reattaching chrome.
+ */
+function tolerantPrefixEnd(a: string, b: string, maxGap: number): number {
+  let i = 0, j = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    let found: { ai: number; bj: number } | null = null;
+    for (let g = 0; g <= maxGap; g++) {
+      const w = a.slice(i + g, i + g + 40);
+      if (w.length < 40) break;
+      const k = b.indexOf(w, j);
+      if (k >= 0 && k - j <= maxGap) { found = { ai: i + g, bj: k }; break; }
+    }
+    if (!found) break; // big divergence => start of the editable body
+    i = found.ai; j = found.bj;
+  }
+  return i;
+}
+
+/**
+ * Recover the immutable header/footer chrome from recent same-type sends.
+ * Footer = the byte-for-byte common suffix (reliable). Header = a gap-tolerant
+ * common prefix vs the 2nd-most-recent send, so the recurring masthead/logo is
+ * captured even though a small variable bit upstream breaks a plain prefix.
  * Pass 2-3 recent sent HTMLs (length > 5000), newest first.
  */
 export function detectChrome(htmls: string[]): Chrome | null {
   const usable = htmls.filter((h) => h && h.length > 5000);
   if (usable.length < 2) return null;
+  const ref = usable[0];
 
-  let p = 0;
+  // Footer: byte-common suffix across all usable sends.
   const minLen = Math.min(...usable.map((h) => h.length));
-  while (p < minLen && usable.every((h) => h.charCodeAt(p) === usable[0].charCodeAt(p))) p++;
   let s = 0;
-  while (s < minLen - p && usable.every((h) => h.charCodeAt(h.length - 1 - s) === usable[0].charCodeAt(usable[0].length - 1 - s))) {
+  while (s < minLen && usable.every((h) => h.charCodeAt(h.length - 1 - s) === ref.charCodeAt(ref.length - 1 - s))) {
     s++;
   }
 
-  const ref = usable[0];
-  const rawPrefix = ref.slice(0, p);
+  // Header: gap-tolerant prefix vs the next-most-recent send.
+  const headerEnd = tolerantPrefixEnd(ref, usable[1], 800);
+
+  const rawPrefix = ref.slice(0, headerEnd);
   const rawSuffix = ref.slice(ref.length - s);
 
   const lastClose = rawPrefix.lastIndexOf(">");

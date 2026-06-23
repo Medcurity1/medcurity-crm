@@ -57,7 +57,7 @@ export function NewsletterEditor({ id, open, onOpenChange }: Props) {
   const [view, setView] = useState<"preview" | "html">("preview");
   const [instruction, setInstruction] = useState("");
   const [trainNote, setTrainNote] = useState("");
-  const [pushed, setPushed] = useState<{ url: string; recipient_count: number | null; recommended_send: { label: string; time_label: string } | null } | null>(null);
+  const [pushed, setPushed] = useState<{ url: string; recipient_count: number | null; recommended_send: { label: string; time_label: string } | null; segment_warning?: boolean } | null>(null);
 
   // Hidden file input shared by all image uploads; pendingUpload says where it goes.
   const fileRef = useRef<HTMLInputElement>(null);
@@ -90,7 +90,7 @@ export function NewsletterEditor({ id, open, onOpenChange }: Props) {
     });
   }
   function onPush() {
-    if (id) push.mutate(id, { onSuccess: (r) => { if (r.success) setPushed({ url: r.url, recipient_count: r.recipient_count, recommended_send: r.recommended_send }); } });
+    if (id) push.mutate(id, { onSuccess: (r) => { if (r.success) setPushed({ url: r.url, recipient_count: r.recipient_count, recommended_send: r.recommended_send, segment_warning: r.segment_warning }); } });
   }
   function pickFile(target: NonNullable<typeof pendingUpload.current>) {
     pendingUpload.current = target;
@@ -160,7 +160,7 @@ export function NewsletterEditor({ id, open, onOpenChange }: Props) {
                 <iframe title="Newsletter preview" srcDoc={html} className="w-full flex-1 min-h-[420px]" sandbox="" />
               ) : (
                 <Textarea
-                  className="flex-1 min-h-[420px] rounded-none border-0 font-mono text-[11px] leading-snug resize-none"
+                  className="flex-1 min-h-[420px] rounded-none border-0 font-mono text-[11px] leading-snug resize-none bg-white text-slate-900"
                   spellCheck={false}
                   value={html}
                   onChange={(e) => setHtml(e.target.value)}
@@ -275,6 +275,9 @@ export function NewsletterEditor({ id, open, onOpenChange }: Props) {
                   <div className="rounded-md bg-emerald-50 border border-emerald-200 p-3 text-xs space-y-1">
                     <p className="font-medium text-emerald-800">Pushed to Mailchimp as a draft.</p>
                     {pushed.recipient_count != null && <p>Audience: ~{pushed.recipient_count} recipients.</p>}
+                    {pushed.segment_warning && (
+                      <p className="text-amber-700">⚠ The original used an advanced Mailchimp segment we can't copy — the draft is on the full list. <strong>Set the audience in Mailchimp before sending.</strong></p>
+                    )}
                     {pushed.recommended_send && <p>Suggested send: {pushed.recommended_send.label} at {pushed.recommended_send.time_label}.</p>}
                     {pushed.url && (
                       <a href={pushed.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1">

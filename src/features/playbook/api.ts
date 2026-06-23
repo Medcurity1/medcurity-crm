@@ -491,6 +491,7 @@ export function usePushNewsletterToMailchimp() {
         recipient_count: number | null;
         audience_label: string;
         recommended_send: { date_iso: string; label: string; time_label: string } | null;
+        segment_warning?: boolean;
         error?: string;
       }>({ action: "push-to-mailchimp", id }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["playbook", "newsletters"] }),
