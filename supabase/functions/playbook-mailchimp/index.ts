@@ -81,19 +81,28 @@ function isServiceRole(authHeader: string | null): boolean {
 // ---------------------------------------------------------------------------
 
 async function ingest() {
-  let totalFetched = 0;
+  let totalScanned = 0;
   let ingested = 0;
   let skipped = 0;
+  let skippedUnclassified = 0;
   let contentFailed = 0;
-  const classified = { report: 0, partner: 0, unclassified: 0 };
+  const classified = { report: 0, partner: 0 };
   const pageSize = 100;
-  // Cap at 5 pages (500 campaigns) — plenty of history for references.
+  // Scan up to 5 pages (500 campaigns) to find the two newsletter types.
+  // We only ingest "The Medcurity Report" + "Partner Exclusive" — the
+  // account also has many unrelated one-off blasts (classified
+  // 'unclassified') that add no value here and whose per-campaign report +
+  // HTML fetches would blow the 150s edge limit. List calls are cheap; the
+  // expensive report+content fetch only runs for the two real types.
   for (let page = 0; page < 5; page++) {
     const resp = await fetchSentCampaigns(pageSize, page * pageSize);
     const campaigns = (resp.campaigns as Record<string, unknown>[]) ?? [];
     if (!campaigns.length) break;
-    totalFetched += campaigns.length;
+    totalScanned += campaigns.length;
     for (const camp of campaigns) {
+      const type = classifyNewsletter(camp);
+      if (type === "unclassified") { skippedUnclassified++; continue; }
+
       const mcId = String(camp.id);
       const { data: existing } = await svc
         .from("playbook_newsletters")
@@ -102,7 +111,6 @@ async function ingest() {
         .maybeSingle();
       if (existing) { skipped++; continue; }
 
-      const type = classifyNewsletter(camp);
       classified[type]++;
       const settings = (camp.settings ?? {}) as { subject_line?: string; title?: string; from_name?: string; preview_text?: string };
 
@@ -128,7 +136,14 @@ async function ingest() {
     }
     if (campaigns.length < pageSize) break;
   }
-  return { total_fetched: totalFetched, ingested, skipped, content_failed: contentFailed, classified };
+  return {
+    total_scanned: totalScanned,
+    ingested,
+    skipped,
+    skipped_unclassified: skippedUnclassified,
+    content_failed: contentFailed,
+    classified,
+  };
 }
 
 async function sync() {
@@ -267,23 +282,17 @@ async function draft(type: "report" | "partner", userNotes: string) {
     bodyReferencesBlock,
   });
 
-  // web_search lets the AI gather current breach/news context. If the
-  // account can't use it, fall back to a no-tools call.
-  let fullText = "";
-  try {
-    fullText = await callClaudeMessages({
-      model: NEWSLETTER_DRAFT_MODEL,
-      maxTokens: 20000,
-      messages: [{ role: "user", content: prompt }],
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }],
-    });
-  } catch (_e) {
-    fullText = await callClaudeMessages({
-      model: NEWSLETTER_DRAFT_MODEL,
-      maxTokens: 20000,
-      messages: [{ role: "user", content: prompt }],
-    });
-  }
+  // Single Claude call, no server tools. web_search would let the AI gather
+  // current breach/news context, but it can run long enough to blow the
+  // edge function's 150s hard limit, so we keep the draft within budget and
+  // rely on the user's notes for any current news (the prompt says as much).
+  // Timeout sits under the 150s edge cap, leaving room to parse + insert.
+  const fullText = await callClaudeMessages({
+    model: NEWSLETTER_DRAFT_MODEL,
+    maxTokens: 20000,
+    messages: [{ role: "user", content: prompt }],
+    timeoutMs: 125000,
+  });
 
   const parsed = parseDraftResult(fullText, useSplit, chrome);
   const { data: inserted } = await svc
