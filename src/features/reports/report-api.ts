@@ -305,6 +305,59 @@ async function runReportQuery(config: ReportConfig): Promise<ReportResult> {
   };
 }
 
+/**
+ * Fetch EVERY row matching a report config (not just the 1,000-row display
+ * cap), for exports. The custom builder used to export whatever was on
+ * screen — silently capped at 1,000 — so a "complete" CSV/XLSX could be
+ * missing most of the data. This pages through the full result set so the
+ * export matches the reported count. Hard safety cap so a runaway can't
+ * exhaust the browser; we log if it's ever hit.
+ */
+export async function fetchAllReportRows(
+  config: ReportConfig,
+): Promise<Record<string, unknown>[]> {
+  const entityDef = getEntityDef(config.entity);
+  const selectStr = buildSelectString(config.entity, config.columns);
+  const PAGE = 1000;
+  const MAX_ROWS = 100_000;
+  const all: Record<string, unknown>[] = [];
+
+  for (let from = 0; from < MAX_ROWS; from += PAGE) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let query: any = supabase.from(entityDef.table).select(selectStr);
+    if (ARCHIVABLE_ENTITIES.includes(config.entity)) {
+      query = query.is("archived_at", null);
+    }
+    for (const filter of config.filters) {
+      query = applyFilter(query, config.entity, filter);
+    }
+    if (config.sort?.field) {
+      const colDef = getColumnDef(config.entity, config.sort.field);
+      const sortField = colDef?.joinTable
+        ? resolveFilterField(config.entity, config.sort.field)
+        : config.sort.field;
+      query = query.order(sortField, { ascending: config.sort.direction === "asc" });
+    } else {
+      query = query.order("created_at", { ascending: false });
+    }
+    // Stable tiebreaker so paging can't duplicate/skip rows at boundaries.
+    query = query.order("id", { ascending: true });
+    query = query.range(from, from + PAGE - 1);
+
+    const { data, error } = await query;
+    if (error) throw error;
+    const rows = (data ?? []) as Record<string, unknown>[];
+    all.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  if (all.length >= MAX_ROWS) {
+    console.warn(
+      `fetchAllReportRows hit the ${MAX_ROWS}-row export cap for entity ${config.entity}; export may be truncated.`,
+    );
+  }
+  return all;
+}
+
 export function useRunReport(config: ReportConfig | null, enabled: boolean) {
   return useQuery({
     queryKey: ["report_results", config],

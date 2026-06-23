@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
   DollarSign,
@@ -9,8 +10,29 @@ import {
   UserCheck,
   UserPlus,
   UserMinus,
+  Search,
+  Star,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+
+// Per-user favorites live in localStorage (same lightweight personalization
+// the dashboard widgets use) — favoriting a report pins it to the top so the
+// "which of these cards do I want" hunt goes away.
+const FAV_KEY = "report_favorites";
+function loadFavorites(): Set<string> {
+  try {
+    const raw = localStorage.getItem(FAV_KEY);
+    if (raw) return new Set(JSON.parse(raw) as string[]);
+  } catch {
+    // ignore
+  }
+  return new Set();
+}
+function saveFavorites(favs: Set<string>) {
+  localStorage.setItem(FAV_KEY, JSON.stringify([...favs]));
+}
 
 /**
  * Standard Reports catalog — Medcurity's Salesforce-aligned reports.
@@ -136,7 +158,102 @@ const REPORTS: ReportCard[] = [
   },
 ];
 
+function ReportCardView({
+  r,
+  isFavorite,
+  onToggleFavorite,
+}: {
+  r: ReportCard;
+  isFavorite: boolean;
+  onToggleFavorite: (id: string) => void;
+}) {
+  const Icon = r.icon;
+  const isLive = r.status === "live";
+  const star = (
+    <button
+      type="button"
+      title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+      aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+      onClick={(e) => {
+        // Inside a Link — don't navigate when toggling the star.
+        e.preventDefault();
+        e.stopPropagation();
+        onToggleFavorite(r.id);
+      }}
+      className="shrink-0 p-1 text-muted-foreground hover:text-amber-500"
+    >
+      <Star
+        className={cn(
+          "h-4 w-4",
+          isFavorite && "fill-amber-400 text-amber-400",
+        )}
+      />
+    </button>
+  );
+  const inner = (
+    <Card
+      className={
+        isLive
+          ? "hover:shadow-md transition-shadow cursor-pointer h-full"
+          : "opacity-60 h-full"
+      }
+    >
+      <CardContent className="p-4 space-y-2">
+        <div className="flex items-start justify-between gap-2">
+          <div className="rounded-md bg-primary/10 p-2">
+            <Icon className="h-5 w-5 text-primary" />
+          </div>
+          <div className="flex items-center gap-1">
+            {!isLive && (
+              <span className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                Coming soon
+              </span>
+            )}
+            {star}
+          </div>
+        </div>
+        <div>
+          <h3 className="font-semibold text-sm">{r.title}</h3>
+          <p className="text-xs text-muted-foreground mt-1">{r.description}</p>
+          <p className="text-[10px] font-mono text-muted-foreground/70 mt-2">
+            /rest/v1/{r.apiView}
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+  return isLive ? (
+    <Link to={`/reports/standard/${r.id}`}>{inner}</Link>
+  ) : (
+    <div>{inner}</div>
+  );
+}
+
 export function StandardReports() {
+  const [search, setSearch] = useState("");
+  const [favorites, setFavorites] = useState<Set<string>>(loadFavorites);
+
+  const toggleFavorite = (id: string) => {
+    setFavorites((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      saveFavorites(next);
+      return next;
+    });
+  };
+
+  const q = search.trim().toLowerCase();
+  const matches = q
+    ? REPORTS.filter(
+        (r) =>
+          r.title.toLowerCase().includes(q) ||
+          r.description.toLowerCase().includes(q),
+      )
+    : REPORTS;
+  const favs = matches.filter((r) => favorites.has(r.id));
+  const rest = matches.filter((r) => !favorites.has(r.id));
+
   return (
     <div className="space-y-4 pt-4">
       <div className="rounded-md border bg-muted/30 p-4 text-sm flex items-start justify-between gap-4">
@@ -145,7 +262,7 @@ export function StandardReports() {
           <p className="text-muted-foreground">
             Pre-built reports aligned column-for-column with the legacy Salesforce reports.
             Each report is also available as a Supabase REST view for the financial spreadsheet
-            (see API column on each card).
+            (see API column on each card). Star the ones you use to pin them up top.
           </p>
         </div>
         <Link
@@ -156,50 +273,52 @@ export function StandardReports() {
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {REPORTS.map((r) => {
-          const Icon = r.icon;
-          const isLive = r.status === "live";
-          const inner = (
-            <Card
-              className={
-                isLive
-                  ? "hover:shadow-md transition-shadow cursor-pointer h-full"
-                  : "opacity-60 h-full"
-              }
-            >
-              <CardContent className="p-4 space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="rounded-md bg-primary/10 p-2">
-                    <Icon className="h-5 w-5 text-primary" />
-                  </div>
-                  {!isLive && (
-                    <span className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded">
-                      Coming soon
-                    </span>
-                  )}
-                </div>
-                <div>
-                  <h3 className="font-semibold text-sm">{r.title}</h3>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {r.description}
-                  </p>
-                  <p className="text-[10px] font-mono text-muted-foreground/70 mt-2">
-                    /rest/v1/{r.apiView}
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          );
-          return isLive ? (
-            <Link key={r.id} to={`/reports/standard/${r.id}`}>
-              {inner}
-            </Link>
-          ) : (
-            <div key={r.id}>{inner}</div>
-          );
-        })}
+      <div className="relative max-w-sm">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          placeholder="Search reports..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="pl-9"
+        />
       </div>
+
+      {matches.length === 0 ? (
+        <p className="text-sm text-muted-foreground py-8 text-center">
+          No reports match "{search}".
+        </p>
+      ) : (
+        <>
+          {favs.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                Favorites
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {favs.map((r) => (
+                  <ReportCardView
+                    key={r.id}
+                    r={r}
+                    isFavorite
+                    onToggleFavorite={toggleFavorite}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {rest.map((r) => (
+              <ReportCardView
+                key={r.id}
+                r={r}
+                isFavorite={false}
+                onToggleFavorite={toggleFavorite}
+              />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

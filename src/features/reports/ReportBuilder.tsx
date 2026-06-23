@@ -48,6 +48,7 @@ import {
   useSavedReports,
   useSavedReportFolders,
   useRunReport,
+  fetchAllReportRows,
   useCreateReport,
   useUpdateReport,
   useDeleteReport,
@@ -990,7 +991,9 @@ function ResultsTable({
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
           {count.toLocaleString()} result{count !== 1 ? "s" : ""}
-          {count > 1000 ? " (showing first 1,000)" : ""}
+          {count > 1000
+            ? ` (showing first 1,000 — export includes all ${count.toLocaleString()})`
+            : ""}
         </p>
 
         {hasChartableData && (
@@ -1600,6 +1603,32 @@ export function ReportBuilder() {
     isFetching: resultsFetching,
   } = useRunReport(queryConfig, hasRun);
 
+  // Exports must include EVERY row, not the 1,000-row display cap. Fetch
+  // the full result set on demand (with a busy state) so a "complete"
+  // CSV/XLSX can't silently drop most of the data.
+  const [exporting, setExporting] = useState(false);
+  const handleExport = useCallback(
+    async (kind: "csv" | "xlsx") => {
+      setExporting(true);
+      try {
+        const entity = getEntityDef(config.entity);
+        const visibleCols = config.columns
+          .map((key) => entity.columns.find((c) => c.key === key))
+          .filter((c): c is ColumnDef => !!c);
+        const rows = await fetchAllReportRows(config);
+        if (kind === "csv") exportToCSV(visibleCols, rows, config.entity);
+        else exportToXLSX(visibleCols, rows, config.entity);
+      } catch (err) {
+        toast.error(
+          "Export failed: " + (err instanceof Error ? err.message : String(err)),
+        );
+      } finally {
+        setExporting(false);
+      }
+    },
+    [config],
+  );
+
   const handleEntityChange = useCallback((entityKey: string) => {
     setConfig(makeDefaultConfig(entityKey));
     setHasRun(false);
@@ -1813,29 +1842,19 @@ export function ReportBuilder() {
                         <>
                           <Button
                             variant="outline"
-                            onClick={() => {
-                              const entity = getEntityDef(config.entity);
-                              const visibleCols = config.columns
-                                .map((key) => entity.columns.find((c) => c.key === key))
-                                .filter((c): c is ColumnDef => !!c);
-                              exportToCSV(visibleCols, results?.data ?? [], config.entity);
-                            }}
+                            disabled={exporting}
+                            onClick={() => handleExport("csv")}
                           >
                             <Download className="h-4 w-4 mr-1.5" />
-                            Export CSV
+                            {exporting ? "Exporting…" : "Export CSV"}
                           </Button>
                           <Button
                             variant="outline"
-                            onClick={() => {
-                              const entity = getEntityDef(config.entity);
-                              const visibleCols = config.columns
-                                .map((key) => entity.columns.find((c) => c.key === key))
-                                .filter((c): c is ColumnDef => !!c);
-                              exportToXLSX(visibleCols, results?.data ?? [], config.entity);
-                            }}
+                            disabled={exporting}
+                            onClick={() => handleExport("xlsx")}
                           >
                             <FileSpreadsheet className="h-4 w-4 mr-1.5" />
-                            Export Excel
+                            {exporting ? "Exporting…" : "Export Excel"}
                           </Button>
                         </>
                       )}
