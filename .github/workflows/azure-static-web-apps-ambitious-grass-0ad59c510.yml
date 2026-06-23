@@ -68,6 +68,9 @@ jobs:
           npx supabase functions deploy meddy-sweep
           npx supabase functions deploy meddy-weekly-report
           npx supabase functions deploy meddy-crawl
+          npx supabase functions deploy playbook-ai
+          npx supabase functions deploy playbook-smartlead
+          npx supabase functions deploy playbook-mailchimp
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ secrets.STAGING_SUPABASE_PROJECT_REF }}

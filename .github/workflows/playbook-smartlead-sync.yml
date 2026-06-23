@@ -1,0 +1,47 @@
+name: Playbook Smartlead Sync (cron)
+
+# Triggers the playbook-smartlead Edge Function's "sync" action daily so
+# campaign metrics (sent / open / click / replies) and status stay fresh
+# in Pulse without anyone clicking "Sync metrics" by hand.
+#
+# Same external-scheduler approach as sync-emails.yml. Target URL is
+# derived from SUPABASE_SYNC_URL by swapping the function name.
+#
+# NOTE: GitHub only runs `schedule:` triggers from the default branch
+# (main). On the Staging branch this workflow is effectively OFF until it
+# is merged to main at cutover.
+
+on:
+  schedule:
+    # Daily at 12:30 UTC.
+    - cron: "30 12 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: playbook-smartlead-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: POST sync to playbook-smartlead
+        env:
+          SUPABASE_SYNC_URL: ${{ secrets.SUPABASE_SYNC_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_SYNC_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "::error::SUPABASE_SYNC_URL and SUPABASE_SERVICE_ROLE_KEY repository secrets must be set."
+            exit 1
+          fi
+          PLAYBOOK_SL_URL="${SUPABASE_SYNC_URL/sync-emails/playbook-smartlead}"
+          curl -fsS --max-time 540 \
+            -X POST \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"action":"sync"}' \
+            "${PLAYBOOK_SL_URL}"
+          echo
+          echo "Smartlead metrics sync triggered."

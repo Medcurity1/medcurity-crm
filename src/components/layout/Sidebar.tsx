@@ -23,6 +23,7 @@ import {
   MessageSquarePlus,
   ExternalLink,
   Bot,
+  Megaphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PulseLogo } from "@/components/PulseLogo";
@@ -89,6 +90,9 @@ const navItems: NavItem[] = [
 ];
 
 const adminItems: NavItem[] = [
+  // Playbook = the AI marketing co-pilot ported from Nexus (weekly ideas +
+  // Smartlead cold-email campaigns + newsletters). Admin-only.
+  { to: "/playbook", icon: Megaphone, label: "Playbook", badge: { label: "Admin", className: ADMIN_BADGE } },
   // Leads = the admin-only working list / import drop zone. Kept the
   // "Leads" name (reps don't see it; admins manage + promote to Contacts).
   { to: "/leads", icon: UserPlus, label: "Leads", badge: { label: "Admin", className: ADMIN_BADGE } },
