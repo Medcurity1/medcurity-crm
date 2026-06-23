@@ -2,12 +2,14 @@
 // Smartlead + view metrics with deep links. The New Campaign wizard +
 // launch (Phase D) and analysis/adaptation (Phase E) land next.
 
-import { Megaphone, Download, RefreshCw, ExternalLink, Loader2 } from "lucide-react";
+import { useState } from "react";
+import { Megaphone, Download, RefreshCw, ExternalLink, Loader2, Plus } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { CampaignWizard } from "./CampaignWizard";
 import {
   useCampaigns,
   useSmartleadStatus,
@@ -28,10 +30,16 @@ export function CampaignsTab() {
   const importMut = useImportCampaigns();
   const syncMut = useSyncCampaigns();
   const busy = importMut.isPending || syncMut.isPending;
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   return (
     <div className="space-y-3 pt-4">
       <div className="flex items-center gap-2 flex-wrap">
+        {sl?.configured && (
+          <Button size="sm" onClick={() => setWizardOpen(true)}>
+            <Plus className="h-4 w-4 mr-1" /> New Campaign
+          </Button>
+        )}
         {sl?.configured ? (
           <>
             <Button size="sm" onClick={() => importMut.mutate()} disabled={busy}>
@@ -105,6 +113,8 @@ export function CampaignsTab() {
           );
         })
       )}
+
+      <CampaignWizard open={wizardOpen} onOpenChange={setWizardOpen} />
     </div>
   );
 }

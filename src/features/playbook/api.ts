@@ -217,3 +217,127 @@ export const useSyncCampaigns = () => useSmartleadAction("sync");
 export function smartleadUrl(id: number | null): string | null {
   return id ? `https://app.smartlead.ai/app/email-campaign/${id}/analytics` : null;
 }
+
+// ---------------------------------------------------------------------------
+// Campaign wizard — AI authoring + launch (Phase D)
+// ---------------------------------------------------------------------------
+
+export interface CampaignSequenceEmail {
+  seq_number: number;
+  delay_days: number;
+  subject: string;
+  body_html: string;
+  body_preview?: string;
+}
+export interface GeneratedCampaign {
+  campaign_name: string;
+  target_audience: string;
+  sequence: CampaignSequenceEmail[];
+}
+export interface Recipient {
+  email: string;
+  first_name?: string;
+  last_name?: string;
+  company_name?: string;
+  contact_id?: string;
+  account_id?: string;
+}
+
+async function invokeAI<T>(body: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke("playbook-ai", { body });
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  return data as T;
+}
+
+export function useGenerateCampaign() {
+  return useMutation({
+    mutationFn: (description: string) =>
+      invokeAI<{ campaign: GeneratedCampaign }>({ action: "generate-campaign", description }),
+    onError: (e) => toast.error("Generation failed: " + (e as Error).message),
+  });
+}
+
+export function useSuggestCampaign() {
+  return useMutation({
+    mutationFn: (campaign: GeneratedCampaign) =>
+      invokeAI<{ suggestions: string }>({ action: "suggest-campaign", campaign }),
+    onError: (e) => toast.error("Suggestions failed: " + (e as Error).message),
+  });
+}
+
+export function useRegenerateEmail() {
+  return useMutation({
+    mutationFn: (p: { description?: string; campaign: GeneratedCampaign; seq_number: number; feedback?: string }) =>
+      invokeAI<{ email: { subject: string; body_html: string; body_preview?: string } }>({
+        action: "regenerate-email",
+        ...p,
+      }),
+    onError: (e) => toast.error("Rewrite failed: " + (e as Error).message),
+  });
+}
+
+export function useEmailAccounts() {
+  return useQuery({
+    queryKey: ["playbook", "email-accounts"],
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "email-accounts" },
+      });
+      if (error) throw error;
+      return (data?.accounts ?? []) as Array<{ id: number; from_email?: string; from_name?: string }>;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useLaunchCampaign() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: {
+      campaign_name: string;
+      target_audience?: string;
+      sequence: CampaignSequenceEmail[];
+      recipients: Recipient[];
+      email_account_id?: number;
+      source_idea_id?: string;
+      autoStart?: boolean;
+      adaptiveEnabled?: boolean;
+      owner_id?: string;
+    }) => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "launch", ...p },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as { smartlead_campaign_id: number; auto_started: boolean; leads_added: number };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] });
+      qc.invalidateQueries({ queryKey: ["playbook", "ideas"] });
+    },
+    onError: (e) => toast.error("Launch failed: " + (e as Error).message),
+  });
+}
+
+/** Recipients = the (non-archived, contactable) contacts carrying a tag. */
+export async function fetchRecipientsByTag(tagId: string): Promise<Recipient[]> {
+  const { data, error } = await supabase
+    .from("contacts")
+    .select("id, first_name, last_name, email, account_id, do_not_contact, no_longer_employed, account:accounts!account_id(name), contact_tags!inner(tag_id)")
+    .eq("contact_tags.tag_id", tagId)
+    .is("archived_at", null)
+    .not("email", "is", null)
+    .limit(5000);
+  if (error) throw error;
+  return (data ?? [])
+    .filter((c: Record<string, unknown>) => !c.do_not_contact && !c.no_longer_employed && c.email)
+    .map((c: Record<string, unknown>) => ({
+      email: c.email as string,
+      first_name: (c.first_name as string) ?? "",
+      last_name: (c.last_name as string) ?? "",
+      company_name: ((c.account as { name?: string } | null)?.name) ?? "",
+      contact_id: c.id as string,
+      account_id: (c.account_id as string) ?? undefined,
+    }));
+}
