@@ -5,6 +5,8 @@ import type {
   PlaybookTrainingNote,
   PlaybookIdea,
   PlaybookCampaign,
+  Newsletter,
+  NewsletterType,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -357,6 +359,146 @@ export function useAnalyzeCampaign() {
       }
     },
     onError: (e) => toast.error("Analysis failed: " + (e as Error).message),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Newsletters (Mailchimp) — Phase G
+// ---------------------------------------------------------------------------
+
+async function invokeMailchimp<T>(body: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke("playbook-mailchimp", { body });
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  return data as T;
+}
+
+export function useMailchimpStatus() {
+  return useQuery({
+    queryKey: ["playbook", "mailchimp-status"],
+    queryFn: () => invokeMailchimp<{ configured: boolean }>({ action: "status" }),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useNewsletters(type?: NewsletterType | "all") {
+  return useQuery({
+    queryKey: ["playbook", "newsletters", type ?? "all"],
+    queryFn: async () => {
+      const body: Record<string, unknown> = { action: "list" };
+      if (type && type !== "all") body.type = type;
+      const data = await invokeMailchimp<{ newsletters: Newsletter[] }>(body);
+      return data.newsletters ?? [];
+    },
+  });
+}
+
+/** Fetch a single newsletter incl. html_content (on demand for the editor). */
+export function useNewsletter(id: string | null) {
+  return useQuery({
+    queryKey: ["playbook", "newsletter", id],
+    enabled: !!id,
+    queryFn: async () => {
+      const data = await invokeMailchimp<{ newsletter: Newsletter }>({ action: "get", id });
+      return data.newsletter;
+    },
+  });
+}
+
+function useMailchimpRead(action: "ingest" | "sync") {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => invokeMailchimp<Record<string, number>>({ action }),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["playbook", "newsletters"] });
+      if (action === "ingest") toast.success(`Ingested ${r.ingested ?? 0} new, skipped ${r.skipped ?? 0}.`);
+      else toast.success(`Synced ${r.synced ?? 0} newsletters.`);
+    },
+    onError: (e) => toast.error(`Mailchimp ${action} failed: ` + (e as Error).message),
+  });
+}
+export const useIngestNewsletters = () => useMailchimpRead("ingest");
+export const useSyncNewsletters = () => useMailchimpRead("sync");
+
+export function useGenerateStyle() {
+  return useMutation({
+    mutationFn: (type: NewsletterType) =>
+      invokeMailchimp<{ type: string; source_count: number; length: number }>({ action: "generate-style", type }),
+    onSuccess: (r) => toast.success(`Style guide ready (from ${r.source_count} past issues).`),
+    onError: (e) => toast.error("Style guide failed: " + (e as Error).message),
+  });
+}
+
+export function useGenerateNewsletterDraft() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: { type: NewsletterType; user_notes?: string }) =>
+      invokeMailchimp<{ draft_id: string; subject: string; preview_text: string; html: string }>({
+        action: "draft",
+        ...p,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["playbook", "newsletters"] }),
+    onError: (e) => toast.error("Draft failed: " + (e as Error).message),
+  });
+}
+
+export function useReviseNewsletter() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: { id: string; instruction: string }) =>
+      invokeMailchimp<{ id: string; subject: string; preview_text: string; html: string }>({
+        action: "revise",
+        ...p,
+      }),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["playbook", "newsletter", r.id] });
+      qc.invalidateQueries({ queryKey: ["playbook", "newsletters"] });
+    },
+    onError: (e) => toast.error("Revise failed: " + (e as Error).message),
+  });
+}
+
+export function useSaveNewsletterHtml() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: { id: string; html?: string; subject?: string; preview_text?: string }) =>
+      invokeMailchimp<{ success: boolean }>({ action: "save-html", ...p }),
+    onSuccess: (_r, p) => {
+      qc.invalidateQueries({ queryKey: ["playbook", "newsletter", p.id] });
+      qc.invalidateQueries({ queryKey: ["playbook", "newsletters"] });
+      toast.success("Saved.");
+    },
+    onError: (e) => toast.error("Save failed: " + (e as Error).message),
+  });
+}
+
+export function usePushNewsletterToMailchimp() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      invokeMailchimp<{
+        success: boolean;
+        campaign_id: string;
+        url: string;
+        recipient_count: number | null;
+        audience_label: string;
+        recommended_send: { date_iso: string; label: string; time_label: string } | null;
+        error?: string;
+      }>({ action: "push-to-mailchimp", id }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["playbook", "newsletters"] }),
+    onError: (e) => toast.error("Push to Mailchimp failed: " + (e as Error).message),
+  });
+}
+
+export function useDeleteNewsletter() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => invokeMailchimp<{ success: boolean }>({ action: "delete", id }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["playbook", "newsletters"] });
+      toast.success("Draft deleted.");
+    },
+    onError: (e) => toast.error("Delete failed: " + (e as Error).message),
   });
 }
 

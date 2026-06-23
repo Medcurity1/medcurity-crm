@@ -67,6 +67,24 @@ export interface PlaybookTrainingNote {
   created_at: string;
 }
 
+export type NewsletterType = "report" | "partner" | "unclassified";
+export type NewsletterStatus = "draft" | "mailchimp_draft" | "sent";
+
+export interface Newsletter {
+  id: string;
+  mailchimp_campaign_id: string | null;
+  newsletter_type: NewsletterType;
+  subject: string | null;
+  preview_text: string | null;
+  from_name: string | null;
+  send_time: string | null;
+  status: NewsletterStatus;
+  html_content?: string | null;
+  metrics: Record<string, string> | null;
+  source: string;
+  updated_at: string;
+}
+
 export interface CampaignAdaptation {
   id: string;
   campaign_id: string;
