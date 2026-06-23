@@ -24,6 +24,20 @@ begin;
 -- "A is partner of B" and "B is partner of A" are contradictory and both
 -- currently insert. Treat the pair as unordered so only ONE relationship
 -- between two accounts can exist, in whichever direction was entered first.
+--
+-- First clear any pre-existing reverse-direction duplicates (e.g. both
+-- A->B and B->A from the legacy partner_account backfill in
+-- 20260422000005) so the unique index can actually build on real data —
+-- otherwise CREATE UNIQUE INDEX aborts the whole migration. Keeps the
+-- earliest physical row of each unordered pair. No-op when there are none.
+delete from public.account_partners a
+  using public.account_partners b
+ where a.ctid > b.ctid
+   and least(a.partner_account_id, a.member_account_id)
+       = least(b.partner_account_id, b.member_account_id)
+   and greatest(a.partner_account_id, a.member_account_id)
+       = greatest(b.partner_account_id, b.member_account_id);
+
 create unique index if not exists ux_account_partners_unordered_pair
   on public.account_partners (
     least(partner_account_id, member_account_id),
