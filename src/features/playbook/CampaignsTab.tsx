@@ -3,7 +3,7 @@
 // launch (Phase D) and analysis/adaptation (Phase E) land next.
 
 import { useState } from "react";
-import { Megaphone, Download, RefreshCw, ExternalLink, Loader2, Plus } from "lucide-react";
+import { Megaphone, Download, RefreshCw, ExternalLink, Loader2, Plus, Trash2 } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +16,7 @@ import {
   useImportCampaigns,
   useSyncCampaigns,
   useAnalyzeCampaign,
+  useDeleteCampaign,
   smartleadUrl,
 } from "./api";
 
@@ -31,6 +32,7 @@ export function CampaignsTab() {
   const importMut = useImportCampaigns();
   const syncMut = useSyncCampaigns();
   const analyze = useAnalyzeCampaign();
+  const del = useDeleteCampaign();
   const busy = importMut.isPending || syncMut.isPending;
   const [wizardOpen, setWizardOpen] = useState(false);
 
@@ -120,6 +122,20 @@ export function CampaignsTab() {
                     <Badge variant="secondary" className="capitalize">
                       {STATUS_LABEL[c.status] ?? c.status}
                     </Badge>
+                    {c.status === "planned" && (
+                      <button
+                        type="button"
+                        title="Delete campaign"
+                        className="p-1 text-muted-foreground hover:text-destructive"
+                        onClick={() => {
+                          if (confirm(`Delete "${c.title}"? This removes it here and in Smartlead.`)) {
+                            del.mutate({ id: c.id, smartlead_campaign_id: c.smartlead_campaign_id });
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
                 {a && (

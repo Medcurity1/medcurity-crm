@@ -347,6 +347,16 @@ Deno.serve(async (req) => {
     if (action === "import") return json(await importCampaigns());
     if (action === "sync") return json(await syncCampaigns());
     if (action === "launch") return json(await launch(body as unknown as LaunchInput));
+    if (action === "delete-campaign") {
+      // Delete a campaign in Smartlead AND remove the Pulse row. Used to
+      // discard a draft. Smartlead delete is best-effort (a campaign may
+      // already be gone); the Pulse row is always removed.
+      const pulseId = body.id as string;
+      const slId = body.smartlead_campaign_id as number | undefined;
+      if (slId) { try { await smartleadFetch(`/campaigns/${slId}`, { method: "DELETE" }); } catch { /* best-effort */ } }
+      if (pulseId) await svc.from("playbook_campaigns").delete().eq("id", pulseId);
+      return json({ success: true });
+    }
     return json({ error: `Unknown action: ${action}` }, 400);
   } catch (e) {
     return json({ error: (e as Error).message }, 500);

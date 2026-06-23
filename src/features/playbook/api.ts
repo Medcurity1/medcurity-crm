@@ -213,6 +213,26 @@ function useSmartleadAction(action: "import" | "sync") {
 export const useImportCampaigns = () => useSmartleadAction("import");
 export const useSyncCampaigns = () => useSmartleadAction("sync");
 
+/** Delete a campaign (Smartlead + Pulse). Used to discard a draft. */
+export function useDeleteCampaign() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (c: { id: string; smartlead_campaign_id: number | null }) => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "delete-campaign", id: c.id, smartlead_campaign_id: c.smartlead_campaign_id },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] });
+      toast.success("Campaign deleted.");
+    },
+    onError: (e) => toast.error("Delete failed: " + (e as Error).message),
+  });
+}
+
 /** Deep link to a campaign in the Smartlead app. */
 export function smartleadUrl(id: number | null): string | null {
   return id ? `https://app.smartlead.ai/app/email-campaign/${id}/analytics` : null;
