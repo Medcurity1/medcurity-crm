@@ -19,6 +19,13 @@ export function typeLabel(type: string): string {
 export const stripEm = (s: string | null): string => (s == null ? "" : String(s).replace(/—/g, ", "));
 export const fixSpacing = (s: string | null): string =>
   s == null ? "" : String(s).replace(/\s+([,;:.!?])(?!\d)/g, "$1");
+// Newsletters should never have underlined text. A stray (often unclosed) <u>
+// from the model underlines everything after it. Strip <u>/</u> tags and any
+// inline text-decoration:underline so the body never renders underlined.
+export const stripUnderline = (s: string | null): string =>
+  s == null ? "" : String(s)
+    .replace(/<\/?u(\s[^>]*)?>/gi, "")
+    .replace(/text-decoration\s*:\s*underline\s*;?/gi, "");
 
 export interface Chrome {
   headerHtml: string;
@@ -179,6 +186,7 @@ export function buildDraftPrompt(input: DraftPromptInput): { prompt: string; use
     "14. Do NOT repeat topics in the recent newsletters list unless it is an obvious follow-up.\n" +
     "15. Use " + input.sendDateLong + " (or " + input.monthYear + ") as the date reference, not today.\n" +
     "16. No em dashes anywhere.\n" +
+    "16b. NEVER underline text. Do not use <u> tags or text-decoration:underline anywhere. Emphasis is bold (sparingly) or color; CTAs are styled buttons (rule 7), not underlined links.\n" +
     "17. PUNCTUATION: never put a space before a comma, period, semicolon, colon, exclamation, or question mark. Punctuation hugs the word that comes before it.\n" +
     "18. The [PREVIEW] line must be a real complete sentence between 50 and 110 characters that complements (does not repeat) the subject. A single word or stub like \"Why\" is invalid.\n" +
     "19. DO NOT add a podcast section, a \"recent episodes\" / \"latest from the podcast\" block, or any recurring section the user did not ask for. The Medcurity podcast is on hiatus. Never reference it or invent episode titles, guests, dates, or links. Only include sections backed by the references, the user notes, or real web_search results. Never invent a section just to fill space.\n" +
@@ -224,7 +232,7 @@ export function parseDraftResult(fullText: string, useSplit: boolean, chrome: Ch
     // Clean the BODY only — the chrome is reattached byte-for-byte and must
     // stay pristine, or a later revise can't match it (chrome-split breaks
     // and revise has to regenerate the whole newsletter).
-    body = fixSpacing(stripEm(body));
+    body = fixSpacing(stripEm(stripUnderline(body)));
     const safeBody =
       '<table border="0" cellpadding="0" cellspacing="0" width="100%" align="center" style="font-weight:400;"><tr><td style="font-weight:400;font-family:Helvetica,Arial,sans-serif;color:#3a3a3a;">' +
       body + "</td></tr></table>";
@@ -238,10 +246,12 @@ export function parseDraftResult(fullText: string, useSplit: boolean, chrome: Ch
     html = htmlMatch ? htmlMatch[1].trim() : fullText;
     html = html.replace(/^```html\s*\n?/i, "").replace(/\n?```\s*$/, "").trim();
     // No chrome here, so cleaning the whole thing is safe.
-    html = fixSpacing(stripEm(html));
+    html = fixSpacing(stripEm(stripUnderline(html)));
   }
 
-  subject = fixSpacing(stripEm(subject));
+  // Subject keeps the AI's exact formatting (the prompt already bans em dashes);
+  // running stripEm/fixSpacing on it mangled intentional dash separators in the
+  // subject line (e.g. "Report — June" -> "Report,  June"). Body/preview stay cleaned.
   previewText = fixSpacing(stripEm(previewText));
 
   // Derive a preview from the body if the AI returned a stub.
@@ -340,7 +350,7 @@ export function parseReviseResult(
     // Clean the BODY only; keep the reattached chrome pristine so the next
     // revise can still chrome-match it. Same pipeline as parseDraftResult
     // (stripEm THEN fixSpacing) so revised issues read identically to drafts.
-    newBody = fixSpacing(stripEm(newBody));
+    newBody = fixSpacing(stripEm(stripUnderline(newBody)));
     html = chrome.headerHtml + "\n" + newBody + "\n" + chrome.footerHtml;
   } else {
     const subjMatch = fullText.match(/\[SUBJECT\]\s*([\s\S]*?)\s*\[(?:PREVIEW|HTML)\]/);
@@ -350,9 +360,10 @@ export function parseReviseResult(
     previewText = previewMatch ? previewMatch[1].trim() : previewText;
     html = htmlMatch ? htmlMatch[1].trim() : html;
     html = html.replace(/^```html\s*\n?/i, "").replace(/\n?```\s*$/, "").trim();
-    html = fixSpacing(stripEm(html));
+    html = fixSpacing(stripEm(stripUnderline(html)));
   }
-  subject = fixSpacing(stripEm(subject));
+  // Subject keeps the AI's exact formatting (see parseDraftResult) — don't mangle
+  // intentional dash separators. Body/preview stay cleaned.
   previewText = fixSpacing(stripEm(previewText));
   return { subject, previewText, html };
 }

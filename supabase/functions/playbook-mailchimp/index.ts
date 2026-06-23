@@ -87,8 +87,16 @@ async function ingest() {
   let skippedUnclassified = 0;
   let contentFailed = 0;
   let insertFailed = 0;
+  let moreRemaining = false;
   const classified = { report: 0, partner: 0 };
   const pageSize = 100;
+  // Each NEW newsletter costs 2 serial Mailchimp fetches (report + full HTML).
+  // On a large account (prod has the full history), ingesting them all in one
+  // call blows the 150s edge ceiling — which is why the first prod run errored.
+  // Cap NEW ingests per run; already-ingested ones are skipped cheaply, so
+  // clicking Ingest again (or the daily sync) drains the backlog a chunk at a
+  // time and every run finishes well under the limit.
+  const MAX_NEW_PER_RUN = 25;
   // Scan up to 5 pages (500 campaigns) to find the two newsletter types.
   // We only ingest "The Medcurity Report" + "Partner Exclusive" — the
   // account also has many unrelated one-off blasts (classified
@@ -138,7 +146,12 @@ async function ingest() {
       }, { onConflict: "mailchimp_campaign_id", ignoreDuplicates: true });
       if (insErr) insertFailed++;
       else ingested++;
+
+      // Stay under the 150s edge ceiling: stop after a safe number of NEW
+      // ingests and tell the caller to run again to continue.
+      if (ingested >= MAX_NEW_PER_RUN) { moreRemaining = true; break; }
     }
+    if (moreRemaining) break;
     if (campaigns.length < pageSize) break;
   }
   return {
@@ -148,6 +161,7 @@ async function ingest() {
     skipped_unclassified: skippedUnclassified,
     content_failed: contentFailed,
     insert_failed: insertFailed,
+    more_remaining: moreRemaining,
     classified,
   };
 }
@@ -494,6 +508,9 @@ async function pushToMailchimp(id: string) {
     web_id: created.web_id ?? null,
     url,
     recipient_count: recipientCount,
+    // Loud signal when the copied audience didn't actually attach (Mailchimp
+    // shows 0/no recipients) — so "no audience" can never fail silently.
+    audience_empty: !recipientCount,
     audience_label: label,
     recommended_send: recommendedSend,
     segment_warning: segmentWarning,
