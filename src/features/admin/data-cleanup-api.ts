@@ -132,6 +132,14 @@ export function useMergeAccounts() {
         p_reason: args.reason ?? null,
       });
       if (error) throw error;
+      // Smart-fill: the merge keeps the survivor's fields; this fills its
+      // BLANK profile fields (phone, address, etc.) from the losers so nothing
+      // useful is lost. Non-critical — a failure here doesn't undo the merge.
+      const { error: fillError } = await supabase.rpc("account_fill_blanks", {
+        p_survivor_id: args.survivorId,
+        p_loser_ids: args.loserIds,
+      });
+      if (fillError) console.error("account_fill_blanks failed", fillError);
       return data as {
         merge_id: string;
         survivor_id: string;
@@ -146,6 +154,61 @@ export function useMergeAccounts() {
       qc.invalidateQueries({ queryKey: ["accounts"] });
       qc.invalidateQueries({ queryKey: ["contacts"] });
       qc.invalidateQueries({ queryKey: ["opportunities"] });
+    },
+  });
+}
+
+/* ─────────────────── Dismiss "not a duplicate" groups ─────────────────── */
+
+export function useDismissAccountDuplicate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { accountIds: string[]; reason?: string }) => {
+      const { data, error } = await supabase.rpc("dismiss_account_duplicate_group", {
+        p_account_ids: args.accountIds,
+        p_reason: args.reason ?? null,
+      });
+      if (error) throw error;
+      return data as string;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["data-cleanup", "account-dups"] });
+      qc.invalidateQueries({ queryKey: ["data-cleanup", "account-dismissals"] });
+    },
+  });
+}
+
+export interface AccountDuplicateDismissalRow {
+  id: string;
+  group_account_ids: string[];
+  group_key: string | null;
+  account_names: string[] | null;
+  reason: string | null;
+  dismissed_by_name: string | null;
+  dismissed_at: string;
+}
+
+export function useAccountDuplicateDismissals() {
+  return useQuery({
+    queryKey: ["data-cleanup", "account-dismissals"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("list_account_duplicate_dismissals");
+      if (error) throw error;
+      return (data ?? []) as AccountDuplicateDismissalRow[];
+    },
+  });
+}
+
+export function useRestoreAccountDuplicateDismissal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.rpc("restore_account_duplicate_dismissal", { p_id: id });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["data-cleanup", "account-dups"] });
+      qc.invalidateQueries({ queryKey: ["data-cleanup", "account-dismissals"] });
     },
   });
 }
