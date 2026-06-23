@@ -1,7 +1,8 @@
 // Campaigns — admin-only AI marketing/outreach hub (ported from Nexus as
-// "Playbook"). Sub-tabs: Playbook (weekly AI ideas), Email Campaigns (Smartlead
-// cold email), Newsletters (Mailchimp). A Training slide-over feeds the AI.
-// (Tab `value`s stay ideas/campaigns/newsletters for stable deep-links.)
+// "Playbook"). Sub-tabs (in order): Campaigns (sequences — email + calls +
+// LinkedIn; the default), Playbook (weekly AI ideas), Newsletters (Mailchimp).
+// A Training slide-over feeds the AI.
+// (Tab `value`s stay campaigns/ideas/newsletters for stable deep-links.)
 
 import { useState } from "react";
 import { Brain } from "lucide-react";
@@ -29,17 +30,17 @@ export function PlaybookPage() {
         }
       />
 
-      <Tabs defaultValue="ideas">
+      <Tabs defaultValue="campaigns">
         <TabsList>
+          <TabsTrigger value="campaigns">Campaigns</TabsTrigger>
           <TabsTrigger value="ideas">Playbook</TabsTrigger>
-          <TabsTrigger value="campaigns">Email Campaigns</TabsTrigger>
           <TabsTrigger value="newsletters">Newsletters</TabsTrigger>
         </TabsList>
-        <TabsContent value="ideas">
-          <IdeasTab />
-        </TabsContent>
         <TabsContent value="campaigns">
           <CampaignsTab />
+        </TabsContent>
+        <TabsContent value="ideas">
+          <IdeasTab />
         </TabsContent>
         <TabsContent value="newsletters">
           <NewslettersTab />
