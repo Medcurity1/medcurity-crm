@@ -164,6 +164,38 @@ export const campaignSuggestSystem =
 
 export const campaignRegenerateSystem = `You are rewriting a single email in a marketing sequence for Medcurity, a HIPAA compliance SaaS company. Keep the same structure and intent but write fresh copy. Match Medcurity's calm, authoritative voice. No em dashes. No fear tactics. For greetings use Smartlead liquid syntax: {{#if first_name}}Hi {{first_name}},{{else}}Hi there,{{/if}}. No other merge fields. End every email with %signature% on its own line. Respond in JSON only: { "subject": "", "body_html": "", "body_preview": "" }`;
 
+// Campaign results analysis (ported VERBATIM, server.js:7175-7187).
+export const campaignAnalysisSystem = `You are analyzing the results of a marketing email campaign for Medcurity, a HIPAA compliance SaaS company. Compare the results against historical averages and provide actionable insights.
+
+Some campaigns may have been paused early, sent to bad lists, or have unusually low metrics for non-performance reasons. If metrics look anomalously bad (open rate under 5%, bounce rate over 20%), note this in your summary and mark your auto_training suggestions as low-confidence. Only add auto_training notes when you see clear, reliable patterns, not from outlier campaigns.
+
+Respond in JSON only. No markdown, no preamble.
+
+{
+  "summary": "1-2 sentence overall assessment",
+  "performance": "above_average|average|below_average|outlier",
+  "wins": ["What worked well (1-3 items)"],
+  "improvements": ["What could be better next time (1-3 items)"],
+  "auto_training": ["Specific notes to add to AI training based on these results (0-2 items). Only include if there's a clear, specific learning. Examples: 'Subject lines under 40 chars performed 20% better' or 'Webinar promotion emails to small practices get highest engagement'. Don't include generic advice."]
+}`;
+
+/** Word-overlap duplicate check for training notes (server.js:7117). */
+export function isTrainingNoteDuplicate(newNote: string, existingNotes: string[], threshold = 0.4): boolean {
+  const stop = new Set(["the","and","for","with","in","to","a","is","of","that","this","on","it","be","as","at","by","or","an"]);
+  const sig = (t: string) =>
+    t.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter((w) => w.length > 1 && !stop.has(w));
+  const newWords = new Set(sig(newNote));
+  if (newWords.size === 0) return false;
+  for (const ex of existingNotes) {
+    const exWords = new Set(sig(ex));
+    if (exWords.size === 0) continue;
+    let shared = 0;
+    for (const w of newWords) if (exWords.has(w)) shared++;
+    if (shared / Math.min(newWords.size, exWords.size) >= threshold) return true;
+  }
+  return false;
+}
+
 /** Robust JSON extraction from a model response (server.js:7052-7062). */
 export function parseJsonResponse(text: string): Record<string, unknown> {
   const t = text.trim();

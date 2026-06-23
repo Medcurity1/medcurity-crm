@@ -15,6 +15,7 @@ import {
   useSmartleadStatus,
   useImportCampaigns,
   useSyncCampaigns,
+  useAnalyzeCampaign,
   smartleadUrl,
 } from "./api";
 
@@ -29,6 +30,7 @@ export function CampaignsTab() {
   const { data: sl } = useSmartleadStatus();
   const importMut = useImportCampaigns();
   const syncMut = useSyncCampaigns();
+  const analyze = useAnalyzeCampaign();
   const busy = importMut.isPending || syncMut.isPending;
   const [wizardOpen, setWizardOpen] = useState(false);
 
@@ -81,33 +83,55 @@ export function CampaignsTab() {
       ) : (
         campaigns.map((c) => {
           const url = smartleadUrl(c.smartlead_campaign_id);
+          const a = c.analysis_json as {
+            performance?: string; summary?: string; wins?: string[]; improvements?: string[];
+          } | null;
           return (
             <Card key={c.id}>
-              <CardContent className="p-4 flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h3 className="font-semibold text-sm truncate">{c.title}</h3>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {c.metrics?.sent != null ? `${c.metrics.sent} sent` : ""}
-                    {c.metrics?.openRate != null ? ` · ${c.metrics.openRate} open` : ""}
-                    {c.metrics?.clickRate != null ? ` · ${c.metrics.clickRate} click` : ""}
-                    {c.metrics?.replies != null ? ` · ${c.metrics.replies} replies` : ""}
-                  </p>
+              <CardContent className="p-4 space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="font-semibold text-sm truncate">{c.title}</h3>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {c.metrics?.sent != null ? `${c.metrics.sent} sent` : ""}
+                      {c.metrics?.openRate != null ? ` · ${c.metrics.openRate} open` : ""}
+                      {c.metrics?.clickRate != null ? ` · ${c.metrics.clickRate} click` : ""}
+                      {c.metrics?.replies != null ? ` · ${c.metrics.replies} replies` : ""}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {c.status === "complete" && !c.analyzed_at && (
+                      <Button
+                        size="sm" variant="outline" className="h-7 text-xs"
+                        disabled={analyze.isPending}
+                        onClick={() => analyze.mutate(c.id)}
+                      >
+                        {analyze.isPending && analyze.variables === c.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : "Analyze"}
+                      </Button>
+                    )}
+                    {url && (
+                      <a href={url} target="_blank" rel="noopener noreferrer"
+                        className="text-xs text-primary hover:underline inline-flex items-center gap-1">
+                        Smartlead <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                    <Badge variant="secondary" className="capitalize">
+                      {STATUS_LABEL[c.status] ?? c.status}
+                    </Badge>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {url && (
-                    <a
-                      href={url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-primary hover:underline inline-flex items-center gap-1"
-                    >
-                      Smartlead <ExternalLink className="h-3 w-3" />
-                    </a>
-                  )}
-                  <Badge variant="secondary" className="capitalize">
-                    {STATUS_LABEL[c.status] ?? c.status}
-                  </Badge>
-                </div>
+                {a && (
+                  <div className="rounded-md bg-muted/40 p-2 text-xs space-y-1">
+                    <p className="font-medium">
+                      AI analysis{a.performance ? ` · ${a.performance.replace(/_/g, " ")}` : ""}
+                    </p>
+                    {a.summary && <p className="text-muted-foreground">{a.summary}</p>}
+                    {a.wins?.length ? <p className="text-muted-foreground">✓ {a.wins.join("; ")}</p> : null}
+                    {a.improvements?.length ? <p className="text-muted-foreground">→ {a.improvements.join("; ")}</p> : null}
+                  </div>
+                )}
               </CardContent>
             </Card>
           );

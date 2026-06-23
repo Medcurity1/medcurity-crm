@@ -17,6 +17,8 @@ import {
   campaignGenerateSystem,
   campaignSuggestSystem,
   campaignRegenerateSystem,
+  campaignAnalysisSystem,
+  isTrainingNoteDuplicate,
   formatTrainingNotes,
   parseJsonResponse,
   callClaude,
@@ -246,6 +248,75 @@ async function regenerateEmail(p: {
   return { success: true, email: parseJsonResponse(text) };
 }
 
+/** Analyze a completed campaign vs historical averages; auto-add training. */
+async function analyzeCampaign(campaignId: string) {
+  const { data: ev } = await svc.from("playbook_campaigns").select("*").eq("id", campaignId).single();
+  if (!ev) throw new Error("Campaign not found");
+  if (ev.analyzed_at) return { already_analyzed: true, analysis: ev.analysis_json ?? {} };
+  const metrics = (ev.metrics ?? {}) as Record<string, string>;
+  if (!metrics.sent || parseInt(metrics.sent) === 0) throw new Error("No send data yet");
+
+  const { data: linked } = await svc
+    .from("playbook_ideas").select("title").eq("executed_campaign_id", campaignId).maybeSingle();
+
+  const { data: others } = await svc
+    .from("playbook_campaigns").select("metrics").eq("status", "complete").neq("id", campaignId);
+  let to = 0, on = 0, tc = 0, cn = 0, tb = 0, bn = 0;
+  for (const c of others ?? []) {
+    const m = (c.metrics ?? {}) as Record<string, string>;
+    const or = parseFloat(m.openRate), cr = parseFloat(m.clickRate);
+    if (!isNaN(or)) { to += or; on++; }
+    if (!isNaN(cr)) { tc += cr; cn++; }
+    const b = parseInt(m.bounces), s = parseInt(m.sent);
+    if (!isNaN(b) && !isNaN(s) && s > 0) { tb += (b / s) * 100; bn++; }
+  }
+  const avgOpen = on ? (to / on).toFixed(1) + "%" : "N/A";
+  const avgClick = cn ? (tc / cn).toFixed(1) + "%" : "N/A";
+  const avgBounce = bn ? (tb / bn).toFixed(1) + "%" : "N/A";
+
+  const user = `Campaign: ${ev.title}
+Sent: ${metrics.sent || "unknown"}
+Open Rate: ${metrics.openRate || "unknown"}
+Click Rate: ${metrics.clickRate || "unknown"}
+Replies: ${metrics.replies || "0"}
+Bounces: ${metrics.bounces || "0"}
+
+Email content from notes:
+${(ev.notes || "").substring(0, 1000)}
+
+Historical averages across all campaigns:
+Avg Open Rate: ${avgOpen}
+Avg Click Rate: ${avgClick}
+Avg Bounce Rate: ${avgBounce}
+
+Was this from a Playbook idea? ${linked ? "Yes: " + linked.title : "No"}`;
+
+  const text = await callClaude({
+    model: PLAYBOOK_FAST_MODEL, system: campaignAnalysisSystem, user, maxTokens: 1000, temperature: 0.7,
+  });
+  const analysis = parseJsonResponse(text);
+
+  let trainingAdded = 0;
+  const proposed = analysis.performance !== "outlier" && Array.isArray(analysis.auto_training)
+    ? (analysis.auto_training as string[]).filter((n) => typeof n === "string" && n.trim()).map((n) => n.trim())
+    : [];
+  if (proposed.length) {
+    const { data: existing } = await svc.from("playbook_training").select("note");
+    const existingNotes = (existing ?? []).map((r) => r.note as string);
+    for (const note of proposed) {
+      if (!isTrainingNoteDuplicate(note, existingNotes)) {
+        await svc.from("playbook_training").insert({ note, source: "campaign_result" });
+        existingNotes.push(note);
+        trainingAdded++;
+      }
+    }
+  }
+  await svc.from("playbook_campaigns")
+    .update({ analysis_json: analysis, analyzed_at: new Date().toISOString() })
+    .eq("id", campaignId);
+  return { success: true, analysis, training_added: trainingAdded };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -267,6 +338,9 @@ Deno.serve(async (req) => {
     }
     if (action === "regenerate-email") {
       return json(await regenerateEmail(body));
+    }
+    if (action === "analyze-campaign") {
+      return json(await analyzeCampaign(body.campaignId));
     }
     return json({ error: `Unknown action: ${action}` }, 400);
   } catch (e) {

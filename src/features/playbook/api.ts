@@ -320,6 +320,26 @@ export function useLaunchCampaign() {
   });
 }
 
+/** Analyze a completed campaign (AI insights + auto-training). */
+export function useAnalyzeCampaign() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (campaignId: string) =>
+      invokeAI<{ analysis: Record<string, unknown>; training_added?: number; already_analyzed?: boolean }>({
+        action: "analyze-campaign",
+        campaignId,
+      }),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] });
+      qc.invalidateQueries({ queryKey: ["playbook", "training"] });
+      if (!r.already_analyzed) {
+        toast.success(`Analyzed.${r.training_added ? ` Added ${r.training_added} training note(s).` : ""}`);
+      }
+    },
+    onError: (e) => toast.error("Analysis failed: " + (e as Error).message),
+  });
+}
+
 /** Recipients = the (non-archived, contactable) contacts carrying a tag. */
 export async function fetchRecipientsByTag(tagId: string): Promise<Recipient[]> {
   const { data, error } = await supabase
