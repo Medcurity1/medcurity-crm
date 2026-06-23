@@ -342,7 +342,9 @@ const ACCOUNT_FIELDS: Record<string, string> = {
   leadsource: "lead_source",
   "lead source detail": "lead_source_detail",
   "partner account": "partner_account",
-  "referring partner": "partner_account",
+  // Referring Partner has its own column now — previously it collapsed
+  // into partner_account, silently overwriting whichever loaded first.
+  "referring partner": "referring_partner",
   "partner prospect": "partner_prospect",
   "partner source": "lead_source_detail",
   "account source": "lead_source",

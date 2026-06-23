@@ -187,13 +187,43 @@ export function PartnerRelationshipsImport() {
         `  ${records.length.toLocaleString()} unique pairs (skipped ${skippedDeleted} deleted, ${skippedSelfRef} self-refs, ${skippedNoMatch} no-match)`,
       );
 
+      // Skip pairs that already exist in EITHER direction. The exact-pair
+      // unique constraint only catches same-direction dupes; a reverse
+      // pair from a prior run would otherwise hit the unordered-pair
+      // unique index and surface as an error instead of a duplicate.
+      log("Checking existing partnerships…");
+      const existingPairs = new Set<string>();
+      {
+        let exFrom = 0;
+        const exPage = 1000;
+        while (existingPairs.size < 1_000_000) {
+          const { data: ex, error: exErr } = await supabase
+            .from("account_partners")
+            .select("partner_account_id, member_account_id")
+            .range(exFrom, exFrom + exPage - 1);
+          if (exErr) throw exErr;
+          const exRows = (ex ?? []) as { partner_account_id: string; member_account_id: string }[];
+          for (const e of exRows) {
+            existingPairs.add(`${e.partner_account_id}|${e.member_account_id}`);
+            existingPairs.add(`${e.member_account_id}|${e.partner_account_id}`);
+          }
+          if (exRows.length < exPage) break;
+          exFrom += exPage;
+        }
+      }
+      const toInsert = records.filter(
+        (r) => !existingPairs.has(`${r.partner_account_id}|${r.member_account_id}`),
+      );
+      const skippedExisting = records.length - toInsert.length;
+      log(`  ${toInsert.length.toLocaleString()} to insert (${skippedExisting} already exist in either direction)`);
+
       log("Inserting…");
       const BATCH = 500;
       let inserted = 0;
-      let duplicates = 0;
+      let duplicates = skippedExisting;
       let errors = 0;
-      for (let i = 0; i < records.length; i += BATCH) {
-        const chunk = records.slice(i, i + BATCH);
+      for (let i = 0; i < toInsert.length; i += BATCH) {
+        const chunk = toInsert.slice(i, i + BATCH);
         const { error, count } = await supabase
           .from("account_partners")
           .upsert(chunk, {
@@ -209,7 +239,7 @@ export function PartnerRelationshipsImport() {
           inserted += ins;
           duplicates += chunk.length - ins;
         }
-        log(`  ${(i + chunk.length).toLocaleString()}/${records.length.toLocaleString()}`);
+        log(`  ${(i + chunk.length).toLocaleString()}/${toInsert.length.toLocaleString()}`);
       }
 
       const finalStats: ImportStats = {

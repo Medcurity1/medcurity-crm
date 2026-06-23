@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, Network, ArrowUp, ArrowDown } from "lucide-react";
+import { Plus, Trash2, Network, ArrowUp, ArrowDown, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import type { AccountPartnership } from "@/types/crm";
@@ -45,7 +45,7 @@ export function AccountPartners({ accountId }: { accountId: string }) {
   // browser since partnerships are <100 rows even for the largest
   // umbrella partner. Joins both account references so the table
   // can render names + status without a per-row lookup.
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["account_partners", accountId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -55,7 +55,10 @@ export function AccountPartners({ accountId }: { accountId: string }) {
           "partner_account:accounts!partner_account_id(id, name, account_type, lifecycle_status), " +
           "member_account:accounts!member_account_id(id, name, account_type, lifecycle_status)"
         )
-        .or(`partner_account_id.eq.${accountId},member_account_id.eq.${accountId}`);
+        .or(`partner_account_id.eq.${accountId},member_account_id.eq.${accountId}`)
+        // Guard against PostgREST's default 1000-row cap silently
+        // truncating a very large umbrella partner.
+        .range(0, 4999);
       if (error) throw error;
       return ((data ?? []) as unknown) as AccountPartnership[];
     },
@@ -71,6 +74,9 @@ export function AccountPartners({ accountId }: { accountId: string }) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["account_partners", accountId] });
+      // Also refresh the standalone /partners overview (member counts,
+      // umbrella/member membership) which keys off the same data.
+      qc.invalidateQueries({ queryKey: ["partners"] });
       toast.success("Partnership removed");
       setPendingDelete(null);
     },
@@ -84,14 +90,32 @@ export function AccountPartners({ accountId }: { accountId: string }) {
     return <div className="text-sm text-muted-foreground">Loading partnerships…</div>;
   }
 
-  // Split rows by which side this account is on. The same partnership
-  // can never appear in both lists (FK uniqueness on the pair) so a
-  // simple partition is fine.
+  // A failed fetch must NOT look like "no partners" — that misleads the
+  // user into thinking data was lost (and re-adding duplicates). Show an
+  // explicit error with a retry, mirroring the /partners list.
+  if (isError) {
+    return (
+      <div className="rounded-md border border-dashed p-8 text-center">
+        <AlertTriangle className="h-8 w-8 mx-auto text-muted-foreground/50 mb-2" />
+        <p className="text-sm text-muted-foreground mb-3">
+          Couldn't load partnerships — this is usually a momentary hiccup.
+        </p>
+        <Button size="sm" onClick={() => refetch()} disabled={isFetching}>
+          {isFetching ? "Retrying…" : "Try again"}
+        </Button>
+      </div>
+    );
+  }
+
+  // Split rows by which side this account is on. Also require the OTHER
+  // side's account to be present — an archived/RLS-hidden counterpart
+  // returns null and its row isn't rendered, so excluding it here keeps
+  // the header count in sync with the visible rows.
   const partnersOfThisAccount = (data ?? []).filter(
-    (p) => p.member_account_id === accountId
+    (p) => p.member_account_id === accountId && p.partner_account
   );
   const membersOfThisAccount = (data ?? []).filter(
-    (p) => p.partner_account_id === accountId
+    (p) => p.partner_account_id === accountId && p.member_account
   );
 
   const isEmpty =
@@ -152,9 +176,10 @@ export function AccountPartners({ accountId }: { accountId: string }) {
         open={addOpen}
         onOpenChange={setAddOpen}
         accountId={accountId}
-        onAdded={() =>
-          qc.invalidateQueries({ queryKey: ["account_partners", accountId] })
-        }
+        onAdded={() => {
+          qc.invalidateQueries({ queryKey: ["account_partners", accountId] });
+          qc.invalidateQueries({ queryKey: ["partners"] });
+        }}
       />
 
       <ConfirmDialog

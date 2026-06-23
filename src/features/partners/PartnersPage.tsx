@@ -49,7 +49,6 @@ export function PartnersPage() {
 
   const partners = result?.data;
   const totalCount = result?.count ?? 0;
-  const memberCount = result?.memberCount;
   const lastContact = result?.lastContact;
 
   const handleSearchChange = (value: string) => {
@@ -136,7 +135,7 @@ export function PartnersPage() {
           icon={Handshake}
           title="No partners found"
           description={
-            search || statusFilter.length > 0
+            search || statusFilter.length > 0 || roleFilter !== "all"
               ? "Try adjusting your search or filter"
               : "No partner accounts exist yet"
           }
@@ -173,10 +172,8 @@ export function PartnersPage() {
                       </Link>
                     </TableCell>
                     <TableCell className="text-right">
-                      {(memberCount?.get(account.id) ?? 0) > 0 ? (
-                        <span className="font-medium">
-                          {memberCount?.get(account.id) ?? 0}
-                        </span>
+                      {account.member_count > 0 ? (
+                        <span className="font-medium">{account.member_count}</span>
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
@@ -200,7 +197,7 @@ export function PartnersPage() {
                         : "—"}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {account.owner?.full_name ?? "Unassigned"}
+                      {account.owner_full_name ?? "Unassigned"}
                     </TableCell>
                   </TableRow>
                 ))}

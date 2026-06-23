@@ -69,6 +69,10 @@ export function AddPartnerDialog({
   );
   const [role, setRole] = useState("");
   const [searching, setSearching] = useState(false);
+  // Accounts already linked to this one (either direction) so the search
+  // results can mark them instead of dead-ending in an "already exists"
+  // toast after the user picks one.
+  const [linkedIds, setLinkedIds] = useState<Set<string>>(new Set());
 
   // Reset everything when the dialog closes — otherwise state leaks
   // across openings (saw selected=stale in QA).
@@ -81,6 +85,33 @@ export function AddPartnerDialog({
       setResults([]);
     }
   }, [open]);
+
+  // Load the set of accounts already partnered with this one (either
+  // direction) whenever the dialog opens.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("account_partners")
+        .select("partner_account_id, member_account_id")
+        .or(`partner_account_id.eq.${accountId},member_account_id.eq.${accountId}`)
+        .range(0, 4999);
+      if (cancelled) return;
+      const ids = new Set<string>();
+      for (const r of data ?? []) {
+        const other =
+          r.partner_account_id === accountId
+            ? r.member_account_id
+            : r.partner_account_id;
+        if (other) ids.add(other as string);
+      }
+      setLinkedIds(ids);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, accountId]);
 
   // Live search the accounts table. Keep results small so the
   // dropdown stays usable on touch screens; users can refine.
@@ -183,21 +214,31 @@ export function AddPartnerDialog({
             {/* Results dropdown */}
             {!selected && results.length > 0 && (
               <div className="rounded-md border max-h-60 overflow-y-auto">
-                {results.map((r) => (
-                  <button
-                    key={r.id}
-                    type="button"
-                    onClick={() => setSelected(r)}
-                    className="w-full text-left px-3 py-2 hover:bg-muted text-sm flex justify-between items-center"
-                  >
-                    <span className="font-medium">{r.name}</span>
-                    {r.account_type && (
-                      <span className="text-xs text-muted-foreground">
-                        {r.account_type}
-                      </span>
-                    )}
-                  </button>
-                ))}
+                {results.map((r) => {
+                  const alreadyLinked = linkedIds.has(r.id);
+                  return (
+                    <button
+                      key={r.id}
+                      type="button"
+                      disabled={alreadyLinked}
+                      onClick={() => !alreadyLinked && setSelected(r)}
+                      className="w-full text-left px-3 py-2 hover:bg-muted text-sm flex justify-between items-center disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                    >
+                      <span className="font-medium">{r.name}</span>
+                      {alreadyLinked ? (
+                        <span className="text-xs text-muted-foreground">
+                          Already linked
+                        </span>
+                      ) : (
+                        r.account_type && (
+                          <span className="text-xs text-muted-foreground">
+                            {r.account_type}
+                          </span>
+                        )
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             )}
             {!selected && search.length >= 2 && !searching && results.length === 0 && (

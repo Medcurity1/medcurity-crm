@@ -103,20 +103,18 @@ export interface AccountPartnership {
   member_account?:  { id: string; name: string; account_type: string | null; lifecycle_status: string | null } | null;
 }
 
-// Legacy interface — left here only as a stub so code that
-// imports the name doesn't break instantly. Marked deprecated;
-// use AccountPartnership above going forward.
-/** @deprecated use AccountPartnership */
-export interface AccountPartner {
-  id: string;
-  account_id: string;
-  partner_id: string;
-  relationship_role: string;
-  notes: string | null;
-  created_at: string;
-  // joined
-  partner?: unknown;
-  account?: { id: string; name: string };
+/**
+ * A row from the v_partner_accounts view: an Account plus the
+ * partnership rollups computed in Postgres (member count, whether it's
+ * an umbrella/member/top-level partner, and the owner's name). Powers
+ * the /partners list so it paginates server-side.
+ */
+export interface PartnerAccount extends Account {
+  member_count: number;
+  is_umbrella: boolean;
+  is_member: boolean;
+  is_top_level: boolean;
+  owner_full_name: string | null;
 }
 
 export type BusinessRelationshipTag =
@@ -229,6 +227,7 @@ export interface Account {
   lead_source: string | null;
   lead_source_detail: string | null;
   partner_account: string | null;
+  referring_partner: string | null;
   partner_prospect: boolean;
   partnership_status: string | null;
   relationship_notes: string | null;
@@ -269,6 +268,8 @@ export interface Contact {
   mobile_phone: string | null;
   is_primary: boolean;
   department: string | null;
+  // Partner/channel this contact was sourced through (SF Partner_Source).
+  partner_source: string | null;
   linkedin_url: string | null;
   credential: CredentialType | null;
   time_zone: UsTimeZone | null;
@@ -443,6 +444,8 @@ export interface Lead {
   status: LeadStatus;
   source: LeadSource | null;
   lead_source_detail?: string | null;
+  // Partner/channel this lead was sourced through (SF Partner_Source).
+  partner_source: string | null;
   description: string | null;
   employees: number | null;
   annual_revenue: number | null;

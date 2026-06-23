@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
-import type { Account } from "@/types/crm";
+import type { PartnerAccount } from "@/types/crm";
 
 interface PartnerFilters {
   search?: string;
@@ -16,119 +16,42 @@ interface PartnerFilters {
   sortDirection?: "asc" | "desc";
 }
 
+export interface PartnersResult {
+  data: PartnerAccount[];
+  count: number;
+  /** account_id -> most-recent interaction timestamp, for the page shown. */
+  lastContact: Map<string, string>;
+}
+
 export function usePartners(filters?: PartnerFilters) {
-  return useQuery({
+  return useQuery<PartnersResult>({
     queryKey: ["partners", filters],
     queryFn: async () => {
       const page = filters?.page ?? 0;
       const pageSize = filters?.pageSize ?? 25;
-
-      // Two ways an account qualifies as a partner:
-      //   1. Explicitly flagged via account_type = 'Partner' (also
-      //      catches the SF-imported partners + accounts using the
-      //      legacy partner_account text / partner_prospect bool)
-      //   2. At least one row in account_partners where it's the
-      //      partner side (i.e. someone is its member)
-      // We pull (2) as a separate id list and OR it into the main
-      // query — keeps the SQL simple and lets PostgREST paginate
-      // normally.
-      // Fetch both sides of the join table so we know who's an
-      // umbrella (has members) vs a member (is under someone) vs
-      // top-level (umbrella AND not a member of anyone).
-      // Page through the join table so a large partner graph can never
-      // be silently truncated at PostgREST's default 1000-row cap, and
-      // so a single unbounded scan can't stall the page. Each request
-      // also carries a 15s timeout — supabase-js has NO default timeout,
-      // so a hung request would otherwise leave React Query in `isLoading`
-      // forever (the root cause of the "Partners page stuck loading ~50%
-      // of the time" bug). A timeout turns a hang into a normal error
-      // that the page surfaces with a Retry button.
-      const joinRows: { partner_account_id: string; member_account_id: string }[] = [];
-      const JOIN_PAGE = 1000;
-      for (let from = 0; ; from += JOIN_PAGE) {
-        const { data: chunk, error: joinErr } = await supabase
-          .from("account_partners")
-          .select("partner_account_id, member_account_id")
-          .range(from, from + JOIN_PAGE - 1)
-          .abortSignal(AbortSignal.timeout(15000));
-        if (joinErr) throw joinErr;
-        const rows = chunk ?? [];
-        joinRows.push(...rows);
-        if (rows.length < JOIN_PAGE) break;
-      }
-      const umbrellaIds = new Set<string>();
-      const memberIds = new Set<string>();
-      // memberCount is also useful for the list page table — we
-      // only compute it here since we already have the data in
-      // hand.
-      const memberCount = new Map<string, number>();
-      for (const r of joinRows ?? []) {
-        umbrellaIds.add(r.partner_account_id);
-        memberIds.add(r.member_account_id);
-        memberCount.set(
-          r.partner_account_id,
-          (memberCount.get(r.partner_account_id) ?? 0) + 1
-        );
-      }
-
-      // Skip legacy partner_account text aggregation for now — it's
-      // ~5600-row scan that was making the page take >10s and
-      // sometimes timing out. The members count is approximate without
-      // it; we'll wire a Postgres view for legacy partner counts in a
-      // follow-up so we don't have to fetch every account row.
-      // Keeping the variables defined so the rest of the function
-      // doesn't break.
-      const topLevelIds = new Set(
-        Array.from(umbrellaIds).filter((id) => !memberIds.has(id))
-      );
-
       const role = filters?.partnerRole ?? "all";
-
-      // Determine the id set the query should constrain on.
-      // - "all" (default): no id constraint; just use the broad
-      //   partner filter (account_type, partner_account text, etc.)
-      // - "umbrella" / "member" / "top_level": strict id list from
-      //   the join table
-      let constrainIds: string[] | null = null;
-      if (role === "umbrella") constrainIds = Array.from(umbrellaIds);
-      else if (role === "member") constrainIds = Array.from(memberIds);
-      else if (role === "top_level") constrainIds = Array.from(topLevelIds);
-
-      // "all" uses the historical OR: explicit Partner account_type,
-      // legacy partner_account text, partner_prospect flag, OR any
-      // umbrella (anyone who has members). Catches everything that
-      // could be considered a partner.
-      const orParts = [
-        "partner_account.not.is.null",
-        "partner_prospect.eq.true",
-        "account_type.eq.Partner",
-      ];
-      if (role === "all" && umbrellaIds.size > 0) {
-        orParts.push(`id.in.(${Array.from(umbrellaIds).join(",")})`);
-      }
-
       const sortCol = filters?.sortColumn ?? "name";
       const sortAsc = (filters?.sortDirection ?? "asc") === "asc";
+
+      // All the partner identification + member-count + umbrella/member
+      // rollups now live in the v_partner_accounts view, so the page
+      // paginates server-side instead of pulling the whole partnership
+      // table into the browser and OR-ing ids into the URL. A 15s timeout
+      // turns a hung request into a normal error (with a Retry button)
+      // rather than a forever-loading page.
       let query = supabase
-        .from("accounts")
-        .select("*, owner:user_profiles!owner_user_id(id, full_name)", { count: "exact" })
+        .from("v_partner_accounts")
+        .select("*", { count: "exact" })
         .order(sortCol, { ascending: sortAsc, nullsFirst: false })
         // Stable tiebreaker so offset paging can't duplicate/skip rows
         // that tie on sortCol at page boundaries.
         .order("id", { ascending: true })
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
-      if (constrainIds) {
-        // Specific role filter — override the broad OR entirely.
-        // An empty id list means no results for that role (e.g. no
-        // umbrellas yet in a fresh DB).
-        if (constrainIds.length === 0) {
-          return { data: [], count: 0, memberCount };
-        }
-        query = query.in("id", constrainIds);
-      } else {
-        query = query.or(orParts.join(","));
-      }
+      // Role buckets are mutually exclusive flags on the view.
+      if (role === "umbrella") query = query.eq("is_umbrella", true);
+      else if (role === "member") query = query.eq("is_member", true);
+      else if (role === "top_level") query = query.eq("is_top_level", true);
 
       if (filters?.search) {
         query = query.ilike("name", `%${filters.search}%`);
@@ -146,10 +69,10 @@ export function usePartners(filters?: PartnerFilters) {
       );
       if (error) throw error;
 
-      // Last Contact date per partner (request #3) — pull the most-recent
-      // activity for just this page's accounts from v_account_last_activity
-      // and hand back a Map for the list column.
-      const accountsPage = (data ?? []) as Account[];
+      const accountsPage = (data ?? []) as unknown as PartnerAccount[];
+
+      // Last Contact for just the visible page — scoped to these ids so we
+      // never aggregate the whole activities table on every render.
       const lastContact = new Map<string, string>();
       const pageIds = accountsPage.map((a) => a.id);
       if (pageIds.length > 0) {
@@ -164,7 +87,8 @@ export function usePartners(filters?: PartnerFilters) {
           }
         }
       }
-      return { data: accountsPage, count: count ?? 0, memberCount, lastContact };
+
+      return { data: accountsPage, count: count ?? 0, lastContact };
     },
   });
 }
