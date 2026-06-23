@@ -104,14 +104,17 @@ export interface AccountDuplicateGroupRow {
   last_activity_at: string | null;
 }
 
-export function useAccountDuplicateGroups() {
+export type AccountMatchBy = "name" | "domain";
+
+export function useAccountDuplicateGroups(matchBy: AccountMatchBy = "name") {
   return useQuery({
-    queryKey: ["data-cleanup", "account-dups"],
+    queryKey: ["data-cleanup", "account-dups", matchBy],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc(
-        "find_account_duplicate_groups",
-        { p_limit_groups: 500 }
-      );
+      const rpc =
+        matchBy === "domain"
+          ? "find_accounts_sharing_email_domain"
+          : "find_account_duplicate_groups";
+      const { data, error } = await supabase.rpc(rpc, { p_limit_groups: 500 });
       if (error) throw error;
       return (data ?? []) as AccountDuplicateGroupRow[];
     },

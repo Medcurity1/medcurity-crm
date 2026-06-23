@@ -223,9 +223,9 @@ as $$
   select d.id, d.group_account_ids, d.group_key,
          (select array_agg(a.name order by a.name) from public.accounts a where a.id = any(d.group_account_ids)),
          d.reason, up.full_name, d.dismissed_at
-    from public.account_duplicate_dismissals d, (select coalesce(public.is_admin(), false) ok) g
+    from public.account_duplicate_dismissals d
     left join public.user_profiles up on up.id = d.dismissed_by
-   where g.ok
+   where coalesce(public.is_admin(), false)
    order by d.dismissed_at desc;
 $$;
 grant execute on function public.list_account_duplicate_dismissals() to authenticated;
