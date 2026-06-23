@@ -19,6 +19,14 @@ import {
   recurrenceToUI,
   type RecurrenceUI,
 } from "./recurrence";
+import { ReminderFields } from "./ReminderFields";
+import {
+  EMPTY_REMINDER,
+  buildReminderFields,
+  isRepeat,
+  reminderFromActivity,
+  type ReminderUI,
+} from "./reminder";
 import { errorMessage } from "@/lib/errors";
 import { toast } from "sonner";
 import type { Activity } from "@/types/crm";
@@ -49,13 +57,7 @@ export function EditTaskDialog({
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [dueAt, setDueAt] = useState("");
-  const [reminderSchedule, setReminderSchedule] = useState<
-    "none" | "once" | "daily" | "weekdays" | "weekly"
-  >("none");
-  const [reminderAt, setReminderAt] = useState("");
-  const [channels, setChannels] = useState<Array<"in_app" | "email">>([
-    "in_app",
-  ]);
+  const [reminder, setReminder] = useState<ReminderUI>(EMPTY_REMINDER);
   const [priority, setPriority] = useState<"high" | "normal" | "low">("normal");
   const [recur, setRecur] = useState<RecurrenceUI>(EMPTY_RECURRENCE);
 
@@ -67,29 +69,12 @@ export function EditTaskDialog({
     // Convert ISO back to the "YYYY-MM-DDTHH:mm" local datetime-local
     // format the input expects.
     setDueAt(task.due_at ? toLocalInput(task.due_at) : "");
-    setReminderSchedule(task.reminder_schedule ?? "none");
-    setReminderAt(
-      task.reminder_at ? toLocalInput(task.reminder_at) : ""
-    );
-    setChannels(
-      task.reminder_channels && task.reminder_channels.length > 0
-        ? task.reminder_channels
-        : ["in_app"]
-    );
+    setReminder(reminderFromActivity(task));
     // Legacy tasks may have a NULL priority — show them as Medium (the
     // default tier), which is how they already sort/render elsewhere.
     setPriority(task.priority ?? "normal");
     setRecur(recurrenceToUI(task));
   }, [task]);
-
-  function toggleChannel(ch: "in_app" | "email", checked: boolean) {
-    setChannels((prev) => {
-      const next = checked
-        ? [...prev, ch].filter((v, i, a) => a.indexOf(v) === i)
-        : prev.filter((v) => v !== ch);
-      return next as Array<"in_app" | "email">;
-    });
-  }
 
   async function handleSave() {
     if (!task) return;
@@ -101,23 +86,22 @@ export function EditTaskDialog({
       toast.error("Pick a due date for a repeating task");
       return;
     }
+    if (isRepeat(reminder.timing) && (reminder.inApp || reminder.email) && !dueAt) {
+      toast.error("Pick a due date for repeating reminders");
+      return;
+    }
     const recurFields = buildRecurrenceFields(recur, dueAt);
     try {
       const dueIso = dueAt ? new Date(dueAt).toISOString() : null;
-      const reminderIso =
-        reminderSchedule !== "none"
-          ? reminderAt
-            ? new Date(reminderAt).toISOString()
-            : dueIso
-          : null;
+      const reminderFields = buildReminderFields(reminder, dueIso);
       await update.mutateAsync({
         id: task.id,
         subject: subject.trim(),
         body: body.trim() || null,
         due_at: dueIso,
-        reminder_schedule: reminderSchedule,
-        reminder_at: reminderIso,
-        reminder_channels: reminderSchedule === "none" ? ["in_app"] : channels,
+        reminder_schedule: reminderFields.reminder_schedule,
+        reminder_at: reminderFields.reminder_at,
+        reminder_channels: reminderFields.reminder_channels,
         priority,
         recur_freq: recurFields.recur_freq,
         recur_interval: recurFields.recur_interval,
@@ -131,8 +115,6 @@ export function EditTaskDialog({
       toast.error("Failed to save: " + errorMessage(err));
     }
   }
-
-  const showReminderDetails = reminderSchedule !== "none";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -183,61 +165,7 @@ export function EditTaskDialog({
 
           <RecurrencePicker value={recur} onChange={setRecur} />
 
-          <div className="space-y-2 border rounded-md p-3">
-            <Label className="text-sm font-semibold">Reminders</Label>
-            <select
-              className="w-full border rounded-md h-9 px-2 bg-background text-sm"
-              value={reminderSchedule}
-              onChange={(e) =>
-                setReminderSchedule(
-                  e.target.value as
-                    | "none"
-                    | "once"
-                    | "daily"
-                    | "weekdays"
-                    | "weekly"
-                )
-              }
-            >
-              <option value="none">No reminder</option>
-              <option value="once">Once</option>
-              <option value="daily">Daily until due</option>
-              <option value="weekdays">Weekdays (M-F) until due</option>
-              <option value="weekly">Weekly until due</option>
-            </select>
-
-            {showReminderDetails && (
-              <>
-                <Label htmlFor="edit-reminder-at" className="text-xs text-muted-foreground">
-                  Next reminder at
-                </Label>
-                <Input
-                  id="edit-reminder-at"
-                  type="datetime-local"
-                  value={reminderAt}
-                  onChange={(e) => setReminderAt(e.target.value)}
-                />
-                <div className="flex flex-wrap gap-3 pt-1">
-                  <label className="flex items-center gap-1 text-xs cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={channels.includes("in_app")}
-                      onChange={(e) => toggleChannel("in_app", e.target.checked)}
-                    />
-                    In-app
-                  </label>
-                  <label className="flex items-center gap-1 text-xs cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={channels.includes("email")}
-                      onChange={(e) => toggleChannel("email", e.target.checked)}
-                    />
-                    Email
-                  </label>
-                </div>
-              </>
-            )}
-          </div>
+          <ReminderFields value={reminder} onChange={setReminder} hasDueDate={!!dueAt} />
 
           <div className="space-y-2">
             <Label htmlFor="edit-body">Notes</Label>

@@ -176,30 +176,42 @@ export async function callClaudeMessages(opts: {
       messages: opts.messages,
     };
     if (opts.tools) body.tools = opts.tools;
-    const res = await fetch(ANTHROPIC_API, {
-      method: "POST",
-      headers: {
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      throw new Error(`Anthropic API ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    // Retry on 429 (rate limit) / 529 (overloaded) — both come back fast,
+    // before generation, so a few backed-off retries ride out transient
+    // Anthropic platform overloads. Bounded by the AbortController above.
+    let lastErr = "";
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const res = await fetch(ANTHROPIC_API, {
+        method: "POST",
+        headers: {
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if ((res.status === 429 || res.status === 529) && attempt < 3) {
+        lastErr = `Anthropic API ${res.status}: ${(await res.text()).slice(0, 200)}`;
+        await new Promise((r) => setTimeout(r, 800 * Math.pow(2, attempt)));
+        continue;
+      }
+      if (!res.ok) {
+        throw new Error(`Anthropic API ${res.status}: ${(await res.text()).slice(0, 300)}`);
+      }
+      const data = await res.json();
+      if (opts.throwOnTruncate && data.stop_reason === "max_tokens") {
+        throw new Error(
+          "The newsletter was too long to finish in one pass (hit the length limit). Try a more targeted edit, or shorten the source newsletter.",
+        );
+      }
+      let text = "";
+      for (const block of (data.content ?? []) as Array<{ type: string; text?: string }>) {
+        if (block.type === "text" && block.text) text += block.text;
+      }
+      return text;
     }
-    const data = await res.json();
-    if (opts.throwOnTruncate && data.stop_reason === "max_tokens") {
-      throw new Error(
-        "The newsletter was too long to finish in one pass (hit the length limit). Try a more targeted edit, or shorten the source newsletter.",
-      );
-    }
-    let text = "";
-    for (const block of (data.content ?? []) as Array<{ type: string; text?: string }>) {
-      if (block.type === "text" && block.text) text += block.text;
-    }
-    return text;
+    throw new Error(lastErr || "Anthropic API: overloaded after retries — please try again in a moment");
   } finally {
     clearTimeout(timer);
   }

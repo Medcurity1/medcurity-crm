@@ -43,6 +43,8 @@ import {
   Users,
   Briefcase,
   Search,
+  Ban,
+  RotateCcw,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/formatters";
@@ -52,10 +54,14 @@ import {
   useArchiveLeadAsDuplicate,
   useAccountDuplicateGroups,
   useMergeAccounts,
+  useDismissAccountDuplicate,
+  useAccountDuplicateDismissals,
+  useRestoreAccountDuplicateDismissal,
   useAccountMergeHistory,
   useUndoAccountMerge,
   type DuplicateTier,
   type AccountDuplicateGroupRow,
+  type AccountMatchBy,
   type LeadContactDuplicate,
 } from "./data-cleanup-api";
 
@@ -104,8 +110,11 @@ function SectionButton({
 /* ============================ Duplicate accounts ============================ */
 
 function AccountDuplicatesPanel() {
-  const { data: rows, isLoading, isError, error } = useAccountDuplicateGroups();
+  const [matchBy, setMatchBy] = useState<AccountMatchBy>("name");
+  const { data: rows, isLoading, isError, error } = useAccountDuplicateGroups(matchBy);
   const mergeMutation = useMergeAccounts();
+  const dismissMutation = useDismissAccountDuplicate();
+  const byDomain = matchBy === "domain";
 
   // Which account is the "keeper" per group (defaults to the first row, which
   // the finder already orders as the strongest survivor candidate).
@@ -141,15 +150,42 @@ function AccountDuplicatesPanel() {
     return survivorByGroup[groupKey] ?? list[0]?.account_id ?? "";
   }
 
-  if (isLoading) return <PanelLoading />;
-  if (isError) return <PanelError message={(error as Error)?.message} />;
+  const toggle = (
+    <div className="flex items-center gap-2 text-sm">
+      <span className="text-muted-foreground">Find duplicates by:</span>
+      <div className="inline-flex rounded-md border p-0.5">
+        <button
+          type="button"
+          className={"px-2.5 py-1 rounded text-xs " + (!byDomain ? "bg-secondary font-medium" : "text-muted-foreground")}
+          onClick={() => setMatchBy("name")}
+        >
+          Company name
+        </button>
+        <button
+          type="button"
+          className={"px-2.5 py-1 rounded text-xs " + (byDomain ? "bg-secondary font-medium" : "text-muted-foreground")}
+          onClick={() => setMatchBy("domain")}
+        >
+          Shared email domain
+        </button>
+      </div>
+    </div>
+  );
+
+  if (isLoading) return <div className="space-y-4">{toggle}<PanelLoading /></div>;
+  if (isError) return <div className="space-y-4">{toggle}<PanelError message={(error as Error)?.message} /></div>;
   if (groups.length === 0) {
     return (
-      <EmptyState
-        icon={<CheckCircle2 className="h-6 w-6 text-green-600" />}
-        title="No duplicate accounts found"
-        body="Every account has a unique company name. Nothing to merge right now."
-      />
+      <div className="space-y-4">
+        {toggle}
+        <EmptyState
+          icon={<CheckCircle2 className="h-6 w-6 text-green-600" />}
+          title="No duplicate accounts found"
+          body={byDomain
+            ? "No two accounts share a (non-generic) email domain. Try matching by company name."
+            : "Every account has a unique company name. Try matching by shared email domain."}
+        />
+      </div>
     );
   }
 
@@ -174,7 +210,7 @@ function AccountDuplicatesPanel() {
         onSuccess: (res) => {
           toast.success(
             `Merged ${res.losers_archived} account${res.losers_archived === 1 ? "" : "s"} into ${confirmSurvivor!.name}.`,
-            { description: `${res.rows_reparented} records moved. You can undo this from Merge history.` }
+            { description: `${res.rows_reparented} records moved; any blank fields on the kept account were filled from the others. Undo from Merge history.` }
           );
         },
         onError: (err: Error) =>
@@ -185,10 +221,11 @@ function AccountDuplicatesPanel() {
 
   return (
     <div className="space-y-5">
+      {toggle}
       <p className="text-sm text-muted-foreground">
-        These accounts look like the same company. Pick the one to keep, then merge
-        the others into it — all their contacts, opportunities, activities, and files
-        move over, and the duplicates are archived (not deleted, so you can undo).
+        {byDomain
+          ? "These accounts have contacts sharing an email domain — likely the same company even if the names differ. Pick the one to keep and merge the rest into it; everything moves over and the duplicates are archived (undoable)."
+          : "These accounts look like the same company. Pick the one to keep, then merge the others into it — all their contacts, opportunities, activities, and files move over, and the duplicates are archived (not deleted, so you can undo)."}
       </p>
 
       <div className="relative max-w-sm">
@@ -213,15 +250,37 @@ function AccountDuplicatesPanel() {
           <Card key={groupKey} className="p-4">
             <div className="mb-3 flex items-center justify-between gap-2">
               <div className="text-sm font-medium">
-                {list.length} accounts that look like the same company
+                {byDomain
+                  ? <>{list.length} accounts share <span className="font-mono">@{groupKey}</span></>
+                  : `${list.length} accounts that look like the same company`}
               </div>
-              <Button
-                size="sm"
-                onClick={() => setConfirmGroup(groupKey)}
-                disabled={mergeMutation.isPending}
-              >
-                Review &amp; merge {list.length - 1} into the kept one
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-muted-foreground"
+                  disabled={dismissMutation.isPending}
+                  onClick={() => {
+                    if (!confirm(`Mark these ${list.length} accounts as NOT duplicates? They'll be hidden from this list (restorable under "Dismissed").`)) return;
+                    dismissMutation.mutate(
+                      { accountIds: list.map((r) => r.account_id) },
+                      {
+                        onSuccess: () => toast.success("Marked as not a duplicate."),
+                        onError: (e: Error) => toast.error("Couldn't dismiss", { description: e.message }),
+                      },
+                    );
+                  }}
+                >
+                  <Ban className="mr-1 h-3.5 w-3.5" /> Not a duplicate
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => setConfirmGroup(groupKey)}
+                  disabled={mergeMutation.isPending}
+                >
+                  Review &amp; merge {list.length - 1} into the kept one
+                </Button>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <Table>
@@ -305,6 +364,8 @@ function AccountDuplicatesPanel() {
         );
       })}
 
+      <DismissedGroups />
+
       {/* Merge confirm — the crucial clarity moment. */}
       <AlertDialog open={!!confirmGroup} onOpenChange={(o) => !o && setConfirmGroup(null)}>
         <AlertDialogContent>
@@ -361,6 +422,50 @@ function AccountDuplicatesPanel() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+/** Groups an admin marked "not a duplicate" — hidden from the finder, restorable. */
+function DismissedGroups() {
+  const { data: dismissals } = useAccountDuplicateDismissals();
+  const restore = useRestoreAccountDuplicateDismissal();
+  const [open, setOpen] = useState(false);
+
+  if (!dismissals || dismissals.length === 0) return null;
+
+  return (
+    <div className="border-t pt-4">
+      <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setOpen((v) => !v)}>
+        {open ? "Hide" : "Show"} dismissed ({dismissals.length})
+      </Button>
+      {open && (
+        <div className="mt-2 space-y-2">
+          <p className="text-xs text-muted-foreground">
+            Groups you marked as "not a duplicate". Restore one to bring it back to the list above.
+          </p>
+          {dismissals.map((d) => (
+            <Card key={d.id} className="p-3 flex items-center justify-between gap-3">
+              <div className="min-w-0 text-sm">
+                <span className="font-medium">{(d.account_names ?? []).join(" · ") || d.group_key}</span>
+                <span className="block text-xs text-muted-foreground">
+                  Dismissed {fmtDate(d.dismissed_at)}{d.dismissed_by_name ? ` by ${d.dismissed_by_name}` : ""}
+                </span>
+              </div>
+              <Button
+                variant="outline" size="sm" className="shrink-0"
+                disabled={restore.isPending}
+                onClick={() => restore.mutate(d.id, {
+                  onSuccess: () => toast.success("Restored to the duplicates list."),
+                  onError: (e: Error) => toast.error("Couldn't restore", { description: e.message }),
+                })}
+              >
+                <RotateCcw className="mr-1 h-3.5 w-3.5" /> Restore
+              </Button>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

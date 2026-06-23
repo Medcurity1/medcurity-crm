@@ -329,6 +329,7 @@ export function useLaunchCampaign() {
       autoStart?: boolean;
       adaptiveEnabled?: boolean;
       owner_id?: string;
+      schedule?: Record<string, unknown>;
     }) => {
       const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
         body: { action: "launch", ...p },
@@ -424,10 +425,14 @@ export const useIngestNewsletters = () => useMailchimpRead("ingest");
 export const useSyncNewsletters = () => useMailchimpRead("sync");
 
 export function useGenerateStyle() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (type: NewsletterType) =>
       invokeMailchimp<{ type: string; source_count: number; length: number }>({ action: "generate-style", type }),
-    onSuccess: (r) => toast.success(`Style guide ready (from ${r.source_count} past issues).`),
+    onSuccess: (r, type) => {
+      qc.invalidateQueries({ queryKey: ["playbook", "newsletter-style", type] });
+      toast.success(`Style guide ready (from ${r.source_count} past issues).`);
+    },
     onError: (e) => toast.error("Style guide failed: " + (e as Error).message),
   });
 }
@@ -486,6 +491,7 @@ export function usePushNewsletterToMailchimp() {
         recipient_count: number | null;
         audience_label: string;
         recommended_send: { date_iso: string; label: string; time_label: string } | null;
+        segment_warning?: boolean;
         error?: string;
       }>({ action: "push-to-mailchimp", id }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["playbook", "newsletters"] }),
@@ -505,17 +511,120 @@ export function useDeleteNewsletter() {
   });
 }
 
-/** Recipients = the (non-archived, contactable) contacts carrying a tag. */
+/** View the AI-learned style guide for a newsletter type (for the editor). */
+export function useNewsletterStyle(type: NewsletterType | null) {
+  return useQuery({
+    queryKey: ["playbook", "newsletter-style", type],
+    enabled: !!type,
+    queryFn: async () => {
+      const d = await invokeMailchimp<{ style: { style_guide: string; updated_at: string } | null }>({
+        action: "get-style",
+        type,
+      });
+      return d.style;
+    },
+  });
+}
+
+export function useUpdateNewsletterStyle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: { type: NewsletterType; style_guide: string }) =>
+      invokeMailchimp<{ success: boolean }>({ action: "update-style", ...p }),
+    onSuccess: (_r, p) => {
+      qc.invalidateQueries({ queryKey: ["playbook", "newsletter-style", p.type] });
+      toast.success("Style guide saved.");
+    },
+    onError: (e) => toast.error("Couldn't save style guide: " + (e as Error).message),
+  });
+}
+
+/** Add a newsletter-type-scoped training note (feeds future drafts of that type). */
+export function useAddNewsletterTraining() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: { type: NewsletterType; note: string }) => {
+      const { error } = await supabase
+        .from("playbook_training")
+        .insert({ note: p.note.trim(), source: `newsletter:${p.type}` });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["playbook", "training"] });
+      toast.success("Saved — the AI will use this on future newsletters.");
+    },
+    onError: (e) => toast.error("Couldn't save note: " + (e as Error).message),
+  });
+}
+
+/** Read a File as base64 (no data: prefix) for image upload. */
+export function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const res = String(reader.result);
+      resolve(res.includes(",") ? res.split(",")[1] : res);
+    };
+    reader.onerror = () => reject(new Error("Couldn't read the image file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+export function useRewriteField() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: { id: string; field: "subject" | "preview" }) =>
+      invokeMailchimp<{ field: string; value: string }>({ action: "rewrite-field", ...p }),
+    onSuccess: (_r, p) => qc.invalidateQueries({ queryKey: ["playbook", "newsletter", p.id] }),
+    onError: (e) => toast.error("Rewrite failed: " + (e as Error).message),
+  });
+}
+
+export function useReplacePlaceholder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: { id: string; index: number; name: string; file_data: string; alt: string }) =>
+      invokeMailchimp<{ success: boolean; image_url: string; html: string }>({ action: "replace-placeholder", ...p }),
+    onSuccess: (_r, p) => {
+      qc.invalidateQueries({ queryKey: ["playbook", "newsletter", p.id] });
+    },
+    onError: (e) => toast.error("Image upload failed: " + (e as Error).message),
+  });
+}
+
+export function useInsertImage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: { id: string; name: string; file_data: string; alt: string }) =>
+      invokeMailchimp<{ success: boolean; image_url: string; html: string }>({ action: "insert-image", ...p }),
+    onSuccess: (_r, p) => {
+      qc.invalidateQueries({ queryKey: ["playbook", "newsletter", p.id] });
+    },
+    onError: (e) => toast.error("Image upload failed: " + (e as Error).message),
+  });
+}
+
+/** Recipients = the (non-archived, contactable) contacts carrying a tag.
+ *  Paginates so a large tag (>1 page) returns EVERY member — a campaign must
+ *  never silently mail a truncated list. Hard-stops at 50k as a sanity cap. */
 export async function fetchRecipientsByTag(tagId: string): Promise<Recipient[]> {
-  const { data, error } = await supabase
-    .from("contacts")
-    .select("id, first_name, last_name, email, account_id, do_not_contact, no_longer_employed, account:accounts!account_id(name), contact_tags!inner(tag_id)")
-    .eq("contact_tags.tag_id", tagId)
-    .is("archived_at", null)
-    .not("email", "is", null)
-    .limit(5000);
-  if (error) throw error;
-  return (data ?? [])
+  const PAGE = 1000;
+  const all: Record<string, unknown>[] = [];
+  for (let page = 0; page < 50; page++) {
+    const { data, error } = await supabase
+      .from("contacts")
+      .select("id, first_name, last_name, email, account_id, do_not_contact, no_longer_employed, account:accounts!account_id(name), contact_tags!inner(tag_id)")
+      .eq("contact_tags.tag_id", tagId)
+      .is("archived_at", null)
+      .not("email", "is", null)
+      .order("id", { ascending: true }) // stable order so range paging can't skip/dupe
+      .range(page * PAGE, (page + 1) * PAGE - 1);
+    if (error) throw error;
+    const batch = data ?? [];
+    all.push(...batch);
+    if (batch.length < PAGE) break;
+  }
+  return all
     .filter((c: Record<string, unknown>) => !c.do_not_contact && !c.no_longer_employed && c.email)
     .map((c: Record<string, unknown>) => ({
       email: c.email as string,

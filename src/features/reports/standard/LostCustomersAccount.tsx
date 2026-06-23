@@ -50,9 +50,9 @@ import { fetchAccountsById, fetchAllRows } from "./report-fetchers";
  *   account.status is NOT the source of truth — we derive activity
  *   from opportunity history instead. An account is currently active
  *   iff it has at least one Closed-Won opp where the opp is "still
- *   open" — meaning maturity_date >= today if maturity_date is set,
+ *   open" — meaning contract_end_date >= today if it's set,
  *   otherwise close_date >= today - 365 days (i.e. assume a 1-year
- *   contract if no maturity_date was captured).
+ *   contract if no contract_end_date was captured).
  *
  * "Lost" then = the account was active at some point in the past but
  * is no longer active per the rule above. The "lost quarter" is the
@@ -74,7 +74,7 @@ interface LostAccountRow {
   account_name: string;
   account_status: string | null;
   latest_close_date: string;
-  /** maturity_date if set, otherwise latest_close_date + 365. */
+  /** contract_end_date if set, otherwise latest_close_date + 365. */
   effective_end_date: string;
   lost_quarter: string; // sortKey like "2026-Q2"
   lost_quarter_label: string;
@@ -115,7 +115,7 @@ export function LostCustomersAccount() {
         id: string;
         amount: number | null;
         close_date: string | null;
-        maturity_date: string | null;
+        contract_end_date: string | null;
         account_id: string | null;
       };
       // Pull every closed-won opp ever (subject to a sane safety cap
@@ -124,7 +124,7 @@ export function LostCustomersAccount() {
       const opps = await fetchAllRows<OppRaw>(() =>
         supabase
           .from("opportunities")
-          .select("id, amount, close_date, maturity_date, account_id")
+          .select("id, amount, close_date, contract_end_date, account_id")
           .eq("stage", "closed_won")
           .is("archived_at", null)
           .not("account_id", "is", null)
@@ -167,10 +167,10 @@ export function LostCustomersAccount() {
       for (const [accountId, info] of perAccount) {
         const latest = info.latest;
         const closeDate = latest.close_date as string;
-        // Effective end = maturity_date if present, otherwise
+        // Effective end = contract_end_date if present, otherwise
         // close_date + 365 (assumed 1-year contract).
-        const effectiveEnd = latest.maturity_date
-          ? (latest.maturity_date as string)
+        const effectiveEnd = latest.contract_end_date
+          ? (latest.contract_end_date as string)
           : addDaysIso(closeDate, 365);
         // Active if effective end is in the future. Skip — they're not lost.
         if (effectiveEnd >= todayIso) continue;
@@ -284,7 +284,7 @@ export function LostCustomersAccount() {
 
       <PageHeader
         title="Lost Customers (Account-based)"
-        description="Accounts whose most recent Closed-Won deal has lapsed (maturity_date in the past, or close_date older than 365 days when no maturity_date is set). Complements the opportunity-based Lost Customers report."
+        description="Accounts whose most recent Closed-Won deal has lapsed (contract_end_date in the past, or close_date older than 365 days when no contract_end_date is set). Complements the opportunity-based Lost Customers report."
         actions={
           <div className="flex items-center gap-2">
             <Select

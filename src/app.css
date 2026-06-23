@@ -237,3 +237,50 @@
     page-break-inside: avoid;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   AI-powered buttons — distinctive gradient + glow + shimmer so it's always
+   clear a control is AI-driven. Ported from the Nexus "Playbook" look
+   (blue -> purple -> pink, 135deg) and applied via <Button variant="ai">.
+   --------------------------------------------------------------------------- */
+.btn-ai {
+  background: linear-gradient(135deg, #127EBF 0%, #9B59B6 50%, #E056A0 100%);
+  color: #fff;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 0 18px rgba(18, 126, 191, 0.28), 0 0 36px rgba(155, 89, 182, 0.14);
+}
+.btn-ai:hover {
+  box-shadow: 0 0 24px rgba(18, 126, 191, 0.45), 0 0 48px rgba(155, 89, 182, 0.22);
+}
+.btn-ai::before {
+  content: "";
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(45deg, transparent 30%, rgba(255, 255, 255, 0.10) 50%, transparent 70%);
+  animation: ai-shimmer 3s ease-in-out infinite;
+  pointer-events: none;
+}
+.btn-ai > * {
+  position: relative;
+  z-index: 1;
+}
+@keyframes ai-shimmer {
+  0% { transform: translateX(-100%) rotate(0deg); }
+  100% { transform: translateX(100%) rotate(0deg); }
+}
+@keyframes ai-pulse {
+  0%, 100% { filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.4)); transform: scale(1); }
+  50% { filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.8)); transform: scale(1.12); }
+}
+.ai-icon {
+  animation: ai-pulse 2.2s ease-in-out infinite;
+  display: inline-flex;
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn-ai::before { animation: none; }
+  .ai-icon { animation: none; }
+}

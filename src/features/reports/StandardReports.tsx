@@ -12,6 +12,7 @@ import {
   UserMinus,
   Search,
   Star,
+  ShieldX,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -54,6 +55,15 @@ interface ReportCard {
 }
 
 const REPORTS: ReportCard[] = [
+  {
+    id: "do-not-email",
+    title: "Do Not Email",
+    description:
+      "Everyone to suppress from marketing — customers, partners, past customers, do-not-contact/do-not-market, and bounced/archived — with a reason column. Filter to one category or export the master list and subtract it from any campaign.",
+    icon: ShieldX,
+    apiView: "v_marketing_suppression",
+    status: "live",
+  },
   {
     id: "arr-base-dataset",
     title: "ARR Base Dataset",

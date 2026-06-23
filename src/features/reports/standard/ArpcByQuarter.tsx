@@ -78,7 +78,7 @@ interface QuarterRow {
   /**
    * Distinct accounts considered "active" as of the END of this quarter.
    * Active = at least one closed-won opp whose contract still covers Q.end,
-   * where the contract end is taken as `maturity_date` if set, else
+   * where the contract end is taken as `contract_end_date` if set, else
    * `close_date + 365 days` (the assumed 1-year contract length).
    */
   active_customer_count: number;
@@ -115,14 +115,14 @@ export function ArpcByQuarter() {
         id: string;
         amount: number | null;
         close_date: string | null;
-        maturity_date: string | null;
+        contract_end_date: string | null;
         account_id: string | null;
       };
       // For ARPC we only need closed-wons whose close_date falls inside the
       // 4-quarter window. But to compute Active Customers AS OF the end of
       // each quarter we also need closed-wons that pre-date the window but
-      // are still in-contract (maturity_date in-window, or close_date+365
-      // when maturity is null). So pull back 365 extra days on the lower
+      // are still in-contract (contract_end_date in-window, or close_date+365
+      // when it is null). So pull back 365 extra days on the lower
       // bound — that covers every opp that could still be "active" at the
       // start of the oldest quarter.
       const windowStart = allQuarters[0].start;
@@ -131,7 +131,7 @@ export function ArpcByQuarter() {
       const opps = await fetchAllRows<OppRaw>(() =>
         supabase
           .from("opportunities")
-          .select("id, amount, close_date, maturity_date, account_id")
+          .select("id, amount, close_date, contract_end_date, account_id")
           .eq("stage", "closed_won")
           .is("archived_at", null)
           .gte("close_date", activeLookbackStart)
@@ -177,7 +177,7 @@ export function ArpcByQuarter() {
       for (const q of allQuarters) activeByQuarter.set(q.sortKey, new Set());
       for (const o of opps) {
         if (!o.close_date || !o.account_id) continue;
-        const effEnd = o.maturity_date ?? addDaysIso(o.close_date, 365);
+        const effEnd = o.contract_end_date ?? addDaysIso(o.close_date, 365);
         for (const q of allQuarters) {
           // Active at Q.end if it had closed by then AND contract still covers Q.end.
           if (o.close_date <= q.end && effEnd >= q.end) {
