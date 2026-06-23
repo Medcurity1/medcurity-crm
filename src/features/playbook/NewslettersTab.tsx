@@ -150,8 +150,8 @@ function NewsletterRow({ n, onEdit, onDelete }: { n: Newsletter; onEdit: () => v
     ? `https://admin.mailchimp.com/campaigns/edit?id=${n.mailchimp_campaign_id}`
     : null;
   return (
-    <Card>
-      <CardContent className="p-4 flex items-start justify-between gap-3">
+    <Card className="py-0">
+      <CardContent className="px-4 py-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="font-semibold text-sm truncate">{n.subject || "(untitled draft)"}</h3>
           <p className="text-xs text-muted-foreground mt-1">

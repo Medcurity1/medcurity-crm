@@ -89,8 +89,8 @@ export function CampaignsTab() {
             performance?: string; summary?: string; wins?: string[]; improvements?: string[];
           } | null;
           return (
-            <Card key={c.id}>
-              <CardContent className="p-4 space-y-2">
+            <Card key={c.id} className="py-0">
+              <CardContent className="px-4 py-3 space-y-2">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <h3 className="font-semibold text-sm truncate">{c.title}</h3>

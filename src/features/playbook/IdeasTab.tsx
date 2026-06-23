@@ -31,8 +31,8 @@ function IdeaCard({ idea }: { idea: PlaybookIdea }) {
   const isBad = idea.status === "bad";
 
   return (
-    <Card className={cn(isBad && "opacity-60")}>
-      <CardContent className="p-4 space-y-2">
+    <Card className={cn("py-0", isBad && "opacity-60")}>
+      <CardContent className="px-4 py-3 space-y-1.5">
         <div className="flex items-start justify-between gap-2">
           <h3 className="font-semibold text-sm">{idea.title}</h3>
           <div className="flex gap-1 shrink-0">
