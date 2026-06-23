@@ -310,8 +310,17 @@ Reaction: "better than playbook ever was." Looks loved. Concrete asks:
   the call days (e.g. Day 8 → Day 9) to hit Tue/Fri, or keep the spacing? Same for LinkedIn days.
 - **Meddy slow first-load (DONE, separate).** Widget bubble + CRM-tab images were 2000×2000 PNGs
   (896KB–2.3MB) shown at 28–96px. Resized to retina (16–84KB, ~40× smaller) + cache-version bump.
-- **Import button UI glitch** — reported (operationally fine). Needs a repro detail (layout jump?
-  flash?) to pin down; flagged.
+- **Import button UI glitch** — reported, then resolved (operationally fine; Nathan: not serious,
+  no longer reproduces). Closed.
+- **Cadence (call days) — DECIDED:** keep as-is (calls land Mon/Fri). No change.
+
+### Polish notes for the NEXT build (Nathan flagged; not yet done)
+- **Pulse-styled delete confirmation.** Deleting a draft campaign works (verified — it deleted in
+  Smartlead too), but the 2nd-click confirm uses the native browser `confirm()`. Replace with an
+  in-app styled confirmation dialog (CampaignsTab / CampaignCard delete).
+- **Training widget tidy-up.** In the Training slide-over (TrainingPanel), the chat bubbles AND the
+  saved-training items run edge-to-edge with the pop-out sider and look a little funky — add
+  padding/insets so they sit cleanly. (The training itself is great and will power future campaigns.)
 
 ---
 
