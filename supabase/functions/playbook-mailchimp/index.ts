@@ -404,6 +404,11 @@ async function pushToMailchimp(id: string) {
   } | undefined;
   if (!tcRecipients?.list_id) throw new Error("Could not load template campaign audience from Mailchimp");
 
+  // FUTURE (Nathan 2026-06-23, low priority — he sets audience in MC manually
+  // for now): instead of copying the last send's audience, set it by TAG —
+  // Partner newsletter -> tag "Partner", Report -> tag "Newsletter" (a Mailchimp
+  // static-segment condition on the tag). Until then we copy the prior audience.
+  //
   // Reproduce the template's audience. Mailchimp segments come in a few
   // flavors: a saved segment (saved_segment_id), a prebuilt segment
   // (prebuilt_segment_id), inline conditions, or an opaque "advanced" segment
