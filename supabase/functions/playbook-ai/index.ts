@@ -57,6 +57,16 @@ async function callerIsAdmin(authHeader: string | null): Promise<boolean> {
   return data === true;
 }
 
+/**
+ * Scheduled invocations (GitHub Actions cron) call this function with the
+ * service-role key as the bearer — there's no user JWT, so callerIsAdmin
+ * would reject them. The service-role key is a server-only secret, so a
+ * direct equality check is a safe "this is our own backend" gate.
+ */
+function isServiceRole(authHeader: string | null): boolean {
+  return !!authHeader && authHeader === `Bearer ${SERVICE_ROLE_KEY}`;
+}
+
 async function gatherContext(): Promise<{ ctx: PlaybookContext; trainingNotes: { note: string }[] }> {
   const ninetyAgo = new Date(Date.now() - 90 * 86400000).toISOString();
   const sixtyAgo = new Date(Date.now() - 60 * 86400000).toISOString();
@@ -320,7 +330,8 @@ Was this from a Playbook idea? ${linked ? "Yes: " + linked.title : "No"}`;
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    if (!(await callerIsAdmin(req.headers.get("Authorization")))) {
+    const auth = req.headers.get("Authorization");
+    if (!isServiceRole(auth) && !(await callerIsAdmin(auth))) {
       return json({ error: "Admin only" }, 403);
     }
     const body = await req.json().catch(() => ({}));

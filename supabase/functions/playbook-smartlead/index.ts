@@ -49,6 +49,16 @@ async function callerIsAdmin(authHeader: string | null): Promise<boolean> {
   return !error && data === true;
 }
 
+/**
+ * Scheduled invocations (GitHub Actions cron) call this with the
+ * service-role key as the bearer (no user JWT). The service-role key is a
+ * server-only secret, so a direct equality check is a safe backend gate
+ * that lets the daily "sync" job through without a logged-in admin.
+ */
+function isServiceRole(authHeader: string | null): boolean {
+  return !!authHeader && authHeader === `Bearer ${SERVICE_ROLE_KEY}`;
+}
+
 /** Plain-text campaign notes from a Smartlead sequences response. */
 function notesFromSequences(sequences: unknown): string {
   const seqArr = Array.isArray(sequences)
@@ -331,7 +341,8 @@ async function launch(p: LaunchInput) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    if (!(await callerIsAdmin(req.headers.get("Authorization")))) {
+    const auth = req.headers.get("Authorization");
+    if (!isServiceRole(auth) && !(await callerIsAdmin(auth))) {
       return json({ error: "Admin only" }, 403);
     }
     const body = await req.json().catch(() => ({}));

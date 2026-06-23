@@ -1,0 +1,52 @@
+name: Playbook Weekly Ideas (cron)
+
+# Triggers the playbook-ai Edge Function's "generate-ideas" action once a
+# week, so the Playbook always has a fresh set of AI marketing ideas for
+# the current week waiting on Monday morning.
+#
+# Same external-scheduler approach as sync-emails.yml (pg_net 0.20 has a
+# worker-level regression on hosted Supabase). The target URL is derived
+# from SUPABASE_SYNC_URL by swapping the function name, so no extra secret
+# is needed.
+#
+# generate-ideas is idempotent per ISO week (keyed to the week's Monday),
+# so an occasional double-run is harmless.
+#
+# NOTE: GitHub only runs `schedule:` triggers from the default branch
+# (main). On the Staging branch this workflow is effectively OFF until it
+# is merged to main at cutover — which is exactly the desired behavior.
+
+on:
+  schedule:
+    # Mondays at 13:00 UTC (after the morning automation window).
+    - cron: "0 13 * * 1"
+  workflow_dispatch: {}
+
+concurrency:
+  group: playbook-weekly-ideas
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: POST generate-ideas to playbook-ai
+        env:
+          SUPABASE_SYNC_URL: ${{ secrets.SUPABASE_SYNC_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_SYNC_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "::error::SUPABASE_SYNC_URL and SUPABASE_SERVICE_ROLE_KEY repository secrets must be set."
+            exit 1
+          fi
+          PLAYBOOK_AI_URL="${SUPABASE_SYNC_URL/sync-emails/playbook-ai}"
+          curl -fsS --max-time 240 \
+            -X POST \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"action":"generate-ideas"}' \
+            "${PLAYBOOK_AI_URL}"
+          echo
+          echo "Weekly ideas generation triggered."
