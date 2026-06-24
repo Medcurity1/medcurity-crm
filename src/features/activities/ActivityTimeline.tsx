@@ -19,6 +19,7 @@ import {
   ExternalLink,
   MessagesSquare,
   Pencil,
+  User,
 } from "lucide-react";
 import { useActivities } from "./api";
 import { ActivityForm } from "./ActivityForm";
@@ -234,6 +235,10 @@ export function ActivityTimeline({
               expandSignal,
               allExpanded,
               enableReattribute,
+              // Show the contact name on each row EXCEPT on a contact's own
+              // timeline (where it's the same contact on every row). Lets reps
+              // see who a call was to without opening it. (Summer's ask.)
+              showContact: !contactId,
               onEdit: (a) => setEditingActivity(a),
             })}
           </div>
@@ -304,6 +309,7 @@ function renderGroupedByMonth(
     expandSignal?: number;
     allExpanded: boolean;
     enableReattribute: boolean;
+    showContact: boolean;
     onEdit: (a: Activity) => void;
   }
 ) {
@@ -365,6 +371,7 @@ function MonthGroup({
     expandSignal?: number;
     allExpanded: boolean;
     enableReattribute: boolean;
+    showContact: boolean;
     onEdit: (a: Activity) => void;
   };
 }) {
@@ -402,6 +409,7 @@ function MonthGroup({
                 expandSignal={opts.expandSignal}
                 forceExpanded={opts.allExpanded}
                 enableReattribute={opts.enableReattribute}
+                showContact={opts.showContact}
                 onEdit={() => opts.onEdit(a)}
               />
             );
@@ -417,14 +425,22 @@ function ActivityEntry({
   expandSignal,
   forceExpanded,
   enableReattribute = false,
+  showContact = false,
   onEdit,
 }: {
   activity: Activity;
   expandSignal?: number;
   forceExpanded?: boolean;
   enableReattribute?: boolean;
+  showContact?: boolean;
   onEdit?: () => void;
 }) {
+  const contactName = activity.contact
+    ? [activity.contact.first_name, activity.contact.last_name]
+        .filter(Boolean)
+        .join(" ")
+        .trim()
+    : "";
   const Icon = typeIcons[activity.activity_type];
   const colorClass = typeColors[activity.activity_type];
   const isCompleted = !!activity.completed_at;
@@ -532,6 +548,17 @@ function ActivityEntry({
           </p>
         )}
         <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+          {showContact && contactName && (
+            <Link
+              to={`/contacts/${activity.contact!.id}`}
+              className="inline-flex items-center gap-1 font-medium text-foreground/80 hover:text-primary hover:underline min-w-0"
+              onClick={(e) => e.stopPropagation()}
+              title={`Contact: ${contactName}`}
+            >
+              <User className="h-3 w-3 shrink-0" />
+              <span className="truncate">{contactName}</span>
+            </Link>
+          )}
           <span>{activityLabel(activity.activity_type)}</span>
           {activity.owner?.full_name && (
             <span>{activity.owner.full_name}</span>

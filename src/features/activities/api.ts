@@ -16,7 +16,9 @@ export function useActivities(filters?: ActivityFilters) {
     queryFn: async () => {
       let query = supabase
         .from("activities")
-        .select("*, owner:user_profiles!owner_user_id(id, full_name)")
+        .select(
+          "*, owner:user_profiles!owner_user_id(id, full_name), contact:contacts!contact_id(id, first_name, last_name)",
+        )
         .is("archived_at", null)
         .order("created_at", { ascending: false });
 
