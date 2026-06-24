@@ -1799,7 +1799,9 @@ export function ReportBuilder() {
   const [searchParams, setSearchParams] = useSearchParams();
   const deepLinkedRef = useRef<string | null>(null);
   useEffect(() => {
-    const id = searchParams.get("report");
+    // Accept ?report=<id> (the landing's cards) and the legacy ?load=<id>
+    // (the dashboard SavedReportWidget links, which nothing consumed before).
+    const id = searchParams.get("report") ?? searchParams.get("load");
     if (!id || !savedReports) return;
     if (deepLinkedRef.current === id) return;
     const rep = savedReports.find((r) => r.id === id);
@@ -1810,6 +1812,7 @@ export function ReportBuilder() {
       (prev) => {
         const next = new URLSearchParams(prev);
         next.delete("report");
+        next.delete("load");
         return next;
       },
       { replace: true },
