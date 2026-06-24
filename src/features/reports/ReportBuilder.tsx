@@ -965,18 +965,34 @@ function ResultsTable({
     );
   }
 
-  // Build chart data
-  const chartData = data.map((row) => {
-    const entry: Record<string, unknown> = {};
-    for (const col of visibleCols) {
-      if (isNumericColType(col.type)) {
-        entry[col.key] = extractNumber(row, col.key);
-      } else {
-        entry[col.key] = formatCellValue(row[col.key], col);
-      }
+  // Build chart data — AGGREGATED by the selected category, not per-row.
+  // (Previously this was a 1:1 row map, so X='Stage' rendered one bar per
+  // opportunity instead of the sum of Amount per stage — the chart was
+  // meaningless.) Inline (not useMemo) because we're past an early return,
+  // where adding a hook would violate the rules of hooks.
+  function aggregate(labelKey: string, valueKey: string) {
+    if (!labelKey || !valueKey) return [] as Record<string, unknown>[];
+    const sums = new Map<string, number>();
+    const counts = new Map<string, number>();
+    const labelCol = visibleCols.find((c) => c.key === labelKey);
+    for (const row of data) {
+      const rawLabel = labelCol
+        ? formatCellValue(row[labelKey], labelCol)
+        : String(row[labelKey] ?? "");
+      const label = rawLabel === "" || rawLabel == null ? "(blank)" : String(rawLabel);
+      sums.set(label, (sums.get(label) ?? 0) + extractNumber(row, valueKey));
+      counts.set(label, (counts.get(label) ?? 0) + 1);
     }
-    return entry;
-  });
+    return Array.from(sums.entries())
+      .map(([label, total]) => ({
+        [labelKey]: label,
+        [valueKey]: total,
+        __count: counts.get(label) ?? 0,
+      }))
+      .sort((a, b) => (b[valueKey] as number) - (a[valueKey] as number));
+  }
+  const barChartData = aggregate(barXKey, barYKey);
+  const pieChartData = aggregate(pieLabelKey, pieValueKey);
 
   return (
     <div className="mt-6 space-y-3">
@@ -1115,7 +1131,7 @@ function ResultsTable({
           </div>
           <div className="border rounded-md p-4">
             <ResponsiveContainer width="100%" height={400}>
-              <BarChart data={chartData}>
+              <BarChart data={barChartData}>
                 <XAxis
                   dataKey={barXKey}
                   tick={{ fontSize: 12 }}
@@ -1128,7 +1144,7 @@ function ResultsTable({
                 <RechartsTooltip />
                 <RechartsLegend />
                 <Bar dataKey={barYKey} name={visibleCols.find((c) => c.key === barYKey)?.label ?? barYKey}>
-                  {chartData.map((_, index) => (
+                  {barChartData.map((_, index) => (
                     <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                   ))}
                 </Bar>
@@ -1177,7 +1193,7 @@ function ResultsTable({
             <ResponsiveContainer width="100%" height={400}>
               <PieChart>
                 <Pie
-                  data={chartData}
+                  data={pieChartData}
                   dataKey={pieValueKey}
                   nameKey={pieLabelKey}
                   cx="50%"
@@ -1185,7 +1201,7 @@ function ResultsTable({
                   outerRadius={150}
                   label
                 >
-                  {chartData.map((_, index) => (
+                  {pieChartData.map((_, index) => (
                     <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                   ))}
                 </Pie>
