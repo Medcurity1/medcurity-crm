@@ -10,6 +10,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { CampaignWizard } from "./CampaignWizard";
 import { TemplatesSection } from "./TemplatesSection";
 import { LoadError } from "./LoadError";
@@ -41,6 +45,7 @@ function CampaignCard({
   analyze: ReturnType<typeof useAnalyzeCampaign>;
   del: ReturnType<typeof useDeleteCampaign>;
 }) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const url = smartleadUrl(c.smartlead_campaign_id);
   const a = c.analysis_json as {
     performance?: string; summary?: string; wins?: string[]; improvements?: string[];
@@ -84,11 +89,7 @@ function CampaignCard({
                 type="button"
                 title="Delete campaign"
                 className="p-1 text-muted-foreground hover:text-destructive"
-                onClick={() => {
-                  if (confirm(`Delete "${c.title}"? This removes it here and in Smartlead.`)) {
-                    del.mutate({ id: c.id, smartlead_campaign_id: c.smartlead_campaign_id });
-                  }
-                }}
+                onClick={() => setConfirmOpen(true)}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
@@ -106,6 +107,26 @@ function CampaignCard({
           </div>
         )}
       </CardContent>
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this campaign?</AlertDialogTitle>
+            <AlertDialogDescription>
+              “{c.title}” will be removed from Pulse and deleted in Smartlead. This can’t be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              onClick={() => del.mutate({ id: c.id, smartlead_campaign_id: c.smartlead_campaign_id })}
+            >
+              Delete campaign
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

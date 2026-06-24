@@ -380,9 +380,19 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     ) {
       return;
     }
-    const sub = Number(watchedSubtotal) || 0;
+    // Base off subtotal, but fall back to the current amount when subtotal is
+    // unset (amount-only / SF-imported opps) so editing the discount can't
+    // divide into 0 and silently zero out the deal. No usable base -> bail.
+    const base = Number(watchedSubtotal) || Number(watchedAmount) || 0;
+    if (base <= 0) return;
     const discPct = Math.max(0, Math.min(100, Number(watchedDiscount) || 0));
-    const next = Math.round(sub * (1 - discPct / 100) * 100) / 100;
+    const next = Math.round(base * (1 - discPct / 100) * 100) / 100;
+    // Persist the gross base into subtotal when it wasn't set, so the displayed
+    // subtotal is populated and a second discount edit re-derives from the
+    // original value instead of compounding off the discounted amount.
+    if (!(Number(watchedSubtotal) > 0)) {
+      setValue("subtotal", Math.round(base * 100) / 100, { shouldDirty: true });
+    }
     if (next !== Number(watchedAmount)) {
       setValue("amount", next, { shouldDirty: true });
     }
@@ -574,14 +584,31 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       name_auto_sync: true,
     };
 
+    // When the opp has line items, amount/subtotal/service_amount/product_amount
+    // are DERIVED — owned by the line-item recompute (DB trigger + recalc RPC),
+    // which runs on every product add/remove/edit. The form loads these as
+    // read-only snapshots and never recomputes them (hasProducts gates the
+    // auto-recalc effects above). So sending them here would clobber a fresh
+    // recompute: e.g. swap a product in the editor (amount recomputes to the
+    // new price immediately), then this save writes back the STALE loaded
+    // amount. That's exactly the "moved to small-practice SRA but Amount still
+    // shows the old $1,350" bug. The flushDrafts() ordering below only covers
+    // pending ROW edits, not immediate add/remove — so drop the derived
+    // totals from the payload entirely and let the recompute own them.
+    if (hasProducts) {
+      delete payload.amount;
+      delete payload.subtotal;
+      delete payload.service_amount;
+      delete payload.product_amount;
+    }
+
     try {
       if (isEditing && id) {
         await updateMutation.mutateAsync({ id, ...payload } as Parameters<typeof updateMutation.mutateAsync>[0]);
         // Flush pending product line-item edits AFTER the opp-level
         // update so the per-line recompute (inside commitDraft) has the
-        // final say on amount/subtotal. If we flushed first, the
-        // updateMutation would overwrite the recomputed totals with the
-        // form's stale amount/subtotal values.
+        // final say on amount/subtotal. (Derived totals are already omitted
+        // from the payload above when the opp has line items.)
         try {
           await productsEditorRef.current?.flushDrafts();
         } catch (err) {
@@ -591,6 +618,19 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           );
           // Stay on the page so the rep can retry the line edits.
           return;
+        }
+        // Belt-and-suspenders: recompute totals from the line items as the
+        // very last step. recalc_opportunity_amount is idempotent and BAILS
+        // when the opp has no line items, so this preserves a manually-entered
+        // amount on amount-only opps while guaranteeing line-item opps reflect
+        // their products — even in edge paths (e.g. adding the first product to
+        // a previously product-less opp, where hasProducts was false at load
+        // and the payload still carried a stale amount). Best-effort; the
+        // triggers already ran on each line edit, so a failure here is benign.
+        try {
+          await supabase.rpc("recalc_opportunity_amount", { p_opp_id: id });
+        } catch {
+          /* triggers already handled it; ignore */
         }
         toast.success("Opportunity updated");
         // Celebrate only a genuine transition INTO Closed Won (not a

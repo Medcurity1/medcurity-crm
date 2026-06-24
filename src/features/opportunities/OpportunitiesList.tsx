@@ -4,7 +4,7 @@ import { useUrlState, useUrlNumberState, useUrlArrayState, useUrlSortState } fro
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Target, Plus, Search, X } from "lucide-react";
-import { useOpportunities, useOpportunitiesTotals, useArchiveOpportunity, useBulkUpdateOwner, useBulkDeleteOpportunities } from "./api";
+import { useOpportunities, useOpportunitiesTotals, useArchiveOpportunity, useBulkUpdateOwner, useBulkDeleteOpportunities, useUpdateOpportunity } from "./api";
 import { toast } from "sonner";
 import { useUsers } from "@/features/accounts/api";
 import { PageHeader } from "@/components/PageHeader";
@@ -21,7 +21,7 @@ import { SavedViews } from "@/features/saved-views/SavedViews";
 import { ColumnPicker } from "@/features/list-columns/ColumnPicker";
 import { useColumnPrefs } from "@/features/list-columns/useColumnPrefs";
 import type { ColumnDescriptor } from "@/features/list-columns/columns";
-import type { Opportunity } from "@/types/crm";
+import type { Opportunity, OpportunityStage } from "@/types/crm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -51,10 +51,98 @@ const OPPORTUNITIES_COLUMNS: ColumnDescriptor[] = [
   { key: "business_type", label: "Business Type", sortKey: "business_type" },
   { key: "amount", label: "Amount", sortKey: "amount", align: "right" },
   { key: "expected_close", label: "Expected Close", sortKey: "expected_close_date" },
-  { key: "close_date", label: "Close Date", sortKey: "close_date" },
+  // Close Date column removed (Summer): it's only set the moment a deal closes,
+  // at which point the opp leaves this open list — so it was always empty here.
   { key: "owner", label: "Owner", sortKey: "owner.full_name" },
   { key: "next_step", label: "Next Step" },
 ];
+
+// ── Inline edit (Summer): edit Stage / Amount / Expected Close / Next Step
+// right from the list. Click a cell to edit; saves on blur / Enter, Esc cancels.
+const INLINE_STAGES: OpportunityStage[] = [
+  "details_analysis", "demo", "proposal_and_price_quote",
+  "proposal_conversation", "closed_won", "closed_lost",
+];
+
+function InlineStage({ o }: { o: Opportunity }) {
+  const update = useUpdateOpportunity();
+  return (
+    <div onClick={(e) => e.stopPropagation()}>
+      <Select
+        value={o.stage}
+        onValueChange={(v) => { if (v !== o.stage) update.mutate({ id: o.id, stage: v as OpportunityStage }); }}
+      >
+        <SelectTrigger className="h-7 w-auto border-0 bg-transparent px-1 shadow-none hover:bg-muted/60 focus:ring-0 [&>svg]:opacity-40">
+          <StatusBadge value={o.stage} variant="stage" label={stageLabel(o.stage)} />
+        </SelectTrigger>
+        <SelectContent>
+          {INLINE_STAGES.map((s) => (
+            <SelectItem key={s} value={s}>{stageLabel(s)}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+function InlineField({
+  o, field, kind, display,
+}: {
+  o: Opportunity;
+  field: "amount" | "expected_close_date" | "next_step";
+  kind: "number" | "date" | "text";
+  display: React.ReactNode;
+}) {
+  const update = useUpdateOpportunity();
+  const [editing, setEditing] = useState(false);
+  const raw = o[field] == null ? "" : String(o[field]);
+  const initial = kind === "date" ? raw.slice(0, 10) : raw;
+  const [val, setVal] = useState(initial);
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        title="Click to edit"
+        className="-mx-1 block w-full rounded px-1 py-0.5 text-left hover:bg-muted/60 cursor-text"
+        onClick={(e) => { e.stopPropagation(); setVal(initial); setEditing(true); }}
+      >
+        {display}
+      </button>
+    );
+  }
+
+  const commit = () => {
+    setEditing(false);
+    let parsed: string | number | null;
+    if (kind === "number") {
+      parsed = val.trim() === "" ? null : Number(val);
+      if (parsed !== null && Number.isNaN(parsed)) return; // ignore a bad number
+    } else {
+      parsed = val.trim() === "" ? null : val.trim();
+    }
+    const original = (o[field] == null ? null : (kind === "date" ? String(o[field]).slice(0, 10) : o[field]));
+    if (parsed !== original) {
+      update.mutate({ id: o.id, [field]: parsed } as Partial<Opportunity> & { id: string });
+    }
+  };
+
+  return (
+    <Input
+      type={kind === "number" ? "number" : kind === "date" ? "date" : "text"}
+      autoFocus
+      value={val}
+      onChange={(e) => setVal(e.target.value)}
+      onClick={(e) => e.stopPropagation()}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") { setVal(initial); setEditing(false); }
+      }}
+      className="h-7 w-full min-w-0 text-sm"
+    />
+  );
+}
 
 export function OpportunitiesList() {
   const navigate = useNavigate();
@@ -212,9 +300,7 @@ export function OpportunitiesList() {
       ) : (
         "—"
       ),
-    stage: (o) => (
-      <StatusBadge value={o.stage} variant="stage" label={stageLabel(o.stage)} />
-    ),
+    stage: (o) => <InlineStage o={o} />,
     business_type: (o) =>
       o.business_type ? (
         <StatusBadge
@@ -225,27 +311,24 @@ export function OpportunitiesList() {
       ) : (
         <span className="text-muted-foreground">—</span>
       ),
-    amount: (o) => <span className="font-medium">{formatCurrency(o.amount)}</span>,
-    expected_close: (o) => (
-      <span className="text-muted-foreground">{formatDate(o.expected_close_date)}</span>
+    amount: (o) => (
+      <InlineField o={o} field="amount" kind="number"
+        display={<span className="font-medium">{formatCurrency(o.amount)}</span>} />
     ),
-    close_date: (o) => (
-      // close_date is only set by the trigger when stage
-      // hits closed_won/closed_lost. Empty otherwise.
-      <span className="text-muted-foreground">
-        {o.close_date ? formatDate(o.close_date) : "—"}
-      </span>
+    expected_close: (o) => (
+      <InlineField o={o} field="expected_close_date" kind="date"
+        display={<span className="text-muted-foreground">{o.expected_close_date ? formatDate(o.expected_close_date) : "—"}</span>} />
     ),
     owner: (o) => (
       <span className="text-muted-foreground">{o.owner?.full_name ?? "Unassigned"}</span>
     ),
     next_step: (o) => (
-      <span
-        className="block max-w-[240px] truncate text-muted-foreground"
-        title={o.next_step ?? undefined}
-      >
-        {o.next_step || "—"}
-      </span>
+      <InlineField o={o} field="next_step" kind="text"
+        display={
+          <span className="block max-w-[240px] truncate text-muted-foreground" title={o.next_step ?? undefined}>
+            {o.next_step || "—"}
+          </span>
+        } />
     ),
   };
 
