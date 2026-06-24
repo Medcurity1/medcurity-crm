@@ -529,7 +529,7 @@ function ColumnPicker({
                     {cols.map((col) => (
                       <label
                         key={col.key}
-                        className="flex items-center gap-2 text-sm cursor-pointer select-none py-1 px-1 rounded-md hover:bg-muted"
+                        className="flex items-center gap-2.5 text-sm cursor-pointer select-none py-1.5 px-2.5 rounded-md hover:bg-muted"
                       >
                         <Checkbox
                           checked={draft.includes(col.key)}
