@@ -691,6 +691,7 @@ export function OpportunityDetail() {
                 (opp as { discount_type?: string | null }).discount_type ??
                 "percent";
               const prevAmount = opp.amount;
+              const prevSubtotal = opp.subtotal;
               const hasProducts = (products?.length ?? 0) > 0;
 
               const patch: Record<string, unknown> = {
@@ -699,17 +700,31 @@ export function OpportunityDetail() {
                 discount_type: type,
               };
               if (!hasProducts) {
-                const sub = Number(opp.subtotal) || 0;
-                if (type === "percent") {
-                  const discPct = Math.max(
-                    0,
-                    Math.min(100, Number(value) || 0),
-                  );
-                  patch.amount =
-                    Math.round(sub * (1 - discPct / 100) * 100) / 100;
-                } else if (type === "amount") {
-                  const discAmt = Math.max(0, Number(value) || 0);
-                  patch.amount = Math.round((sub - discAmt) * 100) / 100;
+                // Amount-only opps (no line items) keep their deal value in
+                // `amount`; `subtotal` is frequently NULL (recalc bails on 0
+                // lines). Use subtotal as the gross base when it's a real
+                // number, else fall back to the current amount — otherwise a
+                // discount edit divides into 0 and silently ZEROES the deal.
+                const base = Number(opp.subtotal) || Number(opp.amount) || 0;
+                if (base > 0) {
+                  let next: number;
+                  if (type === "percent") {
+                    const discPct = Math.max(0, Math.min(100, Number(value) || 0));
+                    next = base * (1 - discPct / 100);
+                  } else {
+                    const discAmt = Math.max(0, Number(value) || 0);
+                    next = base - discAmt;
+                  }
+                  // Floor at 0 — a flat discount larger than the deal must never
+                  // store a NEGATIVE amount (it poisons every downstream sum:
+                  // pipeline, ARR, forecasting).
+                  patch.amount = Math.round(Math.max(0, next) * 100) / 100;
+                  // Persist the gross base into subtotal when it wasn't set, so
+                  // changing the discount again re-derives from the original
+                  // value instead of compounding off an already-discounted amount.
+                  if (!(Number(opp.subtotal) > 0)) {
+                    patch.subtotal = Math.round(base * 100) / 100;
+                  }
                 }
               }
               await updateMutation.mutateAsync(
@@ -730,7 +745,10 @@ export function OpportunityDetail() {
                       discount: prevDiscount,
                       discount_type: prevDiscountType,
                     };
-                    if (!hasProducts) undoPatch.amount = prevAmount;
+                    if (!hasProducts) {
+                      undoPatch.amount = prevAmount;
+                      undoPatch.subtotal = prevSubtotal;
+                    }
                     try {
                       await updateMutation.mutateAsync(
                         undoPatch as Parameters<

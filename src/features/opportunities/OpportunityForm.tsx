@@ -380,9 +380,19 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     ) {
       return;
     }
-    const sub = Number(watchedSubtotal) || 0;
+    // Base off subtotal, but fall back to the current amount when subtotal is
+    // unset (amount-only / SF-imported opps) so editing the discount can't
+    // divide into 0 and silently zero out the deal. No usable base -> bail.
+    const base = Number(watchedSubtotal) || Number(watchedAmount) || 0;
+    if (base <= 0) return;
     const discPct = Math.max(0, Math.min(100, Number(watchedDiscount) || 0));
-    const next = Math.round(sub * (1 - discPct / 100) * 100) / 100;
+    const next = Math.round(base * (1 - discPct / 100) * 100) / 100;
+    // Persist the gross base into subtotal when it wasn't set, so the displayed
+    // subtotal is populated and a second discount edit re-derives from the
+    // original value instead of compounding off the discounted amount.
+    if (!(Number(watchedSubtotal) > 0)) {
+      setValue("subtotal", Math.round(base * 100) / 100, { shouldDirty: true });
+    }
     if (next !== Number(watchedAmount)) {
       setValue("amount", next, { shouldDirty: true });
     }
