@@ -119,23 +119,29 @@ export function ArpcByQuarter() {
         account_id: string | null;
       };
       // For ARPC we only need closed-wons whose close_date falls inside the
-      // 4-quarter window. But to compute Active Customers AS OF the end of
-      // each quarter we also need closed-wons that pre-date the window but
-      // are still in-contract (contract_end_date in-window, or close_date+365
-      // when it is null). So pull back 365 extra days on the lower
-      // bound — that covers every opp that could still be "active" at the
-      // start of the oldest quarter.
+      // window. But to compute Active Customers AS OF the end of each quarter
+      // we also need closed-wons that pre-date the window but are STILL in
+      // contract. Two ways a pre-window deal can still be active:
+      //   (a) contract_end_date is set and reaches into the window, OR
+      //   (b) contract_end_date is null and close_date+365 reaches the window,
+      //       i.e. close_date >= windowStart - 365.
+      // Medcurity sells multi-year (36-month) contracts, so (a) deals can have
+      // closed YEARS before windowStart and must not be excluded by a
+      // close_date floor. Admit rows by an OR of the two so multi-year actives
+      // aren't undercounted. Mirrors v_marketing_suppression's customer-hood.
       const windowStart = allQuarters[0].start;
       const windowEnd = allQuarters[allQuarters.length - 1].end;
-      const activeLookbackStart = addDaysIso(windowStart, -365);
+      const nullContractFloor = addDaysIso(windowStart, -365);
       const opps = await fetchAllRows<OppRaw>(() =>
         supabase
           .from("opportunities")
           .select("id, amount, close_date, contract_end_date, account_id")
           .eq("stage", "closed_won")
           .is("archived_at", null)
-          .gte("close_date", activeLookbackStart)
           .lte("close_date", windowEnd)
+          .or(
+            `close_date.gte.${nullContractFloor},contract_end_date.gte.${windowStart}`,
+          )
           .order("close_date", { ascending: true }),
       );
 

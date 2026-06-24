@@ -74,20 +74,32 @@ interface EmailSyncConnection {
 function nextReminderAt(
   schedule: ActivityRow["reminder_schedule"],
   current: Date,
-  dueAt: Date | null
+  dueAt: Date | null,
+  now: Date
 ): Date | null {
   if (schedule === "once" || schedule === "none") return null;
-  let next = new Date(current);
-  if (schedule === "daily") {
-    next.setDate(next.getDate() + 1);
-  } else if (schedule === "weekly") {
-    next.setDate(next.getDate() + 7);
-  } else if (schedule === "weekdays") {
-    // skip Saturday (6) and Sunday (0)
-    do {
+  const next = new Date(current);
+  const advance = () => {
+    if (schedule === "daily") {
       next.setDate(next.getDate() + 1);
-    } while (next.getDay() === 0 || next.getDay() === 6);
-  }
+    } else if (schedule === "weekly") {
+      next.setDate(next.getDate() + 7);
+    } else if (schedule === "weekdays") {
+      // skip Saturday (6) and Sunday (0)
+      do {
+        next.setDate(next.getDate() + 1);
+      } while (next.getDay() === 0 || next.getDay() === 6);
+    }
+  };
+  // Advance at least once, then keep advancing until the next fire is strictly
+  // in the FUTURE. If reminder_at was several intervals stale (cron downtime,
+  // or the task sat unworked), the old code advanced just ONE interval — still
+  // in the past — so the row re-selected and re-fired on every 5-min tick,
+  // spamming the rep with a burst of notifications/emails. Jumping straight to
+  // the first future occurrence makes it fire once, then schedule forward.
+  do {
+    advance();
+  } while (next <= now);
   if (dueAt && next > dueAt) return null;
   return next;
 }
@@ -314,32 +326,31 @@ async function processReminder(
     }
   }
 
-  // Advance the schedule.
+  // Advance the schedule. Always advance (even if the best-effort email
+  // failed) — leaving reminder_at in the past would re-fire next tick and
+  // spam harder. The next fire is computed forward of `now` so a stale row
+  // can't burst. Check the UPDATE result: if it silently failed, the row
+  // would re-select and re-fire, so log it loudly.
+  const now = new Date();
   const dueAt = task.due_at ? new Date(task.due_at) : null;
   const nextAt = nextReminderAt(
     task.reminder_schedule,
-    new Date(task.reminder_at ?? new Date().toISOString()),
-    dueAt
+    new Date(task.reminder_at ?? now.toISOString()),
+    dueAt,
+    now
   );
 
-  if (nextAt) {
-    await supabase
-      .from("activities")
-      .update({
-        reminder_at: nextAt.toISOString(),
-        last_reminder_sent_at: new Date().toISOString(),
-      })
-      .eq("id", task.id);
-  } else {
-    // once schedule OR past due — stop firing
-    await supabase
-      .from("activities")
-      .update({
-        reminder_schedule: "none",
-        reminder_at: null,
-        last_reminder_sent_at: new Date().toISOString(),
-      })
-      .eq("id", task.id);
+  const advance = nextAt
+    ? { reminder_at: nextAt.toISOString(), last_reminder_sent_at: now.toISOString() }
+    : { reminder_schedule: "none", reminder_at: null, last_reminder_sent_at: now.toISOString() };
+  const { error: advErr } = await supabase
+    .from("activities")
+    .update(advance)
+    .eq("id", task.id);
+  if (advErr) {
+    console.error(
+      `task-reminders: FAILED to advance schedule for task ${task.id} (will re-fire next tick): ${advErr.message}`
+    );
   }
 }
 

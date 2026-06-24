@@ -317,6 +317,16 @@ function startOfQuarter(d: Date): Date {
   const q = Math.floor(d.getMonth() / 3);
   return new Date(d.getFullYear(), q * 3, 1);
 }
+// Parse a date-only ('YYYY-MM-DD') value as LOCAL midnight. `new Date('2026-07-01')`
+// parses as UTC midnight, which in a negative-offset timezone (e.g. Pacific)
+// lands on the PREVIOUS local day. Since the month/quarter boundaries below are
+// built with `new Date(year, month, day)` (local midnight), mixing the two made
+// a contract ending on the 1st of a month fall into NO tile — its ARR silently
+// vanished from the month totals. Parse date strings the same way we build bounds.
+function parseLocalDate(dateStr: string): Date {
+  const [y, m, d] = dateStr.slice(0, 10).split("-").map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
 function inDateRange(
   dateStr: string | null,
   start: Date | null,
@@ -328,14 +338,14 @@ function inDateRange(
   // window, so we always include them. Dropping them was the bug that
   // hid Harbor Regional and ~20 other open renewals.
   if (!dateStr) return true;
-  const d = new Date(dateStr);
+  const d = parseLocalDate(dateStr);
   if (start && d < start) return false;
   if (end && d > end) return false;
   return true;
 }
 function daysBetween(today: Date, dateStr: string | null): number | null {
   if (!dateStr) return null;
-  const d = new Date(dateStr);
+  const d = parseLocalDate(dateStr);
   return Math.round((d.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 }
 function quarterLabel(d: Date): string {
@@ -697,8 +707,12 @@ function rangeFromPreset(
       };
     }
     case "custom": {
-      const s = custom.start ? new Date(custom.start) : null;
-      const e = custom.end ? new Date(custom.end) : null;
+      // Parse the <input type="date"> values as LOCAL dates so they match the
+      // row dates (now parsed via parseLocalDate). Bare new Date('YYYY-MM-DD')
+      // is UTC midnight, which in a negative-offset zone shifts the bound a day
+      // earlier and dropped the last day of the custom range.
+      const s = custom.start ? parseLocalDate(custom.start) : null;
+      const e = custom.end ? parseLocalDate(custom.end) : null;
       if (e) e.setHours(23, 59, 59, 999);
       const label =
         s && e
@@ -1041,7 +1055,7 @@ export function RenewalsQueue() {
     end: Date,
   ): boolean => {
     if (!dateStr) return false;
-    const d = new Date(dateStr);
+    const d = parseLocalDate(dateStr);
     return d >= start && d <= end;
   };
 
