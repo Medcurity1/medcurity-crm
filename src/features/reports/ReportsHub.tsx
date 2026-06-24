@@ -72,9 +72,9 @@ export function ReportsHub() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="standard">Standard</TabsTrigger>
+          <TabsTrigger value="standard">Reports</TabsTrigger>
           <TabsTrigger value="team-dashboard">Team Dashboard</TabsTrigger>
-          <TabsTrigger value="reports">Custom Builder</TabsTrigger>
+          <TabsTrigger value="reports">Builder</TabsTrigger>
         </TabsList>
 
         <TabsContent value="standard" className="mt-4">

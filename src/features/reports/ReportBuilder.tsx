@@ -1,4 +1,5 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import * as XLSX from "xlsx";
 import {
   Play,
@@ -1726,6 +1727,30 @@ export function ReportBuilder() {
         ?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 200);
   };
+
+  // Deep-link: the Reports landing opens a saved report via ?report=<id>.
+  // Load it once (auto-runs), then strip the param so switching tabs or
+  // re-rendering doesn't reload over the user's edits.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = searchParams.get("report");
+    if (!id || !savedReports) return;
+    if (deepLinkedRef.current === id) return;
+    const rep = savedReports.find((r) => r.id === id);
+    if (!rep) return;
+    deepLinkedRef.current = id;
+    handleLoadReport(rep);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("report");
+        return next;
+      },
+      { replace: true },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, savedReports]);
 
   const handleDeleteReport = async (id: string) => {
     try {
