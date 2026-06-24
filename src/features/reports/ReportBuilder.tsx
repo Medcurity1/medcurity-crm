@@ -453,9 +453,11 @@ function ColumnPicker({
   const [sheetOpen, setSheetOpen] = useState(false);
   // Draft selection lives inside the sheet — only committed on Apply.
   const [draft, setDraft] = useState<string[]>(selected);
+  const [colSearch, setColSearch] = useState("");
 
   const openSheet = () => {
     setDraft(selected);
+    setColSearch("");
     setSheetOpen(true);
   };
 
@@ -476,6 +478,32 @@ function ColumnPicker({
 
   const grouped = useMemo(() => groupColumns(entity.columns), [entity.columns]);
   const sortedGroups = useMemo(() => sortedGroupEntries(grouped), [grouped]);
+
+  // Filter the grouped columns by the in-sheet search; drop empty groups.
+  const q = colSearch.trim().toLowerCase();
+  const filteredGroups = useMemo(
+    () =>
+      sortedGroups
+        .map(
+          ([g, cols]) =>
+            [
+              g,
+              q ? cols.filter((c) => c.label.toLowerCase().includes(q)) : cols,
+            ] as [string, ColumnDef[]],
+        )
+        .filter(([, cols]) => cols.length > 0),
+    [sortedGroups, q],
+  );
+  const visibleKeys = useMemo(
+    () => filteredGroups.flatMap(([, cols]) => cols.map((c) => c.key)),
+    [filteredGroups],
+  );
+  const allVisibleSelected =
+    visibleKeys.length > 0 && visibleKeys.every((k) => draft.includes(k));
+  const selectAllVisible = () =>
+    setDraft((prev) => Array.from(new Set([...prev, ...visibleKeys])));
+  const clearVisible = () =>
+    setDraft((prev) => prev.filter((k) => !visibleKeys.includes(k)));
 
   const labelFor = (key: string) =>
     entity.columns.find((c) => c.key === key)?.label ?? key;
@@ -514,42 +542,79 @@ function ColumnPicker({
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
         <SheetContent side="right" className="sm:max-w-md flex flex-col">
           <SheetHeader>
-            <SheetTitle>Select Columns</SheetTitle>
+            <SheetTitle>Select columns</SheetTitle>
           </SheetHeader>
+
+          {/* Search + bulk controls */}
+          <div className="space-y-2 px-4 pt-2">
+            <Input
+              placeholder="Search columns..."
+              value={colSearch}
+              onChange={(e) => setColSearch(e.target.value)}
+              className="h-8"
+            />
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">
+                {draft.length} selected
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={selectAllVisible}
+                  disabled={allVisibleSelected || visibleKeys.length === 0}
+                  className="text-primary hover:underline disabled:opacity-40 disabled:no-underline"
+                >
+                  Select all{q ? " matching" : ""}
+                </button>
+                <span className="text-muted-foreground/40">·</span>
+                <button
+                  type="button"
+                  onClick={clearVisible}
+                  disabled={visibleKeys.length === 0}
+                  className="text-primary hover:underline disabled:opacity-40 disabled:no-underline"
+                >
+                  Clear{q ? " matching" : ""}
+                </button>
+              </div>
+            </div>
+          </div>
 
           {/* min-h-0 lets this flex child shrink so its content scrolls instead
               of growing past the viewport and pushing the Apply button off-screen. */}
           <ScrollArea className="flex-1 min-h-0 -mx-4 px-4">
             <div className="space-y-5 py-2">
-              {sortedGroups.map(([groupName, cols]) => (
-                <div key={groupName}>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                    {groupName}
-                  </p>
-                  <div className="space-y-1">
-                    {cols.map((col) => (
-                      <label
-                        key={col.key}
-                        className="flex items-center gap-2.5 text-sm cursor-pointer select-none py-1.5 px-2.5 rounded-md hover:bg-muted"
-                      >
-                        <Checkbox
-                          checked={draft.includes(col.key)}
-                          onCheckedChange={() => toggleDraft(col.key)}
-                        />
-                        <span>{col.label}</span>
-                      </label>
-                    ))}
+              {filteredGroups.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-6 text-center">
+                  No columns match “{colSearch}”.
+                </p>
+              ) : (
+                filteredGroups.map(([groupName, cols]) => (
+                  <div key={groupName}>
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                      {groupName}
+                    </p>
+                    <div className="space-y-1">
+                      {cols.map((col) => (
+                        <label
+                          key={col.key}
+                          className="flex items-center gap-2.5 text-sm cursor-pointer select-none py-1.5 px-2.5 rounded-md hover:bg-muted"
+                        >
+                          <Checkbox
+                            checked={draft.includes(col.key)}
+                            onCheckedChange={() => toggleDraft(col.key)}
+                          />
+                          <span>{col.label}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </ScrollArea>
 
           <SheetFooter className="flex-row gap-2 justify-end border-t pt-4">
-            <Button
-              variant="outline"
-              onClick={() => setSheetOpen(false)}
-            >
+            <Button variant="outline" onClick={() => setSheetOpen(false)}>
               Cancel
             </Button>
             <Button onClick={applyDraft}>Apply</Button>
