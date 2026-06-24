@@ -609,6 +609,19 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           // Stay on the page so the rep can retry the line edits.
           return;
         }
+        // Belt-and-suspenders: recompute totals from the line items as the
+        // very last step. recalc_opportunity_amount is idempotent and BAILS
+        // when the opp has no line items, so this preserves a manually-entered
+        // amount on amount-only opps while guaranteeing line-item opps reflect
+        // their products — even in edge paths (e.g. adding the first product to
+        // a previously product-less opp, where hasProducts was false at load
+        // and the payload still carried a stale amount). Best-effort; the
+        // triggers already ran on each line edit, so a failure here is benign.
+        try {
+          await supabase.rpc("recalc_opportunity_amount", { p_opp_id: id });
+        } catch {
+          /* triggers already handled it; ignore */
+        }
         toast.success("Opportunity updated");
         // Celebrate only a genuine transition INTO Closed Won (not a
         // re-save of an already-won deal).
