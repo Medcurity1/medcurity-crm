@@ -66,7 +66,7 @@ export function TrainingPanel({
           </SheetDescription>
         </SheetHeader>
 
-        <div className="space-y-3 py-4">
+        <div className="space-y-3 px-4 pb-4">
           <div className="space-y-2">
             <Textarea
               placeholder="e.g. Always lead with the SRA. Never use fear tactics."
