@@ -94,6 +94,15 @@ function getCurrentQuarter(): number {
   return Math.floor(new Date().getMonth() / 3);
 }
 
+// Live open "proposal" stages after the SF-stage migration (20260422000001).
+// The legacy literals "proposal" and "verbal_commit" no longer exist on any
+// opportunity, so the old card math matched zero rows and Best Case silently
+// collapsed to Committed. Keep this in sync with FORECAST_STAGES.
+const PROPOSAL_STAGES: OpportunityStage[] = [
+  "proposal_conversation",
+  "proposal_and_price_quote",
+];
+
 export function ForecastPage() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -106,10 +115,8 @@ export function ForecastPage() {
     const sumAmount = (filterFn: (o: ForecastOpportunity) => boolean) =>
       list.filter(filterFn).reduce((sum, o) => sum + Number(o.amount || 0), 0);
 
-    const committed = sumAmount(
-      (o) => o.stage === "closed_won" || o.stage === "verbal_commit"
-    );
-    const proposalAmount = sumAmount((o) => o.stage === "proposal");
+    const committed = sumAmount((o) => o.stage === "closed_won");
+    const proposalAmount = sumAmount((o) => PROPOSAL_STAGES.includes(o.stage));
     const bestCase = committed + proposalAmount * 0.6;
     const pipeline = sumAmount((o) => o.stage !== "closed_lost");
     return { committed, bestCase, pipeline, quota: QUOTA_PLACEHOLDER };
@@ -143,10 +150,10 @@ export function ForecastPage() {
       const amt = Number(o.amount || 0);
       byOwner[key].pipeline += amt;
       byOwner[key].count += 1;
-      if (o.stage === "closed_won" || o.stage === "verbal_commit") {
+      if (o.stage === "closed_won") {
         byOwner[key].committed += amt;
       }
-      if (o.stage === "proposal") {
+      if (PROPOSAL_STAGES.includes(o.stage)) {
         byOwner[key].proposalAmount += amt;
       }
     }

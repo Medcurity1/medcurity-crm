@@ -512,7 +512,8 @@ export function useAddOpportunityProduct() {
     },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["opportunity_products", vars.opportunity_id] });
-      qc.invalidateQueries({ queryKey: ["opportunity", vars.opportunity_id] });
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["pipeline"] });
     },
   });
 }
@@ -575,8 +576,12 @@ export function useAddOpportunityProductsBulk() {
     },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["opportunity_products", vars.opportunity_id] });
-      qc.invalidateQueries({ queryKey: ["opportunity", vars.opportunity_id] });
-      qc.invalidateQueries({ queryKey: ["opportunities", vars.opportunity_id] });
+      // Broad "opportunities" covers the detail (["opportunities", id]), the
+      // list and totals (["opportunities", filters]); pipeline covers
+      // forecast/ARR. The old singular ["opportunity", id] matched no query,
+      // so line-item edits left the list/pipeline showing the pre-edit amount.
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["pipeline"] });
     },
   });
 }
@@ -598,8 +603,8 @@ export function useEnsureOpportunityAmountFresh(opportunityId: string | undefine
     },
     onSuccess: () => {
       if (!opportunityId) return;
-      qc.invalidateQueries({ queryKey: ["opportunity", opportunityId] });
-      qc.invalidateQueries({ queryKey: ["opportunities", opportunityId] });
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["pipeline"] });
     },
   });
 }
@@ -783,8 +788,8 @@ export function useUpdateOpportunityProduct() {
     },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["opportunity_products", vars.opportunity_id] });
-      qc.invalidateQueries({ queryKey: ["opportunity", vars.opportunity_id] });
-      qc.invalidateQueries({ queryKey: ["opportunities", vars.opportunity_id] });
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["pipeline"] });
     },
   });
 }
@@ -815,8 +820,8 @@ export function useRemoveOpportunityProduct() {
     },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["opportunity_products", vars.opportunityId] });
-      qc.invalidateQueries({ queryKey: ["opportunity", vars.opportunityId] });
-      qc.invalidateQueries({ queryKey: ["opportunities", vars.opportunityId] });
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["pipeline"] });
     },
   });
 }
