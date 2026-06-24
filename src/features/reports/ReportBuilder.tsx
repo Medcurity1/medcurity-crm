@@ -516,7 +516,9 @@ function ColumnPicker({
             <SheetTitle>Select Columns</SheetTitle>
           </SheetHeader>
 
-          <ScrollArea className="flex-1 -mx-4 px-4">
+          {/* min-h-0 lets this flex child shrink so its content scrolls instead
+              of growing past the viewport and pushing the Apply button off-screen. */}
+          <ScrollArea className="flex-1 min-h-0 -mx-4 px-4">
             <div className="space-y-5 py-2">
               {sortedGroups.map(([groupName, cols]) => (
                 <div key={groupName}>
