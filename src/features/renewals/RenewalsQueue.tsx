@@ -707,8 +707,12 @@ function rangeFromPreset(
       };
     }
     case "custom": {
-      const s = custom.start ? new Date(custom.start) : null;
-      const e = custom.end ? new Date(custom.end) : null;
+      // Parse the <input type="date"> values as LOCAL dates so they match the
+      // row dates (now parsed via parseLocalDate). Bare new Date('YYYY-MM-DD')
+      // is UTC midnight, which in a negative-offset zone shifts the bound a day
+      // earlier and dropped the last day of the custom range.
+      const s = custom.start ? parseLocalDate(custom.start) : null;
+      const e = custom.end ? parseLocalDate(custom.end) : null;
       if (e) e.setHours(23, 59, 59, 999);
       const label =
         s && e
