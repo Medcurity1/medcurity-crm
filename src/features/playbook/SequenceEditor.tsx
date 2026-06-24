@@ -126,7 +126,7 @@ export function SequenceEditor({
       },
       {
         onSuccess: (t) => {
-          toast.success(initial?.id ? "Sequence saved" : "Sequence created");
+          toast.success(initial?.id ? "Sequence saved" : "Saved as a template");
           onSaved?.(t);
           onOpenChange(false);
         },
@@ -292,16 +292,33 @@ export function SequenceEditor({
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="gap-2 sm:items-center">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={save.isPending}>
-            {save.isPending ? (
-              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-            ) : null}
-            {initial?.id ? "Save sequence" : "Create sequence"}
-          </Button>
+          {initial?.id ? (
+            <Button onClick={handleSave} disabled={save.isPending}>
+              {save.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
+              Save changes
+            </Button>
+          ) : (
+            <>
+              {/* Save as a reusable card is OPTIONAL — pick it to keep this
+                  sequence in your templates. Otherwise you'd just launch it
+                  once (that launch flow is the next build). */}
+              <Button variant="outline" onClick={handleSave} disabled={save.isPending}>
+                {save.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
+                Save as template
+              </Button>
+              <Button
+                variant="ai"
+                disabled
+                title="Launching on a list or contact is the next build"
+              >
+                Use this sequence
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

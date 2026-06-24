@@ -40,9 +40,14 @@ export function TemplatesSection() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorSeed, setEditorSeed] = useState<EditorSeed>(null);
   const [deleteTarget, setDeleteTarget] = useState<CampaignTemplate | null>(null);
+  // Bumped on every open so the editor REMOUNTS fresh — the dialog stays
+  // mounted between uses, so without a changing key its internal step state
+  // would carry over (e.g. "Customize a copy" showed the last sequence built).
+  const [editorNonce, setEditorNonce] = useState(0);
 
   const openBlank = () => {
     setEditorSeed(null);
+    setEditorNonce((n) => n + 1);
     setEditorOpen(true);
   };
   const openCustomize = (t: CampaignTemplate) => {
@@ -55,11 +60,13 @@ export function TemplatesSection() {
       steps: t.steps,
     });
     setPreview(null);
+    setEditorNonce((n) => n + 1);
     setEditorOpen(true);
   };
   const openEdit = (t: CampaignTemplate) => {
     setEditorSeed({ ...t });
     setPreview(null);
+    setEditorNonce((n) => n + 1);
     setEditorOpen(true);
   };
 
@@ -185,8 +192,9 @@ export function TemplatesSection() {
         </DialogContent>
       </Dialog>
 
-      {/* The one builder — edit/create a sequence */}
-      <SequenceEditor open={editorOpen} onOpenChange={setEditorOpen} initial={editorSeed} />
+      {/* The one builder — edit/create a sequence. key remounts it fresh
+          per open so a reopen never shows the previously-built sequence. */}
+      <SequenceEditor key={editorNonce} open={editorOpen} onOpenChange={setEditorOpen} initial={editorSeed} />
 
       {/* Delete a custom template */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
