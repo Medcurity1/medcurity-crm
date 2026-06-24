@@ -574,14 +574,31 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       name_auto_sync: true,
     };
 
+    // When the opp has line items, amount/subtotal/service_amount/product_amount
+    // are DERIVED — owned by the line-item recompute (DB trigger + recalc RPC),
+    // which runs on every product add/remove/edit. The form loads these as
+    // read-only snapshots and never recomputes them (hasProducts gates the
+    // auto-recalc effects above). So sending them here would clobber a fresh
+    // recompute: e.g. swap a product in the editor (amount recomputes to the
+    // new price immediately), then this save writes back the STALE loaded
+    // amount. That's exactly the "moved to small-practice SRA but Amount still
+    // shows the old $1,350" bug. The flushDrafts() ordering below only covers
+    // pending ROW edits, not immediate add/remove — so drop the derived
+    // totals from the payload entirely and let the recompute own them.
+    if (hasProducts) {
+      delete payload.amount;
+      delete payload.subtotal;
+      delete payload.service_amount;
+      delete payload.product_amount;
+    }
+
     try {
       if (isEditing && id) {
         await updateMutation.mutateAsync({ id, ...payload } as Parameters<typeof updateMutation.mutateAsync>[0]);
         // Flush pending product line-item edits AFTER the opp-level
         // update so the per-line recompute (inside commitDraft) has the
-        // final say on amount/subtotal. If we flushed first, the
-        // updateMutation would overwrite the recomputed totals with the
-        // form's stale amount/subtotal values.
+        // final say on amount/subtotal. (Derived totals are already omitted
+        // from the payload above when the opp has line items.)
         try {
           await productsEditorRef.current?.flushDrafts();
         } catch (err) {

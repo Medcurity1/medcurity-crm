@@ -290,13 +290,29 @@ export function OpportunityDetail() {
     if (!id || !opp || !products) return;
     if (ensureFiredForRef.current === id) return; // run once per opp visit
     if (products.length === 0) return; // nothing to recompute against
-    // Only self-heal when amount is clearly unset/zero, not on every
-    // discrepancy. Discrepancies are expected when the user has set a
-    // custom amount or when discount_type='amount' lines differ from
-    // %-math. Firing on every visit would overwrite those manual values.
+    // Self-heal stale totals. Two cases:
+    //   (a) amount is unset/zero despite having products (legacy/import drift).
+    //   (b) the stored `subtotal` no longer matches the line items. `subtotal`
+    //       is the gross sum of qty*unit_price (no discount ambiguity), so a
+    //       mismatch is unambiguous proof the stored totals drifted from the
+    //       products — e.g. a product swap whose recompute got clobbered by a
+    //       stale opp-save (the "moved to small-practice SRA but Amount still
+    //       shows $1,350" bug). Only treat a NON-NULL subtotal as drift so we
+    //       don't disturb legacy opps that never had subtotal computed; those
+    //       are covered by case (a).
     const amountIsUnset = !opp.amount || Number(opp.amount) === 0;
+    const liveGross = products.reduce(
+      (s, p) =>
+        s +
+        (Number((p as { quantity?: number | string }).quantity) || 0) *
+          (Number((p as { unit_price?: number | string }).unit_price) || 0),
+      0,
+    );
+    const subtotalDrifted =
+      opp.subtotal != null &&
+      Math.abs(liveGross - (Number(opp.subtotal) || 0)) > 0.01;
     ensureFiredForRef.current = id;
-    if (amountIsUnset) {
+    if (amountIsUnset || subtotalDrifted) {
       ensureAmountFresh.mutate();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
