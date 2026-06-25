@@ -203,7 +203,10 @@ function InlineField({
           if (e.key === "Enter") { e.preventDefault(); commit(); }
           if (e.key === "Escape") { e.preventDefault(); cancel(); }
         }}
-        className="h-7 w-full min-w-0 text-sm"
+        // min-w keeps the field readable in the narrow Amount column — without
+        // it the input collapsed to almost nothing once the Save/Cancel buttons
+        // took their space. It still grows to fill wider columns (date/next step).
+        className="h-7 w-full min-w-[7rem] text-sm"
       />
       <button
         type="button"
