@@ -859,7 +859,20 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
 
       <Card>
         <CardContent className="pt-6">
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
+          <form
+            onSubmit={handleSubmit(onSubmit, (formErrors) => {
+              // Without this, a validation failure (e.g. a >100% discount)
+              // silently no-ops the Save button — onSubmit never runs and
+              // nothing is shown. Surface the first error so the rep knows why.
+              const firstMsg = Object.values(formErrors)
+                .map((e) => (e as { message?: string } | undefined)?.message)
+                .find(Boolean);
+              toast.error(
+                firstMsg ? String(firstMsg) : "Please fix the highlighted fields before saving.",
+              );
+            })}
+            className="space-y-8"
+          >
             {/* ---- Basic Info ---- */}
             <FormSection title="Basic Info">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1118,6 +1131,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                     />
                     <span className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">%</span>
                   </div>
+                  {errors.discount && <p className="text-sm text-destructive">{errors.discount.message}</p>}
                   <p className="text-xs text-muted-foreground">{helpMap.get("discount") ?? "Deal-level percent reduction applied on top of any product-level discounts. 0–100. Updates the Amount automatically."}</p>
                 </div>
 
