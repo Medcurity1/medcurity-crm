@@ -8,6 +8,7 @@ import type {
   Newsletter,
   NewsletterType,
   CampaignTemplate,
+  SequenceStep,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -177,6 +178,70 @@ export function useCampaignTemplates() {
       if (error) throw error;
       return (data ?? []) as CampaignTemplate[];
     },
+  });
+}
+
+/** Create or update a campaign template (the sequence editor saves through here).
+ *  No id => insert (new custom template, or a customized copy of a preset).
+ *  With id => update (an existing custom template). step_count + duration_days
+ *  are derived from the steps so they never drift. */
+export function useSaveTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (t: {
+      id?: string;
+      name: string;
+      description?: string | null;
+      category?: CampaignTemplate["category"];
+      steps: SequenceStep[];
+      domain_rules?: Record<string, unknown>;
+    }) => {
+      const steps = t.steps.map((s, i) => ({ ...s, order: i + 1 }));
+      const payload: Record<string, unknown> = {
+        name: t.name.trim() || "Untitled sequence",
+        description: t.description ?? null,
+        category: t.category ?? "custom",
+        steps,
+        step_count: steps.length,
+        duration_days: steps.reduce((m, s) => Math.max(m, s.day_offset || 0), 0),
+        updated_at: new Date().toISOString(),
+      };
+      if (t.domain_rules) payload.domain_rules = t.domain_rules;
+      if (t.id) {
+        const { data, error } = await supabase
+          .from("campaign_templates")
+          .update(payload)
+          .eq("id", t.id)
+          .select()
+          .single();
+        if (error) throw error;
+        return data as CampaignTemplate;
+      }
+      const { data, error } = await supabase
+        .from("campaign_templates")
+        .insert(payload)
+        .select()
+        .single();
+      if (error) throw error;
+      return data as CampaignTemplate;
+    },
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["playbook", "campaign-templates"] }),
+  });
+}
+
+export function useDeleteTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from("campaign_templates")
+        .delete()
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["playbook", "campaign-templates"] }),
   });
 }
 

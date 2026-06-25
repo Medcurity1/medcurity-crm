@@ -1,4 +1,5 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import * as XLSX from "xlsx";
 import {
   Play,
@@ -452,9 +453,11 @@ function ColumnPicker({
   const [sheetOpen, setSheetOpen] = useState(false);
   // Draft selection lives inside the sheet — only committed on Apply.
   const [draft, setDraft] = useState<string[]>(selected);
+  const [colSearch, setColSearch] = useState("");
 
   const openSheet = () => {
     setDraft(selected);
+    setColSearch("");
     setSheetOpen(true);
   };
 
@@ -475,6 +478,32 @@ function ColumnPicker({
 
   const grouped = useMemo(() => groupColumns(entity.columns), [entity.columns]);
   const sortedGroups = useMemo(() => sortedGroupEntries(grouped), [grouped]);
+
+  // Filter the grouped columns by the in-sheet search; drop empty groups.
+  const q = colSearch.trim().toLowerCase();
+  const filteredGroups = useMemo(
+    () =>
+      sortedGroups
+        .map(
+          ([g, cols]) =>
+            [
+              g,
+              q ? cols.filter((c) => c.label.toLowerCase().includes(q)) : cols,
+            ] as [string, ColumnDef[]],
+        )
+        .filter(([, cols]) => cols.length > 0),
+    [sortedGroups, q],
+  );
+  const visibleKeys = useMemo(
+    () => filteredGroups.flatMap(([, cols]) => cols.map((c) => c.key)),
+    [filteredGroups],
+  );
+  const allVisibleSelected =
+    visibleKeys.length > 0 && visibleKeys.every((k) => draft.includes(k));
+  const selectAllVisible = () =>
+    setDraft((prev) => Array.from(new Set([...prev, ...visibleKeys])));
+  const clearVisible = () =>
+    setDraft((prev) => prev.filter((k) => !visibleKeys.includes(k)));
 
   const labelFor = (key: string) =>
     entity.columns.find((c) => c.key === key)?.label ?? key;
@@ -513,42 +542,79 @@ function ColumnPicker({
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
         <SheetContent side="right" className="sm:max-w-md flex flex-col">
           <SheetHeader>
-            <SheetTitle>Select Columns</SheetTitle>
+            <SheetTitle>Select columns</SheetTitle>
           </SheetHeader>
+
+          {/* Search + bulk controls */}
+          <div className="space-y-2 px-4 pt-2">
+            <Input
+              placeholder="Search columns..."
+              value={colSearch}
+              onChange={(e) => setColSearch(e.target.value)}
+              className="h-8"
+            />
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">
+                {draft.length} selected
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={selectAllVisible}
+                  disabled={allVisibleSelected || visibleKeys.length === 0}
+                  className="text-primary hover:underline disabled:opacity-40 disabled:no-underline"
+                >
+                  Select all{q ? " matching" : ""}
+                </button>
+                <span className="text-muted-foreground/40">·</span>
+                <button
+                  type="button"
+                  onClick={clearVisible}
+                  disabled={visibleKeys.length === 0}
+                  className="text-primary hover:underline disabled:opacity-40 disabled:no-underline"
+                >
+                  Clear{q ? " matching" : ""}
+                </button>
+              </div>
+            </div>
+          </div>
 
           {/* min-h-0 lets this flex child shrink so its content scrolls instead
               of growing past the viewport and pushing the Apply button off-screen. */}
           <ScrollArea className="flex-1 min-h-0 -mx-4 px-4">
             <div className="space-y-5 py-2">
-              {sortedGroups.map(([groupName, cols]) => (
-                <div key={groupName}>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                    {groupName}
-                  </p>
-                  <div className="space-y-1">
-                    {cols.map((col) => (
-                      <label
-                        key={col.key}
-                        className="flex items-center gap-2.5 text-sm cursor-pointer select-none py-1.5 px-2.5 rounded-md hover:bg-muted"
-                      >
-                        <Checkbox
-                          checked={draft.includes(col.key)}
-                          onCheckedChange={() => toggleDraft(col.key)}
-                        />
-                        <span>{col.label}</span>
-                      </label>
-                    ))}
+              {filteredGroups.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-6 text-center">
+                  No columns match “{colSearch}”.
+                </p>
+              ) : (
+                filteredGroups.map(([groupName, cols]) => (
+                  <div key={groupName}>
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                      {groupName}
+                    </p>
+                    <div className="space-y-1">
+                      {cols.map((col) => (
+                        <label
+                          key={col.key}
+                          className="flex items-center gap-2.5 text-sm cursor-pointer select-none py-1.5 px-2.5 rounded-md hover:bg-muted"
+                        >
+                          <Checkbox
+                            checked={draft.includes(col.key)}
+                            onCheckedChange={() => toggleDraft(col.key)}
+                          />
+                          <span>{col.label}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </ScrollArea>
 
           <SheetFooter className="flex-row gap-2 justify-end border-t pt-4">
-            <Button
-              variant="outline"
-              onClick={() => setSheetOpen(false)}
-            >
+            <Button variant="outline" onClick={() => setSheetOpen(false)}>
               Cancel
             </Button>
             <Button onClick={applyDraft}>Apply</Button>
@@ -937,6 +1003,11 @@ function ResultsTable({
   const [pieLabelKey, setPieLabelKey] = useState<string>(() => detectLabelColumn(visibleCols)?.key ?? "");
   const [pieValueKey, setPieValueKey] = useState<string>(() => detectValueColumn(visibleCols)?.key ?? "");
 
+  // How to combine the value column per category. Defaulting to Sum is only
+  // right for additive columns (Amount). For a percentage or FTE count, summing
+  // is meaningless — Average or Count is what you want. Shared across bar/pie.
+  const [chartAgg, setChartAgg] = useState<"sum" | "count" | "avg">("sum");
+
   // Re-detect defaults when columns change
   useMemo(() => {
     const defLabel = detectLabelColumn(visibleCols)?.key ?? "";
@@ -970,8 +1041,14 @@ function ResultsTable({
   // opportunity instead of the sum of Amount per stage — the chart was
   // meaningless.) Inline (not useMemo) because we're past an early return,
   // where adding a hook would violate the rules of hooks.
-  function aggregate(labelKey: string, valueKey: string) {
-    if (!labelKey || !valueKey) return [] as Record<string, unknown>[];
+  function aggregate(
+    labelKey: string,
+    valueKey: string,
+    mode: "sum" | "count" | "avg",
+  ) {
+    // Count mode just tallies rows per category, so it doesn't need a value
+    // column; sum/avg do.
+    if (!labelKey || (mode !== "count" && !valueKey)) return [] as Record<string, unknown>[];
     const sums = new Map<string, number>();
     const counts = new Map<string, number>();
     const labelCol = visibleCols.find((c) => c.key === labelKey);
@@ -983,16 +1060,17 @@ function ResultsTable({
       sums.set(label, (sums.get(label) ?? 0) + extractNumber(row, valueKey));
       counts.set(label, (counts.get(label) ?? 0) + 1);
     }
-    return Array.from(sums.entries())
-      .map(([label, total]) => ({
-        [labelKey]: label,
-        [valueKey]: total,
-        __count: counts.get(label) ?? 0,
-      }))
+    return Array.from(counts.entries())
+      .map(([label, n]) => {
+        const total = sums.get(label) ?? 0;
+        const value = mode === "count" ? n : mode === "avg" ? (n ? total / n : 0) : total;
+        return { [labelKey]: label, [valueKey]: value, __count: n };
+      })
       .sort((a, b) => (b[valueKey] as number) - (a[valueKey] as number));
   }
-  const barChartData = aggregate(barXKey, barYKey);
-  const pieChartData = aggregate(pieLabelKey, pieValueKey);
+  const barChartData = aggregate(barXKey, barYKey, chartAgg);
+  const pieChartData = aggregate(pieLabelKey, pieValueKey, chartAgg);
+  const aggLabel = chartAgg === "count" ? "Count" : chartAgg === "avg" ? "Average" : "Sum";
 
   return (
     <div className="mt-6 space-y-3">
@@ -1115,7 +1193,7 @@ function ResultsTable({
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Y-Axis (Value)</Label>
-              <Select value={barYKey} onValueChange={setBarYKey}>
+              <Select value={barYKey} onValueChange={setBarYKey} disabled={chartAgg === "count"}>
                 <SelectTrigger className="w-44 h-8 text-xs">
                   <SelectValue placeholder="Select column" />
                 </SelectTrigger>
@@ -1125,6 +1203,19 @@ function ResultsTable({
                       {col.label}
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Combine by</Label>
+              <Select value={chartAgg} onValueChange={(v) => setChartAgg(v as typeof chartAgg)}>
+                <SelectTrigger className="w-32 h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sum">Sum</SelectItem>
+                  <SelectItem value="avg">Average</SelectItem>
+                  <SelectItem value="count">Count</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1143,7 +1234,14 @@ function ResultsTable({
                 <YAxis tick={{ fontSize: 12 }} />
                 <RechartsTooltip />
                 <RechartsLegend />
-                <Bar dataKey={barYKey} name={visibleCols.find((c) => c.key === barYKey)?.label ?? barYKey}>
+                <Bar
+                  dataKey={barYKey}
+                  name={
+                    chartAgg === "count"
+                      ? "Count"
+                      : `${aggLabel} of ${visibleCols.find((c) => c.key === barYKey)?.label ?? barYKey}`
+                  }
+                >
                   {barChartData.map((_, index) => (
                     <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                   ))}
@@ -1175,7 +1273,7 @@ function ResultsTable({
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Value</Label>
-              <Select value={pieValueKey} onValueChange={setPieValueKey}>
+              <Select value={pieValueKey} onValueChange={setPieValueKey} disabled={chartAgg === "count"}>
                 <SelectTrigger className="w-44 h-8 text-xs">
                   <SelectValue placeholder="Select column" />
                 </SelectTrigger>
@@ -1185,6 +1283,19 @@ function ResultsTable({
                       {col.label}
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Combine by</Label>
+              <Select value={chartAgg} onValueChange={(v) => setChartAgg(v as typeof chartAgg)}>
+                <SelectTrigger className="w-32 h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sum">Sum</SelectItem>
+                  <SelectItem value="avg">Average</SelectItem>
+                  <SelectItem value="count">Count</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1726,6 +1837,35 @@ export function ReportBuilder() {
         ?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 200);
   };
+
+  // Deep-link: the Reports landing opens a saved report via ?report=<id>.
+  // Load it once (auto-runs), then strip the param so switching tabs or
+  // re-rendering doesn't reload over the user's edits.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkedRef = useRef<string | null>(null);
+  useEffect(() => {
+    // Accept ?report=<id> (the landing's cards) and the legacy ?load=<id>
+    // (the dashboard SavedReportWidget links, which nothing consumed before).
+    const id = searchParams.get("report") ?? searchParams.get("load");
+    if (!id || !savedReports) return;
+    if (deepLinkedRef.current === id) return;
+    // Mark handled and strip the param up front — even if the report id is
+    // missing/inaccessible — so a stale link doesn't linger in the URL and
+    // re-fire this effect on every savedReports refetch.
+    deepLinkedRef.current = id;
+    const rep = savedReports.find((r) => r.id === id);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("report");
+        next.delete("load");
+        return next;
+      },
+      { replace: true },
+    );
+    if (rep) handleLoadReport(rep);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, savedReports]);
 
   const handleDeleteReport = async (id: string) => {
     try {

@@ -616,6 +616,7 @@ export interface Activity {
   outlook_synced_at: string | null;
   // joined fields
   owner?: UserProfile;
+  contact?: { id: string; first_name: string | null; last_name: string | null } | null;
 }
 
 export interface OpportunityStageHistory {

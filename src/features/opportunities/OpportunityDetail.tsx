@@ -148,7 +148,24 @@ function DiscountField({
 
   async function commit() {
     setEditing(false);
-    const parsed = draftValue === "" ? null : Number(draftValue);
+    let parsed = draftValue === "" ? null : Number(draftValue);
+    if (parsed != null && Number.isNaN(parsed)) return; // ignore a bad number
+    // Clamp at the source: a percent can't exceed 100% (HTML max= doesn't stop
+    // free typing), and neither type can go negative. A flat-$ amount has no
+    // ceiling. Tell the user when we actually change what they typed, so a
+    // mistyped 150 (or a wrong percent/$ choice) isn't silently rewritten.
+    if (parsed != null) {
+      const typed = parsed;
+      parsed = Math.max(0, parsed);
+      if (draftType === "percent") parsed = Math.min(100, parsed);
+      if (parsed !== typed) {
+        toast.warning(
+          draftType === "percent"
+            ? "A percent discount can't exceed 100% — set to 100%."
+            : "A discount can't be negative — set to 0.",
+        );
+      }
+    }
     if (parsed === discount && draftType === (discountType === "amount" ? "amount" : "percent")) return;
     try {
       await onSave(parsed, draftType);

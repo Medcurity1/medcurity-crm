@@ -150,8 +150,16 @@ export function AccountsList() {
   };
 
   const handleBulkAssignOwner = async (userId: string) => {
-    await bulkOwnerMutation.mutateAsync({ ids: Array.from(selectedIds), owner_user_id: userId });
-    setSelectedIds(new Set());
+    const count = selectedIds.size;
+    try {
+      await bulkOwnerMutation.mutateAsync({ ids: Array.from(selectedIds), owner_user_id: userId });
+      setSelectedIds(new Set());
+      toast.success(`${count} account(s) reassigned.`);
+    } catch (e) {
+      // Keep the selection so the user can retry; surface why it failed
+      // (e.g. some rows hit RLS / no longer exist) instead of failing silently.
+      toast.error("Reassign failed: " + (e as Error).message);
+    }
   };
 
   const allChecked =

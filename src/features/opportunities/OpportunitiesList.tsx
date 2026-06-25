@@ -1,9 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { useState, useRef, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState, useUrlArrayState, useUrlSortState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Target, Plus, Search, X } from "lucide-react";
+import { Target, Plus, Search, X, Pencil, Check } from "lucide-react";
 import { useOpportunities, useOpportunitiesTotals, useArchiveOpportunity, useBulkUpdateOwner, useBulkDeleteOpportunities, useUpdateOpportunity } from "./api";
 import { toast } from "sonner";
 import { useUsers } from "@/features/accounts/api";
@@ -66,17 +66,42 @@ const INLINE_STAGES: OpportunityStage[] = [
 
 function InlineStage({ o }: { o: Opportunity }) {
   const update = useUpdateOpportunity();
+  // Always include the opp's CURRENT stage as an option, even if it's a legacy
+  // value (e.g. "qualified") that isn't in the standard pipeline list. Without
+  // this, an item-aligned dropdown has no item matching the selected value and
+  // renders the menu off-screen — which is exactly the "drops down but nothing
+  // shows" bug. (We also force position="popper" below as a belt-and-suspenders
+  // fix so the menu always anchors to the trigger.)
+  const stageOptions = INLINE_STAGES.includes(o.stage)
+    ? INLINE_STAGES
+    : [o.stage, ...INLINE_STAGES];
   return (
     <div onClick={(e) => e.stopPropagation()}>
       <Select
         value={o.stage}
-        onValueChange={(v) => { if (v !== o.stage) update.mutate({ id: o.id, stage: v as OpportunityStage }); }}
+        onValueChange={(v) => {
+          if (v !== o.stage) {
+            update.mutate(
+              { id: o.id, stage: v as OpportunityStage },
+              {
+                onSuccess: () => toast.success(`Stage → ${stageLabel(v as OpportunityStage)}`),
+                onError: (e) => toast.error("Couldn't update stage: " + (e as Error).message),
+              },
+            );
+          }
+        }}
       >
-        <SelectTrigger className="h-7 w-auto border-0 bg-transparent px-1 shadow-none hover:bg-muted/60 focus:ring-0 [&>svg]:opacity-40">
+        <SelectTrigger
+          title="Click to change stage"
+          className="h-7 w-auto gap-1 rounded border border-dashed border-transparent bg-transparent px-1 shadow-none hover:border-muted-foreground/40 hover:bg-muted/60 focus:ring-0 [&>svg]:opacity-70"
+        >
           <StatusBadge value={o.stage} variant="stage" label={stageLabel(o.stage)} />
         </SelectTrigger>
-        <SelectContent>
-          {INLINE_STAGES.map((s) => (
+        {/* position="popper" anchors the menu to the trigger regardless of
+            whether the current value matches an item — the item-aligned
+            default mispositioned it to the bottom of the page. */}
+        <SelectContent position="popper">
+          {stageOptions.map((s) => (
             <SelectItem key={s} value={s}>{stageLabel(s)}</SelectItem>
           ))}
         </SelectContent>
@@ -98,49 +123,110 @@ function InlineField({
   const raw = o[field] == null ? "" : String(o[field]);
   const initial = kind === "date" ? raw.slice(0, 10) : raw;
   const [val, setVal] = useState(initial);
+  // Guards against a double-commit (e.g. Enter then the unmount blur).
+  const doneRef = useRef(false);
+
+  const startEdit = () => {
+    setVal(initial);
+    doneRef.current = false;
+    setEditing(true);
+  };
+  const cancel = () => {
+    doneRef.current = true;
+    setVal(initial);
+    setEditing(false);
+  };
 
   if (!editing) {
     return (
       <button
         type="button"
         title="Click to edit"
-        className="-mx-1 block w-full rounded px-1 py-0.5 text-left hover:bg-muted/60 cursor-text"
-        onClick={(e) => { e.stopPropagation(); setVal(initial); setEditing(true); }}
+        className="group/edit -mx-1 flex w-full items-center gap-1 rounded border border-dashed border-transparent px-1 py-0.5 text-left hover:border-muted-foreground/40 hover:bg-muted/60 cursor-text"
+        onClick={(e) => { e.stopPropagation(); startEdit(); }}
       >
-        {display}
+        <span className="min-w-0 truncate">{display}</span>
+        <Pencil className="ml-auto h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover/edit:opacity-50" />
       </button>
     );
   }
 
   const commit = () => {
+    if (doneRef.current) return; // already saved/cancelled
+    doneRef.current = true;
     setEditing(false);
     let parsed: string | number | null;
     if (kind === "number") {
-      parsed = val.trim() === "" ? null : Number(val);
-      if (parsed !== null && Number.isNaN(parsed)) return; // ignore a bad number
+      if (val.trim() === "") {
+        // `amount` is NOT NULL with a `>= 0` DB check — clearing it means 0,
+        // not null (a null/negative save throws and the rep loses their edit).
+        parsed = field === "amount" ? 0 : null;
+      } else {
+        parsed = Number(val);
+        if (Number.isNaN(parsed)) return; // ignore a bad number
+        if (parsed < 0) return; // amount can't go negative
+      }
     } else {
       parsed = val.trim() === "" ? null : val.trim();
     }
     const original = (o[field] == null ? null : (kind === "date" ? String(o[field]).slice(0, 10) : o[field]));
-    if (parsed !== original) {
-      update.mutate({ id: o.id, [field]: parsed } as Partial<Opportunity> & { id: string });
+    // amount comes back from Supabase as a STRING (numeric serialized as text),
+    // while parsed is a JS number — so a strict !== would ALWAYS look "changed"
+    // and fire a no-op write + false "Saved" toast on every focus-and-blur.
+    // Compare numerically for the number kind; string-compare text/date.
+    const changed = kind === "number"
+      ? Number(parsed ?? 0) !== Number(original ?? 0)
+      : parsed !== original;
+    if (changed) {
+      update.mutate(
+        { id: o.id, [field]: parsed } as Partial<Opportunity> & { id: string },
+        {
+          onSuccess: () => toast.success("Saved"),
+          onError: (e) => toast.error("Couldn't save: " + (e as Error).message),
+        },
+      );
     }
   };
 
+  // Inline editor: type, then Save (✓) / Enter, or Cancel (✕) / Esc. Clicking
+  // away also saves. The buttons preventDefault on mousedown so they don't blur
+  // the input first (which would double-fire the commit / race the cancel).
   return (
-    <Input
-      type={kind === "number" ? "number" : kind === "date" ? "date" : "text"}
-      autoFocus
-      value={val}
-      onChange={(e) => setVal(e.target.value)}
-      onClick={(e) => e.stopPropagation()}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur();
-        if (e.key === "Escape") { setVal(initial); setEditing(false); }
-      }}
-      className="h-7 w-full min-w-0 text-sm"
-    />
+    <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+      <Input
+        type={kind === "number" ? "number" : kind === "date" ? "date" : "text"}
+        autoFocus
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); commit(); }
+          if (e.key === "Escape") { e.preventDefault(); cancel(); }
+        }}
+        // min-w keeps the field readable in the narrow Amount column — without
+        // it the input collapsed to almost nothing once the Save/Cancel buttons
+        // took their space. It still grows to fill wider columns (date/next step).
+        className="h-7 w-full min-w-[7rem] text-sm"
+      />
+      <button
+        type="button"
+        title="Save (Enter)"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={commit}
+        className="grid h-6 w-6 shrink-0 place-items-center rounded text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950"
+      >
+        <Check className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        title="Cancel (Esc)"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={cancel}
+        className="grid h-6 w-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
   );
 }
 

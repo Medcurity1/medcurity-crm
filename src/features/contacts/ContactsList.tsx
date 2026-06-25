@@ -152,8 +152,16 @@ export function ContactsList() {
   };
 
   const handleBulkAssignOwner = async (userId: string) => {
-    await bulkOwnerMutation.mutateAsync({ ids: Array.from(selectedIds), owner_user_id: userId });
-    setSelectedIds(new Set());
+    const count = selectedIds.size;
+    try {
+      await bulkOwnerMutation.mutateAsync({ ids: Array.from(selectedIds), owner_user_id: userId });
+      setSelectedIds(new Set());
+      toast.success(`${count} contact(s) reassigned.`);
+    } catch (e) {
+      // Keep the selection so the user can retry; surface why it failed
+      // instead of failing silently with the selection wiped.
+      toast.error("Reassign failed: " + (e as Error).message);
+    }
   };
 
   const allChecked =

@@ -67,10 +67,13 @@ export const opportunitySchema = z.object({
   auto_renewal: z.boolean().optional(),
   description: z.string().optional().or(z.literal("")),
   promo_code: z.string().optional().or(z.literal("")),
-  // Discount is a PERCENT (0–100) — matches the DB trigger's
-  // recalc_opportunity_amount which computes:
-  //   amount = subtotal * (1 - discount/100)
-  discount: z.coerce.number().min(0).max(100).optional().nullable(),
+  // Discount can be a PERCENT (0–100) or a flat dollar AMOUNT (the inline
+  // DiscountField on the detail page sets the type). A flat-$ discount can
+  // exceed 100 (e.g. $4,300 off), but a PERCENT can't exceed 100% — you can't
+  // give more than 100% off. The conditional cap is enforced in the
+  // superRefine below (we need discount_type to know which rule applies).
+  discount: z.coerce.number().min(0).optional().nullable(),
+  discount_type: z.enum(["percent", "amount"]).optional().or(z.literal("")),
   subtotal: z.coerce.number().min(0).optional().nullable(),
   follow_up: z.boolean().optional(),
   service_amount: z.coerce.number().min(0).optional().nullable(),
@@ -85,6 +88,18 @@ export const opportunitySchema = z.object({
   assigned_assessor_id: z.string().uuid().nullable().optional(),
   original_sales_rep_id: z.string().uuid().nullable().optional(),
   custom_fields: z.record(z.string(), z.unknown()).optional(),
+}).superRefine((val, ctx) => {
+  // A PERCENT discount can't exceed 100% (you can't give more than 100% off).
+  // A flat-dollar ('amount') discount has no such ceiling. Treat an unset type
+  // as percent, matching the form/detail defaults.
+  const isPercent = !val.discount_type || val.discount_type === "percent";
+  if (isPercent && val.discount != null && val.discount > 100) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["discount"],
+      message: "A percent discount can't be more than 100%.",
+    });
+  }
 });
 
 export type OpportunityFormValues = z.input<typeof opportunitySchema>;
