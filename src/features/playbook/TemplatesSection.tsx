@@ -216,6 +216,9 @@ export function TemplatesSection() {
                     onError: (e) => toast.error("Delete failed: " + (e as Error).message),
                   });
                 }
+                // Close the preview too — otherwise the just-deleted template
+                // stays on screen with live Edit/Delete/Use buttons.
+                setPreview(null);
                 setDeleteTarget(null);
               }}
             >

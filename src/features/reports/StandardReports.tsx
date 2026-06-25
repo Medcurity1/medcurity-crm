@@ -469,9 +469,14 @@ export function StandardReports() {
                 rep={rep}
                 isOwner={isOwner}
                 fav={favs.has(`saved:${rep.id}`)}
-                onToggleFav={() =>
-                  toggleFav.mutate({ ref: `saved:${rep.id}`, on: !favs.has(`saved:${rep.id}`) })
-                }
+                onToggleFav={() => {
+                  const ref = `saved:${rep.id}`;
+                  // Ignore a second click on the SAME star while its toggle is
+                  // still in flight — rapid on/off would otherwise race and the
+                  // DB could settle to the wrong state.
+                  if (toggleFav.isPending && toggleFav.variables?.ref === ref) return;
+                  toggleFav.mutate({ ref, on: !favs.has(ref) });
+                }}
                 onRun={() => navigate(`/reports?tab=reports&report=${rep.id}`)}
                 onShareToggle={() =>
                   updateReport.mutate({ id: rep.id, is_shared: !rep.is_shared })
@@ -485,9 +490,11 @@ export function StandardReports() {
               key={`std-${r.id}`}
               r={r}
               fav={favs.has(`standard:${r.id}`)}
-              onToggleFav={() =>
-                toggleFav.mutate({ ref: `standard:${r.id}`, on: !favs.has(`standard:${r.id}`) })
-              }
+              onToggleFav={() => {
+                const ref = `standard:${r.id}`;
+                if (toggleFav.isPending && toggleFav.variables?.ref === ref) return;
+                toggleFav.mutate({ ref, on: !favs.has(ref) });
+              }}
             />
           ))}
         </div>

@@ -1003,6 +1003,11 @@ function ResultsTable({
   const [pieLabelKey, setPieLabelKey] = useState<string>(() => detectLabelColumn(visibleCols)?.key ?? "");
   const [pieValueKey, setPieValueKey] = useState<string>(() => detectValueColumn(visibleCols)?.key ?? "");
 
+  // How to combine the value column per category. Defaulting to Sum is only
+  // right for additive columns (Amount). For a percentage or FTE count, summing
+  // is meaningless — Average or Count is what you want. Shared across bar/pie.
+  const [chartAgg, setChartAgg] = useState<"sum" | "count" | "avg">("sum");
+
   // Re-detect defaults when columns change
   useMemo(() => {
     const defLabel = detectLabelColumn(visibleCols)?.key ?? "";
@@ -1036,8 +1041,14 @@ function ResultsTable({
   // opportunity instead of the sum of Amount per stage — the chart was
   // meaningless.) Inline (not useMemo) because we're past an early return,
   // where adding a hook would violate the rules of hooks.
-  function aggregate(labelKey: string, valueKey: string) {
-    if (!labelKey || !valueKey) return [] as Record<string, unknown>[];
+  function aggregate(
+    labelKey: string,
+    valueKey: string,
+    mode: "sum" | "count" | "avg",
+  ) {
+    // Count mode just tallies rows per category, so it doesn't need a value
+    // column; sum/avg do.
+    if (!labelKey || (mode !== "count" && !valueKey)) return [] as Record<string, unknown>[];
     const sums = new Map<string, number>();
     const counts = new Map<string, number>();
     const labelCol = visibleCols.find((c) => c.key === labelKey);
@@ -1049,16 +1060,17 @@ function ResultsTable({
       sums.set(label, (sums.get(label) ?? 0) + extractNumber(row, valueKey));
       counts.set(label, (counts.get(label) ?? 0) + 1);
     }
-    return Array.from(sums.entries())
-      .map(([label, total]) => ({
-        [labelKey]: label,
-        [valueKey]: total,
-        __count: counts.get(label) ?? 0,
-      }))
+    return Array.from(counts.entries())
+      .map(([label, n]) => {
+        const total = sums.get(label) ?? 0;
+        const value = mode === "count" ? n : mode === "avg" ? (n ? total / n : 0) : total;
+        return { [labelKey]: label, [valueKey]: value, __count: n };
+      })
       .sort((a, b) => (b[valueKey] as number) - (a[valueKey] as number));
   }
-  const barChartData = aggregate(barXKey, barYKey);
-  const pieChartData = aggregate(pieLabelKey, pieValueKey);
+  const barChartData = aggregate(barXKey, barYKey, chartAgg);
+  const pieChartData = aggregate(pieLabelKey, pieValueKey, chartAgg);
+  const aggLabel = chartAgg === "count" ? "Count" : chartAgg === "avg" ? "Average" : "Sum";
 
   return (
     <div className="mt-6 space-y-3">
@@ -1181,7 +1193,7 @@ function ResultsTable({
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Y-Axis (Value)</Label>
-              <Select value={barYKey} onValueChange={setBarYKey}>
+              <Select value={barYKey} onValueChange={setBarYKey} disabled={chartAgg === "count"}>
                 <SelectTrigger className="w-44 h-8 text-xs">
                   <SelectValue placeholder="Select column" />
                 </SelectTrigger>
@@ -1191,6 +1203,19 @@ function ResultsTable({
                       {col.label}
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Combine by</Label>
+              <Select value={chartAgg} onValueChange={(v) => setChartAgg(v as typeof chartAgg)}>
+                <SelectTrigger className="w-32 h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sum">Sum</SelectItem>
+                  <SelectItem value="avg">Average</SelectItem>
+                  <SelectItem value="count">Count</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1209,7 +1234,14 @@ function ResultsTable({
                 <YAxis tick={{ fontSize: 12 }} />
                 <RechartsTooltip />
                 <RechartsLegend />
-                <Bar dataKey={barYKey} name={visibleCols.find((c) => c.key === barYKey)?.label ?? barYKey}>
+                <Bar
+                  dataKey={barYKey}
+                  name={
+                    chartAgg === "count"
+                      ? "Count"
+                      : `${aggLabel} of ${visibleCols.find((c) => c.key === barYKey)?.label ?? barYKey}`
+                  }
+                >
                   {barChartData.map((_, index) => (
                     <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                   ))}
@@ -1241,7 +1273,7 @@ function ResultsTable({
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Value</Label>
-              <Select value={pieValueKey} onValueChange={setPieValueKey}>
+              <Select value={pieValueKey} onValueChange={setPieValueKey} disabled={chartAgg === "count"}>
                 <SelectTrigger className="w-44 h-8 text-xs">
                   <SelectValue placeholder="Select column" />
                 </SelectTrigger>
@@ -1251,6 +1283,19 @@ function ResultsTable({
                       {col.label}
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Combine by</Label>
+              <Select value={chartAgg} onValueChange={(v) => setChartAgg(v as typeof chartAgg)}>
+                <SelectTrigger className="w-32 h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sum">Sum</SelectItem>
+                  <SelectItem value="avg">Average</SelectItem>
+                  <SelectItem value="count">Count</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1804,10 +1849,11 @@ export function ReportBuilder() {
     const id = searchParams.get("report") ?? searchParams.get("load");
     if (!id || !savedReports) return;
     if (deepLinkedRef.current === id) return;
-    const rep = savedReports.find((r) => r.id === id);
-    if (!rep) return;
+    // Mark handled and strip the param up front — even if the report id is
+    // missing/inaccessible — so a stale link doesn't linger in the URL and
+    // re-fire this effect on every savedReports refetch.
     deepLinkedRef.current = id;
-    handleLoadReport(rep);
+    const rep = savedReports.find((r) => r.id === id);
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -1817,6 +1863,7 @@ export function ReportBuilder() {
       },
       { replace: true },
     );
+    if (rep) handleLoadReport(rep);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, savedReports]);
 

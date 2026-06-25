@@ -98,7 +98,14 @@ export function SequenceEditor({
       const j = i + dir;
       if (j < 0 || j >= prev.length) return prev;
       const next = [...prev];
+      // Swap the step CONTENT but keep each position's day_offset, so the
+      // sequence stays chronological (position order == timing order) — moving
+      // a step up makes it happen earlier rather than saving a backwards cadence.
+      const dayAtI = next[i].day_offset;
+      const dayAtJ = next[j].day_offset;
       [next[i], next[j]] = [next[j], next[i]];
+      next[i] = { ...next[i], day_offset: dayAtI };
+      next[j] = { ...next[j], day_offset: dayAtJ };
       return next;
     });
 

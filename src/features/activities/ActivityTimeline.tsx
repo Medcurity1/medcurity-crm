@@ -398,6 +398,7 @@ function MonthGroup({
                   expandSignal={opts.expandSignal}
                   forceExpanded={opts.allExpanded}
                   enableReattribute={opts.enableReattribute}
+                  showContact={opts.showContact}
                 />
               );
             }
@@ -548,15 +549,15 @@ function ActivityEntry({
           </p>
         )}
         <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-          {showContact && contactName && (
+          {showContact && activity.contact && (
             <Link
-              to={`/contacts/${activity.contact!.id}`}
+              to={`/contacts/${activity.contact.id}`}
               className="inline-flex items-center gap-1 font-medium text-foreground/80 hover:text-primary hover:underline min-w-0"
               onClick={(e) => e.stopPropagation()}
-              title={`Contact: ${contactName}`}
+              title={`Contact: ${contactName || "Contact"}`}
             >
               <User className="h-3 w-3 shrink-0" />
-              <span className="truncate">{contactName}</span>
+              <span className="truncate">{contactName || "Contact"}</span>
             </Link>
           )}
           <span>{activityLabel(activity.activity_type)}</span>
@@ -721,14 +722,22 @@ function ThreadEntry({
   expandSignal,
   forceExpanded,
   enableReattribute = false,
+  showContact = false,
 }: {
   group: ThreadGroup;
   expandSignal?: number;
   forceExpanded: boolean;
   enableReattribute?: boolean;
+  showContact?: boolean;
 }) {
   const [showThread, setShowThread] = useState(false);
   const messageCount = 1 + group.others.length;
+  const contactName = group.primary.contact
+    ? [group.primary.contact.first_name, group.primary.contact.last_name]
+        .filter(Boolean)
+        .join(" ")
+        .trim()
+    : "";
 
   useEffect(() => {
     if (expandSignal && expandSignal > 0) setShowThread(!!forceExpanded);
@@ -778,6 +787,17 @@ function ThreadEntry({
         )}
         <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
           <span>Email Thread</span>
+          {showContact && group.primary.contact && (
+            <Link
+              to={`/contacts/${group.primary.contact.id}`}
+              className="inline-flex items-center gap-1 font-medium text-foreground/80 hover:text-primary hover:underline min-w-0"
+              onClick={(e) => e.stopPropagation()}
+              title={`Contact: ${contactName || "Contact"}`}
+            >
+              <User className="h-3 w-3 shrink-0" />
+              <span className="truncate">{contactName || "Contact"}</span>
+            </Link>
+          )}
           {group.primary.owner?.full_name && (
             <span>{group.primary.owner.full_name}</span>
           )}
