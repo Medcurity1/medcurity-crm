@@ -67,10 +67,12 @@ export const opportunitySchema = z.object({
   auto_renewal: z.boolean().optional(),
   description: z.string().optional().or(z.literal("")),
   promo_code: z.string().optional().or(z.literal("")),
-  // Discount is a PERCENT (0–100) — matches the DB trigger's
-  // recalc_opportunity_amount which computes:
-  //   amount = subtotal * (1 - discount/100)
-  discount: z.coerce.number().min(0).max(100).optional().nullable(),
+  // Discount can be a PERCENT (0–100) or a flat dollar AMOUNT (the inline
+  // DiscountField on the detail page sets the type). No 100 cap here — a flat-$
+  // discount can exceed 100 (e.g. $4,300 off). The percent input is UI-capped
+  // at 100; recalc_opportunity_amount honors discount_type either way.
+  discount: z.coerce.number().min(0).optional().nullable(),
+  discount_type: z.enum(["percent", "amount"]).optional().or(z.literal("")),
   subtotal: z.coerce.number().min(0).optional().nullable(),
   follow_up: z.boolean().optional(),
   service_amount: z.coerce.number().min(0).optional().nullable(),

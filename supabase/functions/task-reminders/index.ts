@@ -71,6 +71,18 @@ interface EmailSyncConnection {
  * never schedule past the task's due_at — after the due date, the
  * reminder stops firing (the task should've been completed or bumped).
  */
+// Day-of-week (0=Sun..6=Sat) in Medcurity's working timezone (Pacific). The
+// function runs in UTC on Supabase, so a Friday-evening-Pacific reminder is
+// Saturday in UTC — using the raw getDay() would wrongly skip it as a weekend.
+const _PAC_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function pacificDay(d: Date): number {
+  const wd = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    weekday: "short",
+  }).format(d);
+  return _PAC_DAYS.indexOf(wd);
+}
+
 function nextReminderAt(
   schedule: ActivityRow["reminder_schedule"],
   current: Date,
@@ -88,7 +100,7 @@ function nextReminderAt(
       // skip Saturday (6) and Sunday (0)
       do {
         next.setDate(next.getDate() + 1);
-      } while (next.getDay() === 0 || next.getDay() === 6);
+      } while (pacificDay(next) === 0 || pacificDay(next) === 6);
     }
   };
   // Advance at least once, then keep advancing until the next fire is strictly
@@ -233,6 +245,41 @@ async function processReminder(
 ): Promise<void> {
   if (!task.owner_user_id) return;
 
+  // CLAIM the row before any side effects: advance reminder_at to the next
+  // fire UP FRONT, conditional on the row still being due. If an overlapping
+  // cron run already advanced it, this update matches 0 rows and we bail — so a
+  // reminder is never sent twice (duplicate notification + email). Advancing
+  // first also means a crash mid-send can't leave reminder_at in the past to
+  // re-fire next tick.
+  const now = new Date();
+  const dueAt = task.due_at ? new Date(task.due_at) : null;
+  const nextAt = nextReminderAt(
+    task.reminder_schedule,
+    new Date(task.reminder_at ?? now.toISOString()),
+    dueAt,
+    now,
+  );
+  const advance = nextAt
+    ? { reminder_at: nextAt.toISOString(), last_reminder_sent_at: now.toISOString() }
+    : { reminder_schedule: "none", reminder_at: null, last_reminder_sent_at: now.toISOString() };
+  const { data: claimed, error: claimErr } = await supabase
+    .from("activities")
+    .update(advance)
+    .eq("id", task.id)
+    .lte("reminder_at", now.toISOString()) // still due — fails if another run advanced it
+    .is("completed_at", null)
+    .select("id");
+  if (claimErr) {
+    console.error(
+      `task-reminders: claim/advance failed for task ${task.id}: ${claimErr.message}`,
+    );
+    return;
+  }
+  if (!claimed || claimed.length === 0) {
+    // Another cron run already claimed this reminder, or it was completed.
+    return;
+  }
+
   // Link points at the record the task is attached to, with an open_task
   // query param so the frontend can pop the EditTaskDialog on arrival.
   // Falls back to the "my tasks" list view when the task has no record.
@@ -326,32 +373,7 @@ async function processReminder(
     }
   }
 
-  // Advance the schedule. Always advance (even if the best-effort email
-  // failed) — leaving reminder_at in the past would re-fire next tick and
-  // spam harder. The next fire is computed forward of `now` so a stale row
-  // can't burst. Check the UPDATE result: if it silently failed, the row
-  // would re-select and re-fire, so log it loudly.
-  const now = new Date();
-  const dueAt = task.due_at ? new Date(task.due_at) : null;
-  const nextAt = nextReminderAt(
-    task.reminder_schedule,
-    new Date(task.reminder_at ?? now.toISOString()),
-    dueAt,
-    now
-  );
-
-  const advance = nextAt
-    ? { reminder_at: nextAt.toISOString(), last_reminder_sent_at: now.toISOString() }
-    : { reminder_schedule: "none", reminder_at: null, last_reminder_sent_at: now.toISOString() };
-  const { error: advErr } = await supabase
-    .from("activities")
-    .update(advance)
-    .eq("id", task.id);
-  if (advErr) {
-    console.error(
-      `task-reminders: FAILED to advance schedule for task ${task.id} (will re-fire next tick): ${advErr.message}`
-    );
-  }
+  // (Schedule already advanced atomically at the top via the claim.)
 }
 
 // ---------------------------------------------------------------------------

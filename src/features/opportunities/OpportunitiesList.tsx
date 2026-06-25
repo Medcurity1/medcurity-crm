@@ -116,8 +116,15 @@ function InlineField({
     setEditing(false);
     let parsed: string | number | null;
     if (kind === "number") {
-      parsed = val.trim() === "" ? null : Number(val);
-      if (parsed !== null && Number.isNaN(parsed)) return; // ignore a bad number
+      if (val.trim() === "") {
+        // `amount` is NOT NULL with a `>= 0` DB check — clearing it means 0,
+        // not null (a null/negative save throws and the rep loses their edit).
+        parsed = field === "amount" ? 0 : null;
+      } else {
+        parsed = Number(val);
+        if (Number.isNaN(parsed)) return; // ignore a bad number
+        if (parsed < 0) return; // amount can't go negative
+      }
     } else {
       parsed = val.trim() === "" ? null : val.trim();
     }

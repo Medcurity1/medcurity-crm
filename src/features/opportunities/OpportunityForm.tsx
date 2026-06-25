@@ -208,6 +208,8 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           description: opp.description ?? "",
           promo_code: opp.promo_code ?? "",
           discount: opp.discount ?? undefined,
+          discount_type:
+            ((opp as { discount_type?: "percent" | "amount" }).discount_type) ?? "percent",
           subtotal: opp.subtotal ?? undefined,
           follow_up: opp.follow_up ?? false,
           service_amount: opp.service_amount ?? undefined,
@@ -250,6 +252,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           description: "",
           promo_code: "",
           discount: undefined,
+          discount_type: "percent",
           subtotal: undefined,
           follow_up: false,
           service_amount: undefined,
@@ -349,6 +352,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   const watchedSubtotal = watch("subtotal");
   const watchedDiscount = watch("discount");
   const watchedAmount = watch("amount");
+  const watchedDiscountType = watch("discount_type");
   const lastEditedRef = useRef<"subtotal" | "discount" | "amount" | null>(null);
 
   // hasProducts is true in edit mode when the opp already has line items.
@@ -385,8 +389,18 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     // divide into 0 and silently zero out the deal. No usable base -> bail.
     const base = Number(watchedSubtotal) || Number(watchedAmount) || 0;
     if (base <= 0) return;
-    const discPct = Math.max(0, Math.min(100, Number(watchedDiscount) || 0));
-    const next = Math.round(base * (1 - discPct / 100) * 100) / 100;
+    // Honor discount_type: a flat-$ ('amount') discount subtracts dollars; a
+    // percent discount scales. Treating an amount-type discount as a percent
+    // (the old behavior) corrupted the deal amount. Floor at 0.
+    const dtype = watchedDiscountType === "amount" ? "amount" : "percent";
+    let next: number;
+    if (dtype === "amount") {
+      const discAmt = Math.max(0, Number(watchedDiscount) || 0);
+      next = Math.round(Math.max(0, base - discAmt) * 100) / 100;
+    } else {
+      const discPct = Math.max(0, Math.min(100, Number(watchedDiscount) || 0));
+      next = Math.round(base * (1 - discPct / 100) * 100) / 100;
+    }
     // Persist the gross base into subtotal when it wasn't set, so the displayed
     // subtotal is populated and a second discount edit re-derives from the
     // original value instead of compounding off the discounted amount.
@@ -397,18 +411,24 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       setValue("amount", next, { shouldDirty: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watchedSubtotal, watchedDiscount, hasProducts, productsLoaded]);
+  }, [watchedSubtotal, watchedDiscount, watchedDiscountType, hasProducts, productsLoaded]);
 
   useEffect(() => {
     if (!productsLoaded) return;
     if (hasProducts) return;
     if (lastEditedRef.current !== "amount") return;
-    // User typed in Amount directly → back-solve Subtotal.
+    // User typed in Amount directly → back-solve Subtotal, honoring discount_type.
     const amt = Number(watchedAmount) || 0;
-    const discPct = Math.max(0, Math.min(99.99, Number(watchedDiscount) || 0));
-    const factor = 1 - discPct / 100;
-    if (factor <= 0) return;
-    const nextSub = Math.round((amt / factor) * 100) / 100;
+    let nextSub: number;
+    if (watchedDiscountType === "amount") {
+      // amount = subtotal - discAmt  =>  subtotal = amount + discAmt
+      nextSub = Math.round((amt + Math.max(0, Number(watchedDiscount) || 0)) * 100) / 100;
+    } else {
+      const discPct = Math.max(0, Math.min(99.99, Number(watchedDiscount) || 0));
+      const factor = 1 - discPct / 100;
+      if (factor <= 0) return;
+      nextSub = Math.round((amt / factor) * 100) / 100;
+    }
     if (nextSub !== Number(watchedSubtotal)) {
       setValue("subtotal", nextSub, { shouldDirty: true });
     }
@@ -566,6 +586,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       description: emptyToNull(values.description),
       promo_code: emptyToNull(values.promo_code),
       discount: values.discount ?? null,
+      discount_type: emptyToNull(values.discount_type) ?? "percent",
       subtotal: values.subtotal ?? null,
       follow_up: values.follow_up ?? false,
       service_amount: values.service_amount ?? null,
