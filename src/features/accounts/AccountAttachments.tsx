@@ -1,6 +1,16 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Paperclip, Upload, Download, Trash2, FileText, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/features/auth/AuthProvider";
@@ -26,6 +36,7 @@ export function AccountAttachments({ accountId }: { accountId: string }) {
   const upload = useUploadAccountAttachments(accountId);
   const del = useDeleteAccountAttachment(accountId);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AccountAttachment | null>(null);
   const { user, profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   // Only the uploader (or an admin) may delete a file — matches the RLS, so the
@@ -54,8 +65,10 @@ export function AccountAttachments({ accountId }: { accountId: string }) {
     }
   }
 
-  function handleDelete(att: AccountAttachment) {
-    if (!confirm(`Delete "${att.original_filename}"? This can't be undone.`)) return;
+  function confirmDelete() {
+    const att = deleteTarget;
+    if (!att) return;
+    setDeleteTarget(null);
     del.mutate(att, {
       onSuccess: () => toast.success("File deleted"),
       onError: (e) => toast.error("Couldn't delete: " + (e as Error).message),
@@ -132,8 +145,8 @@ export function AccountAttachments({ accountId }: { accountId: string }) {
                     size="icon"
                     className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
                     title="Delete"
-                    onClick={() => handleDelete(att)}
-                    disabled={del.isPending}
+                    onClick={() => setDeleteTarget(att)}
+                    disabled={del.isPending && del.variables?.id === att.id}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -143,6 +156,28 @@ export function AccountAttachments({ accountId }: { accountId: string }) {
           </ul>
         )}
       </CardContent>
+
+      {/* Pulse-styled 2-click delete confirmation (not the browser confirm). */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this file?</AlertDialogTitle>
+            <AlertDialogDescription>
+              “{deleteTarget?.original_filename}” will be permanently removed from
+              this account. This can’t be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              onClick={confirmDelete}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

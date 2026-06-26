@@ -100,7 +100,12 @@ export function useDeleteAccountAttachment(accountId: string) {
       if (!deleted || deleted.length === 0) {
         throw new Error("You can only delete files you uploaded.");
       }
-      await supabase.storage.from(BUCKET).remove([att.storage_path]);
+      // Storage cleanup is best-effort (the row is already gone), but don't
+      // swallow a failure silently — surface it so an orphaned object is noticed.
+      const { error: rmErr } = await supabase.storage.from(BUCKET).remove([att.storage_path]);
+      if (rmErr) {
+        console.warn("Account attachment storage cleanup failed (row deleted):", rmErr.message);
+      }
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["account-attachments", accountId] }),
   });

@@ -175,7 +175,12 @@ export function AppLayout() {
         isMobile={isMobile}
       />
 
-      <main className="flex-1 overflow-y-auto bg-background">
+      {/* `relative` makes <main> the containing block for the absolutely-
+          positioned hidden native <select>/<input> elements that shadcn Selects
+          render — otherwise those escape main's overflow clip, stretch the
+          document past the viewport, and produce a second, page-level scrollbar
+          on top of main's (the "scrolls a bit then the whole screen" jank). */}
+      <main className="relative flex-1 overflow-y-auto bg-background">
         {isStaging && (
           <div className="sticky top-0 z-20 bg-yellow-400 text-black text-center text-sm font-semibold py-1.5 border-b-2 border-yellow-600 shadow-sm">
             ⚠️ STAGING ENVIRONMENT — data here is NOT real. For production go to{" "}

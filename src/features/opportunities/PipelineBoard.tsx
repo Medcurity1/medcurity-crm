@@ -237,7 +237,6 @@ function PipelineKanban({
               onCardClick={(id) => navigate(`/opportunities/${id}`)}
               readOnly
               title="Other open"
-              subtitle="Drag into a stage to sort"
             />
           )}
         </div>

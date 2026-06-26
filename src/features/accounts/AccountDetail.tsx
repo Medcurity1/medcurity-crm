@@ -212,6 +212,10 @@ export function AccountDetail() {
         const tz = zipToTimeZone(billingZip);
         if (tz) patch.timezone = TIMEZONE_LABELS[tz];
       }
+    } else if (zipField === "billing_zip" && zip === "") {
+      // Billing is the tz source of truth; once it's cleared the timezone is
+      // no longer backed by any address, so clear it rather than keep it stale.
+      patch.timezone = null;
     }
     await updateMutation.mutateAsync(
       patch as Parameters<typeof updateMutation.mutateAsync>[0],
