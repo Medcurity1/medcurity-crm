@@ -22,6 +22,9 @@ interface ShortcutEntry {
 const generalShortcuts: ShortcutEntry[] = [
   { keys: [formatModShortcut("K")], label: "Search" },
   { keys: [formatModShortcut("N")], label: "Quick Create" },
+  // Quick Task is bound to Ctrl specifically (Cmd+Space is Spotlight on Mac),
+  // so it's shown literally rather than via formatModShortcut.
+  { keys: ["Ctrl", "Space"], label: "Quick Task" },
   { keys: [formatModShortcut("/")], label: "This help" },
 ];
 

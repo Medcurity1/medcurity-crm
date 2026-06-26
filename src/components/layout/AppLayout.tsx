@@ -10,6 +10,7 @@ import { Menu as MenuIcon, Sparkles } from "lucide-react";
 import { WelcomeWizard } from "@/features/auth/WelcomeWizard";
 import { QuickCreateDialog } from "@/components/QuickCreateDialog";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
+import { QuickTaskDialog } from "@/features/activities/QuickTaskDialog";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useIdleLogout } from "@/hooks/useIdleLogout";
 import { useNotificationToasts } from "@/hooks/useNotificationToasts";
@@ -104,6 +105,9 @@ export function AppLayout() {
   // Quick Create dialog
   const [showQuickCreate, setShowQuickCreate] = useState(false);
 
+  // Quick Task dialog (Ctrl+Space global capture)
+  const [showQuickTask, setShowQuickTask] = useState(false);
+
   // Keyboard shortcuts help dialog
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
 
@@ -114,6 +118,7 @@ export function AppLayout() {
   useKeyboardShortcuts({
     onQuickCreate: useCallback(() => setShowQuickCreate(true), []),
     onShowHelp: useCallback(() => setShowShortcutsHelp(true), []),
+    onQuickTask: useCallback(() => setShowQuickTask(true), []),
   });
 
   const section = location.pathname.split("/")[1] || "";
@@ -261,6 +266,12 @@ export function AppLayout() {
       <QuickCreateDialog
         open={showQuickCreate}
         onOpenChange={setShowQuickCreate}
+      />
+
+      {/* Quick Task dialog — opened globally with Ctrl+Space from any screen */}
+      <QuickTaskDialog
+        open={showQuickTask}
+        onOpenChange={setShowQuickTask}
       />
 
       {/* Keyboard shortcuts help dialog */}

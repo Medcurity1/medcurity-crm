@@ -4,17 +4,21 @@ import { useNavigate } from "react-router-dom";
 interface KeyboardShortcutsOptions {
   onQuickCreate: () => void;
   onShowHelp: () => void;
+  onQuickTask: () => void;
 }
 
 /**
  * Registers global keyboard shortcuts:
  * - Cmd+N / Ctrl+N  -- Quick Create dialog
+ * - Ctrl+Space      -- Quick Task capture (works even while typing; Summer's
+ *                      Todoist-style "jot a task without leaving the screen")
  * - Cmd+/ / Ctrl+/  -- Keyboard shortcuts help
  * - G then H/A/L/O/P/R -- Navigation chords
  */
 export function useKeyboardShortcuts({
   onQuickCreate,
   onShowHelp,
+  onQuickTask,
 }: KeyboardShortcutsOptions) {
   const navigate = useNavigate();
   const pendingG = useRef(false);
@@ -45,6 +49,17 @@ export function useKeyboardShortcuts({
       if (mod && e.key === "n") {
         e.preventDefault();
         onQuickCreate();
+        clearGChord();
+        return;
+      }
+
+      // Ctrl+Space -- Quick Task capture. Bound to Ctrl (not Cmd, which is
+      // Spotlight on macOS) per Summer's Todoist muscle memory. Handled BEFORE
+      // the input-focus check so she can jot a task without leaving the field
+      // she's in. Uses e.code so it fires regardless of keyboard layout.
+      if (e.ctrlKey && !e.metaKey && e.code === "Space") {
+        e.preventDefault();
+        onQuickTask();
         clearGChord();
         return;
       }
