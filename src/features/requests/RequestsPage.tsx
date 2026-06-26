@@ -385,12 +385,14 @@ function CrmForm() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<RequestPriority>("medium");
+  const [files, setFiles] = useState<File[]>([]);
 
   function reset() {
     setChangeType("");
     setTitle("");
     setDescription("");
     setPriority("medium");
+    setFiles([]);
   }
 
   function submit() {
@@ -406,10 +408,17 @@ function CrmForm() {
         priority,
         requesterName: profile?.full_name ?? null,
         details: { change_type: changeType || null },
+        files,
       },
       {
-        onSuccess: () => {
-          toast.success("Request submitted");
+        onSuccess: (res) => {
+          if (res.failedUploads.length > 0) {
+            toast.warning(
+              `Request submitted, but these files failed to upload: ${res.failedUploads.join(", ")}`,
+            );
+          } else {
+            toast.success("Request submitted");
+          }
           setSubmitted(true);
         },
         onError: (e) => toast.error("Could not submit: " + (e as Error).message),
@@ -451,6 +460,7 @@ function CrmForm() {
         <Textarea id="r-desc" rows={5} maxLength={4000} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Describe the update, edit, addition, removal, or bug as clearly as you can..." />
       </div>
       <PrioritySelect value={priority} onChange={setPriority} />
+      <AttachmentPicker files={files} onChange={setFiles} maxSizeMB={10} />
       <div className="flex justify-end pt-2">
         <Button onClick={submit} disabled={create.isPending} className="gap-2">
           <Send className="h-4 w-4" />
