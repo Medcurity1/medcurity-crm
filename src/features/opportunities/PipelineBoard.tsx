@@ -18,7 +18,7 @@ import {
 } from "./pipeline-views-api";
 import { useUsers } from "@/features/accounts/api";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { PipelineColumn } from "./PipelineColumn";
+import { PipelineColumn, UNMAPPED_COLUMN_ID } from "./PipelineColumn";
 import { PipelineCard } from "./PipelineCard";
 import { CreatePipelineDialog } from "./CreatePipelineDialog";
 import { PageHeader } from "@/components/PageHeader";
@@ -153,6 +153,14 @@ function PipelineKanban({
     items: pipeline?.filter((p) => p.stage === stage) ?? [],
   }));
 
+  // Open deals whose stage isn't one of the board's columns (legacy Lead/
+  // Qualified, or any open stage we don't render) would otherwise silently
+  // vanish from the board while still counting on the Home page and the stats
+  // above — the "2 deals missing" report. Surface them in a read-only catch-all
+  // so the board never loses a deal; reps can drag a stray into a real stage.
+  const unmappedItems = pipeline?.filter((p) => !displayStages.includes(p.stage)) ?? [];
+  const totalColumns = displayStages.length + (unmappedItems.length > 0 ? 1 : 0);
+
   function handleDragStart(event: DragStartEvent) {
     const item = pipeline?.find((p) => p.id === event.active.id);
     setActiveItem(item ?? null);
@@ -162,6 +170,9 @@ function PipelineKanban({
     setActiveItem(null);
     const { active, over } = event;
     if (!over) return;
+    // Dropping onto the read-only catch-all column is a no-op (the card snaps
+    // back) — it isn't a real stage.
+    if (over.id === UNMAPPED_COLUMN_ID) return;
 
     const newStage = over.id as OpportunityStage;
     const item = pipeline?.find((p) => p.id === active.id);
@@ -207,7 +218,7 @@ function PipelineKanban({
         <div
           className="grid gap-4 min-h-[60vh]"
           style={{
-            gridTemplateColumns: `repeat(${displayStages.length}, minmax(260px, 1fr))`,
+            gridTemplateColumns: `repeat(${totalColumns}, minmax(260px, 1fr))`,
           }}
         >
           {columns.map((col) => (
@@ -218,6 +229,16 @@ function PipelineKanban({
               onCardClick={(id) => navigate(`/opportunities/${id}`)}
             />
           ))}
+          {unmappedItems.length > 0 && (
+            <PipelineColumn
+              key={UNMAPPED_COLUMN_ID}
+              stage={UNMAPPED_COLUMN_ID}
+              items={unmappedItems}
+              onCardClick={(id) => navigate(`/opportunities/${id}`)}
+              readOnly
+              title="Other open"
+            />
+          )}
         </div>
       </div>
       <DragOverlay>

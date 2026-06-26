@@ -3,6 +3,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useTheme, type ThemeMode } from "@/hooks/useTheme";
 import { useUserPreferences } from "@/hooks/useUserPreferences";
+import { QUICK_TASK_SHORTCUTS } from "@/lib/quick-task-shortcut";
 import { Sun, Moon, Monitor, Columns2, AlignLeft } from "lucide-react";
 
 export function PreferencesPanel() {
@@ -105,6 +106,40 @@ export function PreferencesPanel() {
           </div>
           <p className="text-xs text-muted-foreground">
             Reload a detail page after changing.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Quick Task Shortcut</CardTitle>
+          <CardDescription>
+            The keyboard shortcut that pops the Quick Task window from any
+            screen. Ctrl + Space is the default, but on a Mac it can clash with
+            the system "switch input source" shortcut — pick another if it
+            doesn't work for you.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Label>Shortcut</Label>
+          <div className="grid grid-cols-1 gap-2">
+            {QUICK_TASK_SHORTCUTS.map(({ value, label }) => {
+              const active = prefs.quickTaskShortcut === value;
+              return (
+                <Button
+                  key={value}
+                  type="button"
+                  variant={active ? "default" : "outline"}
+                  onClick={() => setPref("quickTaskShortcut", value)}
+                  className="justify-start"
+                >
+                  {label}
+                </Button>
+              );
+            })}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Takes effect immediately. Works even while you're typing in a field.
           </p>
         </CardContent>
       </Card>

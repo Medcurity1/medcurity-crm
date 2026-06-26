@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -33,7 +33,13 @@ import {
 import { useAuth } from "@/features/auth/AuthProvider";
 import { errorMessage } from "@/lib/errors";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, CalendarClock, Repeat } from "lucide-react";
+import {
+  parseTaskText,
+  toDateTimeLocal,
+  formatParsedDate,
+  removeRanges,
+} from "./parse-task-text";
 
 interface QuickTaskDialogProps {
   open: boolean;
@@ -66,8 +72,36 @@ export function QuickTaskDialog({
   // tab) where no record context was passed in via props.
   const [attach, setAttach] = useState<TaskRecordSelection>(EMPTY_TASK_RECORD);
   const [recur, setRecur] = useState<RecurrenceUI>(EMPTY_RECURRENCE);
+  // Once the user hand-edits Due / Recurrence, the smart parser stops managing
+  // that field (so it never clobbers a manual choice).
+  const [dueManual, setDueManual] = useState(false);
+  const [recurManual, setRecurManual] = useState(false);
   const createMutation = useCreateActivity();
   const { user } = useAuth();
+
+  // Smart entry (Todoist-style): parse "tomorrow at 8am" / "every Monday" out of
+  // the subject as it's typed, and auto-fill Due + Recurrence. Runs on each
+  // subject change; skips any field the user has taken over manually.
+  const parsed = useMemo(() => parseTaskText(subject), [subject]);
+  useEffect(() => {
+    if (!dueManual) setDueAt(parsed.date ? toDateTimeLocal(parsed.date) : "");
+    if (!recurManual) setRecur(parsed.recurrence ?? EMPTY_RECURRENCE);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parsed]);
+
+  // The cleaned title (date/recurrence phrases removed) — but only strip a
+  // phrase whose field the parser still manages, so a manual override keeps the
+  // literal text. Falls back to the raw subject if cleaning would empty it.
+  const cleanedSubject = useMemo(() => {
+    if (!parsed.matched) return subject.trim();
+    const cleaned = removeRanges(subject, [
+      recurManual ? null : parsed.recurrenceRange,
+      dueManual ? null : parsed.dateRange,
+    ]).trim();
+    return cleaned || subject.trim();
+  }, [parsed, subject, dueManual, recurManual]);
+  const showSmartChip =
+    parsed.matched && ((parsed.date && !dueManual) || (parsed.recurrence && !recurManual));
 
   // Standalone = opened with no record context (the Activities tab). Only
   // then do we offer the attach-to-record picker; from a record's Tasks
@@ -83,6 +117,8 @@ export function QuickTaskDialog({
     setPriority("normal");
     setAttach(EMPTY_TASK_RECORD);
     setRecur(EMPTY_RECURRENCE);
+    setDueManual(false);
+    setRecurManual(false);
   }
 
   function handleClose(nextOpen: boolean) {
@@ -118,7 +154,7 @@ export function QuickTaskDialog({
     createMutation.mutate(
       {
         activity_type: "task",
-        subject: subject.trim(),
+        subject: cleanedSubject,
         body: notes.trim() || undefined,
         due_at: dueIso,
         account_id: accountId ?? attach.accountId ?? null,
@@ -168,11 +204,40 @@ export function QuickTaskDialog({
             <Label htmlFor="task-subject">Subject *</Label>
             <Input
               id="task-subject"
-              placeholder="e.g. Follow up on proposal"
+              placeholder="e.g. Call Dr. Lee tomorrow at 8am"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
               autoFocus
             />
+            {showSmartChip ? (
+              <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs space-y-1">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  {parsed.date && !dueManual && (
+                    <span className="inline-flex items-center gap-1 font-medium">
+                      <CalendarClock className="h-3.5 w-3.5 text-primary" />
+                      {formatParsedDate(parsed.date)}
+                    </span>
+                  )}
+                  {parsed.recurrenceLabel && !recurManual && (
+                    <span className="inline-flex items-center gap-1 font-medium">
+                      <Repeat className="h-3.5 w-3.5 text-primary" />
+                      {parsed.recurrenceLabel}
+                    </span>
+                  )}
+                </div>
+                {cleanedSubject && cleanedSubject !== subject.trim() && (
+                  <p className="text-muted-foreground">Saves as: "{cleanedSubject}"</p>
+                )}
+                <p className="text-[11px] text-muted-foreground">
+                  Auto-detected from your text — edit the fields below to change.
+                </p>
+              </div>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                Tip: type the date and it fills Due automatically — "tomorrow 8am",
+                "next Wed", "every Monday".
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -181,7 +246,10 @@ export function QuickTaskDialog({
               id="task-due"
               type="datetime-local"
               value={dueAt}
-              onChange={(e) => setDueAt(e.target.value)}
+              onChange={(e) => {
+                setDueAt(e.target.value);
+                setDueManual(true);
+              }}
             />
             <p className="text-xs text-muted-foreground">
               Date + time. Used for calendar placement and reminder
@@ -209,7 +277,13 @@ export function QuickTaskDialog({
             <TaskRecordPicker value={attach} onChange={setAttach} />
           )}
 
-          <RecurrencePicker value={recur} onChange={setRecur} />
+          <RecurrencePicker
+            value={recur}
+            onChange={(v) => {
+              setRecur(v);
+              setRecurManual(true);
+            }}
+          />
 
           <ReminderFields value={reminder} onChange={setReminder} hasDueDate={!!dueAt} />
 

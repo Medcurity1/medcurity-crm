@@ -104,7 +104,7 @@ export function useCustomPipeline(filters: CustomPipelineFilters) {
       let query = supabase
         .from("opportunities")
         .select(
-          "id, name, team, kind, stage, amount, expected_close_date, owner_user_id, account_id, account:accounts!account_id(name)"
+          "id, name, team, kind, stage, amount, expected_close_date, owner_user_id, account_id, account:accounts!account_id(name), owner:user_profiles!owner_user_id(full_name)"
         )
         .is("archived_at", null)
         .in("stage", filters.stages);
@@ -135,6 +135,9 @@ export function useCustomPipeline(filters: CustomPipelineFilters) {
         owner_user_id: row.owner_user_id as string | null,
         account_id: row.account_id as string,
         account_name: (row.account as { name: string } | null)?.name ?? "",
+        // Hydrate owner_name so custom-view cards show the owner instead of
+        // "Unassigned" (the built-in Sales/Renewals tabs already do this).
+        owner_name: (row.owner as { full_name: string | null } | null)?.full_name ?? null,
       })) as ActivePipelineRow[];
     },
     enabled: filters.stages.length > 0,

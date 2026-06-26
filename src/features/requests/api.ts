@@ -196,7 +196,12 @@ async function uploadRequestAttachments(
       mimetype: f.type || null,
       size_bytes: f.size,
     });
-    if (rowErr) failed.push(f.name);
+    if (rowErr) {
+      // Metadata insert failed after the object uploaded — remove the orphan so
+      // the bucket doesn't accumulate undownloadable files.
+      await supabase.storage.from(ATTACHMENTS_BUCKET).remove([path]);
+      failed.push(f.name);
+    }
   }
   return failed;
 }

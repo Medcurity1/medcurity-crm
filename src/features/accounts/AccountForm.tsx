@@ -257,17 +257,13 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
     hawaii: "US/Hawaii",
     arizona_no_dst: "US/Arizona",
   };
-  // Zip → country + timezone autofill. The timezone we care about is
-  // the account's physical location, which is the SHIPPING address
-  // (billing may be a corporate HQ in a different region). So:
-  //   - shipping_zip drives both shipping_country and timezone, and
-  //     overwrites timezone on every change so a corrected zip
-  //     updates the tz (previously we only filled empty tz, which
-  //     made later corrections silent no-ops).
-  //   - billing_zip only fills billing_country. We fall back to
-  //     letting billing drive timezone *only* when shipping_zip is
-  //     empty, so accounts that haven't bothered to set a shipping
-  //     address still get a sensible tz from billing.
+  // Zip → country + timezone autofill. The team works off the BILLING address
+  // (Summer: shipping is never used), so billing_zip is the timezone source.
+  //   - billing_zip drives billing_country AND timezone, overwriting the tz on
+  //     every valid change so a corrected zip updates it.
+  //   - shipping_zip drives shipping_country, and only drives the tz as a
+  //     FALLBACK when billing has no valid zip (so an account with only a
+  //     shipping address still gets a sensible tz).
   // Country keeps the empty-check (we don't want to clobber a manual
   // "USA" / "United States of America" / etc. once the rep set it).
   const watchedBillingZip = watch("billing_zip");
@@ -280,15 +276,12 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
         shouldTouch: true,
       });
     }
-    const shippingZip = (getValues("shipping_zip") ?? "").trim();
-    if (!shippingZip) {
-      const tz = zipToTimeZone(zip);
-      if (tz) {
-        setValue("timezone", TIMEZONE_LABELS[tz], {
-          shouldDirty: true,
-          shouldTouch: true,
-        });
-      }
+    const tz = zipToTimeZone(zip);
+    if (tz) {
+      setValue("timezone", TIMEZONE_LABELS[tz], {
+        shouldDirty: true,
+        shouldTouch: true,
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchedBillingZip]);
@@ -296,35 +289,23 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
   const watchedShippingZip = watch("shipping_zip");
   useEffect(() => {
     const zip = (watchedShippingZip ?? "").trim();
-    if (looksLikeUsZip(zip)) {
-      if (!getValues("shipping_country")) {
-        setValue("shipping_country", "United States", {
-          shouldDirty: true,
-          shouldTouch: true,
-        });
-      }
+    if (!looksLikeUsZip(zip)) return;
+    if (!getValues("shipping_country")) {
+      setValue("shipping_country", "United States", {
+        shouldDirty: true,
+        shouldTouch: true,
+      });
+    }
+    // Shipping only sets the tz as a fallback when billing has no valid zip —
+    // billing is the source of truth.
+    const billingZip = (getValues("billing_zip") ?? "").trim();
+    if (!looksLikeUsZip(billingZip)) {
       const tz = zipToTimeZone(zip);
       if (tz) {
         setValue("timezone", TIMEZONE_LABELS[tz], {
           shouldDirty: true,
           shouldTouch: true,
         });
-      }
-      return;
-    }
-    // Shipping cleared (or invalid) — fall BACK to billing's tz so the
-    // account doesn't keep a stale shipping-derived value after the
-    // rep removes the shipping address.
-    if (!zip) {
-      const billingZip = (getValues("billing_zip") ?? "").trim();
-      if (looksLikeUsZip(billingZip)) {
-        const tz = zipToTimeZone(billingZip);
-        if (tz) {
-          setValue("timezone", TIMEZONE_LABELS[tz], {
-            shouldDirty: true,
-            shouldTouch: true,
-          });
-        }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -670,6 +651,43 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* Company sizing (moved here from the old Company Details
+                    section per Summer): Number of Employees auto-sets FTE Range. */}
+                <div className="space-y-2">
+                  <Label htmlFor="employees">Number of Employees<RequiredIndicator fieldKey="employees" requiredFields={requiredKeys} /></Label>
+                  <Input
+                    id="employees"
+                    type="number"
+                    {...register("employees", {
+                      onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+                        const num = parseInt(e.target.value, 10);
+                        if (!isNaN(num) && num > 0) {
+                          setValue("fte_range", employeesToFteRange(num) as AccountFormValues["fte_range"]);
+                        }
+                      },
+                    })}
+                  />
+                  <p className="text-[11px] text-muted-foreground">Auto-sets FTE Range</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="fte_range">FTE Range<RequiredIndicator fieldKey="fte_range" requiredFields={requiredKeys} /></Label>
+                  <Select
+                    value={watch("fte_range") || "none"}
+                    onValueChange={(v) => setValue("fte_range", v === "none" ? "" as AccountFormValues["fte_range"] : v as AccountFormValues["fte_range"])}
+                  >
+                    <SelectTrigger id="fte_range">
+                      <SelectValue placeholder="Select range" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">-- None --</SelectItem>
+                      {FTE_RANGES.map((r) => (
+                        <SelectItem key={r} value={r}>{r}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 <div className="flex items-center gap-2 md:col-span-2 pt-2">
                   <Checkbox
                     id="priority_account_basic"
@@ -805,75 +823,32 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                   <Input id="shipping_country" disabled={sameAsBilling} {...register("shipping_country")} />
                 </div>
               </div>
-            </CollapsibleFormSection>
 
-            {/* ---- 4. Company Details (collapsible) ---- */}
-            <CollapsibleFormSection title="Company Details">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="fte_count">FTE Count<RequiredIndicator fieldKey="fte_count" requiredFields={requiredKeys} /></Label>
-                  <Input id="fte_count" type="number" {...register("fte_count")} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="fte_range">FTE Range<RequiredIndicator fieldKey="fte_range" requiredFields={requiredKeys} /></Label>
-                  <Select
-                    value={watch("fte_range") || "none"}
-                    onValueChange={(v) => setValue("fte_range", v === "none" ? "" as AccountFormValues["fte_range"] : v as AccountFormValues["fte_range"])}
-                  >
-                    <SelectTrigger id="fte_range">
-                      <SelectValue placeholder="Select range" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">-- None --</SelectItem>
-                      {FTE_RANGES.map((r) => (
-                        <SelectItem key={r} value={r}>{r}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="employees">Number of Employees<RequiredIndicator fieldKey="employees" requiredFields={requiredKeys} /></Label>
-                  <Input
-                    id="employees"
-                    type="number"
-                    {...register("employees", {
-                      onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
-                        const num = parseInt(e.target.value, 10);
-                        if (!isNaN(num) && num > 0) {
-                          setValue("fte_range", employeesToFteRange(num) as AccountFormValues["fte_range"]);
-                        }
-                      },
-                    })}
-                  />
-                  <p className="text-[11px] text-muted-foreground">Auto-sets FTE Range</p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="number_of_providers">Number of Providers<RequiredIndicator fieldKey="number_of_providers" requiredFields={requiredKeys} /></Label>
-                  <Input id="number_of_providers" type="number" {...register("number_of_providers")} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="locations">Number of Locations<RequiredIndicator fieldKey="locations" requiredFields={requiredKeys} /></Label>
-                  <Input id="locations" type="number" {...register("locations")} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="annual_revenue">Annual Revenue<RequiredIndicator fieldKey="annual_revenue" requiredFields={requiredKeys} /></Label>
-                  <Input id="annual_revenue" type="number" step="0.01" {...register("annual_revenue")} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="timezone">Timezone</Label>
-                  <Input
-                    id="timezone"
-                    placeholder="Derived from zip"
-                    {...register("timezone")}
-                    readOnly
-                    className="bg-muted cursor-not-allowed"
-                    title="Timezone is derived from the shipping (or billing) zip code automatically — it can't be edited directly."
-                  />
-                </div>
+              {/* Timezone (moved here from Company Details per Summer): it's
+                  auto-derived from the billing zip, so it lives where the zip
+                  is. Read-only. */}
+              <div className="space-y-2 mt-4 md:w-1/3">
+                <Label htmlFor="timezone">Timezone</Label>
+                <Input
+                  id="timezone"
+                  placeholder="Derived from billing zip"
+                  {...register("timezone")}
+                  readOnly
+                  className="bg-muted cursor-not-allowed"
+                  title="Timezone is derived from the billing (or shipping) zip code automatically — it can't be edited directly."
+                />
               </div>
             </CollapsibleFormSection>
 
-            {/* ---- 5. Contract & Renewal (collapsible) ---- */}
+            {/* Company Details section removed per Summer — FTE Range +
+                Number of Employees moved to Basic Information, Timezone moved to
+                Address Information, and FTE Count / Number of Providers / Number
+                of Locations / Annual Revenue dropped from the visible form.
+                Those four still load via defaultValues and save back via the
+                payload unchanged (round-tripped, shouldUnregister is off), so no
+                existing data is lost — they're just no longer shown or edited. */}
+
+            {/* ---- Contract & Renewal (collapsible) ---- */}
             <CollapsibleFormSection title="Contract & Renewal">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="space-y-2">

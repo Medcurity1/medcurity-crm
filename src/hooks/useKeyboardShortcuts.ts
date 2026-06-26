@@ -1,20 +1,33 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  matchesQuickTaskShortcut,
+  DEFAULT_QUICK_TASK_SHORTCUT,
+  type QuickTaskShortcut,
+} from "@/lib/quick-task-shortcut";
 
 interface KeyboardShortcutsOptions {
   onQuickCreate: () => void;
   onShowHelp: () => void;
+  onQuickTask: () => void;
+  /** User-chosen Quick Task shortcut (My Settings → Preferences). */
+  quickTaskShortcut?: QuickTaskShortcut;
 }
 
 /**
  * Registers global keyboard shortcuts:
  * - Cmd+N / Ctrl+N  -- Quick Create dialog
+ * - <configurable>  -- Quick Task capture (default Ctrl+Space; works even while
+ *                      typing). User-configurable because Ctrl+Space collides
+ *                      with the macOS input-source switcher for some.
  * - Cmd+/ / Ctrl+/  -- Keyboard shortcuts help
  * - G then H/A/L/O/P/R -- Navigation chords
  */
 export function useKeyboardShortcuts({
   onQuickCreate,
   onShowHelp,
+  onQuickTask,
+  quickTaskShortcut = DEFAULT_QUICK_TASK_SHORTCUT,
 }: KeyboardShortcutsOptions) {
   const navigate = useNavigate();
   const pendingG = useRef(false);
@@ -45,6 +58,16 @@ export function useKeyboardShortcuts({
       if (mod && e.key === "n") {
         e.preventDefault();
         onQuickCreate();
+        clearGChord();
+        return;
+      }
+
+      // Quick Task capture (user-configurable shortcut). Handled BEFORE the
+      // input-focus check so a task can be jotted without leaving the current
+      // field.
+      if (matchesQuickTaskShortcut(e, quickTaskShortcut)) {
+        e.preventDefault();
+        onQuickTask();
         clearGChord();
         return;
       }
@@ -95,5 +118,5 @@ export function useKeyboardShortcuts({
       document.removeEventListener("keydown", handleKeyDown);
       clearGChord();
     };
-  }, [navigate, onQuickCreate, onShowHelp, clearGChord]);
+  }, [navigate, onQuickCreate, onShowHelp, onQuickTask, quickTaskShortcut, clearGChord]);
 }
