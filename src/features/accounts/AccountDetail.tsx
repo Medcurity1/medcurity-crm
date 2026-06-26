@@ -157,10 +157,11 @@ export function AccountDetail() {
 
   // Inline-edit save for a zip field that should ALSO autofill country
   // + timezone when the user types a US zip. Mirrors AccountForm's
-  // shipping-vs-billing tz precedence:
-  //   - shipping_zip: drives shipping_country + timezone (always)
-  //   - billing_zip:  drives billing_country always; only drives
-  //     timezone when shipping_zip is currently empty.
+  // billing-primary tz precedence (Summer: the team uses billing, not
+  // shipping):
+  //   - billing_zip:  drives billing_country + timezone (always)
+  //   - shipping_zip: drives shipping_country always; only drives the
+  //     timezone as a fallback when billing has no valid zip.
   // The detail page only renders an EditableField for billing_zip
   // right now (shipping is read-only), but this helper handles both
   // so it doesn't break the day shipping becomes inline-editable.
@@ -192,12 +193,12 @@ export function AccountDetail() {
       if (!currentCountry) {
         patch[countryField] = "United States";
       }
-      // Timezone: shipping is the source of truth. Only let billing
-      // touch tz when shipping_zip is empty.
+      // Timezone: billing is the source of truth (Summer: shipping is unused).
+      // Billing always drives the tz; shipping only as a fallback when billing
+      // has no valid zip.
+      const billingZip = (account.billing_zip ?? "").trim();
       const shouldDriveTz =
-        zipField === "shipping_zip" ||
-        !account.shipping_zip ||
-        account.shipping_zip.trim() === "";
+        zipField === "billing_zip" || !looksLikeUsZip(billingZip);
       if (shouldDriveTz) {
         const tz = zipToTimeZone(zip);
         if (tz) patch.timezone = TIMEZONE_LABELS[tz];
