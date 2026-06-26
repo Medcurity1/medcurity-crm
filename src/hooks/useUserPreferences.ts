@@ -1,4 +1,8 @@
 import { useEffect, useState } from "react";
+import {
+  DEFAULT_QUICK_TASK_SHORTCUT,
+  type QuickTaskShortcut,
+} from "@/lib/quick-task-shortcut";
 
 /**
  * Client-side user preferences, persisted to localStorage.
@@ -18,12 +22,15 @@ export interface UserPreferences {
    *                  panel pinned to the right (Salesforce-style).
    */
   detailLayout: "stacked" | "side_panel";
+  /** Global keyboard shortcut that opens the Quick Task dialog. */
+  quickTaskShortcut: QuickTaskShortcut;
 }
 
 const DEFAULTS: UserPreferences = {
   // Default to the Salesforce-style side-panel layout. Users who prefer the
   // original stacked layout can flip this in My Settings > Preferences.
   detailLayout: "side_panel",
+  quickTaskShortcut: DEFAULT_QUICK_TASK_SHORTCUT,
 };
 
 function readPrefs(): UserPreferences {

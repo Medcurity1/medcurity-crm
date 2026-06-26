@@ -12,6 +12,7 @@ import { QuickCreateDialog } from "@/components/QuickCreateDialog";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { QuickTaskDialog } from "@/features/activities/QuickTaskDialog";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useUserPreferences } from "@/hooks/useUserPreferences";
 import { useIdleLogout } from "@/hooks/useIdleLogout";
 import { useNotificationToasts } from "@/hooks/useNotificationToasts";
 import { useMeddyPresence } from "@/features/meddy/useMeddyPresence";
@@ -115,10 +116,12 @@ export function AppLayout() {
   const [showAssistant, setShowAssistant] = useState(false);
 
   // Register keyboard shortcuts
+  const { prefs } = useUserPreferences();
   useKeyboardShortcuts({
     onQuickCreate: useCallback(() => setShowQuickCreate(true), []),
     onShowHelp: useCallback(() => setShowShortcutsHelp(true), []),
     onQuickTask: useCallback(() => setShowQuickTask(true), []),
+    quickTaskShortcut: prefs.quickTaskShortcut,
   });
 
   const section = location.pathname.split("/")[1] || "";

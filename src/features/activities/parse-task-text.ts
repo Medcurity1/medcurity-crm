@@ -69,19 +69,99 @@ function detectRecurrence(
   return null;
 }
 
+// A broad "every ..." cadence — INCLUDING ones we can't model (every 2 weeks,
+// every 3 months, every other Friday). When detectRecurrence returns null but
+// this matches, we have an unsupported cadence and must keep chrono from
+// turning the embedded unit/weekday into a bogus due date.
+const EVERY_CLAUSE =
+  /\bevery\s+(?:other\s+|\d+\s+)?(?:day|week|month|year|weekday|sun|mon|tues?|wednes?|thurs?|fri|satur?)(?:day)?s?\b/i;
+
+function rangesOverlap(a: Range, b: Range | null): boolean {
+  return !!b && a[0] < b[1] && b[0] < a[1];
+}
+
+function toYmd(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 export function parseTaskText(text: string, ref: Date = new Date()): ParsedTaskText {
   const recur = detectRecurrence(text);
+
+  // Span of an UNSUPPORTED "every ..." cadence, if any (so chrono won't parse a
+  // date out of it).
+  let unsupportedEvery: Range | null = null;
+  if (!recur) {
+    const m = EVERY_CLAUSE.exec(text);
+    if (m) unsupportedEvery = [m.index, m.index + m[0].length];
+  }
+
+  // forwardDate: a bare "Friday" / "the 3rd" means the UPCOMING one.
+  const results = chrono.parse(text, ref, { forwardDate: true });
+
+  // "every ... until <date>": the date right after until/through/til is the
+  // recurrence END, not the due date (only meaningful with a recurrence). It's
+  // often the SECOND chrono match (after the recurrence weekday), so scan all.
+  let recurUntil: string | null = null;
+  let untilRange: Range | null = null;
+  let untilResult: (typeof results)[number] | null = null;
+  if (recur) {
+    for (const r of results) {
+      if (!isDateLike(r.text)) continue;
+      const before = /\b(until|through|thru|til)\s+$/i.exec(text.slice(0, r.index));
+      if (before) {
+        recurUntil = toYmd(r.start.date());
+        untilRange = [r.index - before[0].length, r.index + r.text.length];
+        untilResult = r;
+        break;
+      }
+    }
+  }
 
   let date: Date | null = null;
   let hasTime = false;
   let dateRange: Range | null = null;
-  // forwardDate: a bare "Friday" / "the 3rd" means the UPCOMING one.
-  const results = chrono.parse(text, ref, { forwardDate: true });
-  const result = results.find((r) => isDateLike(r.text));
+  // Due date = first date-like match that isn't the "until" date and isn't part
+  // of an unsupported cadence.
+  const result = results.find(
+    (r) =>
+      r !== untilResult &&
+      isDateLike(r.text) &&
+      !rangesOverlap([r.index, r.index + r.text.length], unsupportedEvery),
+  );
   if (result) {
     date = result.start.date();
     hasTime = result.start.isCertain("hour");
     dateRange = [result.index, result.index + result.text.length];
+
+    // chrono parsed a date RANGE ("every Monday until August 1" -> start=Monday,
+    // end=Aug 1). With a recurrence, the range END is the recurrence end, and
+    // the START is the due. (The "until <date>" loop above handles the other
+    // shape, where the end date is a separate match.)
+    if (recur && !recurUntil && result.end) {
+      recurUntil = toYmd(result.end.date());
+    }
+
+    // Bare afternoon-ish hour with no am/pm ("at 2") — people almost never mean
+    // 1-7 AM. Bias to PM. If a day was explicit ("Friday at 2") keep it and just
+    // flip to PM; if the day was only implied (time-only "at 2"), re-anchor to
+    // the next occurrence of that PM time (today if still future, else tomorrow)
+    // so it doesn't roll to tomorrow 2 AM.
+    if (hasTime && !result.start.isCertain("meridiem")) {
+      const h = result.start.get("hour");
+      const min = result.start.get("minute") ?? 0;
+      if (h != null && h >= 1 && h <= 7) {
+        if (result.start.isCertain("day")) {
+          date = new Date(date);
+          date.setHours(h + 12, min, 0, 0);
+        } else {
+          const pm = new Date(ref);
+          pm.setHours(h + 12, min, 0, 0);
+          if (pm.getTime() <= ref.getTime()) pm.setDate(pm.getDate() + 1);
+          date = pm;
+        }
+      }
+    }
   }
 
   if (date && !hasTime) {
@@ -89,9 +169,9 @@ export function parseTaskText(text: string, ref: Date = new Date()): ParsedTaskT
     date.setHours(DEFAULT_HOUR, 0, 0, 0);
   }
 
-  // Recurrence with no concrete date ("every day"): anchor to the next 9am —
-  // today if it's still upcoming, otherwise tomorrow — so the task (and its
-  // due-date reminder) is never born in the past.
+  // Recurrence with no concrete date ("every day", or after pulling out "until"):
+  // anchor to the next 9am — today if still upcoming, else tomorrow — so the task
+  // (and its due-date reminder) is never born in the past.
   if (!date && recur) {
     const anchor = new Date(ref);
     anchor.setHours(DEFAULT_HOUR, 0, 0, 0);
@@ -100,12 +180,15 @@ export function parseTaskText(text: string, ref: Date = new Date()): ParsedTaskT
     hasTime = false;
   }
 
-  const cleanedSubject = removeRanges(text, [recur?.range ?? null, dateRange]);
+  const recurrence = recur
+    ? { ...recur.ui, until: recurUntil ?? recur.ui.until }
+    : null;
+  const cleanedSubject = removeRanges(text, [recur?.range ?? null, dateRange, untilRange]);
   return {
     date,
     hasTime,
     dateRange,
-    recurrence: recur?.ui ?? null,
+    recurrence,
     recurrenceLabel: recur?.label ?? null,
     recurrenceRange: recur?.range ?? null,
     cleanedSubject,

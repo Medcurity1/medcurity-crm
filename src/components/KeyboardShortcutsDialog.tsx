@@ -6,6 +6,8 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { formatModShortcut } from "@/lib/platform";
+import { useUserPreferences } from "@/hooks/useUserPreferences";
+import { quickTaskShortcutLabel } from "@/lib/quick-task-shortcut";
 
 interface KeyboardShortcutsDialogProps {
   open: boolean;
@@ -16,17 +18,6 @@ interface ShortcutEntry {
   keys: string[];
   label: string;
 }
-
-// Render the mod key per platform — ⌘ on Mac, Ctrl on Windows/Linux. Was
-// hardcoded ⌘K previously which confused PC users who have to press Ctrl+K.
-const generalShortcuts: ShortcutEntry[] = [
-  { keys: [formatModShortcut("K")], label: "Search" },
-  { keys: [formatModShortcut("N")], label: "Quick Create" },
-  // Quick Task is bound to Ctrl specifically (Cmd+Space is Spotlight on Mac),
-  // so it's shown literally rather than via formatModShortcut.
-  { keys: ["Ctrl", "Space"], label: "Quick Task" },
-  { keys: [formatModShortcut("/")], label: "This help" },
-];
 
 const navigationShortcuts: ShortcutEntry[] = [
   { keys: ["G", "H"], label: "Go to Home" },
@@ -63,6 +54,14 @@ export function KeyboardShortcutsDialog({
   open,
   onOpenChange,
 }: KeyboardShortcutsDialogProps) {
+  const { prefs } = useUserPreferences();
+  // Built per-render so the Quick Task row reflects the user's chosen shortcut.
+  const generalShortcuts: ShortcutEntry[] = [
+    { keys: [formatModShortcut("K")], label: "Search" },
+    { keys: [formatModShortcut("N")], label: "Quick Create" },
+    { keys: [quickTaskShortcutLabel(prefs.quickTaskShortcut)], label: "Quick Task" },
+    { keys: [formatModShortcut("/")], label: "This help" },
+  ];
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
