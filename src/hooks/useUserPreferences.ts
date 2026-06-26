@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import {
   DEFAULT_QUICK_TASK_SHORTCUT,
   type QuickTaskShortcut,
@@ -54,19 +54,56 @@ function writePrefs(prefs: UserPreferences) {
   }
 }
 
+/**
+ * Module-level store shared by every useUserPreferences() consumer.
+ *
+ * Previously each call had its own useState, so changing a preference in
+ * Settings updated only that component's copy — the global keyboard-shortcut
+ * handler (mounted way up in AppLayout) kept the stale value until a full page
+ * refresh. With a single store + useSyncExternalStore, a setPref anywhere
+ * re-renders ALL consumers immediately, so e.g. switching the Quick Task
+ * shortcut takes effect on the next keypress.
+ */
+let currentPrefs: UserPreferences = readPrefs();
+const listeners = new Set<() => void>();
+
+function emit() {
+  for (const l of listeners) l();
+}
+
+// Cross-tab sync: localStorage "storage" events fire in OTHER tabs only, so
+// changing a pref in one tab keeps the rest in step.
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    if (e.key === STORAGE_KEY) {
+      currentPrefs = readPrefs();
+      emit();
+    }
+  });
+}
+
+function subscribe(cb: () => void) {
+  listeners.add(cb);
+  return () => {
+    listeners.delete(cb);
+  };
+}
+
+function getSnapshot(): UserPreferences {
+  return currentPrefs;
+}
+
+export function setPref<K extends keyof UserPreferences>(
+  key: K,
+  value: UserPreferences[K]
+) {
+  if (currentPrefs[key] === value) return;
+  currentPrefs = { ...currentPrefs, [key]: value };
+  writePrefs(currentPrefs);
+  emit();
+}
+
 export function useUserPreferences() {
-  const [prefs, setPrefs] = useState<UserPreferences>(() => readPrefs());
-
-  useEffect(() => {
-    writePrefs(prefs);
-  }, [prefs]);
-
-  function setPref<K extends keyof UserPreferences>(
-    key: K,
-    value: UserPreferences[K]
-  ) {
-    setPrefs((prev) => ({ ...prev, [key]: value }));
-  }
-
+  const prefs = useSyncExternalStore(subscribe, getSnapshot, () => DEFAULTS);
   return { prefs, setPref };
 }
