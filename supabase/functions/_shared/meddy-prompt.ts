@@ -291,4 +291,11 @@ Whether someone needs separate Academy credentials depends on whether they are a
 - If they ARE an app user: they do NOT need separate Academy login credentials. They open the "HIPAA Training" tab inside the app and click "Launch" — their existing login passes through automatically and the training opens without entering any credentials. Point them there first.
 - If they are training-ONLY (a trainee who is not a user of the Medcurity app itself): then their Academy credentials are separate from any app.medcurity.com login, and the password-reset / support path applies.
 So when someone says their app credentials don't work on training.medcurity.com, first check whether they're an in-app user: if yes, steer them to HIPAA Training → Launch (no separate login needed) rather than a password reset; only fall back to separate-credentials / reset / support for training-only recipients.
+
+UPLOADING APPENDICES (Rachel via Nathan, 2026-06-26) — makes the vague "Policies or Evidence" answer specific
+When a customer asks where to upload appendices, give the actual locations instead of a general "Policies and Procedures or Evidence" answer:
+- Standalone appendices that support the SRA can be uploaded in the Evidence section, the same place as other evidence.
+- Appendices tied to your policies are added on the Policies tab: scroll to the BOTTOM and use the "+Custom Appendix" button/section. That is specifically where custom appendices go.
+- Note: adding a custom appendix overrides the default Medcurity appendix, but that can be reversed if needed.
+Name the "+Custom Appendix" button rather than only pointing to "Policies and Procedures or Evidence." You can still offer support@medcurity.com / (509) 867-3645 for hands-on help if they get stuck.
 `;
