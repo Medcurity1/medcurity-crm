@@ -41,6 +41,7 @@ import { toast } from "sonner";
 import { AccountContacts } from "./AccountContacts";
 import { AccountOpportunities } from "./AccountOpportunities";
 import { AccountPartners } from "./AccountPartners";
+import { AccountAttachments } from "./AccountAttachments";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
 import { TasksPanel } from "@/features/activities/TasksPanel";
 import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
@@ -439,6 +440,11 @@ export function AccountDetail() {
             value: "contract_history",
             label: "Contract History",
             content: <ContractHistoryTable contracts={contracts ?? []} />,
+          },
+          {
+            value: "attachments",
+            label: "Documents",
+            content: <AccountAttachments accountId={account.id} />,
           },
         ]}
       />
