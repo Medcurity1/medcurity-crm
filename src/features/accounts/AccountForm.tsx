@@ -476,20 +476,9 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                   </p>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="account_number">Account Number</Label>
-                  <div
-                    id="account_number"
-                    className="rounded-md border bg-muted/40 px-3 py-2 text-sm font-mono min-h-[2.25rem] flex items-center"
-                  >
-                    {isEditing
-                      ? (account?.account_number ?? "—")
-                      : "(auto-assigned on save)"}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Auto-assigned 4-digit ID. Not editable.
-                  </p>
-                </div>
+                {/* Account Number field removed from the form (Summer: not
+                    needed). It's still auto-assigned by the DB trigger and the
+                    column/data are untouched — just no longer shown here. */}
 
                 <div className="space-y-2">
                   <Label>Status<RequiredIndicator fieldKey="status" requiredFields={requiredKeys} /></Label>

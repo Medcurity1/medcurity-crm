@@ -76,6 +76,7 @@ import { cn } from "@/lib/utils";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MultiSelect } from "@/components/MultiSelect";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
@@ -634,12 +635,47 @@ function FilterValueInput({
   value,
   onChange,
   lookups,
+  operator,
 }: {
   filterCol: FilterColumnDef;
   value: string;
   onChange: (v: string) => void;
   lookups: RelationLookups;
+  operator: string;
 }) {
+  // "is one of" (multi-value OR). The stored value is a comma-separated string
+  // that applyFilter() splits into an IN list. For enums we offer a multi-pick;
+  // for free-text/number we take a comma-separated entry. (Summer's request.)
+  if (operator === "in") {
+    if (filterCol.type === "enum" && filterCol.enumValues) {
+      const labelFn = getFilterEnumLabelFn(filterCol);
+      const selected = value
+        ? value.split(",").map((v) => v.trim()).filter(Boolean)
+        : [];
+      return (
+        <div className="w-52">
+          <MultiSelect
+            options={filterCol.enumValues.map((ev) => ({
+              value: ev,
+              label: labelFn ? labelFn(ev) : ev,
+            }))}
+            value={selected}
+            onChange={(next) => onChange(next.join(","))}
+            placeholder="Select values"
+          />
+        </div>
+      );
+    }
+    return (
+      <Input
+        className="w-52"
+        placeholder="Comma-separated, e.g. Oregon, Washington"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  }
+
   // Relation filter types: a type-to-search combobox (accounts are searched
   // server-side; contacts/owners/opps filter over the loaded lookups).
   if (isRelationFilterType(filterCol.type)) {
@@ -770,9 +806,17 @@ function FilterRow({
       <div className="w-44">
         <Select
           value={filter.operator}
-          onValueChange={(op) =>
-            onChange(index, { ...filter, operator: op as ReportFilter["operator"] })
-          }
+          onValueChange={(op) => {
+            // Switching into/out of "is one of" flips the value between a
+            // single value and a comma-separated list — clear it so a stale
+            // single value doesn't sit in the multi-select (or vice versa).
+            const crossesMulti = (op === "in") !== (filter.operator === "in");
+            onChange(index, {
+              ...filter,
+              operator: op as ReportFilter["operator"],
+              value: crossesMulti ? "" : filter.value,
+            });
+          }}
         >
           <SelectTrigger>
             <SelectValue placeholder="Operator" />
@@ -794,6 +838,7 @@ function FilterRow({
           value={filter.value}
           onChange={(v) => onChange(index, { ...filter, value: v })}
           lookups={lookups}
+          operator={filter.operator}
         />
       )}
 

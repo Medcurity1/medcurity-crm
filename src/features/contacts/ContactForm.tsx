@@ -377,10 +377,9 @@ function ContactFormInner({
                 <Input id="title" {...register("title")} />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="department">Department<RequiredIndicator fieldKey="department" requiredFields={requiredKeys} /></Label>
-                <Input id="department" {...register("department")} />
-              </div>
+              {/* Department field removed from the form (Summer: sales doesn't
+                  track it). The column + any existing data are preserved — we
+                  still round-trip the loaded value on save so nothing is lost. */}
 
               <div className="space-y-2">
                 <Label htmlFor="phone">

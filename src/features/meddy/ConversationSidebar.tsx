@@ -3,7 +3,7 @@
 // sidebar, restyled with Pulse primitives).
 
 import { useState } from "react";
-import { ArrowLeft, ChevronRight, Search, Star } from "lucide-react";
+import { ArrowLeft, Building2, ChevronRight, Search, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,7 @@ import {
   useToggleSave,
 } from "./api";
 import {
+  companyName,
   isUrgent,
   lastMessage,
   messageCount,
@@ -293,6 +294,13 @@ function ConversationCard({
           </Badge>
         )}
       </div>
+      {/* Company name in the list so staff can scan who's chatting (Rachel). */}
+      {companyName(c) && (
+        <p className="mt-0.5 flex items-center gap-1 truncate text-xs font-medium text-foreground/90">
+          <Building2 className="h-3 w-3 shrink-0 text-muted-foreground" />
+          <span className="truncate">{companyName(c)}</span>
+        </p>
+      )}
       <p className="mt-0.5 truncate text-xs text-muted-foreground">{preview}</p>
       {page && <p className="mt-0.5 truncate text-[10px] text-muted-foreground/70">{page}</p>}
       <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground">

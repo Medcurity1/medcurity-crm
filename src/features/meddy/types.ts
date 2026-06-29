@@ -23,6 +23,8 @@ export type MeddyConversation = {
   updated_at: string;
   // Embedded via PostgREST aliases (see CONV_SELECT in api.ts).
   assigned?: { full_name: string | null } | null;
+  // Linked CRM contact's account (for the company name shown in chat).
+  crm_contact?: { account: { id: string; name: string | null } | null } | null;
   last?: MeddyMessagePreview[];
   msg_count?: { count: number }[];
 };
@@ -81,6 +83,20 @@ export function lastMessage(c: MeddyConversation): MeddyMessagePreview | null {
 
 export function messageCount(c: MeddyConversation): number {
   return c.msg_count?.[0]?.count ?? 0;
+}
+
+/**
+ * Best company label for a conversation: the linked CRM account name if the
+ * visitor matched a contact, otherwise whatever company the visitor typed into
+ * the widget. Null when neither is known.
+ */
+export function companyName(c: MeddyConversation): string | null {
+  return c.crm_contact?.account?.name ?? c.visitor_company ?? null;
+}
+
+/** Linked CRM account id, when the conversation matched a contact with one. */
+export function companyAccountId(c: MeddyConversation): string | null {
+  return c.crm_contact?.account?.id ?? null;
 }
 
 /** Site badge label from source_site (widget data-site attr). */

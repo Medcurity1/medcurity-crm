@@ -302,14 +302,6 @@ export function ContactDetail() {
             <p className="text-sm font-semibold truncate">{contact.owner?.full_name ?? "Unassigned"}</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="pb-1 pt-3 px-4">
-            <CardTitle className="text-xs text-muted-foreground font-medium">Department</CardTitle>
-          </CardHeader>
-          <CardContent className="px-4 pb-3">
-            <p className="text-sm font-semibold truncate">{contact.department ?? "\u2014"}</p>
-          </CardContent>
-        </Card>
       </div>
 
       <DetailPageLayout

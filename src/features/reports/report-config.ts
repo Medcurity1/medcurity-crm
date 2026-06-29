@@ -681,7 +681,10 @@ export const FILTER_OPERATORS: Array<{
   { value: "lte", label: "less or equal", applicableTo: ["number", "currency", "date"] },
   { value: "like", label: "contains (case-sensitive)", applicableTo: ["text"] },
   { value: "ilike", label: "contains", applicableTo: ["text"] },
-  { value: "in", label: "is one of", applicableTo: ["enum"] },
+  // "is one of" = multi-value OR filter. Available for enums (pick several) and
+  // free-text/number fields (comma-separated). Summer: filter a report by, e.g.,
+  // Oregon AND Washington at once instead of being stuck with one value.
+  { value: "in", label: "is one of", applicableTo: ["text", "number", "currency", "enum"] },
   { value: "is_null", label: "is empty", applicableTo: ["text", "number", "currency", "date", "enum", "boolean"] },
   { value: "is_not_null", label: "is not empty", applicableTo: ["text", "number", "currency", "date", "enum", "boolean"] },
 ];

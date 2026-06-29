@@ -17,9 +17,21 @@ import type {
   TeamMember,
 } from "./types";
 
-// Embeds: assigned agent name, latest message preview, message count.
+// Embeds: assigned agent name, latest message preview, message count, and the
+// linked CRM account name (so staff see WHICH company is chatting without
+// looking it up by ID — Rachel's request). The company comes via the linked
+// contact's account; falls back to the visitor-typed company (see companyName()).
+//
+// Access note: this embeds contacts→accounts. Today the CRM read model is FLAT
+// (contacts/accounts policy = "active rows visible to any authenticated user"),
+// so embedding exposes nothing a staff user couldn't already read at /accounts.
+// PostgREST does NOT re-apply embedded-table RLS row-by-row, so IF per-team or
+// per-region read restrictions are ever added to contacts/accounts, this embed
+// (and the Meddy read policy) must be revisited to avoid leaking restricted
+// company names. Keep this in mind before tightening CRM read RLS.
 const CONV_SELECT =
   "*, assigned:user_profiles!meddy_conversations_assigned_to_fkey(full_name), " +
+  "crm_contact:contacts!crm_contact_id(account:accounts!account_id(id, name)), " +
   "last:meddy_messages(content, role, created_at, is_internal), " +
   "msg_count:meddy_messages(count)";
 

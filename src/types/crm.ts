@@ -440,6 +440,13 @@ export interface Opportunity {
   original_sales_rep?: UserProfile;
   creator?: UserProfile;
   updater?: UserProfile;
+  /**
+   * Most recent real interaction on this deal (call/email/meeting or completed
+   * task), attached per-page by useOpportunities from v_opportunity_last_activity.
+   * Drives the "Last Touch" stale-deal column. Undefined until hydrated; null
+   * when the deal has no logged activity.
+   */
+  last_activity_at?: string | null;
 }
 
 export interface Lead {
