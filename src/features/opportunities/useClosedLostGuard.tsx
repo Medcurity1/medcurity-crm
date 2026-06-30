@@ -42,13 +42,20 @@ export function useClosedLostGuard() {
 
   const promptIfClient = useCallback(async (accountId: string | null | undefined) => {
     if (!accountId) return;
-    const { data, error } = await supabase
-      .from("accounts")
-      .select("name, customer_status")
-      .eq("id", accountId)
-      .maybeSingle();
-    if (error || !data) return;
-    if (data.customer_status === "client") {
+    const fetchStatus = () =>
+      supabase.from("accounts").select("name, customer_status").eq("id", accountId).maybeSingle();
+    let res = await fetchStatus();
+    // One quick retry: a transient read failure on this status check would
+    // silently skip the "still a client?" prompt — the exact active→former
+    // transition this feature exists to catch — so don't swallow it on the
+    // first blip.
+    if (res.error) res = await fetchStatus();
+    if (res.error) {
+      console.warn("Customer-status check failed; closed-lost prompt skipped:", res.error.message);
+      return;
+    }
+    const data = res.data;
+    if (data && data.customer_status === "client") {
       setPending({ accountId, accountName: (data.name as string) ?? "This account" });
     }
   }, []);
