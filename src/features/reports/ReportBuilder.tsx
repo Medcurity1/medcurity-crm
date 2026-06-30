@@ -20,6 +20,9 @@ import {
   BarChart3,
   PieChartIcon,
   GripVertical,
+  ArrowUp,
+  ArrowDown,
+  ChevronsUpDown,
 } from "lucide-react";
 // Drag-to-reorder for the selected report columns (Reports slice 5). The
 // chip order IS the report's column display + export order (config.columns),
@@ -119,6 +122,7 @@ import {
   TableCell,
   TableHead,
   TableHeader,
+  TableFooter,
   TableRow,
 } from "@/components/ui/table";
 import {
@@ -1139,6 +1143,11 @@ function ResultsTable({
 
   const [viewMode, setViewMode] = useState<ViewMode>("table");
 
+  // Click-to-sort the displayed rows (a transient DISPLAY sort layered on top of
+  // the report's server-side sort — doesn't change the saved config). Null =
+  // keep the order the rows came in.
+  const [tableSort, setTableSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
+
   // Axis selection state for bar chart
   const [barXKey, setBarXKey] = useState<string>(() => detectLabelColumn(visibleCols)?.key ?? "");
   const [barYKey, setBarYKey] = useState<string>(() => detectValueColumn(visibleCols)?.key ?? "");
@@ -1216,6 +1225,57 @@ function ResultsTable({
   const pieChartData = aggregate(pieLabelKey, pieValueKey, chartAgg);
   const aggLabel = chartAgg === "count" ? "Count" : chartAgg === "avg" ? "Average" : "Sum";
 
+  // Click-to-sort: re-order the loaded rows by the active header. Numeric
+  // columns sort numerically; everything else uses locale compare with blanks
+  // pinned last. Inline (not a hook) because we're past the early returns.
+  const toggleSort = (key: string) =>
+    setTableSort((prev) =>
+      prev?.key === key
+        ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: "asc" },
+    );
+  const sortedData = (() => {
+    if (!tableSort) return data;
+    const col = visibleCols.find((c) => c.key === tableSort.key);
+    // The sorted column may have been removed since the click — fall back to the
+    // unsorted order rather than silently sorting a now-gone column as text.
+    if (!col) return data;
+    const numeric = isNumericColType(col.type);
+    const copy = [...data];
+    copy.sort((a, b) => {
+      const av = a[tableSort.key];
+      const bv = b[tableSort.key];
+      // Blank cells always sort last, regardless of direction or column type.
+      const aEmpty = av == null || av === "";
+      const bEmpty = bv == null || bv === "";
+      if (aEmpty && bEmpty) return 0;
+      if (aEmpty) return 1;
+      if (bEmpty) return -1;
+      const cmp = numeric
+        ? extractNumber(a, tableSort.key) - extractNumber(b, tableSort.key)
+        : String(av).localeCompare(String(bv), undefined, {
+            numeric: true,
+            sensitivity: "base",
+          });
+      return tableSort.dir === "asc" ? cmp : -cmp;
+    });
+    return copy;
+  })();
+
+  // Totals row: sum each numeric/currency column across the LOADED rows. When
+  // the set is capped at 1,000, totals cover the shown rows only (labeled).
+  const columnTotals: Record<string, number> | null =
+    numericCols.length > 0
+      ? Object.fromEntries(
+          numericCols.map((c) => [
+            c.key,
+            data.reduce((s, r) => s + extractNumber(r, c.key), 0),
+          ]),
+        )
+      : null;
+  const totalsCapped = data.length < count;
+  const totalsLabelIndex = visibleCols.findIndex((c) => !isNumericColType(c.type));
+
   return (
     <div className="mt-6 space-y-3">
       {/* Header with result count and view mode toggle */}
@@ -1264,23 +1324,48 @@ function ResultsTable({
 
       {/* Table view */}
       {viewMode === "table" && (
-        <div className="border rounded-md overflow-auto">
+        <div className="border rounded-md overflow-auto max-h-[70vh]">
           <Table>
             <TableHeader>
               <TableRow>
-                {visibleCols.map((col) => (
-                  <TableHead key={col.key} className="whitespace-nowrap">
-                    {col.label}
-                  </TableHead>
-                ))}
+                {visibleCols.map((col) => {
+                  const active = tableSort?.key === col.key;
+                  return (
+                    <TableHead
+                      key={col.key}
+                      className="sticky top-0 z-10 bg-background whitespace-nowrap"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleSort(col.key)}
+                        className="inline-flex items-center gap-1 hover:text-foreground"
+                        title="Sort by this column"
+                      >
+                        {col.label}
+                        {active ? (
+                          tableSort!.dir === "asc" ? (
+                            <ArrowUp className="h-3 w-3" />
+                          ) : (
+                            <ArrowDown className="h-3 w-3" />
+                          )
+                        ) : (
+                          <ChevronsUpDown className="h-3 w-3 opacity-40" />
+                        )}
+                      </button>
+                    </TableHead>
+                  );
+                })}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.map((row, rowIdx) => {
+              {sortedData.map((row, rowIdx) => {
                 const detailUrl = getRowDetailUrl(entityKey, row);
                 return (
                   <TableRow
-                    key={rowIdx}
+                    // Stable identity so re-sorting reconciles rows by record,
+                    // not by position. Falls back to the index when a report has
+                    // no id column.
+                    key={(row.id as string | undefined) ?? rowIdx}
                     className={detailUrl ? "cursor-pointer hover:bg-muted/50" : ""}
                     onClick={() => {
                       // Open in a new tab so the report (and the user's
@@ -1312,6 +1397,30 @@ function ResultsTable({
                 );
               })}
             </TableBody>
+            {columnTotals && (
+              <TableFooter>
+                <TableRow>
+                  {visibleCols.map((col, i) => {
+                    let content = "";
+                    if (isNumericColType(col.type)) {
+                      content = formatCellValue(columnTotals[col.key] ?? 0, col);
+                    } else if (i === totalsLabelIndex) {
+                      content = `Totals${
+                        totalsCapped ? ` (first ${data.length.toLocaleString()})` : ""
+                      }`;
+                    }
+                    return (
+                      <TableCell
+                        key={col.key}
+                        className="font-semibold whitespace-nowrap"
+                      >
+                        {content}
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              </TableFooter>
+            )}
           </Table>
         </div>
       )}
