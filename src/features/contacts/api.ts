@@ -298,17 +298,14 @@ export function useSetPrimaryContact() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, accountId }: { id: string; accountId: string }) => {
-      const { error: demoteErr } = await supabase
-        .from("contacts")
-        .update({ is_primary: false })
-        .eq("account_id", accountId)
-        .neq("id", id);
-      if (demoteErr) throw demoteErr;
-      const { error: promoteErr } = await supabase
-        .from("contacts")
-        .update({ is_primary: true })
-        .eq("id", id);
-      if (promoteErr) throw promoteErr;
+      // One atomic RPC (demote others + promote this one in a single
+      // transaction) so a failure or race can't leave the account with zero or
+      // two primaries. See migration 20260629000002.
+      const { error } = await supabase.rpc("set_primary_contact", {
+        p_contact_id: id,
+        p_account_id: accountId,
+      });
+      if (error) throw error;
     },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["contacts"] });

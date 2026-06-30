@@ -138,15 +138,29 @@ export function AccountsList() {
 
   const handleBulkArchive = async () => {
     const ids = Array.from(selectedIds);
-    await Promise.all(ids.map((id) => archiveMutation.mutateAsync({ id })));
-    setSelectedIds(new Set());
+    const count = ids.length;
+    try {
+      await Promise.all(ids.map((id) => archiveMutation.mutateAsync({ id })));
+      setSelectedIds(new Set());
+      toast.success(`${count} account(s) archived.`);
+    } catch (e) {
+      // Keep the selection so the user can retry; surface why it failed.
+      toast.error("Archive failed: " + (e as Error).message);
+    }
   };
 
   const handleBulkDelete = async () => {
-    if (!confirm(`Permanently delete ${selectedIds.size} account(s)? This cannot be undone.`)) return;
-    await bulkDeleteMutation.mutateAsync({ ids: Array.from(selectedIds) });
-    setSelectedIds(new Set());
-    toast.success(`${selectedIds.size} account(s) deleted.`);
+    // Capture the count BEFORE clearing the selection — reading selectedIds.size
+    // after setSelectedIds(new Set()) showed "0 account(s) deleted".
+    const count = selectedIds.size;
+    if (!confirm(`Permanently delete ${count} account(s)? This cannot be undone.`)) return;
+    try {
+      await bulkDeleteMutation.mutateAsync({ ids: Array.from(selectedIds) });
+      setSelectedIds(new Set());
+      toast.success(`${count} account(s) deleted.`);
+    } catch (e) {
+      toast.error("Delete failed: " + (e as Error).message);
+    }
   };
 
   const handleBulkAssignOwner = async (userId: string) => {

@@ -37,9 +37,23 @@ export function useOpportunities(filters?: OppFilters) {
       const pageSize = filters?.pageSize ?? 25;
       const sortCol = filters?.sortColumn ?? "created_at";
       const sortAsc = (filters?.sortDirection ?? (filters?.sortColumn ? "asc" : "desc")) === "asc";
+      // "Last Touch" (last_activity_at) lives in a joined view, so to sort by it
+      // across the WHOLE list (not just the page) we query the passthrough view
+      // v_opportunities_with_activity. Every OTHER sort keeps using the plain
+      // opportunities table so the common path is untouched. (Summer's request.)
+      const sortByLastTouch = sortCol === "last_touch";
       let query = supabase
-        .from("opportunities")
-        .select("*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
+        .from(sortByLastTouch ? "v_opportunities_with_activity" : "opportunities")
+        .select(
+          sortByLastTouch
+            // PostgREST embeds don't resolve through a VIEW (the FK metadata
+            // lives on the table), so on the last-touch path we select plain
+            // columns and merge the account/owner names by id below — the proven
+            // batch-fetch pattern the reports module uses for the same reason.
+            ? "*"
+            : "*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)",
+          { count: "estimated" },
+        )
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       // Sort: support sorting by columns on embedded relations
@@ -47,7 +61,11 @@ export function useOpportunities(filters?: OppFilters) {
       // referencedTable option. Without this, clicking the Owner
       // header was a no-op because owner is a joined table, not a
       // column on opportunities.
-      if (sortCol.startsWith("account.")) {
+      if (sortByLastTouch) {
+        // ascending = stalest (oldest touch) first, which is the rotting-deals
+        // use case; never-touched (null) deals sort to the end.
+        query = query.order("last_activity_at", { ascending: sortAsc, nullsFirst: false });
+      } else if (sortCol.startsWith("account.")) {
         const innerCol = sortCol.slice("account.".length);
         query = query.order(innerCol, {
           ascending: sortAsc,
@@ -153,13 +171,16 @@ export function useOpportunities(filters?: OppFilters) {
       const { data, error, count } = await query;
       if (error) throw error;
 
-      const rows = (data ?? []) as Opportunity[];
+      // `unknown` first: the conditional select string makes supabase-js infer a
+      // union type its parser can't resolve, so the direct cast is rejected.
+      const rows = (data ?? []) as unknown as Opportunity[];
       // Last-touch for just the visible page — scoped to these ids so we never
       // aggregate the whole activities table on every render (same pattern as
       // the Partners "Last Contact" column). Powers the stale/rotting-deals
       // column. A failure here must NOT break the list, so it's best-effort.
+      // Skipped on the last-touch sort path: the view already provides it.
       const ids = rows.map((o) => o.id);
-      if (ids.length > 0) {
+      if (ids.length > 0 && !sortByLastTouch) {
         const { data: la } = await supabase
           .from("v_opportunity_last_activity")
           .select("opportunity_id, last_activity_at")
@@ -171,6 +192,28 @@ export function useOpportunities(filters?: OppFilters) {
           }
         }
         for (const o of rows) o.last_activity_at = lastByOpp.get(o.id) ?? null;
+      }
+
+      // On the last-touch (view) path we couldn't embed account/owner, so merge
+      // their names in by id — otherwise the Account and Owner columns would
+      // silently render blank when sorting by Last Touch.
+      if (sortByLastTouch && rows.length > 0) {
+        const acctIds = [...new Set(rows.map((o) => o.account_id).filter((v): v is string => !!v))];
+        const ownerIds = [...new Set(rows.map((o) => o.owner_user_id).filter((v): v is string => !!v))];
+        const [acctRes, ownerRes] = await Promise.all([
+          acctIds.length
+            ? supabase.from("accounts").select("id, name").in("id", acctIds)
+            : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+          ownerIds.length
+            ? supabase.from("user_profiles").select("id, full_name").in("id", ownerIds)
+            : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
+        ]);
+        const acctMap = new Map((acctRes.data ?? []).map((a) => [a.id, a]));
+        const ownerMap = new Map((ownerRes.data ?? []).map((u) => [u.id, u]));
+        for (const o of rows) {
+          o.account = (o.account_id ? acctMap.get(o.account_id) : undefined) as Opportunity["account"];
+          o.owner = (o.owner_user_id ? ownerMap.get(o.owner_user_id) : undefined) as Opportunity["owner"];
+        }
       }
 
       return { data: rows, count: count ?? 0 };

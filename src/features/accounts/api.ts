@@ -76,7 +76,11 @@ export function useAccounts(filters?: AccountFilters) {
           `industry.ilike.%${safe}%`,
         ];
         if (contactAccountIds.length > 0) {
-          orParts.push(`id.in.(${contactAccountIds.join(",")})`);
+          // Cap the ids we OR into the request URL so a search term that matches
+          // hundreds of contacts can't blow past PostgREST's URL-length limit
+          // (each UUID is ~37 chars). 150 is plenty for a search box.
+          const capped = contactAccountIds.slice(0, 150);
+          orParts.push(`id.in.(${capped.join(",")})`);
         }
         query = query.or(orParts.join(","));
       }

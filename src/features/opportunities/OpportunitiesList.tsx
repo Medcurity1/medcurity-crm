@@ -57,9 +57,9 @@ const OPPORTUNITIES_COLUMNS: ColumnDescriptor[] = [
   { key: "owner", label: "Owner", sortKey: "owner.full_name" },
   { key: "next_step", label: "Next Step" },
   // "Rotting deals" (Summer): days since the last real touch on the deal,
-  // color-coded so stale deals jump out. Not sortable yet (the value lives in a
-  // separate view, not on the opportunities row).
-  { key: "last_touch", label: "Last Touch" },
+  // color-coded so stale deals jump out. Sortable (server-side via the
+  // v_opportunities_with_activity view) — ascending surfaces the stalest first.
+  { key: "last_touch", label: "Last Touch", sortKey: "last_touch" },
 ];
 
 // Days since an ISO timestamp (floored, never negative).
@@ -220,7 +220,10 @@ function InlineField({
       } else {
         parsed = Number(val);
         if (Number.isNaN(parsed)) return; // ignore a bad number
-        if (parsed < 0) return; // amount can't go negative
+        if (parsed < 0) {
+          toast.error("Amount can't be negative.");
+          return;
+        }
       }
     } else {
       parsed = val.trim() === "" ? null : val.trim();

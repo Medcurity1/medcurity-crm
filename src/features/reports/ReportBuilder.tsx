@@ -378,24 +378,26 @@ function getRelationOptions(
   type: RelationFilterType,
   lookups: RelationLookups
 ): Array<{ value: string; label: string }> {
+  // Each list is defaulted to [] so a lookup that's still loading or failed to
+  // load yields an empty option set instead of throwing on .map of undefined.
   switch (type) {
     case "user":
-      return lookups.users.map((u) => ({
+      return (lookups.users ?? []).map((u) => ({
         value: u.id,
         label: u.full_name,
       }));
     case "account":
-      return lookups.accounts.map((a) => ({
+      return (lookups.accounts ?? []).map((a) => ({
         value: a.id,
         label: a.name,
       }));
     case "contact":
-      return lookups.contacts.map((c) => ({
+      return (lookups.contacts ?? []).map((c) => ({
         value: c.id,
         label: `${c.first_name} ${c.last_name}`.trim(),
       }));
     case "opportunity":
-      return lookups.opportunities.map((o) => ({
+      return (lookups.opportunities ?? []).map((o) => ({
         value: o.id,
         label: o.name,
       }));
