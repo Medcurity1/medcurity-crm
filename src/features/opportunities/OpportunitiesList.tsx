@@ -5,6 +5,7 @@ import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Target, Plus, Search, X, Pencil, Check } from "lucide-react";
 import { useOpportunities, useOpportunitiesTotals, useArchiveOpportunity, useBulkUpdateOwner, useBulkDeleteOpportunities, useUpdateOpportunity } from "./api";
+import { useClosedLostGuard } from "./useClosedLostGuard";
 import { toast } from "sonner";
 import { useUsers } from "@/features/accounts/api";
 import { PageHeader } from "@/components/PageHeader";
@@ -116,7 +117,13 @@ const INLINE_STAGES: OpportunityStage[] = [
   "proposal_conversation", "closed_won", "closed_lost",
 ];
 
-function InlineStage({ o }: { o: Opportunity }) {
+function InlineStage({
+  o,
+  onClosedLost,
+}: {
+  o: Opportunity;
+  onClosedLost: (accountId: string | null) => void;
+}) {
   const update = useUpdateOpportunity();
   // Always include the opp's CURRENT stage as an option, even if it's a legacy
   // value (e.g. "qualified") that isn't in the standard pipeline list. Without
@@ -140,7 +147,10 @@ function InlineStage({ o }: { o: Opportunity }) {
             update.mutate(
               { id: o.id, stage: v as OpportunityStage },
               {
-                onSuccess: () => toast.success(`Stage → ${stageLabel(v as OpportunityStage)}`),
+                onSuccess: () => {
+                  toast.success(`Stage → ${stageLabel(v as OpportunityStage)}`);
+                  if (v === "closed_lost") onClosedLost(o.account_id);
+                },
                 onError: (e) => toast.error("Couldn't update stage: " + (e as Error).message),
               },
             );
@@ -318,6 +328,9 @@ export function OpportunitiesList() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sort, setSortState] = useUrlSortState("sort");
   const cols = useColumnPrefs("opportunities", OPPORTUNITIES_COLUMNS);
+  // After a deal is marked Closed Lost for a current client, ask whether the
+  // client is still contracted (Summer). Non-blocking; fires after the move.
+  const closedLostGuard = useClosedLostGuard();
 
   // Totals query: same filter set as the visible list, but no
   // pagination/sort. Lets the user verify dashboard KPI numbers
@@ -445,7 +458,7 @@ export function OpportunitiesList() {
       ) : (
         "—"
       ),
-    stage: (o) => <InlineStage o={o} />,
+    stage: (o) => <InlineStage o={o} onClosedLost={closedLostGuard.promptIfClient} />,
     business_type: (o) =>
       o.business_type ? (
         <StatusBadge
@@ -724,6 +737,7 @@ export function OpportunitiesList() {
         onAssignOwner={handleBulkAssignOwner}
         users={users}
       />
+      {closedLostGuard.dialog}
     </div>
   );
 }

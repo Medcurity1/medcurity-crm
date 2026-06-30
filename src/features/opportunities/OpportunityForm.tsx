@@ -659,7 +659,11 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
         if (values.stage === "closed_won" && opp?.stage !== "closed_won") {
           celebrateClosedWon();
         }
-        navigate(`/opportunities/${id}`);
+        // After a transition INTO Closed Lost, hand the "still a client?" prompt
+        // (Summer's request) to the detail page via a query flag — it asks only
+        // if the account is currently a Client.
+        const lostTransition = values.stage === "closed_lost" && opp?.stage !== "closed_lost";
+        navigate(`/opportunities/${id}${lostTransition ? "?ask_client_status=1" : ""}`);
       } else {
         const result = await createMutation.mutateAsync(payload as Parameters<typeof createMutation.mutateAsync>[0]);
 

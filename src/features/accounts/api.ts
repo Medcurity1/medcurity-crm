@@ -264,6 +264,30 @@ export function useDeleteAccount() {
   });
 }
 
+/**
+ * Clear a manual Customer Status override so the account goes back to fully
+ * automatic (derived from deal history). The override is normally set by the
+ * closed-lost "still a client?" prompt; this is the undo. Server-side the RPC
+ * requires a CRM write role.
+ */
+export function useClearCustomerStatusOverride() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (accountId: string) => {
+      const { error } = await supabase.rpc("set_account_customer_status_override", {
+        p_account_id: accountId,
+        p_override: null,
+        p_reason: null,
+      });
+      if (error) throw error;
+    },
+    onSuccess: (_d, accountId) => {
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      qc.invalidateQueries({ queryKey: ["accounts", accountId] });
+    },
+  });
+}
+
 export function useAccountContracts(accountId: string | undefined) {
   return useQuery({
     queryKey: ["account_contracts", accountId],
