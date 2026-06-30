@@ -230,7 +230,7 @@ function StandardCardView({
     <Card
       className={
         isLive
-          ? "hover:shadow-md transition-shadow cursor-pointer h-full"
+          ? "hover:shadow-md motion-safe:hover:-translate-y-0.5 transition-all cursor-pointer h-full"
           : "opacity-60 h-full"
       }
     >
@@ -277,7 +277,7 @@ function SavedCardView({
   const entity = ENTITY_LABEL[rep.config?.entity] ?? "Custom";
   const cols = rep.config?.columns?.length ?? 0;
   return (
-    <Card className="hover:shadow-md transition-shadow h-full">
+    <Card className="hover:shadow-md motion-safe:hover:-translate-y-0.5 transition-all h-full">
       <CardContent className="p-4 space-y-2">
         <div className="flex items-start justify-between gap-2">
           <div className="rounded-md bg-violet-500/10 p-2">

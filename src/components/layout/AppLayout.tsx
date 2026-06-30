@@ -247,9 +247,18 @@ export function AppLayout() {
               </div>
             }
           >
-            <ErrorBoundary>
-              <Outlet />
-            </ErrorBoundary>
+            {/* Gentle fade/slide-in on each route change so pages don't snap
+                in. Keyed by pathname (not search) so filtering/sorting a list
+                never re-animates. motion-safe → no animation under reduced
+                motion. Also resets the ErrorBoundary when you navigate away. */}
+            <div
+              key={location.pathname}
+              className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:duration-300"
+            >
+              <ErrorBoundary>
+                <Outlet />
+              </ErrorBoundary>
+            </div>
           </Suspense>
         </div>
       </main>
