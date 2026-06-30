@@ -63,6 +63,17 @@ interface StandardCard {
 // Standard catalog — each id slug maps to a dedicated /reports/standard/:id
 // page (App.tsx) and usually a Postgres v_* view. Keep the slug stable.
 const REPORTS: StandardCard[] = [
+  // Financial & SaaS Metrics pinned to the top of the catalog (Makena/Chad) —
+  // it's the most-referenced exec report, so it leads the Standard list.
+  {
+    id: "financial-saas-metrics",
+    title: "Financial & SaaS Metrics",
+    description:
+      "Consolidated quarterly Revenue / Churn / Rolling 12-month grid with one-click Excel + PDF exports.",
+    icon: TrendingUp,
+    apiView: "f_financial_saas_metrics_quarterly()",
+    status: "live",
+  },
   {
     id: "do-not-email",
     title: "Do Not Email",
@@ -160,15 +171,6 @@ const REPORTS: StandardCard[] = [
       "Single-row scalar summary: ARR, New Customers QTD, NRR (legacy + true), pipeline, churn. Powers the Team Dashboard.",
     icon: FileBarChart,
     apiView: "v_dashboard_metrics",
-    status: "live",
-  },
-  {
-    id: "financial-saas-metrics",
-    title: "Financial & SaaS Metrics",
-    description:
-      "Consolidated quarterly Revenue / Churn / Rolling 12-month grid with one-click Excel + PDF exports.",
-    icon: TrendingUp,
-    apiView: "f_financial_saas_metrics_quarterly()",
     status: "live",
   },
 ];

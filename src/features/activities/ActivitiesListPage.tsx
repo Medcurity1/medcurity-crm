@@ -105,7 +105,11 @@ function useActivitiesList(filters: ListFilters) {
         )
         // Hide soft-deleted activities so the list reflects deletes.
         .is("archived_at", null)
-        .order("created_at", { ascending: false });
+        // Order by the real interaction date (activity_date when set, else the
+        // logged date) so back-dated entries land in the right spot, not at the
+        // top (Summer). Stable id tiebreaker keeps paging from dup/skip on ties.
+        .order("effective_at", { ascending: false })
+        .order("id", { ascending: true });
 
       if (filters.search) {
         query = query.ilike("subject", `%${filters.search}%`);
@@ -117,13 +121,15 @@ function useActivitiesList(filters: ListFilters) {
         query = query.eq("owner_user_id", filters.owner);
       }
       if (filters.startDate) {
-        query = query.gte("created_at", filters.startDate);
+        // Filter by the interaction date too, so the date range matches what's
+        // shown/sorted (a back-dated call falls in its real month, not today).
+        query = query.gte("effective_at", filters.startDate);
       }
       if (filters.endDate) {
         // include full end day
         const end = new Date(filters.endDate);
         end.setHours(23, 59, 59, 999);
-        query = query.lte("created_at", end.toISOString());
+        query = query.lte("effective_at", end.toISOString());
       }
       if (filters.scopeAccountId) {
         query = query.eq("account_id", filters.scopeAccountId);
@@ -391,7 +397,7 @@ export function ActivitiesListPage() {
                   <TableHead>Owner</TableHead>
                   <TableHead>Related</TableHead>
                   {filters.type === "task" && <TableHead>Due</TableHead>}
-                  <TableHead>Created</TableHead>
+                  <TableHead>Date</TableHead>
                   <TableHead className="w-20 text-center">Done</TableHead>
                 </TableRow>
               </TableHeader>
@@ -442,7 +448,9 @@ export function ActivitiesListPage() {
                         </TableCell>
                       )}
                       <TableCell className="text-muted-foreground text-sm">
-                        {formatDate(a.created_at)}
+                        {/* Show the real interaction date (activity_date when
+                            set), falling back to the logged date. */}
+                        {formatDate(a.activity_date ?? a.created_at)}
                       </TableCell>
                       <TableCell className="text-center">
                         {a.completed_at ? (
