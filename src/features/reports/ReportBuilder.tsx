@@ -19,7 +19,29 @@ import {
   Table2,
   BarChart3,
   PieChartIcon,
+  GripVertical,
 } from "lucide-react";
+// Drag-to-reorder for the selected report columns (Reports slice 5). The
+// chip order IS the report's column display + export order (config.columns),
+// so dragging a chip reorders the whole report. @dnd-kit is already a dep
+// (the Pipeline board uses it).
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  arrayMove,
+  horizontalListSortingStrategy,
+  sortableKeyboardCoordinates,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
   BarChart,
   Bar,
@@ -79,7 +101,7 @@ import { Input } from "@/components/ui/input";
 import { MultiSelect } from "@/components/MultiSelect";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Badge } from "@/components/ui/badge";
+import { Badge, badgeVariants } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -441,6 +463,60 @@ function sortedGroupEntries(groups: Map<string, ColumnDef[]>): Array<[string, Co
   });
 }
 
+/**
+ * One selected-column chip that can be dragged to reorder. Rendered as a span
+ * (not <Badge>, which doesn't forward a ref) styled with badgeVariants so the
+ * @dnd-kit node ref attaches to a real DOM element. The grip is the drag
+ * handle; the X still removes. `touch-none` lets it drag on touch devices.
+ */
+function SortableColumnChip({
+  id,
+  label,
+  onRemove,
+}: {
+  id: string;
+  label: string;
+  onRemove: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+  return (
+    <span
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        badgeVariants({ variant: "secondary" }),
+        "gap-1 pl-1 pr-1 cursor-default touch-none select-none",
+        isDragging && "z-10 ring-1 ring-primary/40",
+      )}
+    >
+      <button
+        type="button"
+        className="cursor-grab active:cursor-grabbing rounded-sm p-0.5 text-muted-foreground hover:bg-muted-foreground/20"
+        aria-label={`Drag ${label} to reorder`}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical className="h-3 w-3" />
+      </button>
+      {label}
+      <button
+        type="button"
+        onClick={onRemove}
+        className="ml-0.5 rounded-sm hover:bg-muted-foreground/20 p-0.5"
+        aria-label={`Remove ${label}`}
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </span>
+  );
+}
+
 function ColumnPicker({
   entityKey,
   selected,
@@ -509,26 +585,43 @@ function ColumnPicker({
   const labelFor = (key: string) =>
     entity.columns.find((c) => c.key === key)?.label ?? key;
 
+  // Drag-to-reorder the selected columns. A small activation distance lets the
+  // X / Edit-Columns clicks fire without starting a drag; keyboard sorting is
+  // supported for accessibility.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const handleColumnDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const oldIndex = selected.indexOf(String(active.id));
+    const newIndex = selected.indexOf(String(over.id));
+    if (oldIndex !== -1 && newIndex !== -1) {
+      onChange(arrayMove(selected, oldIndex, newIndex));
+    }
+  };
+
   return (
     <div className="space-y-1.5">
       <Label>Columns</Label>
       <div className="flex flex-wrap items-center gap-1.5">
-        {selected.map((key) => (
-          <Badge
-            key={key}
-            variant="secondary"
-            className="gap-1 pr-1 cursor-default"
-          >
-            {labelFor(key)}
-            <button
-              type="button"
-              onClick={() => removeColumn(key)}
-              className="ml-0.5 rounded-sm hover:bg-muted-foreground/20 p-0.5"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </Badge>
-        ))}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleColumnDragEnd}
+        >
+          <SortableContext items={selected} strategy={horizontalListSortingStrategy}>
+            {selected.map((key) => (
+              <SortableColumnChip
+                key={key}
+                id={key}
+                label={labelFor(key)}
+                onRemove={() => removeColumn(key)}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
         <Button
           variant="outline"
           size="sm"
@@ -539,6 +632,12 @@ function ColumnPicker({
           Edit Columns
         </Button>
       </div>
+      {selected.length > 1 && (
+        <p className="text-[11px] text-muted-foreground">
+          Drag the&nbsp;⠿&nbsp;handles to reorder columns. This order is used in the
+          table and the CSV/Excel export.
+        </p>
+      )}
 
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
         <SheetContent side="right" className="sm:max-w-md flex flex-col">
