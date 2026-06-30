@@ -1,6 +1,10 @@
 export type AppRole = "sales" | "renewals" | "admin" | "super_admin" | "read_only";
 export type AccountLifecycle = "prospect" | "customer" | "former_customer";
 export type AccountStatus = "discovery" | "pending" | "active" | "inactive" | "churned";
+// Automatic customer-hood, derived from closed-won contract dates (NOT set by
+// hand). client = a live contract; former_client = bought before, nothing live
+// now; prospect = never closed-won. See 20260630000002_account_customer_status.
+export type CustomerStatus = "client" | "prospect" | "former_client";
 export type RenewalType = "auto_renew" | "manual_renew" | "no_auto_renew" | "full_auto_renew" | "platform_only_auto_renew";
 export type OpportunityTeam = "sales" | "renewals";
 export type OpportunityKind = "new_business" | "renewal";
@@ -145,6 +149,13 @@ export interface Account {
   owner_user_id: string | null;
   lifecycle_status: AccountLifecycle;
   status: AccountStatus;
+  // Automatic; maintained by triggers + a daily sweep. Never set on the form.
+  customer_status: CustomerStatus;
+  // Set ONLY by the closed-lost "still contracted?" prompt (or an admin clear).
+  // null = fully automatic.
+  customer_status_override: "client" | "former_client" | null;
+  customer_status_override_reason: string | null;
+  customer_status_override_at: string | null;
   verified: boolean;
   verified_at: string | null;
   verified_by: string | null;

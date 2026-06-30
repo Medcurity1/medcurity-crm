@@ -8,6 +8,8 @@ interface AccountFilters {
   lifecycle_status?: string;
   /** Single status (legacy) or array of statuses (multi-select). */
   status?: string | string[];
+  /** Automatic customer status: client | prospect | former_client. */
+  customerStatus?: string | string[];
   /** Filter to one or many owners. "mine" = current user. Arrays do an IN. */
   ownerId?: string | "mine" | string[];
   /** Single industry (legacy) or array of industries (multi-select). */
@@ -92,6 +94,14 @@ export function useAccounts(filters?: AccountFilters) {
           if (filters.status.length > 0) query = query.in("status", filters.status);
         } else {
           query = query.eq("status", filters.status);
+        }
+      }
+      if (filters?.customerStatus) {
+        if (Array.isArray(filters.customerStatus)) {
+          if (filters.customerStatus.length > 0)
+            query = query.in("customer_status", filters.customerStatus);
+        } else {
+          query = query.eq("customer_status", filters.customerStatus);
         }
       }
       if (Array.isArray(filters?.ownerId)) {

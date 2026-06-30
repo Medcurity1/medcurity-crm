@@ -37,12 +37,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { statusLabel, formatDate } from "@/lib/formatters";
+import { statusLabel, customerStatusLabel, formatDate } from "@/lib/formatters";
 
 const ACCOUNTS_COLUMNS: ColumnDescriptor[] = [
   { key: "select", label: "Select", locked: true, headClassName: "w-10" },
   { key: "name", label: "Name", sortKey: "name", locked: true },
   { key: "status", label: "Status", sortKey: "status" },
+  { key: "customer_status", label: "Customer Status", sortKey: "customer_status" },
   { key: "owner", label: "Owner" },
   { key: "industry", label: "Industry", sortKey: "industry" },
   { key: "contract_end", label: "Contract End", sortKey: "current_contract_end_date" },
@@ -59,6 +60,7 @@ export function AccountsList() {
   // keystrokes on the list page).
   const [search, setSearch] = useDebouncedUrlState("q", "");
   const [statusFilter, setStatusFilter] = useUrlArrayState("status");
+  const [customerStatusFilter, setCustomerStatusFilter] = useUrlArrayState("customer");
   const [ownerFilter, setOwnerFilter] = useUrlArrayState("owner");
   const [industryFilter, setIndustryFilter] = useUrlArrayState("industry");
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
@@ -71,6 +73,7 @@ export function AccountsList() {
   const { data: result, isLoading } = useAccounts({
     search: search || undefined,
     status: statusFilter.length > 0 ? statusFilter : undefined,
+    customerStatus: customerStatusFilter.length > 0 ? customerStatusFilter : undefined,
     ownerId: ownerFilter.length > 0 ? ownerFilter : undefined,
     industryCategory: industryFilter.length > 0 ? industryFilter : undefined,
     verified:
@@ -199,6 +202,13 @@ export function AccountsList() {
     status: (a) => (
       <StatusBadge value={a.status} variant="status" label={statusLabel(a.status)} />
     ),
+    customer_status: (a) => (
+      <StatusBadge
+        value={a.customer_status}
+        variant="customerStatus"
+        label={customerStatusLabel(a.customer_status)}
+      />
+    ),
     owner: (a) => (
       <span className="text-muted-foreground">{a.owner?.full_name ?? "Unassigned"}</span>
     ),
@@ -252,6 +262,21 @@ export function AccountsList() {
             { value: "active", label: "Active" },
             { value: "inactive", label: "Inactive" },
             { value: "churned", label: "Churned" },
+          ]}
+        />
+
+        <MultiSelect
+          value={customerStatusFilter}
+          onChange={(v) => {
+            setCustomerStatusFilter(v);
+            setPage(0);
+          }}
+          placeholder="Customer Status"
+          triggerClassName="w-44"
+          options={[
+            { value: "client", label: "Client" },
+            { value: "prospect", label: "Prospect" },
+            { value: "former_client", label: "Former Client" },
           ]}
         />
 

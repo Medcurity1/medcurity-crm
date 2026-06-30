@@ -30,6 +30,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   statusLabel,
+  customerStatusLabel,
   formatDate,
   formatDateTime,
   formatCurrency,
@@ -377,6 +378,23 @@ export function AccountDetail() {
               variant="status"
               label={statusLabel(account.status)}
             />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-1 pt-3 px-4">
+            <CardTitle className="text-xs text-muted-foreground font-medium">Customer Status</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            <StatusBadge
+              value={account.customer_status}
+              variant="customerStatus"
+              label={customerStatusLabel(account.customer_status)}
+            />
+            <p className="text-[10px] text-muted-foreground mt-1">
+              {account.customer_status_override
+                ? "Set by rep · from deal history otherwise"
+                : "Automatic · from deal history"}
+            </p>
           </CardContent>
         </Card>
         <Card>
