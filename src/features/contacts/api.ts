@@ -300,7 +300,7 @@ export function useSetPrimaryContact() {
     mutationFn: async ({ id, accountId }: { id: string; accountId: string }) => {
       // One atomic RPC (demote others + promote this one in a single
       // transaction) so a failure or race can't leave the account with zero or
-      // two primaries. See migration 20260629000002.
+      // two primaries. See migration 20260629000004.
       const { error } = await supabase.rpc("set_primary_contact", {
         p_contact_id: id,
         p_account_id: accountId,
