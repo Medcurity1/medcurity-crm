@@ -1,4 +1,4 @@
-import { useState, useRef, type ReactNode } from "react";
+import { useState, useRef, useMemo, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState, useUrlArrayState, useUrlSortState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
@@ -124,9 +124,13 @@ function InlineStage({ o }: { o: Opportunity }) {
   // renders the menu off-screen — which is exactly the "drops down but nothing
   // shows" bug. (We also force position="popper" below as a belt-and-suspenders
   // fix so the menu always anchors to the trigger.)
-  const stageOptions = INLINE_STAGES.includes(o.stage)
-    ? INLINE_STAGES
-    : [o.stage, ...INLINE_STAGES];
+  const stageOptions = useMemo(
+    () =>
+      INLINE_STAGES.includes(o.stage)
+        ? INLINE_STAGES
+        : [o.stage, ...INLINE_STAGES],
+    [o.stage],
+  );
   return (
     <div onClick={(e) => e.stopPropagation()}>
       <Select

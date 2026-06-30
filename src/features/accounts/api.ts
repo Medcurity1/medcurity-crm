@@ -220,6 +220,9 @@ export function useArchiveAccount() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["accounts"] });
+      // Opp-detail and account contact panels read account-contacts; refresh
+      // so an archived account's related lists don't show stale rows.
+      qc.invalidateQueries({ queryKey: ["account-contacts"] });
     },
   });
 }
@@ -242,6 +245,7 @@ export function useDeleteAccount() {
       qc.invalidateQueries({ queryKey: ["accounts"] });
       qc.invalidateQueries({ queryKey: ["opportunities"] });
       qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["account-contacts"] });
     },
   });
 }

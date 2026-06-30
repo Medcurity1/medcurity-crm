@@ -1,6 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
-import * as XLSX from "xlsx";
 import {
   Play,
   Save,
@@ -280,11 +279,14 @@ function exportToCSV(
 }
 
 /** Export the report to an XLSX (Excel) file. */
-function exportToXLSX(
+async function exportToXLSX(
   columns: ColumnDef[],
   data: Record<string, unknown>[],
   entityName: string
 ) {
+  // Dynamically import xlsx (~95KB) only when someone actually exports, so the
+  // Reports bundle stays light for everyone just viewing reports.
+  const XLSX = await import("xlsx");
   const flat = data.map((row) => {
     const out: Record<string, unknown> = {};
     for (const col of columns) {
@@ -2002,7 +2004,7 @@ export function ReportBuilder() {
           );
         }
         if (kind === "csv") exportToCSV(visibleCols, rows, config.entity);
-        else exportToXLSX(visibleCols, rows, config.entity);
+        else await exportToXLSX(visibleCols, rows, config.entity);
       } catch (err) {
         toast.error(
           "Export failed: " + (err instanceof Error ? err.message : String(err)),

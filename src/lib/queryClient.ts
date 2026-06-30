@@ -37,9 +37,17 @@ export const queryClient = new QueryClient({
   mutationCache,
   defaultOptions: {
     queries: {
-      staleTime: 30_000,
+      // 5s (was 30s): a record you just created/edited shows up on the next
+      // navigation almost immediately instead of looking stale for half a
+      // minute. Mutations also invalidate their queries for an instant update.
+      staleTime: 5_000,
       retry: 1,
-      refetchOnWindowFocus: true,
+      // OFF (was true): refetch-on-focus made EVERY active query re-fire each
+      // time you tab away and back — a lag spike + network flood on big lists.
+      // Freshness now comes from the short staleTime (refetch on navigate) +
+      // explicit post-mutation invalidation. Widgets that need live data set
+      // their own refetchInterval.
+      refetchOnWindowFocus: false,
     },
   },
 });

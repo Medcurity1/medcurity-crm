@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   DndContext,
@@ -61,9 +61,13 @@ import type {
 } from "@/types/crm";
 
 function PipelineStats({ items }: { items: ActivePipelineRow[] }) {
-  const totalValue = items.reduce((sum, item) => sum + Number(item.amount), 0);
-  const dealCount = items.length;
-  const avgDealSize = dealCount > 0 ? totalValue / dealCount : 0;
+  // Memoized so the total/average aren't re-reduced on every re-render of the
+  // board (drag, hover, etc.) — only when the items actually change.
+  const { totalValue, dealCount, avgDealSize } = useMemo(() => {
+    const total = items.reduce((sum, item) => sum + Number(item.amount), 0);
+    const count = items.length;
+    return { totalValue: total, dealCount: count, avgDealSize: count > 0 ? total / count : 0 };
+  }, [items]);
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">

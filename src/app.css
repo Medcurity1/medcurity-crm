@@ -67,7 +67,9 @@
   --color-secondary: hsl(210 20% 18%);
   --color-secondary-foreground: hsl(210 20% 96%);
   --color-muted: hsl(210 20% 16%);
-  --color-muted-foreground: hsl(210 15% 65%);
+  /* Lifted from 65% → 74% lightness: secondary/metadata text in dark mode was
+     too dim to scan in lists, tables, and timelines. Still clearly "muted". */
+  --color-muted-foreground: hsl(210 12% 74%);
   --color-accent: hsl(210 20% 18%);
   --color-accent-foreground: hsl(210 20% 96%);
   --color-destructive: hsl(0 72% 55%);

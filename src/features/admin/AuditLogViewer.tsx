@@ -26,7 +26,6 @@ import { ChevronDown, ChevronRight, Search, Download, X } from "lucide-react";
 import { formatRelativeDate } from "@/lib/formatters";
 import { format, parseISO, subDays, subHours } from "date-fns";
 import { toast } from "sonner";
-import * as XLSX from "xlsx";
 
 const PAGE_SIZE = 25;
 
@@ -723,6 +722,8 @@ export function AuditLogViewer() {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       } else {
+        // Load xlsx (~95KB) only when the user actually exports to Excel.
+        const XLSX = await import("xlsx");
         const ws = XLSX.utils.json_to_sheet(flat);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Audit Log");

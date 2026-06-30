@@ -22,6 +22,7 @@ import {
   User,
 } from "lucide-react";
 import { useActivities } from "./api";
+import { QueryError } from "@/components/QueryError";
 import { ActivityForm } from "./ActivityForm";
 import { LogEmailDialog } from "./LogEmailDialog";
 import { ReattributeActivityDialog } from "./ReattributeActivityDialog";
@@ -100,7 +101,7 @@ export function ActivityTimeline({
   // would be a lot of plumbing.
   const [expandSignal, setExpandSignal] = useState(0);
 
-  const { data: activities, isLoading, refetch, isFetching } = useActivities({
+  const { data: activities, isLoading, isError, refetch, isFetching } = useActivities({
     account_id: accountId,
     contact_id: contactId,
     opportunity_id: opportunityId,
@@ -173,6 +174,16 @@ export function ActivityTimeline({
           </div>
         ))}
       </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <QueryError
+        message="Couldn't load the activity timeline."
+        onRetry={() => refetch()}
+        isRetrying={isFetching}
+      />
     );
   }
 

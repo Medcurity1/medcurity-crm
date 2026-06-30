@@ -2,7 +2,7 @@
 // panel, and the Active / Recent / Saved conversation sections (Nexus
 // sidebar, restyled with Pulse primitives).
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ArrowLeft, Building2, ChevronRight, Search, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -44,44 +44,49 @@ export function ConversationSidebar({ selectedId, onSelect, onBack, unreadIds }:
   });
   const [teamOpen, setTeamOpen] = useState(true);
 
-  const filter = (rows: MeddyConversation[]) => {
+  // Memoized so typing in search doesn't re-filter every conversation list
+  // (with a lastMessage() lookup per row) on every keystroke/re-render.
+  const sections = useMemo<
+    Array<{
+      key: "active" | "recent" | "saved";
+      label: string;
+      rows: MeddyConversation[];
+      empty: string;
+    }>
+  >(() => {
     const s = search.trim().toLowerCase();
-    if (!s) return rows;
-    return rows.filter((c) => {
-      const last = lastMessage(c);
-      return (
-        (c.visitor_name ?? "").toLowerCase().includes(s) ||
-        (c.visitor_email ?? "").toLowerCase().includes(s) ||
-        (last?.content ?? "").toLowerCase().includes(s)
-      );
-    });
-  };
-
-  const sections: Array<{
-    key: "active" | "recent" | "saved";
-    label: string;
-    rows: MeddyConversation[];
-    empty: string;
-  }> = [
-    {
-      key: "active",
-      label: "Active conversations",
-      rows: filter(lists?.active ?? []),
-      empty: "No active conversations",
-    },
-    {
-      key: "recent",
-      label: "Recent conversations",
-      rows: filter(lists?.recent ?? []),
-      empty: "No recent conversations",
-    },
-    {
-      key: "saved",
-      label: "Saved conversations",
-      rows: filter(lists?.saved ?? []),
-      empty: "No saved conversations",
-    },
-  ];
+    const filter = (rows: MeddyConversation[]) => {
+      if (!s) return rows;
+      return rows.filter((c) => {
+        const last = lastMessage(c);
+        return (
+          (c.visitor_name ?? "").toLowerCase().includes(s) ||
+          (c.visitor_email ?? "").toLowerCase().includes(s) ||
+          (last?.content ?? "").toLowerCase().includes(s)
+        );
+      });
+    };
+    return [
+      {
+        key: "active",
+        label: "Active conversations",
+        rows: filter(lists?.active ?? []),
+        empty: "No active conversations",
+      },
+      {
+        key: "recent",
+        label: "Recent conversations",
+        rows: filter(lists?.recent ?? []),
+        empty: "No recent conversations",
+      },
+      {
+        key: "saved",
+        label: "Saved conversations",
+        rows: filter(lists?.saved ?? []),
+        empty: "No saved conversations",
+      },
+    ];
+  }, [lists, search]);
 
   return (
     <div className="flex h-full w-full flex-col">

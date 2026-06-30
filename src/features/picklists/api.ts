@@ -35,7 +35,9 @@ export function usePicklistOptions() {
       }
       return byField;
     },
-    staleTime: 5 * 60 * 1000,
+    // 1 min (was 5): a picklist option an admin just added shows up for everyone
+    // quickly, without making this near-static list refetch constantly.
+    staleTime: 60 * 1000,
   });
 }
 
