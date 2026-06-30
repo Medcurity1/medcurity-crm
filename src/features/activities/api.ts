@@ -20,7 +20,11 @@ export function useActivities(filters?: ActivityFilters) {
           "*, owner:user_profiles!owner_user_id(id, full_name), contact:contacts!contact_id(id, first_name, last_name)",
         )
         .is("archived_at", null)
-        .order("created_at", { ascending: false });
+        // Order by the real interaction date (activity_date when set, else
+        // logged date) so back-dated entries sit in the right spot. The
+        // timeline also re-groups client-side, but ordering here keeps any
+        // non-grouped consumer correct too.
+        .order("effective_at", { ascending: false });
 
       if (filters?.account_id) {
         query = query.eq("account_id", filters.account_id);

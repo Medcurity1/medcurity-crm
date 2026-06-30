@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { stageLabel, businessTypeLabel, formatCurrency, formatDate } from "@/lib/formatters";
+import { cn } from "@/lib/utils";
 
 const OPPORTUNITIES_COLUMNS: ColumnDescriptor[] = [
   { key: "select", label: "Select", locked: true, headClassName: "w-10" },
@@ -55,7 +56,58 @@ const OPPORTUNITIES_COLUMNS: ColumnDescriptor[] = [
   // at which point the opp leaves this open list — so it was always empty here.
   { key: "owner", label: "Owner", sortKey: "owner.full_name" },
   { key: "next_step", label: "Next Step" },
+  // "Rotting deals" (Summer): days since the last real touch on the deal,
+  // color-coded so stale deals jump out. Not sortable yet (the value lives in a
+  // separate view, not on the opportunities row).
+  { key: "last_touch", label: "Last Touch" },
 ];
+
+// Days since an ISO timestamp (floored, never negative).
+function daysSinceTouch(iso: string): number {
+  return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000));
+}
+
+// Color-coded "days since last touch" badge. Fresh deals are green; the longer
+// since the last call/email/meeting/completed task, the hotter the color, so a
+// "rotting" deal is obvious at a glance (Summer's Pipedrive-style request).
+// A deal with NO logged activity falls back to its age since creation (with a
+// ⚠ marker) so neglected deals still surface instead of showing a blank.
+function StaleBadge({
+  at,
+  createdAt,
+}: {
+  at: string | null | undefined;
+  createdAt: string;
+}) {
+  const never = at == null;
+  const basis = at ?? createdAt;
+  if (!basis) return <span className="text-muted-foreground">—</span>;
+  const d = daysSinceTouch(basis);
+  const tone =
+    d < 7
+      ? "bg-green-500/10 text-green-700 dark:text-green-400"
+      : d < 14
+        ? "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400"
+        : d < 30
+          ? "bg-orange-500/10 text-orange-700 dark:text-orange-400"
+          : "bg-red-500/10 text-red-700 dark:text-red-400";
+  const label = d === 0 ? "Today" : d === 1 ? "1 day" : `${d} days`;
+  const title = never
+    ? `No activity logged — ${d} day${d === 1 ? "" : "s"} since the deal was created`
+    : `Last touch ${formatDate(basis)} (${d} day${d === 1 ? "" : "s"} ago)`;
+  return (
+    <span
+      title={title}
+      className={cn(
+        "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium whitespace-nowrap",
+        tone,
+      )}
+    >
+      {never && <span className="opacity-70">⚠</span>}
+      {label}
+    </span>
+  );
+}
 
 // ── Inline edit (Summer): edit Stage / Amount / Expected Close / Next Step
 // right from the list. Click a cell to edit; saves on blur / Enter, Esc cancels.
@@ -416,6 +468,7 @@ export function OpportunitiesList() {
           </span>
         } />
     ),
+    last_touch: (o) => <StaleBadge at={o.last_activity_at} createdAt={o.created_at} />,
   };
 
   return (

@@ -152,7 +152,28 @@ export function useOpportunities(filters?: OppFilters) {
 
       const { data, error, count } = await query;
       if (error) throw error;
-      return { data: data as Opportunity[], count: count ?? 0 };
+
+      const rows = (data ?? []) as Opportunity[];
+      // Last-touch for just the visible page — scoped to these ids so we never
+      // aggregate the whole activities table on every render (same pattern as
+      // the Partners "Last Contact" column). Powers the stale/rotting-deals
+      // column. A failure here must NOT break the list, so it's best-effort.
+      const ids = rows.map((o) => o.id);
+      if (ids.length > 0) {
+        const { data: la } = await supabase
+          .from("v_opportunity_last_activity")
+          .select("opportunity_id, last_activity_at")
+          .in("opportunity_id", ids);
+        const lastByOpp = new Map<string, string>();
+        for (const r of la ?? []) {
+          if (r.last_activity_at) {
+            lastByOpp.set(r.opportunity_id as string, r.last_activity_at as string);
+          }
+        }
+        for (const o of rows) o.last_activity_at = lastByOpp.get(o.id) ?? null;
+      }
+
+      return { data: rows, count: count ?? 0 };
     },
   });
 }

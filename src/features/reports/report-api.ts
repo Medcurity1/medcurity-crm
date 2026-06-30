@@ -244,11 +244,16 @@ function applyFilter(
       return query.like(field, `%${value}%`);
     case "ilike":
       return query.ilike(field, `%${value}%`);
-    case "in":
-      return query.in(
-        field,
-        value.split(",").map((v) => v.trim())
-      );
+    case "in": {
+      // Multi-value OR filter. Empty entries are dropped; if nothing's left the
+      // filter is a no-op (otherwise query.in(field, [""]) would match nothing).
+      const inVals = value
+        .split(",")
+        .map((v) => v.trim())
+        .filter(Boolean);
+      if (inVals.length === 0) return query;
+      return query.in(field, inVals);
+    }
     case "is_null":
       return query.is(field, null);
     case "is_not_null":

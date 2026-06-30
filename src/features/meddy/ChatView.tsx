@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot,
+  Building2,
   ChevronDown,
   Link2,
   MapPin,
@@ -35,7 +36,13 @@ import {
   useSendStaffMessage,
   useTakeover,
 } from "./api";
-import { siteLabel, type MeddyConversation, type MeddyMessage } from "./types";
+import {
+  companyAccountId,
+  companyName,
+  siteLabel,
+  type MeddyConversation,
+  type MeddyMessage,
+} from "./types";
 
 type Props = {
   conversation: MeddyConversation;
@@ -198,6 +205,23 @@ export function ChatView({ conversation: c }: Props) {
             )}
           </div>
         </div>
+        {/* Company name up top so staff see who's chatting at a glance (Rachel) —
+            links to the CRM account when we matched one. */}
+        {companyName(c) && (
+          <p className="mt-0.5 flex items-center gap-1 text-xs font-medium text-foreground">
+            <Building2 className="h-3 w-3 shrink-0 text-muted-foreground" />
+            {companyAccountId(c) ? (
+              <a
+                href={`/accounts/${companyAccountId(c)}`}
+                className="truncate text-primary hover:underline"
+              >
+                {companyName(c)}
+              </a>
+            ) : (
+              <span className="truncate">{companyName(c)}</span>
+            )}
+          </p>
+        )}
         {(c.visitor_email || c.visitor_phone) && (
           <p className="mt-0.5 text-xs text-muted-foreground">
             {[c.visitor_email, c.visitor_phone].filter(Boolean).join(" · ")}

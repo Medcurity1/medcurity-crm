@@ -440,6 +440,13 @@ export interface Opportunity {
   original_sales_rep?: UserProfile;
   creator?: UserProfile;
   updater?: UserProfile;
+  /**
+   * Most recent real interaction on this deal (call/email/meeting or completed
+   * task), attached per-page by useOpportunities from v_opportunity_last_activity.
+   * Drives the "Last Touch" stale-deal column. Undefined until hydrated; null
+   * when the deal has no logged activity.
+   */
+  last_activity_at?: string | null;
 }
 
 export interface Lead {
@@ -589,6 +596,10 @@ export interface Activity {
   activity_date: string | null;
   completed_at: string | null;
   created_at: string;
+  /** Generated: coalesce(activity_date, created_at). The real interaction
+   *  date when set, else the logged date. Used to order/filter the Activities
+   *  list so back-dated entries sort into the right spot. */
+  effective_at?: string;
   updated_at: string;
   // Email-specific metadata (null for non-email activities)
   email_direction: "sent" | "received" | null;
