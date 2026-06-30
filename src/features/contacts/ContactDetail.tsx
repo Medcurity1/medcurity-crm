@@ -355,9 +355,16 @@ export function ContactDetail() {
         entity="contacts"
         record={contact as unknown as Record<string, unknown>}
         onInlineSave={async (fieldKey, newValue) => {
+          // Normalize email on inline-edit (matches the form) so dedup/matching
+          // stays consistent. email2/email3 are excluded below (the DB enforces
+          // their ordering, so they're edited via the multi-email form instead).
+          const normalized =
+            fieldKey === "email" && typeof newValue === "string"
+              ? newValue.trim().toLowerCase()
+              : newValue;
           const patch: Record<string, unknown> = {
             id: contactId,
-            [fieldKey]: newValue === "" ? null : newValue,
+            [fieldKey]: normalized === "" ? null : normalized,
           };
           // When the rep inline-edits the mailing zip, also bump
           // country (if empty) and time_zone (always — corrections
@@ -381,6 +388,10 @@ export function ContactDetail() {
           "owner_user_id",
           "first_name",
           "last_name",
+          // email2/email3 must keep their order (DB-enforced) — edit via the
+          // multi-email form, not inline, so email3 can't be set without email2.
+          "email2",
+          "email3",
           "contact_number",
           "lead_source",
           "mql_date",

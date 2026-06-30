@@ -1,6 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
-import * as XLSX from "xlsx";
 import {
   Play,
   Save,
@@ -280,11 +279,14 @@ function exportToCSV(
 }
 
 /** Export the report to an XLSX (Excel) file. */
-function exportToXLSX(
+async function exportToXLSX(
   columns: ColumnDef[],
   data: Record<string, unknown>[],
   entityName: string
 ) {
+  // Dynamically import xlsx (~95KB) only when someone actually exports, so the
+  // Reports bundle stays light for everyone just viewing reports.
+  const XLSX = await import("xlsx");
   const flat = data.map((row) => {
     const out: Record<string, unknown> = {};
     for (const col of columns) {
@@ -376,24 +378,26 @@ function getRelationOptions(
   type: RelationFilterType,
   lookups: RelationLookups
 ): Array<{ value: string; label: string }> {
+  // Each list is defaulted to [] so a lookup that's still loading or failed to
+  // load yields an empty option set instead of throwing on .map of undefined.
   switch (type) {
     case "user":
-      return lookups.users.map((u) => ({
+      return (lookups.users ?? []).map((u) => ({
         value: u.id,
         label: u.full_name,
       }));
     case "account":
-      return lookups.accounts.map((a) => ({
+      return (lookups.accounts ?? []).map((a) => ({
         value: a.id,
         label: a.name,
       }));
     case "contact":
-      return lookups.contacts.map((c) => ({
+      return (lookups.contacts ?? []).map((c) => ({
         value: c.id,
         label: `${c.first_name} ${c.last_name}`.trim(),
       }));
     case "opportunity":
-      return lookups.opportunities.map((o) => ({
+      return (lookups.opportunities ?? []).map((o) => ({
         value: o.id,
         label: o.name,
       }));
@@ -2002,7 +2006,7 @@ export function ReportBuilder() {
           );
         }
         if (kind === "csv") exportToCSV(visibleCols, rows, config.entity);
-        else exportToXLSX(visibleCols, rows, config.entity);
+        else await exportToXLSX(visibleCols, rows, config.entity);
       } catch (err) {
         toast.error(
           "Export failed: " + (err instanceof Error ? err.message : String(err)),

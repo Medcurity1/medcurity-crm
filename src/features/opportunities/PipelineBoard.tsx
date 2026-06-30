@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   DndContext,
@@ -54,6 +54,7 @@ import { toast } from "sonner";
 import { Plus, MoreVertical, Pencil, Trash2 } from "lucide-react";
 import { OPEN_STAGES, formatCurrency, stageLabel } from "@/lib/formatters";
 import { celebrateClosedWon } from "@/lib/confetti";
+import { useClosedLostGuard } from "./useClosedLostGuard";
 import type {
   ActivePipelineRow,
   OpportunityStage,
@@ -61,9 +62,13 @@ import type {
 } from "@/types/crm";
 
 function PipelineStats({ items }: { items: ActivePipelineRow[] }) {
-  const totalValue = items.reduce((sum, item) => sum + Number(item.amount), 0);
-  const dealCount = items.length;
-  const avgDealSize = dealCount > 0 ? totalValue / dealCount : 0;
+  // Memoized so the total/average aren't re-reduced on every re-render of the
+  // board (drag, hover, etc.) — only when the items actually change.
+  const { totalValue, dealCount, avgDealSize } = useMemo(() => {
+    const total = items.reduce((sum, item) => sum + Number(item.amount), 0);
+    const count = items.length;
+    return { totalValue: total, dealCount: count, avgDealSize: count > 0 ? total / count : 0 };
+  }, [items]);
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
@@ -102,14 +107,16 @@ function PipelineKanban({
 }: PipelineKanbanProps) {
   const navigate = useNavigate();
   const updateMutation = useUpdateOpportunity();
+  // "Still a client?" prompt after a deal goes Closed Lost for a current client.
+  const closedLostGuard = useClosedLostGuard();
   // Drag-to-Closed-Lost prompts for a reason first. X / Escape / outside
   // click still moves the card, just without a reason. movingRef stops the
   // close handler from double-firing after an explicit "save reason & move".
-  const [lossPrompt, setLossPrompt] = useState<{ id: string; name: string } | null>(null);
+  const [lossPrompt, setLossPrompt] = useState<{ id: string; name: string; accountId: string } | null>(null);
   const [lossReason, setLossReason] = useState("");
   const movingRef = useRef(false);
 
-  function doMove(id: string, newStage: OpportunityStage, reason?: string) {
+  function doMove(id: string, newStage: OpportunityStage, accountId: string | null, reason?: string) {
     updateMutation.mutate(
       {
         id,
@@ -122,6 +129,7 @@ function PipelineKanban({
         onSuccess: () => {
           toast.success(`Moved to ${stageLabel(newStage)}`);
           if (newStage === "closed_won") celebrateClosedWon();
+          if (newStage === "closed_lost") closedLostGuard.promptIfClient(accountId);
         },
         onError: (err) =>
           toast.error("Failed to update stage: " + (err as Error).message),
@@ -132,7 +140,7 @@ function PipelineKanban({
   function resolveLoss(withReason: boolean) {
     if (!lossPrompt || movingRef.current) return;
     movingRef.current = true;
-    doMove(lossPrompt.id, "closed_lost", withReason ? lossReason : undefined);
+    doMove(lossPrompt.id, "closed_lost", lossPrompt.accountId, withReason ? lossReason : undefined);
     setLossPrompt(null);
   }
   const [activeItem, setActiveItem] = useState<ActivePipelineRow | null>(null);
@@ -182,11 +190,11 @@ function PipelineKanban({
       // Ask why it's lost before moving. Skipping still moves the card.
       movingRef.current = false;
       setLossReason("");
-      setLossPrompt({ id: item.id, name: item.name });
+      setLossPrompt({ id: item.id, name: item.name, accountId: item.account_id });
       return;
     }
 
-    doMove(item.id, newStage);
+    doMove(item.id, newStage, item.account_id);
   }
 
   if (isLoading) {
@@ -274,6 +282,7 @@ function PipelineKanban({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {closedLostGuard.dialog}
     </>
   );
 }

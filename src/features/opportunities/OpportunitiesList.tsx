@@ -1,10 +1,11 @@
-import { useState, useRef, type ReactNode } from "react";
+import { useState, useRef, useMemo, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState, useUrlArrayState, useUrlSortState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Target, Plus, Search, X, Pencil, Check } from "lucide-react";
 import { useOpportunities, useOpportunitiesTotals, useArchiveOpportunity, useBulkUpdateOwner, useBulkDeleteOpportunities, useUpdateOpportunity } from "./api";
+import { useClosedLostGuard } from "./useClosedLostGuard";
 import { toast } from "sonner";
 import { useUsers } from "@/features/accounts/api";
 import { PageHeader } from "@/components/PageHeader";
@@ -57,9 +58,9 @@ const OPPORTUNITIES_COLUMNS: ColumnDescriptor[] = [
   { key: "owner", label: "Owner", sortKey: "owner.full_name" },
   { key: "next_step", label: "Next Step" },
   // "Rotting deals" (Summer): days since the last real touch on the deal,
-  // color-coded so stale deals jump out. Not sortable yet (the value lives in a
-  // separate view, not on the opportunities row).
-  { key: "last_touch", label: "Last Touch" },
+  // color-coded so stale deals jump out. Sortable (server-side via the
+  // v_opportunities_with_activity view) — ascending surfaces the stalest first.
+  { key: "last_touch", label: "Last Touch", sortKey: "last_touch" },
 ];
 
 // Days since an ISO timestamp (floored, never negative).
@@ -116,7 +117,13 @@ const INLINE_STAGES: OpportunityStage[] = [
   "proposal_conversation", "closed_won", "closed_lost",
 ];
 
-function InlineStage({ o }: { o: Opportunity }) {
+function InlineStage({
+  o,
+  onClosedLost,
+}: {
+  o: Opportunity;
+  onClosedLost: (accountId: string | null) => void;
+}) {
   const update = useUpdateOpportunity();
   // Always include the opp's CURRENT stage as an option, even if it's a legacy
   // value (e.g. "qualified") that isn't in the standard pipeline list. Without
@@ -124,9 +131,13 @@ function InlineStage({ o }: { o: Opportunity }) {
   // renders the menu off-screen — which is exactly the "drops down but nothing
   // shows" bug. (We also force position="popper" below as a belt-and-suspenders
   // fix so the menu always anchors to the trigger.)
-  const stageOptions = INLINE_STAGES.includes(o.stage)
-    ? INLINE_STAGES
-    : [o.stage, ...INLINE_STAGES];
+  const stageOptions = useMemo(
+    () =>
+      INLINE_STAGES.includes(o.stage)
+        ? INLINE_STAGES
+        : [o.stage, ...INLINE_STAGES],
+    [o.stage],
+  );
   return (
     <div onClick={(e) => e.stopPropagation()}>
       <Select
@@ -136,7 +147,10 @@ function InlineStage({ o }: { o: Opportunity }) {
             update.mutate(
               { id: o.id, stage: v as OpportunityStage },
               {
-                onSuccess: () => toast.success(`Stage → ${stageLabel(v as OpportunityStage)}`),
+                onSuccess: () => {
+                  toast.success(`Stage → ${stageLabel(v as OpportunityStage)}`);
+                  if (v === "closed_lost") onClosedLost(o.account_id);
+                },
                 onError: (e) => toast.error("Couldn't update stage: " + (e as Error).message),
               },
             );
@@ -216,7 +230,10 @@ function InlineField({
       } else {
         parsed = Number(val);
         if (Number.isNaN(parsed)) return; // ignore a bad number
-        if (parsed < 0) return; // amount can't go negative
+        if (parsed < 0) {
+          toast.error("Amount can't be negative.");
+          return;
+        }
       }
     } else {
       parsed = val.trim() === "" ? null : val.trim();
@@ -311,6 +328,9 @@ export function OpportunitiesList() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sort, setSortState] = useUrlSortState("sort");
   const cols = useColumnPrefs("opportunities", OPPORTUNITIES_COLUMNS);
+  // After a deal is marked Closed Lost for a current client, ask whether the
+  // client is still contracted (Summer). Non-blocking; fires after the move.
+  const closedLostGuard = useClosedLostGuard();
 
   // Totals query: same filter set as the visible list, but no
   // pagination/sort. Lets the user verify dashboard KPI numbers
@@ -438,7 +458,7 @@ export function OpportunitiesList() {
       ) : (
         "—"
       ),
-    stage: (o) => <InlineStage o={o} />,
+    stage: (o) => <InlineStage o={o} onClosedLost={closedLostGuard.promptIfClient} />,
     business_type: (o) =>
       o.business_type ? (
         <StatusBadge
@@ -717,6 +737,7 @@ export function OpportunitiesList() {
         onAssignOwner={handleBulkAssignOwner}
         users={users}
       />
+      {closedLostGuard.dialog}
     </div>
   );
 }

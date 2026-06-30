@@ -130,6 +130,8 @@ export function OpportunityContacts({
         queryKey: ["opportunity-contacts", opportunityId],
       });
       qc.invalidateQueries({ queryKey: ["contact-record-links"] });
+      // The opp record's stakeholder count/view reads from the opp query.
+      qc.invalidateQueries({ queryKey: ["opportunities", opportunityId] });
     },
     onError: (err) => toast.error((err as Error).message),
   });

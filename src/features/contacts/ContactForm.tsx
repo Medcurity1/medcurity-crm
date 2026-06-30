@@ -251,7 +251,9 @@ function ContactFormInner({
       // email and no known company). "" / the "no account" sentinel -> null.
       account_id:
         values.account_id && values.account_id !== NO_ACCOUNT ? values.account_id : null,
-      email: values.email || null,
+      // Normalize the primary email like email2/email3 so dedup + matching are
+      // consistent (a stray "  Jane@X.com " shouldn't read as a different person).
+      email: values.email ? values.email.trim().toLowerCase() : null,
       email2: values.email2 ? values.email2.trim().toLowerCase() : null,
       // email3 only counts when email2 is set (DB enforces the ordering too).
       email3:

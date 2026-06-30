@@ -1,4 +1,4 @@
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
@@ -7,6 +7,7 @@ import { useOpportunity, useUpdateOpportunity, useArchiveOpportunity, useDeleteO
 import { MultiProductPicker } from "./MultiProductPicker";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { StageProgressBar } from "./StageProgressBar";
+import { useClosedLostGuard } from "./useClosedLostGuard";
 import { PageHeader } from "@/components/PageHeader";
 import { VerifiedBadge } from "@/components/VerifiedBadge";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -245,6 +246,24 @@ export function OpportunityDetail() {
   const archiveMutation = useArchiveOpportunity();
   const deleteMutation = useDeleteOpportunity();
   const removeProdMutation = useRemoveOpportunityProduct();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // "Still a client?" prompt after a deal goes Closed Lost for a current client.
+  const closedLostGuard = useClosedLostGuard();
+  // The edit form hands off the prompt via ?ask_client_status=1 (it navigates
+  // here after saving a closed-lost transition). Fire it once, then strip the
+  // flag so a refresh doesn't re-ask.
+  const askedClientRef = useRef(false);
+  useEffect(() => {
+    if (!opp || askedClientRef.current) return;
+    if (searchParams.get("ask_client_status") === "1") {
+      askedClientRef.current = true;
+      closedLostGuard.promptIfClient(opp.account_id);
+      const next = new URLSearchParams(searchParams);
+      next.delete("ask_client_status");
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opp, searchParams]);
   const [showArchive, setShowArchive] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [showChangeOwner, setShowChangeOwner] = useState(false);
@@ -1207,6 +1226,7 @@ export function OpportunityDetail() {
               onSuccess: () => {
                 toast.success(`Stage changed to ${stageLabel(pendingStage)}`);
                 if (pendingStage === "closed_won") celebrateClosedWon();
+                if (pendingStage === "closed_lost") closedLostGuard.promptIfClient(opp.account_id);
                 setPendingStage(null);
               },
               onError: (err) => {
@@ -1217,6 +1237,8 @@ export function OpportunityDetail() {
           );
         }}
       />
+
+      {closedLostGuard.dialog}
 
       <ChangeOwnerDialog
         open={showChangeOwner}

@@ -7,7 +7,10 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="card"
       className={cn(
-        "flex flex-col gap-6 rounded-xl border bg-card py-6 text-card-foreground shadow-sm",
+        // transition-shadow is additive: it only animates cards that actually
+        // change shadow on hover/state (clickable tiles), and is a no-op for
+        // static cards — so it smooths those without any cost elsewhere.
+        "flex flex-col gap-6 rounded-xl border bg-card py-6 text-card-foreground shadow-sm transition-shadow duration-200",
         className
       )}
       {...props}

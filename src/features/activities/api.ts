@@ -140,6 +140,9 @@ export function useArchiveActivity() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["activities"] });
       qc.invalidateQueries({ queryKey: ["tasks"] });
+      // Home "My Tasks"/activity widgets read under ["dashboard", ...] — refresh
+      // so an archived task disappears from the dashboard without a reload.
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
     },
   });
 }

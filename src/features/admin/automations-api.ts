@@ -260,6 +260,9 @@ export function useUpdateRenewalAutomationConfig() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["renewal_automation_config"] });
       qc.invalidateQueries({ queryKey: ["renewal_audit"] });
+      // Changing the config (lookahead/pullback/test account) changes what the
+      // next run would generate, so refresh the preview too.
+      qc.invalidateQueries({ queryKey: ["renewal_preview"] });
     },
   });
 }

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useUrlNumberState, useUrlArrayState, useUrlState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
@@ -102,8 +102,11 @@ export function ContactsList() {
 
   const contacts = result?.data;
   const totalCount = result?.count ?? 0;
-  // Tags for just this page's contacts, for the Tags column.
-  const { data: tagsByContact } = useContactTagsMap((contacts ?? []).map((c) => c.id));
+  // Tags for just this page's contacts, for the Tags column. Memoize the id
+  // array so the tags query only refetches when the contacts actually change,
+  // not on every render (a new array each render kept re-triggering the query).
+  const contactIds = useMemo(() => (contacts ?? []).map((c) => c.id), [contacts]);
+  const { data: tagsByContact } = useContactTagsMap(contactIds);
 
   const handleSearchChange = (value: string) => {
     setSearch(value);

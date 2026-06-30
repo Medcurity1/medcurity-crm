@@ -37,12 +37,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { statusLabel, formatDate } from "@/lib/formatters";
+import { statusLabel, customerStatusLabel, formatDate } from "@/lib/formatters";
 
 const ACCOUNTS_COLUMNS: ColumnDescriptor[] = [
   { key: "select", label: "Select", locked: true, headClassName: "w-10" },
   { key: "name", label: "Name", sortKey: "name", locked: true },
   { key: "status", label: "Status", sortKey: "status" },
+  { key: "customer_status", label: "Customer Status", sortKey: "customer_status" },
   { key: "owner", label: "Owner" },
   { key: "industry", label: "Industry", sortKey: "industry" },
   { key: "contract_end", label: "Contract End", sortKey: "current_contract_end_date" },
@@ -59,6 +60,7 @@ export function AccountsList() {
   // keystrokes on the list page).
   const [search, setSearch] = useDebouncedUrlState("q", "");
   const [statusFilter, setStatusFilter] = useUrlArrayState("status");
+  const [customerStatusFilter, setCustomerStatusFilter] = useUrlArrayState("customer");
   const [ownerFilter, setOwnerFilter] = useUrlArrayState("owner");
   const [industryFilter, setIndustryFilter] = useUrlArrayState("industry");
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
@@ -71,6 +73,7 @@ export function AccountsList() {
   const { data: result, isLoading } = useAccounts({
     search: search || undefined,
     status: statusFilter.length > 0 ? statusFilter : undefined,
+    customerStatus: customerStatusFilter.length > 0 ? customerStatusFilter : undefined,
     ownerId: ownerFilter.length > 0 ? ownerFilter : undefined,
     industryCategory: industryFilter.length > 0 ? industryFilter : undefined,
     verified:
@@ -138,15 +141,29 @@ export function AccountsList() {
 
   const handleBulkArchive = async () => {
     const ids = Array.from(selectedIds);
-    await Promise.all(ids.map((id) => archiveMutation.mutateAsync({ id })));
-    setSelectedIds(new Set());
+    const count = ids.length;
+    try {
+      await Promise.all(ids.map((id) => archiveMutation.mutateAsync({ id })));
+      setSelectedIds(new Set());
+      toast.success(`${count} account(s) archived.`);
+    } catch (e) {
+      // Keep the selection so the user can retry; surface why it failed.
+      toast.error("Archive failed: " + (e as Error).message);
+    }
   };
 
   const handleBulkDelete = async () => {
-    if (!confirm(`Permanently delete ${selectedIds.size} account(s)? This cannot be undone.`)) return;
-    await bulkDeleteMutation.mutateAsync({ ids: Array.from(selectedIds) });
-    setSelectedIds(new Set());
-    toast.success(`${selectedIds.size} account(s) deleted.`);
+    // Capture the count BEFORE clearing the selection — reading selectedIds.size
+    // after setSelectedIds(new Set()) showed "0 account(s) deleted".
+    const count = selectedIds.size;
+    if (!confirm(`Permanently delete ${count} account(s)? This cannot be undone.`)) return;
+    try {
+      await bulkDeleteMutation.mutateAsync({ ids: Array.from(selectedIds) });
+      setSelectedIds(new Set());
+      toast.success(`${count} account(s) deleted.`);
+    } catch (e) {
+      toast.error("Delete failed: " + (e as Error).message);
+    }
   };
 
   const handleBulkAssignOwner = async (userId: string) => {
@@ -184,6 +201,13 @@ export function AccountsList() {
     ),
     status: (a) => (
       <StatusBadge value={a.status} variant="status" label={statusLabel(a.status)} />
+    ),
+    customer_status: (a) => (
+      <StatusBadge
+        value={a.customer_status}
+        variant="customerStatus"
+        label={customerStatusLabel(a.customer_status)}
+      />
     ),
     owner: (a) => (
       <span className="text-muted-foreground">{a.owner?.full_name ?? "Unassigned"}</span>
@@ -238,6 +262,21 @@ export function AccountsList() {
             { value: "active", label: "Active" },
             { value: "inactive", label: "Inactive" },
             { value: "churned", label: "Churned" },
+          ]}
+        />
+
+        <MultiSelect
+          value={customerStatusFilter}
+          onChange={(v) => {
+            setCustomerStatusFilter(v);
+            setPage(0);
+          }}
+          placeholder="Customer Status"
+          triggerClassName="w-44"
+          options={[
+            { value: "client", label: "Client" },
+            { value: "prospect", label: "Prospect" },
+            { value: "former_client", label: "Former Client" },
           ]}
         />
 

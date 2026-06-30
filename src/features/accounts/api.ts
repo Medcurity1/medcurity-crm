@@ -8,6 +8,8 @@ interface AccountFilters {
   lifecycle_status?: string;
   /** Single status (legacy) or array of statuses (multi-select). */
   status?: string | string[];
+  /** Automatic customer status: client | prospect | former_client. */
+  customerStatus?: string | string[];
   /** Filter to one or many owners. "mine" = current user. Arrays do an IN. */
   ownerId?: string | "mine" | string[];
   /** Single industry (legacy) or array of industries (multi-select). */
@@ -76,7 +78,11 @@ export function useAccounts(filters?: AccountFilters) {
           `industry.ilike.%${safe}%`,
         ];
         if (contactAccountIds.length > 0) {
-          orParts.push(`id.in.(${contactAccountIds.join(",")})`);
+          // Cap the ids we OR into the request URL so a search term that matches
+          // hundreds of contacts can't blow past PostgREST's URL-length limit
+          // (each UUID is ~37 chars). 150 is plenty for a search box.
+          const capped = contactAccountIds.slice(0, 150);
+          orParts.push(`id.in.(${capped.join(",")})`);
         }
         query = query.or(orParts.join(","));
       }
@@ -88,6 +94,14 @@ export function useAccounts(filters?: AccountFilters) {
           if (filters.status.length > 0) query = query.in("status", filters.status);
         } else {
           query = query.eq("status", filters.status);
+        }
+      }
+      if (filters?.customerStatus) {
+        if (Array.isArray(filters.customerStatus)) {
+          if (filters.customerStatus.length > 0)
+            query = query.in("customer_status", filters.customerStatus);
+        } else {
+          query = query.eq("customer_status", filters.customerStatus);
         }
       }
       if (Array.isArray(filters?.ownerId)) {
@@ -220,6 +234,9 @@ export function useArchiveAccount() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["accounts"] });
+      // Opp-detail and account contact panels read account-contacts; refresh
+      // so an archived account's related lists don't show stale rows.
+      qc.invalidateQueries({ queryKey: ["account-contacts"] });
     },
   });
 }
@@ -242,6 +259,31 @@ export function useDeleteAccount() {
       qc.invalidateQueries({ queryKey: ["accounts"] });
       qc.invalidateQueries({ queryKey: ["opportunities"] });
       qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["account-contacts"] });
+    },
+  });
+}
+
+/**
+ * Clear a manual Customer Status override so the account goes back to fully
+ * automatic (derived from deal history). The override is normally set by the
+ * closed-lost "still a client?" prompt; this is the undo. Server-side the RPC
+ * requires a CRM write role.
+ */
+export function useClearCustomerStatusOverride() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (accountId: string) => {
+      const { error } = await supabase.rpc("set_account_customer_status_override", {
+        p_account_id: accountId,
+        p_override: null,
+        p_reason: null,
+      });
+      if (error) throw error;
+    },
+    onSuccess: (_d, accountId) => {
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      qc.invalidateQueries({ queryKey: ["accounts", accountId] });
     },
   });
 }

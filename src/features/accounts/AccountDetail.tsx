@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Pencil, Archive, ExternalLink, ChevronDown, Phone, UserRoundCog, Plus, MapPin, History, Trash2 } from "lucide-react";
-import { useAccount, useUpdateAccount, useArchiveAccount, useDeleteAccount, useAccountContracts } from "./api";
+import { useAccount, useUpdateAccount, useArchiveAccount, useDeleteAccount, useAccountContracts, useClearCustomerStatusOverride } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
 import { formatPhone } from "@/components/PhoneInput";
@@ -30,6 +30,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   statusLabel,
+  customerStatusLabel,
   formatDate,
   formatDateTime,
   formatCurrency,
@@ -120,6 +121,8 @@ export function AccountDetail() {
   // Layout preference is now consumed inside DetailPageLayout. We kept the
   // hook import but no longer need the variable here.
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
+  const canWrite = !!profile?.role && profile.role !== "read_only";
+  const clearOverrideMutation = useClearCustomerStatusOverride();
   const { data: account, isLoading } = useAccount(id);
   const { data: contracts } = useAccountContracts(id);
   const { data: customFieldDefs } = useCustomFieldDefinitions("accounts");
@@ -377,6 +380,42 @@ export function AccountDetail() {
               variant="status"
               label={statusLabel(account.status)}
             />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-1 pt-3 px-4">
+            <CardTitle className="text-xs text-muted-foreground font-medium">Customer Status</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            <StatusBadge
+              value={account.customer_status}
+              variant="customerStatus"
+              label={customerStatusLabel(account.customer_status)}
+            />
+            {account.customer_status_override ? (
+              <div className="mt-1 space-y-0.5">
+                <p className="text-[10px] text-muted-foreground">Set by a rep, not automatic</p>
+                {canWrite && (
+                  <button
+                    type="button"
+                    className="text-[10px] text-primary hover:underline disabled:opacity-50"
+                    disabled={clearOverrideMutation.isPending}
+                    onClick={async () => {
+                      try {
+                        await clearOverrideMutation.mutateAsync(account.id);
+                        toast.success("Back to automatic");
+                      } catch (err) {
+                        toast.error("Couldn't clear: " + (err as Error).message);
+                      }
+                    }}
+                  >
+                    Make automatic again
+                  </button>
+                )}
+              </div>
+            ) : (
+              <p className="text-[10px] text-muted-foreground mt-1">Automatic · from deal history</p>
+            )}
           </CardContent>
         </Card>
         <Card>

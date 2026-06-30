@@ -1,5 +1,5 @@
 import { format, formatDistanceToNow, parseISO, differenceInDays } from "date-fns";
-import type { OpportunityStage, AccountLifecycle, AccountStatus, RenewalType, ActivityType, OpportunityKind, OpportunityBusinessType, OpportunityTeam, LeadStatus, LeadSource, PaymentFrequency, LeadQualification, IndustryCategory, ProjectSegment } from "@/types/crm";
+import type { OpportunityStage, AccountLifecycle, AccountStatus, CustomerStatus, RenewalType, ActivityType, OpportunityKind, OpportunityBusinessType, OpportunityTeam, LeadStatus, LeadSource, PaymentFrequency, LeadQualification, IndustryCategory, ProjectSegment } from "@/types/crm";
 
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -72,6 +72,16 @@ const lifecycleLabels: Record<AccountLifecycle, string> = {
 
 export function lifecycleLabel(status: AccountLifecycle): string {
   return lifecycleLabels[status];
+}
+
+const customerStatusLabels: Record<CustomerStatus, string> = {
+  client: "Client",
+  prospect: "Prospect",
+  former_client: "Former Client",
+};
+
+export function customerStatusLabel(status: CustomerStatus | null | undefined): string {
+  return status ? customerStatusLabels[status] : "Prospect";
 }
 
 const activityLabels: Record<ActivityType, string> = {

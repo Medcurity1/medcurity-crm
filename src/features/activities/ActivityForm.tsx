@@ -460,6 +460,7 @@ export function ActivityForm({
             {selectedType === "call" ? (
               <select
                 id="subject"
+                autoFocus
                 className="w-full border rounded-md h-9 px-2 bg-background text-sm"
                 value={form.watch("subject") ?? ""}
                 onChange={(e) => form.setValue("subject", e.target.value)}

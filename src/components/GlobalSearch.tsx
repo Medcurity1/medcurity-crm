@@ -29,8 +29,10 @@ type ContactResult = Pick<Contact, "id" | "first_name" | "last_name" | "email">;
 type OpportunityResult = Pick<Opportunity, "id" | "name" | "stage" | "amount">;
 type LeadResult = Pick<Lead, "id" | "first_name" | "last_name" | "email" | "company" | "status">;
 
-const DEBOUNCE_MS = 300;
-const MIN_SEARCH_LENGTH = 2;
+// Snappier search: results start after a single character and with a shorter
+// debounce, so typing "M" to find Mary feels instant instead of laggy.
+const DEBOUNCE_MS = 150;
+const MIN_SEARCH_LENGTH = 1;
 // Per-entity cap shown in the dropdown after re-ranking.
 const RESULTS_PER_ENTITY = 10;
 // Fetch a wider net from the DB so we can re-rank prefix matches

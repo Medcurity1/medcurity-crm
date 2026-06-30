@@ -472,7 +472,9 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                     placeholder="Select type…"
                   />
                   <p className="text-xs text-muted-foreground">
-                    High-level classification. Manage values in Admin → Picklists.
+                    Use this to mark partner accounts. Client / Prospect / Former
+                    Client is set automatically from deal history (see Customer
+                    Status on the account).
                   </p>
                 </div>
 

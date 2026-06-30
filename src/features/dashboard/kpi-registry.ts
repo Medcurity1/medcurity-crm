@@ -157,7 +157,10 @@ export const KPI_REGISTRY: KpiDefinition[] = [
         .eq("owner_user_id", userId)
         .eq("stage", "closed_won")
         .is("archived_at", null)
-        .gte("close_date", quarterStart.toISOString());
+        // close_date is a DATE — compare to the LOCAL quarter-start date string,
+        // not toISOString() (whose UTC time component drops deals closed ON the
+        // boundary day for negative-UTC zones). Matches the deep-link above.
+        .gte("close_date", localISODate(quarterStart));
       return count ?? 0;
     },
   },
@@ -399,7 +402,9 @@ export const KPI_REGISTRY: KpiDefinition[] = [
         .select("amount")
         .eq("stage", "closed_won")
         .is("archived_at", null)
-        .gte("close_date", monthStart.toISOString());
+        // close_date is a DATE — use the local month-start date (see the quarter
+        // KPI note); toISOString() drops deals closed on the 1st for US zones.
+        .gte("close_date", localISODate(monthStart));
       return data?.reduce((sum, o) => sum + Number(o.amount), 0) ?? 0;
     },
   },
