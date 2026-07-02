@@ -324,7 +324,9 @@ export function OpportunitiesList() {
   const [expectedAfter, setExpectedAfter] = useUrlState("expected_after", "");
   const [expectedBefore, setExpectedBefore] = useUrlState("expected_before", "");
   const [page, setPage] = useUrlNumberState("page", 0);
-  const [pageSize, setPageSize] = useUrlNumberState("size", 25);
+  // Default 100 per page (Summer: fewer pages to click through). The
+  // Rows selector still offers 25/50/100/200 for anyone who wants less.
+  const [pageSize, setPageSize] = useUrlNumberState("size", 100);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sort, setSortState] = useUrlSortState("sort");
   const cols = useColumnPrefs("opportunities", OPPORTUNITIES_COLUMNS);
