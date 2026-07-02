@@ -38,7 +38,9 @@ const STAGE_PROBABILITY: Record<string, number> = {
   closed_won: 100,
   closed_lost: 0,
 };
-import { useAccountsList, useAccount, useUsers } from "@/features/accounts/api";
+import { useAccount, useUsers } from "@/features/accounts/api";
+import { AccountCombobox } from "@/components/AccountCombobox";
+import { useUnsavedChanges } from "@/hooks/useUnsavedChanges";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
@@ -118,7 +120,6 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const isEditing = !!id;
-  const { data: accountsList } = useAccountsList();
   const helpMap = useFieldHelpMap("opportunities");
   const { data: customFieldDefs } = useCustomFieldDefinitions("opportunities");
   const { data: requiredFieldsData } = useRequiredFields("opportunities");
@@ -175,7 +176,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     handleSubmit,
     setValue,
     watch,
-    formState: { errors, isSubmitting },
+    formState: { errors, isSubmitting, isDirty },
   } = useForm<OpportunityFormValues>({
     resolver: zodResolver(opportunitySchema),
     defaultValues: isEditing && opp
@@ -267,6 +268,14 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           custom_fields: {},
         },
   });
+
+  // Warn before losing edits: RHF dirty state, plus (create mode) any
+  // staged products — those live outside the form but are just as easy
+  // to lose. Cancel buttons route through confirmIfDirty; the post-save
+  // navigates call disarm() first so saving never trips the prompt.
+  const { confirmIfDirty, disarm } = useUnsavedChanges(
+    isDirty || (!isEditing && stagedProducts.length > 0),
+  );
 
   const watchedAccountId = watch("account_id");
   const watchedStage = watch("stage");
@@ -663,6 +672,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
         // (Summer's request) to the detail page via a query flag — it asks only
         // if the account is currently a Client.
         const lostTransition = values.stage === "closed_lost" && opp?.stage !== "closed_lost";
+        disarm();
         navigate(`/opportunities/${id}${lostTransition ? "?ask_client_status=1" : ""}`);
       } else {
         const result = await createMutation.mutateAsync(payload as Parameters<typeof createMutation.mutateAsync>[0]);
@@ -700,6 +710,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           toast.success("Opportunity created");
         }
 
+        disarm();
         navigate(`/opportunities/${result.id}`);
       }
     } catch (err) {
@@ -735,22 +746,12 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
               <Label>
                 Account *
               </Label>
-              <Select
-                value={watchedAccountId ?? ""}
-                onValueChange={(v) => setValue("account_id", v, { shouldDirty: true })}
+              <AccountCombobox
+                value={watchedAccountId || null}
+                onChange={(v) => setValue("account_id", v ?? "", { shouldDirty: true })}
+                placeholder="Pick an account..."
                 disabled={!!preselectedAccountId}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Pick an account..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {accountsList?.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              />
             </div>
 
             {/* Products picker — same component as Step 2, just isolated here */}
@@ -780,7 +781,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
 
             {/* Step navigation */}
             <div className="flex items-center justify-between pt-4 border-t">
-              <Button type="button" variant="ghost" onClick={() => navigate(-1)}>
+              <Button type="button" variant="ghost" onClick={() => confirmIfDirty(() => navigate(-1))}>
                 Cancel
               </Button>
               <Button
@@ -915,16 +916,11 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                       className="bg-muted"
                     />
                   ) : (
-                    <Select value={watchedAccountId} onValueChange={(v) => setValue("account_id", v)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select account" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {accountsList?.map((a) => (
-                          <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <AccountCombobox
+                      value={watchedAccountId || null}
+                      onChange={(v) => setValue("account_id", v ?? "")}
+                      placeholder="Select account"
+                    />
                   )}
                   {errors.account_id && <p className="text-sm text-destructive">{errors.account_id.message}</p>}
                 </div>
@@ -1706,7 +1702,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
               <Button type="submit" disabled={isSubmitting}>
                 {isSubmitting ? "Saving..." : isEditing ? "Save Changes" : "Create Opportunity"}
               </Button>
-              <Button type="button" variant="outline" onClick={() => navigate(-1)}>
+              <Button type="button" variant="outline" onClick={() => confirmIfDirty(() => navigate(-1))}>
                 Cancel
               </Button>
             </div>

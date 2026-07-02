@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -9,6 +9,8 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { US_STATES } from "@/lib/us-states";
 import { looksLikeUsZip, zipToTimeZone } from "@/lib/us-zip";
 import { PhoneInput } from "@/components/PhoneInput";
+import { AccountCombobox } from "@/components/AccountCombobox";
+import { useUnsavedChanges } from "@/hooks/useUnsavedChanges";
 import { useAccountsList } from "@/features/accounts/api";
 import { useUsers } from "@/features/accounts/api";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
@@ -46,6 +48,10 @@ export function ContactForm() {
   const { id } = useParams<{ id: string }>();
   const isEditing = !!id;
   const { data: contact, isLoading: loadingContact } = useContact(id);
+  // Still gate on the accounts list even though the AccountCombobox
+  // fetches it itself (same cache) — mounting with the list ready means
+  // the combobox trigger can resolve the selected account name on first
+  // render instead of flashing "Loading…".
   const { data: accounts } = useAccountsList();
 
   if ((isEditing && (loadingContact || !contact)) || !accounts) {
@@ -57,24 +63,17 @@ export function ContactForm() {
     );
   }
 
-  return <ContactFormInner key={id ?? "new"} contact={contact} accounts={accounts} />;
+  return <ContactFormInner key={id ?? "new"} contact={contact} />;
 }
 
 /* ---------- Inner form ---------- */
 
-// Radix Select can't use "" as a value, so this sentinel represents the
-// "no account" choice; it maps to null on submit.
+// The old Radix Select couldn't use "" as a value, so this sentinel
+// represents the "no account" choice; it maps to null on submit. Kept for
+// backwards-compat with any in-flight form state.
 const NO_ACCOUNT = "__none__";
 
-interface AccountOption { id: string; name: string }
-
-function ContactFormInner({
-  contact,
-  accounts,
-}: {
-  contact: Contact | undefined;
-  accounts: AccountOption[];
-}) {
+function ContactFormInner({ contact }: { contact: Contact | undefined }) {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -88,27 +87,13 @@ function ContactFormInner({
 
   const preselectedAccountId = searchParams.get("account_id");
 
-  // Merge the contact's current account into the dropdown even if it's
-  // archived (and therefore filtered out by useAccountsList). Without
-  // this, opening Edit on a contact whose account was later archived
-  // shows an empty Select (placeholder), which then fails the
-  // "Account is required" zod check on save.
-  const accountOptions = useMemo(() => {
-    const list = [...accounts];
-    const contactAcc = contact?.account;
-    if (contactAcc && !list.some((a) => a.id === contactAcc.id)) {
-      list.unshift({ id: contactAcc.id, name: `${contactAcc.name} (archived)` });
-    }
-    return list;
-  }, [accounts, contact?.account]);
-
   const {
     register,
     handleSubmit,
     setValue,
     watch,
     getValues,
-    formState: { errors, isSubmitting },
+    formState: { errors, isSubmitting, isDirty },
   } = useForm<ContactFormValues>({
     resolver: zodResolver(contactSchema),
     defaultValues: isEditing && contact
@@ -183,6 +168,11 @@ function ContactFormInner({
           next_steps: "",
         },
   });
+
+  // Warn before losing unsaved edits — Cancel routes through
+  // confirmIfDirty; the post-save navigates call disarm() first so a
+  // successful save never trips the prompt.
+  const { confirmIfDirty, disarm } = useUnsavedChanges(isDirty);
 
   // Auto-fill country + time_zone from US ZIP. We previously tried
   // chaining this via register('mailing_zip', { onChange }) but the
@@ -287,10 +277,12 @@ function ContactFormInner({
       if (isEditing && id) {
         await updateMutation.mutateAsync({ id, ...payload } as Parameters<typeof updateMutation.mutateAsync>[0]);
         toast.success("Contact updated");
+        disarm();
         navigate(`/contacts/${id}`);
       } else {
         const result = await createMutation.mutateAsync(payload as Parameters<typeof createMutation.mutateAsync>[0]);
         toast.success("Contact created");
+        disarm();
         navigate(`/contacts/${result.id}`);
       }
     } catch (err) {
@@ -298,6 +290,8 @@ function ContactFormInner({
       toast.error("Failed to save: " + errorMessage(err));
     }
   }
+
+  const watchedAccountId = watch("account_id");
 
   return (
     <div>
@@ -309,24 +303,18 @@ function ContactFormInner({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2 md:col-span-2">
                 <Label>Account</Label>
-                <Select
-                  value={watch("account_id") || NO_ACCOUNT}
-                  onValueChange={(v) => setValue("account_id", v)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select account (optional)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NO_ACCOUNT}>No account (individual)</SelectItem>
-                    {accountOptions.map((a) => (
-                      <SelectItem key={a.id} value={a.id}>
-                        {a.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <AccountCombobox
+                  value={
+                    watchedAccountId && watchedAccountId !== NO_ACCOUNT
+                      ? watchedAccountId
+                      : null
+                  }
+                  onChange={(v) => setValue("account_id", v ?? NO_ACCOUNT)}
+                  placeholder="Select account (optional)"
+                  allowClear
+                />
                 <p className="text-xs text-muted-foreground">
-                  Optional — leave as "No account" for an individual whose company you don't know yet.
+                  Optional — leave empty for an individual whose company you don't know yet.
                 </p>
                 {errors.account_id && <p className="text-sm text-destructive">{errors.account_id.message}</p>}
               </div>
@@ -607,7 +595,7 @@ function ContactFormInner({
               <Button type="submit" disabled={isSubmitting}>
                 {isSubmitting ? "Saving..." : isEditing ? "Save Changes" : "Create Contact"}
               </Button>
-              <Button type="button" variant="outline" onClick={() => navigate(-1)}>
+              <Button type="button" variant="outline" onClick={() => confirmIfDirty(() => navigate(-1))}>
                 Cancel
               </Button>
             </div>

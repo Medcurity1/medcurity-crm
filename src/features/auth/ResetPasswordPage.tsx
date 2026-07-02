@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
@@ -7,11 +7,40 @@ import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { branding } from "@/lib/branding";
+import { PulseLogo } from "@/components/PulseLogo";
+import {
+  SeasonalBackdrop,
+  getSeasonalScene,
+  resolveSceneDate,
+} from "@/components/seasonal/SeasonalBackdrop";
+
+/**
+ * Shared shell — seasonal backdrop + PulseLogo above the card, matching
+ * the LoginPage treatment so the auth pages read as one family.
+ */
+function AuthShell({ children }: { children: React.ReactNode }) {
+  // Resolve the scene once per mount (supports ?preview_date=YYYY-MM-DD).
+  const scene = useMemo(() => getSeasonalScene(resolveSceneDate()), []);
+  return (
+    <div className="relative min-h-screen flex items-center justify-center bg-background p-4 overflow-hidden">
+      {/* Seasonal backdrop — month-aware, decoration only. */}
+      <SeasonalBackdrop scene={scene} />
+      <div className="relative z-10 w-full max-w-sm">
+        <div className="mb-4 flex justify-center">
+          <PulseLogo
+            variant="login"
+            tone={scene.dark ? "silver" : "graphite"}
+            className="h-24 w-auto"
+          />
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 export function ResetPasswordPage() {
   const [password, setPassword] = useState("");
@@ -77,27 +106,24 @@ export function ResetPasswordPage() {
 
   if (checking) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-4">
-        <Card className="w-full max-w-sm">
+      <AuthShell>
+        <Card className="w-full">
           <CardContent className="pt-6">
             <p className="text-center text-muted-foreground">
               Verifying reset link...
             </p>
           </CardContent>
         </Card>
-      </div>
+      </AuthShell>
     );
   }
 
   if (!hasSession) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-4">
-        <Card className="w-full max-w-sm">
+      <AuthShell>
+        <Card className="w-full">
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl font-bold">
-              {branding.fullTitle}
-            </CardTitle>
-            <CardDescription>Invalid or Expired Link</CardDescription>
+            <CardTitle className="text-xl">Invalid or Expired Link</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground text-center">
@@ -112,18 +138,15 @@ export function ResetPasswordPage() {
             </Button>
           </CardContent>
         </Card>
-      </div>
+      </AuthShell>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-sm">
+    <AuthShell>
+      <Card className="w-full">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">
-            {branding.fullTitle}
-          </CardTitle>
-          <CardDescription>Set your new password</CardDescription>
+          <CardTitle className="text-xl">Set your new password</CardTitle>
         </CardHeader>
         <CardContent>
           {success ? (
@@ -141,6 +164,7 @@ export function ResetPasswordPage() {
                 <Input
                   id="password"
                   type="password"
+                  autoComplete="new-password"
                   placeholder="At least 8 characters"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -154,6 +178,7 @@ export function ResetPasswordPage() {
                 <Input
                   id="confirmPassword"
                   type="password"
+                  autoComplete="new-password"
                   placeholder="Re-enter your password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
@@ -169,6 +194,6 @@ export function ResetPasswordPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </AuthShell>
   );
 }

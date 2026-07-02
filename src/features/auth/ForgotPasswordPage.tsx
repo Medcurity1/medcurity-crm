@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
@@ -7,11 +7,40 @@ import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { branding } from "@/lib/branding";
+import { PulseLogo } from "@/components/PulseLogo";
+import {
+  SeasonalBackdrop,
+  getSeasonalScene,
+  resolveSceneDate,
+} from "@/components/seasonal/SeasonalBackdrop";
+
+/**
+ * Shared shell — seasonal backdrop + PulseLogo above the card, matching
+ * the LoginPage treatment so the auth pages read as one family.
+ */
+function AuthShell({ children }: { children: React.ReactNode }) {
+  // Resolve the scene once per mount (supports ?preview_date=YYYY-MM-DD).
+  const scene = useMemo(() => getSeasonalScene(resolveSceneDate()), []);
+  return (
+    <div className="relative min-h-screen flex items-center justify-center bg-background p-4 overflow-hidden">
+      {/* Seasonal backdrop — month-aware, decoration only. */}
+      <SeasonalBackdrop scene={scene} />
+      <div className="relative z-10 w-full max-w-sm">
+        <div className="mb-4 flex justify-center">
+          <PulseLogo
+            variant="login"
+            tone={scene.dark ? "silver" : "graphite"}
+            className="h-24 w-auto"
+          />
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 export function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -38,13 +67,10 @@ export function ForgotPasswordPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-sm">
+    <AuthShell>
+      <Card className="w-full">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">
-            {branding.fullTitle}
-          </CardTitle>
-          <CardDescription>Reset your password</CardDescription>
+          <CardTitle className="text-xl">Reset your password</CardTitle>
         </CardHeader>
         <CardContent>
           {sent ? (
@@ -69,6 +95,7 @@ export function ForgotPasswordPage() {
                 <Input
                   id="email"
                   type="email"
+                  autoComplete="email"
                   placeholder="you@medcurity.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -92,6 +119,6 @@ export function ForgotPasswordPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </AuthShell>
   );
 }

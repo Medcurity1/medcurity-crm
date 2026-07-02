@@ -454,35 +454,35 @@ export function MessageBubble({ message: m }: { message: MeddyMessage }) {
   }
   if (m.is_internal || m.sender_type === "internal") {
     return (
-      <div className="ml-0 mr-auto max-w-[80%] rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm">
+      <div className="ml-0 mr-auto max-w-[80%] rounded-2xl rounded-bl-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm">
         <p className="mb-0.5 flex items-center gap-1.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
           <span className="rounded bg-amber-500/20 px-1 py-px uppercase tracking-wide">
             Team note
           </span>
           {m.sender_name ?? "Agent"}
         </p>
-        <p className="whitespace-pre-wrap">{m.content}</p>
+        <p className="whitespace-pre-wrap break-words">{m.content}</p>
         <p className="mt-1 text-right text-[10px] text-muted-foreground">{time}</p>
       </div>
     );
   }
   if (m.role === "visitor" || m.sender_type === "visitor") {
     return (
-      <div className="ml-auto mr-0 max-w-[80%] rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
+      <div className="ml-auto mr-0 max-w-[80%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground">
         <p className="mb-0.5 text-[10px] font-semibold opacity-80">Visitor</p>
-        <p className="whitespace-pre-wrap">{m.content}</p>
+        <p className="whitespace-pre-wrap break-words">{m.content}</p>
         <p className="mt-1 text-right text-[10px] opacity-70">{time}</p>
       </div>
     );
   }
   if (m.role === "human" || m.sender_type === "employee") {
     return (
-      <div className="ml-0 mr-auto max-w-[80%] rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm">
+      <div className="ml-0 mr-auto max-w-[80%] rounded-2xl rounded-bl-sm border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm">
         <p className="mb-0.5 flex items-center gap-1 text-[10px] font-semibold text-sky-700 dark:text-sky-300">
           <User className="h-3 w-3" />
           {m.sender_name ?? "Medcurity Team"}
         </p>
-        <p className="whitespace-pre-wrap">{m.content}</p>
+        <p className="whitespace-pre-wrap break-words">{m.content}</p>
         <p className="mt-1 text-right text-[10px] text-muted-foreground">{time}</p>
       </div>
     );
@@ -493,7 +493,7 @@ export function MessageBubble({ message: m }: { message: MeddyMessage }) {
     );
   }
   return (
-    <div className="ml-0 mr-auto max-w-[80%] rounded-lg bg-muted px-3 py-2 text-sm">
+    <div className="ml-0 mr-auto max-w-[80%] rounded-2xl rounded-bl-sm bg-muted px-3 py-2 text-sm">
       <p className="mb-0.5 flex items-center gap-1 text-[10px] font-semibold text-muted-foreground">
         <span className="inline-flex items-center gap-0.5 rounded bg-sky-500/15 px-1 py-px text-sky-700 dark:text-sky-300">
           <Bot className="h-3 w-3" />
@@ -501,7 +501,7 @@ export function MessageBubble({ message: m }: { message: MeddyMessage }) {
         </span>
         Meddy
       </p>
-      <p className="whitespace-pre-wrap">{m.content}</p>
+      <p className="whitespace-pre-wrap break-words">{m.content}</p>
       <p className="mt-1 text-right text-[10px] text-muted-foreground">{time}</p>
     </div>
   );

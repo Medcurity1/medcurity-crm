@@ -1,13 +1,14 @@
 import { useMemo } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { LifeBuoy, Hand } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatDateTime } from "@/lib/formatters";
+import { formatRelativeDate } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
+import { MeddyHeader, MEDDY_PANE_CLASS } from "@/features/meddy/MeddyShell";
 import { useSupportConversations, useSupportConversation, useSupportRealtime } from "./api";
 import { SupportChatView } from "./SupportChatView";
-import { displayName, isWaiting, lastPreview, type SupportConversation } from "./types";
+import { displayName, isWaiting, lastPreview, messageCount, type SupportConversation } from "./types";
 
 // Meddy Support console — the staff screen for platform (app.medcurity.com)
 // Coach escalations. Reads ONLY the support_* tables: completely walled off
@@ -47,28 +48,9 @@ export function SupportPage() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-8rem)] flex-col">
-      <div className="mb-2 flex items-center gap-3">
-        <h1 className="text-2xl font-bold">Meddy</h1>
-        {/* Counterpart of the switcher on /meddy — one Meddy home, two
-            streams (Website | Platform). */}
-        <div className="flex gap-1 rounded-lg border border-border bg-muted/40 p-0.5">
-          <Link
-            to="/meddy"
-            className="rounded-md px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Website
-          </Link>
-          <span className="rounded-md bg-background px-3 py-1 text-xs font-medium shadow-sm">
-            Platform
-          </span>
-        </div>
-      </div>
-      <p className="mb-4 text-sm text-muted-foreground">
-        Platform (app.medcurity.com) Meddy chats — take over when a customer
-        needs a human, hand back when you're done
-      </p>
-      <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border">
+    <div className={MEDDY_PANE_CLASS}>
+      <MeddyHeader stream="platform" />
+      <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-border bg-card">
         {/* ── Conversation list ── */}
         <div
           className={cn(
@@ -115,7 +97,13 @@ export function SupportPage() {
             </div>
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
-              <LifeBuoy className="h-10 w-10 opacity-30" />
+              {/* Same Meddy-on-phone idle illustration as /meddy. */}
+              <img
+                src="/widget/meddy-on-phone.png?v=2"
+                alt=""
+                loading="eager"
+                className="h-24 w-auto object-contain opacity-70"
+              />
               <p className="text-sm">Select a conversation</p>
               {groups.waiting.length > 0 && (
                 <p className="text-xs font-medium text-red-500">
@@ -167,7 +155,7 @@ function Section({
             <div className="flex items-center justify-between gap-2">
               <p className="truncate text-sm font-medium">{displayName(c)}</p>
               {urgent && (
-                <Badge variant="secondary" className="shrink-0 bg-red-100 text-red-700">
+                <Badge variant="secondary" className="shrink-0 bg-red-500/15 text-red-600 dark:bg-red-500/20 dark:text-red-400">
                   <Hand className="mr-0.5 h-3 w-3" />
                   Waiting
                 </Badge>
@@ -178,7 +166,8 @@ function Section({
             )}
             <p className="mt-0.5 truncate text-xs text-muted-foreground">{lastPreview(c)}</p>
             <p className="mt-0.5 text-[10px] text-muted-foreground/70">
-              {formatDateTime(c.last_message_at ?? c.updated_at)}
+              {formatRelativeDate(c.last_message_at ?? c.updated_at)}
+              {` · ${messageCount(c)} msgs`}
               {c.is_human_takeover && c.assigned?.full_name ? ` · ${c.assigned.full_name}` : ""}
             </p>
           </button>

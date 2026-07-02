@@ -6,6 +6,7 @@ import { useAccount, useCreateAccount, useUpdateAccount, useUsers, useAccountsLi
 import { PicklistSelect } from "@/features/picklists/PicklistSelect";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
+import { useUnsavedChanges } from "@/hooks/useUnsavedChanges";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { accountSchema, type AccountFormValues } from "./schema";
@@ -125,7 +126,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
     setValue,
     watch,
     getValues,
-    formState: { errors, isSubmitting },
+    formState: { errors, isSubmitting, isDirty },
   } = useForm<AccountFormValues>({
     resolver: zodResolver(accountSchema),
     defaultValues: isEditing && account
@@ -241,6 +242,11 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
           custom_fields: {},
         },
   });
+
+  // Warn before losing unsaved edits — Cancel routes through
+  // confirmIfDirty; the post-save navigate calls disarm() first so a
+  // successful save never trips the prompt.
+  const { confirmIfDirty, disarm } = useUnsavedChanges(isDirty);
 
   // When the rep types a US zip and tabs out, auto-fill country and
   // timezone if those fields are still blank. We never overwrite a
@@ -407,6 +413,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
         savedId = result.id;
       }
       toast.success(isEditing ? "Account updated" : "Account created");
+      disarm();
       navigate(`/accounts/${savedId}`);
     } catch (err) {
       console.error("Failed to save account:", err);
@@ -1059,7 +1066,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
               <Button type="submit" disabled={isSubmitting}>
                 {isSubmitting ? "Saving..." : isEditing ? "Save Changes" : "Create Account"}
               </Button>
-              <Button type="button" variant="outline" onClick={() => navigate(-1)}>
+              <Button type="button" variant="outline" onClick={() => confirmIfDirty(() => navigate(-1))}>
                 Cancel
               </Button>
             </div>

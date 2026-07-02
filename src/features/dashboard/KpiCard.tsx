@@ -49,7 +49,8 @@ export function KpiCard({ kpi, userId }: { kpi: KpiDefinition; userId: string })
 
   if (isLoading) {
     return (
-      <Card>
+      // Base Card defaults to gap-6 py-6 — override so KPI cards stay compact.
+      <Card className="gap-2 py-4">
         <CardHeader className="pb-2">
           <Skeleton className="h-4 w-32" />
         </CardHeader>
@@ -64,7 +65,12 @@ export function KpiCard({ kpi, userId }: { kpi: KpiDefinition; userId: string })
   const href = typeof kpi.link === "function" ? kpi.link(userId) : kpi.link;
 
   const cardInner = (
-    <Card className={href ? "hover:shadow-md hover:border-primary/40 transition-all cursor-pointer" : ""}>
+    // Base Card defaults to gap-6 py-6 — override so label and value sit tight.
+    <Card
+      className={`gap-2 py-4 ${
+        href ? "hover:shadow-md hover:border-primary/40 transition-all cursor-pointer" : ""
+      }`}
+    >
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-sm text-muted-foreground font-medium">
           {kpi.label}

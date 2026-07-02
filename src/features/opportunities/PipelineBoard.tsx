@@ -129,7 +129,7 @@ function PipelineKanban({
       },
       {
         onSuccess: () => {
-          toast.success(`Moved to ${stageLabel(newStage)}`);
+          toast.success(`Stage changed to ${stageLabel(newStage)}`);
           if (newStage === "closed_won") celebrateClosedWon();
           if (newStage === "closed_lost") closedLostGuard.promptIfClient(accountId);
         },

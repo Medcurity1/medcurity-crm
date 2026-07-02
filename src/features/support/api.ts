@@ -13,8 +13,11 @@ import type { SupportConversation, SupportMessage } from "./types";
 // publication) — no broadcast channels needed because the platform Coach
 // POLLS the meddy-support edge function; only this console needs push.
 
+// NOTE: the per-alias filters below (.eq("last.is_internal", …) etc.) are
+// scoped to the "last" alias only — the msg_count embed of the same table
+// counts ALL rows and must not pick up those filters.
 const CONV_SELECT =
-  "*, assigned:user_profiles!assigned_to(id, full_name), last:support_messages(content, role, created_at)";
+  "*, assigned:user_profiles!assigned_to(id, full_name), last:support_messages(content, role, created_at), msg_count:support_messages(count)";
 
 export function useSupportConversations() {
   return useQuery({

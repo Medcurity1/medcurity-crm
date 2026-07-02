@@ -34,6 +34,7 @@ export interface SupportConversation {
   // PostgREST embeds
   assigned?: { id: string; full_name: string | null } | null;
   last?: { content: string; role: string; created_at: string }[] | null;
+  msg_count?: { count: number }[] | null;
 }
 
 /** Waiting on a human and nobody has claimed it yet — the urgent state. */
@@ -43,6 +44,10 @@ export function isWaiting(c: SupportConversation): boolean {
 
 export function displayName(c: SupportConversation): string {
   return c.customer_name || c.customer_email || "Platform customer";
+}
+
+export function messageCount(c: SupportConversation): number {
+  return c.msg_count?.[0]?.count ?? 0;
 }
 
 export function lastPreview(c: SupportConversation): string {
