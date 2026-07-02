@@ -83,11 +83,12 @@ export function RecentWins() {
       </CardHeader>
       <CardContent className="space-y-2">
         {wins.map((w) => {
-          const mine = w.owner?.id === user?.id;
+          const mine = w.owner != null && w.owner.id === user?.id;
           const alreadyFived = w.fives.some((f) => f.user_id === user?.id);
+          // Fallback name so the tooltip count always matches the badge count
+          // even if a profile has no full_name.
           const fiverNames = w.fives
-            .map((f) => f.user?.full_name)
-            .filter(Boolean)
+            .map((f) => f.user?.full_name ?? "A teammate")
             .join(", ");
           const ownerFirst = (w.owner?.full_name ?? "The team").split(" ")[0];
           return (
@@ -111,7 +112,11 @@ export function RecentWins() {
                 <p className="text-xs text-muted-foreground">{formatRelativeDate(w.won_at)}</p>
               </div>
               <div className="shrink-0" title={fiverNames ? `High fives: ${fiverNames}` : undefined}>
-                {mine ? (
+                {w.owner == null ? (
+                  // Ownerless win: nobody to congratulate, so no button
+                  // (the RPC rejects these too).
+                  <span className="text-xs text-muted-foreground">🎉</span>
+                ) : mine ? (
                   <span className="text-xs text-muted-foreground">
                     🎉 {w.fives.length > 0 ? `${w.fives.length} 🖐` : "Your win!"}
                   </span>
