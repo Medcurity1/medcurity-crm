@@ -62,9 +62,12 @@ export function useOpportunities(filters?: OppFilters) {
       // header was a no-op because owner is a joined table, not a
       // column on opportunities.
       if (sortByLastTouch) {
-        // ascending = stalest (oldest touch) first, which is the rotting-deals
-        // use case; never-touched (null) deals sort to the end.
-        query = query.order("last_activity_at", { ascending: sortAsc, nullsFirst: false });
+        // Sort by the SAME value the badge displays: last real touch, or the
+        // deal's created_at when nothing was ever logged. Sorting by the raw
+        // last_activity_at dumped never-touched deals (null) at the end in
+        // arbitrary order while their badges showed an age — Summer's
+        // "it mixes them together" bug. effective_last_touch is never null.
+        query = query.order("effective_last_touch", { ascending: sortAsc });
       } else if (sortCol.startsWith("account.")) {
         const innerCol = sortCol.slice("account.".length);
         query = query.order(innerCol, {
@@ -395,6 +398,9 @@ export function useUpdateOpportunity() {
       qc.invalidateQueries({ queryKey: ["opportunities", vars.id] });
       qc.invalidateQueries({ queryKey: ["pipeline"] });
       qc.invalidateQueries({ queryKey: ["renewal_queue"] });
+      // Stage moves append a row via DB trigger — refetch the history
+      // panel so it doesn't show a stale trail (matches useStageHistory).
+      qc.invalidateQueries({ queryKey: ["stage_history", vars.id] });
     },
   });
 }

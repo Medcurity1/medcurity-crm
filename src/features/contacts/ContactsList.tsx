@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useUrlNumberState, useUrlArrayState, useUrlState } from "@/hooks/useUrlState";
+import { useUrlNumberState, useUrlArrayState, useUrlState, useUrlSortState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Users, Plus, Search } from "lucide-react";
@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { useUsers } from "@/features/accounts/api";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
+import { QueryError } from "@/components/QueryError";
 import { Pagination } from "@/components/Pagination";
 import { formatPhone } from "@/components/PhoneInput";
 import { BulkActionBar } from "@/components/BulkActionBar";
@@ -69,10 +70,13 @@ export function ContactsList() {
   const [page, setPage] = useUrlNumberState("page", 0);
   const [pageSize, setPageSize] = useUrlNumberState("size", 25);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [sort, setSort] = useState<SortState>({ column: "last_name", direction: "asc" });
+  // Sort state is URL-backed (useUrlSortState) so a user can sort, drill
+  // into a contact, then hit Back and find the list still sorted — plain
+  // useState reset on every remount.
+  const [sort, setSortState] = useUrlSortState("sort");
   const cols = useColumnPrefs("contacts", CONTACTS_COLUMNS);
 
-  const { data: result, isLoading } = useContacts({
+  const { data: result, isLoading, isError, isFetching, refetch } = useContacts({
     search: search || undefined,
     ownerId: ownerFilter.length > 0 ? ownerFilter : undefined,
     verified:
@@ -91,7 +95,9 @@ export function ContactsList() {
     page,
     pageSize,
     sortColumn: sort.column,
-    sortDirection: sort.direction,
+    // No sort in the URL → leave direction undefined so the API's
+    // default (last_name ASC) applies instead of the hook's "desc".
+    sortDirection: sort.column ? sort.direction : undefined,
   });
   const { data: users } = useUsers();
   const { data: allTags } = useTags();
@@ -112,6 +118,11 @@ export function ContactsList() {
     setSearch(value);
     setPage(0);
   };
+
+  function handleSort(next: SortState) {
+    setSortState(next);
+    setPage(0);
+  }
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -143,15 +154,29 @@ export function ContactsList() {
 
   const handleBulkArchive = async () => {
     const ids = Array.from(selectedIds);
-    await Promise.all(ids.map((id) => archiveMutation.mutateAsync({ id })));
-    setSelectedIds(new Set());
+    const count = ids.length;
+    try {
+      await Promise.all(ids.map((id) => archiveMutation.mutateAsync({ id })));
+      setSelectedIds(new Set());
+      toast.success(`${count} contact(s) archived.`);
+    } catch (e) {
+      // Keep the selection so the user can retry; surface why it failed.
+      toast.error("Archive failed: " + (e as Error).message);
+    }
   };
 
   const handleBulkDelete = async () => {
-    if (!confirm(`Permanently delete ${selectedIds.size} contact(s)? This cannot be undone.`)) return;
-    await bulkDeleteMutation.mutateAsync({ ids: Array.from(selectedIds) });
-    setSelectedIds(new Set());
-    toast.success(`${selectedIds.size} contact(s) deleted.`);
+    // Capture the count BEFORE clearing the selection — reading selectedIds.size
+    // after setSelectedIds(new Set()) showed "0 contact(s) deleted".
+    const count = selectedIds.size;
+    if (!confirm(`Permanently delete ${count} contact(s)? This cannot be undone.`)) return;
+    try {
+      await bulkDeleteMutation.mutateAsync({ ids: Array.from(selectedIds) });
+      setSelectedIds(new Set());
+      toast.success(`${count} contact(s) deleted.`);
+    } catch (e) {
+      toast.error("Delete failed: " + (e as Error).message);
+    }
   };
 
   const handleBulkAssignOwner = async (userId: string) => {
@@ -169,6 +194,16 @@ export function ContactsList() {
 
   const allChecked =
     !!contacts?.length && contacts.every((c) => selectedIds.has(c.id));
+
+  // Any filter narrowing the list — drives the empty-state copy so a
+  // filtered-to-zero list says "adjust your filters", not "add your
+  // first contact".
+  const hasActiveFilters =
+    !!search ||
+    ownerFilter.length > 0 ||
+    verifiedFilter !== "all" ||
+    statusFilter !== "active" ||
+    tagFilter.length > 0;
 
   const cellRenderers: Record<string, (c: Contact) => ReactNode> = {
     select: (c) => (
@@ -206,7 +241,12 @@ export function ContactsList() {
       <span className="text-muted-foreground">{c.title ?? "—"}</span>
     ),
     email: (c) => (
-      <span className="text-muted-foreground">{c.email ?? "—"}</span>
+      <span
+        className="block max-w-[240px] truncate text-muted-foreground"
+        title={c.email ?? undefined}
+      >
+        {c.email ?? "—"}
+      </span>
     ),
     phone: (c) => (
       <span className="text-muted-foreground">{c.phone ? formatPhone(c.phone) : "—"}</span>
@@ -229,7 +269,7 @@ export function ContactsList() {
     },
     primary: (c) =>
       c.is_primary ? (
-        <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">
+        <Badge variant="secondary" className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
           Primary
         </Badge>
       ) : null,
@@ -249,7 +289,7 @@ export function ContactsList() {
       />
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
-        <div className="relative flex-1 min-w-[200px] max-w-sm">
+        <div className="relative min-w-[220px] w-full sm:w-auto sm:flex-1 sm:max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search by name, email, or title..."
@@ -331,12 +371,18 @@ export function ContactsList() {
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
+      ) : isError ? (
+        <QueryError
+          message="Couldn't load contacts."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
       ) : !contacts?.length ? (
         <EmptyState
           icon={Users}
           title="No contacts found"
-          description={search ? "Try a different search term" : "Add your first contact"}
-          action={!search ? {
+          description={hasActiveFilters ? "Try adjusting your search or filter" : "Add your first contact"}
+          action={!hasActiveFilters ? {
             label: "New Contact",
             onClick: () => navigate("/contacts/new"),
           } : undefined}
@@ -364,7 +410,7 @@ export function ContactsList() {
                         key={c.key}
                         column={c.sortKey}
                         sort={sort}
-                        onSort={setSort}
+                        onSort={handleSort}
                         align={c.align}
                         className={c.headClassName}
                       >

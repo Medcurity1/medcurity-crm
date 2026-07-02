@@ -326,6 +326,8 @@ export const NOTIF_TYPE_FALLBACK_SOUNDS: Record<string, string> = {
   // Platform (Meddy Support) escalations — same doorbell urgency as website.
   support_human_requested: "doorbell",
   support_new_chat: "bubble",
+  // A teammate high-fived your closed deal — happy little clink.
+  deal_high_five: "glass",
 };
 
 /** Saved seconds value → repeat-duration bucket (Nexus index.html:12239). */

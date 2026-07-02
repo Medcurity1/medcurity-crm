@@ -200,6 +200,13 @@ platform changes:
 - **Account/billing:** password reset from the login page (support can reset
   manually if the link fails); renew via upper-right menu → Purchase; payment
   history via support.
+- **Compliance badges (added 2026-07-02):** Medcurity DOES provide a
+  compliance badge to customers who completed their SRA with us (self-serviced
+  or with services). It is not a certification of full HIPAA compliance — it
+  shows Medcurity affirms the org is actively doing its compliance work with
+  us; customers often put it on their website for buyers. Getting one requires
+  our team: escalate to a human in the chat or point them to support. Never
+  say we don't offer a badge.
 
 **Support contact (when actually needed):** support@medcurity.com,
 (509) 867-3645, Mon–Fri 8 AM–5 PM Pacific.

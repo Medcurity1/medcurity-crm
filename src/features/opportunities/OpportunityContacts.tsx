@@ -215,7 +215,13 @@ export function OpportunityContacts({
                     {c.title ?? "—"}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {c.email ?? "—"}
+                    {c.email ? (
+                      <a href={`mailto:${c.email}`} className="hover:underline">
+                        {c.email}
+                      </a>
+                    ) : (
+                      "—"
+                    )}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {lastActivity?.[c.id] ? formatDate(lastActivity[c.id]!) : "—"}

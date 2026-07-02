@@ -175,7 +175,7 @@ function CollateralForm() {
   const [format, setFormat] = useState("");
   const [partnerOrEvent, setPartnerOrEvent] = useState("");
   const [usage, setUsage] = useState("");
-  const [priority, setPriority] = useState<RequestPriority>("medium");
+  const [priority, setPriority] = useState<RequestPriority>("low");
   const [files, setFiles] = useState<File[]>([]);
 
   function reset() {
@@ -185,7 +185,7 @@ function CollateralForm() {
     setFormat("");
     setPartnerOrEvent("");
     setUsage("");
-    setPriority("medium");
+    setPriority("low");
     setFiles([]);
   }
 
@@ -298,13 +298,13 @@ function ProductForm() {
   const [submitted, setSubmitted] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [priority, setPriority] = useState<RequestPriority>("medium");
+  const [priority, setPriority] = useState<RequestPriority>("low");
   const [files, setFiles] = useState<File[]>([]);
 
   function reset() {
     setTitle("");
     setDescription("");
-    setPriority("medium");
+    setPriority("low");
     setFiles([]);
   }
 
@@ -384,14 +384,14 @@ function CrmForm() {
   const [changeType, setChangeType] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [priority, setPriority] = useState<RequestPriority>("medium");
+  const [priority, setPriority] = useState<RequestPriority>("low");
   const [files, setFiles] = useState<File[]>([]);
 
   function reset() {
     setChangeType("");
     setTitle("");
     setDescription("");
-    setPriority("medium");
+    setPriority("low");
     setFiles([]);
   }
 

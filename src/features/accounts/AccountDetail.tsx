@@ -12,6 +12,7 @@ import { VerifiedBadge } from "@/components/VerifiedBadge";
 import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
+import { QueryError } from "@/components/QueryError";
 import { RecordId } from "@/components/RecordId";
 import { InlineEdit, type InlineEditProps } from "@/components/InlineEdit";
 import { looksLikeUsZip, zipToTimeZone } from "@/lib/us-zip";
@@ -123,7 +124,7 @@ export function AccountDetail() {
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const canWrite = !!profile?.role && profile.role !== "read_only";
   const clearOverrideMutation = useClearCustomerStatusOverride();
-  const { data: account, isLoading } = useAccount(id);
+  const { data: account, isLoading, isError, error, refetch } = useAccount(id);
   const { data: contracts } = useAccountContracts(id);
   const { data: customFieldDefs } = useCustomFieldDefinitions("accounts");
   const updateMutation = useUpdateAccount();
@@ -149,8 +150,23 @@ export function AccountDetail() {
     );
   }
 
+  // useAccount uses .single(), so a genuinely-missing row surfaces as a
+  // PGRST116 "no rows" error — show "not found" for that, and a retryable
+  // error state for everything else (network blip, RLS, etc.).
+  const notFound = (error as { code?: string } | null)?.code === "PGRST116";
+  if (isError && !notFound) {
+    return <QueryError message="Something went wrong loading this account." onRetry={() => refetch()} />;
+  }
+
   if (!account) {
-    return <div className="text-muted-foreground">Account not found.</div>;
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+        <p className="text-sm text-muted-foreground">Account not found. It may have been deleted or merged.</p>
+        <Link to="/accounts" className="text-sm text-primary hover:underline">
+          Back to Accounts
+        </Link>
+      </div>
+    );
   }
 
   const accountId = account.id;

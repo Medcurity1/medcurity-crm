@@ -275,7 +275,7 @@ export const ALL_STAGES: OpportunityStage[] = [
 // dropdown, filter dropdown). Matches the picklist the form already
 // surfaces; collecting the labels here prevents the
 // "text column vs enum column" bug that hit accounts.industry.
-const INDUSTRY_CATEGORY_LABELS: Record<IndustryCategory, string> = {
+export const INDUSTRY_CATEGORY_LABELS: Record<IndustryCategory, string> = {
   hospital: "Hospital",
   medical_group: "Medical Group",
   fqhc: "FQHC",

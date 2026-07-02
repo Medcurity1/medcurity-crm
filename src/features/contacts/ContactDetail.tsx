@@ -2,7 +2,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Pencil, Archive, ChevronDown, Phone, Mail, UserRoundCog, History, MapPin, Plus } from "lucide-react";
+import { Pencil, Archive, ChevronDown, Phone, Mail, UserRoundCog, History, MapPin, Plus, Copy, Check } from "lucide-react";
 import { formatPhone } from "@/components/PhoneInput";
 import { InlineEdit } from "@/components/InlineEdit";
 import { useContact, useUpdateContact, useArchiveContact, useOriginatingLead } from "./api";
@@ -16,6 +16,7 @@ import { VerifiedBadge } from "@/components/VerifiedBadge";
 import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
+import { QueryError } from "@/components/QueryError";
 import { RecordId } from "@/components/RecordId";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -76,6 +77,36 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+/* ---------- Copy-to-clipboard affordance ----------
+   Same pattern as RecordId's CopyButton \u2014 tiny icon that flips to a
+   green check for 2s after copying. */
+
+function CopyButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  function handleCopy() {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"
+      title="Copy to clipboard"
+    >
+      {copied ? (
+        <Check className="h-3 w-3 text-green-500" />
+      ) : (
+        <Copy className="h-3 w-3" />
+      )}
+    </button>
+  );
+}
+
 /* ---------- Main component ---------- */
 
 export function ContactDetail() {
@@ -83,7 +114,7 @@ export function ContactDetail() {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
-  const { data: contact, isLoading } = useContact(id);
+  const { data: contact, isLoading, isError, error, refetch } = useContact(id);
   const { data: originatingLead } = useOriginatingLead(id);
   const { data: contactTags = [] } = useContactTags(id);
   const applyTag = useApplyTag();
@@ -112,8 +143,23 @@ export function ContactDetail() {
     );
   }
 
+  // useContact uses .single(), so a genuinely-missing row surfaces as a
+  // PGRST116 "no rows" error — show "not found" for that, and a retryable
+  // error state for everything else (network blip, RLS, etc.).
+  const notFound = (error as { code?: string } | null)?.code === "PGRST116";
+  if (isError && !notFound) {
+    return <QueryError message="Something went wrong loading this contact." onRetry={() => refetch()} />;
+  }
+
   if (!contact) {
-    return <div className="text-muted-foreground">Contact not found.</div>;
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+        <p className="text-sm text-muted-foreground">Contact not found. It may have been deleted or merged.</p>
+        <Link to="/contacts" className="text-sm text-primary hover:underline">
+          Back to Contacts
+        </Link>
+      </div>
+    );
   }
 
   const contactId = contact.id;
@@ -151,7 +197,7 @@ export function ContactDetail() {
               invalidateKeys={[["contact", contact.id]]}
             />
             {contact.is_primary && (
-              <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">
+              <Badge variant="secondary" className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
                 Primary Contact
               </Badge>
             )}
@@ -260,14 +306,16 @@ export function ContactDetail() {
                 {[contact.email, contact.email2, contact.email3]
                   .filter((e): e is string => !!e)
                   .map((e) => (
-                    <a
-                      key={e}
-                      href={`mailto:${e}`}
-                      className="text-sm text-primary hover:underline inline-flex items-center gap-1 truncate"
-                    >
-                      <Mail className="h-3 w-3 shrink-0" />
-                      {e}
-                    </a>
+                    <span key={e} className="inline-flex items-center gap-1.5 min-w-0">
+                      <a
+                        href={`mailto:${e}`}
+                        className="text-sm text-primary hover:underline inline-flex items-center gap-1 truncate"
+                      >
+                        <Mail className="h-3 w-3 shrink-0" />
+                        {e}
+                      </a>
+                      <CopyButton value={e} />
+                    </span>
                   ))}
               </div>
             ) : (
@@ -280,10 +328,24 @@ export function ContactDetail() {
             <CardTitle className="text-xs text-muted-foreground font-medium">Phone</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
-            <p className="text-sm font-semibold inline-flex items-center gap-1">
+            <p className="text-sm font-semibold inline-flex items-center gap-1.5">
               <Phone className="h-3 w-3 text-muted-foreground" />
-              {contact.phone ? formatPhone(contact.phone) : "\u2014"}
+              {contact.phone
+                ? formatPhone(`${contact.phone}${contact.phone_ext ? ` x${contact.phone_ext}` : ""}`)
+                : "\u2014"}
+              {contact.phone && (
+                <CopyButton
+                  value={formatPhone(`${contact.phone}${contact.phone_ext ? ` x${contact.phone_ext}` : ""}`)}
+                />
+              )}
             </p>
+            {contact.mobile_phone && (
+              <p className="text-sm font-semibold inline-flex items-center gap-1.5 mt-1">
+                <span className="text-xs font-normal text-muted-foreground">Mobile</span>
+                {formatPhone(contact.mobile_phone)}
+                <CopyButton value={formatPhone(contact.mobile_phone)} />
+              </p>
+            )}
           </CardContent>
         </Card>
         <Card>

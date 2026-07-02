@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Paperclip, Upload, Download, Trash2, FileText, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { formatDate } from "@/lib/formatters";
 import { useAuth } from "@/features/auth/AuthProvider";
 import {
   useAccountAttachments,
@@ -125,7 +126,7 @@ export function AccountAttachments({ accountId }: { accountId: string }) {
                   <p className="text-xs text-muted-foreground">
                     {formatBytes(att.size_bytes)}
                     {att.size_bytes ? " · " : ""}
-                    {att.uploader?.full_name ?? "Unknown"} · {new Date(att.created_at).toLocaleDateString()}
+                    {att.uploader?.full_name ?? "Unknown"} · {formatDate(att.created_at)}
                   </p>
                 </div>
                 <Button

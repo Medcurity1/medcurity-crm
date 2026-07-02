@@ -1,7 +1,6 @@
 import { useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { LifeBuoy, Hand } from "lucide-react";
-import { PageHeader } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDateTime } from "@/lib/formatters";
@@ -49,10 +48,26 @@ export function SupportPage() {
 
   return (
     <div className="flex h-[calc(100dvh-8rem)] flex-col">
-      <PageHeader
-        title="Support"
-        description="Platform Meddy chats — take over when a customer needs a human, hand back when you're done"
-      />
+      <div className="mb-2 flex items-center gap-3">
+        <h1 className="text-2xl font-bold">Meddy</h1>
+        {/* Counterpart of the switcher on /meddy — one Meddy home, two
+            streams (Website | Platform). */}
+        <div className="flex gap-1 rounded-lg border border-border bg-muted/40 p-0.5">
+          <Link
+            to="/meddy"
+            className="rounded-md px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Website
+          </Link>
+          <span className="rounded-md bg-background px-3 py-1 text-xs font-medium shadow-sm">
+            Platform
+          </span>
+        </div>
+      </div>
+      <p className="mb-4 text-sm text-muted-foreground">
+        Platform (app.medcurity.com) Meddy chats — take over when a customer
+        needs a human, hand back when you're done
+      </p>
       <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border">
         {/* ── Conversation list ── */}
         <div

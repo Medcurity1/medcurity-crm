@@ -315,19 +315,19 @@ export function WinLossAnalysis() {
                 </TableHeader>
                 <TableBody>
                   <VelocityRow
-                    label="Lead &rarr; Qualified"
+                    label="Lead → Qualified"
                     days={velocity.leadToQualified}
                   />
                   <VelocityRow
-                    label="Qualified &rarr; Proposal"
+                    label="Qualified → Proposal"
                     days={velocity.qualifiedToProposal}
                   />
                   <VelocityRow
-                    label="Proposal &rarr; Verbal Commit"
+                    label="Proposal → Verbal Commit"
                     days={velocity.proposalToVerbal}
                   />
                   <VelocityRow
-                    label="Verbal Commit &rarr; Closed Won"
+                    label="Verbal Commit → Closed Won"
                     days={velocity.verbalToWon}
                   />
                   <TableRow className="font-semibold bg-muted/30">
@@ -421,10 +421,7 @@ function SummaryCard({
 function VelocityRow({ label, days }: { label: string; days: number }) {
   return (
     <TableRow>
-      <TableCell
-        className="text-sm"
-        dangerouslySetInnerHTML={{ __html: label }}
-      />
+      <TableCell className="text-sm">{label}</TableCell>
       <TableCell className="text-right">
         {days > 0 ? `${days.toFixed(1)} days` : "\u2014"}
       </TableCell>

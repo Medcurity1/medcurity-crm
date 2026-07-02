@@ -26,7 +26,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { statusLabel, formatDate } from "@/lib/formatters";
+import { statusLabel, leadSourceLabel, formatDate } from "@/lib/formatters";
+import type { LeadSource } from "@/types/crm";
 
 export function PartnersPage() {
   const navigate = useNavigate();
@@ -186,7 +187,9 @@ export function PartnersPage() {
                       />
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {account.lead_source ?? "\u2014"}
+                      {account.lead_source
+                        ? leadSourceLabel(account.lead_source as LeadSource) ?? account.lead_source
+                        : "\u2014"}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {formatDate(account.active_since)}

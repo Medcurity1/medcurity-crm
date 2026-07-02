@@ -28,6 +28,7 @@ import {
 import { useRecentRecords, type RecentRecord } from "@/hooks/useRecentRecords";
 import { TeamActivityFeed } from "./TeamActivityFeed";
 import { MyAccountsWidget } from "./MyAccountsWidget";
+import { RecentWins } from "./RecentWins";
 import { ColdCallWidget } from "./ColdCallWidget";
 import { KpiCard } from "./KpiCard";
 import { KpiConfigDialog } from "./KpiConfigDialog";
@@ -204,11 +205,11 @@ const RECENT_ACTIVITY_ICONS: Record<ActivityType, typeof Phone> = {
 };
 
 const RECENT_ACTIVITY_TINTS: Record<ActivityType, string> = {
-  call: "bg-blue-100 text-blue-600",
-  email: "bg-purple-100 text-purple-600",
-  meeting: "bg-amber-100 text-amber-600",
-  note: "bg-gray-100 text-gray-600",
-  task: "bg-emerald-100 text-emerald-600",
+  call: "bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300",
+  email: "bg-purple-100 text-purple-600 dark:bg-purple-900/40 dark:text-purple-300",
+  meeting: "bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-300",
+  note: "bg-gray-100 text-gray-600 dark:bg-gray-900/40 dark:text-gray-300",
+  task: "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-300",
 };
 
 function RecentActivitySection() {
@@ -1090,6 +1091,11 @@ export function HomePage() {
         </h2>
         <QuickActions />
       </div>
+
+      {/* Recent Wins + high fives — self-hides when there are no wins in
+          the last 7 days, so it only appears when there's something to
+          celebrate (Nathan's delight batch). */}
+      <RecentWins />
 
       {/* My Tasks */}
       {isWidgetVisible("tasks") && <MyTasksSection userId={userId} />}
