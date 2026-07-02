@@ -16,6 +16,7 @@ const HomePage = lazy(() => import("@/features/dashboard/HomePage").then(m => ({
 const NexusPage = lazy(() => import("@/features/nexus/NexusPage").then(m => ({ default: m.NexusPage })));
 const RequestsPage = lazy(() => import("@/features/requests/RequestsPage").then(m => ({ default: m.RequestsPage })));
 const MeddyPage = lazy(() => import("@/features/meddy/MeddyPage").then(m => ({ default: m.MeddyPage })));
+const SupportPage = lazy(() => import("@/features/support/SupportPage").then(m => ({ default: m.SupportPage })));
 const NotFound = lazy(() => import("@/features/NotFound").then(m => ({ default: m.NotFound })));
 const AccountsList = lazy(() => import("@/features/accounts/AccountsList").then(m => ({ default: m.AccountsList })));
 const AccountDetail = lazy(() => import("@/features/accounts/AccountDetail").then(m => ({ default: m.AccountDetail })));
@@ -106,6 +107,9 @@ export default function App() {
                   <Route path="nexus" element={<NexusPage />} />
                   <Route path="requests" element={<RequestsPage />} />
                   <Route path="meddy" element={<MeddyPage />} />
+                  {/* Meddy Support: platform (app.medcurity.com) Coach
+                      escalations. Separate stream from /meddy by design. */}
+                  <Route path="support" element={<SupportPage />} />
                   <Route path="accounts" element={<AccountsList />} />
                   <Route path="accounts/new" element={<AccountForm />} />
                   <Route path="accounts/:id" element={<AccountDetail />} />

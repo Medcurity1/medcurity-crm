@@ -323,6 +323,9 @@ export const NOTIF_TYPE_FALLBACK_SOUNDS: Record<string, string> = {
   meddy_contact_received: "drop",
   task_due: "marimba",
   renewal_upcoming: "horn",
+  // Platform (Meddy Support) escalations — same doorbell urgency as website.
+  support_human_requested: "doorbell",
+  support_new_chat: "bubble",
 };
 
 /** Saved seconds value → repeat-duration bucket (Nexus index.html:12239). */

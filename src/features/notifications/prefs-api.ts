@@ -70,6 +70,25 @@ export const MEDDY_NOTIF_TYPES: NotifTypeDef[] = [
   },
 ];
 
+// Meddy Support (platform Coach escalations) — separate stream from the
+// website Meddy types above.
+export const SUPPORT_NOTIF_TYPES: NotifTypeDef[] = [
+  {
+    key: "support_human_requested",
+    label: "Platform customer requests a human",
+    desc: "When an app.medcurity.com customer asks Meddy for a person",
+    defSound: "doorbell",
+    defDuration: 5,
+  },
+  {
+    key: "support_new_chat",
+    label: "Platform chat reopened",
+    desc: "When a platform customer writes again after their chat ended",
+    defSound: "bubble",
+    defDuration: 5,
+  },
+];
+
 // Existing CRM notification types, now configurable the same way.
 export const CRM_NOTIF_TYPES: NotifTypeDef[] = [
   {
@@ -116,7 +135,7 @@ export function defaultsFor(def: NotifTypeDef): NotifPrefs {
 /** Per-type default duration (seconds) — keeps the delivery engine's
  * fallback in sync with what the settings rows display. */
 export const DEFAULT_DURATIONS: Record<string, number> = Object.fromEntries(
-  [...MEDDY_NOTIF_TYPES, ...CRM_NOTIF_TYPES].map((t) => [t.key, t.defDuration]),
+  [...MEDDY_NOTIF_TYPES, ...SUPPORT_NOTIF_TYPES, ...CRM_NOTIF_TYPES].map((t) => [t.key, t.defDuration]),
 );
 
 export function useNotifPrefs() {

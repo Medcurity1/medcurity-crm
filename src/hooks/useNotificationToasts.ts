@@ -40,7 +40,12 @@ interface NotificationRow {
   created_at: string;
 }
 
-const URGENT_TYPES = new Set(["meddy_human_requested", "meddy_missed_chat"]);
+const URGENT_TYPES = new Set([
+  "meddy_human_requested",
+  "meddy_missed_chat",
+  // Platform (Meddy Support) escalations are just as urgent as website ones.
+  "support_human_requested",
+]);
 
 function showOsNotification(title: string, body: string, tag: string, urgent: boolean) {
   try {
@@ -97,7 +102,9 @@ export function useNotificationToasts() {
       const link =
         n.conversation_id && key.startsWith("meddy_")
           ? `/meddy?conversation=${n.conversation_id}`
-          : n.link;
+          : n.conversation_id && key.startsWith("support_")
+            ? `/support?conversation=${n.conversation_id}`
+            : n.link;
 
       if (document.hidden) {
         if (bannerOn || soundOn) {

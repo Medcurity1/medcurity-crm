@@ -64,6 +64,7 @@ jobs:
           npx supabase functions deploy product-request-action
           npx supabase functions deploy request-email-notify
           npx supabase functions deploy meddy-chat --no-verify-jwt
+          npx supabase functions deploy meddy-support --no-verify-jwt
           npx supabase functions deploy meddy-staff-action
           npx supabase functions deploy meddy-sweep
           npx supabase functions deploy meddy-weekly-report
