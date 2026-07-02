@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
@@ -86,9 +86,13 @@ export function useSupportMessages(conversationId: string | null) {
   });
 }
 
-/** Live updates: any change to conversations/messages refreshes the console. */
-export function useSupportRealtime() {
+/** Live updates: any change to conversations/messages refreshes the console.
+ * onCustomerMessage fires per incoming CUSTOMER message (unread dots). */
+export function useSupportRealtime(onCustomerMessage?: (conversationId: string) => void) {
   const qc = useQueryClient();
+  // Ref so the subscription binds once but always calls the fresh callback.
+  const cbRef = useRef(onCustomerMessage);
+  cbRef.current = onCustomerMessage;
   useEffect(() => {
     const channel = supabase
       .channel("support:console")
@@ -103,8 +107,11 @@ export function useSupportRealtime() {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "support_messages" },
         (payload) => {
-          const convId = (payload.new as { conversation_id?: string })?.conversation_id;
-          if (convId) qc.invalidateQueries({ queryKey: ["support-messages", convId] });
+          const row = payload.new as { conversation_id?: string; role?: string };
+          if (row?.conversation_id) {
+            qc.invalidateQueries({ queryKey: ["support-messages", row.conversation_id] });
+            if (row.role === "customer") cbRef.current?.(row.conversation_id);
+          }
           qc.invalidateQueries({ queryKey: ["support-conversations"] });
         },
       )

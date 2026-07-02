@@ -44,7 +44,11 @@ export function useMeddyRealtime(handlers: Handlers = {}) {
     };
 
     const channel = supabase.channel("meddy:dashboard", {
-      config: { broadcast: { self: false } },
+      // private: carries visitor message previews + staff names, so
+      // subscribers must pass the realtime authorization policy (active
+      // staff only — 20260702000005). The bare anon key can no longer
+      // listen in.
+      config: { broadcast: { self: false }, private: true },
     });
 
     channel

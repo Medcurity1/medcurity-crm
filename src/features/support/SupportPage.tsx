@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { LifeBuoy, Hand } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +18,20 @@ export function SupportPage() {
   const [params, setParams] = useSearchParams();
   const selectedId = params.get("conversation");
   const { data: conversations, isLoading } = useSupportConversations();
-  useSupportRealtime();
+  // Unread dots: a customer message in a conversation you're NOT looking
+  // at marks its card until you open it (mirrors the website sidebar).
+  const [unreadIds, setUnreadIds] = useState<Set<string>>(new Set());
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+  const onCustomerMessage = useCallback((conversationId: string) => {
+    if (conversationId === selectedIdRef.current) return;
+    setUnreadIds((prev) => {
+      const next = new Set(prev);
+      next.add(conversationId);
+      return next;
+    });
+  }, []);
+  useSupportRealtime(onCustomerMessage);
 
   const groups = useMemo(() => {
     const all = conversations ?? [];
@@ -45,6 +58,14 @@ export function SupportPage() {
     // Push (not replace) so the mobile back button returns to the list
     // instead of exiting /support.
     setParams(next);
+    if (id) {
+      setUnreadIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const cleared = new Set(prev);
+        cleared.delete(id);
+        return cleared;
+      });
+    }
   }
 
   return (
@@ -72,10 +93,10 @@ export function SupportPage() {
             </div>
           ) : (
             <div className="space-y-4 p-3">
-              <Section title="Waiting for a human" items={groups.waiting} selectedId={selectedId} onSelect={select} urgent />
-              <Section title="With an agent" items={groups.active} selectedId={selectedId} onSelect={select} />
-              <Section title="Meddy handling" items={groups.aiHandled} selectedId={selectedId} onSelect={select} />
-              <Section title="Ended" items={groups.closed} selectedId={selectedId} onSelect={select} />
+              <Section title="Waiting for a human" items={groups.waiting} selectedId={selectedId} onSelect={select} unreadIds={unreadIds} urgent />
+              <Section title="With an agent" items={groups.active} selectedId={selectedId} onSelect={select} unreadIds={unreadIds} />
+              <Section title="Meddy handling" items={groups.aiHandled} selectedId={selectedId} onSelect={select} unreadIds={unreadIds} />
+              <Section title="Ended" items={groups.closed} selectedId={selectedId} onSelect={select} unreadIds={unreadIds} />
             </div>
           )}
         </div>
@@ -123,12 +144,14 @@ function Section({
   items,
   selectedId,
   onSelect,
+  unreadIds,
   urgent = false,
 }: {
   title: string;
   items: SupportConversation[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  unreadIds: Set<string>;
   urgent?: boolean;
 }) {
   if (items.length === 0) return null;
@@ -147,11 +170,15 @@ function Section({
             type="button"
             onClick={() => onSelect(c.id)}
             className={cn(
-              "w-full rounded-md border bg-background px-3 py-2 text-left transition-colors hover:bg-muted/60",
+              "relative w-full rounded-md border bg-background px-3 py-2 text-left transition-colors hover:bg-muted/60",
               selectedId === c.id && "border-primary/50 bg-muted/60",
               urgent && "border-l-4 border-l-red-500 bg-red-500/5 motion-safe:animate-pulse",
             )}
           >
+            {/* Unread: a customer message arrived while you were elsewhere. */}
+            {unreadIds.has(c.id) && (
+              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-red-500" />
+            )}
             <div className="flex items-center justify-between gap-2">
               <p className="truncate text-sm font-medium">{displayName(c)}</p>
               {urgent && (
