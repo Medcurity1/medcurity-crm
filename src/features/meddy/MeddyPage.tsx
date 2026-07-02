@@ -5,7 +5,7 @@
 // broadcast channel.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -80,7 +80,24 @@ export function MeddyPage() {
     <div className="flex h-[calc(100vh-8.5rem)] min-h-[480px] flex-col">
       <div className="mb-3 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Meddy</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold">Meddy</h1>
+            {/* One Meddy home, two streams (Nathan 2026-07-02): Website =
+                marketing-site chats (this page); Platform = app.medcurity.com
+                support chats (/support). Some staff handle both, so the
+                switcher lives here instead of a second nav tab. */}
+            <div className="flex gap-1 rounded-lg border border-border bg-muted/40 p-0.5">
+              <span className="rounded-md bg-background px-3 py-1 text-xs font-medium shadow-sm">
+                Website
+              </span>
+              <Link
+                to="/support"
+                className="rounded-md px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Platform
+              </Link>
+            </div>
+          </div>
           <p className="text-sm text-muted-foreground">
             Website chat assistant — conversations, takeover, and history
           </p>

@@ -24,7 +24,6 @@ import {
   ExternalLink,
   Bot,
   Megaphone,
-  LifeBuoy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PulseLogo } from "@/components/PulseLogo";
@@ -65,18 +64,19 @@ type NavItem = {
 // blue; New = red (draws the eye to a freshly launched tab).
 const COMING_SOON_BADGE = "bg-orange-500 text-white";
 const ADMIN_BADGE = "bg-sky-500 text-white";
-const NEW_BADGE = "bg-red-500 text-white";
+// NEW_BADGE ("bg-red-500 text-white") retired 2026-07-02 — re-add when the
+// next fresh tab launches.
 
 const navItems: NavItem[] = [
   { to: "/", icon: Home, label: "Home" },
   // Meddy: website chat command center. Live as of 2026-06-16 (the website
   // chat now points at the CRM). Sits right under Home so reps catch incoming
   // website chats first. "New" badge flags the freshly launched tab.
-  { to: "/meddy", icon: Bot, label: "Meddy", badge: { label: "New", className: NEW_BADGE } },
-  // Meddy Support: platform (app.medcurity.com) Coach escalations. A
-  // separate stream from website Meddy on purpose — different tables,
-  // different screen (the "share nothing" wall agreed with Joe).
-  { to: "/support", icon: LifeBuoy, label: "Support", badge: { label: "New", className: NEW_BADGE } },
+  // "New" badge retired 2026-07-02 (Nathan: no longer very new). The
+  // platform Support console lives INSIDE Meddy now (Website | Platform
+  // switcher on the page) — same nav home for people who handle both.
+  // Data stays fully separate; only the entry point merged.
+  { to: "/meddy", icon: Bot, label: "Meddy" },
   { to: "/accounts", icon: Building2, label: "Accounts" },
   { to: "/contacts", icon: Users, label: "Contacts" },
   { to: "/opportunities", icon: Target, label: "Opportunities" },
@@ -88,7 +88,8 @@ const navItems: NavItem[] = [
   { to: "/renewals", icon: RefreshCw, label: "Renewals" },
   { to: "/reports", icon: BarChart3, label: "Reports" },
   // Forecasting + Analytics moved into /reports as tabs (2026-04-17).
-  { to: "/requests", icon: MessageSquarePlus, label: "Requests", badge: { label: "New", className: NEW_BADGE } },
+  // "New" badge retired 2026-07-02 (Nathan).
+  { to: "/requests", icon: MessageSquarePlus, label: "Requests" },
   // Nexus: future per-user command center. Lives at the bottom for now
   // with a Coming Soon badge; will eventually move up to replace Home.
   { to: "/nexus", icon: Sparkles, label: "Nexus", badge: { label: "Coming Soon", className: COMING_SOON_BADGE } },
