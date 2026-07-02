@@ -105,6 +105,13 @@ export const CRM_NOTIF_TYPES: NotifTypeDef[] = [
     defSound: "horn",
     defDuration: 5,
   },
+  {
+    key: "deal_high_five",
+    label: "High fives",
+    desc: "When a teammate high-fives one of your closed deals",
+    defSound: "glass",
+    defDuration: 5,
+  },
 ];
 
 export const EMAIL_OPT_INS: Array<{ key: string; label: string; desc: string }> = [

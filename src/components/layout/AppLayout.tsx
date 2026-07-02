@@ -18,6 +18,7 @@ import { useNotificationToasts } from "@/hooks/useNotificationToasts";
 import { useMeddyPresence } from "@/features/meddy/useMeddyPresence";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { FriendlyLoading } from "@/components/FriendlyLoading";
 import { IdleWarningDialog } from "@/components/IdleWarningDialog";
 import { AnnouncementBanner } from "@/components/AnnouncementBanner";
 import { NotificationPermissionPrompt } from "@/components/NotificationPermissionPrompt";
@@ -248,15 +249,9 @@ export function AppLayout() {
             data tables (opportunities list, reports, etc.) have more
             horizontal room without having to scroll. Brayden 2026-04-17. */}
         <div className="max-w-[1800px] mx-auto px-4 sm:px-6 py-6">
-          <Suspense
-            fallback={
-              <div className="flex items-center justify-center h-64">
-                <div className="animate-pulse text-muted-foreground">
-                  Loading...
-                </div>
-              </div>
-            }
-          >
+          {/* FriendlyLoading rotates playful one-liners instead of a bare
+              "Loading..." (Nathan's delight batch). */}
+          <Suspense fallback={<FriendlyLoading />}>
             {/* Gentle fade/slide-in on each route change so pages don't snap
                 in. Keyed by pathname (not search) so filtering/sorting a list
                 never re-animates. motion-safe → no animation under reduced

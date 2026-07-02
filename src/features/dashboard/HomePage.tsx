@@ -28,6 +28,7 @@ import {
 import { useRecentRecords, type RecentRecord } from "@/hooks/useRecentRecords";
 import { TeamActivityFeed } from "./TeamActivityFeed";
 import { MyAccountsWidget } from "./MyAccountsWidget";
+import { RecentWins } from "./RecentWins";
 import { ColdCallWidget } from "./ColdCallWidget";
 import { KpiCard } from "./KpiCard";
 import { KpiConfigDialog } from "./KpiConfigDialog";
@@ -1090,6 +1091,11 @@ export function HomePage() {
         </h2>
         <QuickActions />
       </div>
+
+      {/* Recent Wins + high fives — self-hides when there are no wins in
+          the last 7 days, so it only appears when there's something to
+          celebrate (Nathan's delight batch). */}
+      <RecentWins />
 
       {/* My Tasks */}
       {isWidgetVisible("tasks") && <MyTasksSection userId={userId} />}
