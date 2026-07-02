@@ -112,7 +112,13 @@ export function AccountContacts({ accountId }: { accountId: string }) {
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {c.phone ? (
-                      <a href={`tel:${c.phone}`} className="hover:underline">
+                      // tel: URIs can't carry "(208) 555-1234 x567" — dial
+                      // the base number (digits only); the visible text
+                      // still shows the extension.
+                      <a
+                        href={`tel:${c.phone.split(/x|ext/i)[0].replace(/[^\d+]/g, "")}`}
+                        className="hover:underline"
+                      >
                         {formatPhone(c.phone)}
                       </a>
                     ) : (
