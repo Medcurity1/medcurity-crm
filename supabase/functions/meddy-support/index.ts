@@ -68,18 +68,25 @@ async function timingSafeEqual(a: string, b: string): Promise<boolean> {
   return diff === 0;
 }
 
-// Light per-IP rate limit (in-memory, best effort — the key is the real
-// gate; this is a backstop against a leaked key being hammered).
+// Light per-CONVERSATION rate limit (in-memory, best effort — the key is
+// the real gate; this is a backstop against runaway loops). Keyed by
+// sessionId, NOT by IP: all legitimate traffic comes from the partner's
+// single backend IP, so an IP bucket would throttle everyone at once —
+// and X-Forwarded-For is client-controlled anyway.
 const rateBucket = new Map<string, { n: number; reset: number }>();
-function rateLimited(ip: string): boolean {
+function rateLimited(sessionId: string): boolean {
   const now = Date.now();
-  const cur = rateBucket.get(ip);
+  // Evict expired buckets when the map grows (prevents unbounded memory).
+  if (rateBucket.size > 5000) {
+    for (const [k, v] of rateBucket) if (now > v.reset) rateBucket.delete(k);
+  }
+  const cur = rateBucket.get(sessionId);
   if (!cur || now > cur.reset) {
-    rateBucket.set(ip, { n: 1, reset: now + 15 * 60_000 });
+    rateBucket.set(sessionId, { n: 1, reset: now + 15 * 60_000 });
     return false;
   }
   cur.n += 1;
-  return cur.n > 900; // polling every few seconds stays well under this
+  return cur.n > 900; // one chat polling every 3s uses ~300/15min
 }
 
 type ConvRow = {
@@ -94,29 +101,33 @@ type ConvRow = {
   customer_company: string | null;
 };
 
-async function findOrCreate(sessionId: string): Promise<ConvRow> {
-  const { data: existing } = await svc
+const CONV_COLS =
+  "id, platform_session_id, status, assigned_to, is_human_takeover, is_human_requested, customer_name, customer_email, customer_company";
+
+async function findOnly(sessionId: string): Promise<ConvRow | null> {
+  const { data } = await svc
     .from("support_conversations")
-    .select("id, platform_session_id, status, assigned_to, is_human_takeover, is_human_requested, customer_name, customer_email, customer_company")
+    .select(CONV_COLS)
     .eq("platform_session_id", sessionId)
     .maybeSingle();
-  if (existing) return existing as ConvRow;
+  return (data as ConvRow | null) ?? null;
+}
+
+async function findOrCreate(sessionId: string): Promise<ConvRow> {
+  const existing = await findOnly(sessionId);
+  if (existing) return existing;
 
   const { data: created, error } = await svc
     .from("support_conversations")
     .insert({ platform_session_id: sessionId })
-    .select("id, platform_session_id, status, assigned_to, is_human_takeover, is_human_requested, customer_name, customer_email, customer_company")
+    .select(CONV_COLS)
     .single();
   if (!error && created) return created as ConvRow;
 
   // Unique-index race: another call created it first — fetch the winner.
-  const { data: winner, error: refetchErr } = await svc
-    .from("support_conversations")
-    .select("id, platform_session_id, status, assigned_to, is_human_takeover, is_human_requested, customer_name, customer_email, customer_company")
-    .eq("platform_session_id", sessionId)
-    .single();
-  if (refetchErr || !winner) throw new Error("could not create conversation");
-  return winner as ConvRow;
+  const winner = await findOnly(sessionId);
+  if (!winner) throw new Error("could not create conversation");
+  return winner;
 }
 
 async function agentName(userId: string | null): Promise<string | null> {
@@ -208,8 +219,9 @@ Deno.serve(async (req) => {
     return json({ error: "unauthorized" }, 401);
   }
 
-  const ip = (req.headers.get("x-forwarded-for") ?? "unknown").split(",")[0].trim();
-  if (rateLimited(ip)) return json({ error: "rate limited" }, 429);
+  // Size cap before buffering/parsing (50 msgs × 8KB fits well within this).
+  const contentLength = Number(req.headers.get("content-length") ?? 0);
+  if (contentLength > 512_000) return json({ error: "payload too large" }, 413);
 
   let body: Record<string, unknown>;
   try {
@@ -217,10 +229,18 @@ Deno.serve(async (req) => {
   } catch {
     return json({ error: "invalid JSON" }, 400);
   }
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return json({ error: "body must be a JSON object" }, 400);
+  }
 
   const action = String(body.action ?? "");
-  const sessionId = String(body.sessionId ?? "").slice(0, 80).trim();
+  const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : "";
   if (!sessionId) return json({ error: "sessionId required" }, 400);
+  // Reject rather than silently truncate — a silent slice would merge
+  // distinct sessions sharing an 80-char prefix into one conversation.
+  if (sessionId.length > 80) return json({ error: "sessionId too long (max 80 chars)" }, 400);
+
+  if (rateLimited(sessionId)) return json({ error: "rate limited" }, 429);
 
   try {
     switch (action) {
@@ -251,15 +271,6 @@ Deno.serve(async (req) => {
         if (raw.length === 0) return json({ ok: true, inserted: 0 });
         if (raw.length > 50) return json({ error: "max 50 messages per call" }, 400);
 
-        // A new customer message on a closed conversation reopens it
-        // (mirrors the website behavior — people come back).
-        if (conv.status === "closed") {
-          await svc
-            .from("support_conversations")
-            .update({ status: "active", closed_at: null })
-            .eq("id", conv.id);
-        }
-
         let inserted = 0;
         for (const m of raw) {
           const msg = m as Record<string, unknown>;
@@ -269,13 +280,15 @@ Deno.serve(async (req) => {
           const clientMsgId = typeof msg.clientMsgId === "string" ? msg.clientMsgId.slice(0, 80) : null;
 
           if (clientMsgId) {
-            const { data: dup } = await svc
+            // Fast-path check; .limit(1) so a historical double can never
+            // error the lookup. The partial UNIQUE index is the real gate.
+            const { data: dups } = await svc
               .from("support_messages")
               .select("id")
               .eq("conversation_id", conv.id)
               .eq("client_msg_id", clientMsgId)
-              .maybeSingle();
-            if (dup) continue; // already synced
+              .limit(1);
+            if (dups && dups.length > 0) continue; // already synced
           }
           const { error: insErr } = await svc.from("support_messages").insert({
             conversation_id: conv.id,
@@ -284,13 +297,44 @@ Deno.serve(async (req) => {
             client_msg_id: clientMsgId,
             sender_name: role === "customer" ? (conv.customer_name ?? "Customer") : "Meddy",
           });
+          // 23505 = a concurrent resend won the unique-index race: it's a
+          // dup, not a failure. Anything else is skipped silently too, but
+          // dups must NOT count as inserted.
           if (!insErr) inserted += 1;
         }
         if (inserted > 0) {
-          await svc
-            .from("support_conversations")
-            .update({ last_message_at: new Date().toISOString() })
-            .eq("id", conv.id);
+          // Reopen AFTER something real landed — an empty/invalid batch
+          // must not reopen a closed conversation.
+          if (conv.status === "closed") {
+            await svc
+              .from("support_conversations")
+              .update({ status: "active", closed_at: null, last_message_at: new Date().toISOString() })
+              .eq("id", conv.id);
+            // The team gets a heads-up that a closed chat came back —
+            // otherwise a returning customer is invisible until someone
+            // happens to look at the console.
+            const { data: users } = await svc
+              .from("user_profiles")
+              .select("id")
+              .eq("is_active", true);
+            if (users?.length) {
+              await svc.from("notifications").insert(
+                users.map((u: { id: string }) => ({
+                  user_id: u.id,
+                  type: "support_new_chat",
+                  title: "Support: chat reopened",
+                  message: `${conv.customer_name || conv.customer_email || "A platform customer"} wrote again after their chat ended.`,
+                  link: `/support?conversation=${conv.id}`,
+                  conversation_id: conv.id,
+                })),
+              );
+            }
+          } else {
+            await svc
+              .from("support_conversations")
+              .update({ last_message_at: new Date().toISOString() })
+              .eq("id", conv.id);
+          }
         }
         return json({ ok: true, inserted });
       }
@@ -319,6 +363,7 @@ Deno.serve(async (req) => {
             is_internal: true,
           });
           conv.is_human_requested = true;
+          conv.status = "active"; // reflect the reopen in the response
           await notifyHumanRequested(conv);
         }
         return json({ ok: true, ...convState(conv, null) });
@@ -326,7 +371,20 @@ Deno.serve(async (req) => {
 
       // ── Poll: who's driving + human/system messages since cursor ─────
       case "status": {
-        const conv = await findOrCreate(sessionId);
+        // Find-only: a poll for a never-registered session must not
+        // create permanent rows. status 'none' = "call upsert first".
+        const conv = await findOnly(sessionId);
+        if (!conv) {
+          return json({
+            ok: true,
+            conversationId: null,
+            status: "none",
+            isHumanRequested: false,
+            isHumanTakeover: false,
+            agentName: null,
+            messages: [],
+          });
+        }
         const sinceId = Number(body.sinceMessageId ?? 0) || 0;
         const { data: msgs } = await svc
           .from("support_messages")
@@ -352,7 +410,13 @@ Deno.serve(async (req) => {
 
       // ── The platform side ended the chat ─────────────────────────────
       case "close": {
-        const conv = await findOrCreate(sessionId);
+        // Find-only: closing a never-registered session is a no-op, not
+        // a ghost-row factory.
+        const conv = await findOnly(sessionId);
+        if (!conv) return json({ ok: true, conversationId: null, status: "none" });
+        if (conv.status === "closed") {
+          return json({ ok: true, conversationId: conv.id, status: "closed" });
+        }
         await svc
           .from("support_conversations")
           .update({

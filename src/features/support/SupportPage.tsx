@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDateTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
-import { useSupportConversations, useSupportRealtime } from "./api";
+import { useSupportConversations, useSupportConversation, useSupportRealtime } from "./api";
 import { SupportChatView } from "./SupportChatView";
 import { displayName, isWaiting, lastPreview, type SupportConversation } from "./types";
 
@@ -32,13 +32,19 @@ export function SupportPage() {
     };
   }, [conversations]);
 
-  const selected = (conversations ?? []).find((c) => c.id === selectedId) ?? null;
+  const fromList = (conversations ?? []).find((c) => c.id === selectedId) ?? null;
+  // Deep-link fallback: a notification can point at a conversation that's
+  // aged out of the top-200 list — fetch it directly so the link works.
+  const { data: single } = useSupportConversation(fromList ? null : selectedId);
+  const selected = fromList ?? single ?? null;
 
   function select(id: string | null) {
     const next = new URLSearchParams(params);
     if (id) next.set("conversation", id);
     else next.delete("conversation");
-    setParams(next, { replace: true });
+    // Push (not replace) so the mobile back button returns to the list
+    // instead of exiting /support.
+    setParams(next);
   }
 
   return (

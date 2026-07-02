@@ -25,12 +25,39 @@ export function useSupportConversations() {
       const { data, error } = await supabase
         .from("support_conversations")
         .select(CONV_SELECT)
+        // Preview = the latest REAL chat line: skip internal notes and
+        // system control rows (agent_joined / handed_back / …), which
+        // otherwise show raw codes in the sidebar.
+        .eq("last.is_internal", false)
+        .neq("last.role", "system")
         .order("updated_at", { ascending: false })
-        .order("created_at", { ascending: false, referencedTable: "support_messages" })
-        .limit(1, { referencedTable: "support_messages" })
+        .order("created_at", { ascending: false, referencedTable: "last" })
+        .limit(1, { referencedTable: "last" })
         .limit(200);
       if (error) throw error;
       return (data ?? []) as unknown as SupportConversation[];
+    },
+  });
+}
+
+/** Single-conversation fetch — deep-link fallback when the id isn't in
+ * the (top-200) list query, e.g. an old notification link. */
+export function useSupportConversation(id: string | null) {
+  return useQuery({
+    queryKey: ["support-conversation", id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("support_conversations")
+        .select(CONV_SELECT)
+        .eq("last.is_internal", false)
+        .neq("last.role", "system")
+        .order("created_at", { ascending: false, referencedTable: "last" })
+        .limit(1, { referencedTable: "last" })
+        .eq("id", id!)
+        .maybeSingle();
+      if (error) throw error;
+      return (data ?? null) as unknown as SupportConversation | null;
     },
   });
 }
@@ -39,6 +66,10 @@ export function useSupportMessages(conversationId: string | null) {
   return useQuery({
     queryKey: ["support-messages", conversationId],
     enabled: !!conversationId,
+    // Fallback behind realtime: a silently dropped socket must not freeze
+    // an open transcript mid-conversation.
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("support_messages")

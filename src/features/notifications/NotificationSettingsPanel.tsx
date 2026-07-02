@@ -16,6 +16,7 @@ import {
   CRM_NOTIF_TYPES,
   EMAIL_OPT_INS,
   MEDDY_NOTIF_TYPES,
+  SUPPORT_NOTIF_TYPES,
   useNotifPrefs,
   useSavePushoverKey,
   useUpdateNotifPrefs,
@@ -64,6 +65,16 @@ export function NotificationSettingsPanel() {
         desc="Alerts from the website chat assistant. Banner shows the in-app popup (and the desktop alert when you're in another tab); Sound plays the chosen tone."
       >
         {meddyTypes.map((def) => (
+          <NotifRow key={def.key} def={def} prefs={prefs} />
+        ))}
+      </Section>
+
+      <Section
+        icon={<Bell className="h-4 w-4" />}
+        title="Support notifications"
+        desc="Alerts from the platform (app.medcurity.com) Meddy — a separate stream from the website chat."
+      >
+        {SUPPORT_NOTIF_TYPES.map((def) => (
           <NotifRow key={def.key} def={def} prefs={prefs} />
         ))}
       </Section>

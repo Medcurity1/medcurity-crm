@@ -48,6 +48,9 @@ export function SupportChatView({ conversation }: { conversation: SupportConvers
   const canChat = !closed && conversation.is_human_takeover && (mine || isAdmin);
 
   async function doSend() {
+    // Guard key-repeat / double-Enter: the button disables on isPending,
+    // but the keydown path must check too or the customer gets dupes.
+    if (sender.isPending) return;
     const text = draft.trim();
     if (!text) return;
     try {

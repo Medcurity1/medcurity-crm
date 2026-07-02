@@ -119,12 +119,17 @@ Response:
 
 - Keep `sinceMessageId` = the highest `id` you've seen; you only get new ones.
 - **Your AI gate:** answer with your own AI only while `isHumanTakeover` is
-  `false`. When `true`, stay silent and render `agent` messages.
+  `false` AND `status` is `"active"`. When takeover is `true`, stay silent
+  and render `agent` messages. When `status` is `"closed"`, treat the thread
+  as ended (a new customer message reopens it automatically).
 - `system` rows tell you the control changes to show in the UI:
   `agent_joined` ("You're now chatting with Rachel"), `handed_back`
   ("You're chatting with Meddy again" — resume your AI), `closed`.
+- Polling a session you never registered returns `status: "none"` (and
+  creates nothing) — call `upsert-conversation` first.
 - Suggested cadence: every 3–5 s while the chat is open or a human is
-  requested/active; stop when idle.
+  requested/active; stop when idle. The budget is per conversation
+  (~900 calls / 15 min each), so concurrent chats don't compete.
 
 ### 5. `close` — the customer/platform ended the chat
 
@@ -165,7 +170,11 @@ platform side. Agent identities are shared with you as display names only.
 
 ## Limits & behavior notes
 
-- `sessionId` max 80 chars; message content max 8,000 chars; max 50
-  messages per `post-messages` call; `status` returns up to 100 new rows.
+- `sessionId` max 80 chars (longer is rejected with 400, never truncated);
+  message content max 8,000 chars; max 50 messages per `post-messages`
+  call; `status` returns up to 100 new rows.
+- Duplicate `clientMsgId`s are dropped — enforced at the database level,
+  so even racing retries can't double-insert.
 - All timestamps UTC ISO-8601.
-- 401 = bad key · 429 = slow down · 503 = our side not configured yet.
+- 401 = bad key · 400 = bad input · 413 = body too large ·
+  429 = slow this conversation down · 503 = our side not configured yet.
