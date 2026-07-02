@@ -61,14 +61,16 @@ export function SupportChatView({ conversation }: { conversation: SupportConvers
     }
   }
 
-  const placeholder = closed
-    ? "This chat has ended."
-    : !conversation.is_human_takeover
-      ? "Meddy (the AI) is handling this chat. Take over to reply as a human."
-      : !mine && !isAdmin
-        ? `${conversation.assigned?.full_name ?? "Another agent"} is driving this chat.`
-        : internal
-          ? "Internal note — the customer never sees this…"
+  // Internal wins first: notes are allowed even when the chat is closed
+  // or the AI is driving, so the placeholder must say so.
+  const placeholder = internal
+    ? "Internal note — the customer never sees this…"
+    : closed
+      ? "This chat has ended."
+      : !conversation.is_human_takeover
+        ? "Meddy (the AI) is handling this chat. Take over to reply as a human."
+        : !mine && !isAdmin
+          ? `${conversation.assigned?.full_name ?? "Another agent"} is driving this chat.`
           : "Reply to the customer…";
 
   return (
@@ -90,15 +92,15 @@ export function SupportChatView({ conversation }: { conversation: SupportConvers
                 {conversation.customer_email}
               </span>
             )}
-            <Badge variant="secondary" className="bg-violet-100 text-violet-700">Platform</Badge>
+            <Badge variant="secondary" className="bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">Platform</Badge>
             {closed ? (
-              <Badge variant="secondary" className="bg-slate-100 text-slate-700">Ended</Badge>
+              <Badge variant="secondary" className="bg-slate-100 text-slate-700 dark:bg-slate-900/40 dark:text-slate-300">Ended</Badge>
             ) : conversation.is_human_takeover ? (
-              <Badge variant="secondary" className="bg-sky-100 text-sky-700">
+              <Badge variant="secondary" className="bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
                 {conversation.assigned?.full_name ?? "Agent"} driving
               </Badge>
             ) : (
-              <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">Meddy (AI) driving</Badge>
+              <Badge variant="secondary" className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">Meddy (AI) driving</Badge>
             )}
           </div>
         </div>
@@ -154,7 +156,7 @@ export function SupportChatView({ conversation }: { conversation: SupportConvers
             }
           }}
           placeholder={placeholder}
-          className={cn(internal && "border-amber-400 bg-amber-50/50 dark:bg-amber-950/20")}
+          className={cn(internal && "border-amber-500/60 bg-amber-500/10")}
         />
         <div className="mt-2 flex items-center justify-between">
           <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
@@ -197,7 +199,7 @@ export function SupportChatView({ conversation }: { conversation: SupportConvers
 export function SupportMessageBubble({ m }: { m: SupportMessage }) {
   if (m.role === "system" && m.content === "human_requested") {
     return (
-      <div className="mx-auto max-w-md rounded-md border border-orange-300 bg-orange-50 px-3 py-2 text-center text-xs font-medium text-orange-700 dark:bg-orange-950/30 dark:text-orange-400">
+      <div className="mx-auto max-w-md rounded-md border border-orange-400/40 bg-orange-500/10 px-3 py-2 text-center text-xs font-medium text-orange-700 dark:text-orange-400">
         🖐 Customer asked for a human · {formatDateTime(m.created_at)}
       </div>
     );
@@ -211,15 +213,16 @@ export function SupportMessageBubble({ m }: { m: SupportMessage }) {
   }
   if (m.is_internal) {
     return (
-      <div className="mx-auto max-w-lg rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+      <div className="mx-auto max-w-lg rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
         <span className="font-semibold">Team note{m.sender_name ? ` · ${m.sender_name}` : ""}:</span> {m.content}
+        <p className="mt-1 text-right text-[10px] opacity-70">{formatDateTime(m.created_at)}</p>
       </div>
     );
   }
   if (m.role === "customer") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[75%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground">
+        <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground">
           <p className="whitespace-pre-wrap break-words">{m.content}</p>
           <p className="mt-1 text-right text-[10px] opacity-70">{formatDateTime(m.created_at)}</p>
         </div>
@@ -229,7 +232,7 @@ export function SupportMessageBubble({ m }: { m: SupportMessage }) {
   if (m.role === "agent") {
     return (
       <div className="flex justify-start">
-        <div className="max-w-[75%] rounded-2xl rounded-bl-sm bg-sky-100 px-3 py-2 text-sm text-sky-900 dark:bg-sky-900/40 dark:text-sky-100">
+        <div className="max-w-[80%] rounded-2xl rounded-bl-sm bg-sky-100 px-3 py-2 text-sm text-sky-900 dark:bg-sky-900/40 dark:text-sky-100">
           <p className="text-[10px] font-semibold">{m.sender_name ?? "Agent"}</p>
           <p className="whitespace-pre-wrap break-words">{m.content}</p>
           <p className="mt-1 text-[10px] opacity-70">{formatDateTime(m.created_at)}</p>

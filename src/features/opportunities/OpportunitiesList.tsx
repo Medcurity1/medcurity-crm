@@ -14,6 +14,7 @@ import { QueryError } from "@/components/QueryError";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Pagination } from "@/components/Pagination";
 import { BulkActionBar } from "@/components/BulkActionBar";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SortableHeader, type SortState } from "@/components/SortableHeader";
 // Sort state is URL-backed (useUrlSortState) so a rep can sort by Amount,
 // drill into a deal, then hit Back and find the list still sorted — the
@@ -149,7 +150,7 @@ function InlineStage({
               { id: o.id, stage: v as OpportunityStage },
               {
                 onSuccess: () => {
-                  toast.success(`Stage → ${stageLabel(v as OpportunityStage)}`);
+                  toast.success(`Stage changed to ${stageLabel(v as OpportunityStage)}`);
                   if (v === "closed_lost") onClosedLost(o.account_id);
                 },
                 onError: (e) => toast.error("Couldn't update stage: " + (e as Error).message),
@@ -329,6 +330,9 @@ export function OpportunitiesList() {
   // Rows selector still offers 25/50/100/200 for anyone who wants less.
   const [pageSize, setPageSize] = useUrlNumberState("size", 100);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Bulk delete is confirmed via the app ConfirmDialog (not window.confirm)
+  // so it matches the destructive-action pattern everywhere else.
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [sort, setSortState] = useUrlSortState("sort");
   const cols = useColumnPrefs("opportunities", OPPORTUNITIES_COLUMNS);
   // After a deal is marked Closed Lost for a current client, ask whether the
@@ -424,11 +428,14 @@ export function OpportunitiesList() {
     }
   };
 
-  const handleBulkDelete = async () => {
+  // Opens the confirm dialog; the actual delete runs in doBulkDelete once
+  // the user confirms.
+  const handleBulkDelete = () => setConfirmBulkDelete(true);
+
+  const doBulkDelete = async () => {
     // Capture the count BEFORE clearing the selection — reading selectedIds.size
     // after setSelectedIds(new Set()) showed "0 opportunity(ies) deleted".
     const count = selectedIds.size;
-    if (!confirm(`Permanently delete ${count} opportunity(ies)? This cannot be undone.`)) return;
     try {
       await bulkDeleteMutation.mutateAsync({ ids: Array.from(selectedIds) });
       setSelectedIds(new Set());
@@ -781,6 +788,19 @@ export function OpportunitiesList() {
         onDelete={isAdmin ? handleBulkDelete : undefined}
         onAssignOwner={handleBulkAssignOwner}
         users={users}
+      />
+
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        onOpenChange={(o) => !o && setConfirmBulkDelete(false)}
+        title="Delete opportunities?"
+        description={`Permanently delete ${selectedIds.size} opportunity(ies)? This cannot be undone.`}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => {
+          setConfirmBulkDelete(false);
+          void doBulkDelete();
+        }}
       />
       {closedLostGuard.dialog}
     </div>

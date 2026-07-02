@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
@@ -13,8 +13,11 @@ import type { SupportConversation, SupportMessage } from "./types";
 // publication) — no broadcast channels needed because the platform Coach
 // POLLS the meddy-support edge function; only this console needs push.
 
+// NOTE: the per-alias filters below (.eq("last.is_internal", …) etc.) are
+// scoped to the "last" alias only — the msg_count embed of the same table
+// counts ALL rows and must not pick up those filters.
 const CONV_SELECT =
-  "*, assigned:user_profiles!assigned_to(id, full_name), last:support_messages(content, role, created_at)";
+  "*, assigned:user_profiles!assigned_to(id, full_name), last:support_messages(content, role, created_at), msg_count:support_messages(count)";
 
 export function useSupportConversations() {
   return useQuery({
@@ -83,9 +86,13 @@ export function useSupportMessages(conversationId: string | null) {
   });
 }
 
-/** Live updates: any change to conversations/messages refreshes the console. */
-export function useSupportRealtime() {
+/** Live updates: any change to conversations/messages refreshes the console.
+ * onCustomerMessage fires per incoming CUSTOMER message (unread dots). */
+export function useSupportRealtime(onCustomerMessage?: (conversationId: string) => void) {
   const qc = useQueryClient();
+  // Ref so the subscription binds once but always calls the fresh callback.
+  const cbRef = useRef(onCustomerMessage);
+  cbRef.current = onCustomerMessage;
   useEffect(() => {
     const channel = supabase
       .channel("support:console")
@@ -100,8 +107,11 @@ export function useSupportRealtime() {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "support_messages" },
         (payload) => {
-          const convId = (payload.new as { conversation_id?: string })?.conversation_id;
-          if (convId) qc.invalidateQueries({ queryKey: ["support-messages", convId] });
+          const row = payload.new as { conversation_id?: string; role?: string };
+          if (row?.conversation_id) {
+            qc.invalidateQueries({ queryKey: ["support-messages", row.conversation_id] });
+            if (row.role === "customer") cbRef.current?.(row.conversation_id);
+          }
           qc.invalidateQueries({ queryKey: ["support-conversations"] });
         },
       )

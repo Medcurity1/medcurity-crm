@@ -1,4 +1,4 @@
-import { format, formatDistanceToNow, parseISO, differenceInDays } from "date-fns";
+import { format, formatDistanceToNow, parseISO, differenceInDays, isValid } from "date-fns";
 import type { OpportunityStage, AccountLifecycle, AccountStatus, CustomerStatus, RenewalType, ActivityType, OpportunityKind, OpportunityBusinessType, OpportunityTeam, LeadStatus, LeadSource, PaymentFrequency, LeadQualification, IndustryCategory, ProjectSegment } from "@/types/crm";
 
 export function formatCurrency(amount: number): string {
@@ -21,12 +21,20 @@ export function formatCurrencyDetailed(amount: number): string {
 
 export function formatDate(dateString: string | null): string {
   if (!dateString) return "—";
-  return format(parseISO(dateString), "MMM d, yyyy");
+  const d = parseISO(dateString);
+  // Defensive: date-fns format() THROWS on invalid dates, and these
+  // strings sometimes come straight from user-editable URL params
+  // (e.g. ?closed_after=07/01/2026) — a garbage date must render as a
+  // dash, not crash the page into the error boundary.
+  if (!isValid(d)) return "—";
+  return format(d, "MMM d, yyyy");
 }
 
 export function formatDateTime(dateString: string | null): string {
   if (!dateString) return "—";
-  return format(parseISO(dateString), "MMM d, yyyy h:mm a");
+  const d = parseISO(dateString);
+  if (!isValid(d)) return "—";
+  return format(d, "MMM d, yyyy h:mm a");
 }
 
 export function formatRelativeDate(dateString: string | null): string {

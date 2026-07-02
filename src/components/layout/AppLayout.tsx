@@ -42,7 +42,7 @@ const pathMap: Record<string, string> = {
   playbook: "Campaigns",
   meddy: "Meddy",
   nexus: "Nexus",
-  support: "Support",
+  support: "Meddy",
   requests: "Requests",
   archive: "Archive",
   admin: "Admin Settings",

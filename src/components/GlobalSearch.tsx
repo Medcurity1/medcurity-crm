@@ -107,7 +107,18 @@ export function GlobalSearch() {
   const [inputValue, setInputValue] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const navigate = useNavigate();
-  const { records: recentRecords } = useRecentRecords();
+  const { records: allRecents, refresh: refreshRecents } = useRecentRecords();
+  // Leads are admin-only everywhere else in the app — keep the Recent
+  // group consistent with that gate.
+  const recentRecords = isAdmin
+    ? allRecents
+    : allRecents.filter((r) => r.entity !== "lead");
+
+  // This palette instance lives in the top bar for the whole session, so
+  // its recents snapshot goes stale — re-read storage every time it opens.
+  useEffect(() => {
+    if (open) refreshRecents();
+  }, [open, refreshRecents]);
 
   // Keyboard shortcut: Cmd+K / Ctrl+K
   useEffect(() => {

@@ -23,16 +23,20 @@ interface Announcement {
  * that announcement.
  */
 // Requests launch banner retired 2026-06-12 (Nathan). Meddy launch banner
-// turned on 2026-06-16 when Meddy went live (website chat now points at the
-// CRM). Bump the id if we ever want to re-show it.
-export const ACTIVE_ANNOUNCEMENT: Announcement | null = {
-  id: "meddy-launch-2026-06",
-  title: "New: Meddy is live",
-  message:
-    "Your website chat command center. Watch chats come in, jump in to help, and review past ones.",
-  ctaLabel: "Meet Meddy",
-  ctaRoute: "/meddy",
-};
+// (meddy-launch-2026-06) ran 2026-06-16 → 2026-07-02. Banner is OFF for
+// now (Nathan 2026-07-02: hold until Joe's platform side is ready).
+//
+// BACK POCKET — the Platform-stream announcement, ready to flip on by
+// assigning it to ACTIVE_ANNOUNCEMENT when Joe's integration goes live:
+//   {
+//     id: "meddy-platform-2026-07",
+//     title: "Meddy now covers platform support",
+//     message:
+//       "One Meddy home, two streams: website chats and app.medcurity.com support. Flip between them with the Website | Platform switcher.",
+//     ctaLabel: "See Platform stream",
+//     ctaRoute: "/support",
+//   }
+export const ACTIVE_ANNOUNCEMENT: Announcement | null = null;
 
 function storageKey(id: string) {
   return `announcement-dismissed:${id}`;

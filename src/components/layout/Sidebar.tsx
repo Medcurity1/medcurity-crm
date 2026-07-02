@@ -202,7 +202,9 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
             ? false
             : item.to === "/"
               ? location.pathname === "/"
-              : location.pathname.startsWith(item.to);
+              : location.pathname.startsWith(item.to) ||
+                // /support is the Platform stream of the Meddy home.
+                (item.to === "/meddy" && location.pathname.startsWith("/support"));
           const linkClasses = cn(
             "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
             isActive

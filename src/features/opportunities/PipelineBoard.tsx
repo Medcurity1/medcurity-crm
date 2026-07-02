@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   DndContext,
@@ -129,7 +129,7 @@ function PipelineKanban({
       },
       {
         onSuccess: () => {
-          toast.success(`Moved to ${stageLabel(newStage)}`);
+          toast.success(`Stage changed to ${stageLabel(newStage)}`);
           if (newStage === "closed_won") celebrateClosedWon();
           if (newStage === "closed_lost") closedLostGuard.promptIfClient(accountId);
         },
@@ -331,6 +331,19 @@ export function PipelineBoard() {
   const { data: users } = useUsers();
   const { data: pipelineViews } = usePipelineViews();
   const deleteMutation = useDeletePipelineView();
+
+  // A shared/bookmarked ?tab=custom-<id> can point at a view this user
+  // can't see (someone else's private view, or a deleted one). Once views
+  // have loaded, fall back to Sales instead of rendering a blank board.
+  useEffect(() => {
+    if (
+      activeTab.startsWith("custom-") &&
+      pipelineViews !== undefined &&
+      !pipelineViews.some((v) => `custom-${v.id}` === activeTab)
+    ) {
+      setActiveTab("sales");
+    }
+  }, [activeTab, pipelineViews, setActiveTab]);
 
   const ownerUserId = myDeals ? profile?.id : ownerFilter || undefined;
 

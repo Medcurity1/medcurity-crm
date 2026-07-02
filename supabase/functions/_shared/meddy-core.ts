@@ -170,7 +170,12 @@ export async function broadcast(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        messages: [{ topic, event, payload, private: false }],
+        // The staff dashboard channel is PRIVATE (it carries visitor
+        // message previews + staff names; the realtime authorization
+        // policy in 20260702000005 gates subscribers to active staff).
+        // Per-visitor widget channels stay public — anonymous visitors
+        // subscribe to their own conversation with the anon key.
+        messages: [{ topic, event, payload, private: topic === "meddy:dashboard" }],
       }),
     });
   } catch (e) {

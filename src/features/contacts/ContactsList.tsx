@@ -13,6 +13,7 @@ import { QueryError } from "@/components/QueryError";
 import { Pagination } from "@/components/Pagination";
 import { formatPhone } from "@/components/PhoneInput";
 import { BulkActionBar } from "@/components/BulkActionBar";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SortableHeader, type SortState } from "@/components/SortableHeader";
 import { MultiSelect } from "@/components/MultiSelect";
 import { SavedViews } from "@/features/saved-views/SavedViews";
@@ -70,6 +71,9 @@ export function ContactsList() {
   const [page, setPage] = useUrlNumberState("page", 0);
   const [pageSize, setPageSize] = useUrlNumberState("size", 25);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Bulk delete is confirmed via the app ConfirmDialog (not window.confirm)
+  // so it matches the destructive-action pattern everywhere else.
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   // Sort state is URL-backed (useUrlSortState) so a user can sort, drill
   // into a contact, then hit Back and find the list still sorted — plain
   // useState reset on every remount.
@@ -165,11 +169,14 @@ export function ContactsList() {
     }
   };
 
-  const handleBulkDelete = async () => {
+  // Opens the confirm dialog; the actual delete runs in doBulkDelete once
+  // the user confirms.
+  const handleBulkDelete = () => setConfirmBulkDelete(true);
+
+  const doBulkDelete = async () => {
     // Capture the count BEFORE clearing the selection — reading selectedIds.size
     // after setSelectedIds(new Set()) showed "0 contact(s) deleted".
     const count = selectedIds.size;
-    if (!confirm(`Permanently delete ${count} contact(s)? This cannot be undone.`)) return;
     try {
       await bulkDeleteMutation.mutateAsync({ ids: Array.from(selectedIds) });
       setSelectedIds(new Set());
@@ -477,6 +484,19 @@ export function ContactsList() {
           }
         />
       </BulkActionBar>
+
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        onOpenChange={(o) => !o && setConfirmBulkDelete(false)}
+        title="Delete contacts?"
+        description={`Permanently delete ${selectedIds.size} contact(s)? This cannot be undone.`}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => {
+          setConfirmBulkDelete(false);
+          void doBulkDelete();
+        }}
+      />
     </div>
   );
 }

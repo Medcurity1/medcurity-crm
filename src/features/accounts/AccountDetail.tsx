@@ -131,6 +131,7 @@ export function AccountDetail() {
   const archiveMutation = useArchiveAccount();
   const deleteMutation = useDeleteAccount();
   const [showArchive, setShowArchive] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
   const [showChangeOwner, setShowChangeOwner] = useState(false);
   const { addRecent } = useRecentRecords();
 
@@ -304,20 +305,7 @@ export function AccountDetail() {
                 variant="outline"
                 size="sm"
                 className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                onClick={async () => {
-                  if (
-                    !window.confirm(
-                      `Permanently delete "${account.name}"? This cannot be undone and will remove related opportunities, contacts, and activities. Use Archive if you might need to restore it later.`,
-                    )
-                  ) return;
-                  try {
-                    await deleteMutation.mutateAsync({ id: account.id });
-                    toast.success("Account deleted");
-                    navigate("/accounts");
-                  } catch (err) {
-                    toast.error("Failed to delete: " + (err as Error).message);
-                  }
-                }}
+                onClick={() => setShowDelete(true)}
                 disabled={deleteMutation.isPending}
               >
                 <Trash2 className="h-4 w-4 mr-1" />
@@ -733,6 +721,24 @@ export function AccountDetail() {
         confirmLabel="Archive"
         destructive
         onConfirm={handleArchive}
+      />
+
+      <ConfirmDialog
+        open={showDelete}
+        onOpenChange={setShowDelete}
+        title="Delete Account"
+        description={`Permanently delete "${account.name}"? This cannot be undone and will remove related opportunities, contacts, and activities. Use Archive if you might need to restore it later.`}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={async () => {
+          try {
+            await deleteMutation.mutateAsync({ id: account.id });
+            toast.success("Account deleted");
+            navigate("/accounts");
+          } catch (err) {
+            toast.error("Failed to delete: " + (err as Error).message);
+          }
+        }}
       />
 
       <ChangeOwnerDialog

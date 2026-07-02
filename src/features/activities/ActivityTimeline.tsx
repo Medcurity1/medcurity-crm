@@ -759,7 +759,7 @@ function ThreadEntry({
     <div className="relative flex gap-3 pl-0">
       <button
         type="button"
-        className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-purple-100 text-purple-600 cursor-pointer hover:opacity-80"
+        className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-purple-100 text-purple-600 dark:bg-purple-900/40 dark:text-purple-300 cursor-pointer hover:opacity-80"
         onClick={() => setShowThread((v) => !v)}
         aria-label={showThread ? "Collapse thread" : "Expand thread"}
       >

@@ -393,7 +393,38 @@ export function useUpdateOpportunity() {
       if (error) throw error;
       return data;
     },
-    onSuccess: (_data, vars) => {
+    onMutate: async (vars) => {
+      // Optimistic Kanban move: on a stage change, patch the moved row in
+      // every cached pipeline query so the card jumps columns instantly
+      // instead of waiting for the round-trip + refetch. Covers both
+      // useActivePipeline (["pipeline", filters]) and useCustomPipeline
+      // (["pipeline", "custom", filters]) via the shared key prefix.
+      // Non-stage updates keep the plain invalidate-on-settle flow.
+      if (!vars.stage) return;
+      const pipelineFilter = {
+        predicate: (q: { queryKey: readonly unknown[] }) => q.queryKey[0] === "pipeline",
+      };
+      await qc.cancelQueries(pipelineFilter);
+      const snapshots = qc.getQueriesData<ActivePipelineRow[]>(pipelineFilter);
+      qc.setQueriesData<ActivePipelineRow[]>(pipelineFilter, (rows) => {
+        if (!rows) return rows;
+        // A move into a closed stage leaves the open-deals-only board
+        // entirely — drop the row rather than strand the card in the
+        // "Other open" catch-all column until the refetch lands.
+        if (vars.stage === "closed_won" || vars.stage === "closed_lost") {
+          return rows.filter((r) => r.id !== vars.id);
+        }
+        return rows.map((r) => (r.id === vars.id ? { ...r, stage: vars.stage! } : r));
+      });
+      return { snapshots };
+    },
+    onError: (_err, _vars, ctx) => {
+      // Failed move — put the board back exactly as it was.
+      for (const [key, data] of ctx?.snapshots ?? []) {
+        qc.setQueryData(key, data);
+      }
+    },
+    onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({ queryKey: ["opportunities"] });
       qc.invalidateQueries({ queryKey: ["opportunities", vars.id] });
       qc.invalidateQueries({ queryKey: ["pipeline"] });

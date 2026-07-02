@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -89,6 +90,7 @@ export function LoginPage() {
             <Input
               id="email"
               type="email"
+              autoComplete="email"
               placeholder="you@medcurity.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -104,6 +106,7 @@ export function LoginPage() {
             <Input
               id="password"
               type="password"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -116,7 +119,14 @@ export function LoginPage() {
             </p>
           )}
           <Button type="submit" className="w-full shadow-lg" disabled={submitting}>
-            {submitting ? "Signing in..." : "Sign In"}
+            {submitting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Signing in...
+              </>
+            ) : (
+              "Sign In"
+            )}
           </Button>
           <div className="text-center">
             <Link

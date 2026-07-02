@@ -109,6 +109,14 @@ function CopyButton({ value }: { value: string }) {
 
 /* ---------- Main component ---------- */
 
+/** Phone + phone_ext display. If the phone already carries an inline
+ * extension ("(208) 555-1234 x567"), don't append the phone_ext column —
+ * formatPhone keeps only the FIRST extension and would silently drop the
+ * appended one, hiding a data conflict. Inline extension wins. */
+function contactPhoneDisplay(phone: string, ext: string | null | undefined): string {
+  return formatPhone(/(?:x|ext)/i.test(phone) ? phone : `${phone}${ext ? ` x${ext}` : ""}`);
+}
+
 export function ContactDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -331,12 +339,10 @@ export function ContactDetail() {
             <p className="text-sm font-semibold inline-flex items-center gap-1.5">
               <Phone className="h-3 w-3 text-muted-foreground" />
               {contact.phone
-                ? formatPhone(`${contact.phone}${contact.phone_ext ? ` x${contact.phone_ext}` : ""}`)
+                ? contactPhoneDisplay(contact.phone, contact.phone_ext)
                 : "\u2014"}
               {contact.phone && (
-                <CopyButton
-                  value={formatPhone(`${contact.phone}${contact.phone_ext ? ` x${contact.phone_ext}` : ""}`)}
-                />
+                <CopyButton value={contactPhoneDisplay(contact.phone, contact.phone_ext)} />
               )}
             </p>
             {contact.mobile_phone && (
