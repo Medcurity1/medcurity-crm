@@ -147,6 +147,10 @@ export function SupportChatView({ conversation }: { conversation: SupportConvers
         <Textarea
           rows={2}
           value={draft}
+          // Spell-check the staff reply box (Summer's request): red
+          // squiggles + right-click correction on customer-facing replies.
+          spellCheck
+          autoCapitalize="sentences"
           disabled={!canChat && !internal}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {

@@ -356,6 +356,10 @@ export function ChatView({ conversation: c }: Props) {
               disabled={!canChat}
               placeholder={placeholder}
               rows={2}
+              // Spell-check the staff reply box (Summer's request): red
+              // squiggles + right-click correction on customer-facing replies.
+              spellCheck
+              autoCapitalize="sentences"
               onChange={(e) => {
                 const v = e.target.value;
                 setInput(v);
@@ -417,7 +421,11 @@ export function ChatView({ conversation: c }: Props) {
         open={confirm === "join"}
         onOpenChange={(open) => !open && setConfirm(null)}
         title="Join Conversation"
-        description="Join this conversation? The visitor and other agents will be notified."
+        // The visitor is NOT notified on join (the "joined" note is
+        // team-only + broadcast to the staff dashboard only — see
+        // meddy-staff-action join case). Only other agents see it, so you
+        // can join and whisper without the customer knowing.
+        description="Join this conversation to whisper with the team? Other agents will be notified — the visitor won't see anything."
         confirmLabel="Join"
         onConfirm={() => {
           join.mutate({ conversationId: c.id });
