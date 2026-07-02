@@ -1,5 +1,9 @@
 # Delight ideas — little joys that make Pulse fun
 
+**Status 2026-07-02:** #4 friendly loading lines and #10 high fives are BUILT
+(staging). Nathan liked the mini-game idea but not on a 404 page — chosen
+placement: **click the Pulse logo ~5 times to open it** (tabled for later).
+
 Brainstorm from Nathan's 2026-07-01 ask, in the spirit of the seasonal login
 background everyone loves. Ranked by joy-per-effort. Nothing here is built;
 pick what sounds fun.
