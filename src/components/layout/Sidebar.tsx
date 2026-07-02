@@ -24,6 +24,7 @@ import {
   ExternalLink,
   Bot,
   Megaphone,
+  LifeBuoy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PulseLogo } from "@/components/PulseLogo";
@@ -72,6 +73,10 @@ const navItems: NavItem[] = [
   // chat now points at the CRM). Sits right under Home so reps catch incoming
   // website chats first. "New" badge flags the freshly launched tab.
   { to: "/meddy", icon: Bot, label: "Meddy", badge: { label: "New", className: NEW_BADGE } },
+  // Meddy Support: platform (app.medcurity.com) Coach escalations. A
+  // separate stream from website Meddy on purpose — different tables,
+  // different screen (the "share nothing" wall agreed with Joe).
+  { to: "/support", icon: LifeBuoy, label: "Support", badge: { label: "New", className: NEW_BADGE } },
   { to: "/accounts", icon: Building2, label: "Accounts" },
   { to: "/contacts", icon: Users, label: "Contacts" },
   { to: "/opportunities", icon: Target, label: "Opportunities" },
