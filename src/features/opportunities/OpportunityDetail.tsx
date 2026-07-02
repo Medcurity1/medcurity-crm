@@ -14,6 +14,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
+import { QueryError } from "@/components/QueryError";
 import { RecordId } from "@/components/RecordId";
 import { InlineEdit, type InlineEditProps } from "@/components/InlineEdit";
 import { HelpTooltip } from "@/components/ui/help-tooltip";
@@ -238,7 +239,7 @@ function DiscountField({
 export function OpportunityDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { data: opp, isLoading } = useOpportunity(id);
+  const { data: opp, isLoading, isError, error, refetch } = useOpportunity(id);
   const { data: history } = useStageHistory(id);
   const { data: products } = useOpportunityProducts(id);
   const { data: customFieldDefs } = useCustomFieldDefinitions("opportunities");
@@ -364,8 +365,23 @@ export function OpportunityDetail() {
     );
   }
 
+  // useOpportunity uses .single(), so a genuinely-missing row surfaces as a
+  // PGRST116 "no rows" error — show "not found" for that, and a retryable
+  // error state for everything else (network blip, RLS, etc.).
+  const notFound = (error as { code?: string } | null)?.code === "PGRST116";
+  if (isError && !notFound) {
+    return <QueryError message="Something went wrong loading this opportunity." onRetry={() => refetch()} />;
+  }
+
   if (!opp) {
-    return <div className="text-muted-foreground">Opportunity not found.</div>;
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+        <p className="text-sm text-muted-foreground">Opportunity not found. It may have been deleted.</p>
+        <Link to="/opportunities" className="text-sm text-primary hover:underline">
+          Back to Opportunities
+        </Link>
+      </div>
+    );
   }
 
   const oppId = opp.id;

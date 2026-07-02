@@ -76,7 +76,8 @@ export function EditTaskDialog({
     setRecur(recurrenceToUI(task));
   }, [task]);
 
-  async function handleSave() {
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
     if (!task) return;
     if (!subject.trim()) {
       toast.error("Subject is required");
@@ -126,7 +127,9 @@ export function EditTaskDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        {/* Form wrapper (same pattern as QuickTaskDialog) so Enter in any
+            field submits instead of doing nothing. */}
+        <form onSubmit={handleSave} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="edit-subject">Subject</Label>
             <Input
@@ -176,16 +179,16 @@ export function EditTaskDialog({
               onChange={(e) => setBody(e.target.value)}
             />
           </div>
-        </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={handleSave} disabled={update.isPending}>
-            {update.isPending ? "Saving..." : "Save"}
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={update.isPending}>
+              {update.isPending ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

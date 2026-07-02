@@ -96,7 +96,7 @@ export function VerifiedBadge({
         "gap-1 font-medium",
         sizeClass,
         verified
-          ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border-emerald-200"
+          ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300 dark:hover:bg-emerald-900/60 dark:border-emerald-800"
           : "text-muted-foreground hover:text-foreground",
         !canToggle && "pointer-events-none"
       )}

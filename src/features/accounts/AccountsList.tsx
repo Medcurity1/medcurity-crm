@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useUrlState, useUrlNumberState, useUrlArrayState } from "@/hooks/useUrlState";
+import { useUrlState, useUrlNumberState, useUrlArrayState, useUrlSortState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Building2, Plus, Search } from "lucide-react";
@@ -8,6 +8,7 @@ import { useAccounts, useArchiveAccount, useBulkUpdateOwner, useBulkDeleteAccoun
 import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
+import { QueryError } from "@/components/QueryError";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Pagination } from "@/components/Pagination";
 import { BulkActionBar } from "@/components/BulkActionBar";
@@ -37,7 +38,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { statusLabel, customerStatusLabel, formatDate } from "@/lib/formatters";
+import { statusLabel, customerStatusLabel, formatDate, INDUSTRY_CATEGORY_LABELS } from "@/lib/formatters";
 
 const ACCOUNTS_COLUMNS: ColumnDescriptor[] = [
   { key: "select", label: "Select", locked: true, headClassName: "w-10" },
@@ -49,6 +50,13 @@ const ACCOUNTS_COLUMNS: ColumnDescriptor[] = [
   { key: "contract_end", label: "Contract End", sortKey: "current_contract_end_date" },
   { key: "notes", label: "Notes" },
 ];
+
+// Industry filter options derived from the shared label map so the filter
+// can't drift from the source of truth in formatters.ts (the previous
+// hardcoded copy had already diverged).
+const INDUSTRY_FILTER_OPTIONS = Object.entries(INDUSTRY_CATEGORY_LABELS)
+  .map(([value, label]) => ({ value, label }))
+  .sort((a, b) => a.label.localeCompare(b.label));
 
 export function AccountsList() {
   const navigate = useNavigate();
@@ -67,10 +75,13 @@ export function AccountsList() {
   const [page, setPage] = useUrlNumberState("page", 0);
   const [pageSize, setPageSize] = useUrlNumberState("size", 25);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [sort, setSort] = useState<SortState>({ column: "name", direction: "asc" });
+  // Sort state is URL-backed (useUrlSortState) so a user can sort, drill
+  // into an account, then hit Back and find the list still sorted — plain
+  // useState reset on every remount.
+  const [sort, setSortState] = useUrlSortState("sort");
   const cols = useColumnPrefs("accounts", ACCOUNTS_COLUMNS);
 
-  const { data: result, isLoading } = useAccounts({
+  const { data: result, isLoading, isError, isFetching, refetch } = useAccounts({
     search: search || undefined,
     status: statusFilter.length > 0 ? statusFilter : undefined,
     customerStatus: customerStatusFilter.length > 0 ? customerStatusFilter : undefined,
@@ -85,7 +96,9 @@ export function AccountsList() {
     page,
     pageSize,
     sortColumn: sort.column,
-    sortDirection: sort.direction,
+    // No sort in the URL → leave direction undefined so the API's
+    // default (name ASC) applies instead of the hook's "desc".
+    sortDirection: sort.column ? sort.direction : undefined,
   });
   const { data: users } = useUsers();
   const archiveMutation = useArchiveAccount();
@@ -110,6 +123,11 @@ export function AccountsList() {
     setIndustryFilter(value);
     setPage(0);
   };
+
+  function handleSort(next: SortState) {
+    setSortState(next);
+    setPage(0);
+  }
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -181,6 +199,17 @@ export function AccountsList() {
 
   const allChecked =
     !!accounts?.length && accounts.every((a) => selectedIds.has(a.id));
+
+  // Any filter narrowing the list — drives the empty-state copy so a
+  // filtered-to-zero list says "adjust your filters", not "create your
+  // first account".
+  const hasActiveFilters =
+    !!search ||
+    statusFilter.length > 0 ||
+    customerStatusFilter.length > 0 ||
+    ownerFilter.length > 0 ||
+    industryFilter.length > 0 ||
+    verifiedFilter !== "all";
 
   const cellRenderers: Record<string, (a: Account) => ReactNode> = {
     select: (a) => (
@@ -302,33 +331,7 @@ export function AccountsList() {
           onChange={handleIndustryChange}
           placeholder="All Industries"
           triggerClassName="w-44"
-          options={[
-            { value: "hospital", label: "Hospital" },
-            { value: "medical_group", label: "Medical Group" },
-            { value: "fqhc", label: "FQHC" },
-            { value: "rural_health_clinic", label: "Rural Health Clinic" },
-            { value: "skilled_nursing", label: "Skilled Nursing" },
-            { value: "long_term_care", label: "Long-Term Care" },
-            { value: "home_health", label: "Home Health" },
-            { value: "hospice", label: "Hospice" },
-            { value: "behavioral_health", label: "Behavioral Health" },
-            { value: "dental", label: "Dental" },
-            { value: "pediatrics", label: "Pediatrics" },
-            { value: "specialty_clinic", label: "Specialty Clinic" },
-            { value: "urgent_care", label: "Urgent Care" },
-            { value: "imaging_center", label: "Imaging Center" },
-            { value: "lab_services", label: "Lab Services" },
-            { value: "pharmacy", label: "Pharmacy" },
-            { value: "telemedicine", label: "Telemedicine" },
-            { value: "tribal_health", label: "Tribal Health" },
-            { value: "public_health_agency", label: "Public Health Agency" },
-            { value: "healthcare_it_vendor", label: "Healthcare IT Vendor" },
-            { value: "managed_service_provider", label: "Managed Service Provider" },
-            { value: "healthcare_consulting", label: "Healthcare Consulting" },
-            { value: "insurance_payer", label: "Insurance / Payer" },
-            { value: "other_healthcare", label: "Other Healthcare" },
-            { value: "other", label: "Other" },
-          ]}
+          options={INDUSTRY_FILTER_OPTIONS}
         />
 
         <Select
@@ -358,14 +361,20 @@ export function AccountsList() {
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
+      ) : isError ? (
+        <QueryError
+          message="Couldn't load accounts."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
       ) : !accounts?.length ? (
         <EmptyState
           icon={Building2}
           title="No accounts found"
-          description={search || statusFilter.length > 0
+          description={hasActiveFilters
             ? "Try adjusting your search or filter"
             : "Create your first account to get started"}
-          action={!search && statusFilter.length === 0 ? {
+          action={!hasActiveFilters ? {
             label: "New Account",
             onClick: () => navigate("/accounts/new"),
           } : undefined}
@@ -393,7 +402,7 @@ export function AccountsList() {
                         key={c.key}
                         column={c.sortKey}
                         sort={sort}
-                        onSort={setSort}
+                        onSort={handleSort}
                         align={c.align}
                         className={c.headClassName}
                       >

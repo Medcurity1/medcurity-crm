@@ -18,10 +18,12 @@ import {
 } from "./pipeline-views-api";
 import { useUsers } from "@/features/accounts/api";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { useUrlState } from "@/hooks/useUrlState";
 import { PipelineColumn, UNMAPPED_COLUMN_ID } from "./PipelineColumn";
 import { PipelineCard } from "./PipelineCard";
 import { CreatePipelineDialog } from "./CreatePipelineDialog";
 import { PageHeader } from "@/components/PageHeader";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -315,20 +317,22 @@ function CustomViewTab({
 
 export function PipelineBoard() {
   const { profile } = useAuth();
-  const [activeTab, setActiveTab] = useState<string>("sales");
-  const [myDeals, setMyDeals] = useState(false);
-  const [ownerFilter, setOwnerFilter] = useState<string>("all");
+  // Tab + filters live in the URL so navigating to a deal and coming
+  // back (or sharing a link) restores the same view instead of
+  // snapping back to the Sales tab.
+  const [activeTab, setActiveTab] = useUrlState("tab", "sales");
+  const [myDealsParam, setMyDealsParam] = useUrlState("my_deals", "0");
+  const myDeals = myDealsParam === "1";
+  const setMyDeals = (checked: boolean) => setMyDealsParam(checked ? "1" : "0");
+  const [ownerFilter, setOwnerFilter] = useUrlState("owner", "");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingView, setEditingView] = useState<PipelineView | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PipelineView | null>(null);
   const { data: users } = useUsers();
   const { data: pipelineViews } = usePipelineViews();
   const deleteMutation = useDeletePipelineView();
 
-  const ownerUserId = myDeals
-    ? profile?.id
-    : ownerFilter !== "all"
-      ? ownerFilter
-      : undefined;
+  const ownerUserId = myDeals ? profile?.id : ownerFilter || undefined;
 
   // Bucket by `kind` (new_business vs renewal) — this is the true
   // intent, set by the renewal automation and the form. `team` was
@@ -383,7 +387,7 @@ export function PipelineBoard() {
             checked={myDeals}
             onCheckedChange={(checked) => {
               setMyDeals(checked);
-              if (checked) setOwnerFilter("all");
+              if (checked) setOwnerFilter("");
             }}
           />
           <Label htmlFor="my-deals" className="text-sm cursor-pointer">
@@ -392,7 +396,10 @@ export function PipelineBoard() {
         </div>
 
         {!myDeals && (
-          <Select value={ownerFilter} onValueChange={setOwnerFilter}>
+          <Select
+            value={ownerFilter || "all"}
+            onValueChange={(v) => setOwnerFilter(v === "all" ? "" : v)}
+          >
             <SelectTrigger className="w-44">
               <SelectValue placeholder="All owners" />
             </SelectTrigger>
@@ -438,7 +445,7 @@ export function PipelineBoard() {
                         Edit
                       </DropdownMenuItem>
                       <DropdownMenuItem
-                        onClick={() => handleDeleteView(view)}
+                        onClick={() => setDeleteTarget(view)}
                         className="text-destructive focus:text-destructive"
                       >
                         <Trash2 className="h-4 w-4 mr-2" />
@@ -488,6 +495,24 @@ export function PipelineBoard() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         editingView={editingView}
+      />
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title="Delete this view?"
+        description={
+          deleteTarget
+            ? `"${deleteTarget.name}" will be permanently deleted. This can't be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => {
+          const t = deleteTarget;
+          setDeleteTarget(null);
+          if (t) handleDeleteView(t);
+        }}
       />
     </div>
   );

@@ -398,6 +398,9 @@ export function useUpdateOpportunity() {
       qc.invalidateQueries({ queryKey: ["opportunities", vars.id] });
       qc.invalidateQueries({ queryKey: ["pipeline"] });
       qc.invalidateQueries({ queryKey: ["renewal_queue"] });
+      // Stage moves append a row via DB trigger — refetch the history
+      // panel so it doesn't show a stale trail (matches useStageHistory).
+      qc.invalidateQueries({ queryKey: ["stage_history", vars.id] });
     },
   });
 }

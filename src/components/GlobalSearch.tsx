@@ -12,19 +12,19 @@ import {
 } from "@/components/ui/command";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { formatCurrency } from "@/lib/formatters";
+import { formatCurrency, customerStatusLabel } from "@/lib/formatters";
 import { buildPersonSearchClause } from "@/lib/search-clause";
+import { useRecentRecords, type RecentRecord } from "@/hooks/useRecentRecords";
 import type {
   Account,
   Contact,
   Opportunity,
   Lead,
-  AccountLifecycle,
   OpportunityStage,
   LeadStatus,
 } from "@/types/crm";
 
-type AccountResult = Pick<Account, "id" | "name" | "lifecycle_status">;
+type AccountResult = Pick<Account, "id" | "name" | "customer_status">;
 type ContactResult = Pick<Contact, "id" | "first_name" | "last_name" | "email">;
 type OpportunityResult = Pick<Opportunity, "id" | "name" | "stage" | "amount">;
 type LeadResult = Pick<Lead, "id" | "first_name" | "last_name" | "email" | "company" | "status">;
@@ -62,12 +62,6 @@ function rankResults<T>(rows: T[] | undefined, query: string, labelOf: (row: T) 
   });
 }
 
-const lifecycleLabels: Record<AccountLifecycle, string> = {
-  prospect: "Prospect",
-  customer: "Customer",
-  former_customer: "Former Customer",
-};
-
 const stageLabels: Record<OpportunityStage, string> = {
   details_analysis: "Details Analysis",
   demo: "Demo",
@@ -90,6 +84,22 @@ const leadStatusLabels: Record<LeadStatus, string> = {
   converted: "Converted",
 };
 
+// Icon + route per recent-record entity (see useRecentRecords) for the
+// "Recent" group shown before the user types anything.
+const recentIcons: Record<RecentRecord["entity"], typeof Building2> = {
+  account: Building2,
+  contact: Users,
+  opportunity: Target,
+  lead: UserPlus,
+};
+
+const recentPaths: Record<RecentRecord["entity"], string> = {
+  account: "/accounts",
+  contact: "/contacts",
+  opportunity: "/opportunities",
+  lead: "/leads",
+};
+
 export function GlobalSearch() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
@@ -97,6 +107,7 @@ export function GlobalSearch() {
   const [inputValue, setInputValue] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const navigate = useNavigate();
+  const { records: recentRecords } = useRecentRecords();
 
   // Keyboard shortcut: Cmd+K / Ctrl+K
   useEffect(() => {
@@ -135,7 +146,7 @@ export function GlobalSearch() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("accounts")
-        .select("id, name, lifecycle_status")
+        .select("id, name, customer_status")
         .is("archived_at", null)
         .ilike("name", searchPattern)
         .limit(FETCH_LIMIT);
@@ -279,9 +290,29 @@ export function GlobalSearch() {
             <CommandEmpty>No results found.</CommandEmpty>
           )}
 
-          {!searchEnabled && (
+          {/* Before the user types: recently-viewed records (from
+              useRecentRecords localStorage), or a hint when there are none. */}
+          {!searchEnabled && recentRecords.length > 0 && (
+            <CommandGroup heading="Recent">
+              {recentRecords.map((record) => {
+                const Icon = recentIcons[record.entity];
+                return (
+                  <CommandItem
+                    key={`${record.entity}-${record.id}`}
+                    value={`recent-${record.entity}-${record.name}-${record.id}`}
+                    onSelect={() => handleSelect(`${recentPaths[record.entity]}/${record.id}`)}
+                  >
+                    <Icon className="h-4 w-4 text-muted-foreground" />
+                    <span className="flex-1 truncate">{record.name}</span>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          )}
+
+          {!searchEnabled && recentRecords.length === 0 && (
             <div className="py-6 text-center text-sm text-muted-foreground">
-              Type at least 2 characters to search...
+              Start typing to search…
             </div>
           )}
 
@@ -296,7 +327,7 @@ export function GlobalSearch() {
                   <Building2 className="h-4 w-4 text-muted-foreground" />
                   <span className="flex-1 truncate">{account.name}</span>
                   <span className="text-xs text-muted-foreground">
-                    {lifecycleLabels[account.lifecycle_status]}
+                    {customerStatusLabel(account.customer_status)}
                   </span>
                 </CommandItem>
               ))}

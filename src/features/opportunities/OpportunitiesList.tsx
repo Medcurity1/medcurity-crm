@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { useUsers } from "@/features/accounts/api";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
+import { QueryError } from "@/components/QueryError";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Pagination } from "@/components/Pagination";
 import { BulkActionBar } from "@/components/BulkActionBar";
@@ -356,7 +357,7 @@ export function OpportunitiesList() {
     expectedBefore: expectedBefore || undefined,
   };
 
-  const { data: result, isLoading } = useOpportunities({
+  const { data: result, isLoading, isError, isFetching, refetch } = useOpportunities({
     ...totalsFilters,
     page,
     pageSize,
@@ -412,24 +413,60 @@ export function OpportunitiesList() {
 
   const handleBulkArchive = async () => {
     const ids = Array.from(selectedIds);
-    await Promise.all(ids.map((id) => archiveMutation.mutateAsync({ id })));
-    setSelectedIds(new Set());
+    const count = ids.length;
+    try {
+      await Promise.all(ids.map((id) => archiveMutation.mutateAsync({ id })));
+      setSelectedIds(new Set());
+      toast.success(`${count} opportunity(ies) archived.`);
+    } catch (e) {
+      // Keep the selection so the user can retry; surface why it failed.
+      toast.error("Archive failed: " + (e as Error).message);
+    }
   };
 
   const handleBulkDelete = async () => {
-    if (!confirm(`Permanently delete ${selectedIds.size} opportunity(ies)? This cannot be undone.`)) return;
-    await bulkDeleteMutation.mutateAsync({ ids: Array.from(selectedIds) });
-    setSelectedIds(new Set());
-    toast.success(`${selectedIds.size} opportunity(ies) deleted.`);
+    // Capture the count BEFORE clearing the selection — reading selectedIds.size
+    // after setSelectedIds(new Set()) showed "0 opportunity(ies) deleted".
+    const count = selectedIds.size;
+    if (!confirm(`Permanently delete ${count} opportunity(ies)? This cannot be undone.`)) return;
+    try {
+      await bulkDeleteMutation.mutateAsync({ ids: Array.from(selectedIds) });
+      setSelectedIds(new Set());
+      toast.success(`${count} opportunity(ies) deleted.`);
+    } catch (e) {
+      toast.error("Delete failed: " + (e as Error).message);
+    }
   };
 
   const handleBulkAssignOwner = async (userId: string) => {
-    await bulkOwnerMutation.mutateAsync({ ids: Array.from(selectedIds), owner_user_id: userId });
-    setSelectedIds(new Set());
+    const count = selectedIds.size;
+    try {
+      await bulkOwnerMutation.mutateAsync({ ids: Array.from(selectedIds), owner_user_id: userId });
+      setSelectedIds(new Set());
+      toast.success(`${count} opportunity(ies) reassigned.`);
+    } catch (e) {
+      // Keep the selection so the user can retry; surface why it failed.
+      toast.error("Reassign failed: " + (e as Error).message);
+    }
   };
 
   const allChecked =
     !!opps?.length && opps.every((o) => selectedIds.has(o.id));
+
+  // Any filter narrowing the list — drives the empty-state copy so a
+  // filtered-to-zero list says "adjust your filters", not "create your
+  // first opportunity".
+  const hasActiveFilters =
+    !!search ||
+    stageFilter.length > 0 ||
+    teamFilter.length > 0 ||
+    businessTypeFilter.length > 0 ||
+    ownerFilter.length > 0 ||
+    verifiedFilter !== "all" ||
+    !!closedAfter ||
+    !!closedBefore ||
+    !!expectedAfter ||
+    !!expectedBefore;
 
   const cellRenderers: Record<string, (o: Opportunity) => ReactNode> = {
     select: (o) => (
@@ -587,14 +624,20 @@ export function OpportunitiesList() {
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
+      ) : isError ? (
+        <QueryError
+          message="Couldn't load opportunities."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
       ) : !opps?.length ? (
         <EmptyState
           icon={Target}
           title="No opportunities found"
-          description={search || stageFilter.length || teamFilter.length || businessTypeFilter.length
+          description={hasActiveFilters
             ? "Try adjusting your filters"
             : "Create your first opportunity"}
-          action={!search && !stageFilter.length && !teamFilter.length && !businessTypeFilter.length ? {
+          action={!hasActiveFilters ? {
             label: "New Opportunity",
             onClick: () => navigate("/opportunities/new"),
           } : undefined}
@@ -615,7 +658,7 @@ export function OpportunitiesList() {
                   onClick={() => setClosedAfter("")}
                   className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-1 text-xs hover:bg-muted/70"
                 >
-                  <span>Closed on/after {closedAfter}</span>
+                  <span>Closed on/after {formatDate(closedAfter)}</span>
                   <X className="h-3 w-3" />
                 </button>
               )}
@@ -625,7 +668,7 @@ export function OpportunitiesList() {
                   onClick={() => setClosedBefore("")}
                   className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-1 text-xs hover:bg-muted/70"
                 >
-                  <span>Closed on/before {closedBefore}</span>
+                  <span>Closed on/before {formatDate(closedBefore)}</span>
                   <X className="h-3 w-3" />
                 </button>
               )}
@@ -635,7 +678,7 @@ export function OpportunitiesList() {
                   onClick={() => setExpectedAfter("")}
                   className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-1 text-xs hover:bg-muted/70"
                 >
-                  <span>Expected on/after {expectedAfter}</span>
+                  <span>Expected on/after {formatDate(expectedAfter)}</span>
                   <X className="h-3 w-3" />
                 </button>
               )}
@@ -645,7 +688,7 @@ export function OpportunitiesList() {
                   onClick={() => setExpectedBefore("")}
                   className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-1 text-xs hover:bg-muted/70"
                 >
-                  <span>Expected on/before {expectedBefore}</span>
+                  <span>Expected on/before {formatDate(expectedBefore)}</span>
                   <X className="h-3 w-3" />
                 </button>
               )}

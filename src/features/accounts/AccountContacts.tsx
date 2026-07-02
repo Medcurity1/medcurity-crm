@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { formatName } from "@/lib/formatters";
+import { formatPhone } from "@/components/PhoneInput";
 import { ContactFlagBadges } from "@/features/contacts/ContactFlagBadges";
 
 /**
@@ -101,17 +102,29 @@ export function AccountContacts({ accountId }: { accountId: string }) {
                     {c.title ?? "—"}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {c.email ?? "—"}
+                    {c.email ? (
+                      <a href={`mailto:${c.email}`} className="hover:underline">
+                        {c.email}
+                      </a>
+                    ) : (
+                      "—"
+                    )}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {c.phone ?? "—"}
+                    {c.phone ? (
+                      <a href={`tel:${c.phone}`} className="hover:underline">
+                        {formatPhone(c.phone)}
+                      </a>
+                    ) : (
+                      "—"
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
                     {c.is_primary ? (
                       <Badge
                         variant="secondary"
-                        className="bg-emerald-100 text-emerald-700"
+                        className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
                       >
                         <Star className="h-3 w-3 mr-1 fill-current" />
                         Primary

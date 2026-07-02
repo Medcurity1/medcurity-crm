@@ -31,12 +31,22 @@ const pathMap: Record<string, string> = {
   opportunities: "Opportunities",
   pipeline: "Pipeline",
   renewals: "Renewals",
+  partners: "Partners",
+  calendar: "Calendar",
+  activities: "Activities",
+  products: "Products",
   reports: "Reports",
   forecasting: "Reports",
   analytics: "Reports",
+  playbook: "Campaigns",
+  meddy: "Meddy",
+  nexus: "Nexus",
+  support: "Support",
+  requests: "Requests",
   archive: "Archive",
   admin: "Admin Settings",
   settings: "My Settings",
+  "change-password": "Change Password",
 };
 
 function useIsMobile(breakpoint = 768) {

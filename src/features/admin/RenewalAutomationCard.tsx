@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
+import { formatDate } from "@/lib/formatters";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useAccountsForPicker,
@@ -49,15 +50,6 @@ function formatDateTime(value: string | null): string {
   if (!value) return "Never";
   try {
     return new Date(value).toLocaleString();
-  } catch {
-    return value;
-  }
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return "—";
-  try {
-    return new Date(value + "T00:00:00").toLocaleDateString();
   } catch {
     return value;
   }

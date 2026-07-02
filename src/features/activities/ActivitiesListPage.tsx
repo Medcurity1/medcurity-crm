@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
+import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -18,6 +20,7 @@ import type { Activity, ActivityType } from "@/types/crm";
 import { useUsers } from "@/features/accounts/api";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
+import { QueryError } from "@/components/QueryError";
 import { Pagination } from "@/components/Pagination";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -210,22 +213,20 @@ export function ActivitiesListPage() {
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const [urlParams] = useSearchParams();
 
-  // Allow the home "View All Tasks" link (and other deep links) to
-  // pre-seed type + owner filters via ?type=task&owner=me.
-  const initialType = urlParams.get("type") ?? "all";
-  const initialOwnerParam = urlParams.get("owner");
-  const initialOwner =
-    initialOwnerParam === "me" && user?.id
-      ? user.id
-      : initialOwnerParam ?? "all";
-
-  const [search, setSearch] = useState("");
-  const [type, setType] = useState<string>(initialType);
-  const [owner, setOwner] = useState<string>(initialOwner);
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [showCompletedTasks, setShowCompletedTasks] = useState(false);
-  const [page, setPage] = useState(0);
+  // Filters are URL-backed so deep links keep working (the home
+  // "View All Tasks" link pre-seeds ?type=task&owner=me) and the back
+  // button restores the user's filter state instead of resetting it.
+  const [search, setSearch] = useDebouncedUrlState("q", "");
+  const [type, setType] = useUrlState("type", "all");
+  const [ownerParam, setOwner] = useUrlState("owner", "all");
+  // "me" (from deep links) resolves to the signed-in user's id.
+  const owner = ownerParam === "me" && user?.id ? user.id : ownerParam;
+  const [startDate, setStartDate] = useUrlState("start", "");
+  const [endDate, setEndDate] = useUrlState("end", "");
+  // "1"/"0" in the URL so the toggle survives navigation too.
+  const [showCompletedParam, setShowCompletedParam] = useUrlState("completed", "0");
+  const showCompletedTasks = showCompletedParam === "1";
+  const [page, setPage] = useUrlNumberState("page", 0);
   const [showAddTask, setShowAddTask] = useState(false);
 
   const scopeAccountId = urlParams.get("account_id") || undefined;
@@ -262,7 +263,7 @@ export function ActivitiesListPage() {
     ]
   );
 
-  const { data: result, isLoading } = useActivitiesList(filters);
+  const { data: result, isLoading, isError, isFetching, refetch } = useActivitiesList(filters);
   const { data: users } = useUsers();
 
   const activities = result?.data ?? [];
@@ -362,7 +363,7 @@ export function ActivitiesListPage() {
           <Checkbox
             checked={showCompletedTasks}
             onCheckedChange={(v) => {
-              setShowCompletedTasks(!!v);
+              setShowCompletedParam(v ? "1" : "0");
               resetPage();
             }}
           />
@@ -376,6 +377,12 @@ export function ActivitiesListPage() {
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
+      ) : isError ? (
+        <QueryError
+          message="Couldn't load activities."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
       ) : activities.length === 0 ? (
         <EmptyState
           icon={Clock}
@@ -416,7 +423,13 @@ export function ActivitiesListPage() {
                         </div>
                       </TableCell>
                       <TableCell className="font-medium max-w-sm truncate">
-                        {a.subject}
+                        <Link
+                          to={`/activities/${a.id}`}
+                          className="text-primary hover:underline"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {a.subject}
+                        </Link>
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {a.owner?.full_name ?? "\u2014"}
