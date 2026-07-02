@@ -356,6 +356,10 @@ export function ChatView({ conversation: c }: Props) {
               disabled={!canChat}
               placeholder={placeholder}
               rows={2}
+              // Spell-check the staff reply box (Summer's request): red
+              // squiggles + right-click correction on customer-facing replies.
+              spellCheck
+              autoCapitalize="sentences"
               onChange={(e) => {
                 const v = e.target.value;
                 setInput(v);
