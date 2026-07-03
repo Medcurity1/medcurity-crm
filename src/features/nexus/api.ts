@@ -73,7 +73,10 @@ export function useAddWidget() {
       if (error) throw error;
       return data as NexusWidget;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["nexus-widgets"] }),
+    // Scope to the target user's grid so admin edits don't churn the
+    // admin's own homepage cache.
+    onSuccess: (data) =>
+      qc.invalidateQueries({ queryKey: ["nexus-widgets", data.user_id] }),
     onError: (e) => toast.error("Couldn't add widget: " + (e as Error).message),
   });
 }
@@ -83,10 +86,17 @@ export function useUpdateWidget() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, patch }: { id: string; patch: Partial<NexusWidgetInput> }) => {
-      const { error } = await supabase.from("nexus_widgets").update(patch).eq("id", id);
+      const { data, error } = await supabase
+        .from("nexus_widgets")
+        .update(patch)
+        .eq("id", id)
+        .select("user_id")
+        .single();
       if (error) throw error;
+      return data as { user_id: string };
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["nexus-widgets"] }),
+    onSuccess: (data) =>
+      qc.invalidateQueries({ queryKey: ["nexus-widgets", data.user_id] }),
     onError: (e) => toast.error("Couldn't save widget: " + (e as Error).message),
   });
 }
@@ -95,28 +105,38 @@ export function useRemoveWidget() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("nexus_widgets").delete().eq("id", id);
+      const { data, error } = await supabase
+        .from("nexus_widgets")
+        .delete()
+        .eq("id", id)
+        .select("user_id")
+        .single();
       if (error) throw error;
+      return data as { user_id: string };
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["nexus-widgets"] }),
+    onSuccess: (data) =>
+      qc.invalidateQueries({ queryKey: ["nexus-widgets", data.user_id] }),
     onError: (e) => toast.error("Couldn't remove widget: " + (e as Error).message),
   });
 }
 
-/** Persist a drag-reorder: batch position updates for the moved widgets. */
+/**
+ * Persist a drag-reorder atomically via the nexus_reorder_widgets RPC —
+ * a single UPDATE server-side, so a partial failure can't leave position
+ * collisions (the old Promise.all-of-row-updates could). `userId` is the
+ * page owner, used to scope the cache invalidation.
+ */
 export function useReorderWidgets() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (items: ReorderItem[]) => {
-      const results = await Promise.all(
-        items.map((i) =>
-          supabase.from("nexus_widgets").update({ position: i.position }).eq("id", i.id),
-        ),
-      );
-      const failed = results.find((r) => r.error);
-      if (failed?.error) throw failed.error;
+    mutationFn: async ({ items }: { items: ReorderItem[]; userId?: string }) => {
+      const { error } = await supabase.rpc("nexus_reorder_widgets", {
+        p_updates: items,
+      });
+      if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["nexus-widgets"] }),
+    onSuccess: (_data, { userId }) =>
+      qc.invalidateQueries({ queryKey: ["nexus-widgets", userId] }),
     onError: (e) => toast.error("Couldn't save the new order: " + (e as Error).message),
   });
 }
@@ -213,20 +233,15 @@ export function useRemoveDefaultWidget() {
   });
 }
 
+/** Atomic reorder for the system default layout (admin-only RPC). */
 export function useReorderDefaultWidgets() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (items: ReorderItem[]) => {
-      const results = await Promise.all(
-        items.map((i) =>
-          supabase
-            .from("nexus_default_widgets")
-            .update({ position: i.position })
-            .eq("id", i.id),
-        ),
-      );
-      const failed = results.find((r) => r.error);
-      if (failed?.error) throw failed.error;
+      const { error } = await supabase.rpc("nexus_reorder_default_widgets", {
+        p_updates: items,
+      });
+      if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["nexus-default-widgets"] }),
     onError: (e) => toast.error("Couldn't save the new order: " + (e as Error).message),

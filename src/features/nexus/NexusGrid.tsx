@@ -99,7 +99,6 @@ export function NexusGrid({ userId, onEditWidget, mode = "user" }: NexusGridProp
   }, [isDefault, userQuery.data, defaultQuery.data, user?.id]);
 
   const isLoading = isDefault ? defaultQuery.isLoading : userQuery.isLoading;
-  const reorder = isDefault ? reorderDefaults : reorderUser;
   const removeWidget = isDefault ? removeDefaults : removeUser;
 
   // Optimistic order so the grid doesn't snap back while the position
@@ -140,7 +139,14 @@ export function NexusGrid({ userId, onEditWidget, mode = "user" }: NexusGridProp
 
     const next = arrayMove(ordered, oldIndex, newIndex);
     setLocalOrder(next.map((w) => w.id));
-    reorder.mutate(next.map((w, idx) => ({ id: w.id, position: idx })));
+    const items = next.map((w, idx) => ({ id: w.id, position: idx }));
+    if (isDefault) {
+      reorderDefaults.mutate(items);
+    } else {
+      // Page owner (self unless the admin editor passed a target user) —
+      // used to scope the cache invalidation to that user's grid.
+      reorderUser.mutate({ items, userId: userId ?? user?.id });
+    }
   }
 
   if (isLoading) {

@@ -1,7 +1,8 @@
-// Nexus — the customizable widget homepage (jordan-v4-spec §2-§4).
-// Replaces the old static HomePage at "/". Each rep gets a 2-column grid
-// of up to 8 widgets they can add, rename, reorder, and configure.
-// First-time visitors are seeded from the system default layout via
+// Nexus — the customizable widget dashboard (jordan-v4-spec §2-§4).
+// Lives at /nexus while it's being tested (the classic dashboard stays
+// at "/" — Nathan, 2026-07-03). Each rep gets a 2-column grid of up to
+// 8 widgets they can add, rename, reorder, and configure. First-time
+// visitors are seeded from the system default layout via
 // nexus_initialize (idempotent, once per session).
 
 import { useState } from "react";

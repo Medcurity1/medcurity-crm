@@ -168,7 +168,10 @@ export function MetricsWidget({ widget, onDataUpdated }: NexusWidgetBodyProps) {
           <div
             className={cn(
               "h-full rounded-full",
-              pct >= 100 ? "bg-emerald-500" : "bg-blue-500",
+              // Dark-safe per WIDGET_ACCENT_CLASSES conventions.
+              pct >= 100
+                ? "bg-emerald-500 dark:bg-emerald-400"
+                : "bg-blue-500 dark:bg-blue-400",
             )}
             style={{ width: `${pct}%` }}
           />

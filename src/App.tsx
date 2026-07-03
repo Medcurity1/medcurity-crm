@@ -12,8 +12,7 @@ import { ResetPasswordPage } from "@/features/auth/ResetPasswordPage";
 import { AppLayout } from "@/components/layout/AppLayout";
 
 // Lazy-loaded route components for code splitting
-// (Legacy HomePage lives on at src/features/dashboard/HomePage.tsx —
-// rollback = re-import it and point the index route back.)
+const HomePage = lazy(() => import("@/features/dashboard/HomePage").then(m => ({ default: m.HomePage })));
 const NexusPage = lazy(() => import("@/features/nexus/NexusPage").then(m => ({ default: m.NexusPage })));
 const RequestsPage = lazy(() => import("@/features/requests/RequestsPage").then(m => ({ default: m.RequestsPage })));
 const MeddyPage = lazy(() => import("@/features/meddy/MeddyPage").then(m => ({ default: m.MeddyPage })));
@@ -104,9 +103,11 @@ export default function App() {
                   }
                 />
                 <Route element={<AppLayout />}>
-                  {/* Nexus IS the homepage now; old /nexus deep-links land home. */}
-                  <Route index element={<NexusPage />} />
-                  <Route path="nexus" element={<Navigate to="/" replace />} />
+                  {/* Classic dashboard stays at "/" while Nexus (the
+                      customizable widget page) is tested at /nexus
+                      (Nathan, 2026-07-03). */}
+                  <Route index element={<HomePage />} />
+                  <Route path="nexus" element={<NexusPage />} />
                   <Route path="requests" element={<RequestsPage />} />
                   <Route path="meddy" element={<MeddyPage />} />
                   {/* Meddy Support: platform (app.medcurity.com) Coach

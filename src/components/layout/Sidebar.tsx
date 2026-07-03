@@ -19,6 +19,7 @@ import {
   Search,
   Calendar as CalendarIcon,
   Clock,
+  Sparkles,
   MessageSquarePlus,
   ExternalLink,
   Bot,
@@ -67,9 +68,7 @@ const ADMIN_BADGE = "bg-sky-500 text-white";
 // next fresh tab launches.
 
 const navItems: NavItem[] = [
-  // Nexus replaced Home at "/" (2026-07-03, Jordan V4) — the customizable
-  // widget homepage. Kept the home icon since it IS the home tab.
-  { to: "/", icon: Home, label: "Nexus" },
+  { to: "/", icon: Home, label: "Home" },
   // Meddy: website chat command center. Live as of 2026-06-16 (the website
   // chat now points at the CRM). Sits right under Home so reps catch incoming
   // website chats first. "New" badge flags the freshly launched tab.
@@ -91,8 +90,10 @@ const navItems: NavItem[] = [
   // Forecasting + Analytics moved into /reports as tabs (2026-04-17).
   // "New" badge retired 2026-07-02 (Nathan).
   { to: "/requests", icon: MessageSquarePlus, label: "Requests" },
-  // The old bottom "/nexus" Coming Soon entry is gone — Nexus moved up to
-  // "/" as the home tab; /nexus redirects there.
+  // Nexus: the customizable widget dashboard (Jordan V4). Lives at /nexus
+  // while it's being tested; the classic Home dashboard is back at "/"
+  // (Nathan, 2026-07-03).
+  { to: "/nexus", icon: Sparkles, label: "Nexus" },
 ];
 
 const adminItems: NavItem[] = [
