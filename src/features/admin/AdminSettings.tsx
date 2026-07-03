@@ -24,6 +24,7 @@ import { DataCleanupManager } from "./DataCleanupManager";
 import { RequestsInbox } from "@/features/requests/RequestsInbox";
 import { RoutingEditor } from "@/features/requests/RoutingEditor";
 import { MeddyAdminPanel } from "@/features/meddy/MeddyAdminPanel";
+import { NexusAdminPanel } from "@/features/nexus/NexusAdminPanel";
 import { Loader2 } from "lucide-react";
 
 /**
@@ -44,6 +45,7 @@ const TOP_TABS = [
   "data-import",
   "requests",
   "meddy",
+  "nexus",
   "audit-log",
   "data-health",
   "data-cleanup",
@@ -171,6 +173,7 @@ export function AdminSettings() {
           <TabsTrigger value="data-import">Data Import</TabsTrigger>
           <TabsTrigger value="requests">Requests</TabsTrigger>
           <TabsTrigger value="meddy">Meddy</TabsTrigger>
+          <TabsTrigger value="nexus">Nexus</TabsTrigger>
           <TabsTrigger value="audit-log">Audit Log</TabsTrigger>
           <TabsTrigger value="data-health">Data Health</TabsTrigger>
           <TabsTrigger value="data-cleanup">Data Cleanup</TabsTrigger>
@@ -316,6 +319,11 @@ export function AdminSettings() {
             </div>
             <MeddyAdminPanel />
           </Card>
+        </TabsContent>
+
+        {/* ---------- NEXUS (homepage widget layouts) ---------- */}
+        <TabsContent value="nexus">
+          <NexusAdminPanel />
         </TabsContent>
 
         {/* ---------- AUDIT / HEALTH / SYSTEM ---------- */}

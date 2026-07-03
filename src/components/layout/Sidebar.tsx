@@ -19,7 +19,6 @@ import {
   Search,
   Calendar as CalendarIcon,
   Clock,
-  Sparkles,
   MessageSquarePlus,
   ExternalLink,
   Bot,
@@ -60,15 +59,17 @@ type NavItem = {
   badge?: { label: string; className: string };
 };
 
-// Badge color presets. Coming Soon = vibrant orange; Admin = cool sky
-// blue; New = red (draws the eye to a freshly launched tab).
-const COMING_SOON_BADGE = "bg-orange-500 text-white";
+// Badge color presets. Admin = cool sky blue; New = red (draws the eye
+// to a freshly launched tab). COMING_SOON ("bg-orange-500 text-white")
+// retired 2026-07-03 with the old /nexus placeholder tab.
 const ADMIN_BADGE = "bg-sky-500 text-white";
 // NEW_BADGE ("bg-red-500 text-white") retired 2026-07-02 — re-add when the
 // next fresh tab launches.
 
 const navItems: NavItem[] = [
-  { to: "/", icon: Home, label: "Home" },
+  // Nexus replaced Home at "/" (2026-07-03, Jordan V4) — the customizable
+  // widget homepage. Kept the home icon since it IS the home tab.
+  { to: "/", icon: Home, label: "Nexus" },
   // Meddy: website chat command center. Live as of 2026-06-16 (the website
   // chat now points at the CRM). Sits right under Home so reps catch incoming
   // website chats first. "New" badge flags the freshly launched tab.
@@ -90,9 +91,8 @@ const navItems: NavItem[] = [
   // Forecasting + Analytics moved into /reports as tabs (2026-04-17).
   // "New" badge retired 2026-07-02 (Nathan).
   { to: "/requests", icon: MessageSquarePlus, label: "Requests" },
-  // Nexus: future per-user command center. Lives at the bottom for now
-  // with a Coming Soon badge; will eventually move up to replace Home.
-  { to: "/nexus", icon: Sparkles, label: "Nexus", badge: { label: "Coming Soon", className: COMING_SOON_BADGE } },
+  // The old bottom "/nexus" Coming Soon entry is gone — Nexus moved up to
+  // "/" as the home tab; /nexus redirects there.
 ];
 
 const adminItems: NavItem[] = [
