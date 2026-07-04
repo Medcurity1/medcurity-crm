@@ -7,13 +7,43 @@ import { formatCurrency } from "@/lib/formatters";
 import type { KpiDefinition } from "./kpi-registry";
 
 // ---------------------------------------------------------------------------
-// Accent color per category
+// Accent styling per category — a soft gradient icon badge + a matching
+// hover glow, in the spirit of the Ask AI button. Dark-mode safe.
 // ---------------------------------------------------------------------------
 
-const CATEGORY_ACCENTS: Record<string, string> = {
-  sales: "text-emerald-600",
-  renewals: "text-red-600",
-  team: "text-blue-600",
+interface Accent {
+  badge: string; // gradient bg for the icon chip
+  icon: string; // icon color
+  glow: string; // colored shadow on hover
+}
+
+const CATEGORY_ACCENTS: Record<string, Accent> = {
+  sales: {
+    badge: "from-emerald-500/20 to-emerald-500/[0.04]",
+    icon: "text-emerald-500",
+    glow: "hover:shadow-emerald-500/15",
+  },
+  renewals: {
+    badge: "from-rose-500/20 to-rose-500/[0.04]",
+    icon: "text-rose-500",
+    glow: "hover:shadow-rose-500/15",
+  },
+  team: {
+    badge: "from-blue-500/20 to-blue-500/[0.04]",
+    icon: "text-blue-500",
+    glow: "hover:shadow-blue-500/15",
+  },
+  marketing: {
+    badge: "from-violet-500/20 to-violet-500/[0.04]",
+    icon: "text-violet-500",
+    glow: "hover:shadow-violet-500/15",
+  },
+};
+
+const DEFAULT_ACCENT: Accent = {
+  badge: "from-slate-500/15 to-slate-500/[0.04]",
+  icon: "text-muted-foreground",
+  glow: "hover:shadow-primary/10",
 };
 
 // ---------------------------------------------------------------------------
@@ -45,7 +75,7 @@ export function KpiCard({ kpi, userId }: { kpi: KpiDefinition; userId: string })
   });
 
   const Icon = kpi.icon;
-  const accent = CATEGORY_ACCENTS[kpi.category] ?? "text-muted-foreground";
+  const accent = CATEGORY_ACCENTS[kpi.category] ?? DEFAULT_ACCENT;
 
   if (isLoading) {
     return (
@@ -67,18 +97,24 @@ export function KpiCard({ kpi, userId }: { kpi: KpiDefinition; userId: string })
   const cardInner = (
     // Base Card defaults to gap-6 py-6 — override so label and value sit tight.
     <Card
-      className={`gap-2 py-4 ${
-        href ? "hover:shadow-md hover:border-primary/40 transition-all cursor-pointer" : ""
+      className={`gap-2 py-4 transition-all duration-200 ${
+        href
+          ? `cursor-pointer hover:-translate-y-0.5 hover:shadow-lg ${accent.glow} hover:border-border`
+          : ""
       }`}
     >
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-sm text-muted-foreground font-medium">
           {kpi.label}
         </CardTitle>
-        <Icon className={`h-4 w-4 ${accent}`} />
+        <span
+          className={`flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br ${accent.badge}`}
+        >
+          <Icon className={`h-4 w-4 ${accent.icon}`} />
+        </span>
       </CardHeader>
       <CardContent>
-        <p className="text-2xl font-bold">
+        <p className="text-2xl font-bold tabular-nums tracking-tight">
           {data !== undefined ? formatKpiValue(data, kpi.format) : "—"}
         </p>
       </CardContent>
