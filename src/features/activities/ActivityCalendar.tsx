@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { QuickTaskDialog } from "./QuickTaskDialog";
 import {
   ChevronLeft,
   ChevronRight,
@@ -144,6 +145,7 @@ function getRecordLink(
 export function ActivityCalendar() {
   const [currentMonth, setCurrentMonth] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
+  const [showAddTask, setShowAddTask] = useState(false);
   // Right-pane filters so users can scan a busy day without scrolling.
   // Applies to selectedActivities below.
   const [dayQuery, setDayQuery] = useState("");
@@ -202,7 +204,9 @@ export function ActivityCalendar() {
         return daySort === "oldest" ? aTime - bTime : bTime - aTime;
       });
     return rows;
-  }, [activities, selectedDate]);
+    // dayType/dayQuery/daySort are read above, so they MUST be deps or the
+    // day-panel search/type/sort controls silently do nothing.
+  }, [activities, selectedDate, dayType, dayQuery, daySort]);
 
   function colorClass(count: number): string {
     if (count === 0) return "";
@@ -321,11 +325,9 @@ export function ActivityCalendar() {
                 ? format(selectedDate, "MMM d, yyyy")
                 : "Select a date"}
             </CardTitle>
-            <Button variant="outline" size="sm" asChild>
-              <Link to="/opportunities">
-                <Plus className="h-4 w-4 mr-1" />
-                Add Activity
-              </Link>
+            <Button variant="outline" size="sm" onClick={() => setShowAddTask(true)}>
+              <Plus className="h-4 w-4 mr-1" />
+              Add Task
             </Button>
           </CardHeader>
           <CardContent>
@@ -427,6 +429,7 @@ export function ActivityCalendar() {
           </CardContent>
         </Card>
       </div>
+      <QuickTaskDialog open={showAddTask} onOpenChange={setShowAddTask} />
     </div>
   );
 }
