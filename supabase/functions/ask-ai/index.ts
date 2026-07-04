@@ -37,10 +37,15 @@ const json = (body: unknown, status = 200) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
-const OPP_STAGES = [
-  "lead", "qualified", "proposal", "verbal_commit", "closed_won", "closed_lost",
+// Mirror src/lib/formatters.ts. The app migrated to SF-aligned stages
+// (details_analysis / demo / proposal_and_price_quote / proposal_conversation)
+// in 20260422000001; the legacy simple stages are kept so nothing that
+// still references them filters to empty. THIS IS WHERE OPEN DEALS LIVE.
+const OPEN_STAGES = [
+  "details_analysis", "demo", "proposal_and_price_quote", "proposal_conversation",
+  "lead", "qualified", "proposal", "verbal_commit",
 ];
-const OPEN_STAGES = ["lead", "qualified", "proposal", "verbal_commit"];
+const OPP_STAGES = [...OPEN_STAGES, "closed_won", "closed_lost"];
 const MAX_ROWS = 25; // hard cap on any list a tool returns
 const MAX_TOOL_LOOPS = 6; // bounded agent loop
 const DEFAULT_MODEL = "claude-sonnet-5";
@@ -60,7 +65,7 @@ const HELP: Record<string, string> = {
   create_task:
     "Create a task from the Activities tab using Create Task, or from the Activities section of any account, contact, or opportunity. You can set a due date and a priority (High, Medium, or Low).",
   pipeline:
-    "The Pipeline tab is a drag-and-drop board organized by stage. The stages are Lead, Qualified, Proposal, Verbal Commit, Closed Won, and Closed Lost. Drag a deal's card between columns to change its stage.",
+    "The Pipeline tab is a drag-and-drop board organized by stage. The stages are Details Analysis, Demo, Proposal and Price Quote, Proposal Conversation, then Closed Won and Closed Lost. Drag a deal's card between columns to change its stage.",
   nexus:
     "Nexus is the customizable dashboard and has its own tab. Click Add a Widget in the top right, choose a widget type (Today's Tasks, Current Pipeline, Custom Report, Metrics, Pinned Records, or Requests), and drag widgets to rearrange them.",
 };
@@ -301,7 +306,7 @@ serve(async (req) => {
     { name: "get_account", description: "Full detail for one account by id: fields, last activity date, open opportunity count, and 5 most-recent activities.", input_schema: { type: "object", properties: { account_id: { type: "string" } }, required: ["account_id"] } },
     { name: "search_contacts", description: "Search/filter contacts (people). Args: query (name/email), owner, tag (e.g. 'Warm Lead'), do_not_call (bool), no_longer_employed (bool), limit.", input_schema: { type: "object", properties: { query: { type: "string" }, owner: { type: "string" }, tag: { type: "string" }, do_not_call: { type: "boolean" }, no_longer_employed: { type: "boolean" }, limit: { type: "integer" } } } },
     { name: "get_contact", description: "Full detail for one contact by id, including their account.", input_schema: { type: "object", properties: { contact_id: { type: "string" } }, required: ["contact_id"] } },
-    { name: "search_opportunities", description: "Search/filter opportunities (deals). Args: query (name), owner, open_only (true = only in-flight deals: Lead/Qualified/Proposal/Verbal Commit), stage (a single stage if you need one specifically), team (sales|renewals), kind (new_business|renewal), min_amount, sort_by ('amount' = biggest first, or 'close_date' = soonest first, the default), limit (max 25). Returns the true total match count plus the rows. For 'top open deals by amount' set open_only=true and sort_by='amount'.", input_schema: { type: "object", properties: { query: { type: "string" }, owner: { type: "string" }, open_only: { type: "boolean" }, stage: { type: "string" }, team: { type: "string" }, kind: { type: "string" }, min_amount: { type: "number" }, sort_by: { type: "string", enum: ["amount", "close_date"] }, limit: { type: "integer" } } } },
+    { name: "search_opportunities", description: "Search/filter opportunities (deals). Args: query (name), owner, open_only (true = only in-flight deals, i.e. Details Analysis / Demo / Proposal and Price Quote / Proposal Conversation), stage (a single raw stage value if you need one specifically), team (sales|renewals), kind (new_business|renewal), min_amount, sort_by ('amount' = biggest first, or 'close_date' = soonest first, the default), limit (max 25). Returns the true total match count plus the rows. For 'top open deals by amount' set open_only=true and sort_by='amount'.", input_schema: { type: "object", properties: { query: { type: "string" }, owner: { type: "string" }, open_only: { type: "boolean" }, stage: { type: "string" }, team: { type: "string" }, kind: { type: "string" }, min_amount: { type: "number" }, sort_by: { type: "string", enum: ["amount", "close_date"] }, limit: { type: "integer" } } } },
     { name: "pipeline_summary", description: "Open-pipeline counts and total amount grouped by stage. Optional owner ('me' or a name).", input_schema: { type: "object", properties: { owner: { type: "string" } } } },
     { name: "list_renewals", description: "Upcoming customer contract renewals: closed-won deals whose contract ends within N days (default 90, max 120). This matches the Renewals tab and the dashboard's 'Renewals Due' metric. Returns the true total plus the soonest rows.", input_schema: { type: "object", properties: { within_days: { type: "integer" } } } },
     { name: "list_my_tasks", description: "The current user's tasks. Args: status ('open'|'completed', default open), overdue (bool).", input_schema: { type: "object", properties: { status: { type: "string" }, overdue: { type: "boolean" } } } },
@@ -318,7 +323,7 @@ serve(async (req) => {
     "For 'how do I' questions, use only the steps the how_do_i tool gives you. Do not invent button names, menu paths, or steps you were not given. If there is no specific guide, say you are not certain of the exact steps and point the person to the most relevant tab.",
     "Voice: write like a helpful teammate, not a chatbot. Use plain, direct sentences. Do not use em dashes; use commas, periods, or the word 'to' instead. Skip cheerful sign-offs like 'Just let me know!'. Do not keep announcing that you are an AI. Keep formatting light: short paragraphs, with a simple bullet or numbered list only when you are actually listing items, and use bold sparingly. Show dollar amounts with a $ and commas.",
     "When you reference specific records, name them; the app turns them into clickable links from the records you retrieved.",
-    "Medcurity terms: pipeline stages are Lead, Qualified, Proposal, Verbal Commit, Closed Won, Closed Lost. customer_status (client, prospect, former_client) is the real customer state. A renewal is an opportunity with kind = renewal.",
+    "Medcurity terms: the live pipeline stages are Details Analysis (details_analysis), Demo (demo), Proposal and Price Quote (proposal_and_price_quote), and Proposal Conversation (proposal_conversation), then Closed Won and Closed Lost. Always refer to a stage by its friendly name, never the raw snake_case value. customer_status (client, prospect, former_client) is the real customer state. A renewal is an opportunity with kind = renewal.",
   ].join("\n");
 
   // ── Bounded tool-use loop ───────────────────────────────────────────
