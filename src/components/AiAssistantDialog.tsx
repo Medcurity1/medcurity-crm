@@ -1,28 +1,41 @@
-import { useState } from "react";
-import { Sparkles, Send, Lightbulb } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Sparkles, Send, Building2, User, Target, ArrowUpRight, ShieldCheck } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
+import { supabase } from "@/lib/supabase";
 
-/**
- * Placeholder AI assistant dialog. Not yet wired to a live model — the
- * goal is a clear scaffold Brayden can see in the top bar and that we
- * can swap in a Claude / Anthropic edge function call behind later.
- *
- * When wired up, prompts like "qualify my leads as hot/warm/cold" or
- * "run a report of Q3 closed-won by rep" would get routed to a Claude
- * API edge function with tool access to read-only CRM views + a
- * narrow set of write actions (lead.qualification, report
- * generation). Data integrity is protected by limiting tool calls
- * to a curated allowlist and showing a diff/preview before any write.
- */
+// Ask AI — read-only CRM assistant. Talks to the `ask-ai` edge function,
+// which answers using a fixed allowlist of read-only lookups scoped to the
+// caller's own permissions. It cannot change any data; these are just Q&A.
+
+type Source = { type: string; id: string; label: string };
+type Msg = { role: "user" | "assistant"; content: string; sources?: Source[]; error?: boolean };
+
+const SOURCE_META: Record<string, { path: string; icon: typeof Building2 }> = {
+  account: { path: "/accounts", icon: Building2 },
+  contact: { path: "/contacts", icon: User },
+  opportunity: { path: "/opportunities", icon: Target },
+};
+
+const EXAMPLES = [
+  "Which of my open deals close in the next 30 days?",
+  "Summarize the account Mallory Community Health Center",
+  "How's my pipeline looking by stage?",
+  "Show my warm-lead contacts I haven't touched lately",
+  "What renewals are coming up in the next 60 days?",
+  "How do I archive a contact?",
+];
+
 export function AiAssistantDialog({
   open,
   onOpenChange,
@@ -31,85 +44,151 @@ export function AiAssistantDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const [prompt, setPrompt] = useState("");
+  const [messages, setMessages] = useState<Msg[]>([]);
+  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  function handleSubmit() {
-    // Wired to a backend edge function later. For now, acknowledge.
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, loading]);
+
+  async function send(text: string) {
+    const q = text.trim();
+    if (!q || loading) return;
+    const history = messages.map((m) => ({ role: m.role, content: m.content }));
+    setMessages((m) => [...m, { role: "user", content: q }]);
     setPrompt("");
-    onOpenChange(false);
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("ask-ai", {
+        body: { question: q, messages: history },
+      });
+      if (error) throw error;
+      if (data?.error) {
+        setMessages((m) => [...m, { role: "assistant", content: data.message || "Something went wrong.", error: true }]);
+      } else {
+        setMessages((m) => [...m, { role: "assistant", content: data.answer ?? "", sources: data.sources ?? [] }]);
+      }
+    } catch (e) {
+      setMessages((m) => [...m, {
+        role: "assistant",
+        content: "I couldn't reach the assistant just now. Please try again in a moment.",
+        error: true,
+      }]);
+    } finally {
+      setLoading(false);
+    }
   }
 
-  const examples = [
-    "Qualify my leads as hot, warm, or cold based on activity in the last 30 days",
-    "Run a Closed Won report for this quarter grouped by owner",
-    "Which accounts haven't had any activity in 60+ days?",
-    "Draft a follow-up email for all prospects that asked about SRA pricing",
-    "Summarize the activity on Acme Corp this month",
-  ];
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-md">
+        <SheetHeader className="border-b px-4 py-3 text-left">
+          <SheetTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-primary" />
-            AI Assistant
-          </DialogTitle>
-          <DialogDescription>
-            Ask in plain English. The assistant will read your CRM data and
-            either answer directly, preview a change for you to confirm, or
-            run a report.
-          </DialogDescription>
-        </DialogHeader>
+            Ask AI
+          </SheetTitle>
+          <SheetDescription className="flex items-center gap-1.5 text-xs">
+            <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+            Read-only — searches and summarizes your data, never changes it.
+          </SheetDescription>
+        </SheetHeader>
 
-        <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-900 p-3 text-sm">
-          <p className="font-medium text-amber-900 dark:text-amber-200 flex items-center gap-1">
-            <Lightbulb className="h-4 w-4" />
-            Preview
-          </p>
-          <p className="text-amber-900 dark:text-amber-300 text-xs mt-1">
-            Backend isn't wired yet — this is a UI placeholder so reps get
-            familiar with the entry point. Prompts here don't actually run
-            anything yet.
-          </p>
-        </div>
+        {/* ── Conversation ── */}
+        <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+          {messages.length === 0 && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Ask about your accounts, contacts, deals, pipeline, renewals, or tasks — in plain English.
+              </p>
+              <div className="space-y-1.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Try asking</p>
+                {EXAMPLES.map((ex) => (
+                  <button
+                    key={ex}
+                    type="button"
+                    onClick={() => send(ex)}
+                    className="block w-full rounded-md border border-border bg-muted/30 px-3 py-1.5 text-left text-xs text-foreground/80 transition-colors hover:bg-muted"
+                  >
+                    {ex}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
-        <div className="space-y-2">
-          <Textarea
-            rows={4}
-            placeholder="Ask the assistant..."
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-          />
-        </div>
-
-        <div className="space-y-1">
-          <p className="text-xs font-semibold text-muted-foreground uppercase">
-            Try asking
-          </p>
-          <div className="space-y-1">
-            {examples.map((ex) => (
-              <button
-                key={ex}
-                type="button"
-                className="w-full text-left text-xs text-blue-600 hover:underline"
-                onClick={() => setPrompt(ex)}
+          {messages.map((m, i) => (
+            <div key={i} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+              <div
+                className={cn(
+                  "max-w-[85%] rounded-2xl px-3.5 py-2 text-sm",
+                  m.role === "user"
+                    ? "rounded-br-sm bg-primary text-primary-foreground"
+                    : m.error
+                      ? "rounded-bl-sm border border-red-500/40 bg-red-500/5 text-foreground"
+                      : "rounded-bl-sm bg-muted text-foreground",
+                )}
               >
-                "{ex}"
-              </button>
-            ))}
+                <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                {m.sources && m.sources.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {m.sources.slice(0, 12).map((s) => {
+                      const meta = SOURCE_META[s.type];
+                      if (!meta) return null;
+                      const Icon = meta.icon;
+                      return (
+                        <Link
+                          key={`${s.type}:${s.id}`}
+                          to={`${meta.path}/${s.id}`}
+                          onClick={() => onOpenChange(false)}
+                          className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2 py-0.5 text-xs text-foreground/80 transition-colors hover:bg-accent hover:text-accent-foreground"
+                        >
+                          <Icon className="h-3 w-3" />
+                          <span className="max-w-[140px] truncate">{s.label || "record"}</span>
+                          <ArrowUpRight className="h-3 w-3 opacity-60" />
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {loading && (
+            <div className="flex justify-start">
+              <div className="max-w-[85%] space-y-1.5 rounded-2xl rounded-bl-sm bg-muted px-3.5 py-2.5">
+                <Skeleton className="h-3 w-40" />
+                <Skeleton className="h-3 w-24" />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Composer ── */}
+        <div className="border-t p-3">
+          <div className="flex items-end gap-2">
+            <Textarea
+              rows={1}
+              value={prompt}
+              disabled={loading}
+              placeholder="Ask about your CRM…"
+              spellCheck
+              className="max-h-32 min-h-[42px] resize-none"
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send(prompt);
+                }
+              }}
+            />
+            <Button size="icon" disabled={!prompt.trim() || loading} onClick={() => send(prompt)}>
+              <Send className="h-4 w-4" />
+            </Button>
           </div>
         </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={handleSubmit} disabled={!prompt.trim()}>
-            <Send className="h-4 w-4 mr-1" />
-            Send
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 }

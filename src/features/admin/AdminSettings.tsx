@@ -25,6 +25,7 @@ import { RequestsInbox } from "@/features/requests/RequestsInbox";
 import { RoutingEditor } from "@/features/requests/RoutingEditor";
 import { MeddyAdminPanel } from "@/features/meddy/MeddyAdminPanel";
 import { NexusAdminPanel } from "@/features/nexus/NexusAdminPanel";
+import { AiAssistantAdmin } from "./AiAssistantAdmin";
 import { Loader2 } from "lucide-react";
 
 /**
@@ -46,6 +47,7 @@ const TOP_TABS = [
   "requests",
   "meddy",
   "nexus",
+  "ai-assistant",
   "audit-log",
   "data-health",
   "data-cleanup",
@@ -174,6 +176,7 @@ export function AdminSettings() {
           <TabsTrigger value="requests">Requests</TabsTrigger>
           <TabsTrigger value="meddy">Meddy</TabsTrigger>
           <TabsTrigger value="nexus">Nexus</TabsTrigger>
+          <TabsTrigger value="ai-assistant">AI Assistant</TabsTrigger>
           <TabsTrigger value="audit-log">Audit Log</TabsTrigger>
           <TabsTrigger value="data-health">Data Health</TabsTrigger>
           <TabsTrigger value="data-cleanup">Data Cleanup</TabsTrigger>
@@ -324,6 +327,20 @@ export function AdminSettings() {
         {/* ---------- NEXUS (homepage widget layouts) ---------- */}
         <TabsContent value="nexus">
           <NexusAdminPanel />
+        </TabsContent>
+
+        {/* ---------- AI ASSISTANT (Ask AI read-only assistant) ---------- */}
+        <TabsContent value="ai-assistant">
+          <Card className="p-6">
+            <div className="space-y-1 mb-6">
+              <h2 className="text-lg font-semibold">Ask AI</h2>
+              <p className="text-sm text-muted-foreground">
+                Control the read-only AI assistant: which lookups it can perform,
+                usage limits, the model it runs on, and recent activity.
+              </p>
+            </div>
+            <AiAssistantAdmin />
+          </Card>
         </TabsContent>
 
         {/* ---------- AUDIT / HEALTH / SYSTEM ---------- */}
