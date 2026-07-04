@@ -136,21 +136,9 @@ export function AppLayout() {
     onQuickCreate: useCallback(() => setShowQuickCreate(true), []),
     onShowHelp: useCallback(() => setShowShortcutsHelp(true), []),
     onQuickTask: useCallback(() => setShowQuickTask(true), []),
+    onAskAi: useCallback(() => setShowAssistant(true), []),
     quickTaskShortcut: prefs.quickTaskShortcut,
   });
-
-  // Cmd/Ctrl+/ opens Ask AI from anywhere. (Cmd+J is taken by Chrome's
-  // Downloads; Cmd+K is the global search.)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "/") {
-        e.preventDefault();
-        setShowAssistant(true);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
 
   const section = location.pathname.split("/")[1] || "";
   const sectionName = pathMap[section] ?? section;
@@ -245,7 +233,7 @@ export function AppLayout() {
               variant="ghost"
               size="sm"
               onClick={() => setShowAssistant(true)}
-              title="Ask AI  (⌘/)"
+              title="Ask AI  (G then I)"
               className="gap-1.5"
             >
               <Sparkles className="h-4 w-4 text-primary" />
