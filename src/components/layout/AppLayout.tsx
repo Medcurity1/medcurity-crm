@@ -139,10 +139,11 @@ export function AppLayout() {
     quickTaskShortcut: prefs.quickTaskShortcut,
   });
 
-  // Cmd/Ctrl+J opens Ask AI from anywhere.
+  // Cmd/Ctrl+/ opens Ask AI from anywhere. (Cmd+J is taken by Chrome's
+  // Downloads; Cmd+K is the global search.)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && (e.key === "j" || e.key === "J")) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "/") {
         e.preventDefault();
         setShowAssistant(true);
       }
@@ -244,7 +245,7 @@ export function AppLayout() {
               variant="ghost"
               size="sm"
               onClick={() => setShowAssistant(true)}
-              title="Ask AI  (⌘J)"
+              title="Ask AI  (⌘/)"
               className="gap-1.5"
             >
               <Sparkles className="h-4 w-4 text-primary" />
