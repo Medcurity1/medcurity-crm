@@ -42,16 +42,26 @@ function renderInline(text: string) {
   return parts.map((p, i) => (i % 2 === 1 ? <strong key={i}>{p}</strong> : p));
 }
 
+function parseRow(line: string): string[] {
+  return line.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+}
+// A markdown table separator row like |---|:--:|---|
+function isTableSeparator(line: string): boolean {
+  return /^\s*\|?[\s:|-]+\|?\s*$/.test(line) && line.includes("-");
+}
+
 function RichText({ text }: { text: string }) {
   const lines = text.split("\n");
   const blocks: ReactElement[] = [];
-  let bucket: { ordered: boolean; items: string[] } | null = null;
-  const flush = () => {
-    if (!bucket) return;
-    const items = bucket.items;
+  let list: { ordered: boolean; items: string[] } | null = null;
+  let table: string[][] | null = null;
+
+  const flushList = () => {
+    if (!list) return;
+    const items = list.items;
     const key = `l${blocks.length}`;
     blocks.push(
-      bucket.ordered ? (
+      list.ordered ? (
         <ol key={key} className="list-decimal space-y-0.5 pl-5">
           {items.map((it, i) => <li key={i}>{renderInline(it)}</li>)}
         </ol>
@@ -61,22 +71,60 @@ function RichText({ text }: { text: string }) {
         </ul>
       ),
     );
-    bucket = null;
+    list = null;
   };
+  const flushTable = () => {
+    if (!table || table.length === 0) { table = null; return; }
+    const [head, ...body] = table;
+    blocks.push(
+      <div key={`t${blocks.length}`} className="overflow-x-auto rounded-lg border border-border/60">
+        <table className="w-full border-collapse text-xs">
+          <thead>
+            <tr className="bg-muted/50">
+              {head.map((h, i) => (
+                <th key={i} className="px-2.5 py-1.5 text-left font-semibold">{renderInline(h)}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {body.map((row, ri) => (
+              <tr key={ri} className="border-t border-border/50">
+                {row.map((c, ci) => (
+                  <td key={ci} className="px-2.5 py-1.5">{renderInline(c)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>,
+    );
+    table = null;
+  };
+  const flush = () => { flushList(); flushTable(); };
+
   lines.forEach((raw) => {
     const line = raw.trimEnd();
+    // Table rows: a line wrapped in pipes.
+    if (/^\s*\|.*\|\s*$/.test(line)) {
+      flushList();
+      if (isTableSeparator(line)) return; // skip the |---|---| divider
+      table = table ?? [];
+      table.push(parseRow(line));
+      return;
+    }
+    flushTable();
     const b = line.match(/^\s*[-*]\s+(.*)$/);
     const n = line.match(/^\s*\d+\.\s+(.*)$/);
     if (b) {
-      if (!bucket || bucket.ordered) { flush(); bucket = { ordered: false, items: [] }; }
-      bucket.items.push(b[1]);
+      if (!list || list.ordered) { flushList(); list = { ordered: false, items: [] }; }
+      list.items.push(b[1]);
     } else if (n) {
-      if (!bucket || !bucket.ordered) { flush(); bucket = { ordered: true, items: [] }; }
-      bucket.items.push(n[1]);
+      if (!list || !list.ordered) { flushList(); list = { ordered: true, items: [] }; }
+      list.items.push(n[1]);
     } else if (line.trim() === "") {
-      flush();
+      flushList();
     } else {
-      flush();
+      flushList();
       blocks.push(<p key={`p${blocks.length}`}>{renderInline(line)}</p>);
     }
   });
