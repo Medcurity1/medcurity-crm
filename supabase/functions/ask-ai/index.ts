@@ -254,19 +254,20 @@ serve(async (req) => {
       return { forModel: { by_stage: byStage, truncated: (data?.length ?? 0) >= 2000 } };
     },
     async list_renewals(a) {
-      const within = Math.min(Math.max(parseInt(String(a.within_days ?? 90), 10) || 90, 1), 365);
-      const until = new Date(Date.now() + within * 86400_000).toISOString().slice(0, 10);
-      const { data, error } = await userClient.from("opportunities")
-        .select("id, name, amount, expected_close_date, account_id, owner_user_id")
-        .eq("kind", "renewal").in("stage", OPEN_STAGES).is("archived_at", null)
-        // Match the Renewals tab: include renewals with no close date set yet
-        // (NULL <= date is NULL, which would silently drop them).
-        .or(`expected_close_date.is.null,expected_close_date.lte.${until}`)
-        .order("expected_close_date", { ascending: true, nullsFirst: false }).limit(MAX_ROWS);
+      // Use the same renewal_queue view the dashboard's "Renewals Due"
+      // metric uses: closed-won deals whose contract_end_date is within the
+      // window. count:exact returns the true total so we never undercount
+      // when the row list is capped.
+      const within = Math.min(Math.max(parseInt(String(a.within_days ?? 90), 10) || 90, 1), 120);
+      const { data, error, count } = await userClient.from("renewal_queue")
+        .select("source_opportunity_id, account_id, account_name, current_arr, contract_end_date, days_until_renewal", { count: "exact" })
+        .gte("days_until_renewal", 0)
+        .lte("days_until_renewal", within)
+        .order("days_until_renewal", { ascending: true }).limit(MAX_ROWS);
       if (error) return { forModel: { error: error.message } };
       return {
-        forModel: data,
-        sources: (data ?? []).map((r: any) => ({ type: "opportunity", id: r.id, label: r.name })),
+        forModel: { total: count ?? data?.length ?? 0, showing: data?.length ?? 0, renewals: data ?? [] },
+        sources: (data ?? []).map((r: any) => ({ type: "account", id: r.account_id, label: r.account_name })),
       };
     },
     async list_my_tasks(a) {
@@ -295,7 +296,7 @@ serve(async (req) => {
     { name: "get_contact", description: "Full detail for one contact by id, including their account.", input_schema: { type: "object", properties: { contact_id: { type: "string" } }, required: ["contact_id"] } },
     { name: "search_opportunities", description: "Search/filter opportunities (deals). Args: query (name), owner, stage (lead|qualified|proposal|verbal_commit|closed_won|closed_lost), team (sales|renewals), kind (new_business|renewal), min_amount, limit.", input_schema: { type: "object", properties: { query: { type: "string" }, owner: { type: "string" }, stage: { type: "string" }, team: { type: "string" }, kind: { type: "string" }, min_amount: { type: "number" }, limit: { type: "integer" } } } },
     { name: "pipeline_summary", description: "Open-pipeline counts and total amount grouped by stage. Optional owner ('me' or a name).", input_schema: { type: "object", properties: { owner: { type: "string" } } } },
-    { name: "list_renewals", description: "Upcoming renewal opportunities due within N days (default 90).", input_schema: { type: "object", properties: { within_days: { type: "integer" } } } },
+    { name: "list_renewals", description: "Upcoming customer contract renewals: closed-won deals whose contract ends within N days (default 90, max 120). This matches the Renewals tab and the dashboard's 'Renewals Due' metric. Returns the true total plus the soonest rows.", input_schema: { type: "object", properties: { within_days: { type: "integer" } } } },
     { name: "list_my_tasks", description: "The current user's tasks. Args: status ('open'|'completed', default open), overdue (bool).", input_schema: { type: "object", properties: { status: { type: "string" }, overdue: { type: "boolean" } } } },
     { name: "how_do_i", description: "Get product help for using Pulse. Arg: topic (e.g. 'archive contacts', 'renewals', 'warm lead').", input_schema: { type: "object", properties: { topic: { type: "string" } }, required: ["topic"] } },
   ];
