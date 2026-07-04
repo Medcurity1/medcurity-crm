@@ -148,7 +148,7 @@ serve(async (req) => {
   const TOOL_IMPLS: Record<string, (args: Record<string, unknown>) => Promise<ToolOut>> = {
     async search_accounts(a) {
       let q = userClient.from("accounts")
-        .select("id, name, customer_status, industry, billing_state, owner_user_id")
+        .select("id, name, customer_status, industry, billing_state, owner_user_id", { count: "exact" })
         .is("archived_at", null).limit(cap(a.limit));
       if (a.query) q = q.ilike("name", `%${String(a.query)}%`);
       if (a.customer_status) q = q.eq("customer_status", String(a.customer_status));
@@ -158,10 +158,10 @@ serve(async (req) => {
       if (a.industry) q = q.ilike("industry", `%${String(a.industry)}%`);
       const owner = await resolveOwner(a.owner as string | undefined);
       if (owner) q = q.eq("owner_user_id", owner);
-      const { data, error } = await q;
+      const { data, error, count } = await q;
       if (error) return { forModel: { error: error.message } };
       return {
-        forModel: data,
+        forModel: { total: count ?? data?.length ?? 0, showing: data?.length ?? 0, accounts: data ?? [] },
         sources: (data ?? []).map((r: any) => ({ type: "account", id: r.id, label: r.name })),
       };
     },
@@ -185,7 +185,7 @@ serve(async (req) => {
     },
     async search_contacts(a) {
       let q = userClient.from("contacts")
-        .select("id, first_name, last_name, title, email, account_id, owner_user_id, do_not_call, no_longer_employed")
+        .select("id, first_name, last_name, title, email, account_id, owner_user_id, do_not_call, no_longer_employed", { count: "exact" })
         .is("archived_at", null).limit(cap(a.limit));
       if (a.query) {
         // Strip PostgREST filter metacharacters so a search term can't inject
@@ -205,10 +205,10 @@ serve(async (req) => {
         if (!ids.length) return { forModel: { results: [] } };
         q = q.in("id", ids);
       }
-      const { data, error } = await q;
+      const { data, error, count } = await q;
       if (error) return { forModel: { error: error.message } };
       return {
-        forModel: data,
+        forModel: { total: count ?? data?.length ?? 0, showing: data?.length ?? 0, contacts: data ?? [] },
         sources: (data ?? []).map((r: any) => ({ type: "contact", id: r.id, label: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() })),
       };
     },
@@ -221,19 +221,26 @@ serve(async (req) => {
     },
     async search_opportunities(a) {
       let q = userClient.from("opportunities")
-        .select("id, name, stage, amount, expected_close_date, kind, team, account_id, owner_user_id")
+        .select("id, name, stage, amount, expected_close_date, kind, team, account_id, owner_user_id", { count: "exact" })
         .is("archived_at", null).limit(cap(a.limit));
       if (a.query) q = q.ilike("name", `%${String(a.query)}%`);
-      if (a.stage && OPP_STAGES.includes(String(a.stage))) q = q.eq("stage", String(a.stage));
+      // open_only = the four in-flight stages; else honor a single stage.
+      if (a.open_only === true) q = q.in("stage", OPEN_STAGES);
+      else if (a.stage && OPP_STAGES.includes(String(a.stage))) q = q.eq("stage", String(a.stage));
       if (a.team) q = q.eq("team", String(a.team));
       if (a.kind) q = q.eq("kind", String(a.kind));
       if (a.min_amount != null) q = q.gte("amount", Number(a.min_amount));
       const owner = await resolveOwner(a.owner as string | undefined);
       if (owner) q = q.eq("owner_user_id", owner);
-      const { data, error } = await q.order("expected_close_date", { ascending: true, nullsFirst: false });
+      q = a.sort_by === "amount"
+        ? q.order("amount", { ascending: false, nullsFirst: false })
+        : q.order("expected_close_date", { ascending: true, nullsFirst: false });
+      const { data, error, count } = await q;
       if (error) return { forModel: { error: error.message } };
       return {
-        forModel: data,
+        // total (from count) tells the model how many matched even when the
+        // row list is capped, so it never says "only one" over a capped set.
+        forModel: { total: count ?? data?.length ?? 0, showing: data?.length ?? 0, opportunities: data ?? [] },
         sources: (data ?? []).map((r: any) => ({ type: "opportunity", id: r.id, label: r.name })),
       };
     },
@@ -294,7 +301,7 @@ serve(async (req) => {
     { name: "get_account", description: "Full detail for one account by id: fields, last activity date, open opportunity count, and 5 most-recent activities.", input_schema: { type: "object", properties: { account_id: { type: "string" } }, required: ["account_id"] } },
     { name: "search_contacts", description: "Search/filter contacts (people). Args: query (name/email), owner, tag (e.g. 'Warm Lead'), do_not_call (bool), no_longer_employed (bool), limit.", input_schema: { type: "object", properties: { query: { type: "string" }, owner: { type: "string" }, tag: { type: "string" }, do_not_call: { type: "boolean" }, no_longer_employed: { type: "boolean" }, limit: { type: "integer" } } } },
     { name: "get_contact", description: "Full detail for one contact by id, including their account.", input_schema: { type: "object", properties: { contact_id: { type: "string" } }, required: ["contact_id"] } },
-    { name: "search_opportunities", description: "Search/filter opportunities (deals). Args: query (name), owner, stage (lead|qualified|proposal|verbal_commit|closed_won|closed_lost), team (sales|renewals), kind (new_business|renewal), min_amount, limit.", input_schema: { type: "object", properties: { query: { type: "string" }, owner: { type: "string" }, stage: { type: "string" }, team: { type: "string" }, kind: { type: "string" }, min_amount: { type: "number" }, limit: { type: "integer" } } } },
+    { name: "search_opportunities", description: "Search/filter opportunities (deals). Args: query (name), owner, open_only (true = only in-flight deals: Lead/Qualified/Proposal/Verbal Commit), stage (a single stage if you need one specifically), team (sales|renewals), kind (new_business|renewal), min_amount, sort_by ('amount' = biggest first, or 'close_date' = soonest first, the default), limit (max 25). Returns the true total match count plus the rows. For 'top open deals by amount' set open_only=true and sort_by='amount'.", input_schema: { type: "object", properties: { query: { type: "string" }, owner: { type: "string" }, open_only: { type: "boolean" }, stage: { type: "string" }, team: { type: "string" }, kind: { type: "string" }, min_amount: { type: "number" }, sort_by: { type: "string", enum: ["amount", "close_date"] }, limit: { type: "integer" } } } },
     { name: "pipeline_summary", description: "Open-pipeline counts and total amount grouped by stage. Optional owner ('me' or a name).", input_schema: { type: "object", properties: { owner: { type: "string" } } } },
     { name: "list_renewals", description: "Upcoming customer contract renewals: closed-won deals whose contract ends within N days (default 90, max 120). This matches the Renewals tab and the dashboard's 'Renewals Due' metric. Returns the true total plus the soonest rows.", input_schema: { type: "object", properties: { within_days: { type: "integer" } } } },
     { name: "list_my_tasks", description: "The current user's tasks. Args: status ('open'|'completed', default open), overdue (bool).", input_schema: { type: "object", properties: { status: { type: "string" }, overdue: { type: "boolean" } } } },
