@@ -148,12 +148,14 @@ serve(async (req) => {
   const TOOL_IMPLS: Record<string, (args: Record<string, unknown>) => Promise<ToolOut>> = {
     async search_accounts(a) {
       let q = userClient.from("accounts")
-        .select("id, name, customer_status, industry_category, billing_state, owner_user_id")
+        .select("id, name, customer_status, industry, billing_state, owner_user_id")
         .is("archived_at", null).limit(cap(a.limit));
       if (a.query) q = q.ilike("name", `%${String(a.query)}%`);
       if (a.customer_status) q = q.eq("customer_status", String(a.customer_status));
       if (a.state) q = q.ilike("billing_state", `%${String(a.state)}%`);
-      if (a.industry) q = q.ilike("industry_category", `%${String(a.industry)}%`);
+      // industry is the free-text column; industry_category is an enum and
+      // can't take ILIKE without a cast, so filter on the text one.
+      if (a.industry) q = q.ilike("industry", `%${String(a.industry)}%`);
       const owner = await resolveOwner(a.owner as string | undefined);
       if (owner) q = q.eq("owner_user_id", owner);
       const { data, error } = await q;
@@ -166,7 +168,7 @@ serve(async (req) => {
     async get_account(a) {
       const id = String(a.account_id ?? "");
       const { data: acct, error } = await userClient.from("accounts")
-        .select("id, name, customer_status, industry_category, billing_state, website, phone, owner_user_id, created_at")
+        .select("id, name, customer_status, industry, billing_state, website, phone, owner_user_id, created_at")
         .eq("id", id).maybeSingle();
       if (error || !acct) return { forModel: { error: "account not found or not visible to you" } };
       const [{ data: la }, { count: openOpps }, { data: recent }] = await Promise.all([
