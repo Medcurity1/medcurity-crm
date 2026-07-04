@@ -260,9 +260,16 @@ export function CustomReportPanel({
         {addableFilters.length > 0 && (
           <Select value="" onValueChange={addFilter}>
             <SelectTrigger className="h-8 w-full text-sm text-muted-foreground">
-              <span className="flex items-center gap-1.5">
-                <Plus className="h-3.5 w-3.5" /> Add filter
-              </span>
+              {/* Always render a <SelectValue> in the trigger — Radix's
+                  item-aligned positioning needs it, and without it the
+                  listbox mounts off-screen (see components/ui/select.tsx). */}
+              <SelectValue
+                placeholder={
+                  <span className="flex items-center gap-1.5">
+                    <Plus className="h-3.5 w-3.5" /> Add filter
+                  </span>
+                }
+              />
             </SelectTrigger>
             <SelectContent>
               {addableFilters.map((d) => (
@@ -366,9 +373,15 @@ export function CustomReportPanel({
         {addableColumns.length > 0 && config.columns.length < REPORT_MAX_COLUMNS && (
           <Select value="" onValueChange={addColumn}>
             <SelectTrigger className="h-8 w-full text-sm text-muted-foreground">
-              <span className="flex items-center gap-1.5">
-                <Plus className="h-3.5 w-3.5" /> Add column
-              </span>
+              {/* See "Add filter" above — SelectValue is required for
+                  correct listbox positioning. */}
+              <SelectValue
+                placeholder={
+                  <span className="flex items-center gap-1.5">
+                    <Plus className="h-3.5 w-3.5" /> Add column
+                  </span>
+                }
+              />
             </SelectTrigger>
             <SelectContent>
               {addableColumns.map((c) => (

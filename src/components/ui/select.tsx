@@ -50,11 +50,20 @@ function SelectTrigger({
   )
 }
 
+// TRAP (do not revert to position="item-aligned" as the default): Radix's
+// item-aligned positioning silently no-ops unless the trigger renders a
+// <SelectValue> (it needs context.valueNode + a selected/first item to
+// measure). A trigger with a bare <span> (e.g. the report builder's
+// "Add filter"/"Add column") still *opens*, but its listbox mounts as
+// position:fixed with NO coordinates and parks at (0, innerHeight) —
+// fully off-screen, indistinguishable from "the Select never opens".
+// "popper" (the upstream shadcn default) anchors to the trigger and has
+// no such dependency.
 function SelectContent({
   className,
   children,
-  position = "item-aligned",
-  align = "center",
+  position = "popper",
+  align = "start",
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
   return (
