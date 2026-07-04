@@ -44,6 +44,7 @@ const OPEN_STAGES = ["lead", "qualified", "proposal", "verbal_commit"];
 const MAX_ROWS = 25; // hard cap on any list a tool returns
 const MAX_TOOL_LOOPS = 6; // bounded agent loop
 const DEFAULT_MODEL = "claude-sonnet-5";
+const FALLBACK_MODEL = "claude-haiku-4-5-20251001"; // known-good if the preferred model id is rejected
 
 type Source = { type: string; id: string; label: string };
 type ToolOut = { forModel: unknown; sources?: Source[] };
@@ -184,7 +185,12 @@ serve(async (req) => {
       let q = userClient.from("contacts")
         .select("id, first_name, last_name, title, email, account_id, owner_user_id, do_not_call, no_longer_employed")
         .is("archived_at", null).limit(cap(a.limit));
-      if (a.query) q = q.or(`first_name.ilike.%${a.query}%,last_name.ilike.%${a.query}%,email.ilike.%${a.query}%`);
+      if (a.query) {
+        // Strip PostgREST filter metacharacters so a search term can't inject
+        // extra OR-conditions into the string-built .or() clause.
+        const s = String(a.query).replace(/[,()*]/g, " ").slice(0, 120);
+        q = q.or(`first_name.ilike.%${s}%,last_name.ilike.%${s}%,email.ilike.%${s}%`);
+      }
       if (typeof a.do_not_call === "boolean") q = q.eq("do_not_call", a.do_not_call);
       if (typeof a.no_longer_employed === "boolean") q = q.eq("no_longer_employed", a.no_longer_employed);
       const owner = await resolveOwner(a.owner as string | undefined);
@@ -311,6 +317,15 @@ serve(async (req) => {
   const sources: Source[] = [];
   const seen = new Set<string>();
   let answer = "";
+  let activeModel = model;
+
+  async function finishLog(ok: boolean) {
+    try {
+      await svc.from("ai_query_log").insert({
+        user_id: user.id, question, tools_called: toolsCalled, answer_chars: answer.length, ok,
+      });
+    } catch { /* logging must never break the response */ }
+  }
 
   try {
     for (let loop = 0; loop < MAX_TOOL_LOOPS; loop++) {
@@ -318,7 +333,7 @@ serve(async (req) => {
         method: "POST",
         headers: { "x-api-key": anthropicKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
         body: JSON.stringify({
-          model, max_tokens: 1200,
+          model: activeModel, max_tokens: 1200,
           system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
           tools, messages,
         }),
@@ -326,6 +341,13 @@ serve(async (req) => {
       if (!res.ok) {
         const t = await res.text();
         console.error("[ask-ai] anthropic error", res.status, t.slice(0, 300));
+        // If the preferred model id is rejected (4xx), fall back once to the
+        // known-good model and retry this turn.
+        if (res.status >= 400 && res.status < 500 && activeModel !== FALLBACK_MODEL) {
+          activeModel = FALLBACK_MODEL;
+          continue;
+        }
+        await finishLog(false);
         return json({ error: "ai_error", message: "The assistant hit an error. Please try again." }, 502);
       }
       const data = await res.json();
@@ -362,15 +384,11 @@ serve(async (req) => {
     }
   } catch (e) {
     console.error("[ask-ai] loop error", (e as Error).message);
+    await finishLog(false);
     return json({ error: "ai_error", message: "The assistant hit an error. Please try again." }, 502);
   }
 
   answer = answer.trim() || "I couldn't find anything for that. Try rephrasing?";
-
-  // ── Audit log (service role; always records) ────────────────────────
-  await svc.from("ai_query_log").insert({
-    user_id: user.id, question, tools_called: toolsCalled, answer_chars: answer.length, ok: true,
-  });
-
+  await finishLog(true);
   return json({ answer, sources, tools_called: toolsCalled });
 });
