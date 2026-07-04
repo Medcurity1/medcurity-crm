@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
@@ -400,7 +401,13 @@ function nullableCompare(a: unknown, b: unknown): number {
 
 function dateValue(s: string | null): number | null {
   if (!s) return null;
-  const t = new Date(s).getTime();
+  // Parse date-only strings as LOCAL midnight (via parseLocalDate) so any
+  // day-count derived from this value (e.g. the "days" sort column, which
+  // subtracts a LOCAL-midnight `today`) doesn't drift by one in negative-offset
+  // timezones. Bare `new Date('YYYY-MM-DD')` parses as UTC midnight, which
+  // caused the off-by-one. parseLocalDate slices to the first 10 chars, so a
+  // full ISO timestamp still resolves to that day's local midnight.
+  const t = parseLocalDate(s).getTime();
   return Number.isFinite(t) ? t : null;
 }
 
@@ -856,8 +863,20 @@ export function RenewalsQueue() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [owners.join(","), excludeAccount, customRange.start, customRange.end, preset]);
 
-  const { data: upcoming, isLoading: upcomingLoading } = useUpcomingRenewals();
-  const { data: closedWon, isLoading: closedLoading } = useClosedWonRenewals();
+  const {
+    data: upcoming,
+    isLoading: upcomingLoading,
+    isError: upcomingError,
+    refetch: refetchUpcoming,
+    isFetching: upcomingFetching,
+  } = useUpcomingRenewals();
+  const {
+    data: closedWon,
+    isLoading: closedLoading,
+    isError: closedError,
+    refetch: refetchClosed,
+    isFetching: closedFetching,
+  } = useClosedWonRenewals();
 
   function setPreset(v: DatePreset) {
     setSearchParams((prev) => {
@@ -1324,6 +1343,19 @@ export function RenewalsQueue() {
                 <Skeleton key={i} className="h-12 w-full" />
               ))}
             </div>
+          ) : upcomingError ? (
+            <EmptyState
+              icon={AlertTriangle}
+              title="Couldn't load renewals"
+              description="Something went wrong loading upcoming renewals. This is usually a momentary hiccup — try again."
+            >
+              <Button
+                onClick={() => refetchUpcoming()}
+                disabled={upcomingFetching}
+              >
+                {upcomingFetching ? "Retrying…" : "Try again"}
+              </Button>
+            </EmptyState>
           ) : !upcomingFiltered?.length ? (
             <EmptyState
               icon={RefreshCw}
@@ -1613,6 +1645,19 @@ export function RenewalsQueue() {
                 <Skeleton key={i} className="h-12 w-full" />
               ))}
             </div>
+          ) : closedError ? (
+            <EmptyState
+              icon={AlertTriangle}
+              title="Couldn't load renewals"
+              description="Something went wrong loading closed-won renewals. This is usually a momentary hiccup — try again."
+            >
+              <Button
+                onClick={() => refetchClosed()}
+                disabled={closedFetching}
+              >
+                {closedFetching ? "Retrying…" : "Try again"}
+              </Button>
+            </EmptyState>
           ) : !closedWonFiltered?.length ? (
             <EmptyState
               icon={RefreshCw}

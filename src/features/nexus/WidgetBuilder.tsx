@@ -255,12 +255,17 @@ export function WidgetBuilder({
   }
 
   const configError = validateWidgetConfig(type, config);
-  const canSave = !!name.trim() && !configError && !savePending;
+  // The name is only gated by config validity / pending — a blank or
+  // whitespace-only name is allowed because we fall back to the type's
+  // default name on save (see effectiveName). This guarantees a widget
+  // never persists with an empty title (which renders as a blank card).
+  const canSave = !configError && !savePending;
 
   function handleSave() {
     if (!canSave) return;
+    const effectiveName = name.trim() || TYPE_META[type].defaultName;
     const shared = {
-      name: name.trim(),
+      name: effectiveName,
       color,
       icon,
       preview_count: previewCount,

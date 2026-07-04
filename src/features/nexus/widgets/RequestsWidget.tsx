@@ -11,6 +11,7 @@ import { useRequests } from "@/features/requests/api";
 import { RequestCard } from "@/features/requests/RequestCard";
 import type { RequestType } from "@/types/crm";
 import type { RequestsWidgetCategory, RequestsWidgetConfig } from "../types";
+import { WidgetError } from "./WidgetError";
 import type { NexusWidgetBodyProps } from "../WidgetShell";
 
 /**
@@ -36,7 +37,14 @@ export function RequestsWidget({
       ? config.category
       : "all";
 
-  const { data: requests, isLoading, dataUpdatedAt } = useRequests({
+  const {
+    data: requests,
+    isLoading,
+    isError,
+    refetch,
+    isFetching,
+    dataUpdatedAt,
+  } = useRequests({
     requesterId: widget.user_id,
     pendingOnly: true, // 'pending' is the only non-terminal status
     type: typesFor(category),
@@ -53,6 +61,16 @@ export function RequestsWidget({
           <Skeleton key={i} className="h-12 w-full" />
         ))}
       </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <WidgetError
+        message="Couldn't load your requests."
+        onRetry={() => refetch()}
+        isRetrying={isFetching}
+      />
     );
   }
 

@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
 import { formatCurrency, formatDate, stageLabel } from "@/lib/formatters";
 import type { OpportunityStage } from "@/types/crm";
+import { WidgetError } from "./WidgetError";
 import type { NexusWidgetBodyProps } from "../WidgetShell";
 
 interface OpenOpportunity {
@@ -49,6 +50,9 @@ export function PipelineWidget({
   const {
     data: opps,
     isLoading,
+    isError,
+    refetch,
+    isFetching,
     dataUpdatedAt,
   } = useOwnerOpenOpportunities(widget.user_id, widget.preview_count);
 
@@ -63,6 +67,16 @@ export function PipelineWidget({
           <Skeleton key={i} className="h-10 w-full" />
         ))}
       </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <WidgetError
+        message="Couldn't load your pipeline."
+        onRetry={() => refetch()}
+        isRetrying={isFetching}
+      />
     );
   }
 

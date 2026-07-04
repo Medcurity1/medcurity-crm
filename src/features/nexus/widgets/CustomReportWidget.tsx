@@ -16,6 +16,7 @@ import {
   REPORT_COLUMNS,
   type ReportCell,
 } from "../report-engine";
+import { WidgetError } from "./WidgetError";
 import type { NexusWidgetBodyProps } from "../WidgetShell";
 
 function Cell({ cell }: { cell: ReportCell }) {
@@ -32,10 +33,14 @@ export function CustomReportWidget({
   onDataUpdated,
 }: NexusWidgetBodyProps) {
   const config = normalizeReportConfig(widget.config);
-  const { data: rows, isLoading, dataUpdatedAt } = useNexusReport(
-    widget.config,
-    widget.preview_count,
-  );
+  const {
+    data: rows,
+    isLoading,
+    isError,
+    refetch,
+    isFetching,
+    dataUpdatedAt,
+  } = useNexusReport(widget.config, widget.preview_count);
 
   useEffect(() => {
     if (dataUpdatedAt) onDataUpdated?.(dataUpdatedAt);
@@ -53,6 +58,16 @@ export function CustomReportWidget({
           <Skeleton key={i} className="h-8 w-full" />
         ))}
       </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <WidgetError
+        message="Couldn't load this report."
+        onRetry={() => refetch()}
+        isRetrying={isFetching}
+      />
     );
   }
 

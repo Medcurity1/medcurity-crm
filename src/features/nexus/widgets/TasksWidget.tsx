@@ -17,6 +17,7 @@ import { describeRecurrence } from "@/features/activities/recurrence";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDate } from "@/lib/formatters";
+import { WidgetError } from "./WidgetError";
 import type { NexusWidgetBodyProps } from "../WidgetShell";
 
 interface TaskItem {
@@ -139,7 +140,14 @@ export function TasksWidget({
   searchQuery,
   onDataUpdated,
 }: NexusWidgetBodyProps) {
-  const { data: tasks, isLoading, dataUpdatedAt } = useOwnerTasks(widget.user_id);
+  const {
+    data: tasks,
+    isLoading,
+    isError,
+    refetch,
+    isFetching,
+    dataUpdatedAt,
+  } = useOwnerTasks(widget.user_id);
   const qc = useQueryClient();
 
   useEffect(() => {
@@ -213,6 +221,16 @@ export function TasksWidget({
           </div>
         ))}
       </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <WidgetError
+        message="Couldn't load your tasks."
+        onRetry={() => refetch()}
+        isRetrying={isFetching}
+      />
     );
   }
 

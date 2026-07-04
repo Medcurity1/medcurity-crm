@@ -19,6 +19,7 @@ import {
   type NexusMetricDef,
 } from "../metrics";
 import type { MetricsWidgetConfig, NexusMetricPeriod } from "../types";
+import { WidgetError } from "./WidgetError";
 import type { NexusWidgetBodyProps } from "../WidgetShell";
 
 function formatValue(def: NexusMetricDef, value: number): string {
@@ -91,28 +92,40 @@ export function MetricsWidget({ widget, onDataUpdated }: NexusWidgetBodyProps) {
   const period: NexusMetricPeriod = config.period ?? "week";
   const compare = !!config.compare;
 
-  const { data, isLoading, dataUpdatedAt } = useQuery({
-    queryKey: [
-      "nexus-widget-data",
-      "metrics",
-      widget.user_id,
-      def?.key,
-      scope,
-      period,
-    ],
-    queryFn: () => def!.query({ scope, period, userId: widget.user_id }),
-    enabled: !!def,
-  });
+  const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } =
+    useQuery({
+      queryKey: [
+        "nexus-widget-data",
+        "metrics",
+        widget.user_id,
+        def?.key,
+        scope,
+        period,
+      ],
+      queryFn: () => def!.query({ scope, period, userId: widget.user_id }),
+      enabled: !!def,
+    });
 
   useEffect(() => {
     if (dataUpdatedAt) onDataUpdated?.(dataUpdatedAt);
   }, [dataUpdatedAt, onDataUpdated]);
 
+  // Unknown metric key (e.g. a config saved before the metric was renamed
+  // or removed from the registry). getMetricDef returned null, so there's
+  // nothing to query — say so plainly instead of rendering a blank card.
   if (!def) {
     return (
-      <p className="text-sm text-muted-foreground py-2">
-        This metric is no longer available. Edit the widget to pick another.
-      </p>
+      <WidgetError message="This metric is no longer available. Edit the widget to pick another." />
+    );
+  }
+
+  if (isError) {
+    return (
+      <WidgetError
+        message="Couldn't load this metric."
+        onRetry={() => refetch()}
+        isRetrying={isFetching}
+      />
     );
   }
 

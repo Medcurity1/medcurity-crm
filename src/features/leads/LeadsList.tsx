@@ -3,7 +3,7 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState, useUrlArrayState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { UserPlus, Plus, Search, X, ListChecks, Save, UserCheck, Upload, Ban } from "lucide-react";
+import { UserPlus, Plus, Search, X, ListChecks, Save, UserCheck, Upload, Ban, AlertTriangle } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useLeads, useArchiveLead, useBulkUpdateOwner, useBulkDeleteLeads, useBulkPromoteImports, useMarkImportAvoid } from "./api";
 import {
@@ -215,7 +215,7 @@ function ImportsList() {
     setPage(0);
   }
 
-  const { data: result, isLoading } = useLeads({
+  const { data: result, isLoading, isError, refetch, isFetching } = useLeads({
     search: search || undefined,
     status: statusFilter.length ? statusFilter : undefined,
     source: sourceFilter.length ? sourceFilter : undefined,
@@ -655,6 +655,16 @@ function ImportsList() {
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
+      ) : isError ? (
+        <EmptyState
+          icon={AlertTriangle}
+          title="Couldn't load leads"
+          description="Something went wrong loading this list. This is usually a momentary hiccup — try again."
+        >
+          <Button onClick={() => refetch()} disabled={isFetching}>
+            {isFetching ? "Retrying…" : "Try again"}
+          </Button>
+        </EmptyState>
       ) : !leads?.length ? (
         <EmptyState
           icon={UserPlus}

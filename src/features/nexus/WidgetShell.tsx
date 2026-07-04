@@ -130,13 +130,15 @@ export function WidgetShell({
   const searchable = widget.widget_type !== "metrics";
 
   // "Updates in real time" (spec §10): re-render every minute so the
-  // relative label ("Updated 3 minutes ago") stays honest.
+  // relative label ("Updated 3 minutes ago") stays honest. The interval
+  // runs unconditionally (not gated on dataUpdatedAt) and is cleaned up on
+  // unmount — previously it only started once data had loaded, so a widget
+  // whose data never refetched kept a frozen "Updated X ago" label.
   const [, setTick] = useState(0);
   useEffect(() => {
-    if (!dataUpdatedAt) return;
     const t = setInterval(() => setTick((n) => n + 1), 60_000);
     return () => clearInterval(t);
-  }, [dataUpdatedAt]);
+  }, []);
 
   const Icon = widget.icon ? NEXUS_WIDGET_ICONS[widget.icon] : undefined;
   const accent = widget.color ? WIDGET_ACCENT_CLASSES[widget.color] : undefined;

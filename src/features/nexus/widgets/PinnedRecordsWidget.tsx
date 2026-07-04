@@ -17,6 +17,7 @@ import {
 import { useUpdateWidget } from "../api";
 import { usePinnedRecordInfos, STALE_DAYS } from "../pinned-api";
 import type { PinnedRecordsWidgetConfig, PinnedRecordType } from "../types";
+import { WidgetError } from "./WidgetError";
 import type { NexusWidgetBodyProps } from "../WidgetShell";
 
 export const PIN_TYPE_ICONS: Record<PinnedRecordType, typeof Users> = {
@@ -38,7 +39,14 @@ export function PinnedRecordsWidget({
 }: NexusWidgetBodyProps) {
   const config = (widget.config ?? {}) as Partial<PinnedRecordsWidgetConfig>;
   const records = Array.isArray(config.records) ? config.records : [];
-  const { data: infos, isLoading, dataUpdatedAt } = usePinnedRecordInfos(records);
+  const {
+    data: infos,
+    isLoading,
+    isError,
+    refetch,
+    isFetching,
+    dataUpdatedAt,
+  } = usePinnedRecordInfos(records);
   const updateWidget = useUpdateWidget();
 
   useEffect(() => {
@@ -50,6 +58,16 @@ export function PinnedRecordsWidget({
       <p className="text-sm text-muted-foreground py-2">
         No records pinned yet. Edit this widget to add some.
       </p>
+    );
+  }
+
+  if (isError) {
+    return (
+      <WidgetError
+        message="Couldn't load pinned records."
+        onRetry={() => refetch()}
+        isRetrying={isFetching}
+      />
     );
   }
 
