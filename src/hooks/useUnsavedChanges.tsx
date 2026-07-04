@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 /**
  * Light unsaved-changes guard for the big edit forms.
@@ -7,17 +8,19 @@ import { useCallback, useEffect, useRef } from "react";
  * react-router's useBlocker/usePrompt are unavailable — we can't
  * intercept in-app navigation generally. What this DOES cover:
  *   - hard exits (tab close, refresh, external nav) via `beforeunload`
- *   - the forms' explicit Cancel buttons via `confirmIfDirty(fn)`
+ *     (that one is necessarily the browser's own prompt)
+ *   - the forms' explicit Cancel buttons via `confirmIfDirty(fn)`, which
+ *     now opens a styled Pulse ConfirmDialog (render the returned
+ *     `dialog` node in the form)
  *
  * Call `disarm()` right before an intentional post-save navigate() so a
- * successful save never trips the browser's leave-page prompt.
+ * successful save never trips the guard.
  */
 export function useUnsavedChanges(isDirty: boolean) {
-  // Refs so the beforeunload listener (bound once) and confirmIfDirty
-  // always see the latest state without re-binding on every keystroke.
   const dirtyRef = useRef(isDirty);
   dirtyRef.current = isDirty;
   const disarmedRef = useRef(false);
+  const [pending, setPending] = useState<(() => void) | null>(null);
 
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
@@ -35,13 +38,32 @@ export function useUnsavedChanges(isDirty: boolean) {
     disarmedRef.current = true;
   }, []);
 
-  /** Run `fn` immediately when clean; ask first when there are unsaved edits. */
+  /** Run `fn` immediately when clean; ask first (styled dialog) when dirty. */
   const confirmIfDirty = useCallback((fn: () => void) => {
     if (dirtyRef.current && !disarmedRef.current) {
-      if (!window.confirm("Discard unsaved changes?")) return;
+      setPending(() => fn);
+    } else {
+      fn();
     }
-    fn();
   }, []);
 
-  return { confirmIfDirty, disarm };
+  const dialog = (
+    <ConfirmDialog
+      open={pending !== null}
+      onOpenChange={(open) => {
+        if (!open) setPending(null);
+      }}
+      title="Discard unsaved changes?"
+      description="You have unsaved edits on this form. If you leave now, they'll be lost."
+      confirmLabel="Discard changes"
+      destructive
+      onConfirm={() => {
+        const fn = pending;
+        setPending(null);
+        fn?.();
+      }}
+    />
+  );
+
+  return { confirmIfDirty, disarm, dialog };
 }

@@ -52,17 +52,17 @@ type ToolOut = { forModel: unknown; sources?: Source[] };
 // ── Static "how do I" help (no DB; keeps product-help on the menu) ────
 const HELP: Record<string, string> = {
   archive_contacts:
-    "To archive a contact: open the contact, use the row/detail menu and choose Archive — it hides them from lists without deleting. Bulk: select rows in the Contacts list and use the bulk action bar.",
+    "To archive one contact, open the contact's page and click the Archive button near the top right of the header, then confirm. To archive several at once, go to the Contacts list, check the ones you want, and click Archive in the bulk action bar that appears (admins only). Archiving hides a contact from the normal lists without deleting their data.",
   renewals:
-    "Renewals live under the Renewals tab. A deal counts as a renewal when its Kind = 'renewal'; upcoming ones show in the queue by expected close date. The renewal automation can auto-create them.",
+    "Renewals are on the Renewals tab. A deal counts as a renewal when its Kind is set to renewal; upcoming ones show in the queue sorted by expected close date.",
   warm_lead:
-    "Warm Lead is a contact tag. Open a contact, use the tag picker, and add 'Warm Lead'. Filter for them in the Contacts list or in a Nexus 'Custom Report' widget (Tag = Warm Lead).",
+    "Warm Lead is a contact tag. Open a contact and add the Warm Lead tag with the tag picker. You can filter for Warm Lead contacts in the Contacts list, or build a Nexus Custom Report widget with Tag set to Warm Lead.",
   create_task:
-    "Create a task from the Activities tab (Create Task), or from any account/contact/opportunity's Activities section. Set a due date and priority (High/Med/Low).",
+    "Create a task from the Activities tab using Create Task, or from the Activities section of any account, contact, or opportunity. You can set a due date and a priority (High, Medium, or Low).",
   pipeline:
-    "The Pipeline tab is a drag-and-drop kanban by stage. Stages: Lead, Qualified, Proposal, Verbal Commit, Closed Won, Closed Lost.",
+    "The Pipeline tab is a drag-and-drop board organized by stage. The stages are Lead, Qualified, Proposal, Verbal Commit, Closed Won, and Closed Lost. Drag a deal's card between columns to change its stage.",
   nexus:
-    "Nexus is the customizable widget dashboard. Add a Widget (top right), pick a type (Tasks, Pipeline, Custom Report, Metrics, Pinned Records, Requests), and arrange by dragging.",
+    "Nexus is the customizable dashboard and has its own tab. Click Add a Widget in the top right, choose a widget type (Today's Tasks, Current Pipeline, Custom Report, Metrics, Pinned Records, or Requests), and drag widgets to rearrange them.",
 };
 
 serve(async (req) => {
@@ -279,7 +279,7 @@ serve(async (req) => {
     async how_do_i(a) {
       const topic = String(a.topic ?? "").toLowerCase().replace(/[^a-z]+/g, "_");
       const hit = HELP[topic] || Object.entries(HELP).find(([k]) => topic.includes(k) || k.includes(topic))?.[1];
-      return { forModel: { help: hit ?? "No specific help article — answer from general Pulse knowledge, and suggest the relevant tab.", topics: Object.keys(HELP) } };
+      return { forModel: { help: hit ?? "No specific guide for that topic. Do not invent steps or button names. Point the user to the most relevant tab and offer to look up data for them instead.", topics: Object.keys(HELP) } };
     },
   };
 
@@ -299,12 +299,14 @@ serve(async (req) => {
 
   const today = new Date().toISOString().slice(0, 10);
   const system = [
-    "You are the Ask AI assistant inside Pulse, Medcurity's CRM. You help sales and success reps by looking things up and analyzing them.",
+    "You are the Ask AI assistant inside Pulse, Medcurity's CRM. You help sales and success reps by looking things up and analyzing their data.",
     `Today is ${today}. The user is ${me?.full_name ?? "a Pulse user"} (role: ${me?.role ?? "user"}).`,
-    "You are STRICTLY READ-ONLY. You can search, summarize, count, compare, and surface records and links. You CANNOT create, edit, delete, move, email, or change anything. If asked to change data, briefly explain you can only look things up for now, and offer to find the relevant record so they can do it.",
-    "Only use the provided tools to get data — never invent records, numbers, names, or ids. If a tool returns nothing, say so plainly.",
-    "When you reference specific records, mention them by name; the app will turn them into clickable links from the sources you retrieved. Keep answers concise, friendly, and skimmable — short sentences, small bullet lists, dollar amounts with $ and commas. Healthcare audience; be accurate, never fabricate.",
-    "Medcurity terms: stages are Lead, Qualified, Proposal, Verbal Commit, Closed Won, Closed Lost. 'customer_status' client/prospect/former_client is the real customer state. A 'renewal' is an opportunity with kind=renewal.",
+    "You are strictly read-only: you can search, summarize, count, compare, and surface records and links, but you cannot create, edit, delete, move, email, or change anything. If someone asks you to change data, say once and briefly that you can only look things up right now, then offer to find the relevant record so they can do it themselves.",
+    "Only use the provided tools to get data. Never invent records, numbers, names, or ids. If a tool returns nothing, say so plainly.",
+    "For 'how do I' questions, use only the steps the how_do_i tool gives you. Do not invent button names, menu paths, or steps you were not given. If there is no specific guide, say you are not certain of the exact steps and point the person to the most relevant tab.",
+    "Voice: write like a helpful teammate, not a chatbot. Use plain, direct sentences. Do not use em dashes; use commas, periods, or the word 'to' instead. Skip cheerful sign-offs like 'Just let me know!'. Do not keep announcing that you are an AI. Keep formatting light: short paragraphs, with a simple bullet or numbered list only when you are actually listing items, and use bold sparingly. Show dollar amounts with a $ and commas.",
+    "When you reference specific records, name them; the app turns them into clickable links from the records you retrieved.",
+    "Medcurity terms: pipeline stages are Lead, Qualified, Proposal, Verbal Commit, Closed Won, Closed Lost. customer_status (client, prospect, former_client) is the real customer state. A renewal is an opportunity with kind = renewal.",
   ].join("\n");
 
   // ── Bounded tool-use loop ───────────────────────────────────────────

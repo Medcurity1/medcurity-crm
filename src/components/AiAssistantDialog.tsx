@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import { Sparkles, Send, Building2, User, Target, ArrowUpRight, ShieldCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,55 @@ const EXAMPLES = [
   "What renewals are coming up in the next 60 days?",
   "How do I archive a contact?",
 ];
+
+// Minimal, dependency-free renderer for the assistant's light markdown:
+// **bold**, bullet lists, numbered lists, and paragraphs. No raw HTML.
+function renderInline(text: string) {
+  const parts = text.split(/\*\*(.+?)\*\*/g);
+  return parts.map((p, i) => (i % 2 === 1 ? <strong key={i}>{p}</strong> : p));
+}
+
+function RichText({ text }: { text: string }) {
+  const lines = text.split("\n");
+  const blocks: ReactElement[] = [];
+  let bucket: { ordered: boolean; items: string[] } | null = null;
+  const flush = () => {
+    if (!bucket) return;
+    const items = bucket.items;
+    const key = `l${blocks.length}`;
+    blocks.push(
+      bucket.ordered ? (
+        <ol key={key} className="list-decimal space-y-0.5 pl-5">
+          {items.map((it, i) => <li key={i}>{renderInline(it)}</li>)}
+        </ol>
+      ) : (
+        <ul key={key} className="list-disc space-y-0.5 pl-5">
+          {items.map((it, i) => <li key={i}>{renderInline(it)}</li>)}
+        </ul>
+      ),
+    );
+    bucket = null;
+  };
+  lines.forEach((raw) => {
+    const line = raw.trimEnd();
+    const b = line.match(/^\s*[-*]\s+(.*)$/);
+    const n = line.match(/^\s*\d+\.\s+(.*)$/);
+    if (b) {
+      if (!bucket || bucket.ordered) { flush(); bucket = { ordered: false, items: [] }; }
+      bucket.items.push(b[1]);
+    } else if (n) {
+      if (!bucket || !bucket.ordered) { flush(); bucket = { ordered: true, items: [] }; }
+      bucket.items.push(n[1]);
+    } else if (line.trim() === "") {
+      flush();
+    } else {
+      flush();
+      blocks.push(<p key={`p${blocks.length}`}>{renderInline(line)}</p>);
+    }
+  });
+  flush();
+  return <div className="space-y-2 break-words">{blocks}</div>;
+}
 
 export function AiAssistantDialog({
   open,
@@ -129,7 +178,11 @@ export function AiAssistantDialog({
                       : "rounded-bl-sm bg-muted text-foreground",
                 )}
               >
-                <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                {m.role === "assistant" && !m.error ? (
+                  <RichText text={m.content} />
+                ) : (
+                  <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                )}
                 {m.sources && m.sources.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {m.sources.slice(0, 12).map((s) => {
