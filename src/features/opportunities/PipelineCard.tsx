@@ -42,8 +42,8 @@ export function PipelineCard({ item, onClick, isDragging }: PipelineCardProps) {
       {...attributes}
       onClick={onClick}
       className={cn(
-        "bg-card border rounded-lg p-3 cursor-grab active:cursor-grabbing shadow-sm hover:shadow-md transition-shadow",
-        isDragging && "opacity-50 shadow-lg rotate-2"
+        "bg-card border border-border/60 rounded-lg p-3 cursor-grab active:cursor-grabbing shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-border",
+        isDragging && "opacity-60 shadow-xl shadow-primary/10 rotate-2 scale-[1.02]"
       )}
     >
       <p className="text-xs text-muted-foreground truncate">{item.account_name}</p>

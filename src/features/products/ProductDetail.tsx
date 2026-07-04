@@ -184,16 +184,16 @@ export function ProductDetail() {
             </div>
             <div className="flex items-center gap-2">
               {product.sf_id ? (
-                <Badge variant="secondary" className="bg-blue-100 text-blue-700 gap-1">
+                <Badge variant="secondary" className="bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300 gap-1">
                   <Cloud className="h-3 w-3" /> Imported
                 </Badge>
               ) : (
-                <Badge variant="secondary" className="bg-amber-100 text-amber-700 gap-1">
+                <Badge variant="secondary" className="bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300 gap-1">
                   <User className="h-3 w-3" /> Manual
                 </Badge>
               )}
               {product.archived_at && (
-                <Badge variant="secondary" className="bg-rose-100 text-rose-700">
+                <Badge variant="secondary" className="bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">
                   Archived
                 </Badge>
               )}

@@ -316,16 +316,16 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
                           {product.sf_id ? (
-                            <Badge variant="secondary" className="bg-blue-100 text-blue-700 gap-1">
+                            <Badge variant="secondary" className="bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300 gap-1">
                               <Cloud className="h-3 w-3" /> Imported
                             </Badge>
                           ) : (
-                            <Badge variant="secondary" className="bg-amber-100 text-amber-700 gap-1">
+                            <Badge variant="secondary" className="bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300 gap-1">
                               <User className="h-3 w-3" /> Manual
                             </Badge>
                           )}
                           {product.archived_at && (
-                            <Badge variant="secondary" className="bg-rose-100 text-rose-700">
+                            <Badge variant="secondary" className="bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">
                               Archived
                             </Badge>
                           )}
@@ -597,10 +597,10 @@ function ProductDetailPanel({ product }: { product: Product }) {
                     <TableCell className="font-medium">
                       {e.price_book?.name ?? e.price_book_id}
                       {e.price_book?.is_default && (
-                        <Badge variant="secondary" className="ml-2 bg-blue-100 text-blue-700 text-xs">Default</Badge>
+                        <Badge variant="secondary" className="ml-2 bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300 text-xs">Default</Badge>
                       )}
                       {e.price_book && !e.price_book.is_active && (
-                        <Badge variant="secondary" className="ml-2 bg-slate-100 text-slate-700 text-xs">Inactive</Badge>
+                        <Badge variant="secondary" className="ml-2 bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-300 text-xs">Inactive</Badge>
                       )}
                     </TableCell>
                     <TableCell className="text-muted-foreground">{e.fte_range ?? "All"}</TableCell>
@@ -1061,12 +1061,12 @@ function PriceBookCard({
             />
             <CardTitle className="text-base">{priceBook.name}</CardTitle>
             {priceBook.is_default && (
-              <Badge variant="secondary" className="bg-blue-100 text-blue-700">Default</Badge>
+              <Badge variant="secondary" className="bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">Default</Badge>
             )}
             {priceBook.is_active ? (
-              <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">Active</Badge>
+              <Badge variant="secondary" className="bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">Active</Badge>
             ) : (
-              <Badge variant="secondary" className="bg-slate-100 text-slate-700">Inactive</Badge>
+              <Badge variant="secondary" className="bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-300">Inactive</Badge>
             )}
           </button>
           {isAdmin && (
