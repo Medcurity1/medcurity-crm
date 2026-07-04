@@ -259,7 +259,9 @@ serve(async (req) => {
       const { data, error } = await userClient.from("opportunities")
         .select("id, name, amount, expected_close_date, account_id, owner_user_id")
         .eq("kind", "renewal").in("stage", OPEN_STAGES).is("archived_at", null)
-        .lte("expected_close_date", until)
+        // Match the Renewals tab: include renewals with no close date set yet
+        // (NULL <= date is NULL, which would silently drop them).
+        .or(`expected_close_date.is.null,expected_close_date.lte.${until}`)
         .order("expected_close_date", { ascending: true, nullsFirst: false }).limit(MAX_ROWS);
       if (error) return { forModel: { error: error.message } };
       return {
