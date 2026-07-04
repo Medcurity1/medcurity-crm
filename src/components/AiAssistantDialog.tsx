@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
-import { Sparkles, Send, Building2, User, Target, ArrowUpRight, ShieldCheck } from "lucide-react";
+import { Sparkles, Send, Building2, User, Target, ArrowUpRight, ShieldCheck, SquarePen } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
   Sheet,
@@ -36,7 +35,7 @@ const EXAMPLES = [
   "How do I archive a contact?",
 ];
 
-// Minimal, dependency-free renderer for the assistant's light markdown:
+// ── Minimal, dependency-free renderer for the assistant's light markdown:
 // **bold**, bullet lists, numbered lists, and paragraphs. No raw HTML.
 function renderInline(text: string) {
   const parts = text.split(/\*\*(.+?)\*\*/g);
@@ -82,7 +81,7 @@ function RichText({ text }: { text: string }) {
     }
   });
   flush();
-  return <div className="space-y-2 break-words">{blocks}</div>;
+  return <div className="space-y-2 break-words leading-relaxed">{blocks}</div>;
 }
 
 export function AiAssistantDialog({
@@ -96,10 +95,18 @@ export function AiAssistantDialog({
   const [messages, setMessages] = useState<Msg[]>([]);
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, loading]);
+
+  // Focus the composer shortly after the panel opens (after the slide-in).
+  useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(() => inputRef.current?.focus(), 250);
+    return () => clearTimeout(t);
+  }, [open]);
 
   async function send(text: string) {
     const q = text.trim();
@@ -118,7 +125,7 @@ export function AiAssistantDialog({
       } else {
         setMessages((m) => [...m, { role: "assistant", content: data.answer ?? "", sources: data.sources ?? [] }]);
       }
-    } catch (e) {
+    } catch {
       setMessages((m) => [...m, {
         role: "assistant",
         content: "I couldn't reach the assistant just now. Please try again in a moment.",
@@ -129,35 +136,69 @@ export function AiAssistantDialog({
     }
   }
 
+  const hasChat = messages.length > 0;
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-md">
-        <SheetHeader className="border-b px-4 py-3 text-left">
-          <SheetTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-primary" />
-            Ask AI
-          </SheetTitle>
+      <SheetContent
+        side="right"
+        className="flex w-full flex-col gap-0 overflow-hidden border-l border-violet-500/15 bg-background p-0 sm:max-w-md"
+      >
+        {/* Soft gradient glow behind the header — the "AI pretty" wash. */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-48 bg-gradient-to-b from-violet-500/10 via-blue-500/[0.06] to-transparent" />
+
+        {/* ── Header ── */}
+        <SheetHeader className="relative space-y-1.5 border-b border-border/60 px-4 py-3 text-left">
+          <div className="flex items-center justify-between">
+            <SheetTitle className="flex items-center gap-2.5">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-violet-600 shadow-sm shadow-violet-500/30">
+                <Sparkles className="h-4 w-4 text-white" />
+              </span>
+              <span className="bg-gradient-to-r from-blue-600 to-violet-600 bg-clip-text text-transparent dark:from-blue-300 dark:to-violet-300">
+                Ask AI
+              </span>
+            </SheetTitle>
+            {hasChat && (
+              <button
+                type="button"
+                onClick={() => { setMessages([]); setPrompt(""); inputRef.current?.focus(); }}
+                title="New chat"
+                className="mr-8 flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <SquarePen className="h-3.5 w-3.5" />
+                New
+              </button>
+            )}
+          </div>
           <SheetDescription className="flex items-center gap-1.5 text-xs">
             <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-            Read-only — searches and summarizes your data, never changes it.
+            Read-only. Searches and summarizes your data, never changes it.
           </SheetDescription>
         </SheetHeader>
 
         {/* ── Conversation ── */}
-        <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
-          {messages.length === 0 && (
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                Ask about your accounts, contacts, deals, pipeline, renewals, or tasks — in plain English.
-              </p>
+        <div ref={scrollRef} className="relative flex-1 space-y-4 overflow-y-auto px-4 py-4">
+          {!hasChat && (
+            <div className="space-y-4">
+              <div className="flex flex-col items-center gap-3 pb-1 pt-4 text-center">
+                <div className="relative">
+                  <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-blue-500 to-violet-600 opacity-40 blur-xl" />
+                  <span className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-violet-600 shadow-lg shadow-violet-500/30">
+                    <Sparkles className="h-7 w-7 text-white" />
+                  </span>
+                </div>
+                <p className="max-w-[17rem] text-sm text-muted-foreground">
+                  Ask about your accounts, contacts, deals, pipeline, renewals, or tasks in plain English.
+                </p>
+              </div>
               <div className="space-y-1.5">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Try asking</p>
+                <p className="px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Try asking</p>
                 {EXAMPLES.map((ex) => (
                   <button
                     key={ex}
                     type="button"
                     onClick={() => send(ex)}
-                    className="block w-full rounded-md border border-border bg-muted/30 px-3 py-1.5 text-left text-xs text-foreground/80 transition-colors hover:bg-muted"
+                    className="block w-full rounded-xl border border-border/60 bg-gradient-to-br from-muted/50 to-muted/10 px-3 py-2 text-left text-xs text-foreground/80 transition-all hover:border-violet-500/40 hover:from-violet-500/10 hover:to-blue-500/[0.06] hover:text-foreground"
                   >
                     {ex}
                   </button>
@@ -167,24 +208,30 @@ export function AiAssistantDialog({
           )}
 
           {messages.map((m, i) => (
-            <div key={i} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+            <div
+              key={i}
+              className={cn(
+                "flex motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300",
+                m.role === "user" ? "justify-end" : "justify-start",
+              )}
+            >
               <div
                 className={cn(
-                  "max-w-[85%] rounded-2xl px-3.5 py-2 text-sm",
+                  "max-w-[86%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm",
                   m.role === "user"
-                    ? "rounded-br-sm bg-primary text-primary-foreground"
+                    ? "rounded-br-sm bg-gradient-to-br from-blue-500 to-violet-600 text-white"
                     : m.error
                       ? "rounded-bl-sm border border-red-500/40 bg-red-500/5 text-foreground"
-                      : "rounded-bl-sm bg-muted text-foreground",
+                      : "rounded-bl-sm border border-border/60 bg-muted/70 text-foreground",
                 )}
               >
                 {m.role === "assistant" && !m.error ? (
                   <RichText text={m.content} />
                 ) : (
-                  <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                  <p className="whitespace-pre-wrap break-words leading-relaxed">{m.content}</p>
                 )}
                 {m.sources && m.sources.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
+                  <div className="mt-2.5 flex flex-wrap gap-1.5">
                     {m.sources.slice(0, 12).map((s) => {
                       const meta = SOURCE_META[s.type];
                       if (!meta) return null;
@@ -194,9 +241,9 @@ export function AiAssistantDialog({
                           key={`${s.type}:${s.id}`}
                           to={`${meta.path}/${s.id}`}
                           onClick={() => onOpenChange(false)}
-                          className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2 py-0.5 text-xs text-foreground/80 transition-colors hover:bg-accent hover:text-accent-foreground"
+                          className="inline-flex items-center gap-1 rounded-full border border-violet-500/20 bg-background/80 px-2 py-0.5 text-xs text-foreground/80 backdrop-blur-sm transition-colors hover:border-violet-500/50 hover:bg-violet-500/10 hover:text-foreground"
                         >
-                          <Icon className="h-3 w-3" />
+                          <Icon className="h-3 w-3 text-violet-500" />
                           <span className="max-w-[140px] truncate">{s.label || "record"}</span>
                           <ArrowUpRight className="h-3 w-3 opacity-60" />
                         </Link>
@@ -209,25 +256,27 @@ export function AiAssistantDialog({
           ))}
 
           {loading && (
-            <div className="flex justify-start">
-              <div className="max-w-[85%] space-y-1.5 rounded-2xl rounded-bl-sm bg-muted px-3.5 py-2.5">
-                <Skeleton className="h-3 w-40" />
-                <Skeleton className="h-3 w-24" />
+            <div className="flex justify-start motion-safe:animate-in motion-safe:fade-in">
+              <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm border border-border/60 bg-muted/70 px-4 py-3">
+                <span className="h-2 w-2 animate-bounce rounded-full bg-gradient-to-br from-blue-500 to-violet-600 [animation-delay:-0.3s]" />
+                <span className="h-2 w-2 animate-bounce rounded-full bg-gradient-to-br from-blue-500 to-violet-600 [animation-delay:-0.15s]" />
+                <span className="h-2 w-2 animate-bounce rounded-full bg-gradient-to-br from-blue-500 to-violet-600" />
               </div>
             </div>
           )}
         </div>
 
         {/* ── Composer ── */}
-        <div className="border-t p-3">
-          <div className="flex items-end gap-2">
+        <div className="border-t border-border/60 bg-background/80 p-3 backdrop-blur-sm">
+          <div className="flex items-end gap-2 rounded-2xl border border-border bg-background p-1.5 shadow-sm transition-colors focus-within:border-violet-500/50 focus-within:ring-2 focus-within:ring-violet-500/15">
             <Textarea
+              ref={inputRef}
               rows={1}
               value={prompt}
               disabled={loading}
               placeholder="Ask about your CRM…"
               spellCheck
-              className="max-h-32 min-h-[42px] resize-none"
+              className="max-h-32 min-h-[36px] resize-none border-0 bg-transparent px-2 py-1.5 shadow-none focus-visible:ring-0"
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -236,10 +285,18 @@ export function AiAssistantDialog({
                 }
               }}
             />
-            <Button size="icon" disabled={!prompt.trim() || loading} onClick={() => send(prompt)}>
+            <Button
+              size="icon"
+              disabled={!prompt.trim() || loading}
+              onClick={() => send(prompt)}
+              className="h-8 w-8 shrink-0 border-0 bg-gradient-to-br from-blue-500 to-violet-600 text-white shadow-sm transition-all hover:from-blue-600 hover:to-violet-700 disabled:opacity-40"
+            >
               <Send className="h-4 w-4" />
             </Button>
           </div>
+          <p className="mt-1.5 px-1 text-center text-[10px] text-muted-foreground/70">
+            AI-generated from your live CRM data. Double-check anything important.
+          </p>
         </div>
       </SheetContent>
     </Sheet>
