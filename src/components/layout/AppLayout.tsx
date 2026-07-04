@@ -139,6 +139,18 @@ export function AppLayout() {
     quickTaskShortcut: prefs.quickTaskShortcut,
   });
 
+  // Cmd/Ctrl+J opens Ask AI from anywhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "j" || e.key === "J")) {
+        e.preventDefault();
+        setShowAssistant(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const section = location.pathname.split("/")[1] || "";
   const sectionName = pathMap[section] ?? section;
 
@@ -232,7 +244,7 @@ export function AppLayout() {
               variant="ghost"
               size="sm"
               onClick={() => setShowAssistant(true)}
-              title="AI Assistant"
+              title="Ask AI  (⌘J)"
               className="gap-1.5"
             >
               <Sparkles className="h-4 w-4 text-primary" />

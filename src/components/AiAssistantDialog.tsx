@@ -18,7 +18,7 @@ import { supabase } from "@/lib/supabase";
 // caller's own permissions. It cannot change any data; these are just Q&A.
 
 type Source = { type: string; id: string; label: string };
-type Msg = { role: "user" | "assistant"; content: string; sources?: Source[]; error?: boolean };
+type Msg = { role: "user" | "assistant"; content: string; sources?: Source[]; suggestions?: string[]; error?: boolean };
 
 const SOURCE_META: Record<string, { path: string; icon: typeof Building2 }> = {
   account: { path: "/accounts", icon: Building2 },
@@ -28,10 +28,10 @@ const SOURCE_META: Record<string, { path: string; icon: typeof Building2 }> = {
 
 const EXAMPLES = [
   "Which of my open deals close in the next 30 days?",
+  "Break down the team's pipeline by stage",
   "Summarize the account Mallory Community Health Center",
-  "How's my pipeline looking by stage?",
-  "Show my warm-lead contacts I haven't touched lately",
   "What renewals are coming up in the next 60 days?",
+  "Show my contacts marked Do Not Call",
   "How do I archive a contact?",
 ];
 
@@ -171,7 +171,7 @@ export function AiAssistantDialog({
       if (data?.error) {
         setMessages((m) => [...m, { role: "assistant", content: data.message || "Something went wrong.", error: true }]);
       } else {
-        setMessages((m) => [...m, { role: "assistant", content: data.answer ?? "", sources: data.sources ?? [] }]);
+        setMessages((m) => [...m, { role: "assistant", content: data.answer ?? "", sources: data.sources ?? [], suggestions: data.suggestions ?? [] }]);
       }
     } catch {
       setMessages((m) => [...m, {
@@ -312,6 +312,23 @@ export function AiAssistantDialog({
               </div>
             </div>
           )}
+
+          {!loading &&
+            messages[messages.length - 1]?.role === "assistant" &&
+            (messages[messages.length - 1]?.suggestions?.length ?? 0) > 0 && (
+              <div className="flex flex-wrap gap-1.5 pl-1 pt-0.5 motion-safe:animate-in motion-safe:fade-in">
+                {messages[messages.length - 1].suggestions!.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => send(s)}
+                    className="rounded-full border border-violet-500/30 bg-violet-500/5 px-3 py-1 text-xs text-foreground/80 transition-colors hover:border-violet-500/50 hover:bg-violet-500/10 hover:text-foreground"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
         </div>
 
         {/* ── Composer ── */}
