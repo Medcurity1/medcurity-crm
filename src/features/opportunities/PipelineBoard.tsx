@@ -24,6 +24,7 @@ import { PipelineCard } from "./PipelineCard";
 import { CreatePipelineDialog } from "./CreatePipelineDialog";
 import { PageHeader } from "@/components/PageHeader";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { PipelineRunnerGame } from "@/features/pipeline-runner/PipelineRunnerGame";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -403,6 +404,10 @@ export function PipelineBoard() {
 
   return (
     <div>
+      {/* Hidden easter egg — triple-click the Pipeline nav label to play.
+          Renders nothing (zero cost) unless launched. */}
+      <PipelineRunnerGame />
+
       <PageHeader
         title="Pipeline"
         description="Drag opportunities between stages"
