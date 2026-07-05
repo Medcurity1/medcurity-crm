@@ -1708,6 +1708,10 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                 Cancel
               </Button>
             </div>
+            {/* Mount the unsaved-changes confirm here too — this edit branch
+                is exclusive with the one at the top that also mounts it, so
+                without this Cancel silently no-ops while the form is dirty. */}
+            {unsavedDialog}
           </form>
         </CardContent>
       </Card>

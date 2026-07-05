@@ -801,6 +801,10 @@ function Leaderboard({
  */
 export function PipelineRunnerGame() {
   const open = usePipelineRunnerOpen();
+  // If the user leaves the Pipeline page while the game is open (clicks another
+  // nav item instead of pressing Esc), reset the launch flag on unmount so it
+  // doesn't silently re-open when they come back to /pipeline.
+  useEffect(() => () => pipelineRunner.close(), []);
   if (!open) return null;
   return <GameModal />;
 }
