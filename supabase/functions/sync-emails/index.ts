@@ -8,9 +8,15 @@
 //
 // Trigger: call via cron (pg_cron or external scheduler) every 5-15 minutes.
 //
+// Auth: deployed --no-verify-jwt, so the function gates callers itself.
+// It accepts EITHER the service-role bearer (the pg_cron sweep) OR a valid
+// signed-in CRM user's JWT (the app's "Sync now" button). Anonymous callers
+// are rejected with 401.
+//
 // Required environment variables (set via supabase secrets set):
 //   SUPABASE_URL              - project URL
 //   SUPABASE_SERVICE_ROLE_KEY - service-role key (bypasses RLS)
+//   SUPABASE_ANON_KEY         - anon key (verifies caller JWTs in the auth gate)
 //   GOOGLE_CLIENT_ID          - Google OAuth client ID
 //   GOOGLE_CLIENT_SECRET      - Google OAuth client secret
 //   MICROSOFT_CLIENT_ID       - Azure AD app client ID
@@ -952,10 +958,72 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+// Constant-time string equality — both inputs hashed to fixed length first
+// so length differences leak nothing either. Mirrors the meddy-support helper.
+async function timingSafeEqual(a: string, b: string): Promise<boolean> {
+  const enc = new TextEncoder();
+  const [ha, hb] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(a)),
+    crypto.subtle.digest("SHA-256", enc.encode(b)),
+  ]);
+  const va = new Uint8Array(ha);
+  const vb = new Uint8Array(hb);
+  let diff = 0;
+  for (let i = 0; i < va.length; i++) diff |= va[i] ^ vb[i];
+  return diff === 0;
+}
+
+/**
+ * Is this the service-role caller? The pg_cron schedule
+ * (20260415000006_email_sync_dedup_and_schedule.sql) posts here with
+ * `Authorization: Bearer <service_role_key>` and an empty body. The
+ * service-role key is a server-only secret, so a constant-time equality
+ * check is a safe "this is our own backend" gate.
+ */
+async function isServiceRole(authHeader: string | null): Promise<boolean> {
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  if (!authHeader) return false;
+  return await timingSafeEqual(authHeader, `Bearer ${serviceKey}`);
+}
+
+/**
+ * Is this a valid signed-in CRM user? The app's "Sync now" button
+ * (src/features/admin/email-sync-api.ts) invokes this via the supabase-js
+ * SDK, which attaches the logged-in user's JWT as the Authorization header.
+ * Any authenticated user may trigger a sync (the handler scopes work to the
+ * user_id in the body).
+ */
+async function isValidUser(authHeader: string | null): Promise<boolean> {
+  if (!authHeader) return false;
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const asUser = createClient(Deno.env.get("SUPABASE_URL")!, anonKey, {
+    global: { headers: { Authorization: authHeader } },
+    auth: { persistSession: false },
+  });
+  const { data, error } = await asUser.auth.getUser();
+  return !error && !!data?.user;
+}
+
 serve(async (req) => {
   // Handle CORS preflight so the browser can invoke this function from the app
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
+  }
+
+  // Auth gate — deployed with --no-verify-jwt, so we must authenticate the
+  // caller ourselves before doing anything (before parsing body/creating the
+  // service-role client). Allow EITHER our own backend (service-role bearer,
+  // used by the pg_cron sweep) OR a signed-in CRM user (the app's "Sync now"
+  // button). Reject anonymous callers.
+  const authHeader = req.headers.get("Authorization");
+  if (!(await isServiceRole(authHeader)) && !(await isValidUser(authHeader))) {
+    return new Response(
+      JSON.stringify({ error: "Unauthorized" }),
+      {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
   }
 
   try {

@@ -24,6 +24,7 @@ import { PipelineCard } from "./PipelineCard";
 import { CreatePipelineDialog } from "./CreatePipelineDialog";
 import { PageHeader } from "@/components/PageHeader";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { PipelineRunnerGame } from "@/features/pipeline-runner/PipelineRunnerGame";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -53,7 +54,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Plus, MoreVertical, Pencil, Trash2 } from "lucide-react";
+import { Plus, MoreVertical, Pencil, Trash2, DollarSign, Hash, TrendingUp } from "lucide-react";
 import { OPEN_STAGES, formatCurrency, stageLabel } from "@/lib/formatters";
 import { celebrateClosedWon } from "@/lib/confetti";
 import { useClosedLostGuard } from "./useClosedLostGuard";
@@ -74,22 +75,37 @@ function PipelineStats({ items }: { items: ActivePipelineRow[] }) {
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-      <Card>
-        <CardContent className="pt-4 pb-3 px-4">
-          <p className="text-xs text-muted-foreground">Total Pipeline Value</p>
-          <p className="text-lg font-semibold">{formatCurrency(totalValue)}</p>
+      <Card className="transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:shadow-emerald-500/10">
+        <CardContent className="flex items-center gap-3 py-3.5 px-4">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500/20 to-emerald-500/[0.04]">
+            <DollarSign className="h-4 w-4 text-emerald-500" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground">Total Pipeline Value</p>
+            <p className="text-lg font-semibold tabular-nums">{formatCurrency(totalValue)}</p>
+          </div>
         </CardContent>
       </Card>
-      <Card>
-        <CardContent className="pt-4 pb-3 px-4">
-          <p className="text-xs text-muted-foreground">Deal Count</p>
-          <p className="text-lg font-semibold">{dealCount}</p>
+      <Card className="transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:shadow-blue-500/10">
+        <CardContent className="flex items-center gap-3 py-3.5 px-4">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500/20 to-blue-500/[0.04]">
+            <Hash className="h-4 w-4 text-blue-500" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground">Deal Count</p>
+            <p className="text-lg font-semibold tabular-nums">{dealCount}</p>
+          </div>
         </CardContent>
       </Card>
-      <Card>
-        <CardContent className="pt-4 pb-3 px-4">
-          <p className="text-xs text-muted-foreground">Average Deal Size</p>
-          <p className="text-lg font-semibold">{formatCurrency(avgDealSize)}</p>
+      <Card className="transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:shadow-violet-500/10">
+        <CardContent className="flex items-center gap-3 py-3.5 px-4">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500/20 to-violet-500/[0.04]">
+            <TrendingUp className="h-4 w-4 text-violet-500" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground">Average Deal Size</p>
+            <p className="text-lg font-semibold tabular-nums">{formatCurrency(avgDealSize)}</p>
+          </div>
         </CardContent>
       </Card>
     </div>
@@ -388,6 +404,10 @@ export function PipelineBoard() {
 
   return (
     <div>
+      {/* Hidden easter egg — triple-click the Pipeline nav label to play.
+          Renders nothing (zero cost) unless launched. */}
+      <PipelineRunnerGame />
+
       <PageHeader
         title="Pipeline"
         description="Drag opportunities between stages"

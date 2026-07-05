@@ -64,6 +64,8 @@ interface RequestFilters {
   sinceDays?: number;
   /** Convenience: status = 'pending'. */
   pendingOnly?: boolean;
+  /** Only requests SUBMITTED by this user (Nexus Requests widget). */
+  requesterId?: string;
 }
 
 export function useRequests(filters?: RequestFilters) {
@@ -88,6 +90,9 @@ export function useRequests(filters?: RequestFilters) {
       if (filters?.sinceDays) {
         const since = new Date(Date.now() - filters.sinceDays * 86_400_000).toISOString();
         q = q.gte("created_at", since);
+      }
+      if (filters?.requesterId) {
+        q = q.eq("requester_user_id", filters.requesterId);
       }
 
       const { data, error } = await q;

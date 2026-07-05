@@ -10,6 +10,7 @@ import { Menu as MenuIcon, Sparkles } from "lucide-react";
 import { WelcomeWizard } from "@/features/auth/WelcomeWizard";
 import { QuickCreateDialog } from "@/components/QuickCreateDialog";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
+import { useFrozenAnimationGuard } from "@/hooks/useFrozenAnimationGuard";
 import { QuickTaskDialog } from "@/features/activities/QuickTaskDialog";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useUserPreferences } from "@/hooks/useUserPreferences";
@@ -67,6 +68,9 @@ function useIsMobile(breakpoint = 768) {
 }
 
 export function AppLayout() {
+  // App-wide: keeps Radix portals (selects, sheets, dialogs, menus) usable
+  // in hidden/background tabs where CSS animations freeze at frame 0.
+  useFrozenAnimationGuard();
   const isMobile = useIsMobile();
   const location = useLocation();
   const { profile, markOnboarded } = useAuth();
@@ -132,6 +136,7 @@ export function AppLayout() {
     onQuickCreate: useCallback(() => setShowQuickCreate(true), []),
     onShowHelp: useCallback(() => setShowShortcutsHelp(true), []),
     onQuickTask: useCallback(() => setShowQuickTask(true), []),
+    onAskAi: useCallback(() => setShowAssistant(true), []),
     quickTaskShortcut: prefs.quickTaskShortcut,
   });
 
@@ -228,7 +233,7 @@ export function AppLayout() {
               variant="ghost"
               size="sm"
               onClick={() => setShowAssistant(true)}
-              title="AI Assistant"
+              title="Ask AI  (G then I)"
               className="gap-1.5"
             >
               <Sparkles className="h-4 w-4 text-primary" />

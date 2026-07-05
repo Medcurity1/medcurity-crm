@@ -753,7 +753,7 @@ export function OpportunitiesList() {
               </TableHeader>
               <TableBody>
                 {opps.map((opp) => (
-                  <TableRow key={opp.id} className="cursor-pointer" onClick={() => navigate(`/opportunities/${opp.id}`)}>
+                  <TableRow key={opp.id} className="cursor-pointer transition-colors hover:bg-muted/40" onClick={() => navigate(`/opportunities/${opp.id}`)}>
                     {cols.visibleColumns.map((c) => (
                       <TableCell
                         key={c.key}

@@ -37,10 +37,12 @@ export const queryClient = new QueryClient({
   mutationCache,
   defaultOptions: {
     queries: {
-      // 5s (was 30s): a record you just created/edited shows up on the next
-      // navigation almost immediately instead of looking stale for half a
-      // minute. Mutations also invalidate their queries for an instant update.
-      staleTime: 5_000,
+      // 30s: list/dashboard data that changes rarely doesn't refetch on nearly
+      // every navigation. Freshness for records you just created/edited comes
+      // from post-mutation invalidation (thorough across the app), which forces
+      // an immediate refetch regardless of staleTime. Queries that genuinely
+      // need fresher data override staleTime locally.
+      staleTime: 30_000,
       retry: 1,
       // OFF (was true): refetch-on-focus made EVERY active query re-fire each
       // time you tab away and back — a lag spike + network flood on big lists.

@@ -8,10 +8,12 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
+import { AlertTriangle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import type { PipelineSummaryRow } from "@/types/crm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { formatCurrency, stageLabel } from "@/lib/formatters";
 
 // ---------------------------------------------------------------------------
@@ -160,13 +162,50 @@ const STAGE_COLORS: Record<string, string> = {
 };
 
 export function ReportsDashboard() {
-  const { data: summary, isLoading: loadingSummary } = usePipelineSummary();
-  const { data: closedWonTotal, isLoading: loadingCW } = useClosedWonTotal();
-  const { data: renewalCount } = useRenewalCount();
-  const { data: winRate, isLoading: loadingWinRate } = useWinRate();
-  const { data: avgDeal, isLoading: loadingAvgDeal } = useAverageDealSize();
-  const { data: topAccounts, isLoading: loadingTopAccounts } = useTopAccountsByRevenue();
-  const { data: velocity, isLoading: loadingVelocity } = usePipelineVelocity();
+  const {
+    data: summary,
+    isLoading: loadingSummary,
+    isError: errorSummary,
+  } = usePipelineSummary();
+  const {
+    data: closedWonTotal,
+    isLoading: loadingCW,
+    isError: errorCW,
+  } = useClosedWonTotal();
+  const { data: renewalCount, isError: errorRenewal } = useRenewalCount();
+  const {
+    data: winRate,
+    isLoading: loadingWinRate,
+    isError: errorWinRate,
+  } = useWinRate();
+  const {
+    data: avgDeal,
+    isLoading: loadingAvgDeal,
+    isError: errorAvgDeal,
+  } = useAverageDealSize();
+  const {
+    data: topAccounts,
+    isLoading: loadingTopAccounts,
+    isError: errorTopAccounts,
+  } = useTopAccountsByRevenue();
+  const {
+    data: velocity,
+    isLoading: loadingVelocity,
+    isError: errorVelocity,
+  } = usePipelineVelocity();
+
+  // Page-level error banner: if any of the headline metric queries fail, the
+  // top cards would otherwise show authoritative-looking $0 / 0. Surface a
+  // single banner so a flaky connection isn't mistaken for real zero data.
+  // A full page reload is the simplest reliable retry across all seven queries.
+  const hasError =
+    errorSummary ||
+    errorCW ||
+    errorRenewal ||
+    errorWinRate ||
+    errorAvgDeal ||
+    errorTopAccounts ||
+    errorVelocity;
 
   const totalPipeline = summary
     ?.filter((s) => !["closed_won", "closed_lost"].includes(s.stage))
@@ -205,11 +244,46 @@ export function ReportsDashboard() {
         </div>
       ) : (
         <>
+          {hasError && (
+            <div className="mb-6 flex items-center justify-between gap-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                <span>
+                  Some reports failed to load. Figures below may be incomplete
+                  or show zero.
+                </span>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => window.location.reload()}
+              >
+                Retry
+              </Button>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-            <MetricCard label="Open Pipeline" value={formatCurrency(totalPipeline)} />
-            <MetricCard label="Open Opportunities" value={String(totalOpenOpps)} />
-            <MetricCard label="Total Closed Won ARR" value={formatCurrency(closedWonTotal ?? 0)} />
-            <MetricCard label="Upcoming Renewals" value={String(renewalCount ?? 0)} />
+            <MetricCard
+              label="Open Pipeline"
+              value={formatCurrency(totalPipeline)}
+              error={errorSummary}
+            />
+            <MetricCard
+              label="Open Opportunities"
+              value={String(totalOpenOpps)}
+              error={errorSummary}
+            />
+            <MetricCard
+              label="Total Closed Won ARR"
+              value={formatCurrency(closedWonTotal ?? 0)}
+              error={errorCW}
+            />
+            <MetricCard
+              label="Upcoming Renewals"
+              value={String(renewalCount ?? 0)}
+              error={errorRenewal}
+            />
           </div>
 
           {/* Pipeline Charts */}
@@ -278,6 +352,8 @@ export function ReportsDashboard() {
               <CardContent>
                 {loadingWinRate ? (
                   <Skeleton className="h-8 w-24" />
+                ) : errorWinRate ? (
+                  <CardError />
                 ) : (
                   <>
                     <p className="text-2xl font-bold">{winRate?.rate ?? 0}% Win Rate</p>
@@ -305,6 +381,8 @@ export function ReportsDashboard() {
               <CardContent>
                 {loadingAvgDeal ? (
                   <Skeleton className="h-8 w-24" />
+                ) : errorAvgDeal ? (
+                  <CardError />
                 ) : (
                   <p className="text-2xl font-bold">
                     {formatCurrency(avgDeal ?? 0)}
@@ -327,6 +405,8 @@ export function ReportsDashboard() {
                       <Skeleton key={i} className="h-5 w-full" />
                     ))}
                   </div>
+                ) : errorTopAccounts ? (
+                  <CardError />
                 ) : !topAccounts?.length ? (
                   <p className="text-sm text-muted-foreground">No data yet</p>
                 ) : (
@@ -356,6 +436,8 @@ export function ReportsDashboard() {
               <CardContent>
                 {loadingVelocity ? (
                   <Skeleton className="h-8 w-24" />
+                ) : errorVelocity ? (
+                  <CardError />
                 ) : (
                   <>
                     <p className="text-2xl font-bold">{velocity ?? 0}</p>
@@ -373,15 +455,38 @@ export function ReportsDashboard() {
   );
 }
 
-function MetricCard({ label, value }: { label: string; value: string }) {
+function MetricCard({
+  label,
+  value,
+  error,
+}: {
+  label: string;
+  value: string;
+  error?: boolean;
+}) {
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-sm text-muted-foreground font-medium">{label}</CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="text-2xl font-bold">{value}</p>
+        {error ? (
+          <CardError />
+        ) : (
+          <p className="text-2xl font-bold">{value}</p>
+        )}
       </CardContent>
     </Card>
+  );
+}
+
+/** Inline error shown in place of a metric value when its query fails, so a
+ * failed fetch reads as an error rather than a real zero. */
+function CardError() {
+  return (
+    <p className="flex items-center gap-1.5 text-sm text-red-700 dark:text-red-400">
+      <AlertTriangle className="h-4 w-4 shrink-0" />
+      Couldn't load
+    </p>
   );
 }

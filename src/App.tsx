@@ -103,6 +103,9 @@ export default function App() {
                   }
                 />
                 <Route element={<AppLayout />}>
+                  {/* Classic dashboard stays at "/" while Nexus (the
+                      customizable widget page) is tested at /nexus
+                      (Nathan, 2026-07-03). */}
                   <Route index element={<HomePage />} />
                   <Route path="nexus" element={<NexusPage />} />
                   <Route path="requests" element={<RequestsPage />} />

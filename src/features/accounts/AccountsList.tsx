@@ -425,7 +425,7 @@ export function AccountsList() {
               </TableHeader>
               <TableBody>
                 {accounts.map((account) => (
-                  <TableRow key={account.id} className="cursor-pointer" onClick={() => navigate(`/accounts/${account.id}`)}>
+                  <TableRow key={account.id} className="cursor-pointer transition-colors hover:bg-muted/40" onClick={() => navigate(`/accounts/${account.id}`)}>
                     {cols.visibleColumns.map((c) => (
                       <TableCell
                         key={c.key}

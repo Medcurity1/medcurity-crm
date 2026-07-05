@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Home,
@@ -26,6 +27,7 @@ import {
   Megaphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { pipelineRunner } from "@/features/pipeline-runner/store";
 import { PulseLogo } from "@/components/PulseLogo";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Button } from "@/components/ui/button";
@@ -58,11 +60,16 @@ type NavItem = {
    * `className` carries the pill's color so each badge can look distinct.
    */
   badge?: { label: string; className: string };
+  /**
+   * When true, triple-clicking the label unlocks a hidden easter egg
+   * (Pipeline Runner). Normal navigation is unaffected.
+   */
+  secret?: boolean;
 };
 
-// Badge color presets. Coming Soon = vibrant orange; Admin = cool sky
-// blue; New = red (draws the eye to a freshly launched tab).
-const COMING_SOON_BADGE = "bg-orange-500 text-white";
+// Badge color presets. Admin = cool sky blue; New = red (draws the eye
+// to a freshly launched tab). COMING_SOON ("bg-orange-500 text-white")
+// retired 2026-07-03 with the old /nexus placeholder tab.
 const ADMIN_BADGE = "bg-sky-500 text-white";
 // NEW_BADGE ("bg-red-500 text-white") retired 2026-07-02 — re-add when the
 // next fresh tab launches.
@@ -80,7 +87,7 @@ const navItems: NavItem[] = [
   { to: "/accounts", icon: Building2, label: "Accounts" },
   { to: "/contacts", icon: Users, label: "Contacts" },
   { to: "/opportunities", icon: Target, label: "Opportunities" },
-  { to: "/pipeline", icon: Kanban, label: "Pipeline" },
+  { to: "/pipeline", icon: Kanban, label: "Pipeline", secret: true },
   { to: "/partners", icon: Handshake, label: "Partners" },
   { to: "/calendar", icon: CalendarIcon, label: "Calendar" },
   { to: "/activities", icon: Clock, label: "Activities" },
@@ -90,9 +97,10 @@ const navItems: NavItem[] = [
   // Forecasting + Analytics moved into /reports as tabs (2026-04-17).
   // "New" badge retired 2026-07-02 (Nathan).
   { to: "/requests", icon: MessageSquarePlus, label: "Requests" },
-  // Nexus: future per-user command center. Lives at the bottom for now
-  // with a Coming Soon badge; will eventually move up to replace Home.
-  { to: "/nexus", icon: Sparkles, label: "Nexus", badge: { label: "Coming Soon", className: COMING_SOON_BADGE } },
+  // Nexus: the customizable widget dashboard (Jordan V4). Lives at /nexus
+  // while it's being tested; the classic Home dashboard is back at "/"
+  // (Nathan, 2026-07-03).
+  { to: "/nexus", icon: Sparkles, label: "Nexus" },
 ];
 
 const adminItems: NavItem[] = [
@@ -111,6 +119,21 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
   const { profile, signOut } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+
+  // Hidden easter egg: three quick clicks on a "secret" nav label (Pipeline)
+  // launches the Pipeline Runner mini-game. Clicks still navigate normally;
+  // we only watch their timing. Window is 700ms between clicks.
+  const secretClicks = useRef<number[]>([]);
+  function handleSecretClick() {
+    const now = performance.now();
+    const recent = secretClicks.current.filter((t) => now - t < 700);
+    recent.push(now);
+    secretClicks.current = recent;
+    if (recent.length >= 3) {
+      secretClicks.current = [];
+      pipelineRunner.launch();
+    }
+  }
 
   const allItems = profile?.role === "admin" || profile?.role === "super_admin"
     ? [...navItems, ...adminItems]
@@ -228,7 +251,12 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
               )}
             </a>
           ) : (
-            <NavLink key={item.to} to={item.to} className={linkClasses}>
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={linkClasses}
+              onClick={item.secret ? handleSecretClick : undefined}
+            >
               <item.icon className="h-5 w-5 shrink-0" />
               {!collapsed && (
                 <span className="flex-1 flex items-center justify-between gap-2">

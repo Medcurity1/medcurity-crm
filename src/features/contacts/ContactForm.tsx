@@ -172,7 +172,7 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
   // Warn before losing unsaved edits — Cancel routes through
   // confirmIfDirty; the post-save navigates call disarm() first so a
   // successful save never trips the prompt.
-  const { confirmIfDirty, disarm } = useUnsavedChanges(isDirty);
+  const { confirmIfDirty, disarm, dialog: unsavedDialog } = useUnsavedChanges(isDirty);
 
   // Auto-fill country + time_zone from US ZIP. We previously tried
   // chaining this via register('mailing_zip', { onChange }) but the
@@ -595,6 +595,7 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
               <Button type="submit" disabled={isSubmitting}>
                 {isSubmitting ? "Saving..." : isEditing ? "Save Changes" : "Create Contact"}
               </Button>
+              {unsavedDialog}
               <Button type="button" variant="outline" onClick={() => confirmIfDirty(() => navigate(-1))}>
                 Cancel
               </Button>

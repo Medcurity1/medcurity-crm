@@ -94,9 +94,13 @@ export function RecentWins() {
           return (
             <div
               key={w.id}
-              className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2"
+              className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:shadow-amber-500/15"
             >
-              <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500/20 to-amber-500/[0.04]">
+                  <Trophy className="h-4 w-4 text-amber-500" />
+                </span>
+                <div className="min-w-0">
                 <p className="truncate text-sm">
                   <span className="font-semibold">{ownerFirst}</span> closed{" "}
                   <Link
@@ -110,6 +114,7 @@ export function RecentWins() {
                   )}
                 </p>
                 <p className="text-xs text-muted-foreground">{formatRelativeDate(w.won_at)}</p>
+                </div>
               </div>
               <div className="shrink-0" title={fiverNames ? `High fives: ${fiverNames}` : undefined}>
                 {w.owner == null ? (

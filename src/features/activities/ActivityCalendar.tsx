@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { QuickTaskDialog } from "./QuickTaskDialog";
 import {
   ChevronLeft,
   ChevronRight,
@@ -54,11 +55,12 @@ function useMonthActivities(year: number, month: number) {
   return useQuery({
     queryKey: ["activities", "calendar", year, month],
     queryFn: async () => {
-      // Pull a generous window: anything whose effective_date
-      // (due_at || completed_at || created_at) falls in the visible
-      // month. Simpler to fetch by created_at window with margin and
-      // filter client-side, since the three-way OR is awkward in
-      // PostgREST.
+      // Fetch anything whose effective_at (coalesce(activity_date, created_at),
+      // indexed via activities_effective_at_idx) falls in the visible month,
+      // plus a 1-month cushion each side to cover the leading/trailing days of
+      // the calendar grid. Filtering on the same column the rows are placed by
+      // fixes the old bug where backdated/synced activities (activity_date in a
+      // past month) were missed because the fetch keyed on created_at/due_at.
       const start = new Date(year, month, 1);
       const end = new Date(year, month + 1, 0, 23, 59, 59, 999);
       const margin = 31 * 24 * 60 * 60 * 1000; // 1-month cushion both sides
@@ -69,12 +71,9 @@ function useMonthActivities(year: number, month: number) {
         .select(
           "*, owner:user_profiles!owner_user_id(id, full_name), account:accounts!account_id(id, name), opportunity:opportunities!opportunity_id(id, name), contact:contacts!contact_id(id, first_name, last_name), lead:leads!lead_id(id, first_name, last_name)"
         )
-        .or(
-          `created_at.gte.${fetchStart},due_at.gte.${fetchStart}`
-        )
-        .or(
-          `created_at.lte.${fetchEnd},due_at.lte.${fetchEnd}`
-        );
+        .gte("effective_at", fetchStart)
+        .lte("effective_at", fetchEnd)
+        .limit(1000);
       if (error) throw error;
       return (data ?? []) as CalendarActivity[];
     },
@@ -144,6 +143,7 @@ function getRecordLink(
 export function ActivityCalendar() {
   const [currentMonth, setCurrentMonth] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
+  const [showAddTask, setShowAddTask] = useState(false);
   // Right-pane filters so users can scan a busy day without scrolling.
   // Applies to selectedActivities below.
   const [dayQuery, setDayQuery] = useState("");
@@ -202,7 +202,9 @@ export function ActivityCalendar() {
         return daySort === "oldest" ? aTime - bTime : bTime - aTime;
       });
     return rows;
-  }, [activities, selectedDate]);
+    // dayType/dayQuery/daySort are read above, so they MUST be deps or the
+    // day-panel search/type/sort controls silently do nothing.
+  }, [activities, selectedDate, dayType, dayQuery, daySort]);
 
   function colorClass(count: number): string {
     if (count === 0) return "";
@@ -321,11 +323,9 @@ export function ActivityCalendar() {
                 ? format(selectedDate, "MMM d, yyyy")
                 : "Select a date"}
             </CardTitle>
-            <Button variant="outline" size="sm" asChild>
-              <Link to="/opportunities">
-                <Plus className="h-4 w-4 mr-1" />
-                Add Activity
-              </Link>
+            <Button variant="outline" size="sm" onClick={() => setShowAddTask(true)}>
+              <Plus className="h-4 w-4 mr-1" />
+              Add Task
             </Button>
           </CardHeader>
           <CardContent>
@@ -427,6 +427,7 @@ export function ActivityCalendar() {
           </CardContent>
         </Card>
       </div>
+      <QuickTaskDialog open={showAddTask} onOpenChange={setShowAddTask} />
     </div>
   );
 }

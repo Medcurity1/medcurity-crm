@@ -24,7 +24,12 @@ export function useActivities(filters?: ActivityFilters) {
         // logged date) so back-dated entries sit in the right spot. The
         // timeline also re-groups client-side, but ordering here keeps any
         // non-grouped consumer correct too.
-        .order("effective_at", { ascending: false });
+        .order("effective_at", { ascending: false })
+        // Bounded window: the timeline shows 25 and its "Show more" is a link
+        // to the full /activities page (not an in-place expand), so a cap
+        // comfortably above 25 avoids downloading thousands of rows for a
+        // long-lived account without changing what's displayed.
+        .limit(50);
 
       if (filters?.account_id) {
         query = query.eq("account_id", filters.account_id);

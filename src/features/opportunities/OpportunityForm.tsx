@@ -273,7 +273,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   // staged products — those live outside the form but are just as easy
   // to lose. Cancel buttons route through confirmIfDirty; the post-save
   // navigates call disarm() first so saving never trips the prompt.
-  const { confirmIfDirty, disarm } = useUnsavedChanges(
+  const { confirmIfDirty, disarm, dialog: unsavedDialog } = useUnsavedChanges(
     isDirty || (!isEditing && stagedProducts.length > 0),
   );
 
@@ -781,6 +781,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
 
             {/* Step navigation */}
             <div className="flex items-center justify-between pt-4 border-t">
+              {unsavedDialog}
               <Button type="button" variant="ghost" onClick={() => confirmIfDirty(() => navigate(-1))}>
                 Cancel
               </Button>
@@ -1702,10 +1703,15 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
               <Button type="submit" disabled={isSubmitting}>
                 {isSubmitting ? "Saving..." : isEditing ? "Save Changes" : "Create Opportunity"}
               </Button>
+              {/* second render branch (edit footer) — dialog already mounted above in wizard branch, but branches are exclusive so mount here too */}
               <Button type="button" variant="outline" onClick={() => confirmIfDirty(() => navigate(-1))}>
                 Cancel
               </Button>
             </div>
+            {/* Mount the unsaved-changes confirm here too — this edit branch
+                is exclusive with the one at the top that also mounts it, so
+                without this Cancel silently no-ops while the form is dirty. */}
+            {unsavedDialog}
           </form>
         </CardContent>
       </Card>

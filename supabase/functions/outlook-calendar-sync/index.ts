@@ -13,6 +13,12 @@
 // on the activity row so the UI can surface it — but we never block the
 // task itself from saving.
 //
+// Auth: deployed --no-verify-jwt, so the function gates callers itself. The
+// only legitimate caller is our own backend (the hourly pg_cron reconcile and
+// server-to-server single-task calls), which send the service-role key as the
+// bearer. Anonymous callers are rejected with 401 — this prevents forcing
+// calendar writes/deletes on staff Outlook calendars.
+//
 // Deploy: supabase functions deploy outlook-calendar-sync --no-verify-jwt
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -328,10 +334,68 @@ async function syncTask(supabase: SupabaseClient, task: TaskRow): Promise<void> 
 }
 
 // ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+// Constant-time string equality — both inputs hashed to fixed length first
+// so length differences leak nothing either. Mirrors the meddy-support helper.
+async function timingSafeEqual(a: string, b: string): Promise<boolean> {
+  const enc = new TextEncoder();
+  const [ha, hb] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(a)),
+    crypto.subtle.digest("SHA-256", enc.encode(b)),
+  ]);
+  const va = new Uint8Array(ha);
+  const vb = new Uint8Array(hb);
+  let diff = 0;
+  for (let i = 0; i < va.length; i++) diff |= va[i] ^ vb[i];
+  return diff === 0;
+}
+
+/**
+ * Is this the service-role caller? This function has NO browser/user caller:
+ * the only legitimate invoker is the hourly pg_cron reconcile (see
+ * docs/dev-handoff/azure-permissions.md), which posts here with
+ * `Authorization: Bearer <service_role_key>`. Single-task mode is invoked
+ * server-to-server with the same key. So service-role-bearer-only is the
+ * correct, simplest gate. The service-role key is a server-only secret, so a
+ * constant-time equality check is a safe "this is our own backend" gate.
+ */
+async function isServiceRole(authHeader: string | null): Promise<boolean> {
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  if (!authHeader) return false;
+  return await timingSafeEqual(authHeader, `Bearer ${serviceKey}`);
+}
+
+// ---------------------------------------------------------------------------
 // Entry
 // ---------------------------------------------------------------------------
 
 serve(async (req) => {
+  // CORS preflight (defensive — no browser calls this today, but keep it safe).
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  // Auth gate — deployed with --no-verify-jwt, so we must authenticate the
+  // caller ourselves before parsing the path/body or creating the service-role
+  // client. Only our own backend (service-role bearer) may invoke this;
+  // reject everyone else. Prevents anonymous callers from forcing calendar
+  // writes/deletes on staff Outlook calendars.
+  if (!(await isServiceRole(req.headers.get("Authorization")))) {
+    return new Response(JSON.stringify({ ok: false, error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,

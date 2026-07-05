@@ -433,7 +433,7 @@ export function ContactsList() {
               </TableHeader>
               <TableBody>
                 {contacts.map((contact) => (
-                  <TableRow key={contact.id} className="cursor-pointer" onClick={() => navigate(`/contacts/${contact.id}`)}>
+                  <TableRow key={contact.id} className="cursor-pointer transition-colors hover:bg-muted/40" onClick={() => navigate(`/contacts/${contact.id}`)}>
                     {cols.visibleColumns.map((c) => (
                       <TableCell
                         key={c.key}

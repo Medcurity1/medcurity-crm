@@ -11,10 +11,23 @@
 // Deployment:
 //   supabase functions deploy pandadoc-sync --no-verify-jwt
 //
+// Auth: this is a PUBLIC webhook (PandaDoc's servers POST to it), so a JWT
+// gate would be wrong. Instead we verify PandaDoc's HMAC-SHA256 signature
+// over the raw body. The endpoint FAILS CLOSED: if the shared secret is not
+// configured (the PandaDoc integration is not built yet — deferred), every
+// call is rejected with 401. Full activation happens when the feature is
+// built and PANDADOC_WEBHOOK_SECRET is set to the per-webhook shared key
+// configured in the PandaDoc dashboard.
+//
 // Required environment variables (set via supabase secrets set):
 //   SUPABASE_URL              - project URL
 //   SUPABASE_SERVICE_ROLE_KEY - service-role key (bypasses RLS)
-//   PANDADOC_API_KEY          - PandaDoc API key (for verifying webhooks + API calls)
+//   PANDADOC_API_KEY          - PandaDoc API key (for outbound API calls)
+//   PANDADOC_WEBHOOK_SECRET   - per-webhook shared key from the PandaDoc
+//                               dashboard, used to verify inbound webhook
+//                               signatures (X-PandaDoc-Signature). Distinct
+//                               from PANDADOC_API_KEY. Until this is set the
+//                               function rejects all calls (fail closed).
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -61,32 +74,87 @@ interface OpportunityMatch {
 // ---------------------------------------------------------------------------
 
 /**
+ * Constant-time comparison of two byte arrays. Returns false immediately on a
+ * length mismatch, otherwise XOR-accumulates so no early-exit timing leaks
+ * which byte differed.
+ */
+function constantTimeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
+/** Decode a lowercase-or-uppercase hex string into bytes; null if malformed. */
+function hexToBytes(hex: string): Uint8Array | null {
+  const clean = hex.trim().toLowerCase();
+  if (clean.length === 0 || clean.length % 2 !== 0) return null;
+  if (!/^[0-9a-f]+$/.test(clean)) return null;
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = parseInt(clean.substr(i * 2, 2), 16);
+  }
+  return out;
+}
+
+/**
  * Verify the PandaDoc webhook signature.
  *
- * PandaDoc sends the shared key in the X-PandaDoc-Signature header.
- * The signature is an HMAC-SHA256 of the raw request body using the API key.
- * If verification is not possible (no header), we log a warning but continue
- * to avoid blocking legitimate webhooks during initial setup.
+ * PandaDoc signs each webhook with HMAC-SHA256 over the RAW request body,
+ * keyed by the per-webhook shared key you configure in the PandaDoc
+ * dashboard, and sends the resulting hex digest in the X-PandaDoc-Signature
+ * header.
+ *
+ * FAIL CLOSED. Returns false (reject) when:
+ *   - the shared secret env var is not configured (integration deferred /
+ *     not built yet — every call is rejected until it's set), OR
+ *   - the X-PandaDoc-Signature header is missing, OR
+ *   - the header is malformed, OR
+ *   - the computed HMAC does not match (constant-time compare).
+ *
+ * NEVER returns true on a missing header or a mismatch — no "allow through
+ * during setup" behaviour, which would be an open write hole.
  */
-function verifyWebhookSignature(
-  _body: string,
+async function verifyWebhookSignature(
+  body: string,
   signatureHeader: string | null,
-  apiKey: string
-): boolean {
+  sharedSecret: string
+): Promise<boolean> {
+  // No secret configured → the integration isn't built yet. Fail closed.
+  if (!sharedSecret) {
+    console.warn(
+      "PANDADOC_WEBHOOK_SECRET not set; rejecting webhook (fail closed). " +
+      "Set the shared key when the PandaDoc integration is activated."
+    );
+    return false;
+  }
+
   if (!signatureHeader) {
-    console.warn("No X-PandaDoc-Signature header present; skipping verification");
-    return true; // Allow through during setup; tighten in production
+    console.warn("No X-PandaDoc-Signature header present; rejecting webhook");
+    return false;
   }
 
-  // PandaDoc webhook verification: the shared key should match the API key
-  // In practice, PandaDoc sends the shared key you configured in their dashboard.
-  // For a basic check, we verify the header is present and non-empty.
-  // For production, implement HMAC-SHA256 verification with the shared secret.
-  if (signatureHeader === apiKey) {
-    return true;
+  const presented = hexToBytes(signatureHeader);
+  if (!presented) {
+    console.warn("X-PandaDoc-Signature is not valid hex; rejecting webhook");
+    return false;
   }
 
-  console.warn("Webhook signature mismatch; allowing through with warning");
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(sharedSecret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const macBuf = await crypto.subtle.sign("HMAC", key, enc.encode(body));
+  const expected = new Uint8Array(macBuf);
+
+  if (!constantTimeEqualBytes(presented, expected)) {
+    console.warn("PandaDoc webhook signature mismatch; rejecting webhook");
+    return false;
+  }
   return true;
 }
 
@@ -405,17 +473,20 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const pandadocApiKey = Deno.env.get("PANDADOC_API_KEY") ?? "";
+    // Per-webhook shared key from the PandaDoc dashboard (NOT the API key).
+    // Unset until the integration is built → verifyWebhookSignature fails closed.
+    const pandadocWebhookSecret = Deno.env.get("PANDADOC_WEBHOOK_SECRET") ?? "";
 
     const supabase = createClient(supabaseUrl, supabaseKey, {
       auth: { persistSession: false },
     });
 
-    // Read and verify the webhook payload
+    // Read and verify the webhook payload. Must read the RAW body (before any
+    // JSON.parse) so the HMAC is computed over exactly what PandaDoc signed.
     const rawBody = await req.text();
     const signatureHeader = req.headers.get("X-PandaDoc-Signature");
 
-    if (!verifyWebhookSignature(rawBody, signatureHeader, pandadocApiKey)) {
+    if (!(await verifyWebhookSignature(rawBody, signatureHeader, pandadocWebhookSecret))) {
       return new Response(JSON.stringify({ error: "Invalid signature" }), {
         status: 401,
         headers: { "Content-Type": "application/json" },

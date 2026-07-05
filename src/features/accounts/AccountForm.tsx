@@ -246,7 +246,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
   // Warn before losing unsaved edits — Cancel routes through
   // confirmIfDirty; the post-save navigate calls disarm() first so a
   // successful save never trips the prompt.
-  const { confirmIfDirty, disarm } = useUnsavedChanges(isDirty);
+  const { confirmIfDirty, disarm, dialog: unsavedDialog } = useUnsavedChanges(isDirty);
 
   // When the rep types a US zip and tabs out, auto-fill country and
   // timezone if those fields are still blank. We never overwrite a
@@ -1066,6 +1066,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
               <Button type="submit" disabled={isSubmitting}>
                 {isSubmitting ? "Saving..." : isEditing ? "Save Changes" : "Create Account"}
               </Button>
+              {unsavedDialog}
               <Button type="button" variant="outline" onClick={() => confirmIfDirty(() => navigate(-1))}>
                 Cancel
               </Button>

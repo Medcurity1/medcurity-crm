@@ -26,6 +26,7 @@ const navigationShortcuts: ShortcutEntry[] = [
   { keys: ["G", "O"], label: "Go to Opportunities" },
   { keys: ["G", "P"], label: "Go to Pipeline" },
   { keys: ["G", "R"], label: "Go to Reports" },
+  { keys: ["G", "I"], label: "Ask AI" },
 ];
 
 function ShortcutRow({ shortcut }: { shortcut: ShortcutEntry }) {

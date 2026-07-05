@@ -10,6 +10,7 @@ interface KeyboardShortcutsOptions {
   onQuickCreate: () => void;
   onShowHelp: () => void;
   onQuickTask: () => void;
+  onAskAi: () => void;
   /** User-chosen Quick Task shortcut (My Settings → Preferences). */
   quickTaskShortcut?: QuickTaskShortcut;
 }
@@ -27,6 +28,7 @@ export function useKeyboardShortcuts({
   onQuickCreate,
   onShowHelp,
   onQuickTask,
+  onAskAi,
   quickTaskShortcut = DEFAULT_QUICK_TASK_SHORTCUT,
 }: KeyboardShortcutsOptions) {
   const navigate = useNavigate();
@@ -95,6 +97,12 @@ export function useKeyboardShortcuts({
 
         if (pendingG.current) {
           clearGChord();
+          // "G then I" opens Ask AI (an action, not a route).
+          if (e.key.toLowerCase() === "i") {
+            e.preventDefault();
+            onAskAi();
+            return;
+          }
           const routes: Record<string, string> = {
             h: "/",
             a: "/accounts",
@@ -118,5 +126,5 @@ export function useKeyboardShortcuts({
       document.removeEventListener("keydown", handleKeyDown);
       clearGChord();
     };
-  }, [navigate, onQuickCreate, onShowHelp, onQuickTask, quickTaskShortcut, clearGChord]);
+  }, [navigate, onQuickCreate, onShowHelp, onQuickTask, onAskAi, quickTaskShortcut, clearGChord]);
 }
