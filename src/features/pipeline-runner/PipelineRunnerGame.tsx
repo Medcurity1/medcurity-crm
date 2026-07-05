@@ -180,19 +180,30 @@ function GameModal() {
     [topScores],
   );
 
-  // ---- sizing (DPR-aware) ----
+  // ---- sizing (DPR-aware, self-healing) ----
+  // We only ever touch the *backing store* (canvas.width/height). The
+  // element's display size comes from the `w-full h-full` classes, so we
+  // never write an inline pixel width — that could get stuck at 0 if the
+  // container is measured before layout (e.g. a 0-size headless viewport).
+  // Called once on mount, by the ResizeObserver, AND every frame, so the
+  // canvas snaps to the right resolution the instant the box has a size.
   const resize = useCallback(() => {
     const canvas = canvasRef.current;
     const wrap = wrapRef.current;
     if (!canvas || !wrap) return;
     const cssW = wrap.clientWidth;
     const cssH = wrap.clientHeight;
+    if (cssW === 0 || cssH === 0) return; // not laid out yet — never pin to 0
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     dprRef.current = dpr;
-    canvas.width = Math.round(cssW * dpr);
-    canvas.height = Math.round(cssH * dpr);
-    canvas.style.width = cssW + "px";
-    canvas.style.height = cssH + "px";
+    const bw = Math.round(cssW * dpr);
+    const bh = Math.round(cssH * dpr);
+    // Reassigning canvas.width clears the canvas, so only do it on a real
+    // change (we redraw every frame anyway).
+    if (canvas.width !== bw || canvas.height !== bh) {
+      canvas.width = bw;
+      canvas.height = bh;
+    }
     const g = gameRef.current;
     if (g) {
       g.W = cssW;
@@ -538,18 +549,24 @@ function GameModal() {
     if (wrapRef.current) ro.observe(wrapRef.current);
 
     const frame = (now: number) => {
+      resize(); // self-healing: snaps the backing store to the box each frame
       if (lastRef.current == null) lastRef.current = now;
       let dt = (now - lastRef.current) / 1000;
       lastRef.current = now;
       if (dt > 0.05) dt = 0.05; // clamp long frames (tab switch)
-      if (phaseRef.current === "playing") update(dt);
-      else if (phaseRef.current === "ready") {
-        // gentle idle life on the ready screen
+      if (phaseRef.current === "playing") {
+        update(dt);
+      } else {
         const g = gameRef.current;
         if (g) {
-          g.bgScroll = (g.bgScroll + dt * 24) % 260;
-          g.groundScroll = (g.groundScroll + dt * 90) % 48;
-          g.playerY = g.groundY - PLAYER_SIZE + Math.sin(now / 380) * 5;
+          // gentle idle life on the ready screen
+          if (phaseRef.current === "ready") {
+            g.bgScroll = (g.bgScroll + dt * 24) % 260;
+            g.groundScroll = (g.groundScroll + dt * 90) % 48;
+            g.playerY = g.groundY - PLAYER_SIZE + Math.sin(now / 380) * 5;
+          }
+          // Effects keep animating in ready + gameover so the death burst
+          // flies out and the screen-shake settles instead of freezing.
           for (const p of g.particles) {
             p.life -= dt;
             p.vy += p.grav * dt;
@@ -557,6 +574,7 @@ function GameModal() {
             p.y += p.vy * dt;
           }
           g.particles = g.particles.filter((p) => p.life > 0);
+          if (g.shake > 0) g.shake = Math.max(0, g.shake - dt * 40);
         }
       }
       render();
@@ -585,12 +603,17 @@ function GameModal() {
         close();
         return;
       }
-      // Ignore lone modifier presses so they don't "start" the game.
-      const isModifier = e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta";
       const jumpKey = e.code === "Space" || e.key === "ArrowUp" || e.key === "w" || e.key === "W";
+      // "Press any key" = a real character, space, enter, or arrow — NOT
+      // lone modifiers or browser keys (F5, Tab, F12) which we leave alone.
+      const startKey =
+        e.code === "Space" ||
+        e.key === "Enter" ||
+        e.key.startsWith("Arrow") ||
+        (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey);
 
       if (phaseRef.current === "ready") {
-        if (!isModifier && !e.metaKey && !e.ctrlKey) {
+        if (startKey) {
           e.preventDefault();
           startRun();
         }
