@@ -11,6 +11,8 @@ import {
   Users as UsersIcon,
   StickyNote,
   CheckSquare,
+  MonitorPlay,
+  Presentation,
   Search,
   Check,
   Plus,
@@ -67,6 +69,8 @@ const ACTIVITY_ICONS: Record<ActivityType, typeof Phone> = {
   meeting: UsersIcon,
   note: StickyNote,
   task: CheckSquare,
+  webinar: MonitorPlay,
+  conference: Presentation,
 };
 
 interface ListFilters {
@@ -316,6 +320,8 @@ export function ActivitiesListPage() {
             <SelectItem value="call">Call</SelectItem>
             <SelectItem value="email">Email</SelectItem>
             <SelectItem value="meeting">Meeting</SelectItem>
+            <SelectItem value="webinar">Webinar</SelectItem>
+            <SelectItem value="conference">Conference</SelectItem>
             <SelectItem value="note">Note</SelectItem>
             <SelectItem value="task">Task</SelectItem>
           </SelectContent>

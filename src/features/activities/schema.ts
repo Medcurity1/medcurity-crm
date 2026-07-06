@@ -6,7 +6,7 @@ export const activityFormSchema = z.object({
   // longer exposes "Note" as a *new* activity option — see
   // ActivityForm's `activityTypes` array — so this enum value is
   // effectively edit-only going forward.
-  activity_type: z.enum(["call", "email", "meeting", "note", "task"], {
+  activity_type: z.enum(["call", "email", "meeting", "note", "task", "webinar", "conference"], {
     message: "Select an activity type",
   }),
   subject: z.string().min(1, "Subject is required"),

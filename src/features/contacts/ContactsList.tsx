@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useUrlNumberState, useUrlArrayState, useUrlState, useUrlSortState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Users, Plus, Search } from "lucide-react";
+import { Users, Plus, Search, UploadCloud } from "lucide-react";
 import { useContacts, useArchiveContact, useBulkUpdateOwner, useBulkDeleteContacts } from "./api";
 import { toast } from "sonner";
 import { useUsers } from "@/features/accounts/api";
@@ -17,6 +17,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SortableHeader, type SortState } from "@/components/SortableHeader";
 import { MultiSelect } from "@/components/MultiSelect";
 import { SavedViews } from "@/features/saved-views/SavedViews";
+import { ContactImportWizard } from "./import/ContactImportWizard";
 import { ColumnPicker } from "@/features/list-columns/ColumnPicker";
 import { useColumnPrefs } from "@/features/list-columns/useColumnPrefs";
 import type { ColumnDescriptor } from "@/features/list-columns/columns";
@@ -71,6 +72,7 @@ export function ContactsList() {
   const [page, setPage] = useUrlNumberState("page", 0);
   const [pageSize, setPageSize] = useUrlNumberState("size", 25);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [importOpen, setImportOpen] = useState(false);
   // Bulk delete is confirmed via the app ConfirmDialog (not window.confirm)
   // so it matches the destructive-action pattern everywhere else.
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
@@ -288,12 +290,22 @@ export function ContactsList() {
         title="Contacts"
         description="People at your accounts"
         actions={
-          <Button onClick={() => navigate("/contacts/new")}>
-            <Plus className="h-4 w-4 mr-2" />
-            New Contact
-          </Button>
+          <>
+            {isAdmin && (
+              <Button variant="outline" onClick={() => setImportOpen(true)}>
+                <UploadCloud className="h-4 w-4 mr-2" />
+                Import Contacts
+              </Button>
+            )}
+            <Button onClick={() => navigate("/contacts/new")}>
+              <Plus className="h-4 w-4 mr-2" />
+              New Contact
+            </Button>
+          </>
         }
       />
+
+      {isAdmin && <ContactImportWizard open={importOpen} onOpenChange={setImportOpen} />}
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="relative min-w-[220px] w-full sm:w-auto sm:flex-1 sm:max-w-sm">

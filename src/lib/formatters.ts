@@ -98,6 +98,8 @@ const activityLabels: Record<ActivityType, string> = {
   meeting: "Meeting",
   note: "Note",
   task: "Task",
+  webinar: "Webinar",
+  conference: "Conference",
 };
 
 export function activityLabel(type: ActivityType): string {
