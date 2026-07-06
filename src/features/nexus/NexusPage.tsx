@@ -6,7 +6,7 @@
 // nexus_initialize (idempotent, once per session).
 
 import { useState } from "react";
-import { Plus, Inbox } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,12 +14,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useNexusInitialize, useNexusWidgets } from "./api";
 import { MAX_WIDGETS, type NexusWidget } from "./types";
 import { NexusGrid } from "./NexusGrid";
 import { WidgetBuilder } from "./WidgetBuilder";
-import { useMyRequestTypes } from "@/features/requests/api";
 import { NexusRequestWidgets } from "@/features/requests/RequestWidgets";
 
 function getGreeting(): string {
@@ -39,14 +37,6 @@ export function NexusPage() {
   const { data: widgets } = useNexusWidgets();
   const [builderOpen, setBuilderOpen] = useState(false);
   const [editing, setEditing] = useState<NexusWidget | null>(null);
-  const [tab, setTab] = useState("dashboard");
-
-  // Routed reviewers (product → Rachel, collateral/CRM → Jordan, all → Nathan)
-  // get a "Requests" tab with their incoming requests + approve/deny. Reps
-  // with no routed types just see their dashboard, no tab bar.
-  const { data: myRequestTypes } = useMyRequestTypes();
-  const hasRequests = (myRequestTypes?.length ?? 0) > 0;
-  const onDashboard = !hasRequests || tab === "dashboard";
 
   const count = widgets?.length ?? 0;
   const atCap = count >= MAX_WIDGETS;
@@ -77,42 +67,28 @@ export function NexusPage() {
             Your day at a glance — arrange it however you work.
           </p>
         </div>
-        {/* "Add a Widget" only makes sense on the dashboard tab. */}
-        {onDashboard &&
-          (atCap ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                {/* span wrapper so the tooltip still fires on the disabled button */}
-                <span tabIndex={0}>{addButton}</span>
-              </TooltipTrigger>
-              <TooltipContent>
-                You've hit the {MAX_WIDGETS}-widget limit. Remove one to add
-                another.
-              </TooltipContent>
-            </Tooltip>
-          ) : (
-            addButton
-          ))}
+        {atCap ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              {/* span wrapper so the tooltip still fires on the disabled button */}
+              <span tabIndex={0}>{addButton}</span>
+            </TooltipTrigger>
+            <TooltipContent>
+              You've hit the {MAX_WIDGETS}-widget limit. Remove one to add
+              another.
+            </TooltipContent>
+          </Tooltip>
+        ) : (
+          addButton
+        )}
       </div>
 
-      {hasRequests ? (
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList>
-            <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-            <TabsTrigger value="requests" className="gap-2">
-              <Inbox className="h-4 w-4" /> Requests
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="dashboard" className="mt-6">
-            <NexusGrid onEditWidget={(w) => openBuilder(w)} />
-          </TabsContent>
-          <TabsContent value="requests" className="mt-6">
-            <NexusRequestWidgets />
-          </TabsContent>
-        </Tabs>
-      ) : (
-        <NexusGrid onEditWidget={(w) => openBuilder(w)} />
-      )}
+      {/* Routed reviewers (product → Rachel, collateral/CRM → Jordan, all →
+          Nathan) see their incoming requests here, one box per form they
+          handle, with approve/deny. Self-hides for reps with no routed types. */}
+      <NexusRequestWidgets />
+
+      <NexusGrid onEditWidget={(w) => openBuilder(w)} />
 
       <WidgetBuilder
         open={builderOpen}
