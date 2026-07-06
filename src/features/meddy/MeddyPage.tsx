@@ -15,6 +15,7 @@ import { MeddyHeader, MEDDY_PANE_CLASS } from "./MeddyShell";
 import { ConversationSidebar } from "./ConversationSidebar";
 import { ChatView } from "./ChatView";
 import { HistoryView } from "./HistoryView";
+import { MeddySweeperGame } from "@/features/meddy-sweeper/MeddySweeperGame";
 
 export function MeddyPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -155,6 +156,9 @@ export function MeddyPage() {
           </>
         )}
       </div>
+
+      {/* Hidden mini-game: triple-click the "Meddy" nav label to unlock. */}
+      <MeddySweeperGame />
     </div>
   );
 }

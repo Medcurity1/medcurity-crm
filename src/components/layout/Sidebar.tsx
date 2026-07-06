@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { pipelineRunner } from "@/features/pipeline-runner/store";
+import { meddySweeper } from "@/features/meddy-sweeper/store";
 import { PulseLogo } from "@/components/PulseLogo";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Button } from "@/components/ui/button";
@@ -61,10 +62,10 @@ type NavItem = {
    */
   badge?: { label: string; className: string };
   /**
-   * When true, triple-clicking the label unlocks a hidden easter egg
-   * (Pipeline Runner). Normal navigation is unaffected.
+   * When set, triple-clicking the label unlocks a hidden mini-game.
+   * Normal navigation is unaffected. Each secret tab launches its own game.
    */
-  secret?: boolean;
+  secret?: "pipeline" | "meddysweeper";
 };
 
 // Badge color presets. Admin = cool sky blue; New = red (draws the eye
@@ -83,11 +84,11 @@ const navItems: NavItem[] = [
   // platform Support console lives INSIDE Meddy now (Website | Platform
   // switcher on the page) — same nav home for people who handle both.
   // Data stays fully separate; only the entry point merged.
-  { to: "/meddy", icon: Bot, label: "Meddy" },
+  { to: "/meddy", icon: Bot, label: "Meddy", secret: "meddysweeper" },
   { to: "/accounts", icon: Building2, label: "Accounts" },
   { to: "/contacts", icon: Users, label: "Contacts" },
   { to: "/opportunities", icon: Target, label: "Opportunities" },
-  { to: "/pipeline", icon: Kanban, label: "Pipeline", secret: true },
+  { to: "/pipeline", icon: Kanban, label: "Pipeline", secret: "pipeline" },
   { to: "/partners", icon: Handshake, label: "Partners" },
   { to: "/calendar", icon: CalendarIcon, label: "Calendar" },
   { to: "/activities", icon: Clock, label: "Activities" },
@@ -123,15 +124,21 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
   // Hidden easter egg: three quick clicks on a "secret" nav label (Pipeline)
   // launches the Pipeline Runner mini-game. Clicks still navigate normally;
   // we only watch their timing. Window is 700ms between clicks.
-  const secretClicks = useRef<number[]>([]);
-  function handleSecretClick() {
+  // Per-game click buffers so triple-clicks on one secret label can't pool
+  // with clicks on the other (two secret tabs now: Pipeline + Meddy).
+  const secretClicks = useRef<Record<NonNullable<NavItem["secret"]>, number[]>>({
+    pipeline: [],
+    meddysweeper: [],
+  });
+  function handleSecretClick(game: NonNullable<NavItem["secret"]>) {
     const now = performance.now();
-    const recent = secretClicks.current.filter((t) => now - t < 700);
+    const recent = secretClicks.current[game].filter((t) => now - t < 700);
     recent.push(now);
-    secretClicks.current = recent;
+    secretClicks.current[game] = recent;
     if (recent.length >= 3) {
-      secretClicks.current = [];
-      pipelineRunner.launch();
+      secretClicks.current[game] = [];
+      if (game === "meddysweeper") meddySweeper.launch();
+      else pipelineRunner.launch();
     }
   }
 
@@ -255,7 +262,7 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
               key={item.to}
               to={item.to}
               className={linkClasses}
-              onClick={item.secret ? handleSecretClick : undefined}
+              onClick={item.secret ? () => handleSecretClick(item.secret!) : undefined}
             >
               <item.icon className="h-5 w-5 shrink-0" />
               {!collapsed && (
