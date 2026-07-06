@@ -79,6 +79,8 @@ export function BulkArchiveFromFile({
   const [preview, setPreview] = useState<BulkArchiveResult | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const archive = useBulkArchiveFromList();
 
   function reset() {
@@ -87,6 +89,47 @@ export function BulkArchiveFromFile({
     setPreview(null);
     setParseError(null);
     setConfirmOpen(false);
+    setProgress(null);
+  }
+
+  // Chunk the id list so each RPC call archives a small batch. A single
+  // statement over thousands of rows (plus per-row triggers) blows past the
+  // DB statement timeout — small batches keep every call fast.
+  const CHUNK = 1000;
+  async function runChunked(dryRun: boolean): Promise<BulkArchiveResult | null> {
+    if (!parsed) return null;
+    const batches: string[][] = [];
+    for (let i = 0; i < parsed.ids.length; i += CHUNK) batches.push(parsed.ids.slice(i, i + CHUNK));
+    const agg: BulkArchiveResult = {
+      matched: 0,
+      already_archived: 0,
+      to_archive: 0,
+      archived: 0,
+      dry_run: dryRun,
+    };
+    setRunning(true);
+    setProgress({ done: 0, total: parsed.ids.length });
+    try {
+      let done = 0;
+      for (const b of batches) {
+        const r = await archive.mutateAsync({
+          ids: b,
+          emails: [],
+          reason: reason.trim() || "bulk cleaning",
+          dryRun,
+        });
+        agg.matched += r.matched;
+        agg.already_archived += r.already_archived;
+        agg.to_archive += r.to_archive;
+        agg.archived += r.archived;
+        done += b.length;
+        setProgress({ done, total: parsed.ids.length });
+      }
+      return agg;
+    } finally {
+      setRunning(false);
+      setProgress(null);
+    }
   }
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -112,30 +155,26 @@ export function BulkArchiveFromFile({
     }
   }
 
-  function runPreview() {
-    if (!parsed) return;
-    archive.mutate(
-      { ids: parsed.ids, emails: parsed.emails, reason: reason.trim() || "bulk cleaning", dryRun: true },
-      {
-        onSuccess: (r) => setPreview(r),
-        onError: (err) => toast.error("Preview failed: " + (err as Error).message),
-      },
-    );
+  async function runPreview() {
+    try {
+      const r = await runChunked(true);
+      if (r) setPreview(r);
+    } catch (err) {
+      toast.error("Preview failed: " + (err as Error).message);
+    }
   }
 
-  function runArchive() {
-    if (!parsed) return;
-    archive.mutate(
-      { ids: parsed.ids, emails: parsed.emails, reason: reason.trim() || "bulk cleaning", dryRun: false },
-      {
-        onSuccess: (r) => {
-          toast.success(`Archived ${r.archived.toLocaleString()} lead${r.archived === 1 ? "" : "s"}.`);
-          reset();
-          onOpenChange(false);
-        },
-        onError: (err) => toast.error("Archive failed: " + (err as Error).message),
-      },
-    );
+  async function runArchive() {
+    try {
+      const r = await runChunked(false);
+      if (r) {
+        toast.success(`Archived ${r.archived.toLocaleString()} lead${r.archived === 1 ? "" : "s"}.`);
+        reset();
+        onOpenChange(false);
+      }
+    } catch (err) {
+      toast.error("Archive failed: " + (err as Error).message);
+    }
   }
 
   return (
@@ -147,7 +186,7 @@ export function BulkArchiveFromFile({
           onOpenChange(o);
         }}
       >
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Archive className="h-5 w-5 text-amber-600" /> Bulk archive from file
@@ -220,17 +259,20 @@ export function BulkArchiveFromFile({
             )}
           </div>
 
+          {running && progress && (
+            <div className="text-xs text-muted-foreground">
+              Working… {progress.done.toLocaleString()} / {progress.total.toLocaleString()}
+            </div>
+          )}
           <DialogFooter className="gap-2">
             {parsed && (
-              <Button variant="outline" onClick={runPreview} disabled={archive.isPending}>
-                {archive.isPending && !confirmOpen ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : null}
+              <Button variant="outline" onClick={runPreview} disabled={running}>
+                {running ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 {preview ? "Re-check" : "Preview matches"}
               </Button>
             )}
             {preview && preview.to_archive > 0 && (
-              <Button variant="destructive" onClick={() => setConfirmOpen(true)} disabled={archive.isPending}>
+              <Button variant="destructive" onClick={() => setConfirmOpen(true)} disabled={running}>
                 Archive {preview.to_archive.toLocaleString()} lead{preview.to_archive === 1 ? "" : "s"}
               </Button>
             )}
