@@ -155,8 +155,8 @@ function spawnObstacle(g: GameState, d: number): SpawnKind {
   // mid-height hop. Built from a ground obstacle + a ceiling with a custom gap;
   // always sized so the 34px player fits through.
   if (d >= 4 && roll < 0.2) {
-    const bh = rand(34, 46);
-    const windowGap = bh + rand(58, 68); // opening the player threads (>= bh+34)
+    const bh = rand(34, 42); // slightly shorter block so a quick tap clears it
+    const windowGap = bh + rand(99, 116); // ~70% taller opening — comfortably threadable
     const w = rand(30, 42);
     g.obstacles.push({ x, w, h: bh, kind: "ground" });
     g.obstacles.push({ x, w, h: 0, kind: "ceiling", gap: windowGap });
