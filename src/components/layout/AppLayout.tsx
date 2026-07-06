@@ -198,7 +198,7 @@ export function AppLayout() {
           on top of main's (the "scrolls a bit then the whole screen" jank). */}
       <main className="relative flex-1 overflow-y-auto bg-background">
         {isStaging && (
-          <div className="sticky top-0 z-20 bg-yellow-400 text-black text-center text-sm font-semibold py-1.5 border-b-2 border-yellow-600 shadow-sm">
+          <div className="bg-yellow-400 text-black text-center text-sm font-semibold py-1.5 border-b-2 border-yellow-600 shadow-sm">
             ⚠️ STAGING ENVIRONMENT — data here is NOT real. For production go to{" "}
             <a
               href="https://crm.medcurity.com"

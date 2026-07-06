@@ -147,7 +147,17 @@ export function LogEmailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        // Don't let a stray outside-click / Esc silently throw away a
+        // half-written email log — only the explicit Cancel/X should discard.
+        onInteractOutside={(e) => {
+          if (form.formState.isDirty) e.preventDefault();
+        }}
+        onEscapeKeyDown={(e) => {
+          if (form.formState.isDirty) e.preventDefault();
+        }}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Mail className="h-5 w-5 text-purple-600" />

@@ -114,7 +114,7 @@ export function AddContactDialog({
   });
 
   // Cross-account search (kicks in at 2+ chars) so partner contacts surface.
-  const { data: searchResults } = useQuery({
+  const { data: searchResults, isFetching: searchFetching, isError: searchError } = useQuery({
     queryKey: ["contact-search-any", search.trim()],
     queryFn: async () => {
       const q = search.trim();
@@ -252,7 +252,13 @@ export function AddContactDialog({
                 })}
               </div>
             )}
-            {!selected && searchActive && displayed.length === 0 && (
+            {!selected && searchActive && displayed.length === 0 && searchFetching && (
+              <p className="text-xs text-muted-foreground">Searching…</p>
+            )}
+            {!selected && searchActive && displayed.length === 0 && !searchFetching && searchError && (
+              <p className="text-xs text-destructive">Search failed — try again.</p>
+            )}
+            {!selected && searchActive && displayed.length === 0 && !searchFetching && !searchError && (
               <p className="text-xs text-muted-foreground">
                 No contacts match. Add them to their account first, or create a
                 new one below.

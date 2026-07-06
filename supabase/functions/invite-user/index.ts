@@ -74,7 +74,8 @@ serve(async (req) => {
       .eq("id", callerUser.id)
       .single();
 
-    if (profileError || profile?.role !== "admin") {
+    const callerRole = profile?.role;
+    if (profileError || (callerRole !== "admin" && callerRole !== "super_admin")) {
       return new Response(
         JSON.stringify({ error: "Only admins can create users" }),
         {
@@ -99,13 +100,25 @@ serve(async (req) => {
       );
     }
 
-    if (!["sales", "renewals", "admin", "super_admin"].includes(role)) {
+    if (!["sales", "renewals", "read_only", "admin", "super_admin"].includes(role)) {
       return new Response(
         JSON.stringify({
-          error: "Invalid role. Must be sales, renewals, or admin",
+          error: "Invalid role. Must be sales, renewals, read_only, admin, or super_admin",
         }),
         {
           status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    // Only a super admin can mint another super admin — a regular admin must
+    // not be able to escalate themselves or a colleague to owner-level access.
+    if (role === "super_admin" && callerRole !== "super_admin") {
+      return new Response(
+        JSON.stringify({ error: "Only a super admin can create another super admin" }),
+        {
+          status: 403,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         },
       );

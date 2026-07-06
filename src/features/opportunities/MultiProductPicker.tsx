@@ -408,7 +408,7 @@ export function MultiProductPicker(props: Props) {
   const subtotal = picked.reduce((s, r) => {
     const lineTotal = r.discount_type === "amount"
       ? Math.max(0, r.quantity * r.unit_price - r.discount_percent)
-      : r.quantity * r.unit_price * (1 - r.discount_percent / 100);
+      : Math.max(0, r.quantity * r.unit_price * (1 - r.discount_percent / 100));
     return s + lineTotal;
   }, 0);
 
@@ -426,7 +426,7 @@ export function MultiProductPicker(props: Props) {
       unit_price: r.unit_price,
       arr_amount: r.discount_type === "amount"
         ? Math.max(0, r.quantity * r.unit_price - r.discount_percent)
-        : r.quantity * r.unit_price * (1 - r.discount_percent / 100),
+        : Math.max(0, r.quantity * r.unit_price * (1 - r.discount_percent / 100)),
       discount_percent: r.discount_percent,
       discount_type: r.discount_type,
     }));
@@ -590,7 +590,7 @@ export function MultiProductPicker(props: Props) {
                 {picked.map((row) => {
                   const total = row.discount_type === "amount"
                     ? Math.max(0, row.quantity * row.unit_price - row.discount_percent)
-                    : row.quantity * row.unit_price * (1 - row.discount_percent / 100);
+                    : Math.max(0, row.quantity * row.unit_price * (1 - row.discount_percent / 100));
                   return (
                     <tr key={row.product_id} className="border-t border-border/50">
                       <td className="py-1 pr-2">
@@ -648,8 +648,13 @@ export function MultiProductPicker(props: Props) {
                             value={String(row.discount_percent)}
                             onChange={(e) => {
                               const n = parseFloat(e.target.value);
-                              if (!Number.isNaN(n) && n >= 0)
-                                updatePicked(row.product_id, { discount_percent: n });
+                              if (!Number.isNaN(n) && n >= 0) {
+                                // Percent can never exceed 100 (would flip the
+                                // line total negative). Fixed-amount discounts
+                                // are floored at 0 in the total math instead.
+                                const clamped = row.discount_type === "percent" ? Math.min(100, n) : n;
+                                updatePicked(row.product_id, { discount_percent: clamped });
+                              }
                             }}
                           />
                         </div>

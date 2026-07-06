@@ -152,7 +152,7 @@ export function GlobalSearch() {
   const searchEnabled = debouncedQuery.length >= MIN_SEARCH_LENGTH;
   const searchPattern = `%${debouncedQuery}%`;
 
-  const { data: accounts } = useQuery({
+  const { data: accounts, isFetching: accountsFetching, isError: accountsError } = useQuery({
     queryKey: ["global-search", "accounts", debouncedQuery],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -167,7 +167,7 @@ export function GlobalSearch() {
     enabled: searchEnabled,
   });
 
-  const { data: contacts } = useQuery({
+  const { data: contacts, isFetching: contactsFetching, isError: contactsError } = useQuery({
     queryKey: ["global-search", "contacts", debouncedQuery],
     queryFn: async () => {
       const orClause = buildPersonSearchClause(debouncedQuery, [
@@ -189,7 +189,7 @@ export function GlobalSearch() {
     enabled: searchEnabled,
   });
 
-  const { data: opportunities } = useQuery({
+  const { data: opportunities, isFetching: opportunitiesFetching, isError: opportunitiesError } = useQuery({
     queryKey: ["global-search", "opportunities", debouncedQuery],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -204,7 +204,7 @@ export function GlobalSearch() {
     enabled: searchEnabled,
   });
 
-  const { data: leads } = useQuery({
+  const { data: leads, isFetching: leadsFetching, isError: leadsError } = useQuery({
     queryKey: ["global-search", "leads", debouncedQuery],
     queryFn: async () => {
       const orClause = buildPersonSearchClause(debouncedQuery, [
@@ -264,6 +264,15 @@ export function GlobalSearch() {
     rankedOpportunities.length > 0 ||
     rankedLeads.length > 0;
 
+  // Distinguish "still searching" and "search failed" from "genuinely empty"
+  // so the palette never flashes a false "No results" mid-keystroke or hides
+  // a real error as an empty CRM.
+  const anyFetching =
+    searchEnabled &&
+    (accountsFetching || contactsFetching || opportunitiesFetching || (isAdmin && leadsFetching));
+  const anyError =
+    accountsError || contactsError || opportunitiesError || (isAdmin && leadsError);
+
   return (
     <>
       {/* Trigger button for the top bar */}
@@ -297,7 +306,15 @@ export function GlobalSearch() {
           onValueChange={setInputValue}
         />
         <CommandList>
-          {searchEnabled && !hasResults && (
+          {searchEnabled && !hasResults && anyFetching && (
+            <div className="py-6 text-center text-sm text-muted-foreground">Searching…</div>
+          )}
+          {searchEnabled && !hasResults && !anyFetching && anyError && (
+            <div className="py-6 text-center text-sm text-destructive">
+              Search failed — try again.
+            </div>
+          )}
+          {searchEnabled && !hasResults && !anyFetching && !anyError && (
             <CommandEmpty>No results found.</CommandEmpty>
           )}
 

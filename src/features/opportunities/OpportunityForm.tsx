@@ -1976,7 +1976,7 @@ const OpportunityProductsEditor = forwardRef<
         const previewArr =
           draft.discount_type === "amount"
             ? Math.max(0, previewQty * previewPrice - previewDisc)
-            : previewQty * previewPrice * (1 - previewDisc / 100);
+            : Math.max(0, previewQty * previewPrice * (1 - previewDisc / 100));
         const dirty = !!drafts[p.id];
         return {
           key: p.id,
