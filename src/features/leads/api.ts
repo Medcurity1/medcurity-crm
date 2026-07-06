@@ -283,6 +283,42 @@ export function useBulkPromoteImports() {
   });
 }
 
+/** Bulk-archive imports matched from an uploaded verification list (e.g. a
+ * MillionVerifier bad/risky export). Matches existing leads by id and/or
+ * email, archives them with a reason (excluded from all future imports).
+ * Pass dryRun=true to PREVIEW the counts without changing anything. */
+export interface BulkArchiveResult {
+  matched: number;
+  already_archived: number;
+  to_archive: number;
+  archived: number;
+  dry_run: boolean;
+}
+export function useBulkArchiveFromList() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: {
+      ids: string[];
+      emails: string[];
+      reason: string;
+      dryRun: boolean;
+    }): Promise<BulkArchiveResult> => {
+      const { data, error } = await supabase.rpc("bulk_archive_leads_by_list", {
+        p_ids: v.ids,
+        p_emails: v.emails,
+        p_reason: v.reason,
+        p_dry_run: v.dryRun,
+      });
+      if (error) throw error;
+      return data as BulkArchiveResult;
+    },
+    onSuccess: (data) => {
+      // Only refresh the lists after a REAL archive, not a dry-run preview.
+      if (!data.dry_run) qc.invalidateQueries({ queryKey: ["leads"] });
+    },
+  });
+}
+
 interface ConvertLeadInput {
   leadId: string;
   /**
