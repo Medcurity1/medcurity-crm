@@ -39,10 +39,25 @@ const SCORE_RATE = 1.5; // pipeline "$" per px travelled
 const COIN_VALUE = 1500; // each coin is worth a real dent in your score
 const TIER1 = 50_000; // score at which things get trickier
 const TIER2 = 100_000; // score at which the "don't jump" ceilings appear
+const TIER3 = 150_000; // score at which fast tumblers + long logs appear
+const TIER4 = 200_000; // score at which thread-the-needle windows appear
 const CEIL_GAP = 56; // grounded clearance under a ceiling bar (player is 34)
 
 type ObstacleKind = "ground" | "ceiling";
-type Obstacle = { x: number; w: number; h: number; kind: ObstacleKind };
+// vxMul: horizontal speed multiplier (tumblers move faster). gap: for ceilings,
+// the clearance below (default CEIL_GAP; windows use a custom gap). spin/tumbler:
+// render a rolling block.
+type Obstacle = {
+  x: number;
+  w: number;
+  h: number;
+  kind: ObstacleKind;
+  vxMul?: number;
+  gap?: number;
+  spin?: number;
+  tumbler?: boolean;
+};
+type SpawnKind = "ground" | "ceiling" | "window" | "tumbler" | "log";
 type Coin = { x: number; y: number; taken: boolean; bob: number };
 type Popup = { x: number; y: number; vy: number; life: number; text: string };
 type Particle = {
@@ -121,27 +136,58 @@ function rand(a: number, b: number) {
 }
 
 function difficultyFor(score: number) {
+  if (score >= TIER4) return 4;
+  if (score >= TIER3) return 3;
   if (score >= TIER2) return 2;
   if (score >= TIER1) return 1;
   return 0;
 }
 
-// Spawn one obstacle sized for the current difficulty tier. Returns its kind
-// so the caller can add extra runway after a "don't jump" ceiling bar.
-function spawnObstacle(g: GameState, d: number): ObstacleKind {
-  // Overhead "don't jump" bar — only at max difficulty, occasionally.
-  if (d >= 2 && Math.random() < 0.16) {
-    g.obstacles.push({ x: g.W + 20, w: rand(28, 44), h: 0, kind: "ceiling" });
+// Spawn obstacle(s) sized for the current difficulty tier. Returns a kind so
+// the caller can add extra runway after the more demanding pieces.
+function spawnObstacle(g: GameState, d: number): SpawnKind {
+  const x = g.W + 20;
+  const roll = Math.random();
+
+  // Tier 4 (>=200k): thread-the-needle window — a ground block with a ceiling
+  // aligned right above it, leaving a gap you must jump THROUGH. A full jump
+  // smashes the ceiling and a tap hits the block, so it demands a measured
+  // mid-height hop. Built from a ground obstacle + a ceiling with a custom gap;
+  // always sized so the 34px player fits through.
+  if (d >= 4 && roll < 0.2) {
+    const bh = rand(34, 46);
+    const windowGap = bh + rand(58, 68); // opening the player threads (>= bh+34)
+    const w = rand(30, 42);
+    g.obstacles.push({ x, w, h: bh, kind: "ground" });
+    g.obstacles.push({ x, w, h: 0, kind: "ceiling", gap: windowGap });
+    return "window";
+  }
+  // Tier 2+ (>=100k): overhead "don't jump" ceiling bar.
+  if (d >= 2 && roll < (d >= 4 ? 0.34 : 0.16)) {
+    g.obstacles.push({ x, w: rand(28, 44), h: 0, kind: "ceiling" });
     return "ceiling";
   }
+  // Tier 3+ (>=150k): fast "tumbler" — a rolling block that rushes in ~1.2x
+  // speed, off the rhythm of the static blocks. Jump it like a normal block,
+  // but it arrives sooner (a reaction test).
+  if (d >= 3 && roll < (d >= 4 ? 0.5 : 0.36)) {
+    g.obstacles.push({ x, w: rand(28, 42), h: rand(32, 48), kind: "ground", vxMul: 1.2, tumbler: true, spin: 0 });
+    return "tumbler";
+  }
+  // Tier 3+ (>=150k): long "log" — a wide, low block for timing variety.
+  if (d >= 3 && roll < (d >= 4 ? 0.64 : 0.54)) {
+    g.obstacles.push({ x, w: rand(92, 150), h: rand(28, 42), kind: "ground" });
+    return "log";
+  }
+  // Standard ground obstacle — height/width scale with tier.
   let h: number;
-  const r = Math.random();
-  if (d <= 0) h = r < 0.55 ? 28 : 44;
-  else if (d === 1) h = r < 0.42 ? 28 : r < 0.76 ? 44 : 60;
-  else h = r < 0.28 ? 30 : r < 0.56 ? 46 : r < 0.82 ? 62 : r < 0.93 ? 84 : 110;
+  const hr = Math.random();
+  if (d <= 0) h = hr < 0.55 ? 28 : 44;
+  else if (d === 1) h = hr < 0.42 ? 28 : hr < 0.76 ? 44 : 60;
+  else h = hr < 0.28 ? 30 : hr < 0.56 ? 46 : hr < 0.82 ? 62 : hr < 0.93 ? 84 : 110;
   const wBonus = d >= 2 ? rand(6, 24) : d >= 1 ? rand(2, 12) : 0;
   const w = rand(24, 38) + wBonus + (h > 55 ? 8 : 0);
-  g.obstacles.push({ x: g.W + 20, w, h, kind: "ground" });
+  g.obstacles.push({ x, w, h, kind: "ground" });
   return "ground";
 }
 
@@ -343,6 +389,12 @@ function GameModal() {
       } else if (g.milestonesPassed === 1 && g.score >= TIER2) {
         g.milestonesPassed = 2;
         g.flash = { text: "Danger zone — don't jump the ceilings", life: 2.6 };
+      } else if (g.milestonesPassed === 2 && g.score >= TIER3) {
+        g.milestonesPassed = 3;
+        g.flash = { text: "Tumblers incoming", life: 2.4 };
+      } else if (g.milestonesPassed === 3 && g.score >= TIER4) {
+        g.milestonesPassed = 4;
+        g.flash = { text: "Thread the needle", life: 2.6 };
       }
       if (g.flash) {
         g.flash.life -= dt;
@@ -373,14 +425,16 @@ function GameModal() {
         const d = difficultyFor(g.score);
         const kind = spawnObstacle(g, d);
         // Gap (seconds) between spawns — floored so a well-timed jump always
-        // clears it. Tightens with difficulty but never below the airtime.
-        // Floors stay above the full-jump airtime (~0.7s) so there's always
-        // time to land between obstacles — including a tall block right before
-        // a "don't jump" ceiling bar.
-        const floorGap = d >= 2 ? 0.94 : d >= 1 ? 0.9 : 0.95;
-        const baseGap = d >= 2 ? rand(1.0, 1.6) : d >= 1 ? rand(1.15, 1.8) : rand(1.35, 2.0);
+        // clears it. Floors stay above the full-jump airtime (~0.7s) so there's
+        // always time to land between obstacles. Higher tiers add faster
+        // tumblers + thread-the-needle windows, which need a touch more room.
+        const floorGap = d >= 3 ? 1.0 : d >= 2 ? 0.94 : d >= 1 ? 0.9 : 0.95;
+        const baseGap =
+          d >= 3 ? rand(1.0, 1.55) : d >= 2 ? rand(1.0, 1.6) : d >= 1 ? rand(1.15, 1.8) : rand(1.35, 2.0);
         let gap = Math.max(floorGap, baseGap - Math.min(g.elapsed * 0.008, 0.4));
-        if (kind === "ceiling") gap += 0.55; // guaranteed runway after a ceiling bar
+        if (kind === "ceiling") gap += 0.55; // runway after a "don't jump" bar
+        else if (kind === "window") gap += 0.7; // threading needs setup + recovery
+        else if (kind === "tumbler") gap += 0.25; // tumblers arrive faster; pad after
         g.spawnTimer = gap;
       }
 
@@ -402,13 +456,14 @@ function GameModal() {
       const px = g.W * PLAYER_X_RATIO;
       const pRect = { x: px + 4, y: g.playerY + 3, w: PLAYER_SIZE - 8, h: PLAYER_SIZE - 6 };
       for (const o of g.obstacles) {
-        o.x -= dx;
+        o.x -= dx * (o.vxMul ?? 1); // tumblers move faster
+        if (o.tumbler) o.spin = (o.spin ?? 0) + dt * 7;
         const overlapX = pRect.x < o.x + o.w && pRect.x + pRect.w > o.x;
         if (!overlapX) continue;
         const hit =
           o.kind === "ceiling"
-            ? pRect.y < g.groundY - CEIL_GAP // player rose into the overhead bar
-            : pRect.y + pRect.h > g.groundY - o.h; // player didn't clear the block
+            ? pRect.y < g.groundY - (o.gap ?? CEIL_GAP) // rose into the overhead bar
+            : pRect.y + pRect.h > g.groundY - o.h; // didn't clear the block
         if (hit) {
           die();
           return;
@@ -532,7 +587,7 @@ function GameModal() {
     // obstacles
     for (const o of g.obstacles) {
       if (o.kind === "ceiling") {
-        const bottom = g.groundY - CEIL_GAP;
+        const bottom = g.groundY - (o.gap ?? CEIL_GAP);
         const cg = ctx.createLinearGradient(0, -6, 0, bottom);
         cg.addColorStop(0, "#7f1d1d");
         cg.addColorStop(1, "#ef4444");
@@ -550,6 +605,29 @@ function GameModal() {
         continue;
       }
       const oy = g.groundY - o.h;
+      // Tumbler: a rolling orange block (distinct from the static red ones).
+      if (o.tumbler) {
+        ctx.save();
+        ctx.translate(o.x + o.w / 2, oy + o.h / 2);
+        ctx.rotate(o.spin ?? 0);
+        const tg = ctx.createLinearGradient(0, -o.h / 2, 0, o.h / 2);
+        tg.addColorStop(0, "#fb923c");
+        tg.addColorStop(1, "#c2410c");
+        ctx.fillStyle = tg;
+        roundRect(ctx, -o.w / 2, -o.h / 2, o.w, o.h, 5);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,0.85)";
+        ctx.lineWidth = 2;
+        const rr = Math.min(o.w, o.h) * 0.24;
+        ctx.beginPath();
+        ctx.moveTo(-rr, -rr);
+        ctx.lineTo(rr, rr);
+        ctx.moveTo(rr, -rr);
+        ctx.lineTo(-rr, rr);
+        ctx.stroke();
+        ctx.restore();
+        continue;
+      }
       const og = ctx.createLinearGradient(o.x, oy, o.x, g.groundY);
       og.addColorStop(0, "#f87171");
       og.addColorStop(1, "#b91c1c");
@@ -850,12 +928,13 @@ function GameModal() {
 
           {/* GAME OVER overlay */}
           {phase === "gameover" && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-slate-950/72 backdrop-blur-[2px] p-4">
+            <div className="absolute inset-0 overflow-y-auto touch-auto bg-slate-950/72 backdrop-blur-[2px]">
+              <div className="min-h-full flex flex-col items-center justify-center gap-2 p-4">
               <div className="text-center">
                 <div className="text-[11px] uppercase tracking-widest text-indigo-300/80">
                   Pipeline closed
                 </div>
-                <div className="text-4xl font-black text-amber-300 drop-shadow">
+                <div className="text-3xl sm:text-4xl font-black text-amber-300 drop-shadow">
                   {fmtMoney(finalScore)}
                 </div>
                 <div className="mt-1 flex items-center justify-center gap-1.5 flex-wrap">
@@ -892,6 +971,7 @@ function GameModal() {
                 </button>
               </div>
               <div className="text-[11px] text-indigo-300/60">Enter to play again · Esc to close</div>
+              </div>
             </div>
           )}
         </div>
@@ -912,7 +992,7 @@ function Leaderboard({
   let highlighted = false;
   return (
     <div className="w-full max-w-sm rounded-xl border border-white/10 bg-white/[0.03] overflow-hidden">
-      <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-white/10 text-indigo-200/80 text-[11px] font-semibold uppercase tracking-wider">
+      <div className="flex items-center gap-1.5 px-3 py-1 border-b border-white/10 text-indigo-200/80 text-[11px] font-semibold uppercase tracking-wider">
         <Trophy className="h-3 w-3 text-amber-300" /> All-time top 5
       </div>
       {rows.length === 0 ? (
@@ -929,7 +1009,7 @@ function Leaderboard({
               <li
                 key={r.id}
                 className={cn(
-                  "flex items-center gap-2 px-3 py-1.5 text-sm",
+                  "flex items-center gap-2 px-3 py-1 text-sm",
                   isMe && "bg-amber-400/10",
                 )}
               >
