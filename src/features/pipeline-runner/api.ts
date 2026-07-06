@@ -28,6 +28,25 @@ export function useTopScores(enabled = true) {
   });
 }
 
+/** The signed-in user's own best run — for their private "personal best". */
+export function useMyBest(userId: string | undefined) {
+  return useQuery({
+    queryKey: ["pipeline-runner", "mybest", userId ?? "anon"],
+    enabled: !!userId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("pipeline_runner_scores")
+        .select("score")
+        .eq("user_id", userId!)
+        .order("score", { ascending: false })
+        .limit(1);
+      if (error) throw error;
+      return data && data.length ? (data[0].score as number) : 0;
+    },
+    staleTime: 15_000,
+  });
+}
+
 export function useSubmitScore() {
   const qc = useQueryClient();
   return useMutation({
@@ -39,6 +58,7 @@ export function useSubmitScore() {
       });
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["pipeline-runner", "top5"] }),
+    // Refresh both the public board and the player's personal best.
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["pipeline-runner"] }),
   });
 }
