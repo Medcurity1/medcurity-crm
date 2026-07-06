@@ -163,9 +163,9 @@ const TYPE_META: Record<
   },
   requests: {
     label: "Requests",
-    description: "Your pending Collateral and CRM requests.",
+    description: "Requests routed to you to review, with approve/deny.",
     icon: Inbox,
-    defaultName: "My Requests",
+    defaultName: "Requests",
   },
 };
 

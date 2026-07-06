@@ -116,7 +116,7 @@ export interface PinnedRecordsWidgetConfig {
   records: PinnedRecordRef[];
 }
 
-export type RequestsWidgetCategory = "collateral" | "crm" | "all";
+export type RequestsWidgetCategory = "collateral" | "product" | "crm" | "all";
 
 export interface RequestsWidgetConfig {
   category: RequestsWidgetCategory;

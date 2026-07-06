@@ -1,13 +1,15 @@
-// Requests widget body (jordan-v4-spec §8). The WIDGET OWNER's pending
-// (non-terminal) submitted requests, filtered by the configured category.
-// Rows reuse RequestCard — title, submitter, date, priority badge, status
-// badge, click-to-open detail dialog — so the visual language matches the
-// old "Your requests" section this widget migrates.
+// Requests widget body (jordan-v4-spec §8). The reviewer's INBOX: pending
+// requests routed to the viewer, filtered by the configured category, with
+// approve/deny via RequestCard. "all" = every form the viewer is routed for
+// (product → Rachel, collateral/CRM → Jordan, all three → Nathan). A rep
+// with no routed types falls back to their own pending submissions, so the
+// widget is still useful to them. Row visibility is enforced by RLS
+// (requester-or-admin), so reviewers only ever see what they're allowed to.
 
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useRequests } from "@/features/requests/api";
+import { useRequests, useMyRequestTypes } from "@/features/requests/api";
 import { RequestCard } from "@/features/requests/RequestCard";
 import type { RequestType } from "@/types/crm";
 import type { RequestsWidgetCategory, RequestsWidgetConfig } from "../types";
@@ -15,15 +17,19 @@ import { WidgetError } from "./WidgetError";
 import type { NexusWidgetBodyProps } from "../WidgetShell";
 
 /**
- * Config category → requests.type filter. The requests schema has three
- * types (collateral / product / crm); the spec's categories are
- * collateral, crm, or all — "all" includes product requests too so a
- * rep's pending product asks don't silently vanish from view.
+ * Config category → requests.type filter. A specific category shows that
+ * one form; "all" shows every form the viewer is ROUTED for (their inbox).
+ * If they're routed for nothing, "all" falls back to all types — RLS then
+ * scopes that to the rows they can see (their own submissions).
  */
-function typesFor(category: RequestsWidgetCategory): RequestType[] | undefined {
+function typesFor(
+  category: RequestsWidgetCategory,
+  routed: RequestType[],
+): RequestType[] | undefined {
   if (category === "collateral") return ["collateral"];
+  if (category === "product") return ["product"];
   if (category === "crm") return ["crm"];
-  return undefined; // all types
+  return routed.length ? routed : undefined; // "all" = the viewer's routed forms
 }
 
 export function RequestsWidget({
@@ -33,9 +39,12 @@ export function RequestsWidget({
 }: NexusWidgetBodyProps) {
   const config = (widget.config ?? {}) as Partial<RequestsWidgetConfig>;
   const category: RequestsWidgetCategory =
-    config.category === "collateral" || config.category === "crm"
+    config.category === "collateral" || config.category === "product" || config.category === "crm"
       ? config.category
       : "all";
+
+  const { data: routedTypes } = useMyRequestTypes();
+  const isRoutedReviewer = (routedTypes?.length ?? 0) > 0;
 
   const {
     data: requests,
@@ -45,9 +54,11 @@ export function RequestsWidget({
     isFetching,
     dataUpdatedAt,
   } = useRequests({
-    requesterId: widget.user_id,
+    // Reviewers see the inbox (all rows RLS lets them); a rep with no
+    // routed types sees only their own submissions.
+    requesterId: isRoutedReviewer ? undefined : widget.user_id,
     pendingOnly: true, // 'pending' is the only non-terminal status
-    type: typesFor(category),
+    type: typesFor(category, routedTypes ?? []),
   });
 
   useEffect(() => {

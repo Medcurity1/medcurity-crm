@@ -18,7 +18,6 @@ import { useNexusInitialize, useNexusWidgets } from "./api";
 import { MAX_WIDGETS, type NexusWidget } from "./types";
 import { NexusGrid } from "./NexusGrid";
 import { WidgetBuilder } from "./WidgetBuilder";
-import { NexusRequestWidgets } from "@/features/requests/RequestWidgets";
 
 function getGreeting(): string {
   const hour = new Date().getHours();
@@ -82,11 +81,6 @@ export function NexusPage() {
           addButton
         )}
       </div>
-
-      {/* Routed reviewers (product → Rachel, collateral/CRM → Jordan, all →
-          Nathan) see their incoming requests here, one box per form they
-          handle, with approve/deny. Self-hides for reps with no routed types. */}
-      <NexusRequestWidgets />
 
       <NexusGrid onEditWidget={(w) => openBuilder(w)} />
 
