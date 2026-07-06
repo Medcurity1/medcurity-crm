@@ -11,11 +11,11 @@ import {
   type Difficulty,
   type GameState,
 } from "./engine";
-import { MeddyFace, ThreatSprite, ShieldSprite, type FaceState } from "./sprites";
+import { MeddyFace, MeddyMine, FlagSprite, type FaceState } from "./sprites";
 import { useTopScores, useMyBest, useSubmitScore } from "./api";
 
-// Neon number palette — deliberately nothing like Pipeline Runner's amber.
-const NUM_COLORS = ["", "#58c7ff", "#4ade80", "#ff6b9d", "#b98bff", "#ffcf4d", "#2ee6c8", "#ffffff", "#94a3b8"];
+// Classic minesweeper-style number colors, tuned to read on the cream tiles.
+const NUM_COLORS = ["", "#2f6fe0", "#2e8b57", "#c23a22", "#7b3ff2", "#b5651d", "#1aa0a0", "#2a2620", "#7a7268"];
 const DIFF_ORDER: Difficulty[] = ["rookie", "analyst", "guardian"];
 
 // ── tiny 8-bit sound (opt-in, default off) ──────────────────────────────
@@ -216,14 +216,14 @@ function GameModal() {
         {/* marquee */}
         <div className="ms-marquee">
           <div className="ms-title">MEDDYSWEEPER</div>
-          <div className="ms-subtitle">clear the network · shield every threat</div>
+          <div className="ms-subtitle">find every hidden Meddy</div>
           <button className="ms-x" onClick={() => meddySweeper.close()} aria-label="Close game">×</button>
         </div>
 
         {/* HUD */}
         <div className="ms-hud">
-          <div className="ms-led" title="Threats remaining">
-            <ThreatSprite size={16} />
+          <div className="ms-led" title="Meddys left to find">
+            <MeddyMine size={16} />
             <span className="ms-led-digits">{pad3(threatsLeft)}</span>
           </div>
 
@@ -258,9 +258,9 @@ function GameModal() {
           <button
             className={"ms-toggle" + (flagMode ? " is-on" : "")}
             onClick={() => setFlagMode((v) => !v)}
-            title="Toggle shield mode (tap to flag). Right-click also flags."
+            title="Toggle flag mode (tap to flag). Right-click also flags."
           >
-            🛡 {flagMode ? "Shield: ON" : "Shield: off"}
+            🚩 {flagMode ? "Flag: ON" : "Flag: off"}
           </button>
           <button className="ms-toggle" onClick={() => setSoundOn((v) => !v)} title="Toggle sound">
             {soundOn ? "🔊" : "🔇"}
@@ -270,10 +270,10 @@ function GameModal() {
 
         {showHelp && (
           <div className="ms-help">
-            Reveal safe nodes. A number = how many <b>threats</b> touch that node. Right-click
-            (or flip <b>Shield</b> mode on) to shield a suspected threat. Click a fully-shielded
-            number to auto-sweep its neighbors. Clear every safe node to <b>secure the network</b>.
-            One wrong node and it detonates. Faster + harder = higher score.
+            Reveal the safe tiles. A number = how many <b>Meddys</b> are hiding next to it.
+            Right-click (or flip <b>Flag</b> mode on) to flag a hiding Meddy. Click a
+            fully-flagged number to auto-clear its neighbors. Clear every safe tile to <b>win</b> —
+            uncover a Meddy and it's game over. Faster + harder = higher score.
           </div>
         )}
 
@@ -302,10 +302,10 @@ function GameModal() {
                   onContextMenu={(e) => onCellContext(e, i)}
                   aria-label={revealed ? (cell.mine ? "threat" : String(cell.adjacent)) : cell.flagged ? "shielded" : "hidden node"}
                 >
-                  {!revealed && cell.flagged && !wrongFlag && <ShieldSprite size={Math.floor(tile * 0.82)} />}
-                  {wrongFlag && <ShieldSprite size={Math.floor(tile * 0.82)} wrong />}
+                  {!revealed && cell.flagged && !wrongFlag && <FlagSprite size={Math.floor(tile * 0.82)} />}
+                  {wrongFlag && <FlagSprite size={Math.floor(tile * 0.82)} wrong />}
                   {(revealed || (finished && cell.mine)) && cell.mine && !cell.flagged && (
-                    <ThreatSprite size={Math.floor(tile * 0.82)} dim={!boom} />
+                    <MeddyMine size={Math.floor(tile * 0.82)} dead={boom} />
                   )}
                   {revealed && !cell.mine && cell.adjacent > 0 && (
                     <span style={{ color: NUM_COLORS[cell.adjacent], fontSize: numFont }} className="ms-num">
@@ -320,7 +320,7 @@ function GameModal() {
           {finished && (
             <div className={"ms-banner " + (game.status === "won" ? "is-win" : "is-lose")}>
               <div className="ms-banner-title">
-                {game.status === "won" ? "NETWORK SECURED" : "BREACH DETECTED"}
+                {game.status === "won" ? "ALL CLEAR!" : "GOTCHA!"}
               </div>
               {lastScore && (
                 <div className="ms-banner-score">
@@ -355,7 +355,7 @@ function GameModal() {
           <div className="ms-best">
             <div className="ms-best-label">YOUR BEST</div>
             <div className="ms-best-val">{myBest.toLocaleString()}</div>
-            <div className="ms-hint">Esc to quit · right-click to shield</div>
+            <div className="ms-hint">Esc to quit · right-click to flag</div>
           </div>
         </div>
       </div>
@@ -365,95 +365,92 @@ function GameModal() {
 
 const CSS = `
 .ms-root{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center;
-  background:radial-gradient(120% 120% at 50% 0%, #170a3a 0%, #0b0720 55%, #05040f 100%);
-  font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;padding:16px;overflow:auto;}
-.ms-scanlines{position:absolute;inset:0;pointer-events:none;z-index:1;opacity:.5;
-  background:repeating-linear-gradient(0deg, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px, rgba(0,0,0,.22) 3px, rgba(0,0,0,0) 4px);
-  mix-blend-mode:overlay;}
+  font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;padding:16px;overflow:auto;
+  background-color:#2f6fe0;
+  background-image:linear-gradient(45deg, rgba(255,255,255,.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.06) 75%),
+    linear-gradient(45deg, rgba(255,255,255,.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.06) 75%);
+  background-size:30px 30px;background-position:0 0,15px 15px;}
+.ms-scanlines{position:absolute;inset:0;pointer-events:none;z-index:1;
+  background:radial-gradient(130% 100% at 50% 40%, transparent 52%, rgba(10,32,80,.42) 100%);}
 .ms-cabinet{position:relative;z-index:2;width:100%;max-width:min(96vw,1000px);max-height:94vh;overflow:auto;
-  border-radius:16px;padding:14px 16px 18px;
-  background:linear-gradient(180deg,#160f38 0%,#0e0926 100%);
-  border:2px solid #3a2a72;
-  box-shadow:0 0 0 2px #08040f, 0 0 34px rgba(139,92,246,.45), inset 0 0 60px rgba(46,230,200,.05);}
+  border-radius:10px;padding:14px 16px 18px;background:#fdf7ec;
+  border:4px solid #1e50b0;
+  box-shadow:0 0 0 4px #14356f, 0 14px 0 rgba(12,32,74,.35), 0 20px 40px rgba(8,24,60,.45);}
 .ms-marquee{position:relative;text-align:center;padding:6px 40px 10px;}
-.ms-title{font-size:clamp(24px,5vw,40px);font-weight:800;letter-spacing:.18em;line-height:1;
-  background:linear-gradient(90deg,#2ee6c8,#8b5cf6 55%,#ff4d9d);-webkit-background-clip:text;background-clip:text;color:transparent;
-  filter:drop-shadow(0 0 10px rgba(46,230,200,.5)) drop-shadow(0 0 18px rgba(255,77,157,.35));
-  animation:ms-flicker 5s infinite steps(1);}
-@keyframes ms-flicker{0%,97%,100%{opacity:1}97.5%{opacity:.72}98.5%{opacity:.9}}
-.ms-subtitle{margin-top:6px;font-size:11px;letter-spacing:.32em;text-transform:uppercase;color:#7c73b8;}
-.ms-x{position:absolute;top:2px;right:4px;width:30px;height:30px;border:none;border-radius:8px;cursor:pointer;
-  background:#241a4e;color:#c9b8ff;font-size:20px;line-height:1;box-shadow:inset 0 0 0 1px #3a2a72;}
-.ms-x:hover{background:#ff4d9d;color:#fff;}
+.ms-title{font-size:clamp(24px,5vw,40px);font-weight:800;letter-spacing:.16em;line-height:1;color:#ea4a2f;
+  text-shadow:2px 2px 0 #1e50b0, 4px 4px 0 rgba(30,80,176,.28);}
+.ms-subtitle{margin-top:8px;font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:#1e50b0;font-weight:700;}
+.ms-x{position:absolute;top:2px;right:4px;width:30px;height:30px;border:none;border-radius:6px;cursor:pointer;
+  background:#f1e6cf;color:#a5432c;font-size:20px;line-height:1;box-shadow:inset 0 0 0 2px #d8c9a8;}
+.ms-x:hover{background:#ea4a2f;color:#fff;}
 .ms-hud{display:flex;align-items:center;justify-content:center;gap:16px;margin:4px 0 12px;}
-.ms-led{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:8px;background:#050310;
-  box-shadow:inset 0 0 0 2px #2a1f56, inset 0 2px 10px rgba(0,0,0,.8);}
-.ms-led-digits{font-weight:800;font-size:22px;letter-spacing:.08em;color:#ff5a3c;
-  text-shadow:0 0 6px rgba(255,90,60,.9);min-width:46px;text-align:right;font-variant-numeric:tabular-nums;}
-.ms-clock{color:#ff5a3c;font-size:15px;text-shadow:0 0 6px rgba(255,90,60,.8);}
-.ms-face{border:none;cursor:pointer;padding:5px;border-radius:12px;line-height:0;
-  background:linear-gradient(180deg,#2a1f56,#170f38);box-shadow:0 0 0 2px #3a2a72,0 4px 0 #0a0620;transition:transform .05s;}
-.ms-face:hover{filter:brightness(1.12);}
-.ms-face:active{transform:translateY(2px);box-shadow:0 0 0 2px #3a2a72,0 1px 0 #0a0620;}
+.ms-led{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:6px;background:#1a1410;
+  box-shadow:inset 0 0 0 2px #4a3a28, inset 0 2px 8px rgba(0,0,0,.7);}
+.ms-led-digits{font-weight:800;font-size:22px;letter-spacing:.08em;color:#ff4a2a;
+  text-shadow:0 0 4px rgba(255,74,42,.7);min-width:46px;text-align:right;font-variant-numeric:tabular-nums;}
+.ms-clock{color:#ff4a2a;font-size:15px;text-shadow:0 0 4px rgba(255,74,42,.7);}
+.ms-face{border:none;cursor:pointer;padding:5px;border-radius:9px;line-height:0;background:#f1e6cf;
+  box-shadow:0 0 0 3px #1e50b0,0 4px 0 #14356f;transition:transform .05s;}
+.ms-face:hover{filter:brightness(1.04);}
+.ms-face:active{transform:translateY(2px);box-shadow:0 0 0 3px #1e50b0,0 1px 0 #14356f;}
+.ms-face svg{animation:ms-bob 2.6s ease-in-out infinite;}
+@keyframes ms-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
 .ms-controls{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;margin-bottom:12px;}
-.ms-seg{display:flex;background:#0a0620;border-radius:9px;padding:3px;box-shadow:inset 0 0 0 1px #2a1f56;}
-.ms-seg-btn{border:none;background:transparent;color:#8b83bf;font-weight:700;font-size:12px;letter-spacing:.08em;
-  text-transform:uppercase;padding:6px 12px;border-radius:7px;cursor:pointer;font-family:inherit;}
-.ms-seg-btn.is-active{background:linear-gradient(180deg,#2ee6c8,#12a892);color:#05231e;
-  box-shadow:0 0 12px rgba(46,230,200,.5);}
-.ms-toggle{border:none;background:#160f38;color:#c9b8ff;font-weight:700;font-size:12px;padding:7px 11px;border-radius:8px;
-  cursor:pointer;font-family:inherit;box-shadow:inset 0 0 0 1px #3a2a72;}
-.ms-toggle:hover{filter:brightness(1.15);}
-.ms-toggle.is-on{background:linear-gradient(180deg,#38bdf8,#0b74c4);color:#04121f;box-shadow:0 0 12px rgba(56,189,248,.5);}
-.ms-help{max-width:640px;margin:0 auto 12px;font-size:12px;line-height:1.6;color:#b9b0e6;
-  background:#0a0620;border-radius:10px;padding:10px 14px;box-shadow:inset 0 0 0 1px #2a1f56;}
-.ms-help b{color:#2ee6c8;}
+.ms-seg{display:flex;background:#f1e6cf;border-radius:8px;padding:3px;box-shadow:inset 0 0 0 2px #d8c9a8;}
+.ms-seg-btn{border:none;background:transparent;color:#8a6d52;font-weight:700;font-size:12px;letter-spacing:.08em;
+  text-transform:uppercase;padding:6px 12px;border-radius:6px;cursor:pointer;font-family:inherit;}
+.ms-seg-btn.is-active{background:#2f6fe0;color:#fff;box-shadow:0 2px 0 #1e50b0;}
+.ms-toggle{border:none;background:#f1e6cf;color:#5a4a38;font-weight:700;font-size:12px;padding:7px 11px;border-radius:7px;
+  cursor:pointer;font-family:inherit;box-shadow:inset 0 0 0 2px #d8c9a8;}
+.ms-toggle:hover{filter:brightness(.98);}
+.ms-toggle.is-on{background:#ea4a2f;color:#fff;box-shadow:0 2px 0 #b83a22;}
+.ms-help{max-width:640px;margin:0 auto 12px;font-size:12px;line-height:1.6;color:#5a4a38;
+  background:#f4ead3;border-radius:8px;padding:10px 14px;box-shadow:inset 0 0 0 2px #d8c9a8;}
+.ms-help b{color:#c23a22;}
 .ms-board-wrap{position:relative;display:flex;justify-content:center;max-width:100%;overflow-x:auto;}
-.ms-board{display:grid;gap:2px;padding:8px;border-radius:10px;background:#060312;
-  box-shadow:inset 0 0 0 2px #2a1f56, 0 0 22px rgba(46,230,200,.12);}
+.ms-board{display:grid;gap:2px;padding:8px;border-radius:6px;background:#c9b48f;
+  box-shadow:inset 0 0 0 3px #a8916a, 0 0 0 3px #1e50b0;}
 .ms-cell{position:relative;display:flex;align-items:center;justify-content:center;padding:0;border:none;cursor:pointer;
-  border-radius:3px;line-height:0;font-family:inherit;}
-.ms-cell--cov{background:linear-gradient(150deg,#26325a,#141d3c);
-  box-shadow:inset 2px 2px 0 #3a4a7d, inset -2px -2px 0 #080c1e;}
-.ms-cell--cov:hover{background:linear-gradient(150deg,#31406e,#1a2550);}
-.ms-cell--cov:active{box-shadow:inset -1px -1px 0 #3a4a7d, inset 1px 1px 0 #080c1e;}
-.ms-cell--rev{background:#0b1330;box-shadow:inset 0 0 0 1px #0a1024;cursor:default;}
-.ms-cell--rev:hover{background:#0d1740;}
-.ms-cell--boom{background:radial-gradient(circle,#ff3d6e,#7c1030)!important;
-  box-shadow:0 0 14px rgba(255,61,110,.8);animation:ms-pop .28s ease-out;}
+  border-radius:2px;line-height:0;font-family:inherit;}
+.ms-cell--cov{background:#3b82f6;box-shadow:inset 2px 2px 0 #8fbaff, inset -2px -2px 0 #1c4fb0;}
+.ms-cell--cov:hover{background:#4c8ff8;}
+.ms-cell--cov:active{box-shadow:inset -2px -2px 0 #8fbaff, inset 2px 2px 0 #1c4fb0;}
+.ms-cell--rev{background:#f1e6cf;box-shadow:inset 0 0 0 1px #d3c3a0;cursor:default;}
+.ms-cell--rev:hover{background:#f6eeda;}
+.ms-cell--boom{background:#ea4a2f !important;box-shadow:inset 0 0 0 2px #b83a22;animation:ms-pop .28s ease-out;}
 @keyframes ms-pop{0%{transform:scale(.6)}70%{transform:scale(1.12)}100%{transform:scale(1)}}
-.ms-num{font-weight:800;text-shadow:0 0 6px currentColor;font-variant-numeric:tabular-nums;line-height:1;}
+.ms-num{font-weight:800;font-variant-numeric:tabular-nums;line-height:1;}
 .ms-banner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
-  border-radius:10px;background:rgba(6,3,18,.86);backdrop-filter:blur(2px);animation:ms-bannerin .3s ease-out;}
+  border-radius:6px;background:rgba(253,247,236,.94);box-shadow:inset 0 0 0 4px #1e50b0;animation:ms-bannerin .3s ease-out;}
 @keyframes ms-bannerin{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:scale(1)}}
-.ms-banner-title{font-size:clamp(22px,4vw,34px);font-weight:800;letter-spacing:.14em;}
-.ms-banner.is-win .ms-banner-title{color:#4ade80;text-shadow:0 0 16px rgba(74,222,128,.7);}
-.ms-banner.is-lose .ms-banner-title{color:#ff3d6e;text-shadow:0 0 16px rgba(255,61,110,.7);}
-.ms-banner-score{font-size:15px;color:#cdc4f2;letter-spacing:.1em;text-transform:uppercase;}
-.ms-banner-score b{color:#ffcf4d;font-size:20px;}
-.ms-banner-time{color:#8b83bf;}
+.ms-banner-title{font-size:clamp(24px,4.5vw,36px);font-weight:800;letter-spacing:.1em;text-shadow:2px 2px 0 rgba(0,0,0,.12);}
+.ms-banner.is-win .ms-banner-title{color:#2fa84f;}
+.ms-banner.is-lose .ms-banner-title{color:#ea4a2f;}
+.ms-banner-score{font-size:15px;color:#6a5540;letter-spacing:.1em;text-transform:uppercase;font-weight:700;}
+.ms-banner-score b{color:#1e50b0;font-size:20px;}
+.ms-banner-time{color:#a08a6e;}
 .ms-play-again{border:none;cursor:pointer;font-family:inherit;font-weight:800;letter-spacing:.1em;
-  padding:10px 20px;border-radius:10px;color:#05231e;background:linear-gradient(180deg,#2ee6c8,#12a892);
-  box-shadow:0 4px 0 #0a5a4c,0 0 18px rgba(46,230,200,.5);}
-.ms-play-again:active{transform:translateY(3px);box-shadow:0 1px 0 #0a5a4c;}
+  padding:10px 20px;border-radius:8px;color:#fff;background:#2f6fe0;box-shadow:0 4px 0 #1e50b0;}
+.ms-play-again:active{transform:translateY(3px);box-shadow:0 1px 0 #1e50b0;}
 .ms-footer{display:flex;flex-wrap:wrap;gap:12px;margin-top:14px;}
-.ms-board-panel{flex:1;min-width:240px;background:#0a0620;border-radius:12px;padding:10px 12px;box-shadow:inset 0 0 0 1px #2a1f56;}
-.ms-panel-h{font-size:11px;letter-spacing:.22em;color:#8b83bf;margin-bottom:8px;}
-.ms-empty{font-size:12px;color:#6f66a3;padding:6px 2px;}
+.ms-board-panel{flex:1;min-width:240px;background:#f4ead3;border-radius:10px;padding:10px 12px;box-shadow:inset 0 0 0 2px #d8c9a8;}
+.ms-panel-h{font-size:11px;letter-spacing:.2em;color:#8a6d52;margin-bottom:8px;font-weight:700;}
+.ms-empty{font-size:12px;color:#a08a6e;padding:6px 2px;}
 .ms-scores{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;}
-.ms-scores li{display:flex;align-items:center;gap:8px;font-size:13px;padding:5px 8px;border-radius:7px;background:#120b30;}
-.ms-scores li.is-me{background:linear-gradient(90deg,rgba(46,230,200,.16),rgba(46,230,200,.04));box-shadow:inset 0 0 0 1px rgba(46,230,200,.4);}
-.ms-rank{width:16px;color:#ffcf4d;font-weight:800;}
-.ms-pname{flex:1;color:#e6e0ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ms-scores li{display:flex;align-items:center;gap:8px;font-size:13px;padding:5px 8px;border-radius:6px;background:#fbf3e2;}
+.ms-scores li.is-me{background:rgba(47,111,224,.12);box-shadow:inset 0 0 0 2px rgba(47,111,224,.45);}
+.ms-rank{width:16px;color:#ea4a2f;font-weight:800;}
+.ms-pname{flex:1;color:#4a3d2e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .ms-dtag{font-size:9px;letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;border-radius:5px;font-weight:700;}
-.ms-dtag--rookie{background:#123a52;color:#58c7ff;}
-.ms-dtag--analyst{background:#0f3a24;color:#4ade80;}
-.ms-dtag--guardian{background:#3a1030;color:#ff6b9d;}
-.ms-pscore{color:#ffcf4d;font-weight:800;font-variant-numeric:tabular-nums;}
-.ms-best{width:170px;background:#0a0620;border-radius:12px;padding:12px;text-align:center;box-shadow:inset 0 0 0 1px #2a1f56;
+.ms-dtag--rookie{background:#d7e6ff;color:#1e50b0;}
+.ms-dtag--analyst{background:#d6f0dc;color:#1e7a3a;}
+.ms-dtag--guardian{background:#ffe0d6;color:#c23a22;}
+.ms-pscore{color:#1e50b0;font-weight:800;font-variant-numeric:tabular-nums;}
+.ms-best{width:170px;background:#f4ead3;border-radius:10px;padding:12px;text-align:center;box-shadow:inset 0 0 0 2px #d8c9a8;
   display:flex;flex-direction:column;justify-content:center;}
-.ms-best-label{font-size:10px;letter-spacing:.24em;color:#8b83bf;}
-.ms-best-val{font-size:30px;font-weight:800;color:#2ee6c8;text-shadow:0 0 14px rgba(46,230,200,.5);font-variant-numeric:tabular-nums;}
-.ms-hint{margin-top:8px;font-size:10px;color:#5b5390;letter-spacing:.05em;}
+.ms-best-label{font-size:10px;letter-spacing:.22em;color:#8a6d52;font-weight:700;}
+.ms-best-val{font-size:30px;font-weight:800;color:#ea4a2f;font-variant-numeric:tabular-nums;}
+.ms-hint{margin-top:8px;font-size:10px;color:#a08a6e;letter-spacing:.05em;}
 @media (max-width:560px){.ms-best{width:100%;}}
+@media (prefers-reduced-motion:reduce){.ms-face svg{animation:none;}.ms-cell--boom{animation:none;}.ms-banner{animation:none;}}
 `;
