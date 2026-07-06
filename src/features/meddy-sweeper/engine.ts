@@ -28,17 +28,21 @@ export interface DifficultyConfig {
   rows: number;
   cols: number;
   mines: number;
-  winBase: number;
-  par: number; // seconds; beating it earns the time bonus
-  speed: number; // points per second under par
-  mult: number; // consolation multiplier per safe cell on a loss
+  clearPoints: number; // points for clearing the board (a win)
+  par: number; // seconds; finishing under par earns the speed bonus
+  speed: number; // bonus points per second under par
   label: string;
 }
 
+// Scoring is intentionally simple and explainable: you only score by CLEARING
+// a board (a win). A win pays a flat `clearPoints` for that difficulty plus a
+// `speed` bonus for every second you finish under `par`. Harder board =
+// bigger clear points + bigger speed bonus, so a Guardian win always outscores
+// an Analyst win outscores a Rookie win. Losing scores nothing — try again.
 export const DIFFICULTIES: Record<Difficulty, DifficultyConfig> = {
-  rookie: { rows: 9, cols: 9, mines: 10, winBase: 1000, par: 60, speed: 12, mult: 3, label: "Rookie" },
-  analyst: { rows: 16, cols: 16, mines: 40, winBase: 6000, par: 240, speed: 18, mult: 6, label: "Analyst" },
-  guardian: { rows: 16, cols: 30, mines: 99, winBase: 20000, par: 600, speed: 30, mult: 10, label: "Guardian" },
+  rookie: { rows: 9, cols: 9, mines: 10, clearPoints: 1000, par: 120, speed: 15, label: "Rookie" },
+  analyst: { rows: 16, cols: 16, mines: 40, clearPoints: 5000, par: 360, speed: 25, label: "Analyst" },
+  guardian: { rows: 16, cols: 30, mines: 99, clearPoints: 15000, par: 900, speed: 50, label: "Guardian" },
 };
 
 const idx = (r: number, c: number, cols: number) => r * cols + c;
@@ -191,16 +195,11 @@ export function chord(prev: GameState, i: number): GameState {
   return state;
 }
 
-// Final score for a finished game.
-export function computeScore(
-  d: Difficulty,
-  won: boolean,
-  seconds: number,
-  safeRevealed: number,
-): number {
+// Score for a WON board, broken into its two legible parts. Losses don't score.
+export function scoreBreakdown(d: Difficulty, seconds: number): { base: number; speed: number; total: number } {
   const cfg = DIFFICULTIES[d];
-  const raw = won
-    ? cfg.winBase + Math.max(0, cfg.par - seconds) * cfg.speed
-    : safeRevealed * cfg.mult;
-  return Math.max(0, Math.min(100_000_000, Math.round(raw)));
+  const base = cfg.clearPoints;
+  const speed = Math.max(0, cfg.par - seconds) * cfg.speed;
+  const total = Math.max(0, Math.min(100_000_000, Math.round(base + speed)));
+  return { base, speed: Math.round(speed), total };
 }

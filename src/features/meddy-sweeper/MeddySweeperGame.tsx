@@ -7,11 +7,11 @@ import {
   reveal,
   toggleFlag,
   chord,
-  computeScore,
+  scoreBreakdown,
   type Difficulty,
   type GameState,
 } from "./engine";
-import { MeddyFace, MeddyMine, FlagSprite, type FaceState } from "./sprites";
+import { MeddyFace, MeddyMine, ShieldSprite, type FaceState } from "./sprites";
 import { useTopScores, useMyBest, useSubmitScore } from "./api";
 
 // Classic minesweeper-style number colors, tuned to read on the cream tiles.
@@ -83,7 +83,7 @@ function GameModal() {
   const [soundOn, setSoundOn] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
-  const [lastScore, setLastScore] = useState<{ score: number; won: boolean } | null>(null);
+  const [lastScore, setLastScore] = useState<{ won: boolean; total?: number; base?: number; speed?: number } | null>(null);
   const [tile, setTile] = useState(30);
 
   const startRef = useRef<number | null>(null);
@@ -133,17 +133,23 @@ function GameModal() {
     play(won ? sfx.win : sfx.boom);
     const finalSeconds = startRef.current != null ? Math.floor((Date.now() - startRef.current) / 1000) : 0;
     setSeconds(finalSeconds);
-    if (submittedRef.current !== gameId && profile?.id) {
-      submittedRef.current = gameId;
-      const sc = computeScore(difficulty, won, finalSeconds, game.safeRevealed);
-      setLastScore({ score: sc, won });
-      submit.mutate({
-        userId: profile.id,
-        playerName: profile.full_name || "Player",
-        score: sc,
-        difficulty,
-        won,
-      });
+    if (submittedRef.current === gameId) return;
+    submittedRef.current = gameId;
+    if (won) {
+      const b = scoreBreakdown(difficulty, finalSeconds);
+      setLastScore({ won: true, total: b.total, base: b.base, speed: b.speed });
+      // Only cleared boards score — nothing to submit on a loss.
+      if (profile?.id) {
+        submit.mutate({
+          userId: profile.id,
+          playerName: profile.full_name || "Player",
+          score: b.total,
+          difficulty,
+          won: true,
+        });
+      }
+    } else {
+      setLastScore({ won: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game.status, gameId]);
@@ -258,9 +264,9 @@ function GameModal() {
           <button
             className={"ms-toggle" + (flagMode ? " is-on" : "")}
             onClick={() => setFlagMode((v) => !v)}
-            title="Toggle flag mode (tap to flag). Right-click also flags."
+            title="Toggle shield mode (tap to shield). Right-click also shields."
           >
-            🚩 {flagMode ? "Flag: ON" : "Flag: off"}
+            🛡 {flagMode ? "Shield: ON" : "Shield: off"}
           </button>
           <button className="ms-toggle" onClick={() => setSoundOn((v) => !v)} title="Toggle sound">
             {soundOn ? "🔊" : "🔇"}
@@ -271,9 +277,9 @@ function GameModal() {
         {showHelp && (
           <div className="ms-help">
             Reveal the safe tiles. A number = how many <b>Meddys</b> are hiding next to it.
-            Right-click (or flip <b>Flag</b> mode on) to flag a hiding Meddy. Click a
-            fully-flagged number to auto-clear its neighbors. Clear every safe tile to <b>win</b> —
-            uncover a Meddy and it's game over. Faster + harder = higher score.
+            Right-click (or flip <b>Shield</b> mode on) to shield a spot where you think a Meddy is
+            hiding. Click a fully-shielded number to auto-clear its neighbors. Clear every safe tile
+            to <b>win</b> — uncover a Meddy and it's game over. Faster + harder = higher score.
           </div>
         )}
 
@@ -302,8 +308,8 @@ function GameModal() {
                   onContextMenu={(e) => onCellContext(e, i)}
                   aria-label={revealed ? (cell.mine ? "threat" : String(cell.adjacent)) : cell.flagged ? "shielded" : "hidden node"}
                 >
-                  {!revealed && cell.flagged && !wrongFlag && <FlagSprite size={Math.floor(tile * 0.82)} />}
-                  {wrongFlag && <FlagSprite size={Math.floor(tile * 0.82)} wrong />}
+                  {!revealed && cell.flagged && !wrongFlag && <ShieldSprite size={Math.floor(tile * 0.82)} />}
+                  {wrongFlag && <ShieldSprite size={Math.floor(tile * 0.82)} wrong />}
                   {(revealed || (finished && cell.mine)) && cell.mine && !cell.flagged && (
                     <MeddyMine size={Math.floor(tile * 0.82)} dead={boom} />
                   )}
@@ -320,13 +326,22 @@ function GameModal() {
           {finished && (
             <div className={"ms-banner " + (game.status === "won" ? "is-win" : "is-lose")}>
               <div className="ms-banner-title">
-                {game.status === "won" ? "ALL CLEAR!" : "GOTCHA!"}
+                {game.status === "won" ? "ALL CLEAR!" : "OOPS!"}
               </div>
-              {lastScore && (
-                <div className="ms-banner-score">
-                  {lastScore.won ? "SCORE" : "salvaged"} <b>{lastScore.score.toLocaleString()}</b>
-                  {lastScore.won && <span className="ms-banner-time"> · {seconds}s</span>}
-                </div>
+              {lastScore?.won && (
+                <>
+                  <div className="ms-banner-score">
+                    SCORE <b>{lastScore.total!.toLocaleString()}</b>
+                    <span className="ms-banner-time"> · {seconds}s</span>
+                  </div>
+                  <div className="ms-banner-break">
+                    {lastScore.base!.toLocaleString()} cleared
+                    {lastScore.speed! > 0 && <> + {lastScore.speed!.toLocaleString()} speed</>}
+                  </div>
+                </>
+              )}
+              {lastScore && !lastScore.won && (
+                <div className="ms-banner-score">Board not cleared — no points. Try again!</div>
               )}
               <button className="ms-play-again" onClick={() => startNewGame()}>▶ PLAY AGAIN</button>
             </div>
@@ -355,7 +370,7 @@ function GameModal() {
           <div className="ms-best">
             <div className="ms-best-label">YOUR BEST</div>
             <div className="ms-best-val">{myBest.toLocaleString()}</div>
-            <div className="ms-hint">Esc to quit · right-click to flag</div>
+            <div className="ms-hint">Esc to quit · right-click to shield</div>
           </div>
         </div>
       </div>
@@ -429,6 +444,7 @@ const CSS = `
 .ms-banner-score{font-size:15px;color:#6a5540;letter-spacing:.1em;text-transform:uppercase;font-weight:700;}
 .ms-banner-score b{color:#1e50b0;font-size:20px;}
 .ms-banner-time{color:#a08a6e;}
+.ms-banner-break{font-size:11px;color:#a08a6e;letter-spacing:.04em;margin-top:-4px;}
 .ms-play-again{border:none;cursor:pointer;font-family:inherit;font-weight:800;letter-spacing:.1em;
   padding:10px 20px;border-radius:8px;color:#fff;background:#2f6fe0;box-shadow:0 4px 0 #1e50b0;}
 .ms-play-again:active{transform:translateY(3px);box-shadow:0 1px 0 #1e50b0;}

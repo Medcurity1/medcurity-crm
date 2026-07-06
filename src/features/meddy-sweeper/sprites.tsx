@@ -8,7 +8,6 @@ const RED = "#ea4a2f"; // Meddy red-orange
 const RED_DK = "#be3620"; // ambient shading
 const BLACK = "#1b1b1f";
 const WHITE = "#ffffff";
-const BLUE = "#2f6fe0";
 
 // Silhouette of the round Meddy head, per row: [y, xStart, xEnd] inclusive.
 const SIL: [number, number, number][] = [
@@ -72,20 +71,32 @@ export function MeddyMine({ size = 22, dead = false }: { size?: number; dead?: b
   );
 }
 
-/** The reactive Meddy mascot — the "new game" reset face. */
+/** The reactive Meddy mascot — the "new game" reset face. Meddy has no mouth
+ *  (canon), so expressions come from the eyes/brows: calm, worried brows +
+ *  a sweat bead, cool shades on a win, and X-eyes when he faints. */
 export function MeddyFace({ state = "idle", size = 44 }: { state?: FaceState; size?: number }) {
   return (
     <Svg size={size}>
       {headRects()}
-      {/* eyes */}
-      {state === "lost" ? (
+      {state === "lost" && (
         <>
           {r(4, 6, 1, 1, BLACK, "x1")}{r(5, 7, 1, 1, BLACK, "x2")}{r(6, 8, 1, 1, BLACK, "x3")}
           {r(6, 6, 1, 1, BLACK, "x4")}{r(4, 8, 1, 1, BLACK, "x5")}
           {r(9, 6, 1, 1, BLACK, "x6")}{r(10, 7, 1, 1, BLACK, "x7")}{r(11, 8, 1, 1, BLACK, "x8")}
           {r(11, 6, 1, 1, BLACK, "x9")}{r(9, 8, 1, 1, BLACK, "x10")}
         </>
-      ) : (
+      )}
+      {state === "won" && (
+        <>
+          {/* cool shades */}
+          {r(3, 6, 4, 3, BLACK, "gl")}
+          {r(9, 6, 4, 3, BLACK, "gr")}
+          {r(6, 7, 4, 1, BLACK, "gb")}
+          {r(4, 6, 1, 1, WHITE, "g1")}
+          {r(10, 6, 1, 1, WHITE, "g2")}
+        </>
+      )}
+      {(state === "idle" || state === "worried") && (
         <>
           {r(5, 6, 2, 3, BLACK, "el")}
           {r(9, 6, 2, 3, BLACK, "er")}
@@ -93,33 +104,42 @@ export function MeddyFace({ state = "idle", size = 44 }: { state?: FaceState; si
           {r(9, 6, 1, 1, WHITE, "hr")}
         </>
       )}
-      {/* mouth */}
-      {state === "idle" && <>{r(5, 11, 1, 1, BLACK, "m1")}{r(6, 12, 4, 1, BLACK, "m2")}{r(10, 11, 1, 1, BLACK, "m3")}</>}
-      {state === "worried" && <>{r(7, 11, 2, 2, BLACK, "m1")}</>}
-      {state === "won" && <>{r(5, 11, 6, 1, BLACK, "m1")}{r(6, 12, 4, 1, BLACK, "m2")}{r(6, 12, 4, 1, WHITE, "mt")}</>}
-      {state === "lost" && <>{r(6, 12, 4, 1, BLACK, "m1")}{r(5, 13, 1, 1, BLACK, "m2")}{r(10, 13, 1, 1, BLACK, "m3")}</>}
+      {state === "worried" && (
+        <>
+          {/* brows sloping up toward the middle + a sweat bead */}
+          {r(4, 5, 2, 1, BLACK, "bl")}{r(6, 4, 1, 1, BLACK, "bl2")}
+          {r(10, 5, 2, 1, BLACK, "br")}{r(9, 4, 1, 1, BLACK, "br2")}
+          {r(12, 4, 1, 2, "#38bdf8", "sweat")}
+        </>
+      )}
     </Svg>
   );
 }
 
-/** A flag — mark a cell where you think a Meddy is hiding. */
-export function FlagSprite({ size = 22, wrong = false }: { size?: number; wrong?: boolean }) {
-  const pennant = wrong ? "#9aa3b2" : RED;
+/** A shield — mark a cell where you think a Meddy is hiding. */
+export function ShieldSprite({ size = 22, wrong = false }: { size?: number; wrong?: boolean }) {
+  const face = wrong ? "#9aa3b2" : "#2f6fe0";
+  const edge = wrong ? "#6b7280" : "#1e50b0";
   return (
     <Svg size={size}>
-      {/* pole */}
-      {r(8, 2, 1, 11, BLACK, "pole")}
-      {/* pennant (points left from the pole top) */}
-      {r(4, 3, 4, 1, pennant, "p1")}
-      {r(5, 4, 3, 1, pennant, "p2")}
-      {r(6, 5, 2, 1, pennant, "p3")}
-      {/* base */}
-      {r(5, 13, 6, 1, BLACK, "b1")}
-      {r(6, 12, 4, 1, BLUE, "b2")}
-      {wrong && (
+      {r(4, 2, 8, 1, edge, "t")}
+      {r(3, 3, 10, 6, face, "b1")}
+      {r(4, 9, 8, 2, face, "b2")}
+      {r(5, 11, 6, 1, face, "b3")}
+      {r(6, 12, 4, 1, face, "b4")}
+      {r(7, 13, 2, 1, edge, "tip")}
+      {r(3, 3, 1, 6, edge, "le")}
+      {r(12, 3, 1, 6, edge, "re")}
+      {wrong ? (
         <>
-          {r(4, 4, 1, 1, "#e0392b", "w1")}{r(5, 5, 1, 1, "#e0392b", "w2")}
-          {r(6, 4, 1, 1, "#e0392b", "w3")}{r(4, 6, 1, 1, "#e0392b", "w4")}
+          {r(5, 4, 1, 1, "#e0392b", "w1")}{r(6, 5, 1, 1, "#e0392b", "w2")}
+          {r(7, 6, 1, 1, "#e0392b", "w3")}{r(9, 4, 1, 1, "#e0392b", "w4")}
+          {r(8, 5, 1, 1, "#e0392b", "w5")}{r(6, 7, 1, 1, "#e0392b", "w6")}
+        </>
+      ) : (
+        <>
+          {r(6, 6, 1, 1, WHITE, "c1")}{r(7, 7, 1, 1, WHITE, "c2")}
+          {r(8, 6, 1, 1, WHITE, "c3")}{r(9, 5, 1, 1, WHITE, "c4")}
         </>
       )}
     </Svg>
