@@ -101,24 +101,38 @@ export function useIdleLogout({
     startTimers();
   }, [startTimers]);
 
+  // Keep the latest handleActivity in a ref so the listener effect below can
+  // depend only on stable values. Previously handleActivity was in that
+  // effect's deps, so the moment the warning showed (which recreates
+  // handleActivity), the effect tore down and re-ran — clearing the live
+  // warn/countdown timers it had just set, so the logout never actually fired.
+  const handleActivityRef = useRef(handleActivity);
+  useEffect(() => {
+    handleActivityRef.current = handleActivity;
+  }, [handleActivity]);
+
+  const onActivity = useCallback(() => handleActivityRef.current(), []);
+
   useEffect(() => {
     if (!enabled) {
       clearAll();
       return;
     }
     for (const evt of ACTIVITY_EVENTS) {
-      window.addEventListener(evt, handleActivity as EventListener, {
+      window.addEventListener(evt, onActivity as EventListener, {
         passive: true,
       });
     }
     startTimers();
     return () => {
       for (const evt of ACTIVITY_EVENTS) {
-        window.removeEventListener(evt, handleActivity as EventListener);
+        window.removeEventListener(evt, onActivity as EventListener);
       }
       clearAll();
     };
-  }, [enabled, handleActivity, startTimers, clearAll]);
+    // Depends only on config-level values (enabled + the memoized timer fns),
+    // NOT on `warning`, so showing the warning can't tear down the timers.
+  }, [enabled, onActivity, startTimers, clearAll]);
 
   return { warning, secondsRemaining, dismissWarning };
 }

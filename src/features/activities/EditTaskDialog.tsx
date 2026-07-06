@@ -117,9 +117,26 @@ export function EditTaskDialog({
     }
   }
 
+  // Guard against a stray outside-click/Esc discarding edits — compare the
+  // typed fields against the original task.
+  const dirty =
+    !!task &&
+    (subject !== (task.subject ?? "") ||
+      body !== (task.body ?? "") ||
+      dueAt !== (task.due_at ? toLocalInput(task.due_at) : "") ||
+      priority !== (task.priority ?? "normal"));
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        onInteractOutside={(e) => {
+          if (dirty) e.preventDefault();
+        }}
+        onEscapeKeyDown={(e) => {
+          if (dirty) e.preventDefault();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Edit Task</DialogTitle>
           <DialogDescription>

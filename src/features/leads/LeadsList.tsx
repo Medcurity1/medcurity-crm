@@ -3,9 +3,10 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState, useUrlArrayState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { UserPlus, Plus, Search, X, ListChecks, Save, UserCheck, Upload, Ban, AlertTriangle } from "lucide-react";
+import { UserPlus, Plus, Search, X, ListChecks, Save, UserCheck, Upload, Ban, AlertTriangle, Archive } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useLeads, useArchiveLead, useBulkUpdateOwner, useBulkDeleteLeads, useBulkPromoteImports, useMarkImportAvoid } from "./api";
+import { BulkArchiveFromFile } from "./BulkArchiveFromFile";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -156,6 +157,7 @@ function ImportsList() {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
+  const [bulkArchiveOpen, setBulkArchiveOpen] = useState(false);
   const [search, setSearch] = useDebouncedUrlState("q", "");
   const [statusFilter, setStatusFilter] = useUrlArrayState("status");
   const [sourceFilter, setSourceFilter] = useUrlArrayState("source");
@@ -427,6 +429,12 @@ function ImportsList() {
               <Upload className="h-4 w-4 mr-2" />
               Import a list
             </Button>
+            {isAdmin && (
+              <Button variant="outline" onClick={() => setBulkArchiveOpen(true)}>
+                <Archive className="h-4 w-4 mr-2" />
+                Bulk archive from file
+              </Button>
+            )}
             <Button variant="outline" onClick={() => navigate("/leads/new")}>
               <Plus className="h-4 w-4 mr-2" />
               Add one
@@ -434,6 +442,10 @@ function ImportsList() {
           </div>
         }
       />
+
+      {isAdmin && (
+        <BulkArchiveFromFile open={bulkArchiveOpen} onOpenChange={setBulkArchiveOpen} />
+      )}
 
       <div className="grid grid-cols-3 gap-3 mb-4">
         <StatCard label="Imports (pending)" value={quickStats?.total ?? 0} />

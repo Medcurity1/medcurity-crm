@@ -37,6 +37,7 @@ import {
 import { toast } from "sonner";
 import type { AppRole, UserProfile } from "@/types/crm";
 import { useAllUsers, useUpdateUserProfile, useInviteUser } from "./admin-api";
+import { useAuth } from "@/features/auth/AuthProvider";
 
 const ROLE_OPTIONS: { value: AppRole; label: string }[] = [
   { value: "sales", label: "Sales" },
@@ -83,6 +84,10 @@ function InviteUserDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const inviteUser = useInviteUser();
+  // Only a super admin may create another super admin (enforced server-side
+  // too); hide the option from everyone else.
+  const { profile } = useAuth();
+  const isSuperAdmin = profile?.role === "super_admin";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -252,7 +257,7 @@ function InviteUserDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {ROLE_OPTIONS.map((opt) => (
+                {ROLE_OPTIONS.filter((opt) => opt.value !== "super_admin" || isSuperAdmin).map((opt) => (
                   <SelectItem key={opt.value} value={opt.value}>
                     {opt.label}
                   </SelectItem>

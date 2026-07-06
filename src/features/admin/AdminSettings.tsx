@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, lazy, Suspense } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
@@ -8,25 +8,29 @@ import { UsersManager } from "./UsersManager";
 import { PermissionsManager } from "./PermissionsManager";
 import { RequiredFieldsManager } from "./RequiredFieldsManager";
 import { IntegrationsManager } from "./IntegrationsManager";
-import { SalesforceImport } from "./SalesforceImport";
 import { PartnerRelationshipsImport } from "./PartnerRelationshipsImport";
 import { DataExport } from "./DataExport";
 import { PicklistsManager } from "@/features/picklists/PicklistsManager";
 import { ObjectManager } from "./ObjectManager";
 import { LayoutsViewer } from "@/features/layouts/LayoutsViewer";
-import { LayoutEditor } from "@/features/layouts/LayoutEditor";
-import { AuditLogViewer } from "./AuditLogViewer";
 import { ClientErrorsViewer } from "./ClientErrorsViewer";
 import { AutomationsManager } from "./AutomationsManager";
 import { SystemInfo } from "./SystemInfo";
-import { DataHealthDashboard } from "./DataHealthDashboard";
-import { DataCleanupManager } from "./DataCleanupManager";
 import { RequestsInbox } from "@/features/requests/RequestsInbox";
 import { RoutingEditor } from "@/features/requests/RoutingEditor";
-import { MeddyAdminPanel } from "@/features/meddy/MeddyAdminPanel";
-import { NexusAdminPanel } from "@/features/nexus/NexusAdminPanel";
 import { AiAssistantAdmin } from "./AiAssistantAdmin";
 import { Loader2 } from "lucide-react";
+
+// The heaviest admin panels are lazy-loaded (with a Suspense boundary around
+// the tab content below), so opening Admin to change one picklist no longer
+// downloads/parses the entire admin surface up front.
+const SalesforceImport = lazy(() => import("./SalesforceImport").then((m) => ({ default: m.SalesforceImport })));
+const LayoutEditor = lazy(() => import("@/features/layouts/LayoutEditor").then((m) => ({ default: m.LayoutEditor })));
+const AuditLogViewer = lazy(() => import("./AuditLogViewer").then((m) => ({ default: m.AuditLogViewer })));
+const DataHealthDashboard = lazy(() => import("./DataHealthDashboard").then((m) => ({ default: m.DataHealthDashboard })));
+const DataCleanupManager = lazy(() => import("./DataCleanupManager").then((m) => ({ default: m.DataCleanupManager })));
+const MeddyAdminPanel = lazy(() => import("@/features/meddy/MeddyAdminPanel").then((m) => ({ default: m.MeddyAdminPanel })));
+const NexusAdminPanel = lazy(() => import("@/features/nexus/NexusAdminPanel").then((m) => ({ default: m.NexusAdminPanel })));
 
 /**
  * Top-level admin tabs. We collapsed schema/layout/picklist/required-field
@@ -183,6 +187,13 @@ export function AdminSettings() {
           <TabsTrigger value="system">System</TabsTrigger>
         </TabsList>
 
+        <Suspense
+          fallback={
+            <div className="flex justify-center py-16">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          }
+        >
         {/* ---------- OBJECT MANAGER (parent with sub-tabs) ---------- */}
         <TabsContent value="object-manager">
           <Tabs
@@ -407,6 +418,7 @@ export function AdminSettings() {
             <SystemInfo />
           </Card>
         </TabsContent>
+        </Suspense>
       </Tabs>
     </div>
   );
