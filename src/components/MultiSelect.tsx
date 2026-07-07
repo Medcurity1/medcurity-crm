@@ -111,6 +111,14 @@ export function MultiSelect({
               maxHeight:
                 "min(18rem, var(--radix-popover-content-available-height, 18rem))",
             }}
+            // When this popover is portaled out of a MODAL Dialog/Sheet (e.g.
+            // the Nexus widget-builder Sheet), the modal's react-remove-scroll
+            // lock listens for wheel/touch on document and cancels them — so
+            // the portaled list won't scroll. Stopping propagation here keeps
+            // the event from reaching that lock; native scroll on this div then
+            // works. Fixes "can't scroll owners" in the Nexus custom report.
+            onWheel={(e) => e.stopPropagation()}
+            onTouchMove={(e) => e.stopPropagation()}
           >
             {options.map((opt) => {
               const checked = value.includes(opt.value);
