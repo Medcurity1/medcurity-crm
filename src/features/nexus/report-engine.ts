@@ -410,15 +410,22 @@ interface RawRecord {
   [key: string]: unknown;
 }
 
-/** Server-side ORDER BY spec for a sortable column key, per entity. */
+/**
+ * Server-side ORDER BY spec for a sortable column key, per entity.
+ *
+ * Joined-column sorts use PostgREST's EMBED-PATH form ("account(name)") —
+ * NOT order(col, { referencedTable }): that variant only reorders rows
+ * INSIDE the embed (a no-op for to-one joins), silently leaving the parent
+ * rows in tiebreak order. Verified against staging PostgREST.
+ */
 function serverSortSpec(
   entity: NexusReportEntity,
   field: string,
-): { column: string; referencedTable?: string } | null {
-  const maps: Record<NexusReportEntity, Record<string, { column: string; referencedTable?: string }>> = {
+): { column: string } | null {
+  const maps: Record<NexusReportEntity, Record<string, { column: string }>> = {
     contacts: {
       name: { column: "last_name" },
-      account: { column: "name", referencedTable: "account" },
+      account: { column: "account(name)" },
       title: { column: "title" },
       email: { column: "email" },
       created: { column: "created_at" },
@@ -441,8 +448,8 @@ function serverSortSpec(
     },
     opportunities: {
       name: { column: "name" },
-      account: { column: "name", referencedTable: "account" },
-      contact: { column: "last_name", referencedTable: "primary_contact" },
+      account: { column: "account(name)" },
+      contact: { column: "primary_contact(last_name)" },
       stage: { column: "stage" },
       amount: { column: "amount" },
       expected_close: { column: "expected_close_date" },
@@ -523,15 +530,20 @@ function applyFilters(entity: NexusReportEntity, query: any, filters: NexusRepor
     }
     if (f.field === "last_activity") {
       if (entity === "accounts") {
-        // Server-side over v_accounts_with_activity.effective_last_touch
-        // (never NULL — created_at fallback), so "untouched for N+ days"
-        // naturally includes accounts that were never touched at all.
+        // Server-side over v_accounts_with_activity. Two different columns
+        // on purpose (mirrors the contacts client-side semantics):
+        //  - "more than N days ago" uses effective_last_touch (created_at
+        //    fallback, never NULL) so never-touched accounts count as
+        //    untouched — the whole point of the outreach report.
+        //  - "within the last N days" uses the raw last_activity_at so a
+        //    brand-new account with zero logged activity does NOT pass as
+        //    "recently worked" (gte on NULL excludes it).
         const n = Number(f.value);
         if (Number.isFinite(n) && n > 0) {
           query =
             f.op === "older_than_days"
               ? query.lte("effective_last_touch", daysAgoISO(n))
-              : query.gte("effective_last_touch", daysAgoISO(n));
+              : query.gte("last_activity_at", daysAgoISO(n));
         }
       }
       continue; // contacts: client-side
@@ -774,7 +786,6 @@ export function useNexusReport(rawConfig: unknown, previewCount: number) {
         query = query.order(spec.column, {
           ascending: sort.dir === "asc",
           nullsFirst: false,
-          ...(spec.referencedTable ? { referencedTable: spec.referencedTable } : {}),
         });
       } else {
         const fallback = entity === "imports" ? "started_at" : "created_at";
