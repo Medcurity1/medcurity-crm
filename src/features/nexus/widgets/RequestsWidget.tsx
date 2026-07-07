@@ -7,7 +7,6 @@
 // (requester-or-admin), so reviewers only ever see what they're allowed to.
 
 import { useEffect } from "react";
-import { Link } from "react-router-dom";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRequests, useMyRequestTypes } from "@/features/requests/api";
 import { RequestCard } from "@/features/requests/RequestCard";
@@ -94,15 +93,14 @@ export function RequestsWidget({
     );
   }
 
-  const preview = all.slice(0, widget.preview_count);
   const q = searchQuery.trim().toLowerCase();
   const visible = q
-    ? preview.filter((r) =>
+    ? all.filter((r) =>
         [r.title, r.status, r.priority, r.type].some((s) =>
           s?.toLowerCase().includes(q),
         ),
       )
-    : preview;
+    : all;
 
   return (
     <div>
@@ -111,23 +109,16 @@ export function RequestsWidget({
           No rows match your filter.
         </p>
       ) : (
-        <div className="space-y-2">
+        // Show every pending request, but cap the height so the widget never
+        // grows unbounded — it becomes a scroll box once a few stack up.
+        <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
           {visible.map((r) => (
             <RequestCard key={r.id} request={r} showType={category === "all"} />
           ))}
         </div>
       )}
 
-      <div className="pt-2 flex items-center justify-between">
-        <Link to="/requests" className="text-sm text-primary hover:underline">
-          View All
-        </Link>
-        {all.length > widget.preview_count && (
-          <span className="text-xs text-muted-foreground">
-            {all.length} pending
-          </span>
-        )}
-      </div>
+      <div className="pt-2 text-xs text-muted-foreground">{all.length} pending</div>
     </div>
   );
 }
