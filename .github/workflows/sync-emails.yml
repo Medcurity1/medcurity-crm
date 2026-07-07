@@ -40,14 +40,24 @@ jobs:
             echo "::error::SUPABASE_SYNC_URL and SUPABASE_SERVICE_ROLE_KEY repository secrets must be set."
             exit 1
           fi
+          # Strip any stray whitespace/newline the stored secret may carry — a
+          # trailing newline breaks the function's exact-match auth gate (added
+          # 2026-07-04) even though the key value is correct. JWTs contain no
+          # whitespace, so this is always safe.
+          KEY="$(printf '%s' "${SUPABASE_SERVICE_ROLE_KEY}" | tr -d '[:space:]')"
+          URL="$(printf '%s' "${SUPABASE_SYNC_URL}" | tr -d '[:space:]')"
+          # Diagnostic (safe — prints the JWT's role claim, never the key): tells
+          # us if the stored key is actually 'service_role' vs 'anon'/wrong.
+          PAYLOAD="$(printf '%s' "$KEY" | cut -d. -f2)"
+          MOD=$(( ${#PAYLOAD} % 4 )); [ $MOD -ne 0 ] && PAYLOAD="${PAYLOAD}$(printf '=%.0s' $(seq 1 $((4-MOD))))"
+          ROLE="$(printf '%s' "$PAYLOAD" | tr '_-' '/+' | base64 -d 2>/dev/null | grep -oE '"role":"[a-z_]+"' | head -1)"
+          echo "stored key role claim: ${ROLE:-<undecodable>}  (key length: ${#KEY})"
           # -f makes curl exit non-zero on HTTP >=400 so the Action fails loudly.
-          # -sS keeps the body suppressed but surfaces errors.
-          # --max-time 240 caps total wall time (function itself runs longer than 5s in some cases).
           curl -fsS --max-time 240 \
             -X POST \
-            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${KEY}" \
             -H "Content-Type: application/json" \
             -d '{}' \
-            "${SUPABASE_SYNC_URL}"
+            "${URL}"
           echo
           echo "Sync triggered successfully."
