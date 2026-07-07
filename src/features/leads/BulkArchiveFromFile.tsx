@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Loader2, Archive, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
@@ -76,6 +77,7 @@ export function BulkArchiveFromFile({
 }) {
   const [parsed, setParsed] = useState<ParsedFile | null>(null);
   const [reason, setReason] = useState("");
+  const [includeConverted, setIncludeConverted] = useState(false);
   const [preview, setPreview] = useState<BulkArchiveResult | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -86,6 +88,7 @@ export function BulkArchiveFromFile({
   function reset() {
     setParsed(null);
     setReason("");
+    setIncludeConverted(false);
     setPreview(null);
     setParseError(null);
     setConfirmOpen(false);
@@ -118,6 +121,7 @@ export function BulkArchiveFromFile({
           emails: parsed.emails.slice(i, i + CHUNK),
           reason: reason.trim() || "bulk cleaning",
           dryRun,
+          includeConverted,
         });
         agg.matched += r.matched;
         agg.already_archived += r.already_archived;
@@ -237,6 +241,27 @@ export function BulkArchiveFromFile({
                   placeholder="MillionVerifier: bad"
                 />
               </div>
+            )}
+
+            {parsed && (
+              <label className="flex items-start gap-2 rounded-md border bg-muted/20 p-3 text-sm cursor-pointer">
+                <Checkbox
+                  checked={includeConverted}
+                  onCheckedChange={(v) => {
+                    setIncludeConverted(v === true);
+                    setPreview(null); // match set changed → re-preview
+                  }}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="font-medium">Include already-converted leads</span>
+                  <span className="block text-xs text-muted-foreground">
+                    By default, leads that already became contacts are skipped. Check this to also
+                    archive the leftover lead rows for contacts that already exist — the contact
+                    itself is never touched.
+                  </span>
+                </span>
+              </label>
             )}
 
             {preview && (
