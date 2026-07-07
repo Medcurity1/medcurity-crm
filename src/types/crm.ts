@@ -24,7 +24,7 @@ export type OpportunityStage =
   | "qualified"
   | "proposal"
   | "verbal_commit";
-export type ActivityType = "call" | "email" | "meeting" | "note" | "task";
+export type ActivityType = "call" | "email" | "meeting" | "note" | "task" | "webinar" | "conference";
 export type CustomFieldType = "text" | "textarea" | "number" | "currency" | "date" | "checkbox" | "select" | "multi_select" | "url" | "email" | "phone";
 export type LeadStatus = "new" | "contacted" | "qualified" | "unqualified" | "converted";
 export type LeadSource = "website" | "referral" | "cold_call" | "trade_show" | "partner" | "social_media" | "email_campaign" | "webinar" | "podcast" | "conference" | "sql" | "mql" | "other";

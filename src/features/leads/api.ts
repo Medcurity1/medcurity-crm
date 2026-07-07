@@ -319,6 +319,26 @@ export function useBulkArchiveFromList() {
   });
 }
 
+/** Dry-run preview counts for "Bulk promote from file": how many matched
+ * leads will actually become contacts vs. be skipped (already contacts /
+ * already converted-or-archived). The promotion itself reuses
+ * useBulkPromoteImports. Callers chunk the id list. */
+export interface PromotePreview {
+  matched: number;
+  promotable: number;
+  already_done: number;
+  already_contact: number;
+}
+export function useCountPromotable() {
+  return useMutation({
+    mutationFn: async (ids: string[]): Promise<PromotePreview> => {
+      const { data, error } = await supabase.rpc("count_promotable_leads", { p_ids: ids });
+      if (error) throw error;
+      return data as PromotePreview;
+    },
+  });
+}
+
 interface ConvertLeadInput {
   leadId: string;
   /**

@@ -24,6 +24,8 @@ import {
   Calendar,
   StickyNote,
   CheckSquare,
+  MonitorPlay,
+  Presentation,
 } from "lucide-react";
 import { useRecentRecords, type RecentRecord } from "@/hooks/useRecentRecords";
 import { TeamActivityFeed } from "./TeamActivityFeed";
@@ -202,6 +204,8 @@ const RECENT_ACTIVITY_ICONS: Record<ActivityType, typeof Phone> = {
   meeting: Calendar,
   note: StickyNote,
   task: CheckSquare,
+  webinar: MonitorPlay,
+  conference: Presentation,
 };
 
 const RECENT_ACTIVITY_TINTS: Record<ActivityType, string> = {
@@ -210,6 +214,8 @@ const RECENT_ACTIVITY_TINTS: Record<ActivityType, string> = {
   meeting: "bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-300",
   note: "bg-gray-100 text-gray-600 dark:bg-gray-900/40 dark:text-gray-300",
   task: "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-300",
+  webinar: "bg-sky-100 text-sky-600 dark:bg-sky-900/40 dark:text-sky-300",
+  conference: "bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-300",
 };
 
 function RecentActivitySection() {

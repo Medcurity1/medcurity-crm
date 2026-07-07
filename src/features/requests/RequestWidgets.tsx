@@ -57,7 +57,7 @@ export function NexusRequestWidgets() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold">Your requests</h2>
+      <h2 className="text-lg font-semibold">Requests</h2>
       <div className="grid gap-4 md:grid-cols-2">
         {types.map((t) => (
           <TypeBox key={t} type={t} />

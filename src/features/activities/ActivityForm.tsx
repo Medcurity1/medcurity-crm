@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
-import { Phone, Mail, Calendar, CheckSquare } from "lucide-react";
+import { Phone, Mail, Calendar, CheckSquare, MonitorPlay, Presentation } from "lucide-react";
 import { activityFormSchema, type ActivityFormValues } from "./schema";
 import { useCreateActivity, useUpdateActivity } from "./api";
 import { RecurrencePicker } from "./RecurrencePicker";
@@ -59,6 +59,8 @@ const activityTypes: { value: ActivityType; label: string; icon: typeof Phone }[
   { value: "call", label: "Call", icon: Phone },
   { value: "email", label: "Email", icon: Mail },
   { value: "meeting", label: "Meeting", icon: Calendar },
+  { value: "webinar", label: "Webinar", icon: MonitorPlay },
+  { value: "conference", label: "Conference", icon: Presentation },
   { value: "task", label: "Task", icon: CheckSquare },
 ];
 

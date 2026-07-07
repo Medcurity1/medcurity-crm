@@ -7,6 +7,7 @@ import { UserPlus, Plus, Search, X, ListChecks, Save, UserCheck, Upload, Ban, Al
 import { useQuery } from "@tanstack/react-query";
 import { useLeads, useArchiveLead, useBulkUpdateOwner, useBulkDeleteLeads, useBulkPromoteImports, useMarkImportAvoid } from "./api";
 import { BulkArchiveFromFile } from "./BulkArchiveFromFile";
+import { BulkPromoteFromFile } from "./BulkPromoteFromFile";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -158,6 +159,7 @@ function ImportsList() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const [bulkArchiveOpen, setBulkArchiveOpen] = useState(false);
+  const [bulkPromoteOpen, setBulkPromoteOpen] = useState(false);
   const [search, setSearch] = useDebouncedUrlState("q", "");
   const [statusFilter, setStatusFilter] = useUrlArrayState("status");
   const [sourceFilter, setSourceFilter] = useUrlArrayState("source");
@@ -430,6 +432,12 @@ function ImportsList() {
               Import a list
             </Button>
             {isAdmin && (
+              <Button variant="outline" onClick={() => setBulkPromoteOpen(true)}>
+                <UserCheck className="h-4 w-4 mr-2" />
+                Bulk promote from file
+              </Button>
+            )}
+            {isAdmin && (
               <Button variant="outline" onClick={() => setBulkArchiveOpen(true)}>
                 <Archive className="h-4 w-4 mr-2" />
                 Bulk archive from file
@@ -445,6 +453,9 @@ function ImportsList() {
 
       {isAdmin && (
         <BulkArchiveFromFile open={bulkArchiveOpen} onOpenChange={setBulkArchiveOpen} />
+      )}
+      {isAdmin && (
+        <BulkPromoteFromFile open={bulkPromoteOpen} onOpenChange={setBulkPromoteOpen} />
       )}
 
       <div className="grid grid-cols-3 gap-3 mb-4">

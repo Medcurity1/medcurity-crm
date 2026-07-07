@@ -10,6 +10,8 @@ import {
   Users as UsersIcon,
   StickyNote,
   CheckSquare,
+  MonitorPlay,
+  Presentation,
   Plus,
 } from "lucide-react";
 import {
@@ -100,6 +102,8 @@ const ACTIVITY_ICONS: Record<ActivityType, typeof Phone> = {
   meeting: UsersIcon,
   note: StickyNote,
   task: CheckSquare,
+  webinar: MonitorPlay,
+  conference: Presentation,
 };
 
 function getRecordLink(
@@ -350,6 +354,8 @@ export function ActivityCalendar() {
                       <SelectItem value="call">Calls</SelectItem>
                       <SelectItem value="email">Emails</SelectItem>
                       <SelectItem value="meeting">Meetings</SelectItem>
+                      <SelectItem value="webinar">Webinars</SelectItem>
+                      <SelectItem value="conference">Conferences</SelectItem>
                       <SelectItem value="note">Notes</SelectItem>
                       <SelectItem value="task">Tasks</SelectItem>
                     </SelectContent>

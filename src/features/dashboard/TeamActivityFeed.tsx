@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Phone, Mail, Calendar, StickyNote, CheckSquare, Users } from "lucide-react";
+import { Phone, Mail, Calendar, StickyNote, CheckSquare, MonitorPlay, Presentation, Users } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -29,6 +29,10 @@ function activityIcon(type: ActivityType) {
       return Mail;
     case "meeting":
       return Calendar;
+    case "webinar":
+      return MonitorPlay;
+    case "conference":
+      return Presentation;
     case "note":
       return StickyNote;
     case "task":
@@ -46,6 +50,10 @@ function actionVerb(type: ActivityType): string {
       return "sent an email";
     case "meeting":
       return "logged a meeting";
+    case "webinar":
+      return "attended a webinar";
+    case "conference":
+      return "attended a conference";
     case "note":
       return "added a note";
     case "task":

@@ -9,6 +9,8 @@ import {
   Calendar,
   StickyNote,
   CheckSquare,
+  MonitorPlay,
+  Presentation,
   CheckCircle2,
   Clock,
   Reply,
@@ -98,6 +100,8 @@ export function ActivityDetail() {
     activity.activity_type === "call" ? Phone :
     activity.activity_type === "email" ? Mail :
     activity.activity_type === "meeting" ? Calendar :
+    activity.activity_type === "webinar" ? MonitorPlay :
+    activity.activity_type === "conference" ? Presentation :
     activity.activity_type === "note" ? StickyNote :
     CheckSquare;
 

@@ -1,6 +1,6 @@
 // Requests builder panel (jordan-v4-spec §4 step 7, §8): pick which
-// request category the widget shows — Collateral only, CRM only, or all
-// pending requests the widget owner has submitted.
+// request form the widget shows — one form, or all the forms you're routed
+// to review. "All" is the reviewer's full inbox.
 
 import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
@@ -10,14 +10,15 @@ export function normalizeRequestsConfig(raw: unknown): RequestsWidgetConfig {
   const cfg = (raw ?? {}) as Partial<RequestsWidgetConfig>;
   return {
     category:
-      cfg.category === "collateral" || cfg.category === "crm"
+      cfg.category === "collateral" || cfg.category === "product" || cfg.category === "crm"
         ? cfg.category
         : "all",
   };
 }
 
 const OPTIONS: { value: RequestsWidgetCategory; label: string; hint: string }[] = [
-  { value: "all", label: "All Requests", hint: "Collateral, CRM, and product requests" },
+  { value: "all", label: "All my forms", hint: "Every request form you're routed to review" },
+  { value: "product", label: "Product", hint: "Product requests only" },
   { value: "collateral", label: "Collateral", hint: "Collateral requests only" },
   { value: "crm", label: "CRM", hint: "CRM change requests only" },
 ];
@@ -68,7 +69,8 @@ export function RequestsPanel({
         })}
       </div>
       <p className="text-xs text-muted-foreground">
-        Shows pending requests submitted by the page owner.
+        Shows pending requests routed to you, with approve/deny. If you don't
+        review any forms, it shows the requests you've submitted.
       </p>
     </div>
   );
