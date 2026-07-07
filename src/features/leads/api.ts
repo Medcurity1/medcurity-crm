@@ -302,12 +302,14 @@ export function useBulkArchiveFromList() {
       emails: string[];
       reason: string;
       dryRun: boolean;
+      includeConverted?: boolean;
     }): Promise<BulkArchiveResult> => {
       const { data, error } = await supabase.rpc("bulk_archive_leads_by_list", {
         p_ids: v.ids,
         p_emails: v.emails,
         p_reason: v.reason,
         p_dry_run: v.dryRun,
+        p_include_converted: v.includeConverted ?? false,
       });
       if (error) throw error;
       return data as BulkArchiveResult;
