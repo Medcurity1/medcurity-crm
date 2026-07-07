@@ -174,6 +174,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
           partner_account: account.partner_account ?? "",
           partner_prospect: account.partner_prospect ?? false,
           partnership_status: account.partnership_status ?? "",
+          partner_type: account.partner_type ?? "",
           relationship_notes: account.relationship_notes ?? "",
           lead_source: account.lead_source ?? "",
           lead_source_detail: account.lead_source_detail ?? "",
@@ -230,6 +231,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
           partner_account: "",
           partner_prospect: false,
           partnership_status: "",
+          partner_type: "",
           relationship_notes: "",
           lead_source: "",
           lead_source_detail: "",
@@ -347,6 +349,16 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
       return;
     }
 
+    // Rachel's rule: a record marked as a partner must say WHAT KIND of
+    // partner it is (keeps partner data consistent for reporting/filtering).
+    // Conditional, not in required_field_config — only applies to partners.
+    if ((values.account_type ?? "").startsWith("Partner") && !values.partner_type) {
+      toast.error(
+        "Partner Type is required for partner accounts — pick one in the Partner Information section."
+      );
+      return;
+    }
+
     const payload: Record<string, unknown> = {
       name: values.name,
       lifecycle_status: values.lifecycle_status,
@@ -391,6 +403,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
       partner_account: emptyToNull(values.partner_account),
       partner_prospect: values.partner_prospect ?? false,
       partnership_status: emptyToNull(values.partnership_status),
+      partner_type: emptyToNull(values.partner_type),
       relationship_notes: emptyToNull(values.relationship_notes),
       lead_source: emptyToNull(values.lead_source),
       lead_source_detail: emptyToNull(values.lead_source_detail),
@@ -981,6 +994,17 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                     onChange={(v) => setValue("partnership_status", v ?? "")}
                     allowClear
                     placeholder="Select status…"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="partner_type">Partner Type</Label>
+                  <PicklistSelect
+                    id="partner_type"
+                    fieldKey="accounts.partner_type"
+                    value={watch("partner_type") ?? ""}
+                    onChange={(v) => setValue("partner_type", v ?? "")}
+                    allowClear
+                    placeholder="Select type…"
                   />
                 </div>
               </div>

@@ -241,6 +241,8 @@ export interface Account {
   referring_partner: string | null;
   partner_prospect: boolean;
   partnership_status: string | null;
+  /** Kind of partner (picklist accounts.partner_type): Referral Partner, Alliance Partner, … */
+  partner_type: string | null;
   relationship_notes: string | null;
   // Custom
   custom_fields: Record<string, unknown>;

@@ -592,6 +592,7 @@ export function AccountDetail() {
           "priority_account",
           // Picklist — edited via the main Edit form, not inline.
           "partnership_status",
+          "partner_type",
         ]}
         inlineEditTypes={{
           fte_count: "number",

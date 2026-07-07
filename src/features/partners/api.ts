@@ -10,6 +10,9 @@ interface PartnerFilters {
   // "top_level"= umbrella AND not a member of anyone else
   // "all"      = default (any partner-flagged account)
   partnerRole?: "umbrella" | "member" | "top_level" | "all";
+  /** Filter by partner_type picklist values. The special value "__none__"
+   *  matches partners with NO type set (Rachel's cleanup view). */
+  partnerType?: string[];
   page?: number;
   pageSize?: number;
   sortColumn?: string | null;
@@ -62,6 +65,19 @@ export function usePartners(filters?: PartnerFilters) {
         } else {
           query = query.eq("status", filters.status);
         }
+      }
+      if (filters?.partnerType && filters.partnerType.length > 0) {
+        // "__none__" = partners with no type yet (the cleanup bucket). It can
+        // be combined with real values, so build an OR of is-null + in-list.
+        const wantNone = filters.partnerType.includes("__none__");
+        const values = filters.partnerType.filter((v) => v !== "__none__");
+        const parts: string[] = [];
+        if (wantNone) parts.push("partner_type.is.null");
+        if (values.length > 0) {
+          // Quote each value — picklist labels can contain spaces/commas.
+          parts.push(`partner_type.in.(${values.map((v) => `"${v.replace(/"/g, "")}"`).join(",")})`);
+        }
+        if (parts.length > 0) query = query.or(parts.join(","));
       }
 
       const { data, error, count } = await query.abortSignal(
