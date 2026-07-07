@@ -6,7 +6,8 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { Users, Plus, Search, UploadCloud } from "lucide-react";
 import { useContacts, useArchiveContact, useBulkUpdateOwner, useBulkDeleteContacts } from "./api";
 import { toast } from "sonner";
-import { useUsers } from "@/features/accounts/api";
+import { useUsers, useStatesInUse } from "@/features/accounts/api";
+import { stateLabel } from "@/lib/us-states";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { QueryError } from "@/components/QueryError";
@@ -55,6 +56,7 @@ const CONTACTS_COLUMNS: ColumnDescriptor[] = [
   { key: "title", label: "Title", sortKey: "title" },
   { key: "email", label: "Email", sortKey: "email" },
   { key: "phone", label: "Phone" },
+  { key: "state", label: "State", sortKey: "mailing_state" },
   { key: "notes", label: "Notes" },
   { key: "tags", label: "Tags" },
   { key: "primary", label: "Primary" },
@@ -69,6 +71,7 @@ export function ContactsList() {
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
   const [statusFilter, setStatusFilter] = useUrlState("status", "active");
   const [tagFilter, setTagFilter] = useUrlArrayState("tags");
+  const [stateFilter, setStateFilter] = useUrlArrayState("state");
   const [page, setPage] = useUrlNumberState("page", 0);
   const [pageSize, setPageSize] = useUrlNumberState("size", 25);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -98,6 +101,7 @@ export function ContactsList() {
         ? "all"
         : "active",
     tagIds: tagFilter.length > 0 ? tagFilter : undefined,
+    mailingState: stateFilter.length > 0 ? stateFilter : undefined,
     page,
     pageSize,
     sortColumn: sort.column,
@@ -106,6 +110,11 @@ export function ContactsList() {
     sortDirection: sort.column ? sort.direction : undefined,
   });
   const { data: users } = useUsers();
+  const { data: statesInUse } = useStatesInUse("contacts");
+  const stateOptions = (statesInUse ?? []).map((s) => ({
+    value: s.state,
+    label: `${stateLabel(s.state)} · ${s.n}`,
+  }));
   const { data: allTags } = useTags();
   const applyTagMut = useApplyTag();
   const archiveMutation = useArchiveContact();
@@ -212,7 +221,8 @@ export function ContactsList() {
     ownerFilter.length > 0 ||
     verifiedFilter !== "all" ||
     statusFilter !== "active" ||
-    tagFilter.length > 0;
+    tagFilter.length > 0 ||
+    stateFilter.length > 0;
 
   const cellRenderers: Record<string, (c: Contact) => ReactNode> = {
     select: (c) => (
@@ -259,6 +269,11 @@ export function ContactsList() {
     ),
     phone: (c) => (
       <span className="text-muted-foreground">{c.phone ? formatPhone(c.phone) : "—"}</span>
+    ),
+    state: (c) => (
+      <span className="text-muted-foreground">
+        {c.mailing_state ? stateLabel(c.mailing_state) : "—"}
+      </span>
     ),
     notes: (c) => (
       <span
@@ -378,6 +393,17 @@ export function ContactsList() {
           placeholder="All Tags"
           triggerClassName="w-36"
           options={(allTags ?? []).map((t) => ({ value: t.id, label: t.name }))}
+        />
+
+        <MultiSelect
+          value={stateFilter}
+          onChange={(v) => {
+            setStateFilter(v);
+            setPage(0);
+          }}
+          placeholder="All States"
+          triggerClassName="w-40"
+          options={stateOptions}
         />
 
         <SavedViews entity="contacts" />

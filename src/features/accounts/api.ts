@@ -14,6 +14,8 @@ interface AccountFilters {
   ownerId?: string | "mine" | string[];
   /** Single industry (legacy) or array of industries (multi-select). */
   industryCategory?: string | string[];
+  /** Filter to accounts whose billing_state is one of these values. */
+  billingState?: string[];
   /** Filter to only verified or only unverified accounts. */
   verified?: "true" | "false";
   page?: number;
@@ -137,6 +139,9 @@ export function useAccounts(filters?: AccountFilters) {
           query = query.eq("industry_category", filters.industryCategory);
         }
       }
+      if (filters?.billingState && filters.billingState.length > 0) {
+        query = query.in("billing_state", filters.billingState);
+      }
       if (filters?.verified === "true") {
         query = query.eq("verified", true);
       } else if (filters?.verified === "false") {
@@ -146,6 +151,27 @@ export function useAccounts(filters?: AccountFilters) {
       const { data, error, count } = await query;
       if (error) throw error;
       return { data: data as Account[], count: count ?? 0 };
+    },
+  });
+}
+
+/**
+ * Distinct billing/mailing states present in the data, with counts — powers
+ * the "State" filter dropdown on the Accounts and Contacts lists. Derived
+ * from real values (not a fixed 50-state list) so the dropdown matches the
+ * migrated data exactly and only offers states that actually have records.
+ */
+export function useStatesInUse(entity: "accounts" | "contacts") {
+  return useQuery({
+    queryKey: ["states_in_use", entity],
+    // States change rarely; keep them cached across list interactions.
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("list_states_in_use", {
+        p_entity: entity,
+      });
+      if (error) throw error;
+      return (data ?? []) as { state: string; n: number }[];
     },
   });
 }
