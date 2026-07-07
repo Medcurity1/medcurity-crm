@@ -52,6 +52,12 @@ jobs:
           MOD=$(( ${#PAYLOAD} % 4 )); [ $MOD -ne 0 ] && PAYLOAD="${PAYLOAD}$(printf '=%.0s' $(seq 1 $((4-MOD))))"
           ROLE="$(printf '%s' "$PAYLOAD" | tr '_-' '/+' | base64 -d 2>/dev/null | grep -oE '"role":"[a-z_]+"' | head -1)"
           echo "stored key role claim: ${ROLE:-<undecodable>}  (key length: ${#KEY})"
+          # DIAGNOSTIC: is this key still accepted by the platform? Hit read-only
+          # PostgREST (same JWT validation the edge gateway uses). Non-401 = the
+          # key is valid → the gateway will accept it once jwt-verify is back on.
+          BASE="${URL%/functions/v1/*}"
+          VCODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$BASE/rest/v1/" -H "apikey: ${KEY}" -H "Authorization: Bearer ${KEY}")"
+          echo "platform key-validity check (PostgREST /rest/v1/): HTTP ${VCODE}  (200=valid, 401=rejected/rotated)"
           # -f makes curl exit non-zero on HTTP >=400 so the Action fails loudly.
           curl -fsS --max-time 240 \
             -X POST \
