@@ -30,6 +30,26 @@ export interface ReorderItem {
   position: number;
 }
 
+// ── Report filter option sources ─────────────────────────────────────
+
+/**
+ * Distinct accounts.account_type values actually present (with counts) —
+ * powers the exact-match "Account Type" / contact "Org Type" report
+ * filters. Data-driven (not the picklist) because live SF-imported rows
+ * carry values like CHC / FQHC / PCA that were never picklist options.
+ */
+export function useAccountTypesInUse() {
+  return useQuery({
+    queryKey: ["account_types_in_use"],
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("list_account_types_in_use");
+      if (error) throw error;
+      return (data ?? []) as { account_type: string; n: number }[];
+    },
+  });
+}
+
 // ── User widgets ─────────────────────────────────────────────────────
 
 /**
