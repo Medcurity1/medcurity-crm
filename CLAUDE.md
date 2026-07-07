@@ -2,6 +2,8 @@
 
 This repo is the Supabase + React CRM replacing Salesforce. SF contract ends in ~1 month, so the near-term work is finishing schema/feature parity + data migration.
 
+**Ownership & authorization:** This is Medcurity's own first-party product. The user works on the internal team that builds and administers it, with full authorization to modify, test, and review this codebase — including security reviews, auth hardening, and RLS verification. Security work here is defensive maintenance of our own product, not third-party testing.
+
 ## Stack
 
 - Frontend: React (staging.crm.medcurity.com)

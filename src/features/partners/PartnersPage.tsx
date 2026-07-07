@@ -10,6 +10,8 @@ import { SortableHeader, type SortState } from "@/components/SortableHeader";
 import { MultiSelect } from "@/components/MultiSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { usePicklistOptionsFor } from "@/features/picklists/api";
 import {
   Select,
   SelectContent,
@@ -33,14 +35,20 @@ export function PartnersPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [typeFilter, setTypeFilter] = useState<string[]>([]);
   const [roleFilter, setRoleFilter] = useState<"all" | "umbrella" | "member" | "top_level">("all");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
   const [sort, setSort] = useState<SortState>({ column: "name", direction: "asc" });
 
+  // Partner Type filter options come from the admin-managed picklist, plus a
+  // "No type set" bucket so the untyped partners are findable for cleanup.
+  const { options: typeOptions } = usePicklistOptionsFor("accounts.partner_type");
+
   const { data: result, isLoading, isError, refetch, isFetching } = usePartners({
     search: search || undefined,
     status: statusFilter.length ? statusFilter : undefined,
+    partnerType: typeFilter.length ? typeFilter : undefined,
     partnerRole: roleFilter,
     page,
     pageSize,
@@ -95,6 +103,19 @@ export function PartnersPage() {
             { value: "churned", label: "Churned" },
           ]}
         />
+        <MultiSelect
+          value={typeFilter}
+          onChange={(v) => {
+            setTypeFilter(v);
+            setPage(0);
+          }}
+          placeholder="All Types"
+          triggerClassName="w-40"
+          options={[
+            ...typeOptions.map((o) => ({ value: o.value, label: o.label })),
+            { value: "__none__", label: "No type set" },
+          ]}
+        />
         {/* Role filter — single-select; the buckets are mutually exclusive */}
         <Select
           value={roleFilter}
@@ -136,7 +157,7 @@ export function PartnersPage() {
           icon={Handshake}
           title="No partners found"
           description={
-            search || statusFilter.length > 0 || roleFilter !== "all"
+            search || statusFilter.length > 0 || typeFilter.length > 0 || roleFilter !== "all"
               ? "Try adjusting your search or filter"
               : "No partner accounts exist yet"
           }
@@ -148,6 +169,7 @@ export function PartnersPage() {
               <TableHeader>
                 <TableRow>
                   <SortableHeader column="name" sort={sort} onSort={handleSort}>Name</SortableHeader>
+                  <SortableHeader column="partner_type" sort={sort} onSort={handleSort}>Type</SortableHeader>
                   <TableHead className="text-right w-24">Members</TableHead>
                   <SortableHeader column="status" sort={sort} onSort={handleSort}>Status</SortableHeader>
                   <SortableHeader column="lead_source" sort={sort} onSort={handleSort}>Lead Source</SortableHeader>
@@ -171,6 +193,13 @@ export function PartnersPage() {
                       >
                         {account.name}
                       </Link>
+                    </TableCell>
+                    <TableCell>
+                      {account.partner_type ? (
+                        <Badge variant="secondary">{account.partner_type}</Badge>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">No type</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       {account.member_count > 0 ? (

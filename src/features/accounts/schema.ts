@@ -81,6 +81,7 @@ export const accountSchema = z.object({
   partner_account: z.string().optional().or(z.literal("")),
   partner_prospect: z.boolean().optional(),
   partnership_status: z.string().optional().nullable().or(z.literal("")),
+  partner_type: z.string().optional().nullable().or(z.literal("")),
   relationship_notes: z.string().optional().or(z.literal("")),
   lead_source: z.string().optional().or(z.literal("")),
   lead_source_detail: z.string().optional().or(z.literal("")),

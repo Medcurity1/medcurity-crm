@@ -55,7 +55,10 @@ export interface ReportFilterDef {
   label: string;
   kind: ReportFilterKind;
   /** For kind "multi": where the option list comes from. */
-  optionsSource?: "owners" | "tags";
+  optionsSource?: "owners" | "tags" | "picklist";
+  /** For optionsSource "picklist": which admin-managed picklist to read
+   *  (stays in sync when admins add/rename values — no code change). */
+  picklistFieldKey?: string;
   staticOptions?: { value: string; label: string }[];
 }
 
@@ -149,6 +152,7 @@ export const REPORT_FILTERS: Record<NexusReportEntity, ReportFilterDef[]> = {
     { field: "customer_status", label: "Customer Status", kind: "multi", staticOptions: CUSTOMER_STATUS_OPTIONS },
     { field: "industry", label: "Industry", kind: "multi", staticOptions: INDUSTRY_OPTIONS },
     { field: "account_type", label: "Account Type contains", kind: "text" },
+    { field: "partner_type", label: "Partner Type", kind: "multi", optionsSource: "picklist", picklistFieldKey: "accounts.partner_type" },
     { field: "state", label: "State (billing)", kind: "text" },
     { field: "created", label: "Created", kind: "days" },
   ],
@@ -425,6 +429,7 @@ function filterColumn(entity: NexusReportEntity, field: string): string | null {
       customer_status: "customer_status",
       industry: "industry_category",
       account_type: "account_type",
+      partner_type: "partner_type",
       state: "billing_state",
       created: "created_at",
     },

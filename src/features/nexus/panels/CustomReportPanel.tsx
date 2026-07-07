@@ -7,6 +7,7 @@ import { ArrowDown, ArrowUp, Plus, X } from "lucide-react";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useUsers } from "@/features/accounts/api";
 import { useTags } from "@/features/tags/api";
+import { usePicklistOptions } from "@/features/picklists/api";
 import { MultiSelect } from "@/components/MultiSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,6 +67,7 @@ export function CustomReportPanel({
   const config = normalizeReportConfig(rawConfig);
   const { data: users } = useUsers();
   const { data: tags } = useTags();
+  const { data: picklists } = usePicklistOptions();
 
   const filterDefs = REPORT_FILTERS[config.entity];
   const columnDefs = REPORT_COLUMNS[config.entity];
@@ -126,6 +128,13 @@ export function CustomReportPanel({
     }
     if (def.optionsSource === "tags") {
       return (tags ?? []).map((t) => ({ value: t.id, label: t.name }));
+    }
+    if (def.optionsSource === "picklist" && def.picklistFieldKey) {
+      // Admin-managed picklist (e.g. accounts.partner_type) — stays in sync
+      // when admins add/rename values, unlike a hardcoded staticOptions list.
+      return (picklists?.get(def.picklistFieldKey) ?? [])
+        .filter((o) => o.is_active)
+        .map((o) => ({ value: o.value, label: o.label }));
     }
     return def.staticOptions ?? [];
   }
