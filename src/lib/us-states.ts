@@ -57,3 +57,17 @@ export const US_STATES: Array<{ code: string; name: string }> = [
   { code: "WI", name: "Wisconsin" },
   { code: "WY", name: "Wyoming" },
 ];
+
+const STATE_NAME_BY_CODE = new Map(
+  US_STATES.map((s) => [s.code.toUpperCase(), s.name]),
+);
+
+/**
+ * Friendly label for a stored state value. A 2-letter code becomes
+ * "Nebraska (NE)"; anything else (a full name already, or non-standard
+ * migrated data) is returned unchanged so the filter never hides a value.
+ */
+export function stateLabel(raw: string): string {
+  const name = STATE_NAME_BY_CODE.get(raw.trim().toUpperCase());
+  return name ? `${name} (${raw.trim().toUpperCase()})` : raw;
+}

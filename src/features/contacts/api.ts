@@ -12,6 +12,8 @@ interface ContactFilters {
   archived?: "active" | "archived" | "all";
   /** Filter to contacts carrying ANY of these tag ids (custom lists). */
   tagIds?: string[];
+  /** Filter to contacts whose mailing_state is one of these values. */
+  mailingState?: string[];
   page?: number;
   pageSize?: number;
   sortColumn?: string | null;
@@ -123,6 +125,10 @@ export function useContacts(filters?: ContactFilters) {
       }
       if (filters?.verified === "true") query = query.eq("verified", true);
       else if (filters?.verified === "false") query = query.eq("verified", false);
+
+      if (filters?.mailingState && filters.mailingState.length > 0) {
+        query = query.in("mailing_state", filters.mailingState);
+      }
 
       const { data, error, count } = await query;
       if (error) throw error;

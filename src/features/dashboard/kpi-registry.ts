@@ -105,6 +105,14 @@ function getMonthStart(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 }
 
+// Monday-start week. getDay() is 0=Sun..6=Sat; (day + 6) % 7 = days since the
+// most recent Monday (Mon→0, Sun→6). Returns local midnight so the deep-link
+// date string and the effective_at bound land on the same day.
+function getWeekStartMonday(date: Date): Date {
+  const offset = (date.getDay() + 6) % 7;
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() - offset);
+}
+
 // Local-timezone YYYY-MM-DD. Used for KPI deep-link URLs so the
 // list-page filter ("Closed on/after …") matches the user's local
 // month/quarter boundary instead of UTC's. Naive `.toISOString()`
@@ -211,28 +219,32 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     },
   },
   {
-    // Summer: a running count of calls she's logged this month.
-    id: "calls_this_month",
-    label: "Calls This Month",
+    // Summer: a running count of calls she's logged this week (Monday-start).
+    id: "calls_this_week",
+    label: "Calls This Week",
     category: "sales",
     icon: Phone,
     format: "number",
     link: () => {
-      const s = getMonthStart(new Date());
-      const end = new Date(s.getFullYear(), s.getMonth() + 1, 0); // last day of month
+      const s = getWeekStartMonday(new Date());
+      const end = new Date(s.getFullYear(), s.getMonth(), s.getDate() + 6); // Sunday
       return `/activities?type=call&start=${localISODate(s)}&end=${localISODate(end)}`;
     },
     query: async (supabase, userId) => {
-      const monthStart = getMonthStart(new Date());
-      const nextMonth = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
+      const weekStart = getWeekStartMonday(new Date());
+      const nextWeek = new Date(
+        weekStart.getFullYear(),
+        weekStart.getMonth(),
+        weekStart.getDate() + 7,
+      );
       const { count } = await supabase
         .from("activities")
         .select("*", { count: "exact", head: true })
         .eq("owner_user_id", userId)
         .eq("activity_type", "call")
         .is("archived_at", null)
-        .gte("effective_at", monthStart.toISOString())
-        .lt("effective_at", nextMonth.toISOString());
+        .gte("effective_at", weekStart.toISOString())
+        .lt("effective_at", nextWeek.toISOString());
       return count ?? 0;
     },
   },
@@ -602,13 +614,20 @@ export const DEFAULT_KPIS: Record<AppRole, string[]> = {
 
 const KPI_CONFIG_KEY = "crm_kpi_config";
 
+// Renamed KPI ids: keep anyone who pinned the old id from losing their tile.
+// Old localStorage entries are remapped on load (and de-duped).
+const KPI_ID_ALIASES: Record<string, string> = {
+  calls_this_month: "calls_this_week",
+};
+
 export function loadKpiConfig(role: AppRole): string[] {
   try {
     const stored = localStorage.getItem(KPI_CONFIG_KEY);
     if (stored) {
       const parsed = JSON.parse(stored) as string[];
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        const migrated = parsed.map((id) => KPI_ID_ALIASES[id] ?? id);
+        return [...new Set(migrated)];
       }
     }
   } catch {

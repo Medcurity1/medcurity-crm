@@ -4,7 +4,8 @@ import { useUrlState, useUrlNumberState, useUrlArrayState, useUrlSortState } fro
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Building2, Plus, Search } from "lucide-react";
-import { useAccounts, useArchiveAccount, useBulkUpdateOwner, useBulkDeleteAccounts, useUsers } from "./api";
+import { useAccounts, useArchiveAccount, useBulkUpdateOwner, useBulkDeleteAccounts, useUsers, useStatesInUse } from "./api";
+import { stateLabel } from "@/lib/us-states";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
@@ -47,6 +48,7 @@ const ACCOUNTS_COLUMNS: ColumnDescriptor[] = [
   { key: "status", label: "Status", sortKey: "status" },
   { key: "customer_status", label: "Customer Status", sortKey: "customer_status" },
   { key: "owner", label: "Owner" },
+  { key: "state", label: "State", sortKey: "billing_state" },
   { key: "industry", label: "Industry", sortKey: "industry" },
   { key: "contract_end", label: "Contract End", sortKey: "current_contract_end_date" },
   { key: "notes", label: "Notes" },
@@ -72,6 +74,7 @@ export function AccountsList() {
   const [customerStatusFilter, setCustomerStatusFilter] = useUrlArrayState("customer");
   const [ownerFilter, setOwnerFilter] = useUrlArrayState("owner");
   const [industryFilter, setIndustryFilter] = useUrlArrayState("industry");
+  const [stateFilter, setStateFilter] = useUrlArrayState("state");
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
   const [page, setPage] = useUrlNumberState("page", 0);
   const [pageSize, setPageSize] = useUrlNumberState("size", 25);
@@ -91,6 +94,7 @@ export function AccountsList() {
     customerStatus: customerStatusFilter.length > 0 ? customerStatusFilter : undefined,
     ownerId: ownerFilter.length > 0 ? ownerFilter : undefined,
     industryCategory: industryFilter.length > 0 ? industryFilter : undefined,
+    billingState: stateFilter.length > 0 ? stateFilter : undefined,
     verified:
       verifiedFilter === "verified"
         ? "true"
@@ -105,6 +109,11 @@ export function AccountsList() {
     sortDirection: sort.column ? sort.direction : undefined,
   });
   const { data: users } = useUsers();
+  const { data: statesInUse } = useStatesInUse("accounts");
+  const stateOptions = (statesInUse ?? []).map((s) => ({
+    value: s.state,
+    label: `${stateLabel(s.state)} · ${s.n}`,
+  }));
   const archiveMutation = useArchiveAccount();
   const bulkOwnerMutation = useBulkUpdateOwner();
   const bulkDeleteMutation = useBulkDeleteAccounts();
@@ -125,6 +134,10 @@ export function AccountsList() {
   };
   const handleIndustryChange = (value: string[]) => {
     setIndustryFilter(value);
+    setPage(0);
+  };
+  const handleStateChange = (value: string[]) => {
+    setStateFilter(value);
     setPage(0);
   };
 
@@ -216,6 +229,7 @@ export function AccountsList() {
     customerStatusFilter.length > 0 ||
     ownerFilter.length > 0 ||
     industryFilter.length > 0 ||
+    stateFilter.length > 0 ||
     verifiedFilter !== "all";
 
   const cellRenderers: Record<string, (a: Account) => ReactNode> = {
@@ -247,6 +261,11 @@ export function AccountsList() {
     ),
     owner: (a) => (
       <span className="text-muted-foreground">{a.owner?.full_name ?? "Unassigned"}</span>
+    ),
+    state: (a) => (
+      <span className="text-muted-foreground">
+        {a.billing_state ? stateLabel(a.billing_state) : "—"}
+      </span>
     ),
     industry: (a) => (
       <span className="text-muted-foreground">{a.industry ?? "—"}</span>
@@ -339,6 +358,14 @@ export function AccountsList() {
           placeholder="All Industries"
           triggerClassName="w-44"
           options={INDUSTRY_FILTER_OPTIONS}
+        />
+
+        <MultiSelect
+          value={stateFilter}
+          onChange={handleStateChange}
+          placeholder="All States"
+          triggerClassName="w-40"
+          options={stateOptions}
         />
 
         <Select
