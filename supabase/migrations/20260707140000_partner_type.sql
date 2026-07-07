@@ -13,10 +13,11 @@
 --     (conditional on account_type = 'Partner'), NOT as a DB constraint —
 --     678 existing partners have no type yet and must stay editable/
 --     importable; the form rule cleans them up gradually as they're touched.
---   - The 36 former 'Partner - Alliance' accounts (PointClickCare, Netsmart,
---     MatrixCare … — EHR/software vendors; 20260630000003 folded them into
---     plain 'Partner') are recovered from the audit trail and backfilled as
---     'Technology' — the closest of Rachel's types. Easy to reassign later.
+--   - NO auto-backfill. An earlier revision pre-tagged the 36 former
+--     'Partner - Alliance' accounts as 'Technology' (recovered from
+--     audit_logs), but Rachel confirmed (via Nathan, 2026-07-07) those 36
+--     aren't all the same type — every partner starts untyped and gets
+--     typed by a human. (20260707150000 clears the staging backfill.)
 --   - v_partner_accounts is recreated so the new column (and any accounts
 --     columns added since its last CREATE, e.g. customer_status) flow
 --     through `a.*` to the /partners page. v_marketing_suppression depends
@@ -42,24 +43,7 @@ on conflict (field_key, value)
                 sort_order = excluded.sort_order,
                 is_active = true;
 
--- 3. Recover the former 'Partner - Alliance' accounts from the audit trail.
---    trg_accounts_audit wrote old_data/new_data JSONB for every row the
---    20260630000003 bulk UPDATE touched. Checking new_data too catches any
---    account whose type was SET to alliance and never changed afterward.
-update public.accounts a
-   set partner_type = 'Technology'
- where a.partner_type is null
-   and a.archived_at is null
-   and exists (
-     select 1
-       from public.audit_logs al
-      where al.table_name = 'accounts'
-        and al.record_id  = a.id
-        and ( al.old_data->>'account_type' = 'Partner - Alliance'
-           or al.new_data->>'account_type' = 'Partner - Alliance' )
-   );
-
--- 4. Surface Partner Type on the account Detail page, in the existing
+-- 3. Surface Partner Type on the account Detail page, in the existing
 --    "Partner Information" section (same idempotent pattern as
 --    20260613000002; sort 55 lands it next to Partnership Status).
 do $$
@@ -83,7 +67,7 @@ begin
   end if;
 end $$;
 
--- 5. Recreate the partner view so a.* picks up partner_type (and other
+-- 4. Recreate the partner view so a.* picks up partner_type (and other
 --    accounts columns added since 20260624000009). CREATE OR REPLACE can't
 --    reorder view columns, so drop + recreate; v_marketing_suppression
 --    depends on this view and is dropped/recreated verbatim below.
@@ -126,7 +110,7 @@ comment on view public.v_partner_accounts is
 
 grant select on public.v_partner_accounts to authenticated;
 
--- 6. v_marketing_suppression — verbatim from 20260624000008 (no logic change;
+-- 5. v_marketing_suppression — verbatim from 20260624000008 (no logic change;
 --    recreated only because it depends on v_partner_accounts).
 create view public.v_marketing_suppression
 with (security_invoker = on) as
