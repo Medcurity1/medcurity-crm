@@ -25,6 +25,11 @@ concurrency:
   group: sync-emails
   cancel-in-progress: false
 
+# Lets the failure-alert steps open/close a GitHub issue with the built-in token.
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -56,3 +61,27 @@ jobs:
             "${URL}"
           echo
           echo "Sync triggered successfully."
+
+      # Self-healing alert: open a GitHub issue the moment the sync cron fails,
+      # and auto-close it once a run succeeds. Uses the built-in token — no new
+      # secrets. Prevents another silent multi-day email-sync outage.
+      - name: Open alert issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing="$(gh issue list --state open --search 'Email sync cron is failing in:title' --json number -q '.[0].number' 2>/dev/null || true)"
+          if [ -z "$existing" ]; then
+            gh issue create \
+              --title "🔴 Email sync cron is failing" \
+              --body "The scheduled email sync failed. Latest run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} — this issue opens automatically on failure and closes automatically once a sync run succeeds." >/dev/null || true
+          fi
+
+      - name: Close alert issue on recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for n in $(gh issue list --state open --search 'Email sync cron is failing in:title' --json number -q '.[].number' 2>/dev/null || true); do
+            gh issue close "$n" --comment "✅ Email sync recovered (run ${{ github.run_id }})." >/dev/null 2>&1 || true
+          done

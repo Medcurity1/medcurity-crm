@@ -4,14 +4,17 @@
 // CRM activity records for messages that match a known contact email address.
 //
 // Deployment:
-//   supabase functions deploy sync-emails --no-verify-jwt
+//   supabase functions deploy sync-emails    (JWT-verify ON — do NOT pass
+//   --no-verify-jwt). The auth gate below trusts the token's verified `role`
+//   claim, which is ONLY safe because the platform gateway verifies the JWT
+//   signature first. Passing --no-verify-jwt would make that trust forgeable.
 //
-// Trigger: call via cron (pg_cron or external scheduler) every 5-15 minutes.
+// Trigger: called by the GitHub Actions cron (.github/workflows/sync-emails.yml)
+// every 10 minutes, plus the app's "Sync now" button.
 //
-// Auth: deployed --no-verify-jwt, so the function gates callers itself.
-// It accepts EITHER the service-role bearer (the pg_cron sweep) OR a valid
-// signed-in CRM user's JWT (the app's "Sync now" button). Anonymous callers
-// are rejected with 401.
+// Auth: the function accepts EITHER a valid service_role token (the cron — by
+// its verified `role` claim, rotation-proof) OR a valid signed-in CRM user's
+// JWT (the "Sync now" button). Anonymous callers are rejected with 401.
 //
 // Required environment variables (set via supabase secrets set):
 //   SUPABASE_URL              - project URL
