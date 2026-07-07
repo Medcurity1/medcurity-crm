@@ -13,13 +13,15 @@
 // on the activity row so the UI can surface it — but we never block the
 // task itself from saving.
 //
-// Auth: deployed --no-verify-jwt, so the function gates callers itself. The
-// only legitimate caller is our own backend (the hourly pg_cron reconcile and
-// server-to-server single-task calls), which send the service-role key as the
-// bearer. Anonymous callers are rejected with 401 — this prevents forcing
-// calendar writes/deletes on staff Outlook calendars.
+// Auth: the only legitimate caller is our own backend (server-to-server
+// single-task calls) sending a service_role token as the bearer. The gate
+// below trusts the token's verified `role` claim, which is safe ONLY because
+// the function is deployed with JWT-verify ON so the platform gateway verifies
+// the signature first. Anonymous callers are rejected with 401 — this prevents
+// forcing calendar writes/deletes on staff Outlook calendars.
 //
-// Deploy: supabase functions deploy outlook-calendar-sync --no-verify-jwt
+// Deploy: supabase functions deploy outlook-calendar-sync   (JWT-verify ON —
+// do NOT pass --no-verify-jwt, or the role-claim trust becomes forgeable.)
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
