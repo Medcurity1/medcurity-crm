@@ -368,10 +368,22 @@ async function timingSafeEqual(a: string, b: string): Promise<boolean> {
  * correct, simplest gate. The service-role key is a server-only secret, so a
  * constant-time equality check is a safe "this is our own backend" gate.
  */
+// Deployed WITH jwt verification ON (gateway verifies the signature), so we
+// trust the token's role claim. Accepting any valid service_role token (by
+// claim) instead of exact-matching one key string avoids the key-rotation
+// mismatch that broke sync 2026-07-05. Only safe while jwt-verify is ON.
 async function isServiceRole(authHeader: string | null): Promise<boolean> {
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   if (!authHeader) return false;
-  return await timingSafeEqual(authHeader, `Bearer ${serviceKey}`);
+  const m = authHeader.match(/^Bearer\s+(.+)$/i);
+  if (!m) return false;
+  try {
+    const payload = JSON.parse(
+      atob(m[1].trim().split(".")[1].replace(/-/g, "+").replace(/_/g, "/")),
+    );
+    return payload?.role === "service_role";
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------

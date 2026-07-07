@@ -57,12 +57,13 @@ jobs:
           set -e
           npx supabase link --project-ref $SUPABASE_PROJECT_REF
           npx supabase functions deploy outlook-oauth --no-verify-jwt
-          # These self-authenticate (isServiceRole/isValidUser gates) so they
-          # MUST deploy --no-verify-jwt — the cron posts a service-role bearer
-          # that the platform JWT-verify gateway otherwise 401s (email sync
-          # outage 2026-07-05 → gate added without the flag). See each fn's header.
-          npx supabase functions deploy sync-emails --no-verify-jwt
-          npx supabase functions deploy outlook-calendar-sync --no-verify-jwt
+          # sync-emails + outlook-calendar-sync gate on the token's VERIFIED
+          # role claim, so they deploy WITH jwt verification ON (default): the
+          # gateway verifies the signature, the function trusts role=service_role.
+          # Do NOT add --no-verify-jwt here — that would let a forged role claim
+          # through. (Exact-key-match here caused the 2026-07-05 email outage.)
+          npx supabase functions deploy sync-emails
+          npx supabase functions deploy outlook-calendar-sync
           npx supabase functions deploy task-reminders
           npx supabase functions deploy task-digest
           npx supabase functions deploy product-request-action

@@ -974,16 +974,32 @@ async function timingSafeEqual(a: string, b: string): Promise<boolean> {
 }
 
 /**
- * Is this the service-role caller? The pg_cron schedule
- * (20260415000006_email_sync_dedup_and_schedule.sql) posts here with
- * `Authorization: Bearer <service_role_key>` and an empty body. The
- * service-role key is a server-only secret, so a constant-time equality
- * check is a safe "this is our own backend" gate.
+ * Is this the service-role caller? The GitHub Actions sync cron posts here
+ * with `Authorization: Bearer <service_role_key>`.
+ *
+ * This function is deployed WITH jwt verification ON (NOT --no-verify-jwt), so
+ * the platform gateway has already cryptographically verified the token's
+ * signature before we run — we can therefore trust its `role` claim. We accept
+ * ANY valid service_role token by that claim rather than exact-string-matching
+ * one specific key. The old exact match broke the moment the project's injected
+ * service_role key differed from the cron's stored key (key rotation / the
+ * dual legacy-vs-new keys Supabase issues) — that mismatch was the 2026-07-05
+ * email-sync outage. SECURITY NOTE: the role-claim shortcut is only safe
+ * BECAUSE the gateway verifies the signature; if this is ever redeployed
+ * --no-verify-jwt, restore real signature verification here.
  */
 async function isServiceRole(authHeader: string | null): Promise<boolean> {
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   if (!authHeader) return false;
-  return await timingSafeEqual(authHeader, `Bearer ${serviceKey}`);
+  const m = authHeader.match(/^Bearer\s+(.+)$/i);
+  if (!m) return false;
+  try {
+    const payload = JSON.parse(
+      atob(m[1].trim().split(".")[1].replace(/-/g, "+").replace(/_/g, "/")),
+    );
+    return payload?.role === "service_role";
+  } catch {
+    return false;
+  }
 }
 
 /**
