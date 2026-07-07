@@ -227,7 +227,9 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       : {
           account_id: preselectedAccountId ?? "",
           primary_contact_id: null,
-          owner_user_id: null,
+          // Default the owner to whoever's creating the opp (Summer's
+          // request, 2026-07-07) — still changeable in the Owner select.
+          owner_user_id: profile?.id ?? null,
           team: "sales",
           kind: "new_business",
           business_type: "",
@@ -268,6 +270,17 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           custom_fields: {},
         },
   });
+
+  // The owner default above reads profile at first render; on a hard page
+  // load the profile can arrive a beat later, leaving owner null. Backfill
+  // it once — but only while the field is still empty, so a deliberate
+  // "Unassigned" pick is never overwritten.
+  useEffect(() => {
+    if (!isEditing && profile?.id && !watch("owner_user_id")) {
+      setValue("owner_user_id", profile.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.id]);
 
   // Warn before losing edits: RHF dirty state, plus (create mode) any
   // staged products — those live outside the form but are just as easy

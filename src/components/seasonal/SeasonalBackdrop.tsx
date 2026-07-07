@@ -22,7 +22,7 @@ import {
  *  Apr        spring sky over meadow, petals all month
  *  May        lush garden green, flowers in the corners
  *  Jun        bold summer sky with sun glow
- *  Jul        dusk sky; Jul 1-10 ambient fireworks; stars after
+ *  Jul        dusk sky; Jul 1-6 ambient fireworks; stars after
  *  Aug        late-summer dusk, fireflies
  *  Sep        burnt golden-hour dusk, sparse leaves
  *  Oct        Halloween twilight, pumpkins + unpredictable bat
@@ -124,7 +124,9 @@ export function getSeasonalScene(now: Date): Scene {
         background: "linear-gradient(180deg, #141d38 0%, #2a3a63 100%)",
         dark: true,
         layers:
-          d <= 10 ? (
+          // Fireworks through July 6 — a short tail past the 4th, not a
+          // week-plus (Nathan, 2026-07-07: 10 days read as stale).
+          d <= 6 ? (
             <>
               <ParticleCanvas kind="stars" count={40} />
               <FireworksCanvas mode="ambient" />

@@ -18,8 +18,10 @@ import {
   Plus,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { toast } from "sonner";
 import type { Activity, ActivityType } from "@/types/crm";
 import { useUsers } from "@/features/accounts/api";
+import { useCompleteActivity, useReopenActivity } from "./api";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { QueryError } from "@/components/QueryError";
@@ -230,6 +232,11 @@ export function ActivitiesListPage() {
   // "1"/"0" in the URL so the toggle survives navigation too.
   const [showCompletedParam, setShowCompletedParam] = useUrlState("completed", "0");
   const showCompletedTasks = showCompletedParam === "1";
+  // Complete / reopen tasks straight from the list (Summer, 2026-07-07:
+  // "lost the ability to complete tasks from the tasks tab" — the Done
+  // column was display-only). Shared mutations with the task widgets.
+  const completeMutation = useCompleteActivity();
+  const reopenMutation = useReopenActivity();
   const [page, setPage] = useUrlNumberState("page", 0);
   const [showAddTask, setShowAddTask] = useState(false);
 
@@ -472,7 +479,27 @@ export function ActivitiesListPage() {
                         {formatDate(a.activity_date ?? a.created_at)}
                       </TableCell>
                       <TableCell className="text-center">
-                        {a.completed_at ? (
+                        {a.activity_type === "task" ? (
+                          // Tasks: a real checkbox — check to complete,
+                          // uncheck to reopen. (With "Show completed tasks"
+                          // off, a completed task leaves the list on refetch —
+                          // that's the filter doing its job.)
+                          <Checkbox
+                            checked={!!a.completed_at}
+                            disabled={completeMutation.isPending || reopenMutation.isPending}
+                            aria-label={a.completed_at ? "Reopen task" : "Mark task complete"}
+                            onCheckedChange={(v) => {
+                              if (v === true) {
+                                completeMutation.mutate(
+                                  { id: a.id },
+                                  { onSuccess: () => toast.success("Task completed") },
+                                );
+                              } else {
+                                reopenMutation.mutate({ id: a.id });
+                              }
+                            }}
+                          />
+                        ) : a.completed_at ? (
                           <Check className="h-4 w-4 text-primary inline" />
                         ) : (
                           <span className="text-muted-foreground">
