@@ -10,6 +10,7 @@ import {
   playScheduled,
   resolveNotifSound,
 } from "@/lib/notification-sounds";
+import { celebrateHighFive } from "@/lib/confetti";
 
 /**
  * The notification delivery engine — banners, sounds, and OS
@@ -90,6 +91,34 @@ export function useNotificationToasts() {
       if (seenIds.current.has(n.id)) return;
       seenIds.current.add(n.id);
       dedupChannel?.postMessage({ id: n.id });
+
+      // High-fives are pure delight: confetti rains + ONE short chime + a quick
+      // toast naming who. Never a bell entry, OS notification, or the long
+      // meddy-style alert. Fires anywhere in the app (this hook is app-wide).
+      if (n.type === "deal_high_five") {
+        celebrateHighFive();
+        const hfPrefs = prefsRef.current;
+        if (!hfPrefs || hfPrefs["sound_deal_high_five"] !== false) {
+          playScheduled(
+            resolveNotifSound(
+              "deal_high_five",
+              hfPrefs?.["soundtype_deal_high_five"] as string | undefined,
+            ),
+            "short", // one short play — never the looping/long alert
+          );
+        }
+        toast("🎉 " + (n.message ?? n.title ?? "You got a high-five!"), {
+          duration: 5000,
+        });
+        // Keep it out of the bell entirely — mark read, then refresh counts.
+        supabase
+          .from("notifications")
+          .update({ is_read: true })
+          .eq("id", n.id)
+          .then(() => qc.invalidateQueries({ queryKey: ["notifications"] }));
+        return;
+      }
+
       qc.invalidateQueries({ queryKey: ["notifications"] });
 
       const prefs = prefsRef.current;

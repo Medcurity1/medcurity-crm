@@ -86,6 +86,13 @@ function getQuarterStart(date: Date): Date {
   return new Date(date.getFullYear(), quarterStartMonth, 1);
 }
 
+// Start of the NEXT quarter — the exclusive upper bound for "this quarter"
+// windows (so a deal closing in a later quarter doesn't leak into the count).
+function getQuarterEnd(date: Date): Date {
+  const start = getQuarterStart(date);
+  return new Date(start.getFullYear(), start.getMonth() + 3, 1);
+}
+
 function getMonthStart(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 }
@@ -148,20 +155,50 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     icon: Trophy,
     format: "number",
     link: () =>
-      `/opportunities?owner=mine&stage=closed_won&closed_after=${localISODate(getQuarterStart(new Date()))}`,
+      `/opportunities?owner=mine&stage=closed_won&closed_after=${localISODate(getQuarterStart(new Date()))}&closed_before=${localISODate(getQuarterEnd(new Date()))}`,
     query: async (supabase, userId) => {
       const quarterStart = getQuarterStart(new Date());
+      const quarterEnd = getQuarterEnd(new Date());
       const { count } = await supabase
         .from("opportunities")
         .select("*", { count: "exact", head: true })
         .eq("owner_user_id", userId)
         .eq("stage", "closed_won")
         .is("archived_at", null)
-        // close_date is a DATE — compare to the LOCAL quarter-start date string,
+        // close_date is a DATE — compare to LOCAL quarter-boundary date strings,
         // not toISOString() (whose UTC time component drops deals closed ON the
         // boundary day for negative-UTC zones). Matches the deep-link above.
-        .gte("close_date", localISODate(quarterStart));
+        // Bounded to [quarterStart, quarterEnd) so deals closing in a LATER
+        // quarter (e.g. a Nov 1 close viewed in Q3) don't inflate the count.
+        .gte("close_date", localISODate(quarterStart))
+        .lt("close_date", localISODate(quarterEnd));
       return count ?? 0;
+    },
+  },
+  {
+    // Summer's ask: a deal can close one quarter but the project (and the
+    // money) starts in another. This tracks won $ whose CONTRACT START DATE
+    // lands in the current quarter — closer to "revenue arriving this quarter"
+    // than close-date does. Separate from "Closed Won This Quarter" (count by
+    // close date) so neither redefines the other.
+    id: "revenue_starting_quarter",
+    label: "Revenue Starting This Quarter",
+    category: "sales",
+    icon: CalendarClock,
+    format: "currency",
+    link: () => `/opportunities?owner=mine&stage=closed_won`,
+    query: async (supabase, userId) => {
+      const quarterStart = getQuarterStart(new Date());
+      const quarterEnd = getQuarterEnd(new Date());
+      const amounts = await fetchAllOppAmounts(supabase, (q) =>
+        q
+          .eq("owner_user_id", userId)
+          .eq("stage", "closed_won")
+          .is("archived_at", null)
+          .gte("contract_start_date", localISODate(quarterStart))
+          .lt("contract_start_date", localISODate(quarterEnd)),
+      );
+      return amounts.reduce((s, n) => s + n, 0);
     },
   },
   {

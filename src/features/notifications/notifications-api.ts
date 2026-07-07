@@ -10,6 +10,9 @@ export function useNotifications(limit = 20) {
       const { data, error } = await supabase
         .from("notifications")
         .select("*")
+        // High-fives never live in the bell — they're a confetti+toast moment
+        // delivered live (see useNotificationToasts). Keep them out of the list.
+        .neq("type", "deal_high_five")
         .order("created_at", { ascending: false })
         .limit(limit);
       if (error) throw error;
@@ -25,7 +28,8 @@ export function useUnreadCount() {
       const { count, error } = await supabase
         .from("notifications")
         .select("*", { count: "exact", head: true })
-        .eq("is_read", false);
+        .eq("is_read", false)
+        .neq("type", "deal_high_five"); // high-fives aren't bell items
       if (error) throw error;
       return count ?? 0;
     },
