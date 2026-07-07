@@ -997,7 +997,20 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="partner_type">Partner Type</Label>
+                  <Label htmlFor="partner_type">
+                    Partner Type
+                    {/* Conditionally required (Rachel's rule): only when the
+                        account is marked as a partner. Same mark as the other
+                        required fields so it's obvious BEFORE hitting Save. */}
+                    {(watch("account_type") ?? "").startsWith("Partner") && (
+                      <span className="text-destructive ml-0.5">
+                        *{" "}
+                        <span className="text-xs font-normal text-muted-foreground">
+                          (required for partners)
+                        </span>
+                      </span>
+                    )}
+                  </Label>
                   <PicklistSelect
                     id="partner_type"
                     fieldKey="accounts.partner_type"
