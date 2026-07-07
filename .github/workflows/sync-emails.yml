@@ -74,9 +74,7 @@ jobs:
           if [ -z "$existing" ]; then
             gh issue create \
               --title "🔴 Email sync cron is failing" \
-              --body "The scheduled email sync failed. Latest run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-Opens automatically on failure; closes automatically once a sync run succeeds." >/dev/null || true
+              --body "The scheduled email sync failed. Latest run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} — this issue opens automatically on failure and closes automatically once a sync run succeeds." >/dev/null || true
           fi
 
       - name: Close alert issue on recovery
