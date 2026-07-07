@@ -11,6 +11,7 @@ import {
   Target,
   UserPlus,
   Percent,
+  Phone,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -93,6 +94,13 @@ function getQuarterEnd(date: Date): Date {
   return new Date(start.getFullYear(), start.getMonth() + 3, 1);
 }
 
+// Last day OF this quarter (inclusive). The list-view date filters use `<=`,
+// so deep-link "…_before" params want this, not the next quarter's first day.
+function getQuarterLastDay(date: Date): Date {
+  const end = getQuarterEnd(date);
+  return new Date(end.getFullYear(), end.getMonth(), end.getDate() - 1);
+}
+
 function getMonthStart(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 }
@@ -155,7 +163,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     icon: Trophy,
     format: "number",
     link: () =>
-      `/opportunities?owner=mine&stage=closed_won&closed_after=${localISODate(getQuarterStart(new Date()))}&closed_before=${localISODate(getQuarterEnd(new Date()))}`,
+      `/opportunities?owner=mine&stage=closed_won&closed_after=${localISODate(getQuarterStart(new Date()))}&closed_before=${localISODate(getQuarterLastDay(new Date()))}`,
     query: async (supabase, userId) => {
       const quarterStart = getQuarterStart(new Date());
       const quarterEnd = getQuarterEnd(new Date());
@@ -186,7 +194,8 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     category: "sales",
     icon: CalendarClock,
     format: "currency",
-    link: () => `/opportunities?owner=mine&stage=closed_won`,
+    link: () =>
+      `/opportunities?owner=mine&stage=closed_won&started_after=${localISODate(getQuarterStart(new Date()))}&started_before=${localISODate(getQuarterLastDay(new Date()))}`,
     query: async (supabase, userId) => {
       const quarterStart = getQuarterStart(new Date());
       const quarterEnd = getQuarterEnd(new Date());
@@ -199,6 +208,32 @@ export const KPI_REGISTRY: KpiDefinition[] = [
           .lt("contract_start_date", localISODate(quarterEnd)),
       );
       return amounts.reduce((s, n) => s + n, 0);
+    },
+  },
+  {
+    // Summer: a running count of calls she's logged this month.
+    id: "calls_this_month",
+    label: "Calls This Month",
+    category: "sales",
+    icon: Phone,
+    format: "number",
+    link: () => {
+      const s = getMonthStart(new Date());
+      const end = new Date(s.getFullYear(), s.getMonth() + 1, 0); // last day of month
+      return `/activities?type=call&start=${localISODate(s)}&end=${localISODate(end)}`;
+    },
+    query: async (supabase, userId) => {
+      const monthStart = getMonthStart(new Date());
+      const nextMonth = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
+      const { count } = await supabase
+        .from("activities")
+        .select("*", { count: "exact", head: true })
+        .eq("owner_user_id", userId)
+        .eq("activity_type", "call")
+        .is("archived_at", null)
+        .gte("effective_at", monthStart.toISOString())
+        .lt("effective_at", nextMonth.toISOString());
+      return count ?? 0;
     },
   },
   {

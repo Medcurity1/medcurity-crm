@@ -79,6 +79,19 @@ const INDUSTRY_OPTIONS = Object.entries(INDUSTRY_CATEGORY_LABELS)
   .map(([value, label]) => ({ value, label }))
   .sort((a, b) => a.label.localeCompare(b.label));
 
+// Where a contact/opportunity came from (the public.lead_source enum). Lets
+// reports filter e.g. "website leads" (Jordan's request).
+const LEAD_SOURCE_OPTIONS = [
+  { value: "website", label: "Website" },
+  { value: "referral", label: "Referral" },
+  { value: "cold_call", label: "Cold Call" },
+  { value: "trade_show", label: "Trade Show" },
+  { value: "partner", label: "Partner" },
+  { value: "social_media", label: "Social Media" },
+  { value: "email_campaign", label: "Email Campaign" },
+  { value: "other", label: "Other" },
+];
+
 const STAGE_OPTIONS = ALL_STAGES.map((s) => ({ value: s, label: stageLabel(s) }));
 
 const TEAM_OPTIONS = (["sales", "renewals"] as OpportunityTeam[]).map((v) => ({
@@ -120,6 +133,7 @@ export const REPORT_FILTERS: Record<NexusReportEntity, ReportFilterDef[]> = {
   contacts: [
     { field: "owner", label: "Owner", kind: "multi", optionsSource: "owners" },
     { field: "tags", label: "Tag", kind: "multi", optionsSource: "tags" },
+    { field: "lead_source", label: "Lead Source", kind: "multi", staticOptions: LEAD_SOURCE_OPTIONS },
     { field: "last_activity", label: "Last Activity", kind: "days" },
     { field: "do_not_call", label: "Do Not Call", kind: "boolean" },
     { field: "no_longer_employed", label: "No Longer Employed", kind: "boolean" },
@@ -143,6 +157,7 @@ export const REPORT_FILTERS: Record<NexusReportEntity, ReportFilterDef[]> = {
     { field: "stage", label: "Stage", kind: "multi", staticOptions: STAGE_OPTIONS },
     { field: "team", label: "Team", kind: "multi", staticOptions: TEAM_OPTIONS },
     { field: "business_type", label: "Business Type", kind: "multi", staticOptions: BUSINESS_TYPE_OPTIONS },
+    { field: "lead_source", label: "Lead Source", kind: "multi", staticOptions: LEAD_SOURCE_OPTIONS },
     { field: "created", label: "Created", kind: "days" },
   ],
   imports: [
@@ -395,6 +410,7 @@ function filterColumn(entity: NexusReportEntity, field: string): string | null {
   const maps: Record<NexusReportEntity, Record<string, string>> = {
     contacts: {
       owner: "owner_user_id",
+      lead_source: "lead_source",
       do_not_call: "do_not_call",
       no_longer_employed: "no_longer_employed",
       do_not_contact: "do_not_contact",
@@ -417,6 +433,7 @@ function filterColumn(entity: NexusReportEntity, field: string): string | null {
       stage: "stage",
       team: "team",
       business_type: "business_type",
+      lead_source: "lead_source",
       created: "created_at",
     },
     imports: {

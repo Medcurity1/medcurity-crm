@@ -98,8 +98,10 @@ export function BulkArchiveFromFile({
   const CHUNK = 1000;
   async function runChunked(dryRun: boolean): Promise<BulkArchiveResult | null> {
     if (!parsed) return null;
-    const batches: string[][] = [];
-    for (let i = 0; i < parsed.ids.length; i += CHUNK) batches.push(parsed.ids.slice(i, i + CHUNK));
+    // Match by id OR email: send BOTH id and email slices per call so a file
+    // with only emails (e.g. a leads-list export) still matches. Chunk over the
+    // longer of the two so every id and every email is sent exactly once.
+    const total = Math.max(parsed.ids.length, parsed.emails.length);
     const agg: BulkArchiveResult = {
       matched: 0,
       already_archived: 0,
@@ -108,13 +110,12 @@ export function BulkArchiveFromFile({
       dry_run: dryRun,
     };
     setRunning(true);
-    setProgress({ done: 0, total: parsed.ids.length });
+    setProgress({ done: 0, total });
     try {
-      let done = 0;
-      for (const b of batches) {
+      for (let i = 0; i < total; i += CHUNK) {
         const r = await archive.mutateAsync({
-          ids: b,
-          emails: [],
+          ids: parsed.ids.slice(i, i + CHUNK),
+          emails: parsed.emails.slice(i, i + CHUNK),
           reason: reason.trim() || "bulk cleaning",
           dryRun,
         });
@@ -122,8 +123,7 @@ export function BulkArchiveFromFile({
         agg.already_archived += r.already_archived;
         agg.to_archive += r.to_archive;
         agg.archived += r.archived;
-        done += b.length;
-        setProgress({ done, total: parsed.ids.length });
+        setProgress({ done: Math.min(total, i + CHUNK), total });
       }
       return agg;
     } finally {
