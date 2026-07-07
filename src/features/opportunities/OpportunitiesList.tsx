@@ -325,6 +325,10 @@ export function OpportunitiesList() {
   // the card is counting.
   const [expectedAfter, setExpectedAfter] = useUrlState("expected_after", "");
   const [expectedBefore, setExpectedBefore] = useUrlState("expected_before", "");
+  // Against contract_start_date — used by the "Revenue Starting This Quarter"
+  // KPI deep-link so the list shows exactly the deals totaling that number.
+  const [startedAfter, setStartedAfter] = useUrlState("started_after", "");
+  const [startedBefore, setStartedBefore] = useUrlState("started_before", "");
   const [page, setPage] = useUrlNumberState("page", 0);
   // Default 100 per page (Summer: fewer pages to click through). The
   // Rows selector still offers 25/50/100/200 for anyone who wants less.
@@ -359,6 +363,8 @@ export function OpportunitiesList() {
     closeBefore: closedBefore || undefined,
     expectedAfter: expectedAfter || undefined,
     expectedBefore: expectedBefore || undefined,
+    startAfter: startedAfter || undefined,
+    startBefore: startedBefore || undefined,
   };
 
   const { data: result, isLoading, isError, isFetching, refetch } = useOpportunities({
@@ -657,7 +663,7 @@ export function OpportunitiesList() {
               the constraint with one click. Without this, the list
               looks like it's narrower than the user's other filters
               for no obvious reason. */}
-          {(closedAfter || closedBefore || expectedAfter || expectedBefore) && (
+          {(closedAfter || closedBefore || expectedAfter || expectedBefore || startedAfter || startedBefore) && (
             <div className="flex flex-wrap items-center gap-2 mb-2">
               {closedAfter && (
                 <button
@@ -696,6 +702,26 @@ export function OpportunitiesList() {
                   className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-1 text-xs hover:bg-muted/70"
                 >
                   <span>Expected on/before {formatDate(expectedBefore)}</span>
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+              {startedAfter && (
+                <button
+                  type="button"
+                  onClick={() => setStartedAfter("")}
+                  className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-1 text-xs hover:bg-muted/70"
+                >
+                  <span>Started on/after {formatDate(startedAfter)}</span>
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+              {startedBefore && (
+                <button
+                  type="button"
+                  onClick={() => setStartedBefore("")}
+                  className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-1 text-xs hover:bg-muted/70"
+                >
+                  <span>Started on/before {formatDate(startedBefore)}</span>
                   <X className="h-3 w-3" />
                 </button>
               )}

@@ -23,6 +23,11 @@ interface OppFilters {
   expectedAfter?: string;
   /** ISO date. Filters expected_close_date <= this value. */
   expectedBefore?: string;
+  /** ISO date. Filters contract_start_date >= this value. Used by the
+   *  "Revenue Starting This Quarter" KPI to land on the same deals. */
+  startAfter?: string;
+  /** ISO date. Filters contract_start_date <= this value. */
+  startBefore?: string;
   page?: number;
   pageSize?: number;
   sortColumn?: string | null;
@@ -170,6 +175,8 @@ export function useOpportunities(filters?: OppFilters) {
       if (filters?.closeBefore) query = query.lte("close_date", filters.closeBefore);
       if (filters?.expectedAfter) query = query.gte("expected_close_date", filters.expectedAfter);
       if (filters?.expectedBefore) query = query.lte("expected_close_date", filters.expectedBefore);
+      if (filters?.startAfter) query = query.gte("contract_start_date", filters.startAfter);
+      if (filters?.startBefore) query = query.lte("contract_start_date", filters.startBefore);
 
       const { data, error, count } = await query;
       if (error) throw error;
@@ -327,6 +334,8 @@ export function useOpportunitiesTotals(filters?: Omit<OppFilters, "page" | "page
         else if (filters?.verified === "false") q = q.eq("verified", false);
         if (filters?.closeAfter) q = q.gte("close_date", filters.closeAfter);
         if (filters?.closeBefore) q = q.lte("close_date", filters.closeBefore);
+        if (filters?.startAfter) q = q.gte("contract_start_date", filters.startAfter);
+        if (filters?.startBefore) q = q.lte("contract_start_date", filters.startBefore);
         if (filters?.expectedAfter) q = q.gte("expected_close_date", filters.expectedAfter);
         if (filters?.expectedBefore) q = q.lte("expected_close_date", filters.expectedBefore);
 
