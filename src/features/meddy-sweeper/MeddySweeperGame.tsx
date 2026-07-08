@@ -84,6 +84,9 @@ function GameModal() {
   const [seconds, setSeconds] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
   const [lastScore, setLastScore] = useState<{ won: boolean; total?: number; base?: number; speed?: number } | null>(null);
+  // The end-of-game banner can be closed WITHOUT ending the game, so the
+  // player can study the finished board (e.g. see which Meddy got them).
+  const [resultsHidden, setResultsHidden] = useState(false);
   const [tile, setTile] = useState(30);
 
   const startRef = useRef<number | null>(null);
@@ -168,6 +171,7 @@ function GameModal() {
     setSeconds(0);
     setFace("idle");
     setLastScore(null);
+    setResultsHidden(false);
     setGame(newGame(d));
     setGameId((g) => g + 1);
   }
@@ -177,6 +181,7 @@ function GameModal() {
   }
 
   const finished = game.status === "won" || game.status === "lost";
+  const lost = game.status === "lost";
   const threatsLeft = game.mines - game.flags;
 
   function onCellClick(i: number) {
@@ -310,8 +315,18 @@ function GameModal() {
                 >
                   {!revealed && cell.flagged && !wrongFlag && <ShieldSprite size={Math.floor(tile * 0.82)} />}
                   {wrongFlag && <ShieldSprite size={Math.floor(tile * 0.82)} wrong />}
-                  {(revealed || (finished && cell.mine)) && cell.mine && !cell.flagged && (
+                  {/* On a loss every Meddy shows, shielded or not (the engine
+                      reveals them all); on a win the auto-shielded board keeps
+                      its shields-only victory look. */}
+                  {(revealed || (finished && cell.mine)) && cell.mine && (!cell.flagged || lost) && (
                     <MeddyMine size={Math.floor(tile * 0.82)} dead={boom} />
+                  )}
+                  {/* A correct shield stays on its Meddy after a loss, faded so
+                      the player can see which guesses were right. */}
+                  {lost && cell.mine && cell.flagged && (
+                    <span className="ms-ghost-shield" aria-hidden="true">
+                      <ShieldSprite size={Math.floor(tile * 0.82)} />
+                    </span>
                   )}
                   {revealed && !cell.mine && cell.adjacent > 0 && (
                     <span style={{ color: NUM_COLORS[cell.adjacent], fontSize: numFont }} className="ms-num">
@@ -323,8 +338,16 @@ function GameModal() {
             })}
           </div>
 
-          {finished && (
+          {finished && !resultsHidden && (
             <div className={"ms-banner " + (game.status === "won" ? "is-win" : "is-lose")}>
+              <button
+                className="ms-banner-x"
+                onClick={() => setResultsHidden(true)}
+                aria-label="Close results and view the board"
+                title="Close results and view the board"
+              >
+                ×
+              </button>
               <div className="ms-banner-title">
                 {game.status === "won" ? "ALL CLEAR!" : "OOPS!"}
               </div>
@@ -341,10 +364,18 @@ function GameModal() {
                 </>
               )}
               {lastScore && !lastScore.won && (
-                <div className="ms-banner-score">Board not cleared — no points. Try again!</div>
+                <>
+                  <div className="ms-banner-score">Board not cleared — no points. Try again!</div>
+                  <div className="ms-banner-break">close (×) to study the board — every Meddy is revealed</div>
+                </>
               )}
               <button className="ms-play-again" onClick={() => startNewGame()}>▶ PLAY AGAIN</button>
             </div>
+          )}
+          {finished && resultsHidden && (
+            <button className="ms-results-chip" onClick={() => setResultsHidden(false)}>
+              ▣ RESULTS
+            </button>
           )}
         </div>
 
@@ -445,6 +476,15 @@ const CSS = `
 .ms-banner-score b{color:#1e50b0;font-size:20px;}
 .ms-banner-time{color:#a08a6e;}
 .ms-banner-break{font-size:11px;color:#a08a6e;letter-spacing:.04em;margin-top:-4px;}
+.ms-banner-x{position:absolute;top:8px;right:8px;width:28px;height:28px;border:none;border-radius:6px;cursor:pointer;
+  background:#f1e6cf;color:#a5432c;font-size:18px;line-height:1;font-family:inherit;box-shadow:inset 0 0 0 2px #d8c9a8;}
+.ms-banner-x:hover{background:#ea4a2f;color:#fff;}
+.ms-results-chip{position:absolute;top:10px;right:10px;z-index:3;border:none;cursor:pointer;font-family:inherit;
+  font-weight:800;font-size:11px;letter-spacing:.08em;padding:7px 11px;border-radius:7px;color:#fff;
+  background:#2f6fe0;box-shadow:0 3px 0 #1e50b0;}
+.ms-results-chip:active{transform:translateY(2px);box-shadow:0 1px 0 #1e50b0;}
+.ms-ghost-shield{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  opacity:.4;pointer-events:none;}
 .ms-play-again{border:none;cursor:pointer;font-family:inherit;font-weight:800;letter-spacing:.1em;
   padding:10px 20px;border-radius:8px;color:#fff;background:#2f6fe0;box-shadow:0 4px 0 #1e50b0;}
 .ms-play-again:active{transform:translateY(3px);box-shadow:0 1px 0 #1e50b0;}
