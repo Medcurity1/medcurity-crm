@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { blankableNumber } from "@/lib/zodFields";
 
 export const opportunitySchema = z.object({
   account_id: z.string().uuid("Account is required"),
@@ -32,38 +33,31 @@ export const opportunitySchema = z.object({
     "proposal",
     "verbal_commit",
   ]),
-  amount: z.coerce.number().min(0, "Amount must be positive"),
+  // blankableNumber keeps a blank input as null (bare z.coerce.number()
+  // turned "" into 0), so the admin-required-field gate can flag a blank
+  // Amount and clearing it can't silently zero a deal. The DB column is
+  // NOT NULL — the form payload maps a null amount back to 0 via
+  // Number(values.amount). See src/lib/zodFields.ts.
+  amount: blankableNumber(z.coerce.number().min(0, "Amount must be positive")),
   expected_close_date: z.string().optional().or(z.literal("")),
   close_date: z.string().optional().or(z.literal("")),
   contract_start_date: z.string().optional().or(z.literal("")),
   contract_end_date: z.string().optional().or(z.literal("")),
-  // Optional numeric picklist fields — must accept undefined / null /
-  // empty string. Using `.optional().nullable()` and `.min(0)` (not
-  // `.positive()`) matches the pattern of every other optional numeric
-  // field on this form (probability, cycle_count, fte_count) so the
-  // page-layout "Required" toggle is the only thing that gates them.
-  contract_length_months: z
-    .preprocess(
-      (v) => (v === "" || v === undefined || v === null ? null : v),
-      z.coerce.number().int().min(0).nullable(),
-    )
-    .optional(),
+  // Optional numeric fields — must accept undefined / null / empty
+  // string, and a blank must stay null (never coerce to 0) so the
+  // admin "Required" toggle is the only thing that gates them.
+  contract_length_months: blankableNumber(z.coerce.number().int().min(0)),
   contract_signed_date: z.string().optional().or(z.literal("")),
-  contract_year: z
-    .preprocess(
-      (v) => (v === "" || v === undefined || v === null ? null : v),
-      z.coerce.number().int().min(0).nullable(),
-    )
-    .optional(),
+  contract_year: blankableNumber(z.coerce.number().int().min(0)),
   loss_reason: z.string().optional().or(z.literal("")),
   notes: z.string().optional().or(z.literal("")),
   // New fields
-  probability: z.coerce.number().min(0).max(100).optional().nullable(),
+  probability: blankableNumber(z.coerce.number().min(0).max(100)),
   next_step: z.string().optional().or(z.literal("")),
   lead_source: z.enum(["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"]).optional().nullable(),
   lead_source_detail: z.string().optional().or(z.literal("")),
   payment_frequency: z.enum(["monthly", "quarterly", "semi_annually", "annually", "one_time"]).optional().nullable(),
-  cycle_count: z.coerce.number().int().min(0).optional().nullable(),
+  cycle_count: blankableNumber(z.coerce.number().int().min(0)),
   auto_renewal: z.boolean().optional(),
   description: z.string().optional().or(z.literal("")),
   promo_code: z.string().optional().or(z.literal("")),
@@ -72,16 +66,16 @@ export const opportunitySchema = z.object({
   // exceed 100 (e.g. $4,300 off), but a PERCENT can't exceed 100% — you can't
   // give more than 100% off. The conditional cap is enforced in the
   // superRefine below (we need discount_type to know which rule applies).
-  discount: z.coerce.number().min(0).optional().nullable(),
+  discount: blankableNumber(z.coerce.number().min(0)),
   discount_type: z.enum(["percent", "amount"]).optional().or(z.literal("")),
-  subtotal: z.coerce.number().min(0).optional().nullable(),
+  subtotal: blankableNumber(z.coerce.number().min(0)),
   follow_up: z.boolean().optional(),
-  service_amount: z.coerce.number().min(0).optional().nullable(),
-  product_amount: z.coerce.number().min(0).optional().nullable(),
+  service_amount: blankableNumber(z.coerce.number().min(0)),
+  product_amount: blankableNumber(z.coerce.number().min(0)),
   services_included: z.boolean().optional(),
   one_time_project: z.boolean().optional(),
   // FTE snapshot
-  fte_count: z.coerce.number().int().nonnegative().optional().nullable(),
+  fte_count: blankableNumber(z.coerce.number().int().nonnegative()),
   fte_range: z.enum(["1-20", "21-50", "51-100", "101-250", "251-500", "501-750", "751-1000", "1001-1500", "1501-2000", "2001-5000", "5001-10000"]).optional().or(z.literal("")).nullable(),
   created_by_automation: z.boolean().optional(),
   // Assignment tracking

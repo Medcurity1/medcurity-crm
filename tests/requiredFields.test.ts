@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { getMissingRequiredFields, formatFieldLabel } from "@/lib/requiredFields";
+import { accountSchema } from "@/features/accounts/schema";
+import { leadSchema } from "@/features/leads/schema";
+import { opportunitySchema } from "@/features/opportunities/schema";
 
 describe("getMissingRequiredFields", () => {
   describe("create mode (no original record)", () => {
@@ -109,6 +112,88 @@ describe("getMissingRequiredFields", () => {
     it("returns an empty array for an empty requiredKeys list", () => {
       expect(getMissingRequiredFields([], { name: "" })).toEqual([]);
     });
+  });
+});
+
+describe("required numeric fields through the form schemas", () => {
+  // The gate runs on POST-zod values. Bare z.coerce.number() used to
+  // turn a blank input ("") into 0, so a required numeric field left
+  // blank on create was never flagged. These tests pin the fixed
+  // end-to-end behavior: blank survives parsing as null (flagged),
+  // explicit 0 stays 0 (a real value, never flagged).
+  const minimalAccount = { name: "Acme", lifecycle_status: "prospect" };
+  const minimalLead = { first_name: "Ada", last_name: "Lovelace", status: "new" };
+  const minimalOpp = {
+    account_id: "6f9619ff-8b86-4d01-b42d-00cf4fc964ff",
+    team: "sales",
+    kind: "new_business",
+    name: "Acme — SRA",
+    stage: "details_analysis",
+  };
+
+  it("flags a required account numeric field left blank on create", () => {
+    const parsed = accountSchema.parse({ ...minimalAccount, employees: "" });
+    expect(parsed.employees).toBeNull();
+    expect(getMissingRequiredFields(["employees"], parsed)).toEqual(["employees"]);
+  });
+
+  it("accepts an explicit 0 in a required account numeric field", () => {
+    const parsed = accountSchema.parse({ ...minimalAccount, employees: "0" });
+    expect(parsed.employees).toBe(0);
+    expect(getMissingRequiredFields(["employees"], parsed)).toEqual([]);
+  });
+
+  it("still parses real numeric input from the form (string in, number out)", () => {
+    const parsed = accountSchema.parse({ ...minimalAccount, employees: "250" });
+    expect(parsed.employees).toBe(250);
+  });
+
+  it("keeps the grandfather rule on edit: blank numeric on a previously-empty record passes", () => {
+    const parsed = accountSchema.parse({ ...minimalAccount, employees: "" });
+    const original = { name: "Acme", employees: null };
+    expect(getMissingRequiredFields(["employees"], parsed, original)).toEqual([]);
+  });
+
+  it("blocks clearing a numeric field that had a value, instead of silently saving 0", () => {
+    const parsed = accountSchema.parse({ ...minimalAccount, employees: "" });
+    const original = { name: "Acme", employees: 50 };
+    expect(getMissingRequiredFields(["employees"], parsed, original)).toEqual(["employees"]);
+  });
+
+  it("flags a required lead numeric field left blank on create", () => {
+    const parsed = leadSchema.parse({ ...minimalLead, employees: "" });
+    expect(parsed.employees).toBeNull();
+    expect(getMissingRequiredFields(["employees"], parsed)).toEqual(["employees"]);
+  });
+
+  it("flags a blank opportunity amount on create, but not an explicit 0", () => {
+    const blank = opportunitySchema.parse({ ...minimalOpp, amount: "" });
+    expect(blank.amount).toBeNull();
+    expect(getMissingRequiredFields(["amount"], blank)).toEqual(["amount"]);
+
+    const zero = opportunitySchema.parse({ ...minimalOpp, amount: "0" });
+    expect(zero.amount).toBe(0);
+    expect(getMissingRequiredFields(["amount"], zero)).toEqual([]);
+  });
+
+  it("keeps blank optional opportunity numerics as null instead of 0", () => {
+    const parsed = opportunitySchema.parse({
+      ...minimalOpp,
+      amount: "1200",
+      probability: "",
+      discount: "",
+      subtotal: "",
+      fte_count: "",
+    });
+    expect(parsed.probability).toBeNull();
+    expect(parsed.discount).toBeNull();
+    expect(parsed.subtotal).toBeNull();
+    expect(parsed.fte_count).toBeNull();
+  });
+
+  it("still rejects non-numeric garbage", () => {
+    expect(accountSchema.safeParse({ ...minimalAccount, employees: "abc" }).success).toBe(false);
+    expect(opportunitySchema.safeParse({ ...minimalOpp, amount: "abc" }).success).toBe(false);
   });
 });
 

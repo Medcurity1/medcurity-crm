@@ -32,6 +32,12 @@
  * string). Numeric 0 and boolean false are real values, not empty — this
  * matches the semantics of the original per-form checks this module
  * replaces.
+ *
+ * COROLLARY FOR NUMERIC FIELDS: because 0 counts as a real value, the
+ * zod form schemas must never coerce a BLANK input to 0 before this
+ * check runs (bare z.coerce.number() does exactly that). Numeric form
+ * fields go through blankableNumber() in src/lib/zodFields.ts, which
+ * keeps blank as null so create-mode enforcement actually fires.
  */
 
 function isEmptyValue(val: unknown): boolean {
