@@ -8,7 +8,7 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { useUsers } from "@/features/accounts/api";
 import { useTags } from "@/features/tags/api";
 import { usePicklistOptions } from "@/features/picklists/api";
-import { useAccountTypesInUse } from "../api";
+import { useAccountTypesInUse, useTimezonesInUse } from "../api";
 import { MultiSelect } from "@/components/MultiSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,6 +70,11 @@ export function CustomReportPanel({
   const { data: tags } = useTags();
   const { data: picklists } = usePicklistOptions();
   const { data: accountTypes } = useAccountTypesInUse();
+  // Only contacts + accounts expose a Time Zone filter — skip the paged fetch
+  // for the other entities.
+  const { data: timezones } = useTimezonesInUse({
+    enabled: config.entity === "contacts" || config.entity === "accounts",
+  });
 
   const filterDefs = REPORT_FILTERS[config.entity];
   const columnDefs = REPORT_COLUMNS[config.entity];
@@ -145,6 +150,11 @@ export function CustomReportPanel({
         value: t.account_type,
         label: `${t.account_type} · ${t.n}`,
       }));
+    }
+    if (def.optionsSource === "timezones") {
+      // Distinct timezone strings actually present in the data (see
+      // useTimezonesInUse) — the raw value IS the filter match, so label = value.
+      return (timezones ?? []).map((tz) => ({ value: tz, label: tz }));
     }
     return def.staticOptions ?? [];
   }
