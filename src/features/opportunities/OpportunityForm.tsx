@@ -48,6 +48,7 @@ import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { opportunitySchema, type OpportunityFormValues } from "./schema";
 import { FTE_RANGES, employeesToFteRange } from "@/lib/formatters";
 import { celebrateClosedWon } from "@/lib/confetti";
+import { checkCloseReadiness, formatCloseReadinessMessage } from "@/lib/closeReadiness";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -177,6 +178,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     handleSubmit,
     setValue,
     watch,
+    getValues,
     formState: { errors, isSubmitting, isDirty },
   } = useForm<OpportunityFormValues>({
     resolver: zodResolver(opportunitySchema),
@@ -342,27 +344,47 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
 
   // Fetch full account data for the selected account (FTE, lead source, partner, etc.)
   const { data: selectedAccount } = useAccount(watchedAccountId || undefined);
+  // Autofill the opp's OWN FTE fields (and lead source on create) from the
+  // selected account — Molly + Summer: "it pulls FTE when picking products
+  // but doesn't show on the opportunity's own field." Rules:
+  //   - One-way only (account → opp). We NEVER write back to the account.
+  //   - Fill ONLY when the opp's field is empty, so a value the user typed
+  //     (or one the opp already carries) is never overwritten.
+  //   - Fire only on an actual account CHANGE (create: the first pick;
+  //     edit: the user swaps the account). The ref baselines to the opp's
+  //     own account so opening an existing opp doesn't silently mutate or
+  //     dirty its snapshot on load. The wrapper only mounts this inner form
+  //     once `opp` has loaded in edit mode, so opp?.account_id is reliable.
+  const prevAutofillAccountRef = useRef<string | null>(opp?.account_id ?? null);
   useEffect(() => {
-    if (!watchedAccountId || isEditing) return;
     const acct = selectedAccount;
-    if (!acct) return;
-    if (acct.lead_source) {
+    if (!watchedAccountId || !acct) return;
+    if (prevAutofillAccountRef.current === watchedAccountId) return;
+    prevAutofillAccountRef.current = watchedAccountId;
+
+    const isBlank = (v: unknown) =>
+      v === null || v === undefined || (typeof v === "string" && v.trim() === "");
+
+    // Lead source: preserve prior behavior — autofill on create only, and
+    // still don't clobber a value that's already set.
+    if (!isEditing && acct.lead_source && isBlank(getValues("lead_source"))) {
       setValue("lead_source", acct.lead_source as OpportunityFormValues["lead_source"]);
     }
-    // Snapshot FTE from account for new opportunities. Imported accounts
-    // often have fte_count populated (from SF NumberOfEmployees) but
-    // fte_range null — derive the range from the count so the price-book
-    // auto-pick has something to match on.
+
+    // FTE count/range: fill from the account only when the opp's field is
+    // empty. Imported accounts often have fte_count (from SF
+    // NumberOfEmployees) but a null fte_range — derive the range from the
+    // count so the price-book auto-pick still has something to match on.
     const fteCount = acct.fte_count ?? acct.employees ?? null;
-    if (fteCount != null) {
+    if (fteCount != null && isBlank(getValues("fte_count"))) {
       setValue("fte_count", fteCount);
     }
     const fteRange =
       acct.fte_range || (fteCount != null ? employeesToFteRange(fteCount) : null);
-    if (fteRange) {
+    if (fteRange && isBlank(getValues("fte_range"))) {
       setValue("fte_range", fteRange as OpportunityFormValues["fte_range"]);
     }
-  }, [watchedAccountId, selectedAccount, isEditing, setValue]);
+  }, [watchedAccountId, selectedAccount, isEditing, setValue, getValues, opp]);
 
   // Keep Amount = Subtotal × (1 − Discount/100) so reps see the impact
   // of a discount on the deal total in real time. Discount is a PERCENT
@@ -579,6 +601,21 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
         "Add at least one product before saving — an opportunity needs something to quote."
       );
       return;
+    }
+
+    // Close-readiness gate (Rachel): a deal can only move INTO Closed Won
+    // once the account has complete client info. Gate only the TRANSITION —
+    // re-saving an already-won deal is never blocked. Stricter than, and
+    // separate from, the admin grandfather rule above. See
+    // src/lib/closeReadiness.ts.
+    const closingWon =
+      values.stage === "closed_won" && (!isEditing || opp?.stage !== "closed_won");
+    if (closingWon) {
+      const { ready, missing } = await checkCloseReadiness(supabase, values.account_id);
+      if (!ready) {
+        toast.error(formatCloseReadinessMessage(missing));
+        return;
+      }
     }
 
     const payload: Record<string, unknown> = {

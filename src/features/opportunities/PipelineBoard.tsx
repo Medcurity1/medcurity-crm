@@ -57,6 +57,8 @@ import { toast } from "sonner";
 import { Plus, MoreVertical, Pencil, Trash2, DollarSign, Hash, TrendingUp } from "lucide-react";
 import { OPEN_STAGES, formatCurrency, stageLabel } from "@/lib/formatters";
 import { celebrateClosedWon } from "@/lib/confetti";
+import { supabase } from "@/lib/supabase";
+import { checkCloseReadiness, formatCloseReadinessMessage } from "@/lib/closeReadiness";
 import { useClosedLostGuard } from "./useClosedLostGuard";
 import type {
   ActivePipelineRow,
@@ -134,7 +136,18 @@ function PipelineKanban({
   const [lossReason, setLossReason] = useState("");
   const movingRef = useRef(false);
 
-  function doMove(id: string, newStage: OpportunityStage, accountId: string | null, reason?: string) {
+  async function doMove(id: string, newStage: OpportunityStage, accountId: string | null, reason?: string) {
+    // Close-readiness gate (Rachel): block a drag INTO Closed Won until the
+    // account has complete client info. Returning without mutating leaves the
+    // card in its source column — there's no optimistic move to undo, so the
+    // card simply snaps back on drop.
+    if (newStage === "closed_won") {
+      const { ready, missing } = await checkCloseReadiness(supabase, accountId);
+      if (!ready) {
+        toast.error(formatCloseReadinessMessage(missing));
+        return;
+      }
+    }
     updateMutation.mutate(
       {
         id,

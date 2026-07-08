@@ -150,7 +150,49 @@ export function useAccounts(filters?: AccountFilters) {
 
       const { data, error, count } = await query;
       if (error) throw error;
-      return { data: data as Account[], count: count ?? 0 };
+      const rows = (data ?? []) as Account[];
+
+      // "Last Touch" + "Primary Contact" for just the visible page — scoped to
+      // these ids so we never aggregate the whole activities/contacts table on
+      // every render (same pattern as useOpportunities' last-touch hydration
+      // and the Partners "Last Contact" column). Neither query below checks
+      // `error` — that's deliberate: v_account_last_activity may not exist
+      // yet on every environment, and a missing view/join must leave the
+      // columns blank instead of breaking the whole list.
+      const ids = rows.map((a) => a.id);
+      if (ids.length > 0) {
+        const { data: la } = await supabase
+          .from("v_account_last_activity")
+          .select("account_id, last_activity_at")
+          .in("account_id", ids);
+        const lastByAccount = new Map<string, string>();
+        for (const r of la ?? []) {
+          if (r.last_activity_at) {
+            lastByAccount.set(r.account_id as string, r.last_activity_at as string);
+          }
+        }
+        for (const a of rows) a.last_activity_at = lastByAccount.get(a.id) ?? null;
+
+        const { data: pc } = await supabase
+          .from("contacts")
+          .select("id, first_name, last_name, account_id")
+          .in("account_id", ids)
+          .eq("is_primary", true)
+          .is("archived_at", null);
+        const primaryByAccount = new Map<string, { id: string; first_name: string; last_name: string }>();
+        for (const c of pc ?? []) {
+          if (c.account_id) {
+            primaryByAccount.set(c.account_id as string, {
+              id: c.id as string,
+              first_name: c.first_name as string,
+              last_name: c.last_name as string,
+            });
+          }
+        }
+        for (const a of rows) a.primary_contact = primaryByAccount.get(a.id) ?? null;
+      }
+
+      return { data: rows, count: count ?? 0 };
     },
   });
 }

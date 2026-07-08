@@ -31,6 +31,7 @@ import {
   OPEN_STAGES,
   INDUSTRY_CATEGORY_LABELS,
 } from "@/lib/formatters";
+import { formatPhone } from "@/components/PhoneInput";
 import type {
   AccountStatus,
   CustomerStatus,
@@ -56,7 +57,7 @@ export interface ReportFilterDef {
   label: string;
   kind: ReportFilterKind;
   /** For kind "multi": where the option list comes from. */
-  optionsSource?: "owners" | "tags" | "picklist" | "account_types";
+  optionsSource?: "owners" | "tags" | "picklist" | "account_types" | "timezones";
   /** For optionsSource "picklist": which admin-managed picklist to read
    *  (stays in sync when admins add/rename values — no code change). */
   picklistFieldKey?: string;
@@ -82,19 +83,6 @@ const CUSTOMER_STATUS_OPTIONS = (
 const INDUSTRY_OPTIONS = Object.entries(INDUSTRY_CATEGORY_LABELS)
   .map(([value, label]) => ({ value, label }))
   .sort((a, b) => a.label.localeCompare(b.label));
-
-// Where a contact/opportunity came from (the public.lead_source enum). Lets
-// reports filter e.g. "website leads" (Jordan's request).
-const LEAD_SOURCE_OPTIONS = [
-  { value: "website", label: "Website" },
-  { value: "referral", label: "Referral" },
-  { value: "cold_call", label: "Cold Call" },
-  { value: "trade_show", label: "Trade Show" },
-  { value: "partner", label: "Partner" },
-  { value: "social_media", label: "Social Media" },
-  { value: "email_campaign", label: "Email Campaign" },
-  { value: "other", label: "Other" },
-];
 
 /**
  * Synthetic "any open stage" stage-filter value (Jordan's doc: reps had to
@@ -155,11 +143,26 @@ export const REPORT_FILTERS: Record<NexusReportEntity, ReportFilterDef[]> = {
   contacts: [
     { field: "owner", label: "Owner", kind: "multi", optionsSource: "owners" },
     { field: "tags", label: "Tag", kind: "multi", optionsSource: "tags" },
-    { field: "lead_source", label: "Lead Source", kind: "multi", staticOptions: LEAD_SOURCE_OPTIONS },
+    // Lead Source pulls its options from the SAME admin-managed picklist the
+    // ContactForm uses (contacts.lead_source), NOT a hardcoded list — so it
+    // exposes every value in use (webinar, conference, …) and stays in sync
+    // when admins add/rename values. The old staticOptions list was a stale
+    // 8-value subset that omitted the values dominating the data, which is
+    // why the filter appeared "not to work" (Jordan).
+    { field: "lead_source", label: "Lead Source", kind: "multi", optionsSource: "picklist", picklistFieldKey: "contacts.lead_source" },
+    // "Called By" = a user who has logged a CALL against the contact
+    // (v_contact_callers → activities.owner_user_id on call activities).
+    // Resolved to contact ids in the hook, then filtered via .in("id", …).
+    { field: "called_by", label: "Called By", kind: "multi", optionsSource: "owners" },
     // "Org Type" = the contact's ACCOUNT account_type (CHC, FQHC, PCA, … —
     // live SF-imported values, hence data-driven options). Filters via an
     // inner-join on the account embed (Jordan's doc / Molly's CHC-FQHC widget).
     { field: "org_type", label: "Org Type", kind: "multi", optionsSource: "account_types" },
+    // Time Zone: contacts' own time_zone enum is effectively unpopulated, so
+    // this filters on the LINKED account's (free-text, SF-imported) timezone.
+    // Options are the distinct values actually in the data (the enum constant
+    // list would match zero rows — accounts store "US/Eastern", not "eastern").
+    { field: "timezone", label: "Time Zone", kind: "multi", optionsSource: "timezones" },
     { field: "last_activity", label: "Last Activity", kind: "days" },
     { field: "do_not_call", label: "Do Not Call", kind: "boolean" },
     { field: "no_longer_employed", label: "No Longer Employed", kind: "boolean" },
@@ -179,6 +182,9 @@ export const REPORT_FILTERS: Record<NexusReportEntity, ReportFilterDef[]> = {
     // with op "contains" are coerced to exact-match in normalizeReportConfig.
     { field: "account_type", label: "Account Type", kind: "multi", optionsSource: "account_types" },
     { field: "partner_type", label: "Partner Type", kind: "multi", optionsSource: "picklist", picklistFieldKey: "accounts.partner_type" },
+    // Time Zone: accounts.timezone is free-text SF-imported data ("US/Eastern",
+    // …), so options come from the distinct values actually present.
+    { field: "timezone", label: "Time Zone", kind: "multi", optionsSource: "timezones" },
     { field: "state", label: "State (billing)", kind: "text" },
     { field: "last_activity", label: "Last Activity", kind: "days" },
     { field: "created", label: "Created", kind: "days" },
@@ -188,7 +194,9 @@ export const REPORT_FILTERS: Record<NexusReportEntity, ReportFilterDef[]> = {
     { field: "stage", label: "Stage", kind: "multi", staticOptions: STAGE_OPTIONS },
     { field: "team", label: "Team", kind: "multi", staticOptions: TEAM_OPTIONS },
     { field: "business_type", label: "Business Type", kind: "multi", staticOptions: BUSINESS_TYPE_OPTIONS },
-    { field: "lead_source", label: "Lead Source", kind: "multi", staticOptions: LEAD_SOURCE_OPTIONS },
+    // Data-driven from the admin-managed opportunities.lead_source picklist
+    // (see the contacts note above) — not a stale hardcoded subset.
+    { field: "lead_source", label: "Lead Source", kind: "multi", optionsSource: "picklist", picklistFieldKey: "opportunities.lead_source" },
     { field: "created", label: "Created", kind: "days" },
   ],
   imports: [
@@ -213,6 +221,9 @@ export const REPORT_COLUMNS: Record<NexusReportEntity, ReportColumnDef[]> = {
     { key: "tags", label: "Tags", sortable: false },
     { key: "notes", label: "Notes", sortable: false },
     { key: "last_activity", label: "Last Activity", sortable: true },
+    // Dedicated "last touch" from v_contact_last_activity (display-only; fails
+    // soft to blank until the view is deployed).
+    { key: "last_touch", label: "Last Touch", sortable: false },
     { key: "owner", label: "Owner", sortable: false },
     { key: "created", label: "Created", sortable: true },
   ],
@@ -222,11 +233,14 @@ export const REPORT_COLUMNS: Record<NexusReportEntity, ReportColumnDef[]> = {
     { key: "customer_status", label: "Customer Status", sortable: true },
     { key: "account_type", label: "Account Type", sortable: true },
     { key: "industry", label: "Industry", sortable: false },
+    { key: "phone", label: "Phone", sortable: false },
     { key: "state", label: "State", sortable: true },
     { key: "contract_end", label: "Contract End", sortable: true },
     { key: "acv", label: "ACV", sortable: true, align: "right" },
     { key: "notes", label: "Notes", sortable: false },
     { key: "last_activity", label: "Last Activity", sortable: true },
+    // Dedicated "last touch" from v_account_last_activity (display-only).
+    { key: "last_touch", label: "Last Touch", sortable: false },
     { key: "owner", label: "Owner", sortable: false },
     { key: "created", label: "Created", sortable: true },
   ],
@@ -385,6 +399,75 @@ export async function fetchLastActivityMap(
   return map;
 }
 
+/**
+ * Per-record "last touch" from a dedicated activity view
+ * (v_contact_last_activity / v_account_last_activity — the parallel
+ * migration 20260708190000). Display-only, over the small final page of
+ * ids (≤ preview_count), so no chunking needed.
+ *
+ * FAILS SOFT: any error (most importantly the view not being deployed yet)
+ * returns an empty map, so the Last Touch column renders blank rather than
+ * erroring the whole widget.
+ */
+async function fetchLastTouchMap(
+  view: "v_contact_last_activity" | "v_account_last_activity",
+  idColumn: "contact_id" | "account_id",
+  ids: string[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (!ids.length) return map;
+  try {
+    const { data, error } = await supabase
+      .from(view)
+      .select(`${idColumn}, last_activity_at`)
+      .in(idColumn, ids);
+    if (error) throw error;
+    for (const row of (data ?? []) as unknown as Array<Record<string, string | null>>) {
+      const id = row[idColumn];
+      const at = row.last_activity_at;
+      if (id && at) map.set(id, at);
+    }
+  } catch {
+    return new Map(); // view absent / not yet deployed → blank cells
+  }
+  return map;
+}
+
+/**
+ * Cap on how many caller→contact ids feed the `.in("id", …)` filter, so the
+ * request URL stays bounded. A very prolific caller's widget then considers
+ * only this many of their called contacts — fine for a preview widget that
+ * is sorted + limited to preview_count downstream anyway.
+ */
+const CALLED_BY_ID_CAP = 250;
+
+/**
+ * Contact ids that any of `callerUserIds` have logged a CALL against, from
+ * v_contact_callers (parallel migration 20260708190000).
+ *
+ * FAILS SOFT: any error (most importantly the view not being deployed yet)
+ * returns [] — the caller filter then yields "no results" instead of
+ * crashing the widget.
+ */
+async function fetchCallerContactIds(callerUserIds: string[]): Promise<string[]> {
+  if (!callerUserIds.length) return [];
+  try {
+    const { data, error } = await supabase
+      .from("v_contact_callers")
+      .select("contact_id")
+      .in("caller_user_id", callerUserIds)
+      .limit(CALLED_BY_ID_CAP);
+    if (error) throw error;
+    const ids = new Set<string>();
+    for (const row of (data ?? []) as { contact_id: string | null }[]) {
+      if (row.contact_id) ids.add(row.contact_id);
+    }
+    return [...ids];
+  } catch {
+    return []; // view absent / not yet deployed → filter matches nothing
+  }
+}
+
 /** Tags per contact for a page of ids (mirrors useContactTagsMap). */
 async function fetchContactTagsMap(ids: string[]): Promise<Map<string, Tag[]>> {
   const map = new Map<string, Tag[]>();
@@ -491,6 +574,7 @@ function filterColumn(entity: NexusReportEntity, field: string): string | null {
       industry: "industry_category",
       account_type: "account_type",
       partner_type: "partner_type",
+      timezone: "timezone",
       state: "billing_state",
       created: "created_at",
     },
@@ -526,6 +610,20 @@ function applyFilters(entity: NexusReportEntity, query: any, filters: NexusRepor
       // are excluded server-side.
       const vals = Array.isArray(f.value) ? f.value : [];
       if (vals.length) query = query.in("account.account_type", vals);
+      continue;
+    }
+    if (entity === "contacts" && f.field === "called_by") {
+      // Resolved in the hook: needs an async pre-fetch of contact ids from
+      // v_contact_callers, then an .in("id", …). Skipped here.
+      continue;
+    }
+    if (entity === "contacts" && f.field === "timezone") {
+      // Contacts have no reliable OWN timezone (the time_zone enum column is
+      // ~unpopulated), so filter on the LINKED account's free-text timezone.
+      // Like org_type, the select flips the account embed to !inner when this
+      // filter is active, so contacts with a non-matching/absent account drop.
+      const vals = Array.isArray(f.value) ? f.value : [];
+      if (vals.length) query = query.in("account.timezone", vals);
       continue;
     }
     if (f.field === "last_activity") {
@@ -602,6 +700,7 @@ function contactCells(
   r: RawRecord,
   lastActivity: Map<string, string>,
   tags: Map<string, Tag[]>,
+  lastTouch: Map<string, string>,
 ): Record<string, ReportCell> {
   const account = r.account as {
     name?: string;
@@ -611,25 +710,32 @@ function contactCells(
   } | null;
   const owner = r.owner as { full_name?: string | null } | null;
   const la = lastActivity.get(r.id);
+  const lt = lastTouch.get(r.id);
   return {
     name: text(formatName(String(r.first_name ?? ""), String(r.last_name ?? ""))),
     account: text(account?.name),
     title: text(r.title),
     email: text(r.email),
-    phone: text(r.phone),
+    phone: text(r.phone ? formatPhone(String(r.phone)) : null),
     org_type: text(account?.account_type),
     status: text(account?.status ? statusLabel(account.status as AccountStatus) : null),
     state: text((r.mailing_state as string | null) ?? account?.billing_state),
     tags: { kind: "tags", tags: tags.get(r.id) ?? [] },
     notes: noteText(r.notes),
     last_activity: text(la ? formatRelativeDate(la) : "No activity"),
+    // Fails soft to blank when v_contact_last_activity isn't deployed yet.
+    last_touch: text(lt ? formatRelativeDate(lt) : null),
     owner: text(owner?.full_name),
     created: text(formatDate(r.created_at as string)),
   };
 }
 
-function accountCells(r: RawRecord): Record<string, ReportCell> {
+function accountCells(
+  r: RawRecord,
+  lastTouch: Map<string, string>,
+): Record<string, ReportCell> {
   const owner = r.owner as { full_name?: string | null } | null;
+  const lt = lastTouch.get(r.id);
   return {
     name: text(r.name),
     status: text(r.status ? statusLabel(r.status as AccountStatus) : null),
@@ -640,6 +746,7 @@ function accountCells(r: RawRecord): Record<string, ReportCell> {
         ? industryCategoryLabel(r.industry_category as IndustryCategory)
         : (r.industry as string | null),
     ),
+    phone: text(r.phone ? formatPhone(String(r.phone)) : null),
     state: text(r.billing_state),
     contract_end: text(formatDate(r.current_contract_end_date as string | null)),
     acv: text(r.acv == null ? null : formatCurrency(Number(r.acv))),
@@ -649,6 +756,8 @@ function accountCells(r: RawRecord): Record<string, ReportCell> {
     last_activity: text(
       r.last_activity_at ? formatRelativeDate(r.last_activity_at as string) : "No activity",
     ),
+    // Dedicated last-touch from v_account_last_activity (already deployed).
+    last_touch: text(lt ? formatRelativeDate(lt) : null),
     owner: text(owner?.full_name),
     created: text(formatDate(r.created_at as string)),
   };
@@ -704,7 +813,7 @@ const SELECTS: Record<NexusReportEntity, string> = {
     "account:accounts!account_id(id, name, account_type, billing_state, status), " +
     "owner:user_profiles!owner_user_id(id, full_name)",
   accounts:
-    "id, name, status, customer_status, account_type, industry, industry_category, billing_state, " +
+    "id, name, status, customer_status, account_type, industry, industry_category, phone, billing_state, " +
     "current_contract_end_date, acv, notes, created_at, " +
     "owner:user_profiles!owner_user_id(id, full_name)",
   opportunities:
@@ -721,7 +830,7 @@ const SELECTS: Record<NexusReportEntity, string> = {
 // selects plain columns from v_opportunities_with_activity), so this select
 // has NO embeds; owner names are merged by id after the fetch.
 const ACCOUNTS_ACTIVITY_SELECT =
-  "id, name, status, customer_status, account_type, industry, industry_category, billing_state, " +
+  "id, name, status, customer_status, account_type, industry, industry_category, phone, billing_state, " +
   "current_contract_end_date, acv, notes, created_at, owner_user_id, last_activity_at";
 
 const TABLES: Record<NexusReportEntity, string> = {
@@ -754,6 +863,14 @@ export function useNexusReport(rawConfig: unknown, previewCount: number) {
       const hasOrgTypeFilter =
         entity === "contacts" &&
         filters.some((f) => f.field === "org_type" && Array.isArray(f.value) && f.value.length > 0);
+      // Contacts filter on the LINKED account's timezone (their own is empty);
+      // like org_type it needs the account embed to be inner.
+      const hasContactTimezoneFilter =
+        entity === "contacts" &&
+        filters.some((f) => f.field === "timezone" && Array.isArray(f.value) && f.value.length > 0);
+      const hasCalledByFilter =
+        entity === "contacts" &&
+        filters.some((f) => f.field === "called_by" && Array.isArray(f.value) && f.value.length > 0);
       // Any last_activity use on ACCOUNTS flips the query to the
       // v_accounts_with_activity view so sort/filter run server-side over
       // ALL accounts (accurate "longest without touch", per Jordan's doc) —
@@ -767,9 +884,10 @@ export function useNexusReport(rawConfig: unknown, previewCount: number) {
       let select = accountsActivity
         ? ACCOUNTS_ACTIVITY_SELECT
         : SELECTS[entity] + (hasTagFilter ? ", contact_tags!inner(tag_id)" : "");
-      if (hasOrgTypeFilter) {
-        // The org_type filter matches on the JOINED account; the embed must
-        // be inner so contacts with no/other-typed accounts drop out.
+      if (hasOrgTypeFilter || hasContactTimezoneFilter) {
+        // These filters match on the JOINED account (account_type / timezone);
+        // the embed must be inner so contacts with no/non-matching account
+        // drop out server-side.
         select = select.replace("account:accounts!account_id(", "account:accounts!account_id!inner(");
       }
 
@@ -779,6 +897,19 @@ export function useNexusReport(rawConfig: unknown, previewCount: number) {
       // else hides archived rows, matching the list pages.
       if (entity !== "imports") query = query.is("archived_at", null);
       query = applyFilters(entity, query, filters);
+
+      // "Called By": resolve the chosen users to the contact ids they've
+      // logged a call against (v_contact_callers), then constrain by id. An
+      // empty set (nobody matched, OR the view isn't deployed yet) short-
+      // circuits to no rows rather than an unfiltered result.
+      if (hasCalledByFilter) {
+        const callerIds = filters
+          .filter((f) => f.field === "called_by" && Array.isArray(f.value))
+          .flatMap((f) => f.value as string[]);
+        const contactIds = await fetchCallerContactIds(callerIds);
+        if (!contactIds.length) return [];
+        query = query.in("id", contactIds);
+      }
 
       // Sort server-side when we can; the client-eval path re-sorts below.
       const spec = clientEval ? null : serverSortSpec(entity, sort.field);
@@ -865,12 +996,23 @@ export function useNexusReport(rawConfig: unknown, previewCount: number) {
         tagsMap = await fetchContactTagsMap(ids);
       }
 
+      // "Last Touch" column: dedicated per-entity activity view. Fails soft
+      // (blank) when the contact view isn't deployed yet.
+      let lastTouch = new Map<string, string>();
+      if (columns.includes("last_touch")) {
+        if (entity === "contacts") {
+          lastTouch = await fetchLastTouchMap("v_contact_last_activity", "contact_id", ids);
+        } else if (entity === "accounts") {
+          lastTouch = await fetchLastTouchMap("v_account_last_activity", "account_id", ids);
+        }
+      }
+
       return rows.map((r): ReportRow => {
         const cellsAll =
           entity === "contacts"
-            ? contactCells(r, lastActivity, tagsMap)
+            ? contactCells(r, lastActivity, tagsMap, lastTouch)
             : entity === "accounts"
-              ? accountCells(r)
+              ? accountCells(r, lastTouch)
               : entity === "opportunities"
                 ? opportunityCells(r)
                 : importCells(r);
