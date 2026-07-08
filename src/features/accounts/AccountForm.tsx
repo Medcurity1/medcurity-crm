@@ -8,6 +8,7 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { useUnsavedChanges } from "@/hooks/useUnsavedChanges";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
+import { getMissingRequiredFields, formatFieldLabel } from "@/lib/requiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { accountSchema, type AccountFormValues } from "./schema";
 import { FTE_RANGES, employeesToFteRange } from "@/lib/formatters";
@@ -337,14 +338,18 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
   }
 
   async function onSubmit(values: AccountFormValues) {
-    // Check dynamic required fields
-    const missingFields = requiredKeys.filter((key) => {
-      const val = values[key as keyof typeof values];
-      return val === null || val === undefined || val === "";
-    });
+    // Check dynamic required fields. In edit mode, a field that was
+    // already empty on the original account is grandfathered — it only
+    // blocks the save if we're clearing a value that used to be there.
+    // See src/lib/requiredFields.ts for the full rationale.
+    const missingFields = getMissingRequiredFields(
+      requiredKeys,
+      values,
+      account as Record<string, unknown> | undefined
+    );
     if (missingFields.length > 0) {
       toast.error(
-        `Required fields missing: ${missingFields.map((k) => k.replace(/_/g, " ")).join(", ")}`
+        `Required fields missing: ${missingFields.map(formatFieldLabel).join(", ")}`
       );
       return;
     }
