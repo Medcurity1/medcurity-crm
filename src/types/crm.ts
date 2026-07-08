@@ -65,8 +65,14 @@ export type OpportunityBusinessType =
   | "existing_business_new_service"
   | "opportunity";
 
+// NOTE: the Postgres enum + accounts/schema.ts's Zod mirror + AccountForm's
+// dropdown already carry ~55 more values from the May 6 expansion
+// (20260506000002_industry_category_expand.sql — community_health_center,
+// cardiology, dermatology, etc.) that were never added here. This union only
+// picks up "rural_hospital" (2026-07-08, Jordan's "Rural Hospital" request) —
+// the rest of that gap is a pre-existing, separate issue, not fixed here.
 export type IndustryCategory =
-  | "hospital" | "medical_group" | "fqhc" | "rural_health_clinic"
+  | "hospital" | "medical_group" | "fqhc" | "rural_health_clinic" | "rural_hospital"
   | "skilled_nursing" | "long_term_care" | "home_health" | "hospice"
   | "behavioral_health" | "dental" | "pediatrics" | "specialty_clinic"
   | "urgent_care" | "imaging_center" | "lab_services" | "pharmacy"
@@ -259,6 +265,23 @@ export interface Account {
   creator?: UserProfile;
   updater?: UserProfile;
   parent_account?: { id: string; name: string } | null;
+  /**
+   * Most recent real interaction on this account (call/email/meeting or
+   * completed task), attached per-page by useAccounts from
+   * v_account_last_activity. Drives the Accounts list "Last Touch" column.
+   * Undefined until hydrated; null when the account has no logged activity.
+   * Mirrors Opportunity.last_activity_at.
+   */
+  last_activity_at?: string | null;
+  /**
+   * This account's primary contact (contacts.is_primary = true, scoped to
+   * this account_id via set_primary_contact), attached per-page by
+   * useAccounts. Undefined until hydrated; null when no contact is marked
+   * primary. Unlike Opportunity.primary_contact (sourced from a FK column,
+   * primary_contact_id), this is sourced from contacts.is_primary — the
+   * account-level "who do we call" flag maintained by AccountContacts.tsx.
+   */
+  primary_contact?: { id: string; first_name: string; last_name: string } | null;
 }
 
 export interface Tag {

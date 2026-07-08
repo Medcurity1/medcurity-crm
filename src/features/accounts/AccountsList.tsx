@@ -40,17 +40,32 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { statusLabel, customerStatusLabel, formatDate, INDUSTRY_CATEGORY_LABELS } from "@/lib/formatters";
+import { statusLabel, customerStatusLabel, formatRelativeDate, formatName, INDUSTRY_CATEGORY_LABELS } from "@/lib/formatters";
+import { formatPhone } from "@/components/PhoneInput";
 
+// "Contract End" (contract_end / current_contract_end_date) was replaced by
+// "Last Touch" below (Jordan, 2026-07-08). AccountsList has a ColumnPicker,
+// but useColumnPrefs has no working "default hidden, still available"
+// mode — ColumnDescriptor.defaultHidden is declared but explicitly commented
+// "reserved; unused in v1" in list-columns/columns.ts, and useColumnPrefs
+// only tracks a per-user HIDDEN deny-list (everything in the registry is
+// visible until a user personally toggles it off). Wiring up true
+// "available but not default" would mean editing shared
+// src/features/list-columns/** code, which is outside this change's file
+// boundary — so Contract End is dropped from the registry entirely rather
+// than left default-on (the spec's documented fallback for fixed-column
+// lists). It's still fully viewable on the Account detail page.
 const ACCOUNTS_COLUMNS: ColumnDescriptor[] = [
   { key: "select", label: "Select", locked: true, headClassName: "w-10" },
   { key: "name", label: "Name", sortKey: "name", locked: true },
+  { key: "primary_contact", label: "Primary Contact" },
+  { key: "phone", label: "Phone", sortKey: "phone" },
   { key: "status", label: "Status", sortKey: "status" },
   { key: "customer_status", label: "Customer Status", sortKey: "customer_status" },
   { key: "owner", label: "Owner" },
   { key: "state", label: "State", sortKey: "billing_state" },
   { key: "industry", label: "Industry", sortKey: "industry" },
-  { key: "contract_end", label: "Contract End", sortKey: "current_contract_end_date" },
+  { key: "last_touch", label: "Last Touch" },
   { key: "notes", label: "Notes" },
 ];
 
@@ -249,6 +264,25 @@ export function AccountsList() {
         {a.name}
       </Link>
     ),
+    primary_contact: (a) =>
+      a.primary_contact ? (
+        <Link
+          to={`/contacts/${a.primary_contact.id}`}
+          className="text-primary hover:underline"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {formatName(a.primary_contact.first_name, a.primary_contact.last_name)}
+        </Link>
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      ),
+    phone: (a) => (
+      <span className="text-muted-foreground">
+        {a.phone
+          ? formatPhone(`${a.phone}${a.phone_extension ? ` x${a.phone_extension}` : ""}`)
+          : "—"}
+      </span>
+    ),
     status: (a) => (
       <StatusBadge value={a.status} variant="status" label={statusLabel(a.status)} />
     ),
@@ -270,8 +304,10 @@ export function AccountsList() {
     industry: (a) => (
       <span className="text-muted-foreground">{a.industry ?? "—"}</span>
     ),
-    contract_end: (a) => (
-      <span className="text-muted-foreground">{formatDate(a.current_contract_end_date)}</span>
+    last_touch: (a) => (
+      <span className="text-muted-foreground">
+        {a.last_activity_at ? formatRelativeDate(a.last_activity_at) : "—"}
+      </span>
     ),
     notes: (a) => (
       <span

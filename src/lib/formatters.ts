@@ -290,6 +290,11 @@ export const INDUSTRY_CATEGORY_LABELS: Record<IndustryCategory, string> = {
   medical_group: "Medical Group",
   fqhc: "FQHC",
   rural_health_clinic: "Rural Health Clinic",
+  // Added 2026-07-08 (Jordan): value already existed on the Postgres enum
+  // (20260506000002_industry_category_expand.sql) and in AccountForm's
+  // dropdown — this label + the IndustryCategory union entry were the only
+  // missing pieces.
+  rural_hospital: "Rural Hospital",
   skilled_nursing: "Skilled Nursing",
   long_term_care: "Long-Term Care",
   home_health: "Home Health",
