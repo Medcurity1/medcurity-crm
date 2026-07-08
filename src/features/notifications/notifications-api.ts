@@ -3,7 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
 import type { Notification } from "@/types/crm";
 
-export function useNotifications(limit = 20) {
+export function useNotifications(limit = 20, opts?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ["notifications", { limit }],
     queryFn: async () => {
@@ -18,6 +18,10 @@ export function useNotifications(limit = 20) {
       if (error) throw error;
       return (data ?? []) as Notification[];
     },
+    // Gated on the bell popover being open — the list is invisible (and this
+    // query pointless) until then. The unread-count query above is separate
+    // and stays always-on.
+    enabled: opts?.enabled ?? true,
   });
 }
 

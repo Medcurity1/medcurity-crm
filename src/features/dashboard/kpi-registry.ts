@@ -125,6 +125,44 @@ function localISODate(date: Date): string {
 }
 
 // ---------------------------------------------------------------------------
+// Shared renewal_queue fetch (dedupe)
+// ---------------------------------------------------------------------------
+//
+// Three renewal KPIs — renewals_30, renewals_60, arr_at_risk — each derive
+// their number from the SAME `renewal_queue` view. Rendered together on the
+// admin home they used to execute that (computed) view 3× concurrently. This
+// memoizes ONE fetch of BOTH columns and shares the in-flight / last-result
+// promise for a short TTL, so the three concurrent callers (and the 60s
+// React Query remounts) collapse onto a single round-trip.
+//
+// Correctness: the row SET returned by `select … from renewal_queue` (no
+// filters, no limit, no order) depends only on the view's contents and the
+// server row cap — never on which columns are projected. So selecting both
+// columns at once returns exactly the same rows the single-column queries
+// did; each KPI then applies its unchanged predicate/aggregation to the same
+// per-row `days_until_renewal` / `current_arr` values and yields an identical
+// number.
+interface RenewalQueueRow {
+  days_until_renewal: number | null;
+  current_arr: number | null;
+}
+
+let _rqCache: { at: number; p: Promise<RenewalQueueRow[]> } | null = null;
+
+function fetchRenewalQueue(
+  supabase: SupabaseClient,
+): Promise<RenewalQueueRow[]> {
+  const now = Date.now();
+  if (_rqCache && now - _rqCache.at < 45_000) return _rqCache.p;
+  const p = supabase
+    .from("renewal_queue")
+    .select("days_until_renewal, current_arr")
+    .then(({ data }) => (data ?? []) as RenewalQueueRow[]);
+  _rqCache = { at: now, p };
+  return p;
+}
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -265,22 +303,24 @@ export const KPI_REGISTRY: KpiDefinition[] = [
       return `/opportunities?owner=mine&stage=${OPEN_STAGES}&expected_after=${localISODate(today)}&expected_before=${localISODate(thirty)}`;
     },
     query: async (supabase, userId) => {
-      const now = new Date();
-      const thirtyDaysOut = new Date(now);
-      thirtyDaysOut.setDate(thirtyDaysOut.getDate() + 30);
-      const { data } = await supabase
+      // Count the 30-day forward window server-side (head:true) instead of
+      // downloading every open opp and filtering in JS. The window mirrors
+      // the deep-link above exactly (today → today+30, inclusive both ends),
+      // so the card and the list it links to agree. expected_close_date is a
+      // DATE column, compared to LOCAL YYYY-MM-DD strings via localISODate.
+      const today = new Date();
+      const thirty = new Date(today);
+      thirty.setDate(thirty.getDate() + 30);
+      const { count } = await supabase
         .from("opportunities")
-        .select("expected_close_date")
+        .select("*", { count: "exact", head: true })
         .eq("owner_user_id", userId)
         .not("stage", "in", '("closed_won","closed_lost")')
-        .is("archived_at", null);
-      return (
-        data?.filter((o) => {
-          if (!o.expected_close_date) return false;
-          const d = new Date(o.expected_close_date);
-          return d >= now && d <= thirtyDaysOut;
-        }).length ?? 0
-      );
+        .is("archived_at", null)
+        .not("expected_close_date", "is", null)
+        .gte("expected_close_date", localISODate(today))
+        .lte("expected_close_date", localISODate(thirty));
+      return count ?? 0;
     },
   },
   {
@@ -290,18 +330,23 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     icon: Percent,
     format: "percent",
     query: async (supabase, userId) => {
-      const { count: wonCount } = await supabase
-        .from("opportunities")
-        .select("*", { count: "exact", head: true })
-        .eq("owner_user_id", userId)
-        .eq("stage", "closed_won")
-        .is("archived_at", null);
-      const { count: lostCount } = await supabase
-        .from("opportunities")
-        .select("*", { count: "exact", head: true })
-        .eq("owner_user_id", userId)
-        .eq("stage", "closed_lost")
-        .is("archived_at", null);
+      // Independent count queries — run them concurrently instead of
+      // awaiting won before starting lost (halves latency). The win-rate
+      // formula below is unchanged.
+      const [{ count: wonCount }, { count: lostCount }] = await Promise.all([
+        supabase
+          .from("opportunities")
+          .select("*", { count: "exact", head: true })
+          .eq("owner_user_id", userId)
+          .eq("stage", "closed_won")
+          .is("archived_at", null),
+        supabase
+          .from("opportunities")
+          .select("*", { count: "exact", head: true })
+          .eq("owner_user_id", userId)
+          .eq("stage", "closed_lost")
+          .is("archived_at", null),
+      ]);
       const won = wonCount ?? 0;
       const lost = lostCount ?? 0;
       const total = won + lost;
@@ -343,21 +388,17 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     // filters on the actual /renewals tab.
     link: "/renewals?preset=30&fresh=1",
     query: async (supabase) => {
-      const { data } = await supabase
-        .from("renewal_queue")
-        .select("days_until_renewal");
+      const rows = await fetchRenewalQueue(supabase);
       // Forward-looking only: matches the page's preset=30 window
       // (today → today+30). Earlier this also included past-due
       // (negative days_until_renewal), which made the count exceed
       // what the renewals page showed.
-      return (
-        data?.filter(
-          (r) =>
-            r.days_until_renewal !== null &&
-            r.days_until_renewal >= 0 &&
-            r.days_until_renewal <= 30,
-        ).length ?? 0
-      );
+      return rows.filter(
+        (r) =>
+          r.days_until_renewal !== null &&
+          r.days_until_renewal >= 0 &&
+          r.days_until_renewal <= 30,
+      ).length;
     },
   },
   {
@@ -368,17 +409,13 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     format: "number",
     link: "/renewals?preset=60&fresh=1",
     query: async (supabase) => {
-      const { data } = await supabase
-        .from("renewal_queue")
-        .select("days_until_renewal");
-      return (
-        data?.filter(
-          (r) =>
-            r.days_until_renewal !== null &&
-            r.days_until_renewal >= 0 &&
-            r.days_until_renewal <= 60,
-        ).length ?? 0
-      );
+      const rows = await fetchRenewalQueue(supabase);
+      return rows.filter(
+        (r) =>
+          r.days_until_renewal !== null &&
+          r.days_until_renewal >= 0 &&
+          r.days_until_renewal <= 60,
+      ).length;
     },
   },
   {
@@ -389,10 +426,8 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     format: "currency",
     link: "/renewals?fresh=1",
     query: async (supabase) => {
-      const { data } = await supabase
-        .from("renewal_queue")
-        .select("current_arr");
-      return data?.reduce((sum, r) => sum + Number(r.current_arr), 0) ?? 0;
+      const rows = await fetchRenewalQueue(supabase);
+      return rows.reduce((sum, r) => sum + Number(r.current_arr), 0);
     },
   },
   {

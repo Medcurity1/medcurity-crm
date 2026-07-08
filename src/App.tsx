@@ -12,7 +12,17 @@ import { ResetPasswordPage } from "@/features/auth/ResetPasswordPage";
 import { AppLayout } from "@/components/layout/AppLayout";
 
 // Lazy-loaded route components for code splitting
-const HomePage = lazy(() => import("@/features/dashboard/HomePage").then(m => ({ default: m.HomePage })));
+//
+// HomePage's import factory is captured once and fired eagerly below (at
+// module scope) so the chunk starts downloading during auth resolution
+// instead of only after the profile fetch resolves and Suspense first
+// renders it — kills a boot waterfall. Pure cache-warming hint; zero
+// behavior change.
+const homePageImport = () => import("@/features/dashboard/HomePage").then(m => ({ default: m.HomePage }));
+const HomePage = lazy(homePageImport);
+if (typeof window !== "undefined") {
+  homePageImport();
+}
 const NexusPage = lazy(() => import("@/features/nexus/NexusPage").then(m => ({ default: m.NexusPage })));
 const RequestsPage = lazy(() => import("@/features/requests/RequestsPage").then(m => ({ default: m.RequestsPage })));
 const MeddyPage = lazy(() => import("@/features/meddy/MeddyPage").then(m => ({ default: m.MeddyPage })));

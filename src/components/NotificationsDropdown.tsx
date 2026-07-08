@@ -58,7 +58,8 @@ const typeColor: Record<Notification["type"], string> = {
 
 export function NotificationsDropdown() {
   const navigate = useNavigate();
-  const { data: notifications = [] } = useNotifications(30);
+  const [open, setOpen] = useState(false);
+  const { data: notifications = [] } = useNotifications(30, { enabled: open });
   const { data: unreadCount = 0 } = useUnreadCount();
   const markAsRead = useMarkAsRead();
   const markAllAsRead = useMarkAllAsRead();
@@ -76,7 +77,7 @@ export function NotificationsDropdown() {
   };
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
