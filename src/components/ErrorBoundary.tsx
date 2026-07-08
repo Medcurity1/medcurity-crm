@@ -59,7 +59,12 @@ export class ErrorBoundary extends Component<Props, State> {
       // 30 seconds — protects against a true broken deploy looping.
       if (now - lastReload > 30_000) {
         sessionStorage.setItem(RELOAD_KEY, String(now));
-        window.location.reload();
+        // Cache-busted replace (same as main.tsx's recovery path) so we
+        // provably fetch a fresh index.html — a plain reload() can be
+        // served the same stale shell and strand the user on this screen.
+        const url = new URL(window.location.href);
+        url.searchParams.set("_r", String(now));
+        window.location.replace(url.toString());
         return;
       }
     }

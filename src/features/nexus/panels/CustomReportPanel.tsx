@@ -8,6 +8,7 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { useUsers } from "@/features/accounts/api";
 import { useTags } from "@/features/tags/api";
 import { usePicklistOptions } from "@/features/picklists/api";
+import { useAccountTypesInUse } from "../api";
 import { MultiSelect } from "@/components/MultiSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,6 +69,7 @@ export function CustomReportPanel({
   const { data: users } = useUsers();
   const { data: tags } = useTags();
   const { data: picklists } = usePicklistOptions();
+  const { data: accountTypes } = useAccountTypesInUse();
 
   const filterDefs = REPORT_FILTERS[config.entity];
   const columnDefs = REPORT_COLUMNS[config.entity];
@@ -135,6 +137,14 @@ export function CustomReportPanel({
       return (picklists?.get(def.picklistFieldKey) ?? [])
         .filter((o) => o.is_active)
         .map((o) => ({ value: o.value, label: o.label }));
+    }
+    if (def.optionsSource === "account_types") {
+      // Distinct account_type values actually in the data (with counts) —
+      // exact-match options for Account Type / contact Org Type filters.
+      return (accountTypes ?? []).map((t) => ({
+        value: t.account_type,
+        label: `${t.account_type} · ${t.n}`,
+      }));
     }
     return def.staticOptions ?? [];
   }

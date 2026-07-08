@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, Suspense } from "react";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { UserMenu } from "./UserMenu";
@@ -11,7 +11,7 @@ import { WelcomeWizard } from "@/features/auth/WelcomeWizard";
 import { QuickCreateDialog } from "@/components/QuickCreateDialog";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { useFrozenAnimationGuard } from "@/hooks/useFrozenAnimationGuard";
-import { QuickTaskDialog } from "@/features/activities/QuickTaskDialog";
+const QuickTaskDialog = lazy(() => import("@/features/activities/QuickTaskDialog").then((m) => ({ default: m.QuickTaskDialog })));
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useUserPreferences } from "@/hooks/useUserPreferences";
 import { useIdleLogout } from "@/hooks/useIdleLogout";
@@ -295,11 +295,19 @@ export function AppLayout() {
         onOpenChange={setShowQuickCreate}
       />
 
-      {/* Quick Task dialog — opened globally with Ctrl+Space from any screen */}
-      <QuickTaskDialog
-        open={showQuickTask}
-        onOpenChange={setShowQuickTask}
-      />
+      {/* Quick Task dialog — opened globally with Ctrl+Space from any screen.
+          Mounted only once opened so the lazy chunk (chrono-node et al.)
+          doesn't fetch at shell boot — and a failed fetch can't crash the
+          shell, only the dialog. `open` lives here, so a press that lands
+          while the chunk streams in still shows the dialog. */}
+      {showQuickTask && (
+        <Suspense fallback={null}>
+          <QuickTaskDialog
+            open={showQuickTask}
+            onOpenChange={setShowQuickTask}
+          />
+        </Suspense>
+      )}
 
       {/* Keyboard shortcuts help dialog */}
       <KeyboardShortcutsDialog

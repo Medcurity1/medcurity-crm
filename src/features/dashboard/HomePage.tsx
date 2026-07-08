@@ -151,24 +151,61 @@ function useRecentActivity() {
   });
 }
 
+// Shared column projection for both task queries below.
+const MY_TASKS_SELECT =
+  "id, subject, due_at, completed_at, priority, recur_freq, recur_interval, account_id, contact_id, opportunity_id, lead_id, account:accounts(id, name), contact:contacts(id, first_name, last_name), opportunity:opportunities(id, name), lead:leads(id, first_name, last_name, company)";
+
+// Split into two BOUNDED queries. The old single query pulled every task
+// (open + all completed history) with no limit, which would silently hit
+// PostgREST's 1000-row cap as completed history grows — truncating the set
+// and corrupting the open-task count. Now:
+//   • open tasks: same query + `.is("completed_at", null)` — small, bounded,
+//     so the header count and client-side sort stay correct.
+//   • completed tasks: only the 2 most-recently-completed (limit 2) — all the
+//     widget ever renders.
+// Both keys start with ["dashboard","my-tasks",…] so the existing
+// invalidateQueries prefix in the complete/uncomplete mutations refreshes both.
 function useMyTasks(userId: string) {
-  return useQuery({
-    queryKey: ["dashboard", "my-tasks", userId],
+  const openQuery = useQuery({
+    queryKey: ["dashboard", "my-tasks", "open", userId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("activities")
-        .select(
-          "id, subject, due_at, completed_at, priority, recur_freq, recur_interval, account_id, contact_id, opportunity_id, lead_id, account:accounts(id, name), contact:contacts(id, first_name, last_name), opportunity:opportunities(id, name), lead:leads(id, first_name, last_name, company)",
-        )
+        .select(MY_TASKS_SELECT)
         .eq("activity_type", "task")
         .eq("owner_user_id", userId)
         .is("archived_at", null)
+        .is("completed_at", null)
         .order("due_at", { ascending: true, nullsFirst: false });
       if (error) throw error;
       return (data ?? []) as unknown as TaskItem[];
     },
     enabled: !!userId,
   });
+
+  const completedQuery = useQuery({
+    queryKey: ["dashboard", "my-tasks", "completed", userId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("activities")
+        .select(MY_TASKS_SELECT)
+        .eq("activity_type", "task")
+        .eq("owner_user_id", userId)
+        .is("archived_at", null)
+        .not("completed_at", "is", null)
+        .order("completed_at", { ascending: false })
+        .limit(2);
+      if (error) throw error;
+      return (data ?? []) as unknown as TaskItem[];
+    },
+    enabled: !!userId,
+  });
+
+  return {
+    openTasks: openQuery.data,
+    completedTasks: completedQuery.data,
+    isLoading: openQuery.isLoading || completedQuery.isLoading,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -374,7 +411,8 @@ function getTaskAccount(
 }
 
 function MyTasksSection({ userId }: { userId: string }) {
-  const { data: tasks, isLoading } = useMyTasks(userId);
+  const { openTasks: openTaskData, completedTasks: completedTaskData, isLoading } =
+    useMyTasks(userId);
   const qc = useQueryClient();
 
   // Two paired mutations so an accidental check-off has a one-click
@@ -414,12 +452,14 @@ function MyTasksSection({ userId }: { userId: string }) {
   });
 
   // Due date first, then priority (High → Medium → Low) as the tiebreak.
-  // The query already returns ALL of the rep's tasks — record-linked and
-  // standalone alike — so this widget is the single "Up Next" surface.
-  const openTasks = (tasks ?? [])
+  // The open query already returns ALL of the rep's open tasks — record-linked
+  // and standalone alike — so this widget is the single "Up Next" surface. The
+  // redundant `.filter` also copies the array so `.sort` never mutates the
+  // React Query cache in place.
+  const openTasks = (openTaskData ?? [])
     .filter((t) => !t.completed_at)
     .sort(compareTasksByDueThenPriority);
-  const completedTasks = (tasks ?? []).filter((t) => t.completed_at);
+  const completedTasks = (completedTaskData ?? []).filter((t) => t.completed_at);
   // 2-column grid on lg → show 10 so each column has 5 rows. Reclaims
   // the empty right-half of the card and lets reps triage twice as
   // many tasks before clicking "View All".

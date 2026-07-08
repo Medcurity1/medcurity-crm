@@ -63,9 +63,10 @@ export function useOpportunities(filters?: OppFilters) {
 
       // Sort: support sorting by columns on embedded relations
       // (e.g. "account.name", "owner.full_name") via PostgREST's
-      // referencedTable option. Without this, clicking the Owner
-      // header was a no-op because owner is a joined table, not a
-      // column on opportunities.
+      // EMBED-PATH order form ("account(name)"). The earlier
+      // order(col, { referencedTable }) variant only reorders rows INSIDE
+      // the embed — a silent no-op for these to-one joins — so the header
+      // click never actually sorted the list (2026-07-07 review finding).
       if (sortByLastTouch) {
         // Sort by the SAME value the badge displays: last real touch, or the
         // deal's created_at when nothing was ever logged. Sorting by the raw
@@ -75,17 +76,15 @@ export function useOpportunities(filters?: OppFilters) {
         query = query.order("effective_last_touch", { ascending: sortAsc });
       } else if (sortCol.startsWith("account.")) {
         const innerCol = sortCol.slice("account.".length);
-        query = query.order(innerCol, {
+        query = query.order(`account(${innerCol})`, {
           ascending: sortAsc,
           nullsFirst: false,
-          referencedTable: "account",
         });
       } else if (sortCol.startsWith("owner.")) {
         const innerCol = sortCol.slice("owner.".length);
-        query = query.order(innerCol, {
+        query = query.order(`owner(${innerCol})`, {
           ascending: sortAsc,
           nullsFirst: false,
-          referencedTable: "owner",
         });
       } else {
         query = query.order(sortCol, { ascending: sortAsc, nullsFirst: false });

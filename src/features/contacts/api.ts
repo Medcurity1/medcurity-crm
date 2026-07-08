@@ -43,11 +43,13 @@ export function useContacts(filters?: ContactFilters) {
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (sortCol.startsWith("account.")) {
+        // EMBED-PATH order form — order(col, { referencedTable }) only
+        // reorders rows INSIDE the embed (no-op for a to-one join), so the
+        // Company header click never actually sorted (2026-07-07 finding).
         const innerCol = sortCol.slice("account.".length);
-        query = query.order(innerCol, {
+        query = query.order(`account(${innerCol})`, {
           ascending: sortAsc,
           nullsFirst: false,
-          referencedTable: "account",
         });
       } else {
         query = query.order(sortCol, { ascending: sortAsc, nullsFirst: false });

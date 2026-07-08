@@ -28,6 +28,7 @@ import {
   teamLabel,
   industryCategoryLabel,
   ALL_STAGES,
+  OPEN_STAGES,
   INDUSTRY_CATEGORY_LABELS,
 } from "@/lib/formatters";
 import type {
@@ -55,7 +56,7 @@ export interface ReportFilterDef {
   label: string;
   kind: ReportFilterKind;
   /** For kind "multi": where the option list comes from. */
-  optionsSource?: "owners" | "tags" | "picklist";
+  optionsSource?: "owners" | "tags" | "picklist" | "account_types";
   /** For optionsSource "picklist": which admin-managed picklist to read
    *  (stays in sync when admins add/rename values — no code change). */
   picklistFieldKey?: string;
@@ -95,7 +96,25 @@ const LEAD_SOURCE_OPTIONS = [
   { value: "other", label: "Other" },
 ];
 
-const STAGE_OPTIONS = ALL_STAGES.map((s) => ({ value: s, label: stageLabel(s) }));
+/**
+ * Synthetic "any open stage" stage-filter value (Jordan's doc: reps had to
+ * hand-pick all four open stages to approximate "Status = Open"). Expanded
+ * into OPEN_STAGES (incl. legacy stage names, so nothing filters to zero)
+ * at query/link time — it never reaches the database as a literal.
+ */
+export const OPEN_STAGE_SENTINEL = "__open__";
+
+function expandStageValues(vals: string[]): string[] {
+  if (!vals.includes(OPEN_STAGE_SENTINEL)) return vals;
+  return [
+    ...new Set<string>([...OPEN_STAGES, ...vals.filter((v) => v !== OPEN_STAGE_SENTINEL)]),
+  ];
+}
+
+const STAGE_OPTIONS = [
+  { value: OPEN_STAGE_SENTINEL, label: "Open (any open stage)" },
+  ...ALL_STAGES.map((s) => ({ value: s, label: stageLabel(s) })),
+];
 
 const TEAM_OPTIONS = (["sales", "renewals"] as OpportunityTeam[]).map((v) => ({
   value: v,
@@ -137,6 +156,10 @@ export const REPORT_FILTERS: Record<NexusReportEntity, ReportFilterDef[]> = {
     { field: "owner", label: "Owner", kind: "multi", optionsSource: "owners" },
     { field: "tags", label: "Tag", kind: "multi", optionsSource: "tags" },
     { field: "lead_source", label: "Lead Source", kind: "multi", staticOptions: LEAD_SOURCE_OPTIONS },
+    // "Org Type" = the contact's ACCOUNT account_type (CHC, FQHC, PCA, … —
+    // live SF-imported values, hence data-driven options). Filters via an
+    // inner-join on the account embed (Jordan's doc / Molly's CHC-FQHC widget).
+    { field: "org_type", label: "Org Type", kind: "multi", optionsSource: "account_types" },
     { field: "last_activity", label: "Last Activity", kind: "days" },
     { field: "do_not_call", label: "Do Not Call", kind: "boolean" },
     { field: "no_longer_employed", label: "No Longer Employed", kind: "boolean" },
@@ -151,9 +174,13 @@ export const REPORT_FILTERS: Record<NexusReportEntity, ReportFilterDef[]> = {
     { field: "status", label: "Status", kind: "multi", staticOptions: ACCOUNT_STATUS_OPTIONS },
     { field: "customer_status", label: "Customer Status", kind: "multi", staticOptions: CUSTOMER_STATUS_OPTIONS },
     { field: "industry", label: "Industry", kind: "multi", staticOptions: INDUSTRY_OPTIONS },
-    { field: "account_type", label: "Account Type contains", kind: "text" },
+    // Exact-match picklist over the account_type values actually in the data
+    // (was a fragile free-text "contains" — Jordan's doc). Old saved configs
+    // with op "contains" are coerced to exact-match in normalizeReportConfig.
+    { field: "account_type", label: "Account Type", kind: "multi", optionsSource: "account_types" },
     { field: "partner_type", label: "Partner Type", kind: "multi", optionsSource: "picklist", picklistFieldKey: "accounts.partner_type" },
     { field: "state", label: "State (billing)", kind: "text" },
+    { field: "last_activity", label: "Last Activity", kind: "days" },
     { field: "created", label: "Created", kind: "days" },
   ],
   opportunities: [
@@ -179,8 +206,12 @@ export const REPORT_COLUMNS: Record<NexusReportEntity, ReportColumnDef[]> = {
     { key: "email", label: "Email", sortable: true },
     { key: "phone", label: "Phone", sortable: false },
     { key: "org_type", label: "Org Type", sortable: false },
+    // "Status" for a contact = their ACCOUNT's status (contacts have no
+    // status of their own; this is what Molly's CHC/FQHC widget wants).
+    { key: "status", label: "Account Status", sortable: false },
     { key: "state", label: "State", sortable: false },
     { key: "tags", label: "Tags", sortable: false },
+    { key: "notes", label: "Notes", sortable: false },
     { key: "last_activity", label: "Last Activity", sortable: true },
     { key: "owner", label: "Owner", sortable: false },
     { key: "created", label: "Created", sortable: true },
@@ -189,22 +220,28 @@ export const REPORT_COLUMNS: Record<NexusReportEntity, ReportColumnDef[]> = {
     { key: "name", label: "Name", sortable: true },
     { key: "status", label: "Status", sortable: true },
     { key: "customer_status", label: "Customer Status", sortable: true },
+    { key: "account_type", label: "Account Type", sortable: true },
     { key: "industry", label: "Industry", sortable: false },
     { key: "state", label: "State", sortable: true },
     { key: "contract_end", label: "Contract End", sortable: true },
     { key: "acv", label: "ACV", sortable: true, align: "right" },
+    { key: "notes", label: "Notes", sortable: false },
+    { key: "last_activity", label: "Last Activity", sortable: true },
     { key: "owner", label: "Owner", sortable: false },
     { key: "created", label: "Created", sortable: true },
   ],
   opportunities: [
     { key: "name", label: "Name", sortable: true },
     { key: "account", label: "Account", sortable: true },
+    { key: "contact", label: "Contact", sortable: true },
     { key: "stage", label: "Stage", sortable: true },
     { key: "amount", label: "Amount", sortable: true, align: "right" },
+    { key: "next_step", label: "Next Step", sortable: false },
     { key: "expected_close", label: "Expected Close", sortable: true },
     { key: "close_date", label: "Close Date", sortable: true },
     { key: "business_type", label: "Business Type", sortable: true },
     { key: "team", label: "Team", sortable: true },
+    { key: "notes", label: "Notes", sortable: false },
     { key: "owner", label: "Owner", sortable: false },
     { key: "created", label: "Created", sortable: true },
   ],
@@ -267,10 +304,20 @@ export function normalizeReportConfig(raw: unknown): CustomReportWidgetConfig {
     cfg.sort && sortable.has(cfg.sort.field)
       ? { field: cfg.sort.field, dir: cfg.sort.dir === "asc" ? ("asc" as const) : ("desc" as const) }
       : { ...DEFAULT_REPORT_SORT[entity] };
-  const filterFields = new Set(REPORT_FILTERS[entity].map((f) => f.field));
-  const filters = Array.isArray(cfg.filters)
-    ? cfg.filters.filter((f) => f && filterFields.has(f.field))
-    : [];
+  const filterDefs = new Map(REPORT_FILTERS[entity].map((f) => [f.field, f]));
+  const filters = (
+    Array.isArray(cfg.filters) ? cfg.filters.filter((f) => f && filterDefs.has(f.field)) : []
+  ).map((f) => {
+    // A field upgraded from text-"contains" to an exact-match multi filter
+    // (account_type, per Jordan's doc) may still be saved with the old op.
+    // Coerce so old widgets keep filtering AND the editor renders correctly.
+    const def = filterDefs.get(f.field);
+    if (def?.kind === "multi" && f.op === "contains") {
+      const v = String(f.value ?? "").trim();
+      return { ...f, op: "in" as const, value: v ? [v] : [] };
+    }
+    return f;
+  });
   return { entity, filters, sort, columns };
 }
 
@@ -363,15 +410,22 @@ interface RawRecord {
   [key: string]: unknown;
 }
 
-/** Server-side ORDER BY spec for a sortable column key, per entity. */
+/**
+ * Server-side ORDER BY spec for a sortable column key, per entity.
+ *
+ * Joined-column sorts use PostgREST's EMBED-PATH form ("account(name)") —
+ * NOT order(col, { referencedTable }): that variant only reorders rows
+ * INSIDE the embed (a no-op for to-one joins), silently leaving the parent
+ * rows in tiebreak order. Verified against staging PostgREST.
+ */
 function serverSortSpec(
   entity: NexusReportEntity,
   field: string,
-): { column: string; referencedTable?: string } | null {
-  const maps: Record<NexusReportEntity, Record<string, { column: string; referencedTable?: string }>> = {
+): { column: string } | null {
+  const maps: Record<NexusReportEntity, Record<string, { column: string }>> = {
     contacts: {
       name: { column: "last_name" },
-      account: { column: "name", referencedTable: "account" },
+      account: { column: "account(name)" },
       title: { column: "title" },
       email: { column: "email" },
       created: { column: "created_at" },
@@ -381,14 +435,21 @@ function serverSortSpec(
       name: { column: "name" },
       status: { column: "status" },
       customer_status: { column: "customer_status" },
+      account_type: { column: "account_type" },
       state: { column: "billing_state" },
       contract_end: { column: "current_contract_end_date" },
       acv: { column: "acv" },
+      // Only reachable when the query targets v_accounts_with_activity
+      // (any last_activity use flips the table — see useNexusReport).
+      // Never NULL: falls back to created_at, so asc = longest-untouched
+      // first with never-touched sorting by account age (opps precedent).
+      last_activity: { column: "effective_last_touch" },
       created: { column: "created_at" },
     },
     opportunities: {
       name: { column: "name" },
-      account: { column: "name", referencedTable: "account" },
+      account: { column: "account(name)" },
+      contact: { column: "primary_contact(last_name)" },
       stage: { column: "stage" },
       amount: { column: "amount" },
       expected_close: { column: "expected_close_date" },
@@ -458,12 +519,43 @@ function applyFilters(entity: NexusReportEntity, query: any, filters: NexusRepor
       if (ids.length) query = query.in("contact_tags.tag_id", ids);
       continue;
     }
-    if (f.field === "last_activity") continue; // client-side
+    if (entity === "contacts" && f.field === "org_type") {
+      // Filter on the joined account's account_type. The select swaps the
+      // account embed to !inner when this filter is active (see the hook),
+      // so contacts whose account doesn't match — or who have no account —
+      // are excluded server-side.
+      const vals = Array.isArray(f.value) ? f.value : [];
+      if (vals.length) query = query.in("account.account_type", vals);
+      continue;
+    }
+    if (f.field === "last_activity") {
+      if (entity === "accounts") {
+        // Server-side over v_accounts_with_activity. Two different columns
+        // on purpose (mirrors the contacts client-side semantics):
+        //  - "more than N days ago" uses effective_last_touch (created_at
+        //    fallback, never NULL) so never-touched accounts count as
+        //    untouched — the whole point of the outreach report.
+        //  - "within the last N days" uses the raw last_activity_at so a
+        //    brand-new account with zero logged activity does NOT pass as
+        //    "recently worked" (gte on NULL excludes it).
+        const n = Number(f.value);
+        if (Number.isFinite(n) && n > 0) {
+          query =
+            f.op === "older_than_days"
+              ? query.lte("effective_last_touch", daysAgoISO(n))
+              : query.gte("last_activity_at", daysAgoISO(n));
+        }
+      }
+      continue; // contacts: client-side
+    }
     const col = filterColumn(entity, f.field);
     if (!col) continue;
     switch (f.op) {
       case "in": {
-        const vals = Array.isArray(f.value) ? f.value : [];
+        let vals = Array.isArray(f.value) ? (f.value as string[]) : [];
+        if (entity === "opportunities" && f.field === "stage") {
+          vals = expandStageValues(vals);
+        }
         if (vals.length) query = query.in(col, vals);
         break;
       }
@@ -500,12 +592,23 @@ function text(value: unknown): ReportCell {
   return { kind: "text", text: s };
 }
 
+/** Notes can be essays — clamp for a widget cell (CSS truncates the rest). */
+function noteText(value: unknown): ReportCell {
+  const s = value === null || value === undefined || value === "" ? null : String(value);
+  return text(s && s.length > 140 ? s.slice(0, 140).trimEnd() + "…" : s);
+}
+
 function contactCells(
   r: RawRecord,
   lastActivity: Map<string, string>,
   tags: Map<string, Tag[]>,
 ): Record<string, ReportCell> {
-  const account = r.account as { name?: string; account_type?: string | null; billing_state?: string | null } | null;
+  const account = r.account as {
+    name?: string;
+    account_type?: string | null;
+    billing_state?: string | null;
+    status?: string | null;
+  } | null;
   const owner = r.owner as { full_name?: string | null } | null;
   const la = lastActivity.get(r.id);
   return {
@@ -515,8 +618,10 @@ function contactCells(
     email: text(r.email),
     phone: text(r.phone),
     org_type: text(account?.account_type),
+    status: text(account?.status ? statusLabel(account.status as AccountStatus) : null),
     state: text((r.mailing_state as string | null) ?? account?.billing_state),
     tags: { kind: "tags", tags: tags.get(r.id) ?? [] },
+    notes: noteText(r.notes),
     last_activity: text(la ? formatRelativeDate(la) : "No activity"),
     owner: text(owner?.full_name),
     created: text(formatDate(r.created_at as string)),
@@ -529,6 +634,7 @@ function accountCells(r: RawRecord): Record<string, ReportCell> {
     name: text(r.name),
     status: text(r.status ? statusLabel(r.status as AccountStatus) : null),
     customer_status: text(customerStatusLabel(r.customer_status as CustomerStatus | null)),
+    account_type: text(r.account_type),
     industry: text(
       r.industry_category
         ? industryCategoryLabel(r.industry_category as IndustryCategory)
@@ -537,6 +643,12 @@ function accountCells(r: RawRecord): Record<string, ReportCell> {
     state: text(r.billing_state),
     contract_end: text(formatDate(r.current_contract_end_date as string | null)),
     acv: text(r.acv == null ? null : formatCurrency(Number(r.acv))),
+    notes: noteText(r.notes),
+    // Present only when the query targeted v_accounts_with_activity (the
+    // hook flips tables whenever last_activity is used).
+    last_activity: text(
+      r.last_activity_at ? formatRelativeDate(r.last_activity_at as string) : "No activity",
+    ),
     owner: text(owner?.full_name),
     created: text(formatDate(r.created_at as string)),
   };
@@ -545,15 +657,23 @@ function accountCells(r: RawRecord): Record<string, ReportCell> {
 function opportunityCells(r: RawRecord): Record<string, ReportCell> {
   const account = r.account as { name?: string } | null;
   const owner = r.owner as { full_name?: string | null } | null;
+  const contact = r.primary_contact as
+    | { first_name?: string | null; last_name?: string | null }
+    | null;
   return {
     name: text(r.name),
     account: text(account?.name),
+    contact: text(
+      contact ? formatName(String(contact.first_name ?? ""), String(contact.last_name ?? "")) : null,
+    ),
     stage: text(stageLabel(r.stage as OpportunityStage)),
     amount: text(formatCurrency(Number(r.amount ?? 0))),
+    next_step: text(r.next_step),
     expected_close: text(formatDate(r.expected_close_date as string | null)),
     close_date: text(formatDate(r.close_date as string | null)),
     business_type: text(businessTypeLabel(r.business_type as OpportunityBusinessType | null)),
     team: text(teamLabel(r.team as OpportunityTeam)),
+    notes: noteText(r.notes),
     owner: text(owner?.full_name),
     created: text(formatDate(r.created_at as string)),
   };
@@ -580,20 +700,29 @@ function importCells(r: RawRecord): Record<string, ReportCell> {
 
 const SELECTS: Record<NexusReportEntity, string> = {
   contacts:
-    "id, first_name, last_name, title, email, phone, mailing_state, created_at, " +
-    "account:accounts!account_id(id, name, account_type, billing_state), " +
+    "id, first_name, last_name, title, email, phone, mailing_state, notes, created_at, " +
+    "account:accounts!account_id(id, name, account_type, billing_state, status), " +
     "owner:user_profiles!owner_user_id(id, full_name)",
   accounts:
-    "id, name, status, customer_status, industry, industry_category, billing_state, " +
-    "current_contract_end_date, acv, created_at, " +
+    "id, name, status, customer_status, account_type, industry, industry_category, billing_state, " +
+    "current_contract_end_date, acv, notes, created_at, " +
     "owner:user_profiles!owner_user_id(id, full_name)",
   opportunities:
-    "id, name, stage, amount, business_type, team, expected_close_date, close_date, created_at, " +
+    "id, name, stage, amount, next_step, notes, business_type, team, expected_close_date, close_date, created_at, " +
     "account:accounts!account_id(id, name), " +
+    "primary_contact:contacts!primary_contact_id(id, first_name, last_name), " +
     "owner:user_profiles!owner_user_id(id, full_name)",
   imports:
     "id, entity, filename, status, total_rows, succeeded_count, failed_count, user_email, started_at",
 };
+
+// v_accounts_with_activity path: PostgREST embeds don't resolve through a
+// VIEW (FK metadata lives on the table — same reason opportunities/api.ts
+// selects plain columns from v_opportunities_with_activity), so this select
+// has NO embeds; owner names are merged by id after the fetch.
+const ACCOUNTS_ACTIVITY_SELECT =
+  "id, name, status, customer_status, account_type, industry, industry_category, billing_state, " +
+  "current_contract_end_date, acv, notes, created_at, owner_user_id, last_activity_at";
 
 const TABLES: Record<NexusReportEntity, string> = {
   contacts: "contacts",
@@ -622,10 +751,30 @@ export function useNexusReport(rawConfig: unknown, previewCount: number) {
       const hasTagFilter =
         entity === "contacts" &&
         filters.some((f) => f.field === "tags" && Array.isArray(f.value) && f.value.length > 0);
-      const select =
-        SELECTS[entity] + (hasTagFilter ? ", contact_tags!inner(tag_id)" : "");
+      const hasOrgTypeFilter =
+        entity === "contacts" &&
+        filters.some((f) => f.field === "org_type" && Array.isArray(f.value) && f.value.length > 0);
+      // Any last_activity use on ACCOUNTS flips the query to the
+      // v_accounts_with_activity view so sort/filter run server-side over
+      // ALL accounts (accurate "longest without touch", per Jordan's doc) —
+      // not a client-side page. Other account reports keep the plain table.
+      const accountsActivity =
+        entity === "accounts" &&
+        (sort.field === "last_activity" ||
+          columns.includes("last_activity") ||
+          filters.some((f) => f.field === "last_activity"));
 
-      let query = supabase.from(TABLES[entity]).select(select);
+      let select = accountsActivity
+        ? ACCOUNTS_ACTIVITY_SELECT
+        : SELECTS[entity] + (hasTagFilter ? ", contact_tags!inner(tag_id)" : "");
+      if (hasOrgTypeFilter) {
+        // The org_type filter matches on the JOINED account; the embed must
+        // be inner so contacts with no/other-typed accounts drop out.
+        select = select.replace("account:accounts!account_id(", "account:accounts!account_id!inner(");
+      }
+
+      const table = accountsActivity ? "v_accounts_with_activity" : TABLES[entity];
+      let query = supabase.from(table).select(select);
       // Archive convention: import_runs has no archived_at; everything
       // else hides archived rows, matching the list pages.
       if (entity !== "imports") query = query.is("archived_at", null);
@@ -637,7 +786,6 @@ export function useNexusReport(rawConfig: unknown, previewCount: number) {
         query = query.order(spec.column, {
           ascending: sort.dir === "asc",
           nullsFirst: false,
-          ...(spec.referencedTable ? { referencedTable: spec.referencedTable } : {}),
         });
       } else {
         const fallback = entity === "imports" ? "started_at" : "created_at";
@@ -650,6 +798,29 @@ export function useNexusReport(rawConfig: unknown, previewCount: number) {
       const { data, error } = await query;
       if (error) throw error;
       let rows = (data ?? []) as unknown as RawRecord[];
+
+      // View path has no owner embed — merge owner names by id (the same
+      // batch-fetch pattern opportunities/api.ts uses for its view).
+      if (accountsActivity && rows.length) {
+        const ownerIds = [
+          ...new Set(rows.map((r) => r.owner_user_id).filter(Boolean)),
+        ] as string[];
+        if (ownerIds.length) {
+          const { data: owners } = await supabase
+            .from("user_profiles")
+            .select("id, full_name")
+            .in("id", ownerIds);
+          const nameById = new Map(
+            ((owners ?? []) as { id: string; full_name: string | null }[]).map((o) => [
+              o.id,
+              o.full_name,
+            ]),
+          );
+          for (const r of rows) {
+            r.owner = { full_name: nameById.get(r.owner_user_id as string) ?? null };
+          }
+        }
+      }
 
       // Client-side last_activity evaluation (contacts only).
       let lastActivity = new Map<string, string>();
@@ -751,7 +922,13 @@ export function buildViewAllLink(rawConfig: unknown): string {
     if (!param || f.op !== "in" || !Array.isArray(f.value) || !f.value.length) {
       return base; // not representable — fall back to the plain list
     }
-    params.set(param, f.value.join(","));
+    // The synthetic "Open" stage value must reach the list page as real
+    // stage names — expand it exactly like the query does.
+    const vals =
+      entity === "opportunities" && f.field === "stage"
+        ? expandStageValues(f.value as string[])
+        : (f.value as string[]);
+    params.set(param, vals.join(","));
   }
 
   // Sort is best-effort: include when the list page sorts by the same key.

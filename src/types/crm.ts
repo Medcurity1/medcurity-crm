@@ -788,13 +788,6 @@ export interface RenewalQueueRow {
   days_until_renewal: number | null;
 }
 
-export interface PipelineSummaryRow {
-  team: OpportunityTeam;
-  stage: OpportunityStage;
-  opportunity_count: number;
-  total_amount: number;
-}
-
 // Custom pipeline views
 export interface PipelineViewConfig {
   stages: OpportunityStage[];

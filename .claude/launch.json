@@ -6,6 +6,13 @@
       "runtimeExecutable": "/bin/sh",
       "runtimeArgs": ["-c", "PATH=/usr/local/bin:$PATH npm run dev -- --port 5176"],
       "port": 5176
+    },
+    {
+      "name": "dev-alt",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": ["-c", "PATH=/usr/local/bin:$PATH npm run dev -- --port $PORT"],
+      "autoPort": true,
+      "port": 5186
     }
   ]
 }

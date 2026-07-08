@@ -42,7 +42,9 @@ function useRecentWins() {
         .is("retracted_at", null)
         .gte("won_at", since)
         .order("won_at", { ascending: false })
-        .limit(6);
+        // The card shows ~4.5 rows and scrolls (see CardContent below), so a
+        // hot week's wins are all reachable instead of cut off at 6.
+        .limit(12);
       if (error) throw error;
       return (data ?? []) as unknown as WinRow[];
     },
@@ -81,7 +83,10 @@ export function RecentWins() {
           Recent Wins
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-2">
+      {/* Cap at ~4.5 win rows; more than that scrolls inside the card so the
+          section never grows past this height (Nathan, 2026-07-07). The half
+          row peeking makes the scrollability obvious. */}
+      <CardContent className="max-h-[264px] space-y-2 overflow-y-auto pr-1">
         {wins.map((w) => {
           const mine = w.owner != null && w.owner.id === user?.id;
           const alreadyFived = w.fives.some((f) => f.user_id === user?.id);
