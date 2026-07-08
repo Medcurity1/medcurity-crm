@@ -295,13 +295,19 @@ export function AppLayout() {
         onOpenChange={setShowQuickCreate}
       />
 
-      {/* Quick Task dialog — opened globally with Ctrl+Space from any screen */}
-      <Suspense fallback={null}>
-        <QuickTaskDialog
-          open={showQuickTask}
-          onOpenChange={setShowQuickTask}
-        />
-      </Suspense>
+      {/* Quick Task dialog — opened globally with Ctrl+Space from any screen.
+          Mounted only once opened so the lazy chunk (chrono-node et al.)
+          doesn't fetch at shell boot — and a failed fetch can't crash the
+          shell, only the dialog. `open` lives here, so a press that lands
+          while the chunk streams in still shows the dialog. */}
+      {showQuickTask && (
+        <Suspense fallback={null}>
+          <QuickTaskDialog
+            open={showQuickTask}
+            onOpenChange={setShowQuickTask}
+          />
+        </Suspense>
+      )}
 
       {/* Keyboard shortcuts help dialog */}
       <KeyboardShortcutsDialog

@@ -157,12 +157,19 @@ function fetchRenewalQueue(
   // Async IIFE so `p` is a real Promise, not the query builder's PromiseLike
   // (the strict CI tsconfig rejects assigning a PromiseLike to Promise).
   const p = (async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("renewal_queue")
       .select("days_until_renewal, current_arr");
+    if (error) throw error;
     return (data ?? []) as RenewalQueueRow[];
   })();
   _rqCache = { at: now, p };
+  // A failed fetch must not poison the TTL window — drop it so the next
+  // caller (e.g. React Query's retry) actually refetches instead of being
+  // handed the same rejection for 45s.
+  p.catch(() => {
+    if (_rqCache?.p === p) _rqCache = null;
+  });
   return p;
 }
 

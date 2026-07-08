@@ -36,8 +36,9 @@ export default defineConfig({
         // them; react/query/dnd are shared app-wide. clsx and react-dom/client
         // are pinned to vendor-react on purpose (object entries are processed
         // in order, so listing vendor-react first claims them) so they don't
-        // leak into vendor-charts (eagerly imported by App) or the cache-busted
-        // entry chunk.
+        // leak into vendor-charts (imported only by the lazy chart route
+        // chunks, not by App — leaking clsx into it would make every clsx
+        // importer pull recharts eagerly) or the cache-busted entry chunk.
         manualChunks: {
           "vendor-react": ["react", "react-dom", "react-dom/client", "clsx", "react-router-dom"],
           "vendor-query": ["@tanstack/react-query"],

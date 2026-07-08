@@ -8,6 +8,7 @@ import {
   Calendar,
   TrendingUp,
   AtSign,
+  Loader2,
   Mail,
   Info,
   Trash2,
@@ -59,7 +60,7 @@ const typeColor: Record<Notification["type"], string> = {
 export function NotificationsDropdown() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const { data: notifications = [] } = useNotifications(30, { enabled: open });
+  const { data: notifications = [], isPending } = useNotifications(30, { enabled: open });
   const { data: unreadCount = 0 } = useUnreadCount();
   const markAsRead = useMarkAsRead();
   const markAllAsRead = useMarkAllAsRead();
@@ -72,6 +73,7 @@ export function NotificationsDropdown() {
       markAsRead.mutate(n.id);
     }
     if (n.link) {
+      setOpen(false);
       navigate(n.link);
     }
   };
@@ -129,7 +131,14 @@ export function NotificationsDropdown() {
           </div>
         </div>
 
-        {notifications.length === 0 ? (
+        {isPending ? (
+          // The list query is gated on the popover opening, so the very first
+          // open of a session starts cold — don't flash "No notifications yet"
+          // under an unread badge while the fetch is in flight.
+          <div className="flex items-center justify-center px-4 py-10">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground/50" />
+          </div>
+        ) : notifications.length === 0 ? (
           <div className="flex flex-col items-center justify-center px-4 py-10 text-center">
             <Bell className="h-8 w-8 text-muted-foreground/40" />
             <p className="mt-2 text-sm text-muted-foreground">
