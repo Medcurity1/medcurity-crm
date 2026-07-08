@@ -154,10 +154,14 @@ function fetchRenewalQueue(
 ): Promise<RenewalQueueRow[]> {
   const now = Date.now();
   if (_rqCache && now - _rqCache.at < 45_000) return _rqCache.p;
-  const p = supabase
-    .from("renewal_queue")
-    .select("days_until_renewal, current_arr")
-    .then(({ data }) => (data ?? []) as RenewalQueueRow[]);
+  // Async IIFE so `p` is a real Promise, not the query builder's PromiseLike
+  // (the strict CI tsconfig rejects assigning a PromiseLike to Promise).
+  const p = (async () => {
+    const { data } = await supabase
+      .from("renewal_queue")
+      .select("days_until_renewal, current_arr");
+    return (data ?? []) as RenewalQueueRow[];
+  })();
   _rqCache = { at: now, p };
   return p;
 }
