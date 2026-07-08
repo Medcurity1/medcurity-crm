@@ -7,6 +7,7 @@ import type { Lead } from "@/types/crm";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
+import { getMissingRequiredFields, formatFieldLabel } from "@/lib/requiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { leadSchema, type LeadFormValues } from "./schema";
 import { PicklistSelect } from "@/features/picklists/PicklistSelect";
@@ -251,14 +252,18 @@ function LeadFormInner({ lead }: { lead: Lead | undefined }) {
   }
 
   async function onSubmit(values: LeadFormValues) {
-    // Check dynamic required fields
-    const missingFields = requiredKeys.filter((key) => {
-      const val = values[key as keyof typeof values];
-      return val === null || val === undefined || val === "";
-    });
+    // Check dynamic required fields. In edit mode, a field that was
+    // already empty on the original lead is grandfathered — it only
+    // blocks the save if we're clearing a value that used to be there.
+    // See src/lib/requiredFields.ts for the full rationale.
+    const missingFields = getMissingRequiredFields(
+      requiredKeys,
+      values,
+      lead as Record<string, unknown> | undefined
+    );
     if (missingFields.length > 0) {
       toast.error(
-        `Required fields missing: ${missingFields.map((k) => k.replace(/_/g, " ")).join(", ")}`
+        `Required fields missing: ${missingFields.map(formatFieldLabel).join(", ")}`
       );
       return;
     }

@@ -14,6 +14,7 @@ import { useUnsavedChanges } from "@/hooks/useUnsavedChanges";
 import { useAccountsList } from "@/features/accounts/api";
 import { useUsers } from "@/features/accounts/api";
 import { useRequiredFields } from "@/hooks/useRequiredFields";
+import { getMissingRequiredFields, formatFieldLabel } from "@/lib/requiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { contactSchema, type ContactFormValues } from "./schema";
 import { errorMessage } from "@/lib/errors";
@@ -223,14 +224,18 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
   }
 
   async function onSubmit(values: ContactFormValues) {
-    // Check dynamic required fields
-    const missingFields = requiredKeys.filter((key) => {
-      const val = values[key as keyof typeof values];
-      return val === null || val === undefined || val === "";
-    });
+    // Check dynamic required fields. In edit mode, a field that was
+    // already empty on the original contact is grandfathered — it only
+    // blocks the save if we're clearing a value that used to be there.
+    // See src/lib/requiredFields.ts for the full rationale.
+    const missingFields = getMissingRequiredFields(
+      requiredKeys,
+      values,
+      contact as Record<string, unknown> | undefined
+    );
     if (missingFields.length > 0) {
       toast.error(
-        `Required fields missing: ${missingFields.map((k) => k.replace(/_/g, " ")).join(", ")}`
+        `Required fields missing: ${missingFields.map(formatFieldLabel).join(", ")}`
       );
       return;
     }

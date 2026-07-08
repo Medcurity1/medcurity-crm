@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { blankableNumber } from "@/lib/zodFields";
 
 export const leadSchema = z.object({
   first_name: z.string().min(1, "First name is required"),
@@ -29,8 +30,10 @@ export const leadSchema = z.object({
   status: z.string().min(1, "Status is required"),
   source: z.string().optional().nullable().or(z.literal("")),
   description: z.string().optional().or(z.literal("")),
-  employees: z.coerce.number().int().nonnegative().optional().or(z.literal("")),
-  annual_revenue: z.coerce.number().nonnegative().optional().or(z.literal("")),
+  // blankableNumber: blank input stays null (never coerced to 0) so
+  // required-field checks and NULL-vs-0 saves work. See src/lib/zodFields.ts.
+  employees: blankableNumber(z.coerce.number().int().nonnegative()),
+  annual_revenue: blankableNumber(z.coerce.number().nonnegative()),
   owner_user_id: z.string().uuid().nullable().optional(),
   // Address
   street: z.string().optional().or(z.literal("")),
@@ -40,7 +43,7 @@ export const leadSchema = z.object({
   country: z.string().optional().or(z.literal("")),
   // Qualification
   qualification: z.string().optional().nullable().or(z.literal("")),
-  score: z.coerce.number().int().nonnegative().optional().or(z.literal("")),
+  score: blankableNumber(z.coerce.number().int().nonnegative()),
   mql_date: z.string().optional().or(z.literal("")),
   // Compliance
   do_not_market_to: z.boolean().optional(),

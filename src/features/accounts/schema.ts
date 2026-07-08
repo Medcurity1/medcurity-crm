@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { blankableNumber } from "@/lib/zodFields";
 
 export const accountSchema = z.object({
   name: z.string().min(1, "Account name is required"),
@@ -47,12 +48,16 @@ export const accountSchema = z.object({
   phone_extension: z.string().optional().or(z.literal("")),
   // Company details
   timezone: z.string().optional().or(z.literal("")),
-  employees: z.coerce.number().int().nonnegative().optional().or(z.literal("")),
-  locations: z.coerce.number().int().nonnegative().optional().or(z.literal("")),
-  fte_count: z.coerce.number().int().nonnegative().optional().or(z.literal("")),
+  // Numeric fields use blankableNumber (not bare z.coerce.number()) so a
+  // blank input stays null instead of coercing to 0 — otherwise admin-
+  // required numeric fields can never be flagged as missing, and blank
+  // saves backfill 0 into nullable columns. See src/lib/zodFields.ts.
+  employees: blankableNumber(z.coerce.number().int().nonnegative()),
+  locations: blankableNumber(z.coerce.number().int().nonnegative()),
+  fte_count: blankableNumber(z.coerce.number().int().nonnegative()),
   fte_range: z.enum(["1-20", "21-50", "51-100", "101-250", "251-500", "501-750", "751-1000", "1001-1500", "1501-2000", "2001-5000", "5001-10000"]).optional().or(z.literal("")),
-  number_of_providers: z.coerce.number().int().nonnegative().optional().or(z.literal("")),
-  annual_revenue: z.coerce.number().nonnegative().optional().or(z.literal("")),
+  number_of_providers: blankableNumber(z.coerce.number().int().nonnegative()),
+  annual_revenue: blankableNumber(z.coerce.number().nonnegative()),
   // Contract & Renewal
   active_since: z.string().optional().or(z.literal("")),
   renewal_type: z.enum(["auto_renew", "manual_renew", "no_auto_renew", "full_auto_renew", "platform_only_auto_renew"]).optional().or(z.literal("")),
@@ -60,10 +65,10 @@ export const accountSchema = z.object({
   contracts: z.string().optional().or(z.literal("")),
   current_contract_start_date: z.string().optional().or(z.literal("")),
   current_contract_end_date: z.string().optional().or(z.literal("")),
-  current_contract_length_months: z.coerce.number().int().positive().optional().or(z.literal("")),
-  acv: z.coerce.number().nonnegative().optional().or(z.literal("")),
-  lifetime_value: z.coerce.number().nonnegative().optional().or(z.literal("")),
-  churn_amount: z.coerce.number().nonnegative().optional().or(z.literal("")),
+  current_contract_length_months: blankableNumber(z.coerce.number().int().positive()),
+  acv: blankableNumber(z.coerce.number().nonnegative()),
+  lifetime_value: blankableNumber(z.coerce.number().nonnegative()),
+  churn_amount: blankableNumber(z.coerce.number().nonnegative()),
   churn_date: z.string().optional().or(z.literal("")),
   // Billing address
   billing_street: z.string().optional().or(z.literal("")),
