@@ -50,6 +50,8 @@ import {
 } from "@/lib/formatters";
 import { celebrateClosedWon } from "@/lib/confetti";
 import { toast } from "sonner";
+import { supabase } from "@/lib/supabase";
+import { checkCloseReadiness, formatCloseReadinessMessage } from "@/lib/closeReadiness";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
 import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
 import { TasksPanel } from "@/features/activities/TasksPanel";
@@ -533,8 +535,19 @@ export function OpportunityDetail() {
       {/* --------- Stage Progress Bar --------- */}
       <StageProgressBar
         currentStage={opp.stage}
-        onStageClick={(stage) => {
-          if (stage !== opp.stage) setPendingStage(stage);
+        onStageClick={async (stage) => {
+          if (stage === opp.stage) return;
+          // Close-readiness gate (Rachel): block the move INTO Closed Won
+          // until the account has complete client info, before we even open
+          // the confirm dialog. Other stage changes are unaffected.
+          if (stage === "closed_won") {
+            const { ready, missing } = await checkCloseReadiness(supabase, opp.account_id);
+            if (!ready) {
+              toast.error(formatCloseReadinessMessage(missing));
+              return;
+            }
+          }
+          setPendingStage(stage);
         }}
       />
 

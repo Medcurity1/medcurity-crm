@@ -7,6 +7,8 @@ import { Target, Plus, Search, X, Pencil, Check } from "lucide-react";
 import { useOpportunities, useOpportunitiesTotals, useArchiveOpportunity, useBulkUpdateOwner, useBulkDeleteOpportunities, useUpdateOpportunity } from "./api";
 import { useClosedLostGuard } from "./useClosedLostGuard";
 import { toast } from "sonner";
+import { supabase } from "@/lib/supabase";
+import { checkCloseReadiness, formatCloseReadinessMessage } from "@/lib/closeReadiness";
 import { useUsers } from "@/features/accounts/api";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
@@ -144,19 +146,29 @@ function InlineStage({
     <div onClick={(e) => e.stopPropagation()}>
       <Select
         value={o.stage}
-        onValueChange={(v) => {
-          if (v !== o.stage) {
-            update.mutate(
-              { id: o.id, stage: v as OpportunityStage },
-              {
-                onSuccess: () => {
-                  toast.success(`Stage changed to ${stageLabel(v as OpportunityStage)}`);
-                  if (v === "closed_lost") onClosedLost(o.account_id);
-                },
-                onError: (e) => toast.error("Couldn't update stage: " + (e as Error).message),
-              },
-            );
+        onValueChange={async (v) => {
+          if (v === o.stage) return;
+          // Close-readiness gate (Rachel): block an inline change INTO
+          // Closed Won until the account has complete client info. The
+          // Select is controlled by o.stage, so returning without mutating
+          // leaves it showing the current stage.
+          if (v === "closed_won") {
+            const { ready, missing } = await checkCloseReadiness(supabase, o.account_id);
+            if (!ready) {
+              toast.error(formatCloseReadinessMessage(missing));
+              return;
+            }
           }
+          update.mutate(
+            { id: o.id, stage: v as OpportunityStage },
+            {
+              onSuccess: () => {
+                toast.success(`Stage changed to ${stageLabel(v as OpportunityStage)}`);
+                if (v === "closed_lost") onClosedLost(o.account_id);
+              },
+              onError: (e) => toast.error("Couldn't update stage: " + (e as Error).message),
+            },
+          );
         }}
       >
         <SelectTrigger
