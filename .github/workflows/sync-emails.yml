@@ -2,14 +2,22 @@ name: Sync Emails (cron)
 
 # Triggers the sync-emails Supabase Edge Function every 10 minutes.
 #
-# This replaces the pg_cron + pg_net schedule documented in
-# supabase/functions/sync-emails/README.md (Option A) with the README's
-# Option B (external scheduler) because pg_net 0.20 has a worker-level
-# regression on hosted Supabase that throws "Quote command returned error"
-# on every net.http_post call.
+# STATUS (2026-07-10): this workflow is now the REDUNDANT SAFETY NET, not the
+# primary trigger. pg_cron + pg_net (migration 20260710130000, jobname
+# email_sync_every_10_min) is primary — it fires on an exact clock inside
+# Postgres, while GitHub throttles this schedule badly (observed median gap
+# ~100 min, max 4.4 h). The function's scheduler-overlap lock makes
+# double-triggering harmless, so keep this running during the transition;
+# once pg_cron cadence is verified (select * from
+# public.v_email_sync_schedule_status; plus steady ~10-min email_sync_runs
+# rows), this file can be deleted.
 #
-# To roll back to pg_cron: delete this file and run the SQL in
-# sync-emails/README.md under "Schedule (cron trigger) — Option A".
+# History: this workflow originally REPLACED the pg_cron schedule
+# (2026-04-30, commit 5d95440) because pg_net 0.20 had a worker-level
+# regression on hosted Supabase ("Quote command returned error" on every
+# net.http_post call). pg_net has since worked on this stack — the
+# task-reminders 5-min job (migration 20260522000003) uses the identical
+# GUC-driven pattern and is live.
 
 on:
   schedule:

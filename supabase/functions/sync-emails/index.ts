@@ -9,8 +9,11 @@
 //   claim, which is ONLY safe because the platform gateway verifies the JWT
 //   signature first. Passing --no-verify-jwt would make that trust forgeable.
 //
-// Trigger: called by the GitHub Actions cron (.github/workflows/sync-emails.yml)
-// every 10 minutes, plus the app's "Sync now" button.
+// Trigger: pg_cron + pg_net every 10 minutes (migration 20260710130000 —
+// primary, runs on an exact clock inside Postgres), plus the GitHub Actions
+// cron (.github/workflows/sync-emails.yml — redundant safety net; GitHub
+// throttles it to ~100-minute median gaps), plus the app's "Sync now" button.
+// The scheduler-overlap lock below makes double-triggering harmless.
 //
 // Auth: the function accepts EITHER a valid service_role token (the cron — by
 // its verified `role` claim, rotation-proof) OR a valid signed-in CRM user's
@@ -69,6 +72,11 @@ interface EmailSyncConnection {
   token_expires_at: string | null;
   last_sync_at: string | null;
   is_active: boolean;
+  // Failure-streak bookkeeping (migration 20260710130000). Optional so the
+  // function still runs against a DB that predates the migration.
+  consecutive_failures?: number | null;
+  failing_since?: string | null;
+  failure_notified_at?: string | null;
   config: {
     log_sent: boolean;
     log_received: boolean;
@@ -106,10 +114,13 @@ interface LeadMatch {
 
 /**
  * Refresh a Gmail OAuth access token using the stored refresh token.
+ *
+ * `refresh_token` is present in the response only when Google rotates it
+ * (rare for Google, but the shape allows it).
  */
 async function refreshGmailToken(
   refreshToken: string
-): Promise<{ access_token: string; expires_in: number }> {
+): Promise<{ access_token: string; expires_in: number; refresh_token?: string }> {
   const clientId = Deno.env.get("GOOGLE_CLIENT_ID")!;
   const clientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET")!;
 
@@ -134,10 +145,15 @@ async function refreshGmailToken(
 
 /**
  * Refresh an Outlook OAuth access token using the stored refresh token.
+ *
+ * Microsoft ROTATES the refresh token on every refresh: the response carries
+ * a new `refresh_token`, and the old one eventually expires (24h for SPA
+ * flows, ~90 days sliding window otherwise). The caller MUST persist the
+ * rotated token or the connection silently dies when the original expires.
  */
 async function refreshOutlookToken(
   refreshToken: string
-): Promise<{ access_token: string; expires_in: number }> {
+): Promise<{ access_token: string; expires_in: number; refresh_token?: string }> {
   const clientId = Deno.env.get("MICROSOFT_CLIENT_ID")!;
   const clientSecret = Deno.env.get("MICROSOFT_CLIENT_SECRET")!;
 
@@ -205,6 +221,14 @@ async function ensureValidToken(
     .update({
       access_token: tokenData.access_token,
       token_expires_at: expiresAt,
+      // Persist the ROTATED refresh token when the provider returns one
+      // (Microsoft always rotates; Google usually doesn't). Previously we
+      // discarded it, so the stored Outlook refresh token aged out and the
+      // connection died silently. Conditional spread: providers that don't
+      // rotate keep the stored token untouched.
+      ...(tokenData.refresh_token
+        ? { refresh_token: tokenData.refresh_token }
+        : {}),
     })
     .eq("id", conn.id);
 
@@ -430,11 +454,21 @@ async function fetchOutlookEmails(
 
 /**
  * Look up CRM contacts by email address, returning account_id and primary flag.
+ *
+ * Returns ALL matching contacts per address (Map<address, ContactMatch[]>).
+ * The same email address can legitimately live on contacts under MULTIPLE
+ * accounts (e.g. a consultant working with two clients, or a person tracked
+ * at both a hospital and its parent system). The old Map<string, ContactMatch>
+ * let later rows silently overwrite earlier ones — with no ORDER BY, which
+ * account "won" was arbitrary, so the email logged to one random account
+ * (Molly's missing-email reports). Callers create one activity per matched
+ * contact; the (owner_user_id, external_message_id, contact_id) unique index
+ * keeps that idempotent.
  */
 async function matchContactsByEmail(
   supabase: SupabaseClient,
   emailAddresses: string[]
-): Promise<Map<string, ContactMatch>> {
+): Promise<Map<string, ContactMatch[]>> {
   if (emailAddresses.length === 0) return new Map();
 
   const lower = emailAddresses.map((e) => e.toLowerCase());
@@ -447,7 +481,7 @@ async function matchContactsByEmail(
   // Workaround: build an OR of `ilike` clauses (PostgREST `or` syntax).
   // 200-address ceiling per query keeps the URL under PostgREST limits;
   // batching handles larger inboxes.
-  const map = new Map<string, ContactMatch>();
+  const map = new Map<string, ContactMatch[]>();
   // A contact can hold up to 3 addresses (email, email2, email3), so each
   // address expands to 3 ilike clauses — keep the batch ~3x smaller so the
   // PostgREST `or` URL stays under length limits (was 100 for one clause each).
@@ -480,8 +514,17 @@ async function matchContactsByEmail(
       };
       // Key the SAME contact under each of its addresses so mail to any one
       // resolves to this contact (contactsSeen dedups by contact_id downstream).
+      // APPEND rather than overwrite: every contact sharing the address is
+      // kept, so an address on contacts under multiple accounts logs to all.
       for (const addr of [contact.email, contact.email2, contact.email3]) {
-        if (addr) map.set(addr.toLowerCase(), match);
+        if (!addr) continue;
+        const key = addr.toLowerCase();
+        const list = map.get(key);
+        if (!list) {
+          map.set(key, [match]);
+        } else if (!list.some((m) => m.contact_id === match.contact_id)) {
+          list.push(match);
+        }
       }
     }
   }
@@ -592,9 +635,10 @@ async function findOpenOpportunity(
 /**
  * Create an activity record for a matched email.
  *
- * Deduplicates via (owner_user_id, external_message_id) — the migration
- * adds a partial unique index, so a concurrent or replayed sync won't
- * produce duplicate rows.
+ * Deduplicates via (owner_user_id, external_message_id, contact_id) — the
+ * widened unique index, so a concurrent or replayed sync won't produce
+ * duplicate rows and one email can still log to MULTIPLE contacts (one row
+ * per contact, each carrying that contact's account_id).
  *
  * Returns true if a new row was created, false if the email was already
  * recorded or the insert failed.
@@ -610,11 +654,15 @@ async function createEmailActivity(
   const externalId = `${conn.provider}:${email.messageId}`;
 
   // Check first — cheaper and avoids noisy unique-violation errors in logs.
+  // MUST scope by contact_id: the same message legitimately produces one
+  // row per matched contact. An unscoped check would see the first
+  // contact's row and silently skip every other contact on the email.
   const { data: existing } = await supabase
     .from("activities")
     .select("id")
     .eq("owner_user_id", conn.user_id)
     .eq("external_message_id", externalId)
+    .eq("contact_id", match.contact_id)
     .maybeSingle();
 
   if (existing) return false;
@@ -714,6 +762,108 @@ async function createLeadEmailActivity(
 }
 
 // ---------------------------------------------------------------------------
+// Failure-streak assurance
+// ---------------------------------------------------------------------------
+//
+// A connection whose runs keep failing (expired refresh token, revoked
+// consent, Graph/Gmail 4xx) previously stayed is_active=true with errors
+// only visible in email_sync_runs — nobody was told, and reps assumed
+// their email was still being logged. Track a consecutive-failure streak
+// on the connection row (columns added in migration 20260710130000) and,
+// once it reaches the threshold, notify the OWNER in-app exactly once per
+// streak. A later success resets everything, re-arming the alert.
+// We deliberately do NOT auto-disable the connection: a transient provider
+// outage shouldn't kill a mailbox link that will heal on its own.
+
+const FAILURE_NOTIFY_THRESHOLD = 3;
+
+async function recordSyncSuccess(
+  supabase: SupabaseClient,
+  conn: EmailSyncConnection
+): Promise<void> {
+  // Nothing to clear — skip the write on the (overwhelmingly common)
+  // healthy path.
+  if (
+    !(conn.consecutive_failures ?? 0) &&
+    !conn.failing_since &&
+    !conn.failure_notified_at
+  ) {
+    return;
+  }
+  const { error } = await supabase
+    .from("email_sync_connections")
+    .update({
+      consecutive_failures: 0,
+      failing_since: null,
+      failure_notified_at: null,
+    })
+    .eq("id", conn.id);
+  if (error) {
+    // Columns may not exist yet if the function deployed before the
+    // migration ran — degrade silently, sync itself already succeeded.
+    console.warn(`failure-streak reset skipped: ${error.message}`);
+  }
+}
+
+async function recordSyncFailure(
+  supabase: SupabaseClient,
+  conn: EmailSyncConnection
+): Promise<void> {
+  const failures = (conn.consecutive_failures ?? 0) + 1;
+  const failingSince = conn.failing_since ?? new Date().toISOString();
+
+  const { error } = await supabase
+    .from("email_sync_connections")
+    .update({
+      consecutive_failures: failures,
+      failing_since: failingSince,
+    })
+    .eq("id", conn.id);
+  if (error) {
+    console.warn(`failure-streak update skipped: ${error.message}`);
+    return;
+  }
+
+  if (failures < FAILURE_NOTIFY_THRESHOLD) return;
+
+  // Notify ONCE per streak: atomically claim the notification slot by
+  // setting failure_notified_at only where it is still null. If another
+  // run got there first (or we already notified earlier in this streak),
+  // zero rows come back and we stay quiet.
+  const { data: claimed, error: claimErr } = await supabase
+    .from("email_sync_connections")
+    .update({ failure_notified_at: new Date().toISOString() })
+    .eq("id", conn.id)
+    .is("failure_notified_at", null)
+    .select("id");
+  if (claimErr || !claimed || claimed.length === 0) return;
+
+  const providerLabel = conn.provider === "gmail" ? "Gmail" : "Outlook";
+  const sinceLabel = new Date(failingSince).toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+  });
+  const { error: notifErr } = await supabase.from("notifications").insert({
+    user_id: conn.user_id,
+    type: "system",
+    title: "Your email sync needs attention",
+    message:
+      `Your ${providerLabel} email sync has been failing since ${sinceLabel}, ` +
+      `so recent emails are not being logged to the CRM. ` +
+      `Please reconnect in Settings → Email Integration.`,
+    link: "/settings?tab=email",
+  });
+  if (notifErr) {
+    console.error(`failure notification insert failed: ${notifErr.message}`);
+  } else {
+    console.log(
+      `Notified user ${conn.user_id}: connection ${conn.id} has failed ` +
+        `${failures} consecutive runs (since ${failingSince})`
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Sync orchestration for a single connection
 // ---------------------------------------------------------------------------
 
@@ -790,17 +940,16 @@ async function syncConnection(
     });
 
     // 5. Collect all unique external email addresses to look up.
-    //    Internal-domain addresses are filtered out before contact lookup
-    //    so we NEVER log Medcurity-to-Medcurity internal threads.
+    //    participantAddresses() filters out internal-domain addresses and
+    //    the mailbox owner's own address, so we NEVER log
+    //    Medcurity-to-Medcurity internal threads. Received emails now
+    //    consider From + To + CC (not just From) so contacts riding a
+    //    thread's CC line still match.
+    const ownAddress = (conn.email_address ?? "").toLowerCase();
     const externalAddresses = new Set<string>();
     for (const email of filteredEmails) {
-      const candidates =
-        email.direction === "sent"
-          ? [...email.to, ...email.cc]
-          : [email.from];
-      for (const addr of candidates) {
-        const lower = addr.toLowerCase();
-        if (!isInternalAddress(lower)) externalAddresses.add(lower);
+      for (const addr of participantAddresses(email, ownAddress)) {
+        externalAddresses.add(addr);
       }
     }
 
@@ -825,53 +974,66 @@ async function syncConnection(
     //    Per Brayden 2026-04-17: when multiple contacts on the same account
     //    are on an email, create one activity row per contact so the email
     //    shows on EACH contact's timeline (matches Salesforce behavior).
+    //    Since 2026-07-10 this also covers ONE ADDRESS matching contacts on
+    //    MULTIPLE accounts: every matched contact gets a row (each with its
+    //    own account_id) instead of one arbitrary winner. contactsSeen
+    //    dedupes by contact_id across ALL participant addresses, so the
+    //    per-email row count stays exactly one per distinct contact.
     //    The widened unique index (owner_user_id, external_message_id,
     //    contact_id) keeps re-runs idempotent.
+    //
+    //    oppCache: findOpenOpportunity is deterministic within a single
+    //    run, so cache it per account to avoid re-querying when many
+    //    emails/contacts share an account.
+    const oppCache = new Map<string, string | null>();
     for (const email of filteredEmails) {
-      const addressesToCheck: string[] =
-        email.direction === "sent"
-          ? [...email.to, ...email.cc]
-          : [email.from];
+      const addressesToCheck = participantAddresses(email, ownAddress);
 
-      // Skip entirely if every candidate is internal.
-      if (addressesToCheck.every((a) => isInternalAddress(a))) continue;
+      // Wholly-internal emails (or owner-only) yield no candidates — skip.
+      if (addressesToCheck.length === 0) continue;
 
       // Deduplicate by contact_id / lead_id within this email so CC'ing
       // the same person twice doesn't double-write.
       const contactsSeen = new Set<string>();
       const leadsSeen = new Set<string>();
 
-      for (const addr of addressesToCheck) {
-        if (isInternalAddress(addr)) continue;
-        const lower = addr.toLowerCase();
-
+      for (const lower of addressesToCheck) {
         // Contact match wins. If the address is a known contact, log
-        // the activity against the contact and move on.
-        const contactMatch = contactMap.get(lower);
-        if (contactMatch) {
-          if (contactsSeen.has(contactMatch.contact_id)) continue;
-          contactsSeen.add(contactMatch.contact_id);
+        // the activity against EVERY matched contact and move on.
+        const contactMatches = contactMap.get(lower);
+        if (contactMatches && contactMatches.length > 0) {
+          for (const contactMatch of contactMatches) {
+            if (contactsSeen.has(contactMatch.contact_id)) continue;
+            contactsSeen.add(contactMatch.contact_id);
 
-          // Skip non-primary contacts if the config requires it
-          if (conn.config.primary_only && !contactMatch.is_primary) continue;
+            // Skip non-primary contacts if the config requires it
+            if (conn.config.primary_only && !contactMatch.is_primary) {
+              continue;
+            }
 
-          // Optionally auto-link to an open opportunity
-          let opportunityId: string | null = null;
-          if (conn.config.auto_link_opps) {
-            opportunityId = await findOpenOpportunity(
+            // Optionally auto-link to an open opportunity
+            let opportunityId: string | null = null;
+            if (conn.config.auto_link_opps) {
+              if (oppCache.has(contactMatch.account_id)) {
+                opportunityId = oppCache.get(contactMatch.account_id) ?? null;
+              } else {
+                opportunityId = await findOpenOpportunity(
+                  supabase,
+                  contactMatch.account_id
+                );
+                oppCache.set(contactMatch.account_id, opportunityId);
+              }
+            }
+
+            const inserted = await createEmailActivity(
               supabase,
-              contactMatch.account_id
+              conn,
+              email,
+              contactMatch,
+              opportunityId
             );
+            if (inserted) created++;
           }
-
-          const inserted = await createEmailActivity(
-            supabase,
-            conn,
-            email,
-            contactMatch,
-            opportunityId
-          );
-          if (inserted) created++;
           continue;
         }
 
@@ -916,6 +1078,9 @@ async function syncConnection(
         })
         .eq("id", runId);
     }
+
+    // Healthy run: clear any failure streak (re-arms the failure alert).
+    await recordSyncSuccess(supabase, conn);
   } catch (err) {
     errors++;
     const message = (err as Error).message;
@@ -934,6 +1099,10 @@ async function syncConnection(
         })
         .eq("id", runId);
     }
+
+    // Bump the failure streak; notifies the owner at the 3rd consecutive
+    // failure (once per streak).
+    await recordSyncFailure(supabase, conn);
   }
 
   return { created, errors };
@@ -948,6 +1117,42 @@ function extractEmail(header: string): string {
   const match = header.match(/<([^>]+)>/);
   if (match) return match[1].trim().toLowerCase();
   return header.trim().toLowerCase();
+}
+
+/**
+ * The participant addresses of an email that are eligible for CRM matching,
+ * lowercased and deduped.
+ *
+ * - Sent mail: To + CC (who the rep wrote to).
+ * - Received mail: From + To + CC. Previously only From was checked, so a
+ *   received email where a known contact was on the To/CC line (e.g. a
+ *   contact's colleague replies and keeps the contact CC'd, or one thread
+ *   spans contacts on two accounts) never logged to those contacts —
+ *   another source of Molly's "email isn't on the account" reports.
+ * - The connection owner's own mailbox address is never a candidate.
+ * - Internal-domain addresses (medcurity.com) are never candidates, which
+ *   also preserves the wholly-internal-email skip: such emails produce an
+ *   empty candidate list.
+ */
+function participantAddresses(
+  email: ParsedEmail,
+  ownAddress: string
+): string[] {
+  const raw =
+    email.direction === "sent"
+      ? [...email.to, ...email.cc]
+      : [email.from, ...email.to, ...email.cc];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const addr of raw) {
+    const lower = addr.trim().toLowerCase();
+    if (!lower || seen.has(lower)) continue;
+    seen.add(lower);
+    if (ownAddress && lower === ownAddress) continue;
+    if (isInternalAddress(lower)) continue;
+    out.push(lower);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -1029,7 +1234,8 @@ serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  // Auth gate — deployed with --no-verify-jwt, so we must authenticate the
+  // Auth gate — the platform gateway has already verified the JWT signature
+  // (deployed with JWT verify ON — see header), but we still authorize the
   // caller ourselves before doing anything (before parsing body/creating the
   // service-role client). Allow EITHER our own backend (service-role bearer,
   // used by the pg_cron sweep) OR a signed-in CRM user (the app's "Sync now"
@@ -1190,6 +1396,65 @@ serve(async (req) => {
       }
     }
 
+    // Overlap guard for the full-sweep (cron) path. Two schedulers can
+    // legitimately fire this function at the same time — pg_cron (primary,
+    // migration 20260710130000) and the GitHub Actions cron (safety net) —
+    // and overlapping sweeps would double-fetch every mailbox. Claim the
+    // singleton lock row with an atomic conditional UPDATE: only one caller
+    // can move locked_until forward past now(). The 3-minute TTL comfortably
+    // covers the 90s work budget + gateway overhead, and self-heals if a
+    // worker is SIGKILL'd while holding the lock (next 10-min tick is fine).
+    // User-scoped "Sync now" calls skip the lock — a rep's manual sync
+    // shouldn't be bounced because a cron sweep is running.
+    let lockClaimed = false;
+    if (!scopedUserId) {
+      const nowIso = new Date().toISOString();
+      const LOCK_TTL_MS = 3 * 60 * 1000;
+      const { data: lockRows, error: lockErr } = await supabase
+        .from("email_sync_scheduler_lock")
+        .update({
+          locked_until: new Date(Date.now() + LOCK_TTL_MS).toISOString(),
+          locked_at: nowIso,
+        })
+        .lt("locked_until", nowIso)
+        .select("id");
+      if (lockErr) {
+        // Lock table missing (function deployed before the migration) or
+        // transient error — fail OPEN: an unguarded sweep is the old,
+        // known-safe behavior (dedup indexes prevent duplicates).
+        console.warn(
+          `scheduler lock unavailable (${lockErr.message}) — proceeding unguarded`
+        );
+      } else if (!lockRows || lockRows.length === 0) {
+        console.log("Another sweep holds the scheduler lock; skipping.");
+        return new Response(
+          JSON.stringify({
+            message: "Another sync sweep is already in progress; skipped",
+            connections_processed: 0,
+            activities_created: 0,
+            errors: 0,
+          }),
+          {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      } else {
+        lockClaimed = true;
+      }
+    }
+
+    // Hand the lock back as soon as the sweep is done (a fatal throw skips
+    // this and the TTL takes over — 3 min, well before the next tick).
+    const releaseLock = async () => {
+      if (!lockClaimed) return;
+      const { error } = await supabase
+        .from("email_sync_scheduler_lock")
+        .update({ locked_until: new Date().toISOString() })
+        .eq("id", true);
+      if (error) console.warn(`scheduler lock release failed: ${error.message}`);
+    };
+
     // Fetch all active email sync connections, oldest-stale first so the
     // ones overdue for a sync get serviced before fresh ones.
     // `nullsFirst: true` puts never-synced connections (initial 90-day
@@ -1208,6 +1473,7 @@ serve(async (req) => {
     }
 
     if (!connections || connections.length === 0) {
+      await releaseLock();
       return new Response(
         JSON.stringify({
           message: "No active connections",
@@ -1257,6 +1523,8 @@ serve(async (req) => {
       totalErrors += result.errors;
       processed++;
     }
+
+    await releaseLock();
 
     return new Response(
       JSON.stringify({

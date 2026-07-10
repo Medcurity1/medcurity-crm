@@ -4,6 +4,8 @@ Newest first. One line per item: date shipped, who asked, what, where it landed 
 
 ## 2026-07
 
+- 2026-07-09 · PROD (49adcd3) · Summer · Un-require Employees on account create. Investigated first per Nathan: NOBODY ever requested the rule (hand-toggled in Admin → Required Fields, which the audit log doesn't cover — no who/when recorded; dormant until the 2026-07-08 numeric fix made it enforce). Nathan authorized removal after a team clarification email; FTE still required at Closed Won via Rachel's gate · 20260709110000 (+ a flip/restore pair 100000/101000 from an unauthorized first attempt, net no change)
+- 2026-07-09 · PROD (49adcd3) · Nathan · In-repo work ledger (this DOCKET/SHIPPED system) + CLAUDE.md rule that every session, incl. worktrees, updates it with the work itself · bd1f814
 - 2026-07-08 · PROD (61495c1) · Rachel · Closed Won gate: account must have phone, billing address, FTE range, and a contact email before a deal can close; config in required_field_config entity opportunity_close; every close surface gated, transition-only, imports/automation exempt · 8a041fa
 - 2026-07-08 · PROD (61495c1) · Jordan · Nexus: lead-source filter fixed (root cause: hardcoded 8-value list vs 13-value picklist — now data-driven), called-by filter (v_contact_callers), timezone filter (data-driven values; contacts via linked account), phone + last-touch widget columns; both /nexus and admin tab · 2e72211
 - 2026-07-08 · PROD (61495c1) · Jordan · Accounts list: Primary Contact (linked) + Phone columns, Last Touch replaces Contract End; Rural Hospital industry display/filter fix (enum existed since May; frontend never picked it up) · 0e878b6
