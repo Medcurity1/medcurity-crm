@@ -52,32 +52,31 @@ supabase secrets set MICROSOFT_CLIENT_SECRET="your-microsoft-client-secret"
 ## Deploy
 
 ```bash
-supabase functions deploy sync-emails --no-verify-jwt
+supabase functions deploy sync-emails
 ```
 
-The `--no-verify-jwt` flag is required because the function is triggered by a cron job, not by authenticated users.
+Deploy with JWT verification ON (do **NOT** pass `--no-verify-jwt`). The
+function's auth gate trusts the token's `role` claim, which is only safe
+because the platform gateway cryptographically verifies the JWT signature
+first — see the security note at the top of `index.ts`. The cron caller
+authenticates with a `Bearer <service_role_key>` header, which is itself a
+valid JWT and passes gateway verification.
 
 ## Schedule (cron trigger)
 
-Option A -- use pg_cron inside Supabase:
+As of 2026-07-10 (migration `20260710130000_email_sync_reliability.sql`):
 
-```sql
-select cron.schedule(
-  'sync-emails-every-10-min',
-  '*/10 * * * *',
-  $$
-  select net.http_post(
-    url := 'https://<project-ref>.supabase.co/functions/v1/sync-emails',
-    headers := jsonb_build_object(
-      'Authorization', 'Bearer ' || '<SUPABASE_SERVICE_ROLE_KEY>'
-    ),
-    body := '{}'::jsonb
-  );
-  $$
-);
-```
-
-Option B -- use an external scheduler (GitHub Actions, Railway cron, etc.) to POST to the function URL every 10 minutes.
+- **Primary:** pg_cron + pg_net job `email_sync_every_10_min` (`*/10 * * * *`),
+  driven by the `app.email_sync_url` / `app.email_sync_key` database GUCs.
+  Installed automatically by the migration (fail-soft if pg_cron or the GUCs
+  are absent). Health check: `select * from public.v_email_sync_schedule_status;`
+- **Redundant safety net:** the GitHub Actions cron
+  (`.github/workflows/sync-emails.yml`) — GitHub throttles it badly (~100-min
+  median gaps), so it only backstops pg_cron. Deletable once pg_cron cadence
+  is verified.
+- A singleton scheduler lock (`email_sync_scheduler_lock`, claimed with a
+  3-minute TTL) makes overlapping triggers harmless: the losing full sweep
+  returns 200 "skipped". User-scoped "Sync now" calls bypass the lock.
 
 ## How it works
 

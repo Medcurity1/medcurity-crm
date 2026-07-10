@@ -4,6 +4,7 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Staging — awaiting prod go-ahead
 
+- [STAGING] 2026-07-10 · Nathan (via Molly's missing-emails report) · Email sync trustworthiness batch: (1) an address matching contacts on multiple accounts now logs to EVERY matched contact (was one arbitrary account); (2) received emails match From+To+CC (was From only; owner + medcurity.com always excluded); (3) rotated Outlook refresh tokens persisted on refresh (were silently dropped → eventual connection death); (4) 3-consecutive-failure in-app alert to the connection owner, once per streak, reset on success (no auto-disable); (5) pg_cron+pg_net 10-min schedule as primary trigger (GH Actions cron kept as safety net; scheduler lock prevents overlap) · supabase/functions/sync-emails/index.ts + migration 20260710130000_email_sync_reliability.sql + .github/workflows/sync-emails.yml · post-deploy: select * from v_email_sync_schedule_status, then confirm ~10-min email_sync_runs cadence on prod
 - [STAGING] 2026-07-07 · Joe · Business Associate SRA product: $799 at the 1-20 FTE tier, mirrors the standard (CE) SRA price at every tier above (copied dynamically from the CE SRA's price rows at apply time) · migration 20260710120000_ba_sra_product.sql · post-deploy: eyeball the BA SRA price grid vs the SRA grid on the Products page + spot-check the deal picker on accounts in different FTE tiers
 
 ## Queued / requested

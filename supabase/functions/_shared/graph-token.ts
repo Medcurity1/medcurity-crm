@@ -29,7 +29,7 @@ export interface OutlookConn {
 
 async function refreshOutlookToken(
   refreshToken: string,
-): Promise<{ access_token: string; expires_in: number }> {
+): Promise<{ access_token: string; expires_in: number; refresh_token?: string }> {
   const clientId = Deno.env.get("MICROSOFT_CLIENT_ID")!;
   const clientSecret = Deno.env.get("MICROSOFT_CLIENT_SECRET")!;
 
@@ -93,6 +93,13 @@ export async function ensureValidOutlookToken(
     .update({
       access_token: tokenData.access_token,
       token_expires_at: expiresAt,
+      // Microsoft ROTATES the refresh token on every refresh. Persist the
+      // new one or the stored token silently ages out and the connection
+      // dies (the pre-2026-07-10 behavior). Conditional spread: if the
+      // provider didn't return one, leave the stored value untouched.
+      ...(tokenData.refresh_token
+        ? { refresh_token: tokenData.refresh_token }
+        : {}),
     })
     .eq("id", conn.id);
 
