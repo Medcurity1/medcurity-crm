@@ -4,12 +4,11 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Staging — awaiting prod go-ahead
 
-- [STAGING] 2026-07-10 · Nathan (via Molly's missing-emails report) · Email sync trustworthiness batch: (1) an address matching contacts on multiple accounts now logs to EVERY matched contact (was one arbitrary account); (2) received emails match From+To+CC (was From only; owner + medcurity.com always excluded); (3) rotated Outlook refresh tokens persisted on refresh (were silently dropped → eventual connection death); (4) 3-consecutive-failure in-app alert to the connection owner, once per streak, reset on success (no auto-disable); (5) pg_cron+pg_net 10-min schedule as primary trigger (GH Actions cron kept as safety net; scheduler lock prevents overlap) · supabase/functions/sync-emails/index.ts + migration 20260710130000_email_sync_reliability.sql + .github/workflows/sync-emails.yml · post-deploy: select * from v_email_sync_schedule_status, then confirm ~10-min email_sync_runs cadence on prod. NOTE: staging GUCs (app.email_sync_url/key) are UNSET → scheduler dormant there by design, GH cron continues; check the same view on prod at promote
-- [STAGING] 2026-07-10 · (found in review) · Task-reminders diagnostic view v_task_reminders_schedule_status created for real — original was added 2026-05-26 by editing already-applied migration 20260522000003, so it existed in no environment (404 PGRST205 on staging; the cron job itself is live) · migration 20260710150000, fail-soft pg_cron guard
-- [STAGING] 2026-07-07 · Joe · Business Associate SRA product: $799 at the 1-20 FTE tier, mirrors the standard (CE) SRA price at every tier above (copied dynamically from the CE SRA's price rows at apply time; 20260710140000 fixed the mirror to the catalog's real flat-per-book shape after live verification) · migrations 20260710120000 + 20260710140000 · verified on staging 2026-07-10: 1-20=$799, all upper tiers identical to SRA, Standard book $799 · post-deploy on prod: same grid eyeball
+(nothing currently)
 
 ## Queued / requested
 
+- [QUEUED] 2026-07-10 · (found in prod verify) · Dedupe the Standard Price Book duplicate NULL-tier rows (pre-existing import quirk on the SRA; the BA SRA mirror inherited 11 identical $799 rows there — pricing correct, cosmetic only) · small idempotent migration
 - [QUEUED] 2026-07-08 · (found in review) · Frontend IndustryCategory union missing ~55 enum values from the May 6 DB expansion (same display/filter gap Rural Hospital had) · chip task_63bbc3ee pending
 - [QUEUED] 2026-06 · Nathan · Leads feature removal: accounts+contacts only, admin-only "uncleaned contacts" staging area · planned for an in-office Tuesday, ~full day
 - [QUEUED] 2026-06-29 · Summer · Account-type cleanup project: surface derived Client/Prospect/Former-Client label, re-word Partnership Status values, retire Direct/Referral/Self-Service (ARR impact investigated: none) · blocked on team confirm
