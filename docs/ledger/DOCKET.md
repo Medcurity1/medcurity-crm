@@ -4,6 +4,7 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Staging — awaiting prod go-ahead
 
+- [STAGING] 2026-07-10 · (found in review) · Task-reminders diagnostic view v_task_reminders_schedule_status created for real — original was added 2026-05-26 by editing already-applied migration 20260522000003, so it existed in no environment (404 PGRST205 on staging; the cron job itself is live) · migration 20260710150000, fail-soft pg_cron guard
 - [STAGING] 2026-07-09 · Summer · Un-require Employees on account create · investigated first per Nathan: nobody ever requested the rule (hand-toggled in Admin → Required Fields, which the audit log doesn't cover; dormant until the 2026-07-08 numeric fix made it enforce). Authorized by Nathan 2026-07-09 after team clarification; FTE still required at Closed Won via Rachel's gate · migration 20260709110000 (an earlier unauthorized flip/restore pair 100000/101000 nets to no change)
 
 ## Queued / requested
