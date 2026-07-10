@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { useRecentRecords, type RecentRecord } from "@/hooks/useRecentRecords";
 import { TeamActivityFeed } from "./TeamActivityFeed";
+import { dedupeEmailActivityRows } from "./activityFeedDedupe";
 import { MyAccountsWidget } from "./MyAccountsWidget";
 import { RecentWins } from "./RecentWins";
 import { ColdCallWidget } from "./ColdCallWidget";
@@ -92,8 +93,12 @@ interface RecentActivity {
   activity_type: ActivityType;
   subject: string;
   created_at: string;
+  owner_user_id: string | null;
+  external_message_id: string | null;
   account: { name: string } | null;
 }
+
+const RECENT_ACTIVITY_LIMIT = 5;
 
 interface TaskItem {
   id: string;
@@ -141,12 +146,19 @@ function useRecentActivity() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("activities")
-        .select("id, activity_type, subject, created_at, account:accounts(name)")
+        .select(
+          "id, activity_type, subject, created_at, owner_user_id, external_message_id, account:accounts(name)",
+        )
         .is("archived_at", null)
         .order("created_at", { ascending: false })
-        .limit(5);
+        // Over-fetch: dce9b1f logs one synced email to every matched contact,
+        // so a widely-CC'd email can appear as several rows before dedupe.
+        .limit(RECENT_ACTIVITY_LIMIT * 3);
       if (error) throw error;
-      return (data ?? []) as unknown as RecentActivity[];
+      return dedupeEmailActivityRows((data ?? []) as unknown as RecentActivity[]).slice(
+        0,
+        RECENT_ACTIVITY_LIMIT,
+      );
     },
   });
 }

@@ -5,7 +5,10 @@ import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelativeDate } from "@/lib/formatters";
+import { dedupeEmailActivityRows } from "./activityFeedDedupe";
 import type { ActivityType } from "@/types/crm";
+
+const FEED_LIMIT = 15;
 
 interface TeamActivity {
   id: string;
@@ -15,6 +18,8 @@ interface TeamActivity {
   account_id: string | null;
   contact_id: string | null;
   opportunity_id: string | null;
+  owner_user_id: string | null;
+  external_message_id: string | null;
   owner: { full_name: string | null } | null;
   account: { name: string } | null;
   contact: { first_name: string | null; last_name: string | null } | null;
@@ -84,13 +89,20 @@ export function TeamActivityFeed() {
       const { data: rows, error } = await supabase
         .from("activities")
         .select(
-          "id, activity_type, subject, created_at, account_id, contact_id, opportunity_id, owner:user_profiles!owner_user_id(full_name), account:accounts(name), contact:contacts(first_name, last_name), opportunity:opportunities(name)",
+          "id, activity_type, subject, created_at, account_id, contact_id, opportunity_id, owner_user_id, external_message_id, owner:user_profiles!owner_user_id(full_name), account:accounts(name), contact:contacts(first_name, last_name), opportunity:opportunities(name)",
         )
         .is("archived_at", null)
         .order("created_at", { ascending: false })
-        .limit(15);
+        // Over-fetch: dce9b1f logs one synced email to every matched contact,
+        // so a single widely-CC'd email can appear as several rows here
+        // before dedupe. 3x the display limit comfortably covers that
+        // fan-out without a second round-trip.
+        .limit(FEED_LIMIT * 3);
       if (error) throw error;
-      return (rows ?? []) as unknown as TeamActivity[];
+      return dedupeEmailActivityRows((rows ?? []) as unknown as TeamActivity[]).slice(
+        0,
+        FEED_LIMIT,
+      );
     },
   });
 

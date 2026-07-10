@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -10,15 +10,21 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Switch } from "@/components/ui/switch";
-import { Loader2 } from "lucide-react";
+import { Loader2, Info } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
+import { CLOSE_READINESS_KEYS, type CloseReadinessKey } from "@/lib/closeReadiness";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type EntityType = "accounts" | "contacts" | "opportunities" | "leads";
+type EntityType =
+  | "accounts"
+  | "contacts"
+  | "opportunities"
+  | "leads"
+  | "opportunity_close";
 
 interface RequiredFieldConfig {
   id: string;
@@ -105,7 +111,7 @@ interface FieldInventoryRow {
   ordinal_position: number;
 }
 
-function useEntityFields(entity: EntityType) {
+function useEntityFields(entity: EntityType, enabled: boolean = true) {
   return useQuery({
     queryKey: ["required-fields-inventory", entity],
     queryFn: async (): Promise<FieldDef[]> => {
@@ -120,7 +126,53 @@ function useEntityFields(entity: EntityType) {
         .filter((r) => !SYSTEM_FIELDS.has(r.field))
         .map((r) => ({ key: r.field, label: prettifyFieldName(r.field) }));
     },
+    // The close-gate section (entity "opportunity_close") isn't backed by
+    // real table columns, so it has no v_field_inventory rows — its fields
+    // are hardcoded below instead of discovered. Skip the query entirely
+    // for that entity rather than let it run and return nothing.
+    enabled,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Close-gate fields (entity "opportunity_close")
+//
+// These four keys aren't columns on any table — they're the checks the
+// Closed Won gate runs against the opportunity's ACCOUNT (and its
+// contacts). Source of truth for the key list + evaluation logic is
+// src/lib/closeReadiness.ts (CLOSE_READINESS_KEYS / evaluateCloseReadiness).
+// closeReadiness.ts's own LABELS constant isn't exported (it's private to
+// that module), so the admin-friendly copy below is defined locally —
+// keep it in sync with closeReadiness.ts's CLOSE_READINESS_KEYS if that
+// list ever changes.
+// ---------------------------------------------------------------------------
+
+const CLOSE_GATE_LABELS: Record<CloseReadinessKey, string> = {
+  account_phone: "Account phone number",
+  account_billing_address: "Account billing address",
+  account_fte_range: "Account FTE range",
+  contact_email: "A contact email address",
+};
+
+const CLOSE_GATE_FIELDS: FieldDef[] = CLOSE_READINESS_KEYS.map((key) => ({
+  key,
+  label: CLOSE_GATE_LABELS[key],
+}));
+
+function CloseGateFallbackNote() {
+  return (
+    <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200">
+      <div className="flex gap-2">
+        <Info className="h-4 w-4 mt-0.5 shrink-0" />
+        <p>
+          Turning individual checks off narrows what's enforced. But turning{" "}
+          <strong>all four off</strong> does not disable the gate — with none
+          marked required, the system falls back to enforcing all four
+          automatically. This gate can be narrowed, but never fully emptied.
+        </p>
+      </div>
+    </div>
+  );
 }
 
 const ENTITY_TABS: { value: EntityType; label: string }[] = [
@@ -128,6 +180,7 @@ const ENTITY_TABS: { value: EntityType; label: string }[] = [
   { value: "contacts", label: "Contacts" },
   { value: "opportunities", label: "Opportunities" },
   { value: "leads", label: "Leads" },
+  { value: "opportunity_close", label: "Closing a Deal (Closed Won)" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -186,9 +239,25 @@ function useUpsertRequiredField() {
 // Sub-component: entity fields table
 // ---------------------------------------------------------------------------
 
-function EntityRequiredFields({ entity }: { entity: EntityType }) {
+function EntityRequiredFields({
+  entity,
+  fields: staticFields,
+  helperText = "Toggle fields that must be filled before a record can be saved.",
+  note,
+}: {
+  entity: EntityType;
+  /** Pass a fixed list to skip schema discovery (e.g. the close-gate keys, which aren't real columns). */
+  fields?: FieldDef[];
+  helperText?: string;
+  note?: ReactNode;
+}) {
   const { data: configs, isLoading, isError } = useRequiredFieldConfigs(entity);
-  const { data: fields, isLoading: fieldsLoading } = useEntityFields(entity);
+  const { data: fetchedFields, isLoading: fieldsLoading } = useEntityFields(
+    entity,
+    staticFields === undefined,
+  );
+  const fields = staticFields ?? fetchedFields;
+  const isFieldsLoading = staticFields === undefined && fieldsLoading;
   const upsert = useUpsertRequiredField();
 
   // Build a lookup for current required state
@@ -231,7 +300,7 @@ function EntityRequiredFields({ entity }: { entity: EntityType }) {
     [entity, upsert],
   );
 
-  if (isLoading || fieldsLoading) {
+  if (isLoading || isFieldsLoading) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -250,9 +319,9 @@ function EntityRequiredFields({ entity }: { entity: EntityType }) {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        Toggle fields that must be filled before a record can be saved.
-      </p>
+      <p className="text-sm text-muted-foreground">{helperText}</p>
+
+      {note}
 
       <div className="border rounded-lg">
         <Table>
@@ -299,11 +368,22 @@ export function RequiredFieldsManager() {
           </TabsTrigger>
         ))}
       </TabsList>
-      {ENTITY_TABS.map((tab) => (
-        <TabsContent key={tab.value} value={tab.value}>
-          <EntityRequiredFields entity={tab.value} />
-        </TabsContent>
-      ))}
+      {ENTITY_TABS.map((tab) =>
+        tab.value === "opportunity_close" ? (
+          <TabsContent key={tab.value} value={tab.value}>
+            <EntityRequiredFields
+              entity="opportunity_close"
+              fields={CLOSE_GATE_FIELDS}
+              helperText="These must be complete on the deal's account before it can be marked Closed Won."
+              note={<CloseGateFallbackNote />}
+            />
+          </TabsContent>
+        ) : (
+          <TabsContent key={tab.value} value={tab.value}>
+            <EntityRequiredFields entity={tab.value} />
+          </TabsContent>
+        ),
+      )}
     </Tabs>
   );
 }

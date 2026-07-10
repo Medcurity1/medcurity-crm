@@ -146,36 +146,66 @@ async function countActivities(
   return count ?? 0;
 }
 
-/** Per-local-day buckets for a trend metric (bounded fetch). */
-async function activityTrend(
-  type: ActivityKind,
+// ── Email fan-out dedupe ─────────────────────────────────────────────
+//
+// dce9b1f made sync-emails log one synced email to EVERY matched contact
+// under an account (was: one arbitrary contact), so a single email now
+// produces N activity rows sharing the same external_message_id. Counting
+// rows would inflate "Emails Sent" by however many contacts a message
+// happened to match. These two helpers are pure (exported for unit tests)
+// and used by activityTrend / countDistinctEmailActivities below.
+
+interface EmailIdentityRow {
+  id: string;
+  external_message_id: string | null;
+}
+
+/**
+ * Identity for "one real email, once." Synced emails key off
+ * external_message_id (shared across every fan-out row for the same
+ * message). Manually-logged emails have no external_message_id, so each
+ * row is its own message — falls back to the row id so it's never
+ * accidentally merged with another manual log.
+ */
+export function emailActivityIdentity(row: EmailIdentityRow): string {
+  return row.external_message_id ?? `row:${row.id}`;
+}
+
+interface ActivityTrendRow extends EmailIdentityRow {
+  effective_at: string;
+}
+
+/**
+ * Bucket rows into per-local-day counts across [range.start, range.end),
+ * deduping each bucket by emailActivityIdentity. This is a no-op for
+ * call/meeting rows (every row has a unique id and no external_message_id
+ * fan-out); for email rows it collapses same-message fan-out copies that
+ * land in the same day (they always do — fan-out copies share
+ * effective_at) down to one count. Pure — exported for unit tests.
+ */
+export function bucketActivityRowsByDay(
+  rows: ActivityTrendRow[],
   range: { start: Date; end: Date },
-  ownerId: string | null,
-): Promise<{ label: string; value: number }[]> {
-  const stamps: string[] = [];
-  const PAGE = 1000;
-  let from = 0;
-  while (stamps.length < 5000) {
-    const { data, error } = await activityBase(type, ownerId, "effective_at", false)
-      .gte("effective_at", range.start.toISOString())
-      .lt("effective_at", range.end.toISOString())
-      .order("effective_at", { ascending: true })
-      .range(from, from + PAGE - 1);
-    if (error) throw error;
-    const rows = (data ?? []) as { effective_at: string }[];
-    for (const r of rows) stamps.push(r.effective_at);
-    if (rows.length < PAGE) break;
-    from += PAGE;
-  }
+): { label: string; value: number }[] {
   const buckets = new Map<string, number>();
   const cursor = new Date(range.start);
   while (cursor < range.end && buckets.size < 92) {
     buckets.set(localISODate(cursor), 0);
     cursor.setDate(cursor.getDate() + 1);
   }
-  for (const s of stamps) {
-    const key = localISODate(new Date(s));
-    if (buckets.has(key)) buckets.set(key, (buckets.get(key) ?? 0) + 1);
+  const seenPerBucket = new Map<string, Set<string>>();
+  for (const r of rows) {
+    const key = localISODate(new Date(r.effective_at));
+    if (!buckets.has(key)) continue;
+    let seen = seenPerBucket.get(key);
+    if (!seen) {
+      seen = new Set<string>();
+      seenPerBucket.set(key, seen);
+    }
+    const identity = emailActivityIdentity(r);
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    buckets.set(key, (buckets.get(key) ?? 0) + 1);
   }
   return Array.from(buckets.entries()).map(([date, value]) => ({
     label: new Date(`${date}T00:00:00`).toLocaleDateString("en-US", {
@@ -184,6 +214,72 @@ async function activityTrend(
     }),
     value,
   }));
+}
+
+/** Per-local-day buckets for a trend metric (bounded fetch, deduped). */
+async function activityTrend(
+  type: ActivityKind,
+  range: { start: Date; end: Date },
+  ownerId: string | null,
+): Promise<{ label: string; value: number }[]> {
+  const rows: ActivityTrendRow[] = [];
+  const PAGE = 1000;
+  let from = 0;
+  while (rows.length < 5000) {
+    const { data, error } = await activityBase(
+      type,
+      ownerId,
+      "id, effective_at, external_message_id",
+      false,
+    )
+      .gte("effective_at", range.start.toISOString())
+      .lt("effective_at", range.end.toISOString())
+      .order("effective_at", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as ActivityTrendRow[];
+    rows.push(...page);
+    if (page.length < PAGE) break;
+    from += PAGE;
+  }
+  return bucketActivityRowsByDay(rows, range);
+}
+
+/**
+ * Distinct-email count over a period (no trend buckets — used for the
+ * "Emails Sent" previous-period comparison). Bounded fetch, same 5000-row
+ * cap as activityTrend: this metric already fetches full email rows (not
+ * a head:true count) for the trend chart, so a client-side dedupe over
+ * that same volume-tested pattern is the natural fit here rather than
+ * adding a SQL RPC just for the comparison number.
+ */
+async function countDistinctEmailActivities(
+  range: { start: Date; end: Date },
+  ownerId: string | null,
+): Promise<number> {
+  const ids = new Set<string>();
+  const PAGE = 1000;
+  let from = 0;
+  let fetched = 0;
+  while (fetched < 5000) {
+    const { data, error } = await activityBase(
+      "email",
+      ownerId,
+      "id, external_message_id",
+      false,
+    )
+      .gte("effective_at", range.start.toISOString())
+      .lt("effective_at", range.end.toISOString())
+      .order("effective_at", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as EmailIdentityRow[];
+    for (const r of page) ids.add(emailActivityIdentity(r));
+    fetched += page.length;
+    if (page.length < PAGE) break;
+    from += PAGE;
+  }
+  return ids.size;
 }
 
 /**
@@ -279,9 +375,12 @@ export const NEXUS_METRICS: NexusMetricDef[] = [
       const owner = ownerFor(opts, true);
       const range = periodRange(opts.period);
       const prev = periodRange(opts.period, -1);
+      // "current" comes from the (deduped) trend buckets; "previous" uses
+      // the matching distinct-email count so both sides of the ↑/↓
+      // comparison count real emails, not fan-out rows.
       const [trend, previous] = await Promise.all([
         activityTrend("email", range, owner),
-        countActivities("email", prev, owner),
+        countDistinctEmailActivities(prev, owner),
       ]);
       const current = trend.reduce((s, b) => s + b.value, 0);
       return { current, previous, trend, goal: null };

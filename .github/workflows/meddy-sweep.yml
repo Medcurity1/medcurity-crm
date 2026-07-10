@@ -1,5 +1,16 @@
 name: Meddy Sweep (cron)
 
+# STATUS (2026-07-10): this workflow is now the REDUNDANT SAFETY NET, not
+# the primary trigger. pg_cron + pg_net (migration 20260710178000, jobname
+# meddy_sweep_every_5_min) is primary — it fires on an exact schedule
+# inside Postgres, while GitHub throttles this schedule badly (observed
+# gaps up to ~2.75h — a website visitor waiting for a human could sit
+# unalerted that long). The sweep's missed_chat_alerted column makes
+# double-triggering harmless, so keep this running during the transition;
+# once pg_cron cadence is verified (select * from
+# public.v_meddy_sweep_schedule_status;), this file can be deleted. Same
+# pattern/history as sync-emails.yml.
+#
 # Scheduled safety net for Meddy: missed-chat alerts (5 min), Pushover
 # escalation (2 min), stale-agent availability cleanup. Replaces OG
 # Nexus's in-memory timers (which died on restart). NOTE on timing:

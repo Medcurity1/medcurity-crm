@@ -59,10 +59,80 @@ interface ActivityTimelineProps {
   enableReattribute?: boolean;
 }
 
-interface ThreadGroup {
+export interface ThreadGroup {
   threadKey: string;
   primary: Activity; // newest message
   others: Activity[]; // earlier messages in the same thread
+}
+
+/**
+ * Group consecutive emails on the same thread under one row (newest
+ * message visible, older messages collapse into a chevron). Non-email
+ * activities never group.
+ *
+ * `dedupeFanOut` additionally collapses rows that are the SAME email
+ * logged to multiple matched contacts under an account (dce9b1f logs one
+ * synced email to every contact it matches, not just one) so the "N
+ * earlier messages" chevron doesn't show copies of the identical message.
+ * Only account-scoped timelines (accountId set, contactId not set — see
+ * ActivityTimeline below) pass true here: contact-scoped timelines are
+ * already filtered to one contact_id so they never see the fan-out, and
+ * showing one row per contact there is the intended behavior.
+ *
+ * Identity for the fan-out dedupe is external_message_id alone (not
+ * combined with owner) — duplicate fan-out rows for the same message
+ * always share both email_thread_id and external_message_id, so they're
+ * guaranteed to land in the same thread group and never need to be
+ * compared across groups.
+ *
+ * Pure — exported for unit tests.
+ */
+export function groupActivitiesForTimeline(
+  activities: Activity[],
+  opts: { dedupeFanOut: boolean },
+): Array<Activity | ThreadGroup> {
+  const out: Array<Activity | ThreadGroup> = [];
+  const threadIndex = new Map<string, number>();
+  // Identities already present in each open thread group, keyed by
+  // threadKey. Lazily seeded with the group's primary the first time a
+  // second email in that thread shows up.
+  const seenInGroup = new Map<string, Set<string>>();
+
+  for (const a of activities) {
+    const key = a.email_thread_id ?? null;
+    if (a.activity_type === "email" && key) {
+      const existingIdx = threadIndex.get(key);
+      if (existingIdx != null) {
+        const existing = out[existingIdx];
+        if (opts.dedupeFanOut && a.external_message_id) {
+          let seen = seenInGroup.get(key);
+          if (!seen) {
+            seen = new Set<string>();
+            const primary = (existing as ThreadGroup).threadKey
+              ? (existing as ThreadGroup).primary
+              : (existing as Activity);
+            if (primary.external_message_id) seen.add(primary.external_message_id);
+            seenInGroup.set(key, seen);
+          }
+          if (seen.has(a.external_message_id)) continue; // duplicate fan-out copy
+          seen.add(a.external_message_id);
+        }
+        if ((existing as ThreadGroup).threadKey) {
+          (existing as ThreadGroup).others.push(a);
+        } else {
+          out[existingIdx] = {
+            threadKey: key,
+            primary: existing as Activity,
+            others: [a],
+          };
+        }
+        continue;
+      }
+      threadIndex.set(key, out.length);
+    }
+    out.push(a);
+  }
+  return out;
 }
 
 const typeIcons: Record<ActivityType, typeof Phone> = {
@@ -123,36 +193,17 @@ export function ActivityTimeline({
     return "/activities";
   })();
 
-  // Group consecutive emails on the same thread under one row. The newest
-  // message is the visible one; older messages collapse into a chevron.
-  // Non-email activities never group.
-  const groupedActivities = useMemo(() => {
-    if (!activities) return [] as Array<Activity | ThreadGroup>;
-    const out: Array<Activity | ThreadGroup> = [];
-    const threadIndex = new Map<string, number>();
-    for (const a of activities) {
-      const key = a.email_thread_id ?? null;
-      if (a.activity_type === "email" && key) {
-        const existingIdx = threadIndex.get(key);
-        if (existingIdx != null) {
-          const existing = out[existingIdx];
-          if ((existing as ThreadGroup).threadKey) {
-            (existing as ThreadGroup).others.push(a);
-          } else {
-            out[existingIdx] = {
-              threadKey: key,
-              primary: existing as Activity,
-              others: [a],
-            };
-          }
-          continue;
-        }
-        threadIndex.set(key, out.length);
-      }
-      out.push(a);
-    }
-    return out;
-  }, [activities]);
+  // Group consecutive emails on the same thread under one row (see
+  // groupActivitiesForTimeline above). Account-scoped timelines (accountId
+  // set, contactId not) additionally dedupe same-message fan-out copies —
+  // see that function's doc comment. Contact-scoped timelines are left
+  // exactly as-is: they're already filtered to one contact_id, and the
+  // per-contact row there is the intended one-row-per-contact behavior.
+  const dedupeFanOut = !!accountId && !contactId;
+  const groupedActivities = useMemo(
+    () => groupActivitiesForTimeline(activities ?? [], { dedupeFanOut }),
+    [activities, dedupeFanOut],
+  );
 
   const visible = compact ? groupedActivities.slice(0, visibleLimit) : groupedActivities;
   const hiddenCount = groupedActivities.length - visible.length;
