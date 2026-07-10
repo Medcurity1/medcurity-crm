@@ -4,7 +4,7 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Staging — awaiting prod go-ahead
 
-(nothing currently)
+- [STAGING] 2026-07-07 · Joe · Business Associate SRA product: $799 at the 1-20 FTE tier, mirrors the standard (CE) SRA price at every tier above (copied dynamically from the CE SRA's price rows at apply time) · migration 20260710120000_ba_sra_product.sql · post-deploy: eyeball the BA SRA price grid vs the SRA grid on the Products page + spot-check the deal picker on accounts in different FTE tiers
 
 ## Queued / requested
 
