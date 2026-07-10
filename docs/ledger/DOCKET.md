@@ -4,7 +4,7 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Staging — awaiting prod go-ahead
 
-- [STAGING] 2026-07-09 · Summer · Un-require Employees on account create · investigated first per Nathan: nobody ever requested the rule (hand-toggled in Admin → Required Fields, which the audit log doesn't cover; dormant until the 2026-07-08 numeric fix made it enforce). Authorized by Nathan 2026-07-09 after team clarification; FTE still required at Closed Won via Rachel's gate · migration 20260709110000 (an earlier unauthorized flip/restore pair 100000/101000 nets to no change)
+(nothing currently)
 
 ## Queued / requested
 
