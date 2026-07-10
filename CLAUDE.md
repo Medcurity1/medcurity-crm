@@ -45,6 +45,15 @@ Per-area deep dives are in `docs/migration/raw/` (00-landscape through 10-stagin
 - Tests: `tests/` (unit) and `tests/migration/` (end-to-end migration tests)
 - Env: `.env.local` (never commit); staging env config in Supabase dashboard
 
+## Work ledger (ALWAYS update — every session, including worktree/subagent sessions)
+
+Two tracked files answer "who asked for this, when, and did it happen?" Update them **in the same commit as the work itself**:
+
+- `docs/ledger/DOCKET.md` — everything current & future: team requests, projects, ideas, bugs. Log new asks immediately with who + date; keep statuses current (IDEA / QUEUED / IN PROGRESS / BLOCKED / STAGING).
+- `docs/ledger/SHIPPED.md` — everything completed, newest first: date, who asked, what, where it landed (STAGING/PROD + commit).
+
+When work ships, move its DOCKET line to SHIPPED. Before building anything "new", check the DOCKET for prior asks and SHIPPED for whether it already happened.
+
 ## Current phase
 
 (update this as work progresses)
