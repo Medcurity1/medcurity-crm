@@ -204,12 +204,13 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     format: "number",
     link: () => `/opportunities?owner=mine&stage=${OPEN_STAGES}`,
     query: async (supabase, userId) => {
-      const { count } = await supabase
+      const { count, error } = await supabase
         .from("opportunities")
         .select("*", { count: "exact", head: true })
         .eq("owner_user_id", userId)
         .not("stage", "in", '("closed_won","closed_lost")')
         .is("archived_at", null);
+      if (error) throw error;
       return count ?? 0;
     },
   },
@@ -224,7 +225,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     query: async (supabase, userId) => {
       const quarterStart = getQuarterStart(new Date());
       const quarterEnd = getQuarterEnd(new Date());
-      const { count } = await supabase
+      const { count, error } = await supabase
         .from("opportunities")
         .select("*", { count: "exact", head: true })
         .eq("owner_user_id", userId)
@@ -237,6 +238,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
         // quarter (e.g. a Nov 1 close viewed in Q3) don't inflate the count.
         .gte("close_date", localISODate(quarterStart))
         .lt("close_date", localISODate(quarterEnd));
+      if (error) throw error;
       return count ?? 0;
     },
   },
@@ -286,7 +288,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
         weekStart.getMonth(),
         weekStart.getDate() + 7,
       );
-      const { count } = await supabase
+      const { count, error } = await supabase
         .from("activities")
         .select("*", { count: "exact", head: true })
         .eq("owner_user_id", userId)
@@ -294,6 +296,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
         .is("archived_at", null)
         .gte("effective_at", weekStart.toISOString())
         .lt("effective_at", nextWeek.toISOString());
+      if (error) throw error;
       return count ?? 0;
     },
   },
@@ -322,7 +325,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
       const today = new Date();
       const thirty = new Date(today);
       thirty.setDate(thirty.getDate() + 30);
-      const { count } = await supabase
+      const { count, error } = await supabase
         .from("opportunities")
         .select("*", { count: "exact", head: true })
         .eq("owner_user_id", userId)
@@ -331,6 +334,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
         .not("expected_close_date", "is", null)
         .gte("expected_close_date", localISODate(today))
         .lte("expected_close_date", localISODate(thirty));
+      if (error) throw error;
       return count ?? 0;
     },
   },
@@ -344,7 +348,10 @@ export const KPI_REGISTRY: KpiDefinition[] = [
       // Independent count queries — run them concurrently instead of
       // awaiting won before starting lost (halves latency). The win-rate
       // formula below is unchanged.
-      const [{ count: wonCount }, { count: lostCount }] = await Promise.all([
+      const [
+        { count: wonCount, error: wonError },
+        { count: lostCount, error: lostError },
+      ] = await Promise.all([
         supabase
           .from("opportunities")
           .select("*", { count: "exact", head: true })
@@ -358,6 +365,8 @@ export const KPI_REGISTRY: KpiDefinition[] = [
           .eq("stage", "closed_lost")
           .is("archived_at", null),
       ]);
+      if (wonError) throw wonError;
+      if (lostError) throw lostError;
       const won = wonCount ?? 0;
       const lost = lostCount ?? 0;
       const total = won + lost;
@@ -372,12 +381,13 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     icon: BarChart3,
     format: "currency",
     query: async (supabase, userId) => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("opportunities")
         .select("amount")
         .eq("owner_user_id", userId)
         .eq("stage", "closed_won")
         .is("archived_at", null);
+      if (error) throw error;
       if (!data?.length) return 0;
       const total = data.reduce((sum, o) => sum + Number(o.amount), 0);
       return Math.round(total / data.length);
@@ -450,13 +460,14 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     link: () =>
       `/opportunities?owner=mine&kind=renewal&stage=${OPEN_STAGES}`,
     query: async (supabase, userId) => {
-      const { count } = await supabase
+      const { count, error } = await supabase
         .from("opportunities")
         .select("*", { count: "exact", head: true })
         .eq("owner_user_id", userId)
         .eq("kind", "renewal")
         .is("archived_at", null)
         .not("stage", "in", '("closed_won","closed_lost")');
+      if (error) throw error;
       return count ?? 0;
     },
   },
@@ -488,10 +499,11 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     requiredRole: ["admin"],
     link: "/accounts",
     query: async (supabase) => {
-      const { count } = await supabase
+      const { count, error } = await supabase
         .from("accounts")
         .select("*", { count: "exact", head: true })
         .is("archived_at", null);
+      if (error) throw error;
       return count ?? 0;
     },
   },
@@ -504,10 +516,11 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     requiredRole: ["admin"],
     link: "/contacts",
     query: async (supabase) => {
-      const { count } = await supabase
+      const { count, error } = await supabase
         .from("contacts")
         .select("*", { count: "exact", head: true })
         .is("archived_at", null);
+      if (error) throw error;
       return count ?? 0;
     },
   },
@@ -527,7 +540,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
       `/opportunities?stage=closed_won&closed_after=${localISODate(getMonthStart(new Date()))}`,
     query: async (supabase) => {
       const monthStart = getMonthStart(new Date());
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("opportunities")
         .select("amount")
         .eq("stage", "closed_won")
@@ -535,6 +548,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
         // close_date is a DATE — use the local month-start date (see the quarter
         // KPI note); toISOString() drops deals closed on the 1st for US zones.
         .gte("close_date", localISODate(monthStart));
+      if (error) throw error;
       return data?.reduce((sum, o) => sum + Number(o.amount), 0) ?? 0;
     },
   },
@@ -546,10 +560,11 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     format: "number",
     requiredRole: ["admin"],
     query: async (supabase) => {
-      const { count } = await supabase
+      const { count, error } = await supabase
         .from("leads")
         .select("*", { count: "exact", head: true })
         .is("archived_at", null);
+      if (error) throw error;
       return count ?? 0;
     },
   },
@@ -561,11 +576,12 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     format: "number",
     requiredRole: ["admin"],
     query: async (supabase) => {
-      const { count } = await supabase
+      const { count, error } = await supabase
         .from("leads")
         .select("*", { count: "exact", head: true })
         .eq("qualification", "mql")
         .is("archived_at", null);
+      if (error) throw error;
       return count ?? 0;
     },
   },
@@ -577,11 +593,12 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     format: "number",
     requiredRole: ["admin"],
     query: async (supabase) => {
-      const { count } = await supabase
+      const { count, error } = await supabase
         .from("leads")
         .select("*", { count: "exact", head: true })
         .eq("qualification", "sql")
         .is("archived_at", null);
+      if (error) throw error;
       return count ?? 0;
     },
   },
@@ -594,11 +611,12 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     requiredRole: ["admin"],
     query: async (supabase) => {
       const monthStart = getMonthStart(new Date());
-      const { count } = await supabase
+      const { count, error } = await supabase
         .from("leads")
         .select("*", { count: "exact", head: true })
         .is("archived_at", null)
         .gte("created_at", monthStart.toISOString());
+      if (error) throw error;
       return count ?? 0;
     },
   },

@@ -77,6 +77,10 @@ jobs:
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
+          # No checkout step, so gh can't infer the repo from a git remote —
+          # without GH_REPO every gh call errors (and the || true guards
+          # would swallow it, silently disabling the alert).
+          GH_REPO: ${{ github.repository }}
         run: |
           existing="$(gh issue list --state open --search 'Email sync cron is failing in:title' --json number -q '.[0].number' 2>/dev/null || true)"
           if [ -z "$existing" ]; then
@@ -89,6 +93,7 @@ jobs:
         if: success()
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           for n in $(gh issue list --state open --search 'Email sync cron is failing in:title' --json number -q '.[].number' 2>/dev/null || true); do
             gh issue close "$n" --comment "✅ Email sync recovered (run ${{ github.run_id }})." >/dev/null 2>&1 || true

@@ -72,8 +72,34 @@ async function callerIsAdmin(authHeader: string | null): Promise<boolean> {
   const { data, error } = await asUser.rpc("is_admin");
   return !error && data === true;
 }
+/**
+ * Scheduled invocations call this with the service-role key as the bearer
+ * (no user JWT), so callerIsAdmin would reject them.
+ *
+ * This function deploys WITH JWT verification ON (no --no-verify-jwt in
+ * CI), so the platform gateway has already cryptographically verified the
+ * token's signature before we run — we can therefore trust its `role`
+ * claim. We accept ANY valid service_role token by that claim rather than
+ * exact-string-matching one specific key: an exact match breaks the moment
+ * the project's injected SUPABASE_SERVICE_ROLE_KEY differs from the cron's
+ * stored key (key rotation / dual legacy-vs-new keys / stray whitespace in
+ * the GH secret) — that mismatch caused the 2026-07-05 email-sync outage.
+ * Same pattern as sync-emails/index.ts. SECURITY NOTE: the role-claim
+ * shortcut is only safe BECAUSE the gateway verifies the signature; if this
+ * is ever redeployed --no-verify-jwt, restore real signature verification.
+ */
 function isServiceRole(authHeader: string | null): boolean {
-  return !!authHeader && authHeader === `Bearer ${SERVICE_ROLE_KEY}`;
+  if (!authHeader) return false;
+  const m = authHeader.match(/^Bearer\s+(.+)$/i);
+  if (!m) return false;
+  try {
+    const payload = JSON.parse(
+      atob(m[1].trim().split(".")[1].replace(/-/g, "+").replace(/_/g, "/")),
+    );
+    return payload?.role === "service_role";
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------

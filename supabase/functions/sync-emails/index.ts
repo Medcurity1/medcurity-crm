@@ -632,6 +632,68 @@ async function findOpenOpportunity(
 // Activity creation
 // ---------------------------------------------------------------------------
 
+// Dedup-set keys for (message, contact) / (message, lead) pairs. The set is
+// prefetched once per connection (fetchExistingEmailActivityPairs) instead of
+// one SELECT per pair — the 2026-07-10 To/CC fan-out multiplied pair counts
+// ~2-4x on group threads, and per-pair round trips were eating the headroom
+// under the Edge gateway's 150s wall-clock kill (see the BUDGET_MS comment in
+// the handler and the 2026-04-30 incident notes above INITIAL_BACKFILL_DAYS).
+function contactPairKey(externalId: string, contactId: string): string {
+  return `${externalId}|c:${contactId}`;
+}
+function leadPairKey(externalId: string, leadId: string): string {
+  return `${externalId}|l:${leadId}`;
+}
+
+/**
+ * Batch-fetch the already-logged (external_message_id, contact_id/lead_id)
+ * pairs for this connection's fetched messages, replacing the old per-pair
+ * pre-check SELECT in createEmailActivity / createLeadEmailActivity.
+ *
+ * Chunked .in() lookups: Outlook Graph message ids run ~150 chars, so keep
+ * chunks small enough that the querystring stays well under URL limits.
+ *
+ * Fail-soft: on a query error we log and return whatever we gathered — a
+ * missing pair just means the insert runs and the unique index's 23505
+ * handler (still in place as the race guard) treats it as a dupe.
+ */
+async function fetchExistingEmailActivityPairs(
+  supabase: SupabaseClient,
+  conn: EmailSyncConnection,
+  externalIds: string[]
+): Promise<Set<string>> {
+  const pairs = new Set<string>();
+  const CHUNK = 40;
+  for (let i = 0; i < externalIds.length; i += CHUNK) {
+    const chunk = externalIds.slice(i, i + CHUNK);
+    const { data, error } = await supabase
+      .from("activities")
+      .select("external_message_id, contact_id, lead_id")
+      .eq("owner_user_id", conn.user_id)
+      .in("external_message_id", chunk);
+    if (error) {
+      console.warn(`existing-activity prefetch failed: ${error.message}`);
+      break;
+    }
+    for (const row of (data ?? []) as {
+      external_message_id: string;
+      contact_id: string | null;
+      lead_id: string | null;
+    }[]) {
+      // Mirrors the old per-pair checks exactly: the contact check matched
+      // any row with that contact_id (including converted-lead rows, which
+      // carry both ids); the lead check required contact_id IS NULL.
+      if (row.contact_id) {
+        pairs.add(contactPairKey(row.external_message_id, row.contact_id));
+      }
+      if (row.lead_id && !row.contact_id) {
+        pairs.add(leadPairKey(row.external_message_id, row.lead_id));
+      }
+    }
+  }
+  return pairs;
+}
+
 /**
  * Create an activity record for a matched email.
  *
@@ -648,24 +710,19 @@ async function createEmailActivity(
   conn: EmailSyncConnection,
   email: ParsedEmail,
   match: ContactMatch,
-  opportunityId: string | null
+  opportunityId: string | null,
+  existingPairs: Set<string>
 ): Promise<boolean> {
   const dirLabel = email.direction === "sent" ? "Sent" : "Received";
   const externalId = `${conn.provider}:${email.messageId}`;
 
-  // Check first — cheaper and avoids noisy unique-violation errors in logs.
-  // MUST scope by contact_id: the same message legitimately produces one
-  // row per matched contact. An unscoped check would see the first
-  // contact's row and silently skip every other contact on the email.
-  const { data: existing } = await supabase
-    .from("activities")
-    .select("id")
-    .eq("owner_user_id", conn.user_id)
-    .eq("external_message_id", externalId)
-    .eq("contact_id", match.contact_id)
-    .maybeSingle();
-
-  if (existing) return false;
+  // Check the prefetched set first — avoids a per-pair SELECT round trip
+  // and keeps unique-violation noise out of the logs. MUST be scoped by
+  // contact_id: the same message legitimately produces one row per matched
+  // contact. An unscoped check would see the first contact's row and
+  // silently skip every other contact on the email.
+  const pairKey = contactPairKey(externalId, match.contact_id);
+  if (existingPairs.has(pairKey)) return false;
 
   const { error } = await supabase.from("activities").insert({
     account_id: match.account_id,
@@ -690,13 +747,17 @@ async function createEmailActivity(
 
   if (error) {
     // If it's the unique-violation race, treat as a non-error dupe.
-    if (error.code === "23505") return false;
+    if (error.code === "23505") {
+      existingPairs.add(pairKey);
+      return false;
+    }
     console.error(
       `Failed to create activity for message ${email.messageId}:`,
       error.message
     );
     return false;
   }
+  existingPairs.add(pairKey);
   return true;
 }
 
@@ -710,29 +771,23 @@ async function createEmailActivity(
  *
  * Dedup uses (owner_user_id, external_message_id, lead_id) — see the
  * ux_activities_external_message_lead unique index added in
- * migration 20260526000002. The presence check matches that scope
- * exactly so we don't trip over the existing contact-row dedup
- * (where contact_id is set and lead_id may be null).
+ * migration 20260526000002. The prefetched-pair check matches that
+ * scope exactly (lead rows are only keyed while contact_id is null)
+ * so we don't trip over the existing contact-row dedup (where
+ * contact_id is set and lead_id may be null).
  */
 async function createLeadEmailActivity(
   supabase: SupabaseClient,
   conn: EmailSyncConnection,
   email: ParsedEmail,
-  match: LeadMatch
+  match: LeadMatch,
+  existingPairs: Set<string>
 ): Promise<boolean> {
   const dirLabel = email.direction === "sent" ? "Sent" : "Received";
   const externalId = `${conn.provider}:${email.messageId}`;
 
-  const { data: existing } = await supabase
-    .from("activities")
-    .select("id")
-    .eq("owner_user_id", conn.user_id)
-    .eq("external_message_id", externalId)
-    .eq("lead_id", match.lead_id)
-    .is("contact_id", null)
-    .maybeSingle();
-
-  if (existing) return false;
+  const pairKey = leadPairKey(externalId, match.lead_id);
+  if (existingPairs.has(pairKey)) return false;
 
   const { error } = await supabase.from("activities").insert({
     lead_id: match.lead_id,
@@ -751,13 +806,17 @@ async function createLeadEmailActivity(
   });
 
   if (error) {
-    if (error.code === "23505") return false;
+    if (error.code === "23505") {
+      existingPairs.add(pairKey);
+      return false;
+    }
     console.error(
       `Failed to create lead activity for message ${email.messageId}:`,
       error.message
     );
     return false;
   }
+  existingPairs.add(pairKey);
   return true;
 }
 
@@ -986,6 +1045,23 @@ async function syncConnection(
     //    run, so cache it per account to avoid re-querying when many
     //    emails/contacts share an account.
     const oppCache = new Map<string, string | null>();
+
+    // Batch the dedup lookups: one chunked prefetch of already-logged
+    // (message, contact/lead) pairs instead of one SELECT per pair. Only
+    // worth doing when something actually matched. The 23505 handlers in
+    // the two creators remain as the concurrent-run race guard.
+    const existingPairs =
+      contactMap.size > 0 || leadMap.size > 0
+        ? await fetchExistingEmailActivityPairs(
+            supabase,
+            conn,
+            Array.from(
+              new Set(
+                filteredEmails.map((e) => `${conn.provider}:${e.messageId}`)
+              )
+            )
+          )
+        : new Set<string>();
     for (const email of filteredEmails) {
       const addressesToCheck = participantAddresses(email, ownAddress);
 
@@ -1030,7 +1106,8 @@ async function syncConnection(
               conn,
               email,
               contactMatch,
-              opportunityId
+              opportunityId,
+              existingPairs
             );
             if (inserted) created++;
           }
@@ -1049,7 +1126,8 @@ async function syncConnection(
             supabase,
             conn,
             email,
-            leadMatch
+            leadMatch,
+            existingPairs
           );
           if (inserted) created++;
         }

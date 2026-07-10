@@ -50,9 +50,29 @@ jobs:
       # across deploys.
 
       - name: Deploy Edge Functions (Production)
-        # Deploys the three Outlook-related edge functions. The
-        # outlook-oauth callback receives requests from Microsoft
-        # (not an authenticated browser), so it needs --no-verify-jwt.
+        # Deploys every CI-managed edge function (18 today): the Outlook
+        # trio, task-reminders/task-digest, product-request +
+        # request-email-notify, the Meddy suite, the Playbook suite,
+        # ask-ai, and invite-user. outlook-oauth receives requests from
+        # Microsoft (not an authenticated browser) and meddy-chat /
+        # meddy-support serve the public website widget, so those three
+        # need --no-verify-jwt; everything else keeps JWT verification ON.
+        #
+        # NOT deployed by CI — manual `supabase functions deploy` only, so
+        # merging changes to these does NOT ship them anywhere:
+        #   clickup-services-sync  --no-verify-jwt  (pg_cron caller)
+        #   crm-mcp                --no-verify-jwt  (prod-only read-only MCP)
+        #   inbound-lead           --no-verify-jwt  (public website form)
+        #   nexus-activity         --no-verify-jwt  (Nexus feed shim)
+        #   pandadoc-sync          --no-verify-jwt  (PandaDoc webhook)
+        # WARNING: clickup-sf-id-sync is live on prod (cron migration
+        # 20260429000002 + scripts/migration/clickup-prod-bootstrap*.sql
+        # POST to it daily) but its source was never committed to this
+        # repo. Before ever redeploying or deleting it, recover the
+        # deployed source with:
+        #   npx supabase functions download clickup-sf-id-sync \
+        #     --project-ref igmwomnkbbsytihtvhbp
+        # and commit it under supabase/functions/clickup-sf-id-sync/.
         run: |
           set -e
           npx supabase link --project-ref $SUPABASE_PROJECT_REF

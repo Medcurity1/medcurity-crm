@@ -26,13 +26,17 @@ jobs:
   sweep:
     runs-on: ubuntu-latest
     steps:
+      # -fsS surfaces HTTP >=400 as a visible error in the run log; the
+      # trailing `|| true` deliberately keeps the every-5-min step green so
+      # a transient blip doesn't spam red runs (the next sweep retries in
+      # ~5 min). Sustained breakage still shows as error lines in every log.
       - name: Sweep staging
         env:
           URL: ${{ secrets.STAGING_VITE_SUPABASE_URL }}
           KEY: ${{ secrets.STAGING_VITE_SUPABASE_ANON_KEY }}
         run: |
           if [ -z "$URL" ] || [ -z "$KEY" ]; then echo "staging secrets unset; skipping"; exit 0; fi
-          curl -s -X POST "$URL/functions/v1/meddy-sweep" \
+          curl -fsS --max-time 120 -X POST "$URL/functions/v1/meddy-sweep" \
             -H "Authorization: Bearer $KEY" -H "apikey: $KEY" \
             -H "Content-Type: application/json" -d '{}' | head -c 300 || true
       - name: Sweep production
@@ -41,6 +45,6 @@ jobs:
           KEY: ${{ secrets.PRODUCTION_VITE_SUPABASE_ANON_KEY }}
         run: |
           if [ -z "$URL" ] || [ -z "$KEY" ]; then echo "production secrets unset; skipping"; exit 0; fi
-          curl -s -X POST "$URL/functions/v1/meddy-sweep" \
+          curl -fsS --max-time 120 -X POST "$URL/functions/v1/meddy-sweep" \
             -H "Authorization: Bearer $KEY" -H "apikey: $KEY" \
             -H "Content-Type: application/json" -d '{}' | head -c 300 || true

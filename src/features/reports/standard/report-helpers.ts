@@ -91,14 +91,25 @@ export type DateRangeKey =
 
 export function resolveRange(key: DateRangeKey): { start: string | null; end: string | null } {
   const today = new Date();
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  // All boundaries are computed in LOCAL time (getMonth/getFullYear + a local
+  // YYYY-MM-DD formatter), NOT UTC/toISOString(). On the last day of a quarter
+  // (or Dec 31), from ~late-afternoon US-local until midnight, UTC has already
+  // rolled into the next period — so a UTC-based "current_quarter"/"current_year"
+  // would resolve to the WRONG (next) period. This mirrors the dashboard
+  // kpi-registry (localISODate / getQuarterStart), which already does it right.
+  const iso = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${dd}`;
+  };
   const startOfQuarter = (d: Date) => {
-    const q = Math.floor(d.getUTCMonth() / 3);
-    return new Date(Date.UTC(d.getUTCFullYear(), q * 3, 1));
+    const q = Math.floor(d.getMonth() / 3);
+    return new Date(d.getFullYear(), q * 3, 1);
   };
   const endOfQuarter = (d: Date) => {
     const s = startOfQuarter(d);
-    return new Date(Date.UTC(s.getUTCFullYear(), s.getUTCMonth() + 3, 0));
+    return new Date(s.getFullYear(), s.getMonth() + 3, 0);
   };
   switch (key) {
     case "current_quarter": {
@@ -108,35 +119,35 @@ export function resolveRange(key: DateRangeKey): { start: string | null; end: st
     }
     case "last_quarter": {
       const s = startOfQuarter(today);
-      const prevStart = new Date(Date.UTC(s.getUTCFullYear(), s.getUTCMonth() - 3, 1));
-      const prevEnd = new Date(Date.UTC(s.getUTCFullYear(), s.getUTCMonth(), 0));
+      const prevStart = new Date(s.getFullYear(), s.getMonth() - 3, 1);
+      const prevEnd = new Date(s.getFullYear(), s.getMonth(), 0);
       return { start: iso(prevStart), end: iso(prevEnd) };
     }
     case "current_year":
-      return { start: `${today.getUTCFullYear()}-01-01`, end: `${today.getUTCFullYear()}-12-31` };
+      return { start: `${today.getFullYear()}-01-01`, end: `${today.getFullYear()}-12-31` };
     case "last_year":
       return {
-        start: `${today.getUTCFullYear() - 1}-01-01`,
-        end: `${today.getUTCFullYear() - 1}-12-31`,
+        start: `${today.getFullYear() - 1}-01-01`,
+        end: `${today.getFullYear() - 1}-12-31`,
       };
     case "last_30_days": {
       const s = new Date(today);
-      s.setUTCDate(s.getUTCDate() - 30);
+      s.setDate(s.getDate() - 30);
       return { start: iso(s), end: iso(today) };
     }
     case "last_60_days": {
       const s = new Date(today);
-      s.setUTCDate(s.getUTCDate() - 60);
+      s.setDate(s.getDate() - 60);
       return { start: iso(s), end: iso(today) };
     }
     case "last_90_days": {
       const s = new Date(today);
-      s.setUTCDate(s.getUTCDate() - 90);
+      s.setDate(s.getDate() - 90);
       return { start: iso(s), end: iso(today) };
     }
     case "last_365_days": {
       const s = new Date(today);
-      s.setUTCDate(s.getUTCDate() - 365);
+      s.setDate(s.getDate() - 365);
       return { start: iso(s), end: iso(today) };
     }
     case "all_time":

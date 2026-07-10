@@ -1,3 +1,5 @@
+import { ALL_STAGES } from "@/lib/formatters";
+
 export interface ColumnDef {
   key: string;
   label: string;
@@ -26,6 +28,17 @@ export interface FilterColumnDef {
   type: ColumnDef["type"] | RelationFilterType;
   /** For enum columns, the set of valid values. */
   enumValues?: string[];
+  /**
+   * When set, the ReportBuilder resolves this enum's dropdown options from the
+   * admin-managed picklist with this `field_key` (e.g. "opportunities.lead_source")
+   * instead of the static `enumValues` above — the same data-driven, drift-proof
+   * source the Nexus report engine reads (see
+   * src/features/nexus/report-engine.ts optionsSource/picklistFieldKey). This
+   * prevents the "hardcoded list falls behind the admin picklist" bug. The
+   * `enumValues` list is kept in sync with the canonical enum as a fallback for
+   * when the picklist hasn't loaded.
+   */
+  picklistFieldKey?: string;
 }
 
 export interface EntityDef {
@@ -78,7 +91,10 @@ const accountColumns: ColumnDef[] = [
     key: "renewal_type",
     label: "Renewal Type",
     type: "enum",
-    enumValues: ["auto_renew", "manual_renew", "no_auto_renew"],
+    // Canonical set: RenewalType in src/types/crm.ts (also the
+    // accounts.renewal_type admin picklist). Was missing full_auto_renew /
+    // platform_only_auto_renew.
+    enumValues: ["auto_renew", "manual_renew", "no_auto_renew", "full_auto_renew", "platform_only_auto_renew"],
     group: "Contract",
   },
   { key: "active_since", label: "Active Since", type: "date", group: "Contract" },
@@ -131,7 +147,10 @@ const accountFilterColumns: FilterColumnDef[] = [
     filterKey: "renewal_type",
     label: "Renewal Type",
     type: "enum",
-    enumValues: ["auto_renew", "manual_renew", "no_auto_renew"],
+    // Data-driven from the accounts.renewal_type admin picklist; enumValues
+    // (canonical RenewalType set — src/types/crm.ts) is the loading fallback.
+    enumValues: ["auto_renew", "manual_renew", "no_auto_renew", "full_auto_renew", "platform_only_auto_renew"],
+    picklistFieldKey: "accounts.renewal_type",
   },
   { filterKey: "active_since", label: "Active Since", type: "date" },
   { filterKey: "acv", label: "ACV", type: "currency" },
@@ -230,7 +249,11 @@ const opportunityColumns: ColumnDef[] = [
     key: "stage",
     label: "Stage",
     type: "enum",
-    enumValues: ["lead", "qualified", "proposal", "verbal_commit", "closed_won", "closed_lost"],
+    // Canonical live stage set (formatters.ALL_STAGES). Migration
+    // 20260422000001 rewrote every opportunity/history row onto the
+    // SF-matching stages; the old legacy values (lead/qualified/proposal/
+    // verbal_commit) now match zero live rows, so we must not offer them.
+    enumValues: ALL_STAGES,
     group: "Basic Info",
   },
   {
@@ -266,7 +289,10 @@ const opportunityColumns: ColumnDef[] = [
     key: "lead_source",
     label: "Lead Source",
     type: "enum",
-    enumValues: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "other"],
+    // Canonical set: LeadSource in src/types/crm.ts (also the
+    // opportunities.lead_source admin picklist). Was missing webinar/podcast/
+    // conference/sql/mql.
+    enumValues: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"],
     group: "Basic Info",
   },
   {
@@ -318,7 +344,9 @@ const opportunityFilterColumns: FilterColumnDef[] = [
     filterKey: "stage",
     label: "Stage",
     type: "enum",
-    enumValues: ["lead", "qualified", "proposal", "verbal_commit", "closed_won", "closed_lost"],
+    // Canonical live stage set (formatters.ALL_STAGES) — legacy values were
+    // migrated off by 20260422000001 and match zero live rows.
+    enumValues: ALL_STAGES,
   },
   { filterKey: "team", label: "Team", type: "enum", enumValues: ["sales", "renewals"] },
   { filterKey: "kind", label: "Kind", type: "enum", enumValues: ["new_business", "renewal"] },
@@ -341,7 +369,10 @@ const opportunityFilterColumns: FilterColumnDef[] = [
     filterKey: "lead_source",
     label: "Lead Source",
     type: "enum",
-    enumValues: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "other"],
+    // Data-driven from the opportunities.lead_source admin picklist; enumValues
+    // (canonical LeadSource set — src/types/crm.ts) is the loading fallback.
+    enumValues: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"],
+    picklistFieldKey: "opportunities.lead_source",
   },
   {
     filterKey: "payment_frequency",
@@ -499,7 +530,9 @@ const leadColumns: ColumnDef[] = [
     key: "source",
     label: "Source",
     type: "enum",
-    enumValues: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "other"],
+    // Canonical set: LeadSource in src/types/crm.ts (also the leads.source
+    // admin picklist). Was missing webinar/podcast/conference/sql/mql.
+    enumValues: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"],
     group: "Basic Info",
   },
   { key: "description", label: "Description", type: "text", group: "Basic Info" },
@@ -543,7 +576,10 @@ const leadFilterColumns: FilterColumnDef[] = [
     filterKey: "source",
     label: "Source",
     type: "enum",
-    enumValues: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "other"],
+    // Data-driven from the leads.source admin picklist; enumValues (canonical
+    // LeadSource set — src/types/crm.ts) is the loading fallback.
+    enumValues: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"],
+    picklistFieldKey: "leads.source",
   },
   { filterKey: "description", label: "Description", type: "text" },
   { filterKey: "employees", label: "Employees", type: "number" },

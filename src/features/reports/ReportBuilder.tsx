@@ -83,6 +83,7 @@ import { useUsers, useAccounts } from "@/features/accounts/api";
 import { RelationCombobox } from "./RelationCombobox";
 import { useContacts } from "@/features/contacts/api";
 import { useOpportunities } from "@/features/opportunities/api";
+import { usePicklistOptions } from "@/features/picklists/api";
 import type { ReportConfig, ReportFilter, ReportSort, SavedReport } from "@/types/crm";
 import {
   formatCurrency,
@@ -750,22 +751,40 @@ function FilterValueInput({
   lookups: RelationLookups;
   operator: string;
 }) {
+  // Session-cached (deduped across every filter row). Used to resolve enum
+  // options from the admin-managed picklist when a column sets picklistFieldKey.
+  const { data: picklists } = usePicklistOptions();
+
+  // Options for an enum filter input. Prefer the admin-managed picklist (stays
+  // in sync when admins add/rename values — the same durable source the Nexus
+  // report engine reads); fall back to the static enumValues while the picklist
+  // is loading or if it's empty.
+  const enumOptions = (): { value: string; label: string }[] => {
+    if (filterCol.picklistFieldKey) {
+      const opts = (picklists?.get(filterCol.picklistFieldKey) ?? [])
+        .filter((o) => o.is_active)
+        .map((o) => ({ value: o.value, label: o.label }));
+      if (opts.length > 0) return opts;
+    }
+    const labelFn = getFilterEnumLabelFn(filterCol);
+    return (filterCol.enumValues ?? []).map((ev) => ({
+      value: ev,
+      label: labelFn ? labelFn(ev) : ev,
+    }));
+  };
+
   // "is one of" (multi-value OR). The stored value is a comma-separated string
   // that applyFilter() splits into an IN list. For enums we offer a multi-pick;
   // for free-text/number we take a comma-separated entry. (Summer's request.)
   if (operator === "in") {
     if (filterCol.type === "enum" && filterCol.enumValues) {
-      const labelFn = getFilterEnumLabelFn(filterCol);
       const selected = value
         ? value.split(",").map((v) => v.trim()).filter(Boolean)
         : [];
       return (
         <div className="w-52">
           <MultiSelect
-            options={filterCol.enumValues.map((ev) => ({
-              value: ev,
-              label: labelFn ? labelFn(ev) : ev,
-            }))}
+            options={enumOptions()}
             value={selected}
             onChange={(next) => onChange(next.join(","))}
             placeholder="Select values"
@@ -793,16 +812,15 @@ function FilterValueInput({
   }
 
   if (filterCol.type === "enum" && filterCol.enumValues) {
-    const labelFn = getFilterEnumLabelFn(filterCol);
     return (
       <Select value={value} onValueChange={onChange}>
         <SelectTrigger className="w-52">
           <SelectValue placeholder="Value" />
         </SelectTrigger>
         <SelectContent>
-          {filterCol.enumValues.map((ev) => (
-            <SelectItem key={ev} value={ev}>
-              {labelFn ? labelFn(ev) : ev}
+          {enumOptions().map((opt) => (
+            <SelectItem key={opt.value} value={opt.value}>
+              {opt.label}
             </SelectItem>
           ))}
         </SelectContent>
