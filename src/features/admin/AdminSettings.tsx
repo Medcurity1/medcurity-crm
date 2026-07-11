@@ -170,7 +170,9 @@ export function AdminSettings() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList>
+        {/* h-auto + flex-wrap: 14 tabs must never overflow the viewport —
+            they wrap to extra rows on narrower screens instead. */}
+        <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="object-manager">Object Manager</TabsTrigger>
           <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="permissions">Permissions</TabsTrigger>

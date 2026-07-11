@@ -172,6 +172,12 @@ export interface RenewalAutomationConfig {
   test_account_id: string | null;
   pullback_days_auto_renew: number;
   pullback_days_signature_required: number;
+  /**
+   * Fresh-start date: contracts already inside the renewal window on this
+   * date are the team's manual backlog and are never auto-created. Set by
+   * migration when the automation went live on this environment.
+   */
+  baseline_date: string | null;
 }
 
 /**
@@ -313,6 +319,7 @@ export interface RenewalPreviewRow {
   status:
     | "will_create"
     | "anniversary_outside_window"
+    | "before_baseline"
     | "has_live_renewal"
     | "account_not_active"
     | "account_do_not_auto_renew"
