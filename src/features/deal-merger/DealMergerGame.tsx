@@ -167,7 +167,6 @@ function GameModal() {
   gameRef.current = game;
   const millionSeen = useRef(game.won);
   const prevHighest = useRef(game.highestTier);
-  const lastMoveAt = useRef(0);
   const inkSeq = useRef(0);
   const ghostTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -232,11 +231,10 @@ function GameModal() {
     (dir: Dir) => {
       const g = gameRef.current;
       if (g.over || showMillion) return;
-      const now = performance.now();
-      if (now - lastMoveAt.current < 80) return; // key-repeat throttle
+      // No input throttle on purpose: fast play just clips animations, which
+      // is the classic 2048 feel — a throttle here eats held-key repeats.
       const outcome = move(g, dir);
       if (!outcome.moved) return;
-      lastMoveAt.current = now;
 
       // sweep the previous move's transients so fast play never stacks them
       if (ghostTimer.current) clearTimeout(ghostTimer.current);
