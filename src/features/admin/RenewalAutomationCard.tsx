@@ -64,6 +64,7 @@ const PREVIEW_STATUS_META: Record<
     label: "Outside window",
     tone: "warning",
   },
+  before_baseline: { label: "Before start date", tone: "muted" },
   has_live_renewal: { label: "Already has renewal", tone: "muted" },
   account_not_active: { label: "Account not active", tone: "warning" },
   account_do_not_auto_renew: {
@@ -409,6 +410,13 @@ export function RenewalAutomationCard() {
             <div className="text-sm font-medium">
               {formatDateTime(config?.last_run_at ?? null)}
             </div>
+            {config?.baseline_date && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Fresh start {config.baseline_date}: contracts already in their
+                renewal window before then stay manual — only newer ones are
+                auto-created.
+              </p>
+            )}
           </div>
           <div className="flex flex-col items-end gap-1">
             <Button
