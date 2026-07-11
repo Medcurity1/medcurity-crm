@@ -29,6 +29,7 @@ import {
 import { cn } from "@/lib/utils";
 import { pipelineRunner } from "@/features/pipeline-runner/store";
 import { meddySweeper } from "@/features/meddy-sweeper/store";
+import { dealMerger } from "@/features/deal-merger/store";
 import { PulseLogo } from "@/components/PulseLogo";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Button } from "@/components/ui/button";
@@ -65,7 +66,7 @@ type NavItem = {
    * When set, triple-clicking the label unlocks a hidden mini-game.
    * Normal navigation is unaffected. Each secret tab launches its own game.
    */
-  secret?: "pipeline" | "meddysweeper";
+  secret?: "pipeline" | "meddysweeper" | "dealmerger";
 };
 
 // Badge color presets. Admin = cool sky blue; New = red (draws the eye
@@ -87,7 +88,7 @@ const navItems: NavItem[] = [
   { to: "/meddy", icon: Bot, label: "Meddy", secret: "meddysweeper" },
   { to: "/accounts", icon: Building2, label: "Accounts" },
   { to: "/contacts", icon: Users, label: "Contacts" },
-  { to: "/opportunities", icon: Target, label: "Opportunities" },
+  { to: "/opportunities", icon: Target, label: "Opportunities", secret: "dealmerger" },
   { to: "/pipeline", icon: Kanban, label: "Pipeline", secret: "pipeline" },
   { to: "/partners", icon: Handshake, label: "Partners" },
   { to: "/calendar", icon: CalendarIcon, label: "Calendar" },
@@ -129,6 +130,7 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
   const secretClicks = useRef<Record<NonNullable<NavItem["secret"]>, number[]>>({
     pipeline: [],
     meddysweeper: [],
+    dealmerger: [],
   });
   function handleSecretClick(game: NonNullable<NavItem["secret"]>) {
     const now = performance.now();
@@ -138,6 +140,7 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
     if (recent.length >= 3) {
       secretClicks.current[game] = [];
       if (game === "meddysweeper") meddySweeper.launch();
+      else if (game === "dealmerger") dealMerger.launch();
       else pipelineRunner.launch();
     }
   }
