@@ -161,6 +161,9 @@ function GameModal() {
   const [flash, setFlash] = useState<string | null>(null);
   const [showMillion, setShowMillion] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  // Badges snapshot at the moment the game ends — computed live they'd
+  // self-cancel once the submitted score refetches into myBest/topScores.
+  const [endStats, setEndStats] = useState<{ pb: boolean; ranked: boolean }>({ pb: false, ranked: false });
   const [sound, setSound] = useState(() => localStorage.getItem(SOUND_KEY) === "on");
 
   const gameRef = useRef(game);
@@ -214,6 +217,10 @@ function GameModal() {
   const finalize = useCallback(
     (finished: GameState) => {
       if (soundRef.current) sfx.over();
+      setEndStats({
+        pb: finished.score > 0 && finished.score > (myBest ?? 0),
+        ranked: wouldRank(finished.score),
+      });
       if (uid && finished.score > 0) {
         setSubmitted(true);
         submit.mutate({
@@ -224,7 +231,7 @@ function GameModal() {
         });
       }
     },
-    [uid, profile?.full_name, submit],
+    [uid, profile?.full_name, submit, myBest, wouldRank],
   );
 
   const doMove = useCallback(
@@ -291,6 +298,7 @@ function GameModal() {
     prevHighest.current = fresh.highestTier;
     resumed.current = false;
     setSubmitted(false);
+    setEndStats({ pb: false, ranked: false });
     setShowMillion(false);
     setGhosts([]);
     setInks([]);
@@ -357,8 +365,6 @@ function GameModal() {
   );
 
   const bestShown = Math.max(myBest ?? 0, game.score);
-  const madeBoard = game.over && wouldRank(game.score);
-  const newPB = game.over && game.score > (myBest ?? 0) && game.score > 0;
 
   const slots = useMemo(() => Array.from({ length: SIZE * SIZE }, (_, i) => i), []);
 
@@ -473,8 +479,8 @@ function GameModal() {
                   <div className="dm-overlay-kicker">Quarter closed</div>
                   <div className="dm-overlay-total">{fmtMoney(game.score)}</div>
                   <div className="dm-overlay-badges">
-                    {newPB && <span className="dm-badge dm-badge-gold">★ New personal best</span>}
-                    {madeBoard && <span className="dm-badge dm-badge-red">✒ Made the ledger</span>}
+                    {endStats.pb && <span className="dm-badge dm-badge-gold">★ New personal best</span>}
+                    {endStats.ranked && <span className="dm-badge dm-badge-red">✒ Made the ledger</span>}
                   </div>
                   <div className="dm-overlay-sub">
                     Biggest deal: {tierLabel(game.highestTier)} · {game.moves} moves
