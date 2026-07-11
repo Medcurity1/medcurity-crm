@@ -26,7 +26,7 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 - [IDEA] 2026-07-11 · Nathan · Account Snake mini-game (classic snake; eat accounts to grow your book of business; hide on the Accounts nav label) — Deal Merger won the pick, Nathan said snake "maybe another time"
 - [IDEA] 2026-07-08 · Molly · FTE autofill reverse direction (opportunity → account) — one-way account→opp shipped; Molly's original ask was bidirectional
-- [IDEA] 2026-07 · Nathan · Pulse Arcade hub (games list, profiles, records, daily events) — revisit at 3+ games
+- [IDEA] 2026-07 · Nathan · Pulse Arcade hub (games list, profiles, records, daily events) — revisit at 6+ games (raised from 3+ on 2026-07-11; currently 3: Runner, MeddySweeper, Deal Merger)
 - [IDEA] 2026-06 · Nathan · CRM AI layer (describe-a-report, AI nav/search) — big project, deferred
 - [IDEA] 2026-07 · Nathan · Campaigns: Playbook → mixed-channel sequence builder (8-Touch etc.) · docs/campaigns/campaigns-plan.md; 5 pre-bugs listed there
 - [IDEA] 2026-07-08 · (review note) · Nexus called-by filter caps at 250 contact ids per caller — sanity-check under real volume post-adoption
