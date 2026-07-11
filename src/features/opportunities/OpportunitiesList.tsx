@@ -6,6 +6,7 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { Target, Plus, Search, X, Pencil, Check } from "lucide-react";
 import { useOpportunities, useOpportunitiesTotals, useArchiveOpportunity, useBulkUpdateOwner, useBulkDeleteOpportunities, useUpdateOpportunity } from "./api";
 import { useClosedLostGuard } from "./useClosedLostGuard";
+import { DealMergerGame } from "@/features/deal-merger/DealMergerGame";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { checkCloseReadiness, formatCloseReadinessMessage } from "@/lib/closeReadiness";
@@ -841,6 +842,8 @@ export function OpportunitiesList() {
         }}
       />
       {closedLostGuard.dialog}
+      {/* Deal Merger — hidden mini-game (triple-click the Opportunities nav label) */}
+      <DealMergerGame />
     </div>
   );
 }
