@@ -10,6 +10,7 @@ import {
   Globe,
   Hash,
   Loader2,
+  CalendarClock,
 } from "lucide-react";
 
 const APP_VERSION = "0.1.0";
@@ -82,6 +83,46 @@ function useLatestMigration() {
   });
 }
 
+interface ScheduledJobStatus {
+  jobname: string;
+  kind: "sql" | "http";
+  required: boolean;
+  installed: boolean;
+  active: boolean;
+  schedule: string | null;
+  last_run_at: string | null;
+  last_run_status: string | null;
+  last_run_message: string | null;
+}
+
+function useScheduledJobs() {
+  return useQuery({
+    queryKey: ["scheduled_jobs_status"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("scheduled_jobs_status");
+      if (error) throw error;
+      return (data ?? []) as ScheduledJobStatus[];
+    },
+    staleTime: 30_000,
+  });
+}
+
+// One glanceable verdict per job. "not on this env" is normal for jobs whose
+// URL+key literals are only pasted into production (email sync, ClickUp, …).
+function jobHealth(j: ScheduledJobStatus): {
+  label: string;
+  variant: "default" | "secondary" | "destructive" | "outline";
+} {
+  if (!j.installed)
+    return j.required
+      ? { label: "missing", variant: "destructive" }
+      : { label: "not on this env", variant: "outline" };
+  if (!j.active) return { label: "disabled", variant: "destructive" };
+  if (j.last_run_status === "failed") return { label: "failed", variant: "destructive" };
+  if (!j.last_run_at) return { label: "waiting for first run", variant: "secondary" };
+  return { label: "ok", variant: "default" };
+}
+
 function formatTableName(name: string): string {
   return name
     .split("_")
@@ -92,6 +133,7 @@ function formatTableName(name: string): string {
 export function SystemInfo() {
   const tableCounts = useTableCounts();
   const latestMigration = useLatestMigration();
+  const scheduledJobs = useScheduledJobs();
 
   const supabaseUrl = env.supabaseUrl;
   const projectRef = supabaseUrl.match(
@@ -169,6 +211,62 @@ export function SystemInfo() {
               Migration tracking table not available. Migrations are applied via
               the combined SQL file.
             </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Scheduled background jobs — the watchdog's view, self-serve */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">
+            <span className="flex items-center gap-2">
+              <CalendarClock className="h-4 w-4 text-muted-foreground" />
+              Scheduled Jobs
+            </span>
+          </CardTitle>
+          {scheduledJobs.isLoading && (
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          )}
+        </CardHeader>
+        <CardContent>
+          {scheduledJobs.isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading job status...</p>
+          ) : scheduledJobs.error ? (
+            <p className="text-sm text-destructive">
+              Failed to load scheduled job status.
+            </p>
+          ) : (
+            <div className="space-y-1.5">
+              {scheduledJobs.data?.map((j) => {
+                const health = jobHealth(j);
+                return (
+                  <div
+                    key={j.jobname}
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border px-3 py-2"
+                  >
+                    <span className="text-sm font-mono">{j.jobname}</span>
+                    {j.schedule && (
+                      <span className="text-xs text-muted-foreground font-mono">
+                        {j.schedule}
+                      </span>
+                    )}
+                    <span className="ml-auto flex items-center gap-2">
+                      {j.last_run_at && (
+                        <span className="text-xs text-muted-foreground">
+                          last run {new Date(j.last_run_at).toLocaleString()}
+                        </span>
+                      )}
+                      <Badge variant={health.variant}>{health.label}</Badge>
+                    </span>
+                    {j.last_run_status === "failed" && j.last_run_message && (
+                      <p className="w-full text-xs text-destructive">
+                        {j.last_run_message}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </CardContent>
       </Card>
