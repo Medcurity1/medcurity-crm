@@ -12,9 +12,15 @@ name: Playbook Weekly Ideas (cron)
 # generate-ideas is idempotent per ISO week (keyed to the week's Monday),
 # so an occasional double-run is harmless.
 #
-# NOTE: GitHub only runs `schedule:` triggers from the default branch
-# (main). On the Staging branch this workflow is effectively OFF until it
-# is merged to main at cutover — which is exactly the desired behavior.
+# STATUS (2026-07-10): this workflow is MANUALLY DISABLED in the GitHub
+# Actions UI (disabled alongside playbook-smartlead-sync after its
+# scheduled runs from main failed 403 on 2026-06-24..26 — SUPABASE_SYNC_URL
+# points at prod and Playbook is staging-only, so the playbook-ai
+# function/config don't exist on prod yet; this one never got a run in).
+# Merging to main does NOT re-enable a manually-disabled workflow. At
+# Playbook promotion (see DOCKET): (1) deploy/config the playbook
+# functions on prod, (2) re-enable this workflow in the Actions UI
+# (gh workflow enable playbook-weekly-ideas.yml).
 
 on:
   schedule:
@@ -41,10 +47,15 @@ jobs:
             echo "::error::SUPABASE_SYNC_URL and SUPABASE_SERVICE_ROLE_KEY repository secrets must be set."
             exit 1
           fi
-          PLAYBOOK_AI_URL="${SUPABASE_SYNC_URL/sync-emails/playbook-ai}"
+          # Strip any stray whitespace/newline the stored secrets may carry —
+          # a trailing newline in this same secret once broke sync-emails'
+          # auth gate. JWTs and URLs contain no whitespace, so always safe.
+          KEY="$(printf '%s' "${SUPABASE_SERVICE_ROLE_KEY}" | tr -d '[:space:]')"
+          URL="$(printf '%s' "${SUPABASE_SYNC_URL}" | tr -d '[:space:]')"
+          PLAYBOOK_AI_URL="${URL/sync-emails/playbook-ai}"
           curl -fsS --max-time 240 \
             -X POST \
-            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${KEY}" \
             -H "Content-Type: application/json" \
             -d '{"action":"generate-ideas"}' \
             "${PLAYBOOK_AI_URL}"

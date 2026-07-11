@@ -68,7 +68,7 @@ function formatKpiValue(value: string | number, format: KpiDefinition["format"])
 // ---------------------------------------------------------------------------
 
 export function KpiCard({ kpi, userId }: { kpi: KpiDefinition; userId: string }) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["kpi", kpi.id, userId],
     queryFn: () => kpi.query(supabase, userId),
     staleTime: 60_000,
@@ -114,9 +114,24 @@ export function KpiCard({ kpi, userId }: { kpi: KpiDefinition; userId: string })
         </span>
       </CardHeader>
       <CardContent>
-        <p className="text-2xl font-bold tabular-nums tracking-tight">
-          {data !== undefined ? formatKpiValue(data, kpi.format) : "—"}
-        </p>
+        {isError ? (
+          // The query threw (network drop, RLS denial, PostgREST 500…).
+          // Show an explicit dash + note instead of a misleading 0/$0 —
+          // React Query retries in the background and refetches on focus.
+          <p
+            className="text-2xl font-bold tabular-nums tracking-tight text-muted-foreground"
+            title="This number couldn't be loaded. It will retry automatically."
+          >
+            —{" "}
+            <span className="text-xs font-normal align-middle">
+              couldn't load
+            </span>
+          </p>
+        ) : (
+          <p className="text-2xl font-bold tabular-nums tracking-tight">
+            {data !== undefined ? formatKpiValue(data, kpi.format) : "—"}
+          </p>
+        )}
       </CardContent>
     </Card>
   );

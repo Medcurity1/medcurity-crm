@@ -55,10 +55,9 @@ export function useAccountTypesInUse() {
  * exact-match "Time Zone" report filter (contacts + accounts). Data-driven,
  * NOT the app's UsTimeZone constant list, because accounts.timezone holds
  * free-text SF-imported strings ("US/Eastern", "Central- (CDT)", …) that the
- * enum values would never match. There's no distinct RPC for timezone (unlike
- * account_type / states), and PostgREST caps a response at 1000 rows, so this
- * pages through the column and dedupes client-side. Cardinality is tiny (a
- * dozen-ish values), so the result is small; cached like the sibling sources.
+ * enum values would never match. One round trip via the
+ * list_timezones_in_use RPC (migration 20260710172000) — server-side
+ * DISTINCT, same pattern as list_account_types_in_use / list_states_in_use.
  *
  * `opts.enabled` lets the panel skip the fetch for entities without a
  * timezone filter (opportunities / imports).
@@ -69,26 +68,12 @@ export function useTimezonesInUse(opts?: { enabled?: boolean }) {
     staleTime: 5 * 60 * 1000,
     enabled: opts?.enabled ?? true,
     queryFn: async () => {
-      const seen = new Set<string>();
-      const PAGE = 1000;
-      // Safety cap: 20 pages (20k rows) — far beyond the actual account count.
-      for (let page = 0; page < 20; page++) {
-        const { data, error } = await supabase
-          .from("accounts")
-          .select("timezone")
-          .is("archived_at", null)
-          .not("timezone", "is", null)
-          .order("timezone", { ascending: true })
-          .range(page * PAGE, page * PAGE + PAGE - 1);
-        if (error) throw error;
-        const rows = (data ?? []) as { timezone: string | null }[];
-        for (const r of rows) {
-          const tz = r.timezone?.trim();
-          if (tz) seen.add(tz);
-        }
-        if (rows.length < PAGE) break;
-      }
-      return [...seen].sort((a, b) => a.localeCompare(b));
+      const { data, error } = await supabase.rpc("list_timezones_in_use");
+      if (error) throw error;
+      const rows = (data ?? []) as { timezone: string; n: number }[];
+      return rows
+        .map((r) => r.timezone)
+        .sort((a, b) => a.localeCompare(b));
     },
   });
 }

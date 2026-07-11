@@ -7,9 +7,15 @@ name: Playbook Smartlead Sync (cron)
 # Same external-scheduler approach as sync-emails.yml. Target URL is
 # derived from SUPABASE_SYNC_URL by swapping the function name.
 #
-# NOTE: GitHub only runs `schedule:` triggers from the default branch
-# (main). On the Staging branch this workflow is effectively OFF until it
-# is merged to main at cutover.
+# STATUS (2026-07-10): this workflow is MANUALLY DISABLED in the GitHub
+# Actions UI. It ran from main on 2026-06-24/25/26 (GitHub only runs
+# `schedule:` triggers from the default branch) and all 3 runs failed with
+# curl 403, because SUPABASE_SYNC_URL points at prod and Playbook is
+# staging-only — the playbook-smartlead function/config don't exist on
+# prod yet. Merging to main does NOT re-enable a manually-disabled
+# workflow. At Playbook promotion (see DOCKET): (1) deploy/config the
+# playbook functions on prod, (2) re-enable this workflow in the Actions
+# UI (gh workflow enable playbook-smartlead-sync.yml).
 
 on:
   schedule:
@@ -36,10 +42,15 @@ jobs:
             echo "::error::SUPABASE_SYNC_URL and SUPABASE_SERVICE_ROLE_KEY repository secrets must be set."
             exit 1
           fi
-          PLAYBOOK_SL_URL="${SUPABASE_SYNC_URL/sync-emails/playbook-smartlead}"
+          # Strip any stray whitespace/newline the stored secrets may carry —
+          # a trailing newline in this same secret once broke sync-emails'
+          # auth gate. JWTs and URLs contain no whitespace, so always safe.
+          KEY="$(printf '%s' "${SUPABASE_SERVICE_ROLE_KEY}" | tr -d '[:space:]')"
+          URL="$(printf '%s' "${SUPABASE_SYNC_URL}" | tr -d '[:space:]')"
+          PLAYBOOK_SL_URL="${URL/sync-emails/playbook-smartlead}"
           curl -fsS --max-time 540 \
             -X POST \
-            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${KEY}" \
             -H "Content-Type: application/json" \
             -d '{"action":"sync"}' \
             "${PLAYBOOK_SL_URL}"

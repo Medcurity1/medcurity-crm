@@ -644,6 +644,13 @@ export interface Activity {
   email_cc: string[] | null;
   email_html_body: string | null;
   email_thread_id: string | null;
+  // Provider message id (Graph/Gmail). Set for synced emails; null for
+  // manually-logged ones. dce9b1f logs one synced email to EVERY matched
+  // contact under an account, so this is the identity to dedupe on when a
+  // consumer needs "one real email" rather than "one activity row" — see
+  // src/features/nexus/metrics.ts, activityFeedDedupe.ts, and the
+  // groupActivitiesForTimeline dedupeFanOut option.
+  external_message_id: string | null;
   // Reminders (tasks) — see migration 20260417000007
   reminder_schedule: ReminderSchedule;
   reminder_at: string | null;

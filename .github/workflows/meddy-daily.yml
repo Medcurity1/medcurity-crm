@@ -11,6 +11,11 @@ name: Meddy Daily Jobs (cron)
 # staging test conversations age out too). Each env is its own step
 # with its own secrets — no conditional fallback expressions, so an
 # unset secret skips that env instead of silently hitting the other.
+#
+# Failure visibility: curl runs with -fsS so any HTTP >=400 (rotated key,
+# broken deploy, function 500) fails the step instead of staying silently
+# green. The second step in each job runs even if the first failed
+# (!cancelled()) so one env's outage never hides the other's run.
 
 on:
   schedule:
@@ -22,45 +27,57 @@ jobs:
   retention:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.schedule == '0 9 * * *' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Retention purge (production)
         env:
           URL: ${{ secrets.PRODUCTION_VITE_SUPABASE_URL }}
           KEY: ${{ secrets.PRODUCTION_VITE_SUPABASE_ANON_KEY }}
         run: |
-          if [ -z "$URL" ] || [ -z "$KEY" ]; then echo "production secrets unset; skipping"; exit 0; fi
-          curl -s -X POST "$URL/functions/v1/meddy-sweep" \
+          set -euo pipefail
+          if [ -z "${URL:-}" ] || [ -z "${KEY:-}" ]; then echo "production secrets unset; skipping"; exit 0; fi
+          RESP="$(curl -fsS --max-time 240 -X POST "$URL/functions/v1/meddy-sweep" \
             -H "Authorization: Bearer $KEY" -H "apikey: $KEY" \
-            -H "Content-Type: application/json" -d '{"retention": true}' | head -c 300
+            -H "Content-Type: application/json" -d '{"retention": true}')"
+          echo "${RESP:0:300}"
       - name: Retention purge (staging)
+        if: ${{ !cancelled() }}
         env:
           URL: ${{ secrets.STAGING_VITE_SUPABASE_URL }}
           KEY: ${{ secrets.STAGING_VITE_SUPABASE_ANON_KEY }}
         run: |
-          if [ -z "$URL" ] || [ -z "$KEY" ]; then echo "staging secrets unset; skipping"; exit 0; fi
-          curl -s -X POST "$URL/functions/v1/meddy-sweep" \
+          set -euo pipefail
+          if [ -z "${URL:-}" ] || [ -z "${KEY:-}" ]; then echo "staging secrets unset; skipping"; exit 0; fi
+          RESP="$(curl -fsS --max-time 240 -X POST "$URL/functions/v1/meddy-sweep" \
             -H "Authorization: Bearer $KEY" -H "apikey: $KEY" \
-            -H "Content-Type: application/json" -d '{"retention": true}' | head -c 300
+            -H "Content-Type: application/json" -d '{"retention": true}')"
+          echo "${RESP:0:300}"
 
   crawl:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.schedule == '0 10 * * *' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: KB crawl (production)
         env:
           URL: ${{ secrets.PRODUCTION_VITE_SUPABASE_URL }}
           KEY: ${{ secrets.PRODUCTION_VITE_SUPABASE_ANON_KEY }}
         run: |
-          if [ -z "$URL" ] || [ -z "$KEY" ]; then echo "production secrets unset; skipping"; exit 0; fi
-          curl -s -X POST "$URL/functions/v1/meddy-crawl" \
+          set -euo pipefail
+          if [ -z "${URL:-}" ] || [ -z "${KEY:-}" ]; then echo "production secrets unset; skipping"; exit 0; fi
+          RESP="$(curl -fsS --max-time 240 -X POST "$URL/functions/v1/meddy-crawl" \
             -H "Authorization: Bearer $KEY" -H "apikey: $KEY" \
-            -H "Content-Type: application/json" -d '{}' | head -c 300
+            -H "Content-Type: application/json" -d '{}')"
+          echo "${RESP:0:300}"
       - name: KB crawl (staging)
+        if: ${{ !cancelled() }}
         env:
           URL: ${{ secrets.STAGING_VITE_SUPABASE_URL }}
           KEY: ${{ secrets.STAGING_VITE_SUPABASE_ANON_KEY }}
         run: |
-          if [ -z "$URL" ] || [ -z "$KEY" ]; then echo "staging secrets unset; skipping"; exit 0; fi
-          curl -s -X POST "$URL/functions/v1/meddy-crawl" \
+          set -euo pipefail
+          if [ -z "${URL:-}" ] || [ -z "${KEY:-}" ]; then echo "staging secrets unset; skipping"; exit 0; fi
+          RESP="$(curl -fsS --max-time 240 -X POST "$URL/functions/v1/meddy-crawl" \
             -H "Authorization: Bearer $KEY" -H "apikey: $KEY" \
-            -H "Content-Type: application/json" -d '{}' | head -c 300
+            -H "Content-Type: application/json" -d '{}')"
+          echo "${RESP:0:300}"

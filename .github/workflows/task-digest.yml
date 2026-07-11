@@ -1,42 +1,103 @@
 name: Task Digest (cron)
 
+# STATUS (2026-07-10): pg_cron + pg_net (migration 20260710178000, jobname
+# task_digest_weekday_morning, "0 15 * * 1-5" UTC) is now PRIMARY and the
+# ONLY automatic trigger for task-digest — this workflow's `schedule:`
+# trigger has been REMOVED (not just left as a redundant net like
+# sync-emails.yml / meddy-sweep.yml). Reason: supabase/functions/
+# task-digest/index.ts has no per-day send dedup (flagged in
+# docs/audit/2026-06-24-full-audit.md — "re-run double-emails"), so
+# running both an exact-time pg_cron trigger AND a GitHub cron that lands
+# late-but-same-day (observed drift ~2h, e.g. "8 AM" landing ~10 AM) would
+# email every opted-in rep two digests. Once the function gets a per-day
+# dedup guard (e.g. a task_digest_log(user_id, digest_date) table checked
+# before send — tracked on the DOCKET), this workflow's schedule trigger
+# can be safely restored as a true redundant safety net.
+#
+# This workflow file stays as a MANUAL safety net: workflow_dispatch still
+# works for an on-demand run (e.g. if pg_cron/pg_net is down — check
+# select * from public.v_task_digest_schedule_status; first), same
+# curl -fsS failure visibility as before.
+#
 # Daily morning task digest: one email per rep listing the tasks they
 # have due today (+ overdue). Opt-in per user (My Settings →
 # Notifications → "Daily morning digest"); the function no-ops for anyone
 # who hasn't turned it on, and skips reps with no due tasks.
 #
 # Weekday mornings ~8 AM Pacific. GitHub cron is UTC: 15:00 UTC = 8 AM
-# PDT (7 AM during PST winter — fine for a morning digest). Schedule
-# targets PRODUCTION (real reps); workflow_dispatch also hits staging for
-# testing. Same external-scheduler pattern as the Meddy crons (more
-# reliable than pg_net from Postgres).
+# PDT (7 AM during PST winter — fine for a morning digest). Manual runs
+# target PRODUCTION (real reps) by default; workflow_dispatch also hits
+# staging for testing.
+#
+# Failure visibility: curl runs with -fsS so any HTTP >=400 (rotated key,
+# broken deploy, function 500) fails the step instead of staying silently
+# green, and a failed run auto-opens a GitHub issue (auto-closed on
+# recovery) — same self-healing alert pattern as sync-emails.yml.
 
 on:
-  schedule:
-    - cron: "0 15 * * 1-5"
   workflow_dispatch: {}
+
+# Lets the failure-alert steps open/close a GitHub issue with the built-in token.
+permissions:
+  contents: read
+  issues: write
 
 jobs:
   digest:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Send production digests
-        if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
           URL: ${{ secrets.PRODUCTION_VITE_SUPABASE_URL }}
           KEY: ${{ secrets.PRODUCTION_VITE_SUPABASE_ANON_KEY }}
         run: |
-          if [ -z "$URL" ] || [ -z "$KEY" ]; then echo "production secrets unset; skipping"; exit 0; fi
-          curl -s -X POST "$URL/functions/v1/task-digest" \
+          set -euo pipefail
+          if [ -z "${URL:-}" ] || [ -z "${KEY:-}" ]; then echo "production secrets unset; skipping"; exit 0; fi
+          # -f makes curl exit non-zero on HTTP >=400 so the Action fails loudly.
+          RESP="$(curl -fsS --max-time 240 -X POST "$URL/functions/v1/task-digest" \
             -H "Authorization: Bearer $KEY" -H "apikey: $KEY" \
-            -H "Content-Type: application/json" -d '{}' | head -c 300
+            -H "Content-Type: application/json" -d '{}')"
+          echo "${RESP:0:300}"
       - name: Send staging digests (manual runs only)
         if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
           URL: ${{ secrets.STAGING_VITE_SUPABASE_URL }}
           KEY: ${{ secrets.STAGING_VITE_SUPABASE_ANON_KEY }}
         run: |
-          if [ -z "$URL" ] || [ -z "$KEY" ]; then echo "staging secrets unset; skipping"; exit 0; fi
-          curl -s -X POST "$URL/functions/v1/task-digest" \
+          set -euo pipefail
+          if [ -z "${URL:-}" ] || [ -z "${KEY:-}" ]; then echo "staging secrets unset; skipping"; exit 0; fi
+          RESP="$(curl -fsS --max-time 240 -X POST "$URL/functions/v1/task-digest" \
             -H "Authorization: Bearer $KEY" -H "apikey: $KEY" \
-            -H "Content-Type: application/json" -d '{}' | head -c 300
+            -H "Content-Type: application/json" -d '{}')"
+          echo "${RESP:0:300}"
+
+      # Self-healing alert: open a GitHub issue the moment the digest cron
+      # fails, and auto-close it once a run succeeds. Uses the built-in token —
+      # no new secrets. Prevents a silent "the digests just stopped" outage.
+      - name: Open alert issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # No checkout step, so gh can't infer the repo from a git remote —
+          # without GH_REPO every gh call errors (and the || true guards
+          # would swallow it, silently disabling the alert).
+          GH_REPO: ${{ github.repository }}
+        run: |
+          existing="$(gh issue list --state open --search 'Task digest cron is failing in:title' --json number -q '.[0].number' 2>/dev/null || true)"
+          if [ -z "$existing" ]; then
+            gh issue create \
+              --title "🔴 Task digest cron is failing" \
+              --body "The scheduled task digest failed. Latest run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} — this issue opens automatically on failure and closes automatically once a digest run succeeds." >/dev/null || true
+          fi
+
+      - name: Close alert issue on recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          for n in $(gh issue list --state open --search 'Task digest cron is failing in:title' --json number -q '.[].number' 2>/dev/null || true); do
+            gh issue close "$n" --comment "✅ Task digest recovered (run ${{ github.run_id }})." >/dev/null 2>&1 || true
+          done
