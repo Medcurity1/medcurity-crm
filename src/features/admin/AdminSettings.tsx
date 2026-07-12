@@ -1,6 +1,6 @@
 import { useEffect, lazy, Suspense } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AdminSettingsNav } from "./AdminSettingsNav";
 import { Card } from "@/components/ui/card";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { CustomFieldsManager } from "./CustomFieldsManager";
@@ -169,26 +169,19 @@ export function AdminSettings() {
         </p>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        {/* h-auto + flex-wrap: 14 tabs must never overflow the viewport —
-            they wrap to extra rows on narrower screens instead. */}
-        <TabsList className="h-auto flex-wrap justify-start">
-          <TabsTrigger value="object-manager">Object Manager</TabsTrigger>
-          <TabsTrigger value="users">Users</TabsTrigger>
-          <TabsTrigger value="permissions">Permissions</TabsTrigger>
-          <TabsTrigger value="integrations">Integrations</TabsTrigger>
-          <TabsTrigger value="automations">Automations</TabsTrigger>
-          <TabsTrigger value="data-import">Data Import</TabsTrigger>
-          <TabsTrigger value="requests">Requests</TabsTrigger>
-          <TabsTrigger value="meddy">Meddy</TabsTrigger>
-          <TabsTrigger value="nexus">Nexus</TabsTrigger>
-          <TabsTrigger value="ai-assistant">AI Assistant</TabsTrigger>
-          <TabsTrigger value="audit-log">Audit Log</TabsTrigger>
-          <TabsTrigger value="data-health">Data Health</TabsTrigger>
-          <TabsTrigger value="data-cleanup">Data Cleanup</TabsTrigger>
-          <TabsTrigger value="system">System</TabsTrigger>
-        </TabsList>
+      {/* Grouped settings navigation (sticky rail on desktop, scrollable
+          pill bar on narrow screens) — replaces the old wrapping tab rows.
+          Content panels below still use the same URL-driven Tabs values. */}
+      <div className="flex flex-col lg:flex-row gap-6 items-start">
+        <AdminSettingsNav
+          activeTab={activeTab}
+          activeSubTab={activeSubTab}
+          onSelectTab={setActiveTab}
+          onSelectSubTab={setActiveSubTab}
+        />
 
+        <div className="flex-1 min-w-0 w-full">
+      <div className="space-y-4">
         <Suspense
           fallback={
             <div className="flex justify-center py-16">
@@ -197,25 +190,16 @@ export function AdminSettings() {
           }
         >
         {/* ---------- OBJECT MANAGER (parent with sub-tabs) ---------- */}
-        <TabsContent value="object-manager">
-          <Tabs
-            value={activeSubTab}
-            onValueChange={setActiveSubTab}
-            className="space-y-4"
-          >
-            <TabsList>
-              <TabsTrigger value="schema">Schema</TabsTrigger>
-              <TabsTrigger value="layouts">Page Layouts</TabsTrigger>
-              <TabsTrigger value="custom-fields">Custom Fields</TabsTrigger>
-              <TabsTrigger value="picklists">Picklists</TabsTrigger>
-              <TabsTrigger value="required-fields">Required Fields</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="schema">
+        {activeTab === "object-manager" && (<div>
+          {/* Sub-panel switching is plain conditional rendering — the nav
+              rail (AdminSettingsNav) is the only tab-like UI, so no orphaned
+              ARIA tabpanels or stray focus stops. */}
+          <div className="space-y-4">
+            {activeSubTab === "schema" && (<div>
               <ObjectManager />
-            </TabsContent>
+            </div>)}
 
-            <TabsContent value="layouts">
+            {activeSubTab === "layouts" && (<div>
               {/* Admin and super_admin see the drag-and-drop editor; the
                   outer AdminSettings already gates this whole page to
                   those roles, but the editor also enforces internally. */}
@@ -224,9 +208,9 @@ export function AdminSettings() {
               ) : (
                 <LayoutsViewer />
               )}
-            </TabsContent>
+            </div>)}
 
-            <TabsContent value="custom-fields">
+            {activeSubTab === "custom-fields" && (<div>
               <Card className="p-6">
                 <div className="space-y-1 mb-6">
                   <h2 className="text-lg font-semibold">Custom Field Definitions</h2>
@@ -237,13 +221,13 @@ export function AdminSettings() {
                 </div>
                 <CustomFieldsManager />
               </Card>
-            </TabsContent>
+            </div>)}
 
-            <TabsContent value="picklists">
+            {activeSubTab === "picklists" && (<div>
               <PicklistsManager />
-            </TabsContent>
+            </div>)}
 
-            <TabsContent value="required-fields">
+            {activeSubTab === "required-fields" && (<div>
               <Card className="p-6">
                 <div className="space-y-1 mb-6">
                   <h2 className="text-lg font-semibold">Required Fields</h2>
@@ -254,12 +238,12 @@ export function AdminSettings() {
                 </div>
                 <RequiredFieldsManager />
               </Card>
-            </TabsContent>
-          </Tabs>
-        </TabsContent>
+            </div>)}
+          </div>
+        </div>)}
 
         {/* ---------- USERS / PERMISSIONS ---------- */}
-        <TabsContent value="users">
+        {activeTab === "users" && (<div>
           <Card className="p-6">
             <div className="space-y-1 mb-6">
               <h2 className="text-lg font-semibold">User Management</h2>
@@ -269,9 +253,9 @@ export function AdminSettings() {
             </div>
             <UsersManager />
           </Card>
-        </TabsContent>
+        </div>)}
 
-        <TabsContent value="permissions">
+        {activeTab === "permissions" && (<div>
           <Card className="p-6">
             <div className="space-y-1 mb-6">
               <h2 className="text-lg font-semibold">Role Permissions</h2>
@@ -282,25 +266,25 @@ export function AdminSettings() {
             </div>
             <PermissionsManager />
           </Card>
-        </TabsContent>
+        </div>)}
 
         {/* ---------- INTEGRATIONS / AUTOMATIONS / DATA IMPORT ---------- */}
-        <TabsContent value="integrations">
+        {activeTab === "integrations" && (<div>
           <IntegrationsManager onNavigateTab={setActiveTab} />
-        </TabsContent>
+        </div>)}
 
-        <TabsContent value="automations">
+        {activeTab === "automations" && (<div>
           <AutomationsManager />
-        </TabsContent>
+        </div>)}
 
-        <TabsContent value="data-import" className="space-y-6">
+        {activeTab === "data-import" && (<div className="space-y-6">
           <DataExport />
           <SalesforceImport />
           <PartnerRelationshipsImport />
-        </TabsContent>
+        </div>)}
 
         {/* ---------- REQUESTS ---------- */}
-        <TabsContent value="requests" className="space-y-6">
+        {activeTab === "requests" && (<div className="space-y-6">
           <Card className="p-6">
             <div className="space-y-1 mb-4">
               <h2 className="text-lg font-semibold">Request routing</h2>
@@ -321,10 +305,10 @@ export function AdminSettings() {
             </div>
             <RequestsInbox />
           </Card>
-        </TabsContent>
+        </div>)}
 
         {/* ---------- MEDDY (website chat assistant) ---------- */}
-        <TabsContent value="meddy">
+        {activeTab === "meddy" && (<div>
           <Card className="p-6">
             <div className="space-y-1 mb-6">
               <h2 className="text-lg font-semibold">Meddy</h2>
@@ -335,15 +319,15 @@ export function AdminSettings() {
             </div>
             <MeddyAdminPanel />
           </Card>
-        </TabsContent>
+        </div>)}
 
         {/* ---------- NEXUS (homepage widget layouts) ---------- */}
-        <TabsContent value="nexus">
+        {activeTab === "nexus" && (<div>
           <NexusAdminPanel />
-        </TabsContent>
+        </div>)}
 
         {/* ---------- AI ASSISTANT (Ask AI read-only assistant) ---------- */}
-        <TabsContent value="ai-assistant">
+        {activeTab === "ai-assistant" && (<div>
           <Card className="p-6">
             <div className="space-y-1 mb-6">
               <h2 className="text-lg font-semibold">Ask AI</h2>
@@ -354,10 +338,10 @@ export function AdminSettings() {
             </div>
             <AiAssistantAdmin />
           </Card>
-        </TabsContent>
+        </div>)}
 
         {/* ---------- AUDIT / HEALTH / SYSTEM ---------- */}
-        <TabsContent value="audit-log">
+        {activeTab === "audit-log" && (<div>
           <Card className="p-6">
             <div className="space-y-1 mb-6">
               <h2 className="text-lg font-semibold">Audit Log</h2>
@@ -367,9 +351,9 @@ export function AdminSettings() {
             </div>
             <AuditLogViewer />
           </Card>
-        </TabsContent>
+        </div>)}
 
-        <TabsContent value="data-health" className="space-y-6">
+        {activeTab === "data-health" && (<div className="space-y-6">
           <Card className="p-6">
             <div className="space-y-1 mb-6">
               <h2 className="text-lg font-semibold">Data Health & Protection</h2>
@@ -393,9 +377,9 @@ export function AdminSettings() {
             </div>
             <ClientErrorsViewer />
           </Card>
-        </TabsContent>
+        </div>)}
 
-        <TabsContent value="data-cleanup">
+        {activeTab === "data-cleanup" && (<div>
           <Card className="p-6">
             <div className="space-y-1 mb-6">
               <h2 className="text-lg font-semibold">Data Cleanup</h2>
@@ -407,9 +391,9 @@ export function AdminSettings() {
             </div>
             <DataCleanupManager />
           </Card>
-        </TabsContent>
+        </div>)}
 
-        <TabsContent value="system">
+        {activeTab === "system" && (<div>
           <Card className="p-6">
             <div className="space-y-1 mb-6">
               <h2 className="text-lg font-semibold">System Information</h2>
@@ -419,9 +403,11 @@ export function AdminSettings() {
             </div>
             <SystemInfo />
           </Card>
-        </TabsContent>
+        </div>)}
         </Suspense>
-      </Tabs>
+      </div>
+        </div>
+      </div>
     </div>
   );
 }
