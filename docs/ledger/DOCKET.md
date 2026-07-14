@@ -4,6 +4,8 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Staging — awaiting prod go-ahead
 
+- [STAGING] 2026-07-10 · Joe (high) · Lead Source now required when an opportunity is CREATED (config flip; form was already wired). Grandfather rule keeps existing opps editable · migration 20260710186000
+
 (nothing — the 2026-07-10 security fix + maintenance sweep + follow-ups all shipped to prod in 3d8b1f0; see SHIPPED.md)
 
 ## Queued / requested
