@@ -4,6 +4,8 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Staging — awaiting prod go-ahead
 
+- [STAGING] 2026-07-11 · Nathan · ClickUp parked until actually configured: unscheduled clickup_services_sync_daily + clickup_sf_id_sync_daily (built + prod-bootstrapped May 11-12 by an earlier session; prod's CLICKUP_API_TOKEN is set but ClickUp rejects it as invalid — likely the departed dev's personal token — so the daily sync failed and the watchdog nagged admins every day). Foundation (tables/fns/bootstrap script) kept; watchdog's ClickUp check now gated on the job being installed+active, so it self-heals if ClickUp is ever set up · migration 20260711220000
+
 - [STAGING] 2026-07-10 · Joe (high) · Lead Source now required when an opportunity is CREATED (config flip; form was already wired). Grandfather rule keeps existing opps editable · migration 20260710186000
 
 (nothing — the 2026-07-10 security fix + maintenance sweep + follow-ups all shipped to prod in 3d8b1f0; see SHIPPED.md)
