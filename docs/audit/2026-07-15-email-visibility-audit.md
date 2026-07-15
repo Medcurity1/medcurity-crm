@@ -41,11 +41,12 @@ history predates the contact record.
 | 5 | Mail arrives during a long sync run (dead zone past the 2-min overlap) | Cursor now advances to the fetch-window END (fetch-start time / chunk boundary), never to completion time. |
 | 6 | One oversized mailbox window (dead token healed, busy new connection) starves EVERY mailbox forever (SIGKILL before cursor advance; oldest-first ordering retries it first each tick) | Live catch-up windows are chunked to 7 days per run — the cursor walks forward tick by tick; each run is bounded. |
 | 7 | Contact/lead lookup batch error silently dropped that batch's matches while the cursor advanced | Lookup errors now FAIL the connection's run (cursor untouched; next tick retries). |
-| 8 | Gmail per-message fetch failure (429/5xx) silently skipped past the cursor | Retry once, then fail the run. |
+| 8 | Gmail per-message fetch failure (429/5xx) silently skipped past the cursor | Retry once, then fail the run. (Note: no Gmail OAuth function is deployed today, so Gmail connections can't currently exist — this and the other Gmail fixes are future-proofing.) |
 | 9 | A connection failing repeatedly burns sweep budget every 10 min | Hourly retry cooldown once past the 3-failure alert threshold (manual Sync Now bypasses). |
 | 10 | `email_sync_scheduler_lock` singleton row missing → every sweep silently no-ops with a green 200 | Edge fn distinguishes "lock held" from "row missing", reseeds and proceeds; migration also reseeds. |
 | 11 | Rep deactivated then reactivated → connections stayed off forever | Two-way cascade: reactivation re-enables connections the deactivation cascade turned off (never manually-disabled ones — new `deactivated_by_cascade` flag). |
 | 12 | Account-less contact + `auto_link_opps` → pointless null-account opp lookup | Guarded (hygiene; was harmless but wasteful). |
+| 13 | One dead mailbox connection (e.g. Azure AD user deleted from the directory — found LIVE on staging during verification) poisoned every backfill-queue drain attempt | Drain isolates failures per connection, skips connections past the 3-strike alert, and only retries a queue row when EVERY eligible mailbox failed. |
 
 **Post-promote step (needs Nathan):** run the existing manual backfill
 workflow (`sync-emails-backfill.yml`, 90 days) once on prod AFTER promoting —
