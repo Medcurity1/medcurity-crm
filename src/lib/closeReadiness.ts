@@ -29,12 +29,17 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * enforced — the gate is never silently disabled.
  */
 
-/** The four keys, in the order their messages should read. */
+/** The keys, in the order their messages should read. */
 export const CLOSE_READINESS_KEYS = [
   "account_phone",
   "account_billing_address",
   "account_fte_range",
   "contact_email",
+  // Rachel (2026-07-15): a deal that INCLUDES SERVICES needs an Assigned
+  // Assessor before it can close — someone has to deliver the SRA/NVA.
+  // Deals without services are exempt (the condition lives in the
+  // evaluator, not the config).
+  "assigned_assessor",
 ] as const;
 
 export type CloseReadinessKey = (typeof CLOSE_READINESS_KEYS)[number];
@@ -44,6 +49,7 @@ const LABELS: Record<CloseReadinessKey, string> = {
   account_billing_address: "Billing address",
   account_fte_range: "FTE range",
   contact_email: "A contact email address",
+  assigned_assessor: "An assigned assessor (this deal includes services)",
 };
 
 export interface CloseReadinessResult {
@@ -68,6 +74,34 @@ export interface CloseReadinessContact {
   email?: unknown;
   email2?: unknown;
   email3?: unknown;
+}
+
+/**
+ * Opportunity-level inputs for the assigned-assessor rule. Callers supply
+ * whichever they have: the form passes its in-flight values (the deal may
+ * not exist yet, or the save may be about to change them); the inline
+ * surfaces pass the opp id and checkCloseReadiness fetches these fields.
+ */
+export interface CloseReadinessOpportunity {
+  services_included?: boolean | null;
+  service_amount?: number | string | null;
+  assigned_assessor_id?: string | null;
+  /** Any attached line item with products.product_family ILIKE 'service%' —
+   *  the same signal recalc_opportunity_amount splits totals on. */
+  has_service_line_items?: boolean;
+}
+
+/**
+ * A deal "includes services" when ANY signal says so: the Services
+ * Included flag, a service dollar amount, or a service-family line item.
+ * OR-ing keeps the rule safe against the historical drift between these
+ * three (see the 20260513 services_included backfills).
+ */
+export function opportunityHasServices(opp: CloseReadinessOpportunity): boolean {
+  if (opp.services_included === true) return true;
+  const amt = Number(opp.service_amount ?? 0);
+  if (Number.isFinite(amt) && amt > 0) return true;
+  return opp.has_service_line_items === true;
 }
 
 /**
@@ -96,6 +130,10 @@ export function evaluateCloseReadiness(
   keys: CloseReadinessKey[],
   account: CloseReadinessAccount | null,
   contacts: CloseReadinessContact[],
+  // Omitted/null => the assessor rule is skipped: the caller had no
+  // opportunity context to judge. Every UI surface passes it (form: its
+  // in-flight values; inline stage changes: fetched by opp id).
+  opportunity?: CloseReadinessOpportunity | null,
 ): string[] {
   // Can't verify the account at all — block rather than let an
   // unverifiable deal close.
@@ -141,6 +179,15 @@ export function evaluateCloseReadiness(
     }
   }
 
+  if (
+    want("assigned_assessor") &&
+    opportunity &&
+    opportunityHasServices(opportunity) &&
+    isBlank(opportunity.assigned_assessor_id)
+  ) {
+    missing.push(LABELS.assigned_assessor);
+  }
+
   return missing;
 }
 
@@ -174,20 +221,56 @@ export async function getEnforcedCloseKeys(
 /**
  * Full check used by the UI surfaces. Reads the enforced keys, the
  * account row, and (only if the email rule is enforced) its non-archived
- * contacts, then returns { ready, missing }. Two small id-scoped queries;
+ * contacts, then returns { ready, missing }. Small id-scoped queries;
  * only ever called at the moment a user tries to close a deal.
  *
- * Signature per spec: checkCloseReadiness(supabase, accountId).
+ * `opportunity` feeds the assigned-assessor rule (Rachel): pass the opp
+ * id (inline surfaces — the fields are fetched) or an already-known data
+ * object (the form — its in-flight values are what's about to be saved).
+ * Omitting it skips that one rule.
  */
 export async function checkCloseReadiness(
   supabase: SupabaseClient,
   accountId: string | null | undefined,
+  opportunity?: string | CloseReadinessOpportunity | null,
 ): Promise<CloseReadinessResult> {
   if (!accountId) {
     return { ready: false, missing: ["Account information could not be loaded"] };
   }
 
   const keys = await getEnforcedCloseKeys(supabase);
+
+  // Resolve opportunity-level inputs for the assessor rule (only when
+  // that rule is enforced — mirrors the conditional contacts fetch).
+  let opp: CloseReadinessOpportunity | null = null;
+  if (keys.includes("assigned_assessor") && opportunity != null) {
+    if (typeof opportunity === "string") {
+      const { data: oppRow, error: oppErr } = await supabase
+        .from("opportunities")
+        .select("services_included, service_amount, assigned_assessor_id")
+        .eq("id", opportunity)
+        .maybeSingle();
+      if (oppErr || !oppRow) {
+        return { ready: false, missing: ["Opportunity information could not be loaded"] };
+      }
+      const { data: lines, error: linesErr } = await supabase
+        .from("opportunity_products")
+        .select("product:products!product_id(product_family)")
+        .eq("opportunity_id", opportunity);
+      if (linesErr) {
+        return { ready: false, missing: ["Opportunity information could not be loaded"] };
+      }
+      const hasServiceLine = (lines ?? []).some((l) => {
+        const fam =
+          (l as { product?: { product_family?: string | null } | null }).product
+            ?.product_family ?? "";
+        return fam.toLowerCase().startsWith("service");
+      });
+      opp = { ...oppRow, has_service_line_items: hasServiceLine };
+    } else {
+      opp = opportunity;
+    }
+  }
 
   const { data: account, error: acctErr } = await supabase
     .from("accounts")
@@ -211,15 +294,16 @@ export async function checkCloseReadiness(
     contacts = error ? [] : ((data as CloseReadinessContact[] | null) ?? []);
   }
 
-  const missing = evaluateCloseReadiness(keys, (account as CloseReadinessAccount) ?? null, contacts);
+  const missing = evaluateCloseReadiness(keys, (account as CloseReadinessAccount) ?? null, contacts, opp);
   return { ready: missing.length === 0, missing };
 }
 
-/** Friendly, toast-ready message pointing the user at the account. */
+/** Friendly, toast-ready message. Items are self-descriptive (account
+ *  fields name the account; the assessor item names the deal). */
 export function formatCloseReadinessMessage(missing: string[]): string {
   if (missing.length === 0) return "";
   return (
-    `Can't mark this deal Closed Won yet — the account is missing complete ` +
-    `client info: ${missing.join(", ")}. Open the account to fill it in, then try again.`
+    `Can't mark this deal Closed Won yet — still needed: ${missing.join(", ")}. ` +
+    `Fill these in, then try again.`
   );
 }

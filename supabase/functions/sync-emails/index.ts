@@ -77,6 +77,9 @@ interface EmailSyncConnection {
   consecutive_failures?: number | null;
   failing_since?: string | null;
   failure_notified_at?: string | null;
+  // Bumped on every failure-streak update — drives the hourly retry
+  // cooldown for connections already past the alert threshold.
+  updated_at?: string | null;
   config: {
     log_sent: boolean;
     log_received: boolean;
@@ -93,6 +96,9 @@ interface ParsedEmail {
   from: string;
   to: string[];
   cc: string[];
+  // BCC (2026-07-15 audit): present on the sender's SentItems copy — a rep
+  // BCC'ing a contact (small blasts, intros) previously never logged.
+  bcc: string[];
   date: string;
   direction: "sent" | "received";
   threadId: string | null;
@@ -249,15 +255,20 @@ async function fetchGmailEmails(
   accessToken: string,
   userEmail: string,
   sinceDate: string,
-  untilDate?: string
+  untilDate?: string,
+  // Full Gmail search override — used by the per-address backfill drain
+  // (fetchGmailEmailsForAddress) to target one correspondent's history.
+  queryOverride?: string
 ): Promise<ParsedEmail[]> {
   const sinceEpoch = Math.floor(new Date(sinceDate).getTime() / 1000);
   // When `untilDate` is set we bound the upper end too, which is what the
   // chunked-backfill driver uses to slice 90 days into ~7-day pieces.
   // Each chunk fits comfortably under the 150s Edge gateway timeout.
-  const query = untilDate
-    ? `after:${sinceEpoch} before:${Math.floor(new Date(untilDate).getTime() / 1000)}`
-    : `after:${sinceEpoch}`;
+  const query =
+    queryOverride ??
+    (untilDate
+      ? `after:${sinceEpoch} before:${Math.floor(new Date(untilDate).getTime() / 1000)}`
+      : `after:${sinceEpoch}`);
 
   // Step 1 -- list message IDs, following pageToken across many pages.
   // High-volume reps (Summer hit the old 30-page ceiling = ~3000 emails)
@@ -291,12 +302,24 @@ async function fetchGmailEmails(
   // Step 2 -- fetch each message's metadata (batching omitted for clarity)
   const emails: ParsedEmail[] = [];
   for (const msgId of messageIds) {
-    const msgRes = await fetch(
-      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Subject&metadataHeaders=Date`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
+    const msgUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Bcc&metadataHeaders=Subject&metadataHeaders=Date`;
+    let msgRes = await fetch(msgUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
 
-    if (!msgRes.ok) continue;
+    // Retry once (rate limits are transient), then FAIL the run: the old
+    // `continue` silently dropped the message forever while the cursor
+    // advanced past it (2026-07-15 audit).
+    if (!msgRes.ok) {
+      await new Promise((r) => setTimeout(r, 1000));
+      msgRes = await fetch(msgUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+    }
+    if (!msgRes.ok) {
+      const text = await msgRes.text();
+      throw new Error(`Gmail message fetch failed: ${msgRes.status} ${text}`);
+    }
 
     const msg = await msgRes.json();
     const headers: Record<string, string> = {};
@@ -310,6 +333,10 @@ async function fetchGmailEmails(
       .map(extractEmail)
       .filter(Boolean);
     const cc = (headers["cc"] ?? "")
+      .split(",")
+      .map(extractEmail)
+      .filter(Boolean);
+    const bcc = (headers["bcc"] ?? "")
       .split(",")
       .map(extractEmail)
       .filter(Boolean);
@@ -330,6 +357,7 @@ async function fetchGmailEmails(
       from,
       to,
       cc,
+      bcc,
       date: headers["date"] ?? new Date().toISOString(),
       direction,
       threadId: msg.threadId ?? null,
@@ -377,7 +405,7 @@ async function fetchOutlookEmails(
   // before (≈20k emails per folder) — preserves backfill capacity.
   const MAX_PAGES = 200;
   const SELECT =
-    "id,subject,bodyPreview,body,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,conversationId";
+    "id,subject,bodyPreview,body,from,toRecipients,ccRecipients,bccRecipients,receivedDateTime,sentDateTime,conversationId";
 
   // userEmail is intentionally unused now that direction comes from
   // the folder. Keep it in the signature so callers don't need to
@@ -416,6 +444,12 @@ async function fetchOutlookEmails(
           (r: { emailAddress: { address: string } }) =>
             r.emailAddress?.address ?? ""
         );
+        // Only populated on the sender's own SentItems copy — recipients'
+        // copies never carry BCC (that's the point of BCC).
+        const bcc = (msg.bccRecipients ?? []).map(
+          (r: { emailAddress: { address: string } }) =>
+            r.emailAddress?.address ?? ""
+        );
         const bodyContentType: string = msg.body?.contentType ?? "text";
         const bodyContent: string = msg.body?.content ?? "";
         const htmlBody =
@@ -429,6 +463,7 @@ async function fetchOutlookEmails(
           from,
           to,
           cc,
+          bcc,
           date:
             msg.receivedDateTime ?? msg.sentDateTime ?? new Date().toISOString(),
           direction,
@@ -446,6 +481,121 @@ async function fetchOutlookEmails(
     fetchFolder("SentItems", "sent"),
   ]);
   return [...inbox, ...sent];
+}
+
+// ---------------------------------------------------------------------------
+// Per-address retroactive search (backfill-queue drain — 2026-07-15)
+// ---------------------------------------------------------------------------
+//
+// The incremental sync matches addresses exactly once, at fetch time. When a
+// contact is created (or gains a corrected/additional address, or is
+// unarchived) AFTER its emails were scanned, those messages are gone — the
+// cursor never revisits them. These targeted fetchers search ONE address's
+// history so the queue drain can link it retroactively.
+
+/**
+ * Search an Outlook mailbox for every message involving `address` within the
+ * window. Uses $search (KQL participants:), which spans ALL folders — a bonus
+ * over the incremental sync's Inbox+SentItems restriction: rule-filed mail in
+ * subfolders is found here.
+ *
+ * Draft protection: $search also returns drafts, which caused the 2026-05-19
+ * fake-sent-activity incident on /me/messages. Drafts are excluded via the
+ * isDraft flag, and Junk/Deleted Items are excluded by folder id, so this
+ * path cannot reintroduce that bug. Direction falls back to from-address
+ * comparison (folder context isn't available in search results), which is
+ * safe precisely because drafts are filtered out.
+ */
+async function fetchOutlookEmailsForAddress(
+  accessToken: string,
+  ownAddress: string,
+  address: string,
+  sinceIso: string
+): Promise<ParsedEmail[]> {
+  const excludedFolders = new Set<string>();
+  for (const wellKnown of ["drafts", "junkemail", "deleteditems"]) {
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/me/mailFolders/${wellKnown}?$select=id`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (res.ok) {
+      const folder = await res.json();
+      if (folder?.id) excludedFolders.add(folder.id);
+    }
+  }
+
+  const SELECT =
+    "id,subject,bodyPreview,body,from,toRecipients,ccRecipients,bccRecipients," +
+    "receivedDateTime,sentDateTime,conversationId,isDraft,parentFolderId";
+  const sinceMs = new Date(sinceIso).getTime();
+  const out: ParsedEmail[] = [];
+
+  // $search can't be combined with $filter/$orderby — window client-side.
+  // Graph caps $search page size at 25 and total results at 250; 10 pages
+  // covers the full cap.
+  let url: string | null =
+    `https://graph.microsoft.com/v1.0/me/messages` +
+    `?$search=${encodeURIComponent(`"participants:${address}"`)}` +
+    `&$top=25&$select=${SELECT}`;
+  let pageCount = 0;
+  while (url && pageCount < 10) {
+    const res: Response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Outlook address search failed: ${res.status} ${text}`);
+    }
+    const data = await res.json();
+    for (const msg of data.value ?? []) {
+      if (msg.isDraft) continue;
+      if (msg.parentFolderId && excludedFolders.has(msg.parentFolderId)) continue;
+      const dateIso: string =
+        msg.receivedDateTime ?? msg.sentDateTime ?? "";
+      if (!dateIso || new Date(dateIso).getTime() < sinceMs) continue;
+
+      const from = msg.from?.emailAddress?.address ?? "";
+      const mapAddrs = (
+        rs: { emailAddress: { address: string } }[] | undefined
+      ) => (rs ?? []).map((r) => r.emailAddress?.address ?? "");
+
+      out.push({
+        messageId: msg.id,
+        subject: msg.subject ?? "(no subject)",
+        body: msg.bodyPreview ?? "",
+        htmlBody:
+          (msg.body?.contentType ?? "").toLowerCase() === "html"
+            ? msg.body?.content ?? null
+            : null,
+        from,
+        to: mapAddrs(msg.toRecipients),
+        cc: mapAddrs(msg.ccRecipients),
+        bcc: mapAddrs(msg.bccRecipients),
+        date: dateIso,
+        direction:
+          from.trim().toLowerCase() === ownAddress ? "sent" : "received",
+        threadId: msg.conversationId ?? null,
+      });
+    }
+    url = (data["@odata.nextLink"] as string | undefined) ?? null;
+    pageCount++;
+  }
+  return out;
+}
+
+/**
+ * Gmail counterpart: targeted query over one address's history. Reuses the
+ * same list+metadata pattern as the incremental fetch.
+ */
+async function fetchGmailEmailsForAddress(
+  accessToken: string,
+  userEmail: string,
+  address: string,
+  sinceIso: string
+): Promise<ParsedEmail[]> {
+  const sinceEpoch = Math.floor(new Date(sinceIso).getTime() / 1000);
+  const q = `(from:${address} OR to:${address} OR cc:${address} OR bcc:${address}) after:${sinceEpoch}`;
+  return fetchGmailEmails(accessToken, userEmail, sinceIso, undefined, q);
 }
 
 // ---------------------------------------------------------------------------
@@ -503,8 +653,11 @@ async function matchContactsByEmail(
       .is("archived_at", null);
 
     if (error) {
-      console.error("Contact lookup error:", error.message);
-      continue;
+      // FAIL HARD (2026-07-15 audit): the old `continue` silently dropped
+      // every email whose counterparties fell in this batch while the
+      // cursor still advanced — permanent, invisible loss. Throwing fails
+      // the connection's run instead: cursor untouched, next tick retries.
+      throw new Error(`Contact lookup failed: ${error.message}`);
     }
     for (const contact of data ?? []) {
       const match = {
@@ -518,7 +671,10 @@ async function matchContactsByEmail(
       // kept, so an address on contacts under multiple accounts logs to all.
       for (const addr of [contact.email, contact.email2, contact.email3]) {
         if (!addr) continue;
-        const key = addr.toLowerCase();
+        // trim: message addresses are trimmed; a padded stored value must
+        // still key correctly (the DB normalizes on write since 20260715220000,
+        // but rows written before that migration may sneak through a cache).
+        const key = addr.trim().toLowerCase();
         const list = map.get(key);
         if (!list) {
           map.set(key, [match]);
@@ -568,12 +724,13 @@ async function matchLeadsByEmail(
       .is("converted_at", null);
 
     if (error) {
-      console.error("Lead lookup error:", error.message);
-      continue;
+      // Same fail-hard rationale as matchContactsByEmail: a silent skip
+      // here permanently loses this batch's lead emails.
+      throw new Error(`Lead lookup failed: ${error.message}`);
     }
     for (const lead of data ?? []) {
       if (lead.email) {
-        map.set(lead.email.toLowerCase(), { lead_id: lead.id });
+        map.set(lead.email.trim().toLowerCase(), { lead_id: lead.id });
       }
     }
   }
@@ -971,6 +1128,12 @@ async function syncConnection(
     //    2-minute overlap to ride over clock drift, and rely on the
     //    activities.external_message_id dedup to prevent duplicates.
     const INITIAL_BACKFILL_DAYS = 30;
+    // Captured BEFORE the provider fetch: the cursor must advance to when
+    // the fetch WINDOW ended, not when processing finished. The old
+    // completion-time stamp left a dead zone — mail arriving during a
+    // multi-minute run was past the 2-minute overlap and never fetched
+    // (2026-07-15 audit).
+    const runStartedIso = new Date().toISOString();
     const baseSince =
       override?.since ??
       conn.last_sync_at ??
@@ -978,7 +1141,30 @@ async function syncConnection(
     const sinceDate = new Date(
       new Date(baseSince).getTime() - 2 * 60 * 1000
     ).toISOString();
-    const untilDate = override?.until;
+
+    // Chunk oversized catch-up windows (2026-07-15 audit): a mailbox whose
+    // pending window is weeks deep (dead token healed, brand-new busy
+    // connection) can fetch more than the Edge gateway's ~150s wall clock
+    // allows — the worker gets SIGKILL'd mid-run, last_sync_at never
+    // advances, and because the sweep orders oldest-cursor-first the same
+    // mailbox starves EVERY connection on EVERY tick. Capping the live
+    // window at 7 days per run makes each tick bounded and the cursor walk
+    // forward chunk by chunk until caught up.
+    const MAX_LIVE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+    let untilDate = override?.until;
+    let cursorTargetIso = runStartedIso;
+    if (
+      !override &&
+      Date.now() - new Date(baseSince).getTime() > MAX_LIVE_WINDOW_MS
+    ) {
+      untilDate = new Date(
+        new Date(baseSince).getTime() + MAX_LIVE_WINDOW_MS
+      ).toISOString();
+      cursorTargetIso = untilDate;
+      console.log(
+        `Connection ${conn.id}: window exceeds 7d — chunking ${sinceDate} → ${untilDate}`
+      );
+    }
 
     // 3. Fetch emails from the appropriate provider
     const emails =
@@ -1087,9 +1273,10 @@ async function syncConnection(
               continue;
             }
 
-            // Optionally auto-link to an open opportunity
+            // Optionally auto-link to an open opportunity (account-less
+            // contacts have no opps to link — skip the lookup).
             let opportunityId: string | null = null;
-            if (conn.config.auto_link_opps) {
+            if (conn.config.auto_link_opps && contactMatch.account_id) {
               if (oppCache.has(contactMatch.account_id)) {
                 opportunityId = oppCache.get(contactMatch.account_id) ?? null;
               } else {
@@ -1138,11 +1325,13 @@ async function syncConnection(
 
     // 8. Update last_sync_at — but only for the live cursor, not for
     //    historical chunked-backfill calls (those would clobber the
-    //    incremental cron's high-water mark).
+    //    incremental cron's high-water mark). Advances to the END of the
+    //    fetched window (fetch-start time, or the chunk boundary when the
+    //    window was capped) — never to completion time.
     if (!override?.skipCursorUpdate) {
       await supabase
         .from("email_sync_connections")
-        .update({ last_sync_at: new Date().toISOString() })
+        .update({ last_sync_at: cursorTargetIso })
         .eq("id", conn.id);
     }
 
@@ -1187,6 +1376,234 @@ async function syncConnection(
 }
 
 // ---------------------------------------------------------------------------
+// Backfill-queue drain (2026-07-15)
+// ---------------------------------------------------------------------------
+//
+// email_backfill_queue rows (migration 20260715220000) are addresses that
+// need retroactive linking: a contact was created, gained a new/corrected
+// address, or was unarchived AFTER its emails were synced. Each sweep drains
+// a few of the newest requests: per address, search every connected mailbox
+// for the last BACKFILL_WINDOW_DAYS and run the matches through the normal
+// dedup-safe activity inserts. Newest-first means a rep who just created a
+// contact sees their history within a tick or two, while bulk-import noise
+// grinds through in the background over successive runs.
+
+const BACKFILL_WINDOW_DAYS = 90;
+const BACKFILL_MAX_ADDRESSES_PER_RUN = 5;
+const BACKFILL_MAX_ATTEMPTS = 3;
+
+async function drainEmailBackfillQueue(
+  supabase: SupabaseClient,
+  connections: EmailSyncConnection[],
+  deadlineMs: number
+): Promise<{ processed: number; created: number }> {
+  let processed = 0;
+  let created = 0;
+
+  const { data: pending, error } = await supabase
+    .from("email_backfill_queue")
+    .select("id, address, attempts")
+    .is("processed_at", null)
+    .order("requested_at", { ascending: false })
+    .limit(BACKFILL_MAX_ADDRESSES_PER_RUN);
+  if (error) {
+    // Table may predate this deploy on an env — degrade silently.
+    console.warn(`backfill queue read skipped: ${error.message}`);
+    return { processed, created };
+  }
+  if (!pending || pending.length === 0) return { processed, created };
+
+  const sinceIso = new Date(
+    Date.now() - BACKFILL_WINDOW_DAYS * 24 * 60 * 60 * 1000
+  ).toISOString();
+
+  for (const row of pending as {
+    id: string;
+    address: string;
+    attempts: number | null;
+  }[]) {
+    if (Date.now() > deadlineMs) break;
+    const address = (row.address ?? "").trim().toLowerCase();
+
+    // Internal-domain / empty addresses can never match a CRM contact the
+    // sync would log — retire the request immediately.
+    if (!address || isInternalAddress(address)) {
+      await supabase
+        .from("email_backfill_queue")
+        .update({
+          processed_at: new Date().toISOString(),
+          last_error: "skipped: internal or empty address",
+        })
+        .eq("id", row.id);
+      processed++;
+      continue;
+    }
+
+    try {
+      // Re-resolve the contacts for this address at drain time (the queue
+      // row's contact may have been merged/archived; other contacts may
+      // share the address — every live match gets rows).
+      const contactMap = await matchContactsByEmail(supabase, [address]);
+      const matches = contactMap.get(address) ?? [];
+      if (matches.length === 0) {
+        await supabase
+          .from("email_backfill_queue")
+          .update({
+            processed_at: new Date().toISOString(),
+            last_error: "skipped: no live contact holds this address",
+          })
+          .eq("id", row.id);
+        processed++;
+        continue;
+      }
+
+      let rowCreated = 0;
+      let connOk = 0;
+      let connFailed = 0;
+      let lastConnError = "";
+      for (const conn of connections) {
+        if (Date.now() > deadlineMs) {
+          throw new Error("drain budget exhausted; will retry next run");
+        }
+        const ownAddress = (conn.email_address ?? "").trim().toLowerCase();
+        if (address === ownAddress) continue;
+
+        // Known-dead mailboxes (past the 3-strike alert) get skipped:
+        // their owners were already notified, and burning a drain attempt
+        // on a token that can't refresh would poison this address's queue
+        // row for every HEALTHY mailbox too (seen live on staging: a
+        // connection whose Azure AD user was deleted from the directory).
+        if ((conn.consecutive_failures ?? 0) >= FAILURE_NOTIFY_THRESHOLD) {
+          continue;
+        }
+
+        // Per-connection isolation: one broken mailbox must not abort the
+        // search of the others.
+        try {
+          const accessToken = await ensureValidToken(supabase, conn);
+          const emails =
+            conn.provider === "gmail"
+              ? await fetchGmailEmailsForAddress(
+                  accessToken,
+                  conn.email_address ?? "",
+                  address,
+                  sinceIso
+                )
+              : await fetchOutlookEmailsForAddress(
+                  accessToken,
+                  ownAddress,
+                  address,
+                  sinceIso
+                );
+
+          const filtered = emails.filter((e) => {
+            if (e.direction === "sent" && !conn.config.log_sent) return false;
+            if (e.direction === "received" && !conn.config.log_received)
+              return false;
+            return true;
+          });
+
+          if (filtered.length > 0) {
+            const existingPairs = await fetchExistingEmailActivityPairs(
+              supabase,
+              conn,
+              Array.from(
+                new Set(filtered.map((e) => `${conn.provider}:${e.messageId}`))
+              )
+            );
+            const oppCache = new Map<string, string | null>();
+
+            for (const email of filtered) {
+              for (const match of matches) {
+                // Same per-connection semantics as the live sync.
+                if (conn.config.primary_only && !match.is_primary) continue;
+
+                let opportunityId: string | null = null;
+                if (conn.config.auto_link_opps && match.account_id) {
+                  if (oppCache.has(match.account_id)) {
+                    opportunityId = oppCache.get(match.account_id) ?? null;
+                  } else {
+                    opportunityId = await findOpenOpportunity(
+                      supabase,
+                      match.account_id
+                    );
+                    oppCache.set(match.account_id, opportunityId);
+                  }
+                }
+
+                const inserted = await createEmailActivity(
+                  supabase,
+                  conn,
+                  email,
+                  match,
+                  opportunityId,
+                  existingPairs
+                );
+                if (inserted) {
+                  created++;
+                  rowCreated++;
+                }
+              }
+            }
+          }
+          connOk++;
+        } catch (connErr) {
+          connFailed++;
+          lastConnError = (connErr as Error).message;
+          console.error(
+            `backfill: connection ${conn.id} failed for ${address}: ${lastConnError}`
+          );
+        }
+      }
+
+      // Success = at least one mailbox was searched (or none needed to be).
+      // Only when EVERY eligible mailbox failed do we leave the row pending
+      // for the retry/attempts path.
+      if (connOk === 0 && connFailed > 0) {
+        throw new Error(
+          `all ${connFailed} eligible connection(s) failed; last: ${lastConnError}`
+        );
+      }
+
+      await supabase
+        .from("email_backfill_queue")
+        .update({
+          processed_at: new Date().toISOString(),
+          last_error:
+            connFailed > 0
+              ? `partial: ${connFailed} connection(s) skipped on error; last: ${lastConnError}`.slice(0, 500)
+              : null,
+        })
+        .eq("id", row.id);
+      processed++;
+      console.log(
+        `backfill: ${address} → ${rowCreated} activity row(s) (${connOk} mailbox(es) searched, ${connFailed} failed)`
+      );
+    } catch (err) {
+      const attempts = (row.attempts ?? 0) + 1;
+      const patch: Record<string, unknown> = {
+        attempts,
+        last_error: (err as Error).message,
+      };
+      // Retire poison pills after N attempts so one broken address can't
+      // wedge the queue's head forever (newest-first ordering would keep
+      // retrying it ahead of everything else).
+      if (attempts >= BACKFILL_MAX_ATTEMPTS) {
+        patch.processed_at = new Date().toISOString();
+      }
+      await supabase
+        .from("email_backfill_queue")
+        .update(patch)
+        .eq("id", row.id);
+      console.error(
+        `backfill failed for ${address} (attempt ${attempts}): ${(err as Error).message}`
+      );
+    }
+  }
+  return { processed, created };
+}
+
+// ---------------------------------------------------------------------------
 // Utility
 // ---------------------------------------------------------------------------
 
@@ -1218,8 +1635,8 @@ function participantAddresses(
 ): string[] {
   const raw =
     email.direction === "sent"
-      ? [...email.to, ...email.cc]
-      : [email.from, ...email.to, ...email.cc];
+      ? [...email.to, ...email.cc, ...email.bcc]
+      : [email.from, ...email.to, ...email.cc, ...email.bcc];
   const out: string[] = [];
   const seen = new Set<string>();
   for (const addr of raw) {
@@ -1504,19 +1921,58 @@ serve(async (req) => {
           `scheduler lock unavailable (${lockErr.message}) — proceeding unguarded`
         );
       } else if (!lockRows || lockRows.length === 0) {
-        console.log("Another sweep holds the scheduler lock; skipping.");
-        return new Response(
-          JSON.stringify({
-            message: "Another sync sweep is already in progress; skipped",
-            connections_processed: 0,
-            activities_created: 0,
-            errors: 0,
-          }),
-          {
-            status: 200,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          }
-        );
+        // Zero rows updated means EITHER another sweep holds the lock OR the
+        // singleton row is missing entirely (fresh env, partial restore, an
+        // ill-advised cleanup). The old code treated both as "lock held",
+        // which fails CLOSED forever on a missing row — every sweep no-ops
+        // with a green 200 while email silently stops (2026-07-15 audit).
+        // Distinguish the two: recreate a missing row and proceed.
+        const { data: lockExists } = await supabase
+          .from("email_sync_scheduler_lock")
+          .select("id")
+          .limit(1);
+        if (lockExists && lockExists.length > 0) {
+          console.log("Another sweep holds the scheduler lock; skipping.");
+          return new Response(
+            JSON.stringify({
+              message: "Another sync sweep is already in progress; skipped",
+              connections_processed: 0,
+              activities_created: 0,
+              errors: 0,
+            }),
+            {
+              status: 200,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            }
+          );
+        }
+        const { error: seedErr } = await supabase
+          .from("email_sync_scheduler_lock")
+          .insert({
+            id: true,
+            locked_at: nowIso,
+            locked_until: new Date(Date.now() + LOCK_TTL_MS).toISOString(),
+          });
+        if (seedErr) {
+          // A concurrent caller seeded (and now holds) it — yield this tick.
+          console.log(
+            `scheduler lock row seeded by a concurrent sweep (${seedErr.message}); skipping.`
+          );
+          return new Response(
+            JSON.stringify({
+              message: "Another sync sweep is already in progress; skipped",
+              connections_processed: 0,
+              activities_created: 0,
+              errors: 0,
+            }),
+            {
+              status: 200,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            }
+          );
+        }
+        console.warn("scheduler lock row was missing — recreated and claimed.");
+        lockClaimed = true;
       } else {
         lockClaimed = true;
       }
@@ -1587,6 +2043,11 @@ serve(async (req) => {
     // gateway timeout to finish whatever connection is in-flight.
     const BUDGET_MS = 90_000;
     const startedAt = Date.now();
+    // A connection already past the failure-alert threshold retries at most
+    // hourly instead of burning sweep budget every 10 minutes (its owner was
+    // already notified at strike 3). Manual "Sync now" bypasses the cooldown
+    // — the rep is explicitly asking.
+    const FAILURE_COOLDOWN_MS = 60 * 60 * 1000;
 
     for (const conn of connections as EmailSyncConnection[]) {
       if (Date.now() - startedAt > BUDGET_MS) {
@@ -1596,11 +2057,32 @@ serve(async (req) => {
         );
         break;
       }
+      if (
+        !scopedUserId &&
+        (conn.consecutive_failures ?? 0) >= FAILURE_NOTIFY_THRESHOLD &&
+        conn.updated_at &&
+        Date.now() - new Date(conn.updated_at).getTime() < FAILURE_COOLDOWN_MS
+      ) {
+        console.log(
+          `Skipping connection ${conn.id} (failure cooldown; ` +
+            `${conn.consecutive_failures} consecutive failures)`
+        );
+        continue;
+      }
       const result = await syncConnection(supabase, conn);
       totalCreated += result.created;
       totalErrors += result.errors;
       processed++;
     }
+
+    // Retroactive linking: drain queued per-address backfills (new contacts,
+    // corrected emails, unarchives — migration 20260715220000) with whatever
+    // wall-clock remains under the gateway ceiling.
+    const backfill = await drainEmailBackfillQueue(
+      supabase,
+      connections as EmailSyncConnection[],
+      startedAt + 120_000
+    );
 
     await releaseLock();
 
@@ -1611,6 +2093,8 @@ serve(async (req) => {
         connections_total: connections.length,
         connections_deferred: connections.length - processed,
         activities_created: totalCreated,
+        backfill_addresses_processed: backfill.processed,
+        backfill_activities_created: backfill.created,
         errors: totalErrors,
       }),
       {

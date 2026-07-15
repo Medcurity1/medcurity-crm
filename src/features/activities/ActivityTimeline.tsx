@@ -178,7 +178,14 @@ export function ActivityTimeline({
   const [expandSignal, setExpandSignal] = useState(0);
 
   const { data: activities, isLoading, isError, refetch, isFetching } = useActivities({
-    account_id: accountId,
+    // When a contactId is present, scope by contact ONLY. useActivities ANDs
+    // every filter it's given, and activities carry the account_id the
+    // contact had AT SYNC TIME — so a contact who started account-less (or
+    // moved accounts) would have their earlier emails filtered OUT of their
+    // own timeline the moment an account was assigned (Summer's
+    // missing-emails report, 2026-07-15). accountId is still used below for
+    // the Log Activity dialog defaults.
+    account_id: contactId ? undefined : accountId,
     contact_id: contactId,
     opportunity_id: opportunityId,
     lead_id: leadId,

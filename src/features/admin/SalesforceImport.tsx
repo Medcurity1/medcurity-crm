@@ -3627,8 +3627,12 @@ export function SalesforceImport() {
 
               // Validate against known enum values — unknown values get stored as detail
               const VALID_ENUMS: Record<string, Set<string>> = {
-                lead_source: new Set(["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"]),
-                source: new Set(["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"]),
+                // sql/mql removed (Joe 2026-07-14): Source is a CHANNEL. An SF
+                // row carrying SQL/MQL as its source falls through the
+                // unknown-value path below (original kept in detail, source
+                // → "other") instead of reintroducing stage-as-source.
+                lead_source: new Set(["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "other"]),
+                source: new Set(["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "other"]),
                 stage: new Set([
                   // SF-matching values (current — migration 20260422000001)
                   "details_analysis", "demo", "proposal_and_price_quote",
@@ -4623,7 +4627,8 @@ export function SalesforceImport() {
       stage: ["lead", "qualified", "proposal", "verbal_commit", "closed_won", "closed_lost"],
       kind: ["new_business", "renewal"],
       team: ["sales", "renewals"],
-      lead_source: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"],
+      // sql/mql removed (Joe 2026-07-14): Source is a CHANNEL, not a stage.
+      lead_source: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "other"],
       payment_frequency: ["monthly", "quarterly", "semi_annually", "annually"],
       qualification: ["unqualified", "mql", "sql", "sal"],
     };
