@@ -1458,6 +1458,9 @@ async function drainEmailBackfillQueue(
       }
 
       let rowCreated = 0;
+      let connOk = 0;
+      let connFailed = 0;
+      let lastConnError = "";
       for (const conn of connections) {
         if (Date.now() > deadlineMs) {
           throw new Error("drain budget exhausted; will retry next run");
@@ -1465,80 +1468,116 @@ async function drainEmailBackfillQueue(
         const ownAddress = (conn.email_address ?? "").trim().toLowerCase();
         if (address === ownAddress) continue;
 
-        const accessToken = await ensureValidToken(supabase, conn);
-        const emails =
-          conn.provider === "gmail"
-            ? await fetchGmailEmailsForAddress(
-                accessToken,
-                conn.email_address ?? "",
-                address,
-                sinceIso
-              )
-            : await fetchOutlookEmailsForAddress(
-                accessToken,
-                ownAddress,
-                address,
-                sinceIso
-              );
+        // Known-dead mailboxes (past the 3-strike alert) get skipped:
+        // their owners were already notified, and burning a drain attempt
+        // on a token that can't refresh would poison this address's queue
+        // row for every HEALTHY mailbox too (seen live on staging: a
+        // connection whose Azure AD user was deleted from the directory).
+        if ((conn.consecutive_failures ?? 0) >= FAILURE_NOTIFY_THRESHOLD) {
+          continue;
+        }
 
-        const filtered = emails.filter((e) => {
-          if (e.direction === "sent" && !conn.config.log_sent) return false;
-          if (e.direction === "received" && !conn.config.log_received)
-            return false;
-          return true;
-        });
-        if (filtered.length === 0) continue;
-
-        const existingPairs = await fetchExistingEmailActivityPairs(
-          supabase,
-          conn,
-          Array.from(
-            new Set(filtered.map((e) => `${conn.provider}:${e.messageId}`))
-          )
-        );
-        const oppCache = new Map<string, string | null>();
-
-        for (const email of filtered) {
-          for (const match of matches) {
-            // Same per-connection semantics as the live sync.
-            if (conn.config.primary_only && !match.is_primary) continue;
-
-            let opportunityId: string | null = null;
-            if (conn.config.auto_link_opps && match.account_id) {
-              if (oppCache.has(match.account_id)) {
-                opportunityId = oppCache.get(match.account_id) ?? null;
-              } else {
-                opportunityId = await findOpenOpportunity(
-                  supabase,
-                  match.account_id
+        // Per-connection isolation: one broken mailbox must not abort the
+        // search of the others.
+        try {
+          const accessToken = await ensureValidToken(supabase, conn);
+          const emails =
+            conn.provider === "gmail"
+              ? await fetchGmailEmailsForAddress(
+                  accessToken,
+                  conn.email_address ?? "",
+                  address,
+                  sinceIso
+                )
+              : await fetchOutlookEmailsForAddress(
+                  accessToken,
+                  ownAddress,
+                  address,
+                  sinceIso
                 );
-                oppCache.set(match.account_id, opportunityId);
-              }
-            }
 
-            const inserted = await createEmailActivity(
+          const filtered = emails.filter((e) => {
+            if (e.direction === "sent" && !conn.config.log_sent) return false;
+            if (e.direction === "received" && !conn.config.log_received)
+              return false;
+            return true;
+          });
+
+          if (filtered.length > 0) {
+            const existingPairs = await fetchExistingEmailActivityPairs(
               supabase,
               conn,
-              email,
-              match,
-              opportunityId,
-              existingPairs
+              Array.from(
+                new Set(filtered.map((e) => `${conn.provider}:${e.messageId}`))
+              )
             );
-            if (inserted) {
-              created++;
-              rowCreated++;
+            const oppCache = new Map<string, string | null>();
+
+            for (const email of filtered) {
+              for (const match of matches) {
+                // Same per-connection semantics as the live sync.
+                if (conn.config.primary_only && !match.is_primary) continue;
+
+                let opportunityId: string | null = null;
+                if (conn.config.auto_link_opps && match.account_id) {
+                  if (oppCache.has(match.account_id)) {
+                    opportunityId = oppCache.get(match.account_id) ?? null;
+                  } else {
+                    opportunityId = await findOpenOpportunity(
+                      supabase,
+                      match.account_id
+                    );
+                    oppCache.set(match.account_id, opportunityId);
+                  }
+                }
+
+                const inserted = await createEmailActivity(
+                  supabase,
+                  conn,
+                  email,
+                  match,
+                  opportunityId,
+                  existingPairs
+                );
+                if (inserted) {
+                  created++;
+                  rowCreated++;
+                }
+              }
             }
           }
+          connOk++;
+        } catch (connErr) {
+          connFailed++;
+          lastConnError = (connErr as Error).message;
+          console.error(
+            `backfill: connection ${conn.id} failed for ${address}: ${lastConnError}`
+          );
         }
+      }
+
+      // Success = at least one mailbox was searched (or none needed to be).
+      // Only when EVERY eligible mailbox failed do we leave the row pending
+      // for the retry/attempts path.
+      if (connOk === 0 && connFailed > 0) {
+        throw new Error(
+          `all ${connFailed} eligible connection(s) failed; last: ${lastConnError}`
+        );
       }
 
       await supabase
         .from("email_backfill_queue")
-        .update({ processed_at: new Date().toISOString(), last_error: null })
+        .update({
+          processed_at: new Date().toISOString(),
+          last_error:
+            connFailed > 0
+              ? `partial: ${connFailed} connection(s) skipped on error; last: ${lastConnError}`.slice(0, 500)
+              : null,
+        })
         .eq("id", row.id);
       processed++;
       console.log(
-        `backfill: ${address} → ${rowCreated} activity row(s) across ${connections.length} connection(s)`
+        `backfill: ${address} → ${rowCreated} activity row(s) (${connOk} mailbox(es) searched, ${connFailed} failed)`
       );
     } catch (err) {
       const attempts = (row.attempts ?? 0) + 1;
