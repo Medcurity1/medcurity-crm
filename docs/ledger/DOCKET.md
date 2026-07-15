@@ -4,17 +4,9 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Staging — awaiting prod go-ahead
 
-- [STAGING] 2026-07-15 · Summer (via Nathan; Molly's recurring reports) · Emails-not-showing fix batch: ROOT CAUSE = matching runs once at fetch time, never retroactively — new contacts/corrected emails/unarchives now queue a retroactive per-address mailbox search (email_backfill_queue + drain in sync-emails, 90d window, all folders); contact timeline no longer ANDs stale account_id (+ NULL account_id backfill trigger); email whitespace hygiene (trigger + data fix); BCC matching; cursor dead-zone fix; 7-day window chunking (starvation fix); fail-hard lookups; Gmail retry; failure cooldown; scheduler-lock + reactivation self-heals · migration 20260715220000 + sync-emails edge fn + ActivityTimeline · full audit: docs/audit/2026-07-15-email-visibility-audit.md · POST-PROMOTE: run sync-emails-backfill.yml (90d) once on prod to heal history
+- [STAGING] 2026-07-14 · Summer (+Molly, via Nathan) · Account status restructure Step 1 (Sales Status, follow-up dates, call lists — additive layer): committed on Staging (122fb18) + two uncommitted Step-2 migrations (renewal_gate_customer_status 20260715230000, status_view_rewires 20260715232000). HELD BACK from the 2026-07-15 prod push per Nathan — not ready. ⚠ its migration is timestamped 20260715120000 (earlier than the 150000-220000 already on prod), so promoting it may need `supabase db push --include-all`.
 
-- [STAGING] 2026-07-15 · Rachel (low, via Nathan) · Assigned Assessor required when a deal includes services (service line item / service amount / Services Included flag; deals without services exempt): opportunity form enforces on create/edit (grandfathered) + Closed Won gate blocks service deals with no assessor from every surface; both rules admin-toggleable in Required Fields · migration 20260715170000
-
-- [STAGING] 2026-07-14 · Joe (high, via Nathan) · Lead Source = channel only, carried onto Opportunities: mql/sql retired from every Source picklist (stage lives in Qualification; existing rows migrated — leads→qualification, contacts→mql/sql dates where missing, opps/accounts→cleared to unattributed), convert_lead + bulk-promote now stamp Source onto the created opportunity and newly-created account, Opportunities list gains a Source column + filter (incl. "No Source") with inline edit, Opportunity/Account forms switched to the admin-managed picklist, SF importer stops accepting sql/mql as source · migrations 20260715150000 + 20260715151000
-
-- [STAGING] 2026-07-11 · Nathan · ClickUp parked until actually configured: unscheduled clickup_services_sync_daily + clickup_sf_id_sync_daily (built + prod-bootstrapped May 11-12 by an earlier session; prod's CLICKUP_API_TOKEN is set but ClickUp rejects it as invalid — likely the departed dev's personal token — so the daily sync failed and the watchdog nagged admins every day). Foundation (tables/fns/bootstrap script) kept; watchdog's ClickUp check now gated on the job being installed+active, so it self-heals if ClickUp is ever set up · migration 20260711220000
-
-- [STAGING] 2026-07-10 · Joe (high) · Lead Source now required when an opportunity is CREATED (config flip; form was already wired). Grandfather rule keeps existing opps editable · migration 20260710186000
-
-(nothing — the 2026-07-10 security fix + maintenance sweep + follow-ups all shipped to prod in 3d8b1f0; see SHIPPED.md)
+(The 2026-07-15 batch — Joe Lead Source, Rachel Assessor, Summer email fix — shipped to prod in 5bc05df; the 7/10 Lead-Source-required + 7/11 ClickUp items were already on prod via 9d6b6a7. See SHIPPED.md.)
 
 ## Queued / requested
 
