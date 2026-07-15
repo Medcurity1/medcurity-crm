@@ -43,7 +43,7 @@ export async function fetchAllRows<T = unknown>(
 }
 
 /**
- * Fetch accounts by a set of IDs, return map id → {name, lifecycle_status,
+ * Fetch accounts by a set of IDs, return map id → {name, customer_status,
  * owner_user_id, renewal_type}. Batches into chunks of 500 to stay under
  * PostgREST's URL length limit.
  */
@@ -52,8 +52,7 @@ export async function fetchAccountsById(ids: Set<string>): Promise<
     string,
     {
       name: string;
-      lifecycle_status: string | null;
-      status: string | null;
+      customer_status: string | null;
       owner_user_id: string | null;
       renewal_type: string | null;
       notes: string | null;
@@ -73,7 +72,7 @@ export async function fetchAccountsById(ids: Set<string>): Promise<
     const { data, error } = await supabase
       .from("accounts")
       .select(
-        "id, name, lifecycle_status, status, owner_user_id, renewal_type, notes, lead_source, created_at, account_number, account_type",
+        "id, name, customer_status, owner_user_id, renewal_type, notes, lead_source, created_at, account_number, account_type",
       )
       .in("id", chunk);
     if (error) throw error;

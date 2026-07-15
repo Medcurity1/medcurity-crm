@@ -1,6 +1,4 @@
 export type AppRole = "sales" | "renewals" | "admin" | "super_admin" | "read_only";
-export type AccountLifecycle = "prospect" | "customer" | "former_customer";
-export type AccountStatus = "discovery" | "pending" | "active" | "inactive" | "churned";
 // Automatic customer-hood, derived from closed-won contract dates (NOT set by
 // hand). client = a live contract; former_client = bought before, nothing live
 // now; prospect = never closed-won. See 20260630000002_account_customer_status.
@@ -116,8 +114,8 @@ export interface AccountPartnership {
   created_at: string;
   updated_at: string;
   // Joined helpers (populated by the API layer)
-  partner_account?: { id: string; name: string; account_type: string | null; status: AccountStatus | null } | null;
-  member_account?:  { id: string; name: string; account_type: string | null; status: AccountStatus | null } | null;
+  partner_account?: { id: string; name: string; account_type: string | null; customer_status: CustomerStatus | null } | null;
+  member_account?:  { id: string; name: string; account_type: string | null; customer_status: CustomerStatus | null } | null;
 }
 
 /**
@@ -160,8 +158,6 @@ export interface Account {
   sf_id: string | null;
   name: string;
   owner_user_id: string | null;
-  lifecycle_status: AccountLifecycle;
-  status: AccountStatus;
   // Automatic; maintained by triggers + a daily sweep. Never set on the form.
   customer_status: CustomerStatus;
   // Set ONLY by the closed-lost "still contracted?" prompt (or an admin clear).

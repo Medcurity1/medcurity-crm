@@ -1,5 +1,5 @@
 import { format, formatDistanceToNow, parseISO, differenceInDays, isValid } from "date-fns";
-import type { OpportunityStage, AccountLifecycle, AccountStatus, CustomerStatus, SalesStatus, RenewalType, ActivityType, OpportunityKind, OpportunityBusinessType, OpportunityTeam, LeadStatus, LeadSource, PaymentFrequency, LeadQualification, IndustryCategory, ProjectSegment } from "@/types/crm";
+import type { OpportunityStage, CustomerStatus, SalesStatus, RenewalType, ActivityType, OpportunityKind, OpportunityBusinessType, OpportunityTeam, LeadStatus, LeadSource, PaymentFrequency, LeadQualification, IndustryCategory, ProjectSegment } from "@/types/crm";
 
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -70,16 +70,6 @@ const stageLabels: Record<OpportunityStage, string> = {
 
 export function stageLabel(stage: OpportunityStage): string {
   return stageLabels[stage];
-}
-
-const lifecycleLabels: Record<AccountLifecycle, string> = {
-  prospect: "Prospect",
-  customer: "Customer",
-  former_customer: "Former Customer",
-};
-
-export function lifecycleLabel(status: AccountLifecycle): string {
-  return lifecycleLabels[status];
 }
 
 // Stored values stay client/prospect/former_client — only the labels moved
@@ -157,18 +147,6 @@ const teamLabels: Record<OpportunityTeam, string> = {
 
 export function teamLabel(team: OpportunityTeam): string {
   return teamLabels[team];
-}
-
-const statusLabels: Record<AccountStatus, string> = {
-  discovery: "Discovery",
-  pending: "Pending",
-  active: "Active",
-  inactive: "Inactive",
-  churned: "Churned",
-};
-
-export function statusLabel(status: AccountStatus): string {
-  return statusLabels[status];
 }
 
 const renewalTypeLabels: Record<RenewalType, string> = {

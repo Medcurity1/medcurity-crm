@@ -31,7 +31,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatCurrency, formatDate } from "@/lib/formatters";
+import { formatCurrency, formatDate, customerStatusLabel } from "@/lib/formatters";
+import type { CustomerStatus } from "@/types/crm";
 import {
   downloadCsv,
   todayStamp,
@@ -47,7 +48,7 @@ import { fetchAccountsById, fetchAllRows } from "./report-fetchers";
  * but no longer have any open / in-contract opportunity.
  *
  * "Currently active" rule (per Brayden 2026-05-29):
- *   account.status is NOT the source of truth — we derive activity
+ *   customer_status is NOT the source of truth — we derive activity
  *   from opportunity history instead. An account is currently active
  *   iff it has at least one Closed-Won opp where the opp is "still
  *   open" — meaning contract_end_date >= today if it's set,
@@ -157,8 +158,8 @@ export function LostCustomersAccount() {
         }
       }
 
-      // Resolve account display names + status (status is shown for
-      // context but does NOT drive the active/lost classification —
+      // Resolve account display names + Account Status (customer_status is
+      // shown for context but does NOT drive the active/lost classification —
       // the opportunity history does).
       const accountIds = new Set<string>(perAccount.keys());
       const accounts = await fetchAccountsById(accountIds);
@@ -179,7 +180,7 @@ export function LostCustomersAccount() {
         lost.push({
           account_id: accountId,
           account_name: acc?.name ?? "Unknown",
-          account_status: acc?.status ?? null,
+          account_status: acc?.customer_status ?? null,
           latest_close_date: closeDate,
           effective_end_date: effectiveEnd,
           lost_quarter: lostBucket.sortKey,
@@ -251,7 +252,7 @@ export function LostCustomersAccount() {
     ];
     const rows = filteredLost.map((r) => [
       r.account_name,
-      r.account_status ?? "",
+      r.account_status ? customerStatusLabel(r.account_status as CustomerStatus) : "",
       r.lost_quarter_label,
       r.effective_end_date,
       r.latest_close_date,
@@ -394,7 +395,11 @@ export function LostCustomersAccount() {
                               {r.account_name}
                             </Link>
                           </TableCell>
-                          <TableCell>{r.account_status ?? "—"}</TableCell>
+                          <TableCell>
+                            {r.account_status
+                              ? customerStatusLabel(r.account_status as CustomerStatus)
+                              : "—"}
+                          </TableCell>
                           <TableCell>{r.lost_quarter_label}</TableCell>
                           <TableCell>
                             {formatDate(r.effective_end_date)}

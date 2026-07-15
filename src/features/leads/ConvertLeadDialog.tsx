@@ -25,13 +25,13 @@ import {
 import { Loader2, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import type { Lead } from "@/types/crm";
+import type { Lead, CustomerStatus } from "@/types/crm";
 import {
   MultiProductPicker,
   type StagedOpportunityProduct,
 } from "@/features/opportunities/MultiProductPicker";
 import { useAddOpportunityProductsBulk } from "@/features/opportunities/api";
-import { employeesToFteRange, formatCurrency } from "@/lib/formatters";
+import { employeesToFteRange, formatCurrency, customerStatusLabel } from "@/lib/formatters";
 import { DuplicateWarning } from "@/components/DuplicateWarning";
 
 interface ConvertLeadDialogProps {
@@ -43,7 +43,7 @@ interface ConvertLeadDialogProps {
 interface AccountSuggestion {
   id: string;
   name: string;
-  lifecycle_status: string | null;
+  customer_status: string | null;
 }
 
 type AccountMode = "existing" | "new" | "none";
@@ -196,7 +196,7 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
     debounceRef.current = setTimeout(async () => {
       const { data, error } = await supabase
         .from("accounts")
-        .select("id, name, lifecycle_status")
+        .select("id, name, customer_status")
         .ilike("name", `%${q}%`)
         .is("archived_at", null)
         .order("name", { ascending: true })
@@ -227,7 +227,7 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
           if (token) {
             const { data: extra } = await supabase
               .from("accounts")
-              .select("id, name, lifecycle_status")
+              .select("id, name, customer_status")
               .ilike("name", `%${token}%`)
               .is("archived_at", null)
               .limit(25);
@@ -423,9 +423,9 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
                   <div className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 bg-muted/30">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="font-medium truncate">{selectedAccount.name}</span>
-                      {selectedAccount.lifecycle_status && (
+                      {selectedAccount.customer_status && (
                         <Badge variant="outline" className="text-xs capitalize shrink-0">
-                          {selectedAccount.lifecycle_status}
+                          {customerStatusLabel(selectedAccount.customer_status as CustomerStatus)}
                         </Badge>
                       )}
                     </div>
@@ -472,9 +472,9 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
                               )}
                             >
                               <span className="truncate">{a.name}</span>
-                              {a.lifecycle_status && (
+                              {a.customer_status && (
                                 <Badge variant="outline" className="text-xs capitalize shrink-0">
-                                  {a.lifecycle_status}
+                                  {customerStatusLabel(a.customer_status as CustomerStatus)}
                                 </Badge>
                               )}
                             </button>

@@ -61,20 +61,6 @@ const accountColumns: ColumnDef[] = [
   { key: "id", label: "ID", type: "text", group: "System" },
   { key: "name", label: "Name", type: "text", group: "Basic Info" },
   {
-    key: "lifecycle_status",
-    label: "Lifecycle Status",
-    type: "enum",
-    enumValues: ["prospect", "customer", "former_customer"],
-    group: "Basic Info",
-  },
-  {
-    key: "status",
-    label: "Status",
-    type: "enum",
-    enumValues: ["discovery", "pending", "active", "inactive", "churned"],
-    group: "Basic Info",
-  },
-  {
     // Derived customer-hood (see CustomerStatus in src/types/crm.ts). Surfaced
     // as "Account Status" per Summer's 2026-07 status restructure — stored
     // values are unchanged, only the display wording moved.
@@ -147,18 +133,6 @@ const accountColumns: ColumnDef[] = [
 const accountFilterColumns: FilterColumnDef[] = [
   { filterKey: "id", label: "ID", type: "text" },
   { filterKey: "name", label: "Name", type: "text" },
-  {
-    filterKey: "lifecycle_status",
-    label: "Lifecycle Status",
-    type: "enum",
-    enumValues: ["prospect", "customer", "former_customer"],
-  },
-  {
-    filterKey: "status",
-    label: "Status",
-    type: "enum",
-    enumValues: ["discovery", "pending", "active", "inactive", "churned"],
-  },
   {
     filterKey: "customer_status",
     label: "Account Status",
@@ -651,7 +625,7 @@ export const ENTITY_DEFS: Record<string, EntityDef> = {
     table: "accounts",
     columns: accountColumns,
     filterColumns: accountFilterColumns,
-    defaultColumns: ["name", "lifecycle_status", "status", "industry", "owner", "current_contract_end_date"],
+    defaultColumns: ["name", "customer_status", "industry", "owner", "current_contract_end_date"],
     joins: "*, owner:user_profiles!owner_user_id(full_name)",
   },
 

@@ -41,7 +41,7 @@ interface AccountSearchResult {
   id: string;
   name: string;
   account_type: string | null;
-  lifecycle_status: string | null;
+  customer_status: string | null;
 }
 
 /**
@@ -129,7 +129,7 @@ export function AddPartnerDialog({
     (async () => {
       const { data, error } = await supabase
         .from("accounts")
-        .select("id, name, account_type, lifecycle_status")
+        .select("id, name, account_type, customer_status")
         .ilike("name", `%${debouncedSearch.trim()}%`)
         .neq("id", accountId)  // can't partner with yourself
         .is("archived_at", null)

@@ -13,31 +13,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatCurrency } from "@/lib/formatters";
-import type { AccountStatus } from "@/types/crm";
+import { formatCurrency, customerStatusLabel } from "@/lib/formatters";
+import type { CustomerStatus } from "@/types/crm";
 
 interface MyAccountRow {
   id: string;
   name: string;
-  status: AccountStatus;
+  customer_status: CustomerStatus | null;
   acv: number | null;
-}
-
-function statusLabel(status: AccountStatus): string {
-  switch (status) {
-    case "discovery":
-      return "Discovery";
-    case "pending":
-      return "Pending";
-    case "active":
-      return "Active";
-    case "inactive":
-      return "Inactive";
-    case "churned":
-      return "Churned";
-    default:
-      return status;
-  }
 }
 
 export function MyAccountsWidget({ userId }: { userId: string }) {
@@ -47,7 +30,7 @@ export function MyAccountsWidget({ userId }: { userId: string }) {
     queryFn: async () => {
       const { data: rows, error } = await supabase
         .from("accounts")
-        .select("id, name, status, acv")
+        .select("id, name, customer_status, acv")
         .eq("owner_user_id", userId)
         .is("archived_at", null)
         .order("acv", { ascending: false, nullsFirst: false })
@@ -99,9 +82,9 @@ export function MyAccountsWidget({ userId }: { userId: string }) {
                     </TableCell>
                     <TableCell>
                       <StatusBadge
-                        value={row.status}
-                        variant="status"
-                        label={statusLabel(row.status)}
+                        value={row.customer_status ?? "prospect"}
+                        variant="customerStatus"
+                        label={customerStatusLabel(row.customer_status)}
                       />
                     </TableCell>
                     <TableCell className="text-right font-medium">

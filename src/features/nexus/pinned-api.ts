@@ -9,9 +9,9 @@ import {
   formatName,
   formatRelativeDate,
   stageLabel,
-  statusLabel,
+  customerStatusLabel,
 } from "@/lib/formatters";
-import type { AccountStatus, OpportunityStage } from "@/types/crm";
+import type { CustomerStatus, OpportunityStage } from "@/types/crm";
 import { fetchLastActivityMap } from "./report-engine";
 import type { PinnedRecordRef, PinnedRecordType } from "./types";
 
@@ -90,18 +90,18 @@ export function usePinnedRecordInfos(records: PinnedRecordRef[]) {
       if (accountIds.length) {
         const { data, error } = await supabase
           .from("accounts")
-          .select("id, name, status, acv")
+          .select("id, name, customer_status, acv")
           .in("id", accountIds)
           .is("archived_at", null);
         if (error) throw error;
         for (const a of (data ?? []) as {
           id: string;
           name: string;
-          status: AccountStatus | null;
+          customer_status: CustomerStatus | null;
           acv: number | null;
         }[]) {
           const parts = [
-            a.status ? statusLabel(a.status) : null,
+            a.customer_status ? customerStatusLabel(a.customer_status) : null,
             a.acv != null ? `${formatCurrency(Number(a.acv))} ACV` : null,
           ].filter(Boolean);
           infos.set(`account:${a.id}`, {

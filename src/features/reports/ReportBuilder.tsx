@@ -89,7 +89,6 @@ import {
   formatCurrency,
   formatDate,
   stageLabel,
-  lifecycleLabel,
   activityLabel,
   kindLabel,
   teamLabel,
@@ -161,10 +160,9 @@ export interface RelationLookups {
 // ---------------------------------------------------------------------------
 
 const ENUM_LABEL_MAP: Record<string, (v: string) => string> = {
-  lifecycle_status: (v) => lifecycleLabel(v as Parameters<typeof lifecycleLabel>[0]),
   status: (v) => {
-    // "status" is used for both accounts (AccountStatus) and leads (LeadStatus).
-    // Try lead status labels first, fall back to account status, then raw value.
+    // "status" is a leads-only enum now (accounts.status is retired). Account
+    // customer-hood is the separate customer_status field below.
     const leadLabels: Record<string, string> = {
       new: "New",
       contacted: "Contacted",
@@ -172,14 +170,7 @@ const ENUM_LABEL_MAP: Record<string, (v: string) => string> = {
       unqualified: "Unqualified",
       converted: "Converted",
     };
-    const accountLabels: Record<string, string> = {
-      discovery: "Discovery",
-      pending: "Pending",
-      active: "Active",
-      inactive: "Inactive",
-      churned: "Churned",
-    };
-    return leadLabels[v] ?? accountLabels[v] ?? v;
+    return leadLabels[v] ?? v;
   },
   // Keyed by the actual column key (NOT "status", which is shared between
   // leads and accounts). "Account Status" wording per the 2026-07 status

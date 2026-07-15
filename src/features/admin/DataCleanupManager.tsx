@@ -47,7 +47,8 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { formatCurrency } from "@/lib/formatters";
+import { formatCurrency, customerStatusLabel } from "@/lib/formatters";
+import type { CustomerStatus } from "@/types/crm";
 import {
   useLeadContactDuplicates,
   useLeadDuplicateCounts,
@@ -340,7 +341,9 @@ function AccountDuplicatesPanel() {
                           )}
                         </TableCell>
                         <TableCell className="capitalize text-sm">
-                          {r.lifecycle_status ?? r.account_status ?? "—"}
+                          {r.customer_status
+                            ? customerStatusLabel(r.customer_status as CustomerStatus)
+                            : "—"}
                         </TableCell>
                         <TableCell className="text-sm">{r.owner_name ?? "—"}</TableCell>
                         <TableCell className="text-right">{r.contact_count}</TableCell>

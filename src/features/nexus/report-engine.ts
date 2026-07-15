@@ -22,7 +22,6 @@ import {
   formatRelativeDate,
   formatName,
   stageLabel,
-  statusLabel,
   customerStatusLabel,
   businessTypeLabel,
   teamLabel,
@@ -33,7 +32,6 @@ import {
 } from "@/lib/formatters";
 import { formatPhone } from "@/components/PhoneInput";
 import type {
-  AccountStatus,
   CustomerStatus,
   IndustryCategory,
   OpportunityBusinessType,
@@ -73,10 +71,6 @@ export interface ReportColumnDef {
   sortable: boolean;
   align?: "right";
 }
-
-const ACCOUNT_STATUS_OPTIONS = (
-  ["discovery", "pending", "active", "inactive", "churned"] as AccountStatus[]
-).map((v) => ({ value: v, label: statusLabel(v) }));
 
 const CUSTOMER_STATUS_OPTIONS = (
   ["client", "prospect", "former_client"] as CustomerStatus[]
@@ -176,9 +170,9 @@ export const REPORT_FILTERS: Record<NexusReportEntity, ReportFilterDef[]> = {
   ],
   accounts: [
     { field: "owner", label: "Owner", kind: "multi", optionsSource: "owners" },
-    { field: "status", label: "Status", kind: "multi", staticOptions: ACCOUNT_STATUS_OPTIONS },
     // Surfaced as "Account Status" per the 2026-07 status restructure
-    // (stored values unchanged: client / prospect / former_client).
+    // (stored values unchanged: client / prospect / former_client). The old
+    // discovery/pending/active/inactive/churned "status" filter is retired.
     { field: "customer_status", label: "Account Status", kind: "multi", staticOptions: CUSTOMER_STATUS_OPTIONS },
     // Sales-working fields (2026-07 restructure). sales_status options come
     // from the admin-managed accounts.sales_status picklist (partner_type
@@ -224,8 +218,11 @@ export const REPORT_COLUMNS: Record<NexusReportEntity, ReportColumnDef[]> = {
     { key: "email", label: "Email", sortable: true },
     { key: "phone", label: "Phone", sortable: false },
     { key: "org_type", label: "Org Type", sortable: false },
-    // "Status" for a contact = their ACCOUNT's status (contacts have no
-    // status of their own; this is what Molly's CHC/FQHC widget wants).
+    // "Status" for a contact = their ACCOUNT's Account Status (contacts have
+    // no status of their own; this is what Molly's CHC/FQHC widget wants).
+    // Sourced from the linked account's customer_status (client / prospect /
+    // former_client) now that accounts.status is retired. Key stays "status"
+    // for saved-config compatibility.
     { key: "status", label: "Account Status", sortable: false },
     { key: "state", label: "State", sortable: false },
     { key: "tags", label: "Tags", sortable: false },
@@ -239,7 +236,6 @@ export const REPORT_COLUMNS: Record<NexusReportEntity, ReportColumnDef[]> = {
   ],
   accounts: [
     { key: "name", label: "Name", sortable: true },
-    { key: "status", label: "Status", sortable: true },
     { key: "customer_status", label: "Account Status", sortable: true },
     { key: "account_type", label: "Account Type", sortable: true },
     { key: "industry", label: "Industry", sortable: false },
@@ -285,7 +281,7 @@ export const REPORT_COLUMNS: Record<NexusReportEntity, ReportColumnDef[]> = {
 /** Sensible starting columns per entity for a fresh widget. */
 export const DEFAULT_REPORT_COLUMNS: Record<NexusReportEntity, string[]> = {
   contacts: ["name", "account", "title", "last_activity"],
-  accounts: ["name", "status", "owner", "contract_end"],
+  accounts: ["name", "customer_status", "owner", "contract_end"],
   opportunities: ["name", "account", "stage", "amount"],
   imports: ["entity", "status", "rows", "started"],
 };
@@ -541,7 +537,6 @@ function serverSortSpec(
     },
     accounts: {
       name: { column: "name" },
-      status: { column: "status" },
       customer_status: { column: "customer_status" },
       account_type: { column: "account_type" },
       state: { column: "billing_state" },
@@ -595,7 +590,6 @@ function filterColumn(entity: NexusReportEntity, field: string): string | null {
     },
     accounts: {
       owner: "owner_user_id",
-      status: "status",
       customer_status: "customer_status",
       sales_active: "sales_active",
       sales_status: "sales_status",
@@ -758,7 +752,7 @@ function contactCells(
     name?: string;
     account_type?: string | null;
     billing_state?: string | null;
-    status?: string | null;
+    customer_status?: string | null;
   } | null;
   const owner = r.owner as { full_name?: string | null } | null;
   const la = lastActivity.get(r.id);
@@ -770,7 +764,7 @@ function contactCells(
     email: text(r.email),
     phone: text(r.phone ? formatPhone(String(r.phone)) : null),
     org_type: text(account?.account_type),
-    status: text(account?.status ? statusLabel(account.status as AccountStatus) : null),
+    status: text(account?.customer_status ? customerStatusLabel(account.customer_status as CustomerStatus) : null),
     state: text((r.mailing_state as string | null) ?? account?.billing_state),
     tags: { kind: "tags", tags: tags.get(r.id) ?? [] },
     notes: noteText(r.notes),
@@ -790,7 +784,6 @@ function accountCells(
   const lt = lastTouch.get(r.id);
   return {
     name: text(r.name),
-    status: text(r.status ? statusLabel(r.status as AccountStatus) : null),
     customer_status: text(customerStatusLabel(r.customer_status as CustomerStatus | null)),
     account_type: text(r.account_type),
     industry: text(
@@ -863,10 +856,10 @@ function importCells(r: RawRecord): Record<string, ReportCell> {
 const SELECTS: Record<NexusReportEntity, string> = {
   contacts:
     "id, first_name, last_name, title, email, phone, mailing_state, notes, created_at, " +
-    "account:accounts!account_id(id, name, account_type, billing_state, status), " +
+    "account:accounts!account_id(id, name, account_type, billing_state, customer_status), " +
     "owner:user_profiles!owner_user_id(id, full_name)",
   accounts:
-    "id, name, status, customer_status, sales_active, sales_status, next_follow_up_date, " +
+    "id, name, customer_status, sales_active, sales_status, next_follow_up_date, " +
     "account_type, industry, industry_category, phone, billing_state, " +
     "current_contract_end_date, acv, notes, created_at, " +
     "owner:user_profiles!owner_user_id(id, full_name)",
@@ -887,7 +880,7 @@ const SELECTS: Record<NexusReportEntity, string> = {
 // must be recreated after the sales_active/sales_status/next_follow_up_date
 // column migration or these selects will 400 on the activity path.
 const ACCOUNTS_ACTIVITY_SELECT =
-  "id, name, status, customer_status, sales_active, sales_status, next_follow_up_date, " +
+  "id, name, customer_status, sales_active, sales_status, next_follow_up_date, " +
   "account_type, industry, industry_category, phone, billing_state, " +
   "current_contract_end_date, acv, notes, created_at, owner_user_id, last_activity_at";
 
@@ -1113,7 +1106,7 @@ export function buildViewAllLink(rawConfig: unknown): string {
     entity === "contacts"
       ? { owner: "owner", tags: "tags" }
       : entity === "accounts"
-        ? { owner: "owner", status: "status", customer_status: "customer", industry: "industry" }
+        ? { owner: "owner", customer_status: "customer", industry: "industry" }
         : { owner: "owner", stage: "stage", team: "team", business_type: "business_type" };
 
   const params = new URLSearchParams();
@@ -1164,7 +1157,7 @@ export function buildViewAllLink(rawConfig: unknown): string {
     entity === "contacts"
       ? { name: "last_name", account: "account.name", title: "title", email: "email" }
       : entity === "accounts"
-        ? { name: "name", status: "status", customer_status: "customer_status", contract_end: "current_contract_end_date", next_follow_up_date: "next_follow_up_date" }
+        ? { name: "name", customer_status: "customer_status", contract_end: "current_contract_end_date", next_follow_up_date: "next_follow_up_date" }
         : {
             name: "name",
             account: "account.name",

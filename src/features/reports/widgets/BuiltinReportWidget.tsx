@@ -250,7 +250,7 @@ function ChurnMetrics() {
       const lyStart = new Date(now.getFullYear() - 1, 0, 1).toISOString();
       const { data: accounts, error } = await supabase
         .from("accounts")
-        .select("churn_amount, churn_date, status, acv")
+        .select("churn_amount, churn_date, acv")
         .not("churn_date", "is", null);
       if (error) throw error;
       const rows = accounts ?? [];

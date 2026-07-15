@@ -121,7 +121,7 @@ describe("required numeric fields through the form schemas", () => {
   // blank on create was never flagged. These tests pin the fixed
   // end-to-end behavior: blank survives parsing as null (flagged),
   // explicit 0 stays 0 (a real value, never flagged).
-  const minimalAccount = { name: "Acme", lifecycle_status: "prospect" };
+  const minimalAccount = { name: "Acme" };
   const minimalLead = { first_name: "Ada", last_name: "Lovelace", status: "new" };
   const minimalOpp = {
     account_id: "6f9619ff-8b86-4d01-b42d-00cf4fc964ff",

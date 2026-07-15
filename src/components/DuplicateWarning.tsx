@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { AlertTriangle, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { customerStatusLabel } from "@/lib/formatters";
+import type { CustomerStatus } from "@/types/crm";
 
 /* ================================================================
    Types
@@ -52,10 +54,12 @@ export function DuplicateWarning({
         });
         if (!error && data && data.length > 0) {
           results = data.map(
-            (d: { id: string; name: string; lifecycle_status: string | null }) => ({
+            (d: { id: string; name: string; customer_status: string | null }) => ({
               id: d.id,
               label: d.name,
-              detail: d.lifecycle_status ?? "",
+              detail: d.customer_status
+                ? customerStatusLabel(d.customer_status as CustomerStatus)
+                : "",
               href: `/accounts/${d.id}`,
             })
           );

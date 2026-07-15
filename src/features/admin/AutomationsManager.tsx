@@ -63,28 +63,10 @@ interface AutomationTemplate {
 }
 
 const TEMPLATES: AutomationTemplate[] = [
-  {
-    name: "Closed Won -> Active Account",
-    description:
-      "When an opportunity reaches Closed Won, update the account lifecycle status to Customer.",
-    input: {
-      name: "Closed Won -> Active Account",
-      description:
-        "Automatically set account lifecycle to customer when an opportunity is closed won.",
-      trigger_entity: "opportunities",
-      trigger_event: "stage_changed",
-      trigger_conditions: [{ field: "stage", operator: "eq", value: "closed_won" }],
-      actions: [
-        {
-          type: "update_field",
-          entity: "accounts",
-          field: "lifecycle_status",
-          value: "customer",
-        },
-      ],
-      is_active: true,
-    },
-  },
+  // The old "Closed Won -> Active Account" quick-start template was removed:
+  // it targeted the retired accounts.lifecycle_status column (now dropped),
+  // and the opp-automation executor's update_account_status branch is gone.
+  // Customer-hood is derived automatically into customer_status by DB triggers.
   {
     name: "Closed Won -> Follow-up Task",
     description:

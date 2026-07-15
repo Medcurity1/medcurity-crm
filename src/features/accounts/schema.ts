@@ -3,8 +3,6 @@ import { blankableNumber } from "@/lib/zodFields";
 
 export const accountSchema = z.object({
   name: z.string().min(1, "Account name is required"),
-  lifecycle_status: z.enum(["prospect", "customer", "former_customer"]),
-  status: z.enum(["discovery", "pending", "active", "inactive", "churned"]).optional(),
   // Sales working state (status restructure). sales_status values come from
   // the 'accounts.sales_status' picklist; validated loosely here so admins
   // can add options without a code change.

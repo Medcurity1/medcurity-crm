@@ -242,13 +242,13 @@ export function ReportsDiagnostic() {
           supabase.from("accounts").select("*", opts),
         ),
         count(
-          "  ... lifecycle_status = inactive",
-          "accounts currently marked churned",
+          "  ... customer_status = former_client",
+          "accounts currently marked Former Customer",
           supabase
             .from("accounts")
             .select("*", opts)
             .is("archived_at", null)
-            .eq("lifecycle_status", "inactive"),
+            .eq("customer_status", "former_client"),
         ),
       ]);
 

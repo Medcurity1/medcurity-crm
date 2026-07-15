@@ -15,7 +15,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { StatusBadge } from "@/components/StatusBadge";
-import { statusLabel } from "@/lib/formatters";
+import { customerStatusLabel } from "@/lib/formatters";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { AddPartnerDialog } from "./AddPartnerDialog";
 
@@ -53,8 +53,8 @@ export function AccountPartners({ accountId }: { accountId: string }) {
         .from("account_partners")
         .select(
           "*, " +
-          "partner_account:accounts!partner_account_id(id, name, account_type, status), " +
-          "member_account:accounts!member_account_id(id, name, account_type, status)"
+          "partner_account:accounts!partner_account_id(id, name, account_type, customer_status), " +
+          "member_account:accounts!member_account_id(id, name, account_type, customer_status)"
         )
         .or(`partner_account_id.eq.${accountId},member_account_id.eq.${accountId}`)
         // Guard against PostgREST's default 1000-row cap silently
@@ -256,11 +256,11 @@ function PartnershipSection({
                     </Link>
                   </TableCell>
                   <TableCell>
-                    {target.status ? (
+                    {target.customer_status ? (
                       <StatusBadge
-                        value={target.status}
-                        variant="status"
-                        label={statusLabel(target.status)}
+                        value={target.customer_status}
+                        variant="customerStatus"
+                        label={customerStatusLabel(target.customer_status)}
                       />
                     ) : (
                       <span className="text-muted-foreground">—</span>

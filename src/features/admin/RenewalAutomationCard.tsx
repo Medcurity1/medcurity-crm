@@ -385,9 +385,11 @@ export function RenewalAutomationCard() {
                       onClick={() => handleSelectTestAccount(a.id)}
                     >
                       <span className="truncate">{a.name}</span>
-                      {a.lifecycle_status && (
+                      {a.customer_status && (
                         <span className="text-xs text-muted-foreground ml-2">
-                          {a.lifecycle_status}
+                          {customerStatusLabel(
+                            a.customer_status as "client" | "prospect" | "former_client",
+                          )}
                         </span>
                       )}
                     </button>

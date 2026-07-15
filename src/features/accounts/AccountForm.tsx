@@ -156,7 +156,6 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
     defaultValues: isEditing && account
       ? {
           name: account.name,
-          lifecycle_status: account.lifecycle_status,
           sales_active: account.sales_active ?? false,
           sales_status: account.sales_status ?? "",
           next_follow_up_date: account.next_follow_up_date ?? "",
@@ -214,7 +213,6 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
         }
       : {
           name: "",
-          lifecycle_status: "prospect",
           sales_active: false,
           sales_status: "",
           next_follow_up_date: "",
@@ -411,9 +409,10 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
     // blocks the save if we're clearing a value that used to be there.
     // See src/lib/requiredFields.ts for the full rationale.
     const missingFields = getMissingRequiredFields(
-      // `status` is being phased out and is no longer on the form — a stale
-      // required_field_config row for it must not brick account saves.
-      requiredKeys.filter((k) => k !== "status"),
+      // `status` and `lifecycle_status` are fully retired (columns dropped) —
+      // a stale required_field_config row for either must not brick account
+      // saves. Neither is on the form anymore.
+      requiredKeys.filter((k) => k !== "status" && k !== "lifecycle_status"),
       values,
       account as Record<string, unknown> | undefined
     );
@@ -446,9 +445,9 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
 
     const payload: Record<string, unknown> = {
       name: values.name,
-      lifecycle_status: values.lifecycle_status,
-      // Legacy `status` is intentionally NOT sent — the column stays in the
-      // DB for now but the form no longer reads or writes it.
+      // `status` and `lifecycle_status` are retired (columns dropped); the
+      // form never reads or writes them. Account-hood is derived automatically
+      // into customer_status.
       sales_active: values.sales_active ?? false,
       sales_status: emptyToNull(values.sales_status),
       next_follow_up_date: emptyToNull(values.next_follow_up_date),
@@ -616,9 +615,9 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                 {/* ---- Sales Status (replaces the retired `status` field) ----
                     sales_active is also auto-set by a DB trigger from
                     call-list membership; the form just reads/writes the
-                    columns. lifecycle_status remains on the column so
-                    existing dashboard/ARR/churn views don't break — it will
-                    be retired in a follow-up once views migrate. */}
+                    columns. The old status/lifecycle_status columns are fully
+                    retired — customer-hood is derived automatically into
+                    customer_status; dashboard/ARR/churn views read that now. */}
                 <div className="space-y-2 md:col-span-2">
                   <Label>Sales Status</Label>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

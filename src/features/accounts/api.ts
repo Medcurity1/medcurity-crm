@@ -5,9 +5,6 @@ import { buildPersonSearchClause } from "@/lib/search-clause";
 
 interface AccountFilters {
   search?: string;
-  lifecycle_status?: string;
-  /** Single status (legacy) or array of statuses (multi-select). */
-  status?: string | string[];
   /** Automatic customer status: client | prospect | former_client. */
   customerStatus?: string | string[];
   /** Sales working state: "true" = actively worked, "false" = not. */
@@ -94,16 +91,6 @@ export function useAccounts(filters?: AccountFilters) {
           orParts.push(`id.in.(${capped.join(",")})`);
         }
         query = query.or(orParts.join(","));
-      }
-      if (filters?.lifecycle_status) {
-        query = query.eq("lifecycle_status", filters.lifecycle_status);
-      }
-      if (filters?.status) {
-        if (Array.isArray(filters.status)) {
-          if (filters.status.length > 0) query = query.in("status", filters.status);
-        } else {
-          query = query.eq("status", filters.status);
-        }
       }
       if (filters?.customerStatus) {
         if (Array.isArray(filters.customerStatus)) {

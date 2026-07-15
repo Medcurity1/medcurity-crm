@@ -24,13 +24,6 @@ export const branding = {
   /** Industry context — affects default field labels and terminology */
   industry: "healthcare" as "healthcare" | "saas" | "finance" | "consulting" | "general",
 
-  /** Default account lifecycle stages */
-  lifecycleLabels: {
-    prospect: "Prospect",
-    customer: "Customer",
-    former_customer: "Former Customer",
-  },
-
   /** Default opportunity stages — customize per sales process */
   stageLabels: {
     lead: "Lead",

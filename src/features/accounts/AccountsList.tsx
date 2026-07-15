@@ -40,7 +40,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { statusLabel, customerStatusLabel, salesStatusLabel, formatRelativeDate, formatDate, formatName, daysUntil, INDUSTRY_CATEGORY_LABELS } from "@/lib/formatters";
+import { customerStatusLabel, salesStatusLabel, formatRelativeDate, formatDate, formatName, daysUntil, INDUSTRY_CATEGORY_LABELS } from "@/lib/formatters";
 import { formatPhone } from "@/components/PhoneInput";
 
 // "Contract End" (contract_end / current_contract_end_date) was replaced by
@@ -60,7 +60,6 @@ const ACCOUNTS_COLUMNS: ColumnDescriptor[] = [
   { key: "name", label: "Name", sortKey: "name", locked: true },
   { key: "primary_contact", label: "Primary Contact" },
   { key: "phone", label: "Phone", sortKey: "phone" },
-  { key: "status", label: "Status", sortKey: "status" },
   { key: "customer_status", label: "Account Status", sortKey: "customer_status" },
   { key: "sales", label: "Sales Status", sortKey: "sales_status" },
   { key: "next_follow_up", label: "Next Follow Up", sortKey: "next_follow_up_date" },
@@ -87,7 +86,6 @@ export function AccountsList() {
   // setPage(0) / setSearch (users on slow networks were losing
   // keystrokes on the list page).
   const [search, setSearch] = useDebouncedUrlState("q", "");
-  const [statusFilter, setStatusFilter] = useUrlArrayState("status");
   const [customerStatusFilter, setCustomerStatusFilter] = useUrlArrayState("customer");
   // Sales working-state filters (status restructure): ?sales=active|inactive,
   // ?sub=<comma-list of sales_status values>, ?follow_up=due|overdue.
@@ -112,7 +110,6 @@ export function AccountsList() {
 
   const { data: result, isLoading, isError, isFetching, refetch } = useAccounts({
     search: search || undefined,
-    status: statusFilter.length > 0 ? statusFilter : undefined,
     customerStatus: customerStatusFilter.length > 0 ? customerStatusFilter : undefined,
     salesActive:
       salesFilter === "active" ? "true" : salesFilter === "inactive" ? "false" : undefined,
@@ -154,10 +151,6 @@ export function AccountsList() {
     // object, but the debounced useDebouncedUrlState serializes its
     // own writes so there's no race with this one.
     if (page !== 0) setPage(0);
-  };
-  const handleStatusChange = (value: string[]) => {
-    setStatusFilter(value);
-    setPage(0);
   };
   const handleIndustryChange = (value: string[]) => {
     setIndustryFilter(value);
@@ -252,7 +245,6 @@ export function AccountsList() {
   // first account".
   const hasActiveFilters =
     !!search ||
-    statusFilter.length > 0 ||
     customerStatusFilter.length > 0 ||
     salesFilter !== "all" ||
     subStatusFilter.length > 0 ||
@@ -297,9 +289,6 @@ export function AccountsList() {
           ? formatPhone(`${a.phone}${a.phone_extension ? ` x${a.phone_extension}` : ""}`)
           : "—"}
       </span>
-    ),
-    status: (a) => (
-      <StatusBadge value={a.status} variant="status" label={statusLabel(a.status)} />
     ),
     customer_status: (a) => (
       <StatusBadge
@@ -379,20 +368,6 @@ export function AccountsList() {
             className="pl-9"
           />
         </div>
-        <MultiSelect
-          value={statusFilter}
-          onChange={handleStatusChange}
-          placeholder="All Statuses"
-          triggerClassName="w-40"
-          options={[
-            { value: "discovery", label: "Discovery" },
-            { value: "pending", label: "Pending" },
-            { value: "active", label: "Active" },
-            { value: "inactive", label: "Inactive" },
-            { value: "churned", label: "Churned" },
-          ]}
-        />
-
         <MultiSelect
           value={customerStatusFilter}
           onChange={(v) => {

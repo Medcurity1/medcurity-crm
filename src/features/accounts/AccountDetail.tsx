@@ -605,9 +605,7 @@ export function AccountDetail() {
           "parent_account_id",
           // Auto-set / read-only on detail
           "account_number",
-          "lifecycle_status",
           "industry_category",
-          "status",
           "renewal_type",
           "active_since",
           "current_contract_start_date",

@@ -91,8 +91,9 @@ export interface AccountDuplicateGroupRow {
   account_id: string;
   name: string;
   account_number: string | null;
-  lifecycle_status: string | null;
-  account_status: string | null;
+  // The dedup finder RPCs now return a single customer_status column
+  // (client / prospect / former_client) — was lifecycle_status + account_status.
+  customer_status: string | null;
   owner_user_id: string | null;
   owner_name: string | null;
   contact_count: number;
