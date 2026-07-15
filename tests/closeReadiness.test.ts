@@ -5,6 +5,7 @@ import {
   getEnforcedCloseKeys,
   checkCloseReadiness,
   formatCloseReadinessMessage,
+  opportunityHasServices,
   CLOSE_READINESS_KEYS,
   type CloseReadinessKey,
 } from "@/lib/closeReadiness";
@@ -120,6 +121,71 @@ describe("evaluateCloseReadiness (pure decision logic)", () => {
     ]);
   });
 
+  // --- Assigned-assessor rule (Rachel): service deals need an assessor ---
+
+  const noServicesOpp = {
+    services_included: false,
+    service_amount: 0,
+    assigned_assessor_id: null,
+  };
+
+  it("skips the assessor rule when no opportunity context is provided", () => {
+    expect(evaluateCloseReadiness(["assigned_assessor"], fullAccount, [])).toEqual([]);
+  });
+
+  it("blocks a Services-Included deal with no assessor", () => {
+    expect(
+      evaluateCloseReadiness(["assigned_assessor"], fullAccount, [], {
+        ...noServicesOpp,
+        services_included: true,
+      }),
+    ).toEqual(["An assigned assessor (this deal includes services)"]);
+  });
+
+  it("blocks when a service dollar amount is present (string form input too)", () => {
+    for (const amt of [1200, "250.00"]) {
+      expect(
+        evaluateCloseReadiness(["assigned_assessor"], fullAccount, [], {
+          ...noServicesOpp,
+          service_amount: amt,
+        }),
+      ).toEqual(["An assigned assessor (this deal includes services)"]);
+    }
+  });
+
+  it("blocks when a service-family line item is attached", () => {
+    expect(
+      evaluateCloseReadiness(["assigned_assessor"], fullAccount, [], {
+        ...noServicesOpp,
+        has_service_line_items: true,
+      }),
+    ).toEqual(["An assigned assessor (this deal includes services)"]);
+  });
+
+  it("passes a service deal once an assessor is named", () => {
+    expect(
+      evaluateCloseReadiness(["assigned_assessor"], fullAccount, [], {
+        services_included: true,
+        service_amount: 900,
+        has_service_line_items: true,
+        assigned_assessor_id: "user-uuid-1",
+      }),
+    ).toEqual([]);
+  });
+
+  it("never blocks a deal without services, assessor or not", () => {
+    expect(
+      evaluateCloseReadiness(["assigned_assessor"], fullAccount, [], noServicesOpp),
+    ).toEqual([]);
+  });
+
+  it("opportunityHasServices ORs the three signals and treats '0' as no amount", () => {
+    expect(opportunityHasServices(noServicesOpp)).toBe(false);
+    expect(opportunityHasServices({ ...noServicesOpp, services_included: true })).toBe(true);
+    expect(opportunityHasServices({ ...noServicesOpp, service_amount: "0" })).toBe(false);
+    expect(opportunityHasServices({ ...noServicesOpp, has_service_line_items: true })).toBe(true);
+  });
+
   it("returns no missing items when the enforced key set is empty", () => {
     const blank = { phone: "", fte_range: "", billing_street: "", billing_city: "", billing_state: "", billing_zip: "" };
     expect(evaluateCloseReadiness([], blank, [])).toEqual([]);
@@ -131,11 +197,10 @@ describe("formatCloseReadinessMessage", () => {
     expect(formatCloseReadinessMessage([])).toBe("");
   });
 
-  it("lists the missing items and points at the account", () => {
+  it("lists the missing items", () => {
     const msg = formatCloseReadinessMessage(["Account phone number", "FTE range"]);
     expect(msg).toContain("Closed Won");
     expect(msg).toContain("Account phone number, FTE range");
-    expect(msg.toLowerCase()).toContain("open the account");
   });
 });
 
@@ -195,6 +260,41 @@ describe("checkCloseReadiness (wiring + fallback)", () => {
       ready: false,
       missing: ["Account information could not be loaded"],
     });
+  });
+
+  it("fetches the deal by id and blocks a service deal with no assessor", async () => {
+    const client = mockClient({
+      required_field_config: { data: [{ field_key: "assigned_assessor" }], error: null },
+      opportunities: {
+        data: { services_included: false, service_amount: 0, assigned_assessor_id: null },
+        error: null,
+      },
+      // One attached line item whose product is a service.
+      opportunity_products: {
+        data: [{ product: { product_family: "Services" } }],
+        error: null,
+      },
+      accounts: { data: fullAccount, error: null },
+      contacts: { data: [emailedContact], error: null },
+    });
+    const res = await checkCloseReadiness(client, "acct-1", "opp-1");
+    expect(res.ready).toBe(false);
+    expect(res.missing).toEqual(["An assigned assessor (this deal includes services)"]);
+  });
+
+  it("passes a service deal whose fetched row already names an assessor", async () => {
+    const client = mockClient({
+      required_field_config: { data: [{ field_key: "assigned_assessor" }], error: null },
+      opportunities: {
+        data: { services_included: true, service_amount: 500, assigned_assessor_id: "user-1" },
+        error: null,
+      },
+      opportunity_products: { data: [], error: null },
+      accounts: { data: fullAccount, error: null },
+      contacts: { data: [emailedContact], error: null },
+    });
+    const res = await checkCloseReadiness(client, "acct-1", "opp-1");
+    expect(res).toEqual({ ready: true, missing: [] });
   });
 
   it("enforces all four when config is absent and blocks an incomplete account", async () => {

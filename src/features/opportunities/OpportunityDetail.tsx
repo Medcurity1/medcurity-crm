@@ -541,7 +541,7 @@ export function OpportunityDetail() {
           // until the account has complete client info, before we even open
           // the confirm dialog. Other stage changes are unaffected.
           if (stage === "closed_won") {
-            const { ready, missing } = await checkCloseReadiness(supabase, opp.account_id);
+            const { ready, missing } = await checkCloseReadiness(supabase, opp.account_id, opp.id);
             if (!ready) {
               toast.error(formatCloseReadinessMessage(missing));
               return;

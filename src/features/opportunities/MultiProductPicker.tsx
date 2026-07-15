@@ -63,6 +63,9 @@ export interface StagedOpportunityProduct {
   product_code: string | null;
   /** Short abbreviation used by opp auto-naming (e.g. "SRA", "Remote Services"). */
   product_short_name?: string | null;
+  /** Lets the create form know a staged line is a service (family ILIKE
+   *  'service%') — feeds the assessor-required-with-services rule. */
+  product_family?: string | null;
   quantity: number;
   unit_price: number;
   arr_amount: number;
@@ -422,6 +425,7 @@ export function MultiProductPicker(props: Props) {
       product_name: r.product_name,
       product_code: r.product_code,
       product_short_name: r.product_short_name,
+      product_family: r.product_family,
       quantity: r.quantity,
       unit_price: r.unit_price,
       arr_amount: r.discount_type === "amount"

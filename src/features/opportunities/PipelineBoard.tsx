@@ -142,7 +142,7 @@ function PipelineKanban({
     // card in its source column — there's no optimistic move to undo, so the
     // card simply snaps back on drop.
     if (newStage === "closed_won") {
-      const { ready, missing } = await checkCloseReadiness(supabase, accountId);
+      const { ready, missing } = await checkCloseReadiness(supabase, accountId, id);
       if (!ready) {
         toast.error(formatCloseReadinessMessage(missing));
         return;

@@ -415,6 +415,21 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   // page already worked because that flow doesn't gate amount.
   const productsLoaded = !isEditing || existingProducts !== undefined;
 
+  // Any service-family line item attached to this deal? (create: staged
+  // rows; edit: saved rows). Same product_family ILIKE 'service%' signal
+  // recalc_opportunity_amount splits totals on. Feeds Rachel's rule:
+  // a deal that includes services must name an Assigned Assessor.
+  const lineItemsHaveService = isEditing
+    ? (existingProducts ?? []).some((ep) =>
+        (ep.product?.product_family ?? "").toLowerCase().startsWith("service"))
+    : stagedProducts.some((p) =>
+        (p.product_family ?? "").toLowerCase().startsWith("service"));
+  // Live (render-time) version for the required indicator on the label.
+  const dealHasServices =
+    (watch("services_included") ?? false) ||
+    Number(watch("service_amount") ?? 0) > 0 ||
+    lineItemsHaveService;
+
   useEffect(() => {
     if (!productsLoaded) return; // wait until we know if opp has products
     if (hasProducts) return; // DB trigger owns amount when products exist
@@ -580,13 +595,41 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     // only blocks the save if we're clearing a value that used to be
     // there. See src/lib/requiredFields.ts for the full rationale.
     const missingFields = getMissingRequiredFields(
-      requiredKeys,
+      // assigned_assessor_id is enforced CONDITIONALLY below (only when
+      // the deal includes services — Rachel), so it's excluded from this
+      // unconditional pass.
+      requiredKeys.filter((k) => k !== "assigned_assessor_id"),
       values,
       opp as Record<string, unknown> | undefined
     );
     if (missingFields.length > 0) {
       toast.error(
         `Required fields missing: ${missingFields.map(formatFieldLabel).join(", ")}`
+      );
+      return;
+    }
+
+    // Rachel (2026-07-15): a deal that includes services must name an
+    // Assigned Assessor — someone has to deliver the SRA/NVA. Uses the
+    // same admin toggle ('opportunities' / assigned_assessor_id in
+    // Admin → Required Fields) and the same grandfather semantics as
+    // every other required field; the services condition lives here
+    // because required_field_config is a flat per-field flag.
+    const valuesHaveServices =
+      (values.services_included ?? false) ||
+      Number(values.service_amount ?? 0) > 0 ||
+      lineItemsHaveService;
+    if (
+      requiredKeys.includes("assigned_assessor_id") &&
+      valuesHaveServices &&
+      getMissingRequiredFields(
+        ["assigned_assessor_id"],
+        values,
+        opp as Record<string, unknown> | undefined
+      ).length > 0
+    ) {
+      toast.error(
+        "This deal includes services — pick an Assigned Assessor before saving."
       );
       return;
     }
@@ -611,7 +654,17 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     const closingWon =
       values.stage === "closed_won" && (!isEditing || opp?.stage !== "closed_won");
     if (closingWon) {
-      const { ready, missing } = await checkCloseReadiness(supabase, values.account_id);
+      // Pass the deal's IN-FLIGHT values (not a DB fetch) — this save may
+      // be the one setting the assessor, and on create the row doesn't
+      // exist yet.
+      const { ready, missing } = await checkCloseReadiness(supabase, values.account_id, {
+        services_included: values.services_included ?? false,
+        // blankableNumber leaves the field loosely typed; normalize to a
+        // plain number (blank -> 0 = "no service amount signal").
+        service_amount: Number(values.service_amount ?? 0),
+        assigned_assessor_id: values.assigned_assessor_id ?? null,
+        has_service_line_items: lineItemsHaveService,
+      });
       if (!ready) {
         toast.error(formatCloseReadinessMessage(missing));
         return;
@@ -1018,7 +1071,9 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Assigned Assessor</Label>
+                  {/* The required marker only shows when the deal includes
+                      services (Rachel) — the admin toggle alone isn't enough. */}
+                  <Label>Assigned Assessor{dealHasServices && <RequiredIndicator fieldKey="assigned_assessor_id" requiredFields={requiredKeys} />}</Label>
                   <Select
                     value={watch("assigned_assessor_id") ?? "unassigned"}
                     onValueChange={(v) => setValue("assigned_assessor_id", v === "unassigned" ? null : v)}
@@ -1031,7 +1086,10 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                       ))}
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-muted-foreground">For SRA/NVA service assessments</p>
+                  <p className="text-xs text-muted-foreground">
+                    For SRA/NVA service assessments
+                    {dealHasServices ? " — required because this deal includes services" : ""}
+                  </p>
                 </div>
 
                 <div className="space-y-2">

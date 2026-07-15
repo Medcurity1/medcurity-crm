@@ -38,7 +38,16 @@ interface RequiredFieldConfig {
 interface FieldDef {
   key: string;
   label: string;
+  /** Small muted caveat under the label (e.g. a conditional rule). */
+  note?: string;
 }
+
+// Per-field caveats for inventory-discovered fields whose enforcement has
+// a condition the flat toggle can't express. Keyed `<entity>.<field>`.
+const FIELD_NOTES: Record<string, string> = {
+  "opportunities.assigned_assessor_id":
+    "Only enforced when the deal includes services (a service line item, a service amount, or “Services Included”). Deals without services are exempt. (Rachel, 2026-07-15)",
+};
 
 // ---------------------------------------------------------------------------
 // Field definitions per entity — sourced dynamically from v_field_inventory
@@ -124,7 +133,11 @@ function useEntityFields(entity: EntityType, enabled: boolean = true) {
       const rows = (data ?? []) as FieldInventoryRow[];
       return rows
         .filter((r) => !SYSTEM_FIELDS.has(r.field))
-        .map((r) => ({ key: r.field, label: prettifyFieldName(r.field) }));
+        .map((r) => ({
+          key: r.field,
+          label: prettifyFieldName(r.field),
+          note: FIELD_NOTES[`${entity}.${r.field}`],
+        }));
     },
     // The close-gate section (entity "opportunity_close") isn't backed by
     // real table columns, so it has no v_field_inventory rows — its fields
@@ -152,11 +165,18 @@ const CLOSE_GATE_LABELS: Record<CloseReadinessKey, string> = {
   account_billing_address: "Account billing address",
   account_fte_range: "Account FTE range",
   contact_email: "A contact email address",
+  assigned_assessor: "An assigned assessor",
+};
+
+const CLOSE_GATE_NOTES: Partial<Record<CloseReadinessKey, string>> = {
+  assigned_assessor:
+    "Only enforced when the deal includes services — deals without services close without one. (Rachel, 2026-07-15)",
 };
 
 const CLOSE_GATE_FIELDS: FieldDef[] = CLOSE_READINESS_KEYS.map((key) => ({
   key,
   label: CLOSE_GATE_LABELS[key],
+  note: CLOSE_GATE_NOTES[key],
 }));
 
 function CloseGateFallbackNote() {
@@ -166,8 +186,8 @@ function CloseGateFallbackNote() {
         <Info className="h-4 w-4 mt-0.5 shrink-0" />
         <p>
           Turning individual checks off narrows what's enforced. But turning{" "}
-          <strong>all four off</strong> does not disable the gate — with none
-          marked required, the system falls back to enforcing all four
+          <strong>all of them off</strong> does not disable the gate — with none
+          marked required, the system falls back to enforcing every check
           automatically. This gate can be narrowed, but never fully emptied.
         </p>
       </div>
@@ -337,7 +357,12 @@ function EntityRequiredFields({
                 optimistic[f.key] ?? requiredMap.get(f.key) ?? false;
               return (
                 <TableRow key={f.key}>
-                  <TableCell className="font-medium text-sm">{f.label}</TableCell>
+                  <TableCell className="font-medium text-sm">
+                    {f.label}
+                    {f.note && (
+                      <p className="mt-0.5 text-xs font-normal text-muted-foreground">{f.note}</p>
+                    )}
+                  </TableCell>
                   <TableCell className="text-center">
                     <Switch
                       checked={isRequired}
@@ -374,7 +399,7 @@ export function RequiredFieldsManager() {
             <EntityRequiredFields
               entity="opportunity_close"
               fields={CLOSE_GATE_FIELDS}
-              helperText="These must be complete on the deal's account before it can be marked Closed Won."
+              helperText="These must be complete before a deal can be marked Closed Won — account info checks plus the deal's assigned assessor when it includes services."
               note={<CloseGateFallbackNote />}
             />
           </TabsContent>
