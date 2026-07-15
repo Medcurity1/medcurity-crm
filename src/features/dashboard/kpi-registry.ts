@@ -492,17 +492,21 @@ export const KPI_REGISTRY: KpiDefinition[] = [
   },
   {
     id: "active_accounts",
-    label: "Total Active Accounts",
+    // Was "Total Active Accounts" but counted EVERY non-archived account with
+    // no status filter — misleading next to the new Account Status. Now counts
+    // actual customers (customer_status='client'). (Account restructure Step 2.)
+    label: "Active Customers",
     category: "team",
     icon: Building2,
     format: "number",
     requiredRole: ["admin"],
-    link: "/accounts",
+    link: "/accounts?customer=client",
     query: async (supabase) => {
       const { count, error } = await supabase
         .from("accounts")
         .select("*", { count: "exact", head: true })
-        .is("archived_at", null);
+        .is("archived_at", null)
+        .eq("customer_status", "client");
       if (error) throw error;
       return count ?? 0;
     },

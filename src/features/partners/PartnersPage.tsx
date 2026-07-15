@@ -28,7 +28,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { statusLabel, leadSourceLabel, formatDate } from "@/lib/formatters";
+import { customerStatusLabel, leadSourceLabel, formatDate } from "@/lib/formatters";
 import type { LeadSource } from "@/types/crm";
 
 export function PartnersPage() {
@@ -47,7 +47,7 @@ export function PartnersPage() {
 
   const { data: result, isLoading, isError, refetch, isFetching } = usePartners({
     search: search || undefined,
-    status: statusFilter.length ? statusFilter : undefined,
+    customerStatus: statusFilter.length ? statusFilter : undefined,
     partnerType: typeFilter.length ? typeFilter : undefined,
     partnerRole: roleFilter,
     page,
@@ -93,14 +93,12 @@ export function PartnersPage() {
         <MultiSelect
           value={statusFilter}
           onChange={handleStatusChange}
-          placeholder="All Statuses"
+          placeholder="All Account Statuses"
           triggerClassName="w-44"
           options={[
-            { value: "discovery", label: "Discovery" },
-            { value: "pending", label: "Pending" },
-            { value: "active", label: "Active" },
-            { value: "inactive", label: "Inactive" },
-            { value: "churned", label: "Churned" },
+            { value: "client", label: "Customer" },
+            { value: "prospect", label: "Prospect" },
+            { value: "former_client", label: "Former Customer" },
           ]}
         />
         <MultiSelect
@@ -171,7 +169,7 @@ export function PartnersPage() {
                   <SortableHeader column="name" sort={sort} onSort={handleSort}>Name</SortableHeader>
                   <SortableHeader column="partner_type" sort={sort} onSort={handleSort}>Type</SortableHeader>
                   <TableHead className="text-right w-24">Members</TableHead>
-                  <SortableHeader column="status" sort={sort} onSort={handleSort}>Status</SortableHeader>
+                  <SortableHeader column="customer_status" sort={sort} onSort={handleSort}>Account Status</SortableHeader>
                   <SortableHeader column="lead_source" sort={sort} onSort={handleSort}>Lead Source</SortableHeader>
                   <SortableHeader column="active_since" sort={sort} onSort={handleSort}>Active Since</SortableHeader>
                   <TableHead>Last Contact</TableHead>
@@ -210,9 +208,9 @@ export function PartnersPage() {
                     </TableCell>
                     <TableCell>
                       <StatusBadge
-                        value={account.status}
-                        variant="status"
-                        label={statusLabel(account.status)}
+                        value={account.customer_status}
+                        variant="customerStatus"
+                        label={customerStatusLabel(account.customer_status)}
                       />
                     </TableCell>
                     <TableCell className="text-muted-foreground">

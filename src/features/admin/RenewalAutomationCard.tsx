@@ -34,7 +34,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
-import { formatDate } from "@/lib/formatters";
+import { formatDate, customerStatusLabel } from "@/lib/formatters";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useAccountsForPicker,
@@ -66,7 +66,7 @@ const PREVIEW_STATUS_META: Record<
   },
   before_baseline: { label: "Before start date", tone: "muted" },
   has_live_renewal: { label: "Already has renewal", tone: "muted" },
-  account_not_active: { label: "Account not active", tone: "warning" },
+  account_not_customer: { label: "Account not a customer", tone: "warning" },
   account_do_not_auto_renew: {
     label: "Do-not-auto-renew",
     tone: "muted",
@@ -540,10 +540,12 @@ export function RenewalAutomationCard() {
                             {row.account_name}
                           </Link>
                           {row.account_status &&
-                          row.account_status !== "active" ? (
+                          row.account_status !== "client" ? (
                             <span className="text-muted-foreground">
                               {" "}
-                              ({row.account_status})
+                              ({customerStatusLabel(
+                                row.account_status as "client" | "prospect" | "former_client",
+                              )})
                             </span>
                           ) : null}
                         </TableCell>

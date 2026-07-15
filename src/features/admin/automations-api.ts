@@ -321,7 +321,7 @@ export interface RenewalPreviewRow {
     | "anniversary_outside_window"
     | "before_baseline"
     | "has_live_renewal"
-    | "account_not_active"
+    | "account_not_customer"
     | "account_do_not_auto_renew"
     | "one_time_project"
     | "no_close_date"
