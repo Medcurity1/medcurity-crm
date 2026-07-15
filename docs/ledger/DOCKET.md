@@ -12,6 +12,7 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Queued / requested
 
+- [IN PROGRESS] 2026-07-14 · Summer (+Molly endorsed, via Nathan) · Account status restructure: split confusing account Status into (a) Account Status = Prospect/Customer/Former Customer (closed-lost demotion popup) + Partner question, (b) NEW Sales/Relationship Status (Active/Inactive focus toggle → Prospecting/Identified Outreach/Engaged/Nurture), (c) NEW required-when-working Next Follow Up Date, (d) all reportable/filterable for her follow-up widgets. Supersedes+unblocks the two 2026-06-29 Summer items below (team confirm arrived). Deep-dive impact map done 2026-07-14; awaiting Summer's answers on design questions before build
 - [QUEUED] 2026-07-10 · (sweep follow-up) · Add per-day dedup guard to task-digest (task_digest_log(user_id, digest_date)) so the GH schedule can be restored as true redundancy alongside pg_cron without double-emailing reps
 - [QUEUED] 2026-07-10 · (found in prod verify) · Dedupe the Standard Price Book duplicate NULL-tier rows (pre-existing import quirk on the SRA; the BA SRA mirror inherited 11 identical $799 rows there — pricing correct, cosmetic only) · small idempotent migration
 - [QUEUED] 2026-07-08 · (found in review) · Frontend IndustryCategory union missing ~55 enum values from the May 6 DB expansion (same display/filter gap Rural Hospital had) · chip task_63bbc3ee pending
