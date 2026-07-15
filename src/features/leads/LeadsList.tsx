@@ -493,15 +493,15 @@ function ImportsList() {
           placeholder="All Sources"
           triggerClassName="w-44"
           options={[
+            // mql/sql removed (Joe): Source is a CHANNEL; stage lives in the
+            // Qualification field/filter below.
             { value: "cold_call", label: "Cold Call" },
             { value: "conference", label: "Conference" },
             { value: "email_campaign", label: "Email Campaign" },
-            { value: "mql", label: "MQL" },
             { value: "partner", label: "Partner" },
             { value: "podcast", label: "Podcast" },
             { value: "referral", label: "Referral" },
             { value: "social_media", label: "Social Media" },
-            { value: "sql", label: "SQL" },
             { value: "trade_show", label: "Trade Show" },
             { value: "webinar", label: "Webinar" },
             { value: "website", label: "Website" },

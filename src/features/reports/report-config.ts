@@ -289,10 +289,10 @@ const opportunityColumns: ColumnDef[] = [
     key: "lead_source",
     label: "Lead Source",
     type: "enum",
-    // Canonical set: LeadSource in src/types/crm.ts (also the
-    // opportunities.lead_source admin picklist). Was missing webinar/podcast/
-    // conference/sql/mql.
-    enumValues: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"],
+    // Channel values from the opportunities.lead_source admin picklist.
+    // sql/mql retired from Source (Joe 2026-07-14): channel only; stage lives
+    // in Qualification. Historic rows were migrated by 20260715150000.
+    enumValues: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "other"],
     group: "Basic Info",
   },
   {
@@ -371,7 +371,9 @@ const opportunityFilterColumns: FilterColumnDef[] = [
     type: "enum",
     // Data-driven from the opportunities.lead_source admin picklist; enumValues
     // (canonical LeadSource set — src/types/crm.ts) is the loading fallback.
-    enumValues: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"],
+    // sql/mql retired from Source (Joe 2026-07-14): channel only; stage lives
+    // in Qualification. Historic rows were migrated by 20260715150000.
+    enumValues: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "other"],
     picklistFieldKey: "opportunities.lead_source",
   },
   {
@@ -530,9 +532,10 @@ const leadColumns: ColumnDef[] = [
     key: "source",
     label: "Source",
     type: "enum",
-    // Canonical set: LeadSource in src/types/crm.ts (also the leads.source
-    // admin picklist). Was missing webinar/podcast/conference/sql/mql.
-    enumValues: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"],
+    // Channel values from the leads.source admin picklist.
+    // sql/mql retired from Source (Joe 2026-07-14): channel only; stage lives
+    // in Qualification. Historic rows were migrated by 20260715150000.
+    enumValues: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "other"],
     group: "Basic Info",
   },
   { key: "description", label: "Description", type: "text", group: "Basic Info" },
@@ -578,7 +581,9 @@ const leadFilterColumns: FilterColumnDef[] = [
     type: "enum",
     // Data-driven from the leads.source admin picklist; enumValues (canonical
     // LeadSource set — src/types/crm.ts) is the loading fallback.
-    enumValues: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "sql", "mql", "other"],
+    // sql/mql retired from Source (Joe 2026-07-14): channel only; stage lives
+    // in Qualification. Historic rows were migrated by 20260715150000.
+    enumValues: ["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "other"],
     picklistFieldKey: "leads.source",
   },
   { filterKey: "description", label: "Description", type: "text" },

@@ -4,6 +4,8 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Staging — awaiting prod go-ahead
 
+- [STAGING] 2026-07-14 · Joe (high, via Nathan) · Lead Source = channel only, carried onto Opportunities: mql/sql retired from every Source picklist (stage lives in Qualification; existing rows migrated — leads→qualification, contacts→mql/sql dates where missing, opps/accounts→cleared to unattributed), convert_lead + bulk-promote now stamp Source onto the created opportunity and newly-created account, Opportunities list gains a Source column + filter (incl. "No Source") with inline edit, Opportunity/Account forms switched to the admin-managed picklist, SF importer stops accepting sql/mql as source · migrations 20260715150000 + 20260715151000
+
 - [STAGING] 2026-07-11 · Nathan · ClickUp parked until actually configured: unscheduled clickup_services_sync_daily + clickup_sf_id_sync_daily (built + prod-bootstrapped May 11-12 by an earlier session; prod's CLICKUP_API_TOKEN is set but ClickUp rejects it as invalid — likely the departed dev's personal token — so the daily sync failed and the watchdog nagged admins every day). Foundation (tables/fns/bootstrap script) kept; watchdog's ClickUp check now gated on the job being installed+active, so it self-heals if ClickUp is ever set up · migration 20260711220000
 
 - [STAGING] 2026-07-10 · Joe (high) · Lead Source now required when an opportunity is CREATED (config flip; form was already wired). Grandfather rule keeps existing opps editable · migration 20260710186000

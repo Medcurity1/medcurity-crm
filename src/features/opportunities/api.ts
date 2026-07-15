@@ -8,6 +8,9 @@ interface OppFilters {
   team?: string | string[];
   kind?: string | string[];
   business_type?: string | string[];
+  /** Multi-select on lead_source. The sentinel "__none__" matches rows with
+   *  NO source set, so unattributed deals can be found and corrected. */
+  lead_source?: string[];
   account_id?: string;
   ownerId?: string | "mine" | string[];
   verified?: "true" | "false";
@@ -143,6 +146,19 @@ export function useOpportunities(filters?: OppFilters) {
             query = query.in("business_type", filters.business_type);
         } else {
           query = query.eq("business_type", filters.business_type);
+        }
+      }
+      if (filters?.lead_source && filters.lead_source.length > 0) {
+        // "__none__" = rows with no source. Values are snake_case enum tokens
+        // (no commas/spaces), safe to inline in the or() expression.
+        const vals = filters.lead_source.filter((v) => v !== "__none__");
+        const wantNone = filters.lead_source.includes("__none__");
+        if (wantNone && vals.length > 0) {
+          query = query.or(`lead_source.in.(${vals.join(",")}),lead_source.is.null`);
+        } else if (wantNone) {
+          query = query.is("lead_source", null);
+        } else {
+          query = query.in("lead_source", vals);
         }
       }
       if (filters?.account_id) query = query.eq("account_id", filters.account_id);
@@ -324,6 +340,18 @@ export function useOpportunitiesTotals(filters?: Omit<OppFilters, "page" | "page
               q = q.in("business_type", filters.business_type);
           } else {
             q = q.eq("business_type", filters.business_type);
+          }
+        }
+        if (filters?.lead_source && filters.lead_source.length > 0) {
+          // Mirrors useOpportunities so the totals strip matches the list.
+          const vals = filters.lead_source.filter((v) => v !== "__none__");
+          const wantNone = filters.lead_source.includes("__none__");
+          if (wantNone && vals.length > 0) {
+            q = q.or(`lead_source.in.(${vals.join(",")}),lead_source.is.null`);
+          } else if (wantNone) {
+            q = q.is("lead_source", null);
+          } else {
+            q = q.in("lead_source", vals);
           }
         }
         if (filters?.account_id) q = q.eq("account_id", filters.account_id);

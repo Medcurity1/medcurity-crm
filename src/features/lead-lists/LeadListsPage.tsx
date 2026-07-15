@@ -94,10 +94,10 @@ const STATUS_OPTIONS = [
 ];
 
 const SOURCE_OPTIONS = [
+  // mql removed (Joe): Source is a CHANNEL; MQL is a qualification stage.
   { value: "cold_call", label: "Cold Call" },
   { value: "conference", label: "Conference" },
   { value: "email_campaign", label: "Email Campaign" },
-  { value: "mql", label: "MQL" },
   { value: "partner", label: "Partner" },
   { value: "podcast", label: "Podcast" },
   { value: "referral", label: "Referral" },

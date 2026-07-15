@@ -27,7 +27,7 @@ import { SavedViews } from "@/features/saved-views/SavedViews";
 import { ColumnPicker } from "@/features/list-columns/ColumnPicker";
 import { useColumnPrefs } from "@/features/list-columns/useColumnPrefs";
 import type { ColumnDescriptor } from "@/features/list-columns/columns";
-import type { Opportunity, OpportunityStage } from "@/types/crm";
+import type { Opportunity, OpportunityStage, LeadSource } from "@/types/crm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -47,7 +47,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { stageLabel, businessTypeLabel, formatCurrency, formatDate } from "@/lib/formatters";
+import { stageLabel, businessTypeLabel, leadSourceLabel, formatCurrency, formatDate } from "@/lib/formatters";
+import { usePicklistOptionsFor } from "@/features/picklists/api";
 import { cn } from "@/lib/utils";
 
 const OPPORTUNITIES_COLUMNS: ColumnDescriptor[] = [
@@ -56,6 +57,9 @@ const OPPORTUNITIES_COLUMNS: ColumnDescriptor[] = [
   { key: "account", label: "Account", sortKey: "account.name" },
   { key: "stage", label: "Stage", sortKey: "stage" },
   { key: "business_type", label: "Business Type", sortKey: "business_type" },
+  // Source column (Joe): the channel that earned the deal, visible and
+  // filterable so marketing spend can be judged per channel.
+  { key: "lead_source", label: "Source", sortKey: "lead_source" },
   { key: "amount", label: "Amount", sortKey: "amount", align: "right" },
   { key: "expected_close", label: "Expected Close", sortKey: "expected_close_date" },
   // Close Date column removed (Summer): it's only set the moment a deal closes,
@@ -184,6 +188,61 @@ function InlineStage({
         <SelectContent position="popper">
           {stageOptions.map((s) => (
             <SelectItem key={s} value={s}>{stageLabel(s)}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+// ── Inline Source (Joe): correct a deal's lead source right from the list.
+// Options come from the admin-managed opportunities.lead_source picklist, so
+// retired values (mql/sql) stop being offered without a code change. A legacy
+// value already stored on the row stays visible until the rep picks a real
+// channel. Inline editing can't CLEAR a source — Lead Source is required on
+// create, and un-setting stays a form-level (grandfather-aware) concern.
+function InlineSource({ o }: { o: Opportunity }) {
+  const update = useUpdateOpportunity();
+  const { options } = usePicklistOptionsFor("opportunities.lead_source");
+  const sourceOptions = useMemo(() => {
+    const base = options.map((opt) => ({ value: opt.value, label: opt.label }));
+    if (o.lead_source && !base.some((b) => b.value === o.lead_source)) {
+      return [
+        { value: o.lead_source as string, label: `${leadSourceLabel(o.lead_source)} (legacy)` },
+        ...base,
+      ];
+    }
+    return base;
+  }, [options, o.lead_source]);
+  return (
+    <div onClick={(e) => e.stopPropagation()}>
+      <Select
+        value={o.lead_source ?? ""}
+        onValueChange={(v) => {
+          if (!v || v === o.lead_source) return;
+          update.mutate(
+            { id: o.id, lead_source: v as LeadSource },
+            {
+              onSuccess: () =>
+                toast.success(`Source set to ${leadSourceLabel(v as LeadSource)}`),
+              onError: (e) =>
+                toast.error("Couldn't update source: " + (e as Error).message),
+            },
+          );
+        }}
+      >
+        <SelectTrigger
+          title="Click to change source"
+          className="h-7 w-auto gap-1 rounded border border-dashed border-transparent bg-transparent px-1 shadow-none hover:border-muted-foreground/40 hover:bg-muted/60 focus:ring-0 [&>svg]:opacity-70"
+        >
+          <span className={cn("text-sm whitespace-nowrap", !o.lead_source && "text-muted-foreground")}>
+            {o.lead_source ? leadSourceLabel(o.lead_source) : "—"}
+          </span>
+        </SelectTrigger>
+        {/* position="popper" for the same anchoring reason as InlineStage. */}
+        <SelectContent position="popper">
+          {sourceOptions.map((s) => (
+            <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
           ))}
         </SelectContent>
       </Select>
@@ -326,6 +385,9 @@ export function OpportunitiesList() {
   // by PipelineBoard to bucket Sales vs Renewals tabs, but no longer
   // exposed to users in the list view or detail badge.
   const [businessTypeFilter, setBusinessTypeFilter] = useUrlArrayState("business_type");
+  // Source filter (Joe): answer "which channel earned this pipeline?" right
+  // from the list. "__none__" surfaces unattributed deals so they get fixed.
+  const [sourceFilter, setSourceFilter] = useUrlArrayState("source");
   const [ownerFilter, setOwnerFilter] = useUrlArrayState("owner");
   const [verifiedFilter, setVerifiedFilter] = useUrlState("verified", "all");
   // Date-range filter: ISO YYYY-MM-DD on close_date. Set by KPI
@@ -356,6 +418,17 @@ export function OpportunitiesList() {
   // client is still contracted (Summer). Non-blocking; fires after the move.
   const closedLostGuard = useClosedLostGuard();
 
+  // Source filter options come from the same admin-managed picklist as the
+  // form/inline pickers, plus a "No Source" bucket for unattributed deals.
+  const { options: sourcePicklist } = usePicklistOptionsFor("opportunities.lead_source");
+  const sourceFilterOptions = useMemo(
+    () => [
+      ...sourcePicklist.map((o) => ({ value: o.value, label: o.label })),
+      { value: "__none__", label: "No Source" },
+    ],
+    [sourcePicklist],
+  );
+
   // Totals query: same filter set as the visible list, but no
   // pagination/sort. Lets the user verify dashboard KPI numbers
   // against the same filtered list (e.g. clicking "My Open Pipeline"
@@ -365,6 +438,7 @@ export function OpportunitiesList() {
     stage: stageFilter.length ? stageFilter : undefined,
     team: teamFilter.length ? teamFilter : undefined,
     business_type: businessTypeFilter.length ? businessTypeFilter : undefined,
+    lead_source: sourceFilter.length ? sourceFilter : undefined,
     ownerId: ownerFilter.length > 0 ? ownerFilter : undefined,
     verified:
       verifiedFilter === "verified"
@@ -487,6 +561,7 @@ export function OpportunitiesList() {
     stageFilter.length > 0 ||
     teamFilter.length > 0 ||
     businessTypeFilter.length > 0 ||
+    sourceFilter.length > 0 ||
     ownerFilter.length > 0 ||
     verifiedFilter !== "all" ||
     !!closedAfter ||
@@ -524,6 +599,7 @@ export function OpportunitiesList() {
         "—"
       ),
     stage: (o) => <InlineStage o={o} onClosedLost={closedLostGuard.promptIfClient} />,
+    lead_source: (o) => <InlineSource o={o} />,
     business_type: (o) =>
       o.business_type ? (
         <StatusBadge
@@ -605,6 +681,13 @@ export function OpportunitiesList() {
             { value: "existing_business_new_service", label: "Existing Business — New Service" },
             { value: "opportunity", label: "Opportunity" },
           ]}
+        />
+        <MultiSelect
+          value={sourceFilter}
+          onChange={(v) => { setSourceFilter(v); setPage(0); }}
+          placeholder="All Sources"
+          triggerClassName="w-40"
+          options={sourceFilterOptions}
         />
         <MultiSelect
           value={teamFilter}

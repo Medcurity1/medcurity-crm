@@ -962,29 +962,16 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                 </div>
                 <div className="space-y-2">
                   <Label>Lead Source<RequiredIndicator fieldKey="lead_source" requiredFields={requiredKeys} /></Label>
-                  <Select
-                    value={watch("lead_source") ?? ""}
-                    onValueChange={(v) => setValue("lead_source", v)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="website">Website</SelectItem>
-                      <SelectItem value="referral">Referral</SelectItem>
-                      <SelectItem value="cold_call">Cold Call</SelectItem>
-                      <SelectItem value="trade_show">Trade Show</SelectItem>
-                      <SelectItem value="partner">Partner</SelectItem>
-                      <SelectItem value="social_media">Social Media</SelectItem>
-                      <SelectItem value="email_campaign">Email Campaign</SelectItem>
-                      <SelectItem value="webinar">Webinar</SelectItem>
-                      <SelectItem value="podcast">Podcast</SelectItem>
-                      <SelectItem value="conference">Conference</SelectItem>
-                      <SelectItem value="sql">SQL</SelectItem>
-                      <SelectItem value="mql">MQL</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  {/* Admin-managed picklist (Joe: Source = CHANNEL only — mql/sql
+                      retired). Options seeded by 20260715150000; a stored legacy
+                      value still displays via PicklistSelect's "(legacy)" entry. */}
+                  <PicklistSelect
+                    fieldKey="accounts.lead_source"
+                    value={watch("lead_source") ?? null}
+                    onChange={(v) => setValue("lead_source", v ?? "")}
+                    allowClear
+                    placeholder="Select..."
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="lead_source_detail">Lead Source Detail<RequiredIndicator fieldKey="lead_source_detail" requiredFields={requiredKeys} /></Label>

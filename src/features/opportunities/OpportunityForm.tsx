@@ -1395,28 +1395,16 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Lead Source<RequiredIndicator fieldKey="lead_source" requiredFields={requiredKeys} /></Label>
-                  <Select
-                    value={watch("lead_source") ?? "none"}
-                    onValueChange={(v) => setValue("lead_source", v === "none" ? null : v as OpportunityFormValues["lead_source"])}
-                  >
-                    <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="partner">Partner</SelectItem>
-                      <SelectItem value="webinar">Webinar</SelectItem>
-                      <SelectItem value="podcast">Podcast</SelectItem>
-                      <SelectItem value="conference">Conference</SelectItem>
-                      <SelectItem value="email_campaign">Email Campaign</SelectItem>
-                      <SelectItem value="sql">SQL</SelectItem>
-                      <SelectItem value="mql">MQL</SelectItem>
-                      <SelectItem value="referral">Referral</SelectItem>
-                      <SelectItem value="website">Website</SelectItem>
-                      <SelectItem value="cold_call">Cold Call</SelectItem>
-                      <SelectItem value="trade_show">Trade Show</SelectItem>
-                      <SelectItem value="social_media">Social Media</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  {/* Admin-managed picklist (Joe: Source = CHANNEL only — mql/sql
+                      retired). A stored legacy value still displays via
+                      PicklistSelect's "(legacy)" entry until re-picked. */}
+                  <PicklistSelect
+                    fieldKey="opportunities.lead_source"
+                    value={watch("lead_source") ?? null}
+                    onChange={(v) => setValue("lead_source", (v ?? null) as OpportunityFormValues["lead_source"])}
+                    allowClear
+                    placeholder="Select..."
+                  />
                 </div>
 
                 <div className="space-y-2">
