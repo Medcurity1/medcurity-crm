@@ -1,5 +1,5 @@
 import { format, formatDistanceToNow, parseISO, differenceInDays, isValid } from "date-fns";
-import type { OpportunityStage, AccountLifecycle, AccountStatus, CustomerStatus, RenewalType, ActivityType, OpportunityKind, OpportunityBusinessType, OpportunityTeam, LeadStatus, LeadSource, PaymentFrequency, LeadQualification, IndustryCategory, ProjectSegment } from "@/types/crm";
+import type { OpportunityStage, AccountLifecycle, AccountStatus, CustomerStatus, SalesStatus, RenewalType, ActivityType, OpportunityKind, OpportunityBusinessType, OpportunityTeam, LeadStatus, LeadSource, PaymentFrequency, LeadQualification, IndustryCategory, ProjectSegment } from "@/types/crm";
 
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -82,14 +82,29 @@ export function lifecycleLabel(status: AccountLifecycle): string {
   return lifecycleLabels[status];
 }
 
+// Stored values stay client/prospect/former_client — only the labels moved
+// to Customer / Former Customer when the field was renamed "Account Status"
+// (Summer's status restructure).
 const customerStatusLabels: Record<CustomerStatus, string> = {
-  client: "Client",
+  client: "Customer",
   prospect: "Prospect",
-  former_client: "Former Client",
+  former_client: "Former Customer",
 };
 
 export function customerStatusLabel(status: CustomerStatus | null | undefined): string {
   return status ? customerStatusLabels[status] : "Prospect";
+}
+
+const salesStatusLabels: Record<SalesStatus, string> = {
+  prospecting: "Prospecting",
+  identified_outreach: "Identified Outreach",
+  engaged: "Engaged",
+  nurture: "Nurture",
+};
+
+export function salesStatusLabel(status: SalesStatus | string | null | undefined): string {
+  if (!status) return "—";
+  return salesStatusLabels[status as SalesStatus] ?? titleCaseSnake(status);
 }
 
 const activityLabels: Record<ActivityType, string> = {

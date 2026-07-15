@@ -48,6 +48,7 @@ import { ContactFlagBadges } from "./ContactFlagBadges";
 import { useTags, useApplyTag, useContactTagsMap } from "@/features/tags/api";
 import { TagChips } from "@/features/tags/TagChips";
 import { TagPicker } from "@/features/tags/TagPicker";
+import { AddToListDialog } from "@/features/lead-lists/AddToListDialog";
 
 const CONTACTS_COLUMNS: ColumnDescriptor[] = [
   { key: "select", label: "Select", locked: true, headClassName: "w-10" },
@@ -76,6 +77,7 @@ export function ContactsList() {
   const [pageSize, setPageSize] = useUrlNumberState("size", 25);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [importOpen, setImportOpen] = useState(false);
+  const [addToListOpen, setAddToListOpen] = useState(false);
   // Bulk delete is confirmed via the app ConfirmDialog (not window.confirm)
   // so it matches the destructive-action pattern everywhere else.
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
@@ -521,7 +523,17 @@ export function ContactsList() {
             </Button>
           }
         />
+        <Button variant="outline" size="sm" onClick={() => setAddToListOpen(true)}>
+          Add to list…
+        </Button>
       </BulkActionBar>
+
+      <AddToListDialog
+        open={addToListOpen}
+        onOpenChange={setAddToListOpen}
+        contactIds={Array.from(selectedIds)}
+        onAdded={() => setSelectedIds(new Set())}
+      />
 
       <ConfirmDialog
         open={confirmBulkDelete}

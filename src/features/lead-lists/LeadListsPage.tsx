@@ -16,6 +16,8 @@ import {
   Mail,
   Phone,
   X,
+  FolderInput,
+  Search,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -71,6 +73,9 @@ import {
   useSmartListLeads,
   useLeadsByFilter,
   useBulkAddToList,
+  useSearchContactsForList,
+  useBulkAddContactsToList,
+  useMoveContactMember,
   type LeadListFilterConfig,
 } from "./lead-lists-api";
 import { useUpdateLead, useBulkUpdateOwner } from "@/features/leads/api";
@@ -1028,6 +1033,253 @@ function AddLeadsDialog({
 }
 
 // ---------------------------------------------------------------------------
+// Add contacts dialog (static lists only). Search-driven picker — contacts
+// already on the list are excluded from results by the search hook.
+// ---------------------------------------------------------------------------
+
+function AddContactsDialog({
+  open,
+  onOpenChange,
+  listId,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  listId: string;
+}) {
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const bulkAdd = useBulkAddContactsToList();
+  const { data: results, isLoading } = useSearchContactsForList(
+    open ? search : "",
+    listId,
+  );
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function reset() {
+    setSearch("");
+    setSelected(new Set());
+  }
+
+  async function handleAdd() {
+    if (!selected.size) return;
+    try {
+      const res = await bulkAdd.mutateAsync({
+        list_id: listId,
+        contact_ids: Array.from(selected),
+      });
+      const skipped = res.requested - res.added;
+      toast.success(
+        res.added > 0
+          ? `Added ${res.added} contact${res.added === 1 ? "" : "s"}${
+              skipped > 0 ? ` (${skipped} already on list)` : ""
+            }`
+          : "No new contacts to add (all already on list)",
+      );
+      reset();
+      onOpenChange(false);
+    } catch {
+      toast.error("Failed to add contacts");
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) reset();
+        onOpenChange(o);
+      }}
+    >
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Add Contacts to List</DialogTitle>
+          <DialogDescription>
+            Search contacts by name or email, then check the ones to add.
+            Contacts already on this list are hidden.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name or email…"
+              className="pl-9"
+              autoFocus
+            />
+          </div>
+
+          <div className="border rounded-lg overflow-hidden">
+            {search.length < 2 ? (
+              <p className="text-sm text-muted-foreground text-center py-6">
+                Type at least 2 characters to search.
+              </p>
+            ) : isLoading ? (
+              <div className="p-3 space-y-2">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <Skeleton key={i} className="h-10 w-full" />
+                ))}
+              </div>
+            ) : !results?.length ? (
+              <p className="text-sm text-muted-foreground text-center py-6">
+                No matching contacts (or they're all on this list already).
+              </p>
+            ) : (
+              <div className="max-h-[40vh] overflow-y-auto">
+                <Table>
+                  <TableHeader className="sticky top-0 bg-background z-10">
+                    <TableRow>
+                      <TableHead className="w-[40px]" />
+                      <TableHead>Name</TableHead>
+                      <TableHead>Account</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Title</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {results.map((c) => (
+                      <TableRow
+                        key={c.id}
+                        className="cursor-pointer"
+                        onClick={() => toggle(c.id)}
+                      >
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            checked={selected.has(c.id)}
+                            onCheckedChange={() => toggle(c.id)}
+                            aria-label={`Select ${c.first_name} ${c.last_name}`}
+                          />
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {`${c.first_name ?? ""} ${c.last_name ?? ""}`.trim() || "Unnamed"}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {c.account?.name ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {c.email ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {c.title ?? "—"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+
+          <div className="text-sm text-muted-foreground">
+            {selected.size} selected
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleAdd}
+            disabled={!selected.size || bulkAdd.isPending}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            {bulkAdd.isPending
+              ? "Adding..."
+              : `Add ${selected.size || ""} Contact${selected.size === 1 ? "" : "s"}`.trim()}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Move contact member dialog — insert on the target list + remove here.
+// ---------------------------------------------------------------------------
+
+function MoveContactMemberDialog({
+  member,
+  onOpenChange,
+  fromListId,
+}: {
+  /** Null = closed. */
+  member: { memberId: string; contactId: string; name: string } | null;
+  onOpenChange: (o: boolean) => void;
+  fromListId: string;
+}) {
+  const { data: lists } = useLeadLists();
+  const moveMutation = useMoveContactMember();
+  const targets = (lists ?? [])
+    .filter((l) => !l.is_dynamic && l.id !== fromListId)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  async function handlePick(toListId: string, toName: string) {
+    if (!member) return;
+    const name = member.name || "Contact";
+    try {
+      const res = await moveMutation.mutateAsync({
+        memberId: member.memberId,
+        fromListId,
+        toListId,
+        contactId: member.contactId,
+      });
+      toast.success(
+        res.alreadyInTarget
+          ? `${name} was already on "${toName}" — removed from this list`
+          : `Moved ${name} to "${toName}"`,
+      );
+      onOpenChange(false);
+    } catch {
+      toast.error("Failed to move contact");
+    }
+  }
+
+  return (
+    <Dialog open={!!member} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Move {member?.name || "contact"} to…</DialogTitle>
+          <DialogDescription>
+            Pick the destination list. The contact is removed from this list
+            once added there.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+          {!targets.length ? (
+            <p className="text-sm text-muted-foreground">
+              No other static lists to move to. Create one first.
+            </p>
+          ) : (
+            targets.map((l) => (
+              <Button
+                key={l.id}
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => handlePick(l.id, l.name)}
+                disabled={moveMutation.isPending}
+              >
+                <ListChecks className="h-4 w-4 mr-2" />
+                {l.name}
+              </Button>
+            ))
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Choose-list dialog — used by /leads bulk action ("Add to list…") and by
 // the in-list bulk action ("Copy to another list…"). Static lists only.
 // ---------------------------------------------------------------------------
@@ -1271,8 +1523,14 @@ function ListDetailView({
   const updateLead = useUpdateLead();
 
   const [showAddLeads, setShowAddLeads] = useState(false);
+  const [showAddContacts, setShowAddContacts] = useState(false);
   const [showEditFilters, setShowEditFilters] = useState(false);
   const [showCopyToList, setShowCopyToList] = useState(false);
+  const [moveMember, setMoveMember] = useState<{
+    memberId: string;
+    contactId: string;
+    name: string;
+  } | null>(null);
 
   // Sort + quick-filter live in the URL so that a Back-to-list breadcrumb
   // from a lead detail page restores them exactly.
@@ -1326,6 +1584,7 @@ function ListDetailView({
     rowKey: string;
     lead: EnrichedLead | null;
     isContact: boolean;
+    contactId?: string;
     contactName?: string;
     contactEmail?: string;
     contactPhone?: string;
@@ -1352,6 +1611,7 @@ function ListDetailView({
           rowKey: m.id,
           lead: null,
           isContact: true,
+          contactId: m.contact_id ?? m.contact?.id,
           contactName: `${m.contact?.first_name ?? ""} ${m.contact?.last_name ?? ""}`.trim(),
           contactEmail: m.contact?.email ?? "",
           contactPhone: m.contact?.phone ?? "",
@@ -1563,10 +1823,16 @@ function ListDetailView({
               Edit Filters
             </Button>
           ) : (
-            <Button onClick={() => setShowAddLeads(true)}>
-              <UserPlus className="h-4 w-4 mr-2" />
-              Add Leads
-            </Button>
+            <>
+              <Button onClick={() => setShowAddLeads(true)}>
+                <UserPlus className="h-4 w-4 mr-2" />
+                Add Leads
+              </Button>
+              <Button variant="outline" onClick={() => setShowAddContacts(true)}>
+                <UserPlus className="h-4 w-4 mr-2" />
+                Add Contacts
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -1626,7 +1892,7 @@ function ListDetailView({
                     <TableHead key={c.key}>{c.label}</TableHead>
                   )
                 ))}
-                <TableHead className="w-[60px]" />
+                <TableHead className="w-[90px]" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1665,21 +1931,41 @@ function ListDetailView({
                   ))}
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     {!list.is_dynamic && r.memberId ? (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-destructive"
-                        onClick={() => {
-                          removeMutation.mutate(
-                            { memberId: r.memberId!, listId: list.id },
-                            {
-                              onSuccess: () => toast.success("Removed from list"),
+                      <div className="flex items-center">
+                        {r.isContact && r.contactId && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            title="Move to another list"
+                            onClick={() =>
+                              setMoveMember({
+                                memberId: r.memberId!,
+                                contactId: r.contactId!,
+                                name: r.contactName ?? "",
+                              })
                             }
-                          );
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                          >
+                            <FolderInput className="h-4 w-4" />
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive"
+                          title="Remove from list"
+                          onClick={() => {
+                            removeMutation.mutate(
+                              { memberId: r.memberId!, listId: list.id },
+                              {
+                                onSuccess: () => toast.success("Removed from list"),
+                              }
+                            );
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     ) : null}
                   </TableCell>
                 </TableRow>
@@ -1693,6 +1979,20 @@ function ListDetailView({
         open={showAddLeads}
         onOpenChange={setShowAddLeads}
         listId={list.id}
+      />
+
+      <AddContactsDialog
+        open={showAddContacts}
+        onOpenChange={setShowAddContacts}
+        listId={list.id}
+      />
+
+      <MoveContactMemberDialog
+        member={moveMember}
+        onOpenChange={(o) => {
+          if (!o) setMoveMember(null);
+        }}
+        fromListId={list.id}
       />
 
       <EditFiltersDialog

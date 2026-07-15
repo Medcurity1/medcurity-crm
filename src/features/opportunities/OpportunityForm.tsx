@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, Pencil } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
@@ -73,6 +73,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { formatCurrencyDetailed } from "@/lib/formatters";
 import { errorMessage } from "@/lib/errors";
 import { toast } from "sonner";
@@ -129,7 +137,14 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   const createMutation = useCreateOpportunity();
   const updateMutation = useUpdateOpportunity();
   const { profile } = useAuth();
+  const qc = useQueryClient();
   const [newNote, setNewNote] = useState("");
+  // Post-create follow-up nudge (Summer's status restructure): when the new
+  // opp's account has no next_follow_up_date, offer to set one. Skippable —
+  // it renders AFTER a successful create and never blocks the save.
+  const [followUpPrompt, setFollowUpPrompt] = useState<{ accountId: string; oppId: string } | null>(null);
+  const [followUpDate, setFollowUpDate] = useState("");
+  const [savingFollowUp, setSavingFollowUp] = useState(false);
   // Per-line inline edit state for the form's Notes log. Mirrors the
   // detail page so reps can fix a typo from either entry point. Edits
   // mutate the in-memory `notes` field via setValue and persist on form
@@ -819,6 +834,19 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
         }
 
         disarm();
+        // Follow-up nudge: if the account has no next_follow_up_date, ask for
+        // one before leaving. Best-effort — any read failure (including the
+        // column not existing yet) just skips the prompt.
+        const { data: acct, error: acctError } = await supabase
+          .from("accounts")
+          .select("next_follow_up_date")
+          .eq("id", values.account_id)
+          .maybeSingle();
+        if (!acctError && acct && !acct.next_follow_up_date) {
+          setFollowUpDate("");
+          setFollowUpPrompt({ accountId: values.account_id, oppId: result.id });
+          return;
+        }
         navigate(`/opportunities/${result.id}`);
       }
     } catch (err) {
@@ -826,6 +854,66 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       toast.error("Failed to save: " + errorMessage(err));
     }
   }
+
+  // Skip (or finish) the follow-up nudge → continue to the new opp.
+  function dismissFollowUpPrompt() {
+    const prompt = followUpPrompt;
+    setFollowUpPrompt(null);
+    if (prompt) navigate(`/opportunities/${prompt.oppId}`);
+  }
+
+  async function saveFollowUpDate() {
+    if (!followUpPrompt || !followUpDate) return;
+    setSavingFollowUp(true);
+    try {
+      const { error } = await supabase
+        .from("accounts")
+        .update({ next_follow_up_date: followUpDate })
+        .eq("id", followUpPrompt.accountId);
+      if (error) throw error;
+      toast.success("Follow-up date set on the account");
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      qc.invalidateQueries({ queryKey: ["accounts", followUpPrompt.accountId] });
+    } catch (e) {
+      toast.error("Couldn't set the follow-up date: " + (e as Error).message);
+    } finally {
+      setSavingFollowUp(false);
+      dismissFollowUpPrompt();
+    }
+  }
+
+  const followUpDialog = (
+    <Dialog
+      open={!!followUpPrompt}
+      onOpenChange={(o) => {
+        if (!o && !savingFollowUp) dismissFollowUpPrompt();
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Set a follow-up date?</DialogTitle>
+          <DialogDescription>
+            This opportunity's account has no Next Follow Up Date. Set one now so
+            the deal doesn't go quiet — or skip and set it later on the account.
+          </DialogDescription>
+        </DialogHeader>
+        <Input
+          type="date"
+          value={followUpDate}
+          onChange={(e) => setFollowUpDate(e.target.value)}
+          disabled={savingFollowUp}
+        />
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button variant="outline" onClick={dismissFollowUpPrompt} disabled={savingFollowUp}>
+            Skip
+          </Button>
+          <Button onClick={saveFollowUpDate} disabled={savingFollowUp || !followUpDate}>
+            {savingFollowUp ? "Saving…" : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 
   // When creating from an account page, lock the account selection
   const accountLocked = isEditing || !!preselectedAccountId;
@@ -1889,6 +1977,8 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           );
         }}
       />
+
+      {followUpDialog}
     </div>
   );
 }

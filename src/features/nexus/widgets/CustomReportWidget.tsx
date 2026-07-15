@@ -24,7 +24,16 @@ function Cell({ cell }: { cell: ReportCell }) {
     if (!cell.tags.length) return <span className="text-muted-foreground">—</span>;
     return <TagChips tags={cell.tags} className="max-w-[14rem]" />;
   }
-  return <span className={cn(cell.text === "—" && "text-muted-foreground")}>{cell.text}</span>;
+  return (
+    <span
+      className={cn(
+        cell.text === "—" && "text-muted-foreground",
+        cell.tone === "danger" && "text-destructive font-medium",
+      )}
+    >
+      {cell.text}
+    </span>
+  );
 }
 
 export function CustomReportWidget({

@@ -10,6 +10,13 @@ interface AccountFilters {
   status?: string | string[];
   /** Automatic customer status: client | prospect | former_client. */
   customerStatus?: string | string[];
+  /** Sales working state: "true" = actively worked, "false" = not. */
+  salesActive?: "true" | "false";
+  /** Filter to one or many sales_status values. */
+  salesStatus?: string[];
+  /** next_follow_up_date window: due = set and within 7 days (includes
+   *  overdue), overdue = set and strictly before today. */
+  followUp?: "due" | "overdue";
   /** Filter to one or many owners. "mine" = current user. Arrays do an IN. */
   ownerId?: string | "mine" | string[];
   /** Single industry (legacy) or array of industries (multi-select). */
@@ -104,6 +111,29 @@ export function useAccounts(filters?: AccountFilters) {
             query = query.in("customer_status", filters.customerStatus);
         } else {
           query = query.eq("customer_status", filters.customerStatus);
+        }
+      }
+      if (filters?.salesActive === "true") {
+        query = query.eq("sales_active", true);
+      } else if (filters?.salesActive === "false") {
+        query = query.eq("sales_active", false);
+      }
+      if (filters?.salesStatus && filters.salesStatus.length > 0) {
+        query = query.in("sales_status", filters.salesStatus);
+      }
+      if (filters?.followUp) {
+        // Local calendar date (not UTC) — follow-ups are day-granular and
+        // reps think in their own timezone.
+        const localIso = (d: Date) =>
+          `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        const today = new Date();
+        query = query.not("next_follow_up_date", "is", null);
+        if (filters.followUp === "due") {
+          const plus7 = new Date(today);
+          plus7.setDate(plus7.getDate() + 7);
+          query = query.lte("next_follow_up_date", localIso(plus7));
+        } else {
+          query = query.lt("next_follow_up_date", localIso(today));
         }
       }
       if (Array.isArray(filters?.ownerId)) {

@@ -551,6 +551,147 @@ export function useLeadsByFilter(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Contact members — call-list curation. Same membership table, contact_id
+// side of the (lead_id | contact_id) pair.
+// ---------------------------------------------------------------------------
+
+export interface ContactListCandidate {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  title: string | null;
+  account: { name: string } | null;
+}
+
+/**
+ * Search contacts by name/email for adding to a list. Over-fetches (50)
+ * then excludes contacts already on `listId` client-side, returning up
+ * to 20 — a NOT IN clause with a long membership list would blow up the
+ * PostgREST URL.
+ */
+export function useSearchContactsForList(search: string, listId?: string) {
+  return useQuery({
+    queryKey: ["contact-search-for-list", search, listId],
+    queryFn: async () => {
+      if (!search || search.length < 2) return [];
+      const orClause = buildPersonSearchClause(search, [
+        "first_name",
+        "last_name",
+        "email",
+      ]);
+      let q = supabase
+        .from("contacts")
+        .select(
+          "id, first_name, last_name, email, title, account:accounts!account_id(name)",
+        )
+        .is("archived_at", null);
+      if (orClause) q = q.or(orClause);
+      const [{ data, error }, membersRes] = await Promise.all([
+        q.order("last_name", { ascending: true, nullsFirst: false }).limit(50),
+        listId
+          ? supabase
+              .from("lead_list_members")
+              .select("contact_id")
+              .eq("list_id", listId)
+              .not("contact_id", "is", null)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (error) throw error;
+      if (membersRes.error) throw membersRes.error;
+      const existing = new Set(
+        (membersRes.data ?? []).map(
+          (r) => (r as { contact_id: string | null }).contact_id,
+        ),
+      );
+      return ((data ?? []) as unknown as ContactListCandidate[])
+        .filter((c) => !existing.has(c.id))
+        .slice(0, 20);
+    },
+    enabled: search.length >= 2,
+  });
+}
+
+// Bulk add contacts to a static list. Duplicates no-op cleanly via the
+// unique index on (list_id, contact_id); `added` reflects only new rows
+// so callers can report "added N (M already on list)".
+export function useBulkAddContactsToList() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      list_id,
+      contact_ids,
+    }: {
+      list_id: string;
+      contact_ids: string[];
+    }) => {
+      if (!contact_ids.length) return { added: 0, requested: 0 };
+      const rows = contact_ids.map((contact_id) => ({ list_id, contact_id }));
+      const { error, count } = await supabase
+        .from("lead_list_members")
+        .upsert(rows, {
+          onConflict: "list_id,contact_id",
+          ignoreDuplicates: true,
+          count: "exact",
+        });
+      if (error) throw error;
+      return { added: count ?? 0, requested: contact_ids.length };
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({
+        queryKey: ["lead-list-members", vars.list_id],
+      });
+      qc.invalidateQueries({ queryKey: ["lead-list-member-counts"] });
+      qc.invalidateQueries({ queryKey: ["contact-search-for-list"] });
+    },
+  });
+}
+
+// Move a contact member to another list. Insert-then-delete ordering is
+// deliberate: a DB trigger deactivates an account when its contacts leave
+// ALL lists, so the contact must land on the target list before leaving
+// the source to avoid a transient "on no lists" state.
+export function useMoveContactMember() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      memberId,
+      toListId,
+      contactId,
+    }: {
+      memberId: string;
+      fromListId: string;
+      toListId: string;
+      contactId: string;
+    }) => {
+      const { error: insertError, count } = await supabase
+        .from("lead_list_members")
+        .upsert([{ list_id: toListId, contact_id: contactId }], {
+          onConflict: "list_id,contact_id",
+          ignoreDuplicates: true,
+          count: "exact",
+        });
+      if (insertError) throw insertError;
+      const { error: deleteError } = await supabase
+        .from("lead_list_members")
+        .delete()
+        .eq("id", memberId);
+      if (deleteError) throw deleteError;
+      return { alreadyInTarget: (count ?? 0) === 0 };
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({
+        queryKey: ["lead-list-members", vars.fromListId],
+      });
+      qc.invalidateQueries({
+        queryKey: ["lead-list-members", vars.toListId],
+      });
+      qc.invalidateQueries({ queryKey: ["lead-list-member-counts"] });
+    },
+  });
+}
+
 // Bulk add many leads to a static list in one call. Skips duplicates
 // silently (unique constraint on (list_id, lead_id)) so the dialog can
 // re-add a result set without erroring on already-included leads.

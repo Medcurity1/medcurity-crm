@@ -51,6 +51,8 @@ function newFilter(def: ReportFilterDef): NexusReportFilter {
       return { field: def.field, op: "eq", value: true };
     case "days":
       return { field: def.field, op: "older_than_days", value: 14 };
+    case "due":
+      return { field: def.field, op: "due_within_days", value: 7 };
     case "text":
       return { field: def.field, op: "contains", value: "" };
   }
@@ -260,6 +262,46 @@ export function CustomReportPanel({
                       <span className="text-xs text-muted-foreground shrink-0">
                         days ago
                       </span>
+                    </div>
+                  )}
+                  {def.kind === "due" && (
+                    <div className="flex items-center gap-2">
+                      <Select
+                        value={filter.op === "overdue" ? "overdue" : "due_within_days"}
+                        onValueChange={(v) =>
+                          updateFilter(index, {
+                            ...filter,
+                            op: v as NexusReportFilter["op"],
+                          })
+                        }
+                      >
+                        <SelectTrigger className="h-8 flex-1 text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="due_within_days">Due within</SelectItem>
+                          <SelectItem value="overdue">Overdue (before today)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {filter.op !== "overdue" && (
+                        <>
+                          <Input
+                            type="number"
+                            min={0}
+                            className="h-8 w-20 text-sm"
+                            value={String(filter.value ?? "")}
+                            onChange={(e) =>
+                              updateFilter(index, {
+                                ...filter,
+                                value: e.target.value === "" ? "" : Number(e.target.value),
+                              })
+                            }
+                          />
+                          <span className="text-xs text-muted-foreground shrink-0">
+                            days
+                          </span>
+                        </>
+                      )}
                     </div>
                   )}
                   {def.kind === "text" && (

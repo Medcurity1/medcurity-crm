@@ -4,7 +4,14 @@ export type AccountStatus = "discovery" | "pending" | "active" | "inactive" | "c
 // Automatic customer-hood, derived from closed-won contract dates (NOT set by
 // hand). client = a live contract; former_client = bought before, nothing live
 // now; prospect = never closed-won. See 20260630000002_account_customer_status.
+// Stored values stay client/prospect/former_client; the UI labels them
+// Customer / Prospect / Former Customer ("Account Status") per Summer's
+// 2026-07-14 status restructure.
 export type CustomerStatus = "client" | "prospect" | "former_client";
+// Sales working sub-status (picklist 'accounts.sales_status'). Only
+// meaningful alongside accounts.sales_active; kept as history when the
+// account goes inactive.
+export type SalesStatus = "prospecting" | "identified_outreach" | "engaged" | "nurture";
 export type RenewalType = "auto_renew" | "manual_renew" | "no_auto_renew" | "full_auto_renew" | "platform_only_auto_renew";
 export type OpportunityTeam = "sales" | "renewals";
 export type OpportunityKind = "new_business" | "renewal";
@@ -162,6 +169,13 @@ export interface Account {
   customer_status_override: "client" | "former_client" | null;
   customer_status_override_reason: string | null;
   customer_status_override_at: string | null;
+  // Sales working state (Summer's 2026-07 status restructure). sales_active
+  // is auto-set from call-list membership by a DB trigger; sales_status is
+  // preserved as history while inactive; next_follow_up_date is cleared by
+  // the trigger when sales_active flips false.
+  sales_active: boolean;
+  sales_status: string | null;
+  next_follow_up_date: string | null;
   verified: boolean;
   verified_at: string | null;
   verified_by: string | null;
@@ -839,7 +853,9 @@ export interface PipelineView {
 // Saved reports
 export interface ReportFilter {
   field: string;
-  operator: "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "like" | "ilike" | "in" | "is_null" | "is_not_null";
+  // due_within_days / overdue are date-column relative operators (account
+  // restructure 2026-07-15): value holds a day count / nothing.
+  operator: "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "like" | "ilike" | "in" | "is_null" | "is_not_null" | "due_within_days" | "overdue";
   value: string;
 }
 
@@ -905,7 +921,8 @@ export interface Notification {
     | "meddy_human_requested"
     | "meddy_buying_intent"
     | "meddy_missed_chat"
-    | "meddy_contact_received";
+    | "meddy_contact_received"
+    | "follow_up_due";
   title: string;
   message: string | null;
   link: string | null;

@@ -153,10 +153,18 @@ serve(async (req) => {
   const TOOL_IMPLS: Record<string, (args: Record<string, unknown>) => Promise<ToolOut>> = {
     async search_accounts(a) {
       let q = userClient.from("accounts")
-        .select("id, name, customer_status, industry, billing_state, owner_user_id", { count: "exact" })
+        .select("id, name, customer_status, sales_active, sales_status, next_follow_up_date, industry, billing_state, owner_user_id", { count: "exact" })
         .is("archived_at", null).limit(cap(a.limit));
       if (a.query) q = q.ilike("name", `%${String(a.query)}%`);
       if (a.customer_status) q = q.eq("customer_status", String(a.customer_status));
+      if (typeof a.sales_active === "boolean") q = q.eq("sales_active", a.sales_active);
+      if (a.sales_status) q = q.eq("sales_status", String(a.sales_status));
+      if (a.follow_up === "overdue") {
+        q = q.not("next_follow_up_date", "is", null).lt("next_follow_up_date", new Date().toISOString().slice(0, 10));
+      } else if (a.follow_up === "due") {
+        const in7 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+        q = q.not("next_follow_up_date", "is", null).lte("next_follow_up_date", in7);
+      }
       if (a.state) q = q.ilike("billing_state", `%${String(a.state)}%`);
       // industry is the free-text column; industry_category is an enum and
       // can't take ILIKE without a cast, so filter on the text one.
@@ -302,7 +310,7 @@ serve(async (req) => {
 
   // ── Anthropic tool schemas (only the enabled ones get offered) ──────
   const ALL_TOOLS: Array<{ name: string; description: string; input_schema: unknown }> = [
-    { name: "search_accounts", description: "Search/filter accounts (companies). Args: query (name substring), owner ('me' or a name), customer_status (client|prospect|former_client), industry, state, limit.", input_schema: { type: "object", properties: { query: { type: "string" }, owner: { type: "string" }, customer_status: { type: "string" }, industry: { type: "string" }, state: { type: "string" }, limit: { type: "integer" } } } },
+    { name: "search_accounts", description: "Search/filter accounts (companies). Args: query (name substring), owner ('me' or a name), customer_status (client|prospect|former_client), sales_active (bool, true = actively worked), sales_status (prospecting|identified_outreach|engaged|nurture), follow_up ('due' = follow-up within 7 days incl. overdue, 'overdue' = past due), industry, state, limit.", input_schema: { type: "object", properties: { query: { type: "string" }, owner: { type: "string" }, customer_status: { type: "string" }, sales_active: { type: "boolean" }, sales_status: { type: "string" }, follow_up: { type: "string", enum: ["due", "overdue"] }, industry: { type: "string" }, state: { type: "string" }, limit: { type: "integer" } } } },
     { name: "get_account", description: "Full detail for one account by id: fields, last activity date, open opportunity count, and 5 most-recent activities.", input_schema: { type: "object", properties: { account_id: { type: "string" } }, required: ["account_id"] } },
     { name: "search_contacts", description: "Search/filter contacts (people). Args: query (name/email), owner, tag (e.g. 'Warm Lead'), do_not_call (bool), no_longer_employed (bool), limit.", input_schema: { type: "object", properties: { query: { type: "string" }, owner: { type: "string" }, tag: { type: "string" }, do_not_call: { type: "boolean" }, no_longer_employed: { type: "boolean" }, limit: { type: "integer" } } } },
     { name: "get_contact", description: "Full detail for one contact by id, including their account.", input_schema: { type: "object", properties: { contact_id: { type: "string" } }, required: ["contact_id"] } },
@@ -325,7 +333,7 @@ serve(async (req) => {
     "If a question is ambiguous or outside what your tools can see, briefly say what you can and can't check, make one reasonable interpretation, and ask a single short clarifying question rather than guessing.",
     "When it would genuinely help, end your reply with one final line of up to 3 suggested follow-up questions, in exactly this format with nothing else on that line: [[SUGGESTIONS]] first question | second question | third question. Keep each short and specific to what you just showed. Omit the line entirely if no follow-up is useful.",
     "When you reference specific records, name them; the app turns them into clickable links from the records you retrieved.",
-    "Medcurity terms: the live pipeline stages are Details Analysis (details_analysis), Demo (demo), Proposal and Price Quote (proposal_and_price_quote), and Proposal Conversation (proposal_conversation), then Closed Won and Closed Lost. Always refer to a stage by its friendly name, never the raw snake_case value. customer_status (client, prospect, former_client) is the real customer state. A renewal is an opportunity with kind = renewal.",
+    "Medcurity terms: the live pipeline stages are Details Analysis (details_analysis), Demo (demo), Proposal and Price Quote (proposal_and_price_quote), and Proposal Conversation (proposal_conversation), then Closed Won and Closed Lost. Always refer to a stage by its friendly name, never the raw snake_case value. customer_status (client, prospect, former_client) is the real customer state, shown in the app as Account Status with the labels Customer, Prospect, and Former Customer. sales_active plus sales_status (prospecting, identified_outreach, engaged, nurture, shown as Sales Status) mark whether and how a rep is actively working an account, and next_follow_up_date is the rep's planned follow-up. A renewal is an opportunity with kind = renewal.",
   ].join("\n");
 
   // ── Bounded tool-use loop ───────────────────────────────────────────
