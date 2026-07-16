@@ -2,9 +2,8 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type {
   OpportunityStage,
-  AccountLifecycle,
-  AccountStatus,
   CustomerStatus,
+  SalesStatus,
   OpportunityKind,
   OpportunityBusinessType,
   LeadStatus,
@@ -28,24 +27,20 @@ const stageColors: Record<OpportunityStage, string> = {
   verbal_commit: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
 };
 
-const lifecycleColors: Record<AccountLifecycle, string> = {
-  prospect: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-  customer: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-  former_customer: "bg-slate-100 text-slate-700 dark:bg-slate-900/40 dark:text-slate-300",
-};
-
-const statusColors: Record<AccountStatus, string> = {
-  discovery: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-  pending: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-  active: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-  inactive: "bg-slate-100 text-slate-700 dark:bg-slate-900/40 dark:text-slate-300",
-  churned: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-};
-
 const customerStatusColors: Record<CustomerStatus, string> = {
   client: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
   prospect: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
   former_client: "bg-slate-100 text-slate-700 dark:bg-slate-900/40 dark:text-slate-300",
+};
+
+// Sales working state: the four working sub-statuses get distinct colors;
+// "inactive" (not being worked) renders grey.
+const salesStatusColors: Record<SalesStatus | "inactive", string> = {
+  prospecting: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+  identified_outreach: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300",
+  engaged: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
+  nurture: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+  inactive: "bg-slate-100 text-slate-700 dark:bg-slate-900/40 dark:text-slate-300",
 };
 
 const kindColors: Record<OpportunityKind, string> = {
@@ -92,7 +87,7 @@ const qualificationColors: Record<LeadQualification, string> = {
   sal: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
 };
 
-type BadgeVariant = "stage" | "lifecycle" | "kind" | "businessType" | "status" | "customerStatus" | "leadStatus" | "leadSource" | "qualification";
+type BadgeVariant = "stage" | "kind" | "businessType" | "customerStatus" | "salesStatus" | "leadStatus" | "leadSource" | "qualification";
 
 interface StatusBadgeProps {
   value: string;
@@ -103,9 +98,8 @@ interface StatusBadgeProps {
 export function StatusBadge({ value, variant, label }: StatusBadgeProps) {
   let colorClass = "";
   if (variant === "stage") colorClass = stageColors[value as OpportunityStage] ?? "";
-  if (variant === "lifecycle") colorClass = lifecycleColors[value as AccountLifecycle] ?? "";
-  if (variant === "status") colorClass = statusColors[value as AccountStatus] ?? "";
   if (variant === "customerStatus") colorClass = customerStatusColors[value as CustomerStatus] ?? "";
+  if (variant === "salesStatus") colorClass = salesStatusColors[value as SalesStatus | "inactive"] ?? "";
   if (variant === "kind") colorClass = kindColors[value as OpportunityKind] ?? "";
   if (variant === "businessType") colorClass = businessTypeColors[value as OpportunityBusinessType] ?? "";
   if (variant === "leadStatus") colorClass = leadStatusColors[value as LeadStatus] ?? "";

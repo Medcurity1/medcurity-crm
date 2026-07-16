@@ -1280,8 +1280,6 @@ function getCRMFields(entity: EntityType): string[] {
         "owner_user_id",
         "account_type",
         "account_number",
-        "status",
-        "lifecycle_status",
         "industry",
         "website",
         "parent_account_id",
@@ -3516,7 +3514,7 @@ export function SalesforceImport() {
             }
 
             // Normalize enum values: "No Auto Renew" → "no_auto_renew", etc.
-            if (["renewal_type", "status", "lifecycle_status", "stage", "kind",
+            if (["renewal_type", "status", "stage", "kind",
                  "team", "lead_source", "source", "payment_frequency", "qualification"].includes(field)) {
               // Convert human-readable to snake_case enum: lowercase, trim, replace spaces with underscores
               const normalized = value.toLowerCase().trim().replace(/[\s-]+/g, "_");
@@ -3528,13 +3526,6 @@ export function SalesforceImport() {
                   "manual_renew": "manual_renew",
                   "full_auto_renew": "full_auto_renew",
                   "platform_only_auto_renew": "platform_only_auto_renew",
-                },
-                status: {
-                  "active": "active",
-                  "inactive": "inactive",
-                  "discovery": "discovery",
-                  "pending": "pending",
-                  "churned": "churned",
                 },
                 // Maps SF StageName picklist values → enum values
                 // that match SF (migration 20260422000001). SF's six
@@ -3640,8 +3631,7 @@ export function SalesforceImport() {
                   // Legacy values still valid in the enum for FK safety
                   "lead", "qualified", "proposal", "verbal_commit",
                 ]),
-                status: new Set(["active", "inactive", "discovery", "pending", "churned", "new", "contacted", "qualified", "unqualified", "converted", "dead"]),
-                lifecycle_status: new Set(["prospect", "active_client", "former_client", "partner"]),
+                status: new Set(["new", "contacted", "qualified", "unqualified", "converted", "dead"]),
                 kind: new Set(["new_business", "renewal"]),
                 team: new Set(["sales", "renewals"]),
                 payment_frequency: new Set(["monthly", "quarterly", "semi_annually", "annually", "one_time"]),
@@ -3933,8 +3923,8 @@ export function SalesforceImport() {
 
           // Defaults
           if (entity === "accounts") {
-            record.lifecycle_status = record.lifecycle_status ?? "prospect";
-            record.status = record.status ?? "discovery";
+            // status / lifecycle_status columns are retired — never written.
+            // customer-hood is derived automatically into customer_status.
             // Auto-calculate FTE Range from employees if not already set
             if (!record.fte_range && typeof record.employees === "number" && record.employees > 0) {
               record.fte_range = employeesToFteRange(record.employees as number);
@@ -4622,8 +4612,8 @@ export function SalesforceImport() {
   function getEnumOptions(field: string): string[] | null {
     const enums: Record<string, string[]> = {
       renewal_type: ["auto_renew", "manual_renew", "no_auto_renew", "full_auto_renew", "platform_only_auto_renew"],
-      status: ["discovery", "pending", "active", "inactive", "churned"],
-      lifecycle_status: ["prospect", "customer", "former_customer"],
+      // leads.status only (accounts.status retired)
+      status: ["new", "contacted", "qualified", "unqualified", "converted"],
       stage: ["lead", "qualified", "proposal", "verbal_commit", "closed_won", "closed_lost"],
       kind: ["new_business", "renewal"],
       team: ["sales", "renewals"],

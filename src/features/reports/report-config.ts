@@ -1,4 +1,5 @@
 import { ALL_STAGES } from "@/lib/formatters";
+import type { ReportFilter } from "@/types/crm";
 
 export interface ColumnDef {
   key: string;
@@ -60,19 +61,27 @@ const accountColumns: ColumnDef[] = [
   { key: "id", label: "ID", type: "text", group: "System" },
   { key: "name", label: "Name", type: "text", group: "Basic Info" },
   {
-    key: "lifecycle_status",
-    label: "Lifecycle Status",
+    // Derived customer-hood (see CustomerStatus in src/types/crm.ts). Surfaced
+    // as "Account Status" per Summer's 2026-07 status restructure — stored
+    // values are unchanged, only the display wording moved.
+    key: "customer_status",
+    label: "Account Status",
     type: "enum",
-    enumValues: ["prospect", "customer", "former_customer"],
+    enumValues: ["client", "prospect", "former_client"],
     group: "Basic Info",
   },
+  // Sales-working fields (Summer's 2026-07 status restructure): sales_active =
+  // is anyone actively working this account; sales_status = where in the
+  // outreach motion (kept as history even when sales_active is false).
+  { key: "sales_active", label: "Working (Active/Inactive)", type: "boolean", group: "Basic Info" },
   {
-    key: "status",
-    label: "Status",
+    key: "sales_status",
+    label: "Sales Status",
     type: "enum",
-    enumValues: ["discovery", "pending", "active", "inactive", "churned"],
+    enumValues: ["prospecting", "identified_outreach", "engaged", "nurture"],
     group: "Basic Info",
   },
+  { key: "next_follow_up_date", label: "Next Follow Up", type: "date", group: "Basic Info" },
   { key: "industry", label: "Industry", type: "text", group: "Basic Info" },
   { key: "website", label: "Website", type: "text", group: "Basic Info" },
   { key: "notes", label: "Notes", type: "text", group: "Basic Info" },
@@ -125,17 +134,22 @@ const accountFilterColumns: FilterColumnDef[] = [
   { filterKey: "id", label: "ID", type: "text" },
   { filterKey: "name", label: "Name", type: "text" },
   {
-    filterKey: "lifecycle_status",
-    label: "Lifecycle Status",
+    filterKey: "customer_status",
+    label: "Account Status",
     type: "enum",
-    enumValues: ["prospect", "customer", "former_customer"],
+    enumValues: ["client", "prospect", "former_client"],
   },
+  { filterKey: "sales_active", label: "Working (Active/Inactive)", type: "boolean" },
   {
-    filterKey: "status",
-    label: "Status",
+    filterKey: "sales_status",
+    label: "Sales Status",
     type: "enum",
-    enumValues: ["discovery", "pending", "active", "inactive", "churned"],
+    // Data-driven from the accounts.sales_status admin picklist; enumValues is
+    // the loading fallback (canonical set from the 2026-07 restructure).
+    enumValues: ["prospecting", "identified_outreach", "engaged", "nurture"],
+    picklistFieldKey: "accounts.sales_status",
   },
+  { filterKey: "next_follow_up_date", label: "Next Follow Up", type: "date" },
   { filterKey: "industry", label: "Industry", type: "text" },
   { filterKey: "website", label: "Website", type: "text" },
   { filterKey: "notes", label: "Notes", type: "text" },
@@ -611,7 +625,7 @@ export const ENTITY_DEFS: Record<string, EntityDef> = {
     table: "accounts",
     columns: accountColumns,
     filterColumns: accountFilterColumns,
-    defaultColumns: ["name", "lifecycle_status", "status", "industry", "owner", "current_contract_end_date"],
+    defaultColumns: ["name", "customer_status", "industry", "owner", "current_contract_end_date"],
     joins: "*, owner:user_profiles!owner_user_id(full_name)",
   },
 
@@ -709,6 +723,15 @@ function resolveOperatorType(type: FilterColumnDef["type"]): ColumnDef["type"] {
   return type;
 }
 
+/**
+ * The relative-date operators (due_within_days / overdue) postdate the
+ * ReportFilter["operator"] union in src/types/crm.ts (owned by the parallel
+ * account-status work, so not widened here). Saved configs are JSON, so the
+ * runtime value carries them fine — use this union wherever a filter's
+ * operator is switched on.
+ */
+export type ReportFilterOperator = ReportFilter["operator"] | "due_within_days" | "overdue";
+
 export const FILTER_OPERATORS: Array<{
   value: string;
   label: string;
@@ -726,6 +749,12 @@ export const FILTER_OPERATORS: Array<{
   // free-text/number fields (comma-separated). Summer: filter a report by, e.g.,
   // Oregon AND Washington at once instead of being stuck with one value.
   { value: "in", label: "is one of", applicableTo: ["text", "number", "currency", "enum"] },
+  // Relative-date windows (2026-07 restructure, built for Next Follow Up):
+  // "due within N days" = today .. today+N inclusive (value = N, a day
+  // count); "overdue" = strictly before today (needs no value; NULLs never
+  // match). Both re-evaluate against today each run — no hardcoded dates.
+  { value: "due_within_days", label: "due within N days", applicableTo: ["date"] },
+  { value: "overdue", label: "overdue (before today)", applicableTo: ["date"] },
   { value: "is_null", label: "is empty", applicableTo: ["text", "number", "currency", "date", "enum", "boolean"] },
   { value: "is_not_null", label: "is not empty", applicableTo: ["text", "number", "currency", "date", "enum", "boolean"] },
 ];

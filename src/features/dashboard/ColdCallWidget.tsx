@@ -3,16 +3,30 @@
 // reflects flag changes (do_not_call / NLE / do_not_contact) the instant
 // they happen. Sorted warm-first (most recently touched first) and capped.
 //
-// ICP filtering (org type / state / FTE) is intentionally config-driven and
-// defaults to permissive (match-all) until Summer defines her criteria. The
-// plumbing below applies any criteria placed in COLD_CALL_ICP (or a
-// localStorage "cold_call_icp" override) without further code changes.
+// Source picker (account restructure, Summer's Q8 answer 2026-07-15): she
+// curates her own call lists (Lists with contact members) and the widget
+// pulls from the chosen list instead of the auto pool. "All contacts"
+// keeps the original pool; the choice persists per browser like the ICP
+// override. Adding a contact to any list auto-activates its account
+// (trg_list_member_sales_active); removing it everywhere deactivates
+// unless the account is a current customer or partner.
+//
+// ICP filtering (org type / state / FTE) stays config-driven and permissive
+// by default (superseded in practice by her lists, kept for the auto pool).
 
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { PhoneCall } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -66,11 +80,47 @@ function loadIcp(): IcpConfig {
 }
 
 const LIMIT = 15;
+const LIST_CHOICE_KEY = "cold_call_list_id"; // '' = auto pool
 
 export function ColdCallWidget() {
-  const { data, isLoading } = useQuery({
-    queryKey: ["dashboard", "cold-call-contacts"],
+  const [listId, setListId] = useState<string>(
+    () => localStorage.getItem(LIST_CHOICE_KEY) ?? "",
+  );
+
+  // Lists that can act as a call-list source (any list with contact members).
+  const { data: lists } = useQuery({
+    queryKey: ["dashboard", "cold-call-lists"],
     queryFn: async () => {
+      const { data, error } = await supabase
+        .from("lead_lists")
+        .select("id, name, lead_list_members!inner(contact_id)")
+        .not("lead_list_members.contact_id", "is", null)
+        .order("name");
+      if (error) throw error;
+      const seen = new Set<string>();
+      return ((data ?? []) as { id: string; name: string }[]).filter((l) =>
+        seen.has(l.id) ? false : (seen.add(l.id), true),
+      );
+    },
+  });
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["dashboard", "cold-call-contacts", listId],
+    queryFn: async () => {
+      // List mode: the pool is exactly the contacts Summer curated onto the
+      // chosen list (still through the view, so DNC/NLE flags apply).
+      let memberIds: string[] | null = null;
+      if (listId) {
+        const { data: members, error } = await supabase
+          .from("lead_list_members")
+          .select("contact_id")
+          .eq("list_id", listId)
+          .not("contact_id", "is", null)
+          .limit(1000);
+        if (error) throw error;
+        memberIds = (members ?? []).map((m) => m.contact_id as string);
+        if (memberIds.length === 0) return [] as ColdCallRow[];
+      }
       const icp = loadIcp();
       let q = supabase
         .from("v_cold_call_contacts")
@@ -80,11 +130,15 @@ export function ColdCallWidget() {
         // Warm-first: most recently touched at the top; never-touched last.
         .order("last_activity_at", { ascending: false, nullsFirst: false })
         .limit(LIMIT);
-      // "Org type" for Medcurity = the account's industry (Hospital, Clinic…).
-      if (icp.orgTypes.length) q = q.in("industry", icp.orgTypes);
-      if (icp.states.length) q = q.in("state", icp.states);
-      if (icp.minFte != null) q = q.gte("fte_count", icp.minFte);
-      if (icp.maxFte != null) q = q.lte("fte_count", icp.maxFte);
+      if (memberIds) {
+        q = q.in("id", memberIds);
+      } else {
+        // "Org type" for Medcurity = the account's industry (Hospital, Clinic…).
+        if (icp.orgTypes.length) q = q.in("industry", icp.orgTypes);
+        if (icp.states.length) q = q.in("state", icp.states);
+        if (icp.minFte != null) q = q.gte("fte_count", icp.minFte);
+        if (icp.maxFte != null) q = q.lte("fte_count", icp.maxFte);
+      }
       const { data, error } = await q;
       if (error) throw error;
       return (data ?? []) as unknown as ColdCallRow[];
@@ -93,11 +147,31 @@ export function ColdCallWidget() {
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0">
         <CardTitle className="text-base flex items-center gap-2">
           <PhoneCall className="h-4 w-4 text-primary" />
           Cold Call List
         </CardTitle>
+        <Select
+          value={listId || "__auto__"}
+          onValueChange={(v) => {
+            const next = v === "__auto__" ? "" : v;
+            setListId(next);
+            localStorage.setItem(LIST_CHOICE_KEY, next);
+          }}
+        >
+          <SelectTrigger className="h-8 w-[190px] text-xs">
+            <SelectValue placeholder="Source" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__auto__">All contacts (auto)</SelectItem>
+            {(lists ?? []).map((l) => (
+              <SelectItem key={l.id} value={l.id}>
+                {l.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </CardHeader>
       <CardContent>
         {isLoading ? (

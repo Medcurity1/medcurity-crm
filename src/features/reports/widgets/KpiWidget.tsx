@@ -169,11 +169,14 @@ async function fetchMetric(metric: DashboardKpiMetric): Promise<MetricResult> {
       return { value: count ?? 0 };
     }
     case "active_customers": {
+      // "Active customers" = current clients (customer_status = 'client'),
+      // derived from live contract history. Was accounts.status = 'active'
+      // before that column was retired.
       const { count, error } = await supabase
         .from("accounts")
         .select("id", { count: "exact", head: true })
         .is("archived_at", null)
-        .eq("status", "active");
+        .eq("customer_status", "client");
       if (error) throw error;
       return { value: count ?? 0 };
     }

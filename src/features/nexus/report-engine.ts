@@ -22,7 +22,6 @@ import {
   formatRelativeDate,
   formatName,
   stageLabel,
-  statusLabel,
   customerStatusLabel,
   businessTypeLabel,
   teamLabel,
@@ -33,7 +32,6 @@ import {
 } from "@/lib/formatters";
 import { formatPhone } from "@/components/PhoneInput";
 import type {
-  AccountStatus,
   CustomerStatus,
   IndustryCategory,
   OpportunityBusinessType,
@@ -50,7 +48,9 @@ import { REPORT_MIN_COLUMNS, REPORT_MAX_COLUMNS } from "./types";
 
 // ── Field / column registries ────────────────────────────────────────
 
-export type ReportFilterKind = "multi" | "boolean" | "days" | "text";
+/** "days" = past window (older/newer than N days ago); "due" = future
+ *  window on a date column (due within N days / overdue). */
+export type ReportFilterKind = "multi" | "boolean" | "days" | "due" | "text";
 
 export interface ReportFilterDef {
   field: string;
@@ -71,10 +71,6 @@ export interface ReportColumnDef {
   sortable: boolean;
   align?: "right";
 }
-
-const ACCOUNT_STATUS_OPTIONS = (
-  ["discovery", "pending", "active", "inactive", "churned"] as AccountStatus[]
-).map((v) => ({ value: v, label: statusLabel(v) }));
 
 const CUSTOMER_STATUS_OPTIONS = (
   ["client", "prospect", "former_client"] as CustomerStatus[]
@@ -174,8 +170,16 @@ export const REPORT_FILTERS: Record<NexusReportEntity, ReportFilterDef[]> = {
   ],
   accounts: [
     { field: "owner", label: "Owner", kind: "multi", optionsSource: "owners" },
-    { field: "status", label: "Status", kind: "multi", staticOptions: ACCOUNT_STATUS_OPTIONS },
-    { field: "customer_status", label: "Customer Status", kind: "multi", staticOptions: CUSTOMER_STATUS_OPTIONS },
+    // Surfaced as "Account Status" per the 2026-07 status restructure
+    // (stored values unchanged: client / prospect / former_client). The old
+    // discovery/pending/active/inactive/churned "status" filter is retired.
+    { field: "customer_status", label: "Account Status", kind: "multi", staticOptions: CUSTOMER_STATUS_OPTIONS },
+    // Sales-working fields (2026-07 restructure). sales_status options come
+    // from the admin-managed accounts.sales_status picklist (partner_type
+    // pattern) so they stay in sync when admins add/rename values.
+    { field: "sales_active", label: "Working (Active/Inactive)", kind: "boolean" },
+    { field: "sales_status", label: "Sales Status", kind: "multi", optionsSource: "picklist", picklistFieldKey: "accounts.sales_status" },
+    { field: "next_follow_up_date", label: "Next Follow Up", kind: "due" },
     { field: "industry", label: "Industry", kind: "multi", staticOptions: INDUSTRY_OPTIONS },
     // Exact-match picklist over the account_type values actually in the data
     // (was a fragile free-text "contains" — Jordan's doc). Old saved configs
@@ -214,8 +218,11 @@ export const REPORT_COLUMNS: Record<NexusReportEntity, ReportColumnDef[]> = {
     { key: "email", label: "Email", sortable: true },
     { key: "phone", label: "Phone", sortable: false },
     { key: "org_type", label: "Org Type", sortable: false },
-    // "Status" for a contact = their ACCOUNT's status (contacts have no
-    // status of their own; this is what Molly's CHC/FQHC widget wants).
+    // "Status" for a contact = their ACCOUNT's Account Status (contacts have
+    // no status of their own; this is what Molly's CHC/FQHC widget wants).
+    // Sourced from the linked account's customer_status (client / prospect /
+    // former_client) now that accounts.status is retired. Key stays "status"
+    // for saved-config compatibility.
     { key: "status", label: "Account Status", sortable: false },
     { key: "state", label: "State", sortable: false },
     { key: "tags", label: "Tags", sortable: false },
@@ -229,13 +236,13 @@ export const REPORT_COLUMNS: Record<NexusReportEntity, ReportColumnDef[]> = {
   ],
   accounts: [
     { key: "name", label: "Name", sortable: true },
-    { key: "status", label: "Status", sortable: true },
-    { key: "customer_status", label: "Customer Status", sortable: true },
+    { key: "customer_status", label: "Account Status", sortable: true },
     { key: "account_type", label: "Account Type", sortable: true },
     { key: "industry", label: "Industry", sortable: false },
     { key: "phone", label: "Phone", sortable: false },
     { key: "state", label: "State", sortable: true },
     { key: "contract_end", label: "Contract End", sortable: true },
+    { key: "next_follow_up_date", label: "Next Follow Up", sortable: true },
     { key: "acv", label: "ACV", sortable: true, align: "right" },
     { key: "notes", label: "Notes", sortable: false },
     { key: "last_activity", label: "Last Activity", sortable: true },
@@ -274,7 +281,7 @@ export const REPORT_COLUMNS: Record<NexusReportEntity, ReportColumnDef[]> = {
 /** Sensible starting columns per entity for a fresh widget. */
 export const DEFAULT_REPORT_COLUMNS: Record<NexusReportEntity, string[]> = {
   contacts: ["name", "account", "title", "last_activity"],
-  accounts: ["name", "status", "owner", "contract_end"],
+  accounts: ["name", "customer_status", "owner", "contract_end"],
   opportunities: ["name", "account", "stage", "amount"],
   imports: ["entity", "status", "rows", "started"],
 };
@@ -338,7 +345,8 @@ export function normalizeReportConfig(raw: unknown): CustomReportWidgetConfig {
 // ── Display row shape ────────────────────────────────────────────────
 
 export type ReportCell =
-  | { kind: "text"; text: string }
+  /** tone "danger" renders the cell red (e.g. an overdue follow-up date). */
+  | { kind: "text"; text: string; tone?: "danger" }
   | { kind: "tags"; tags: Tag[] };
 
 export interface ReportRow {
@@ -365,6 +373,19 @@ const ILIKE_ESCAPE = /[(),%]/g;
 
 function daysAgoISO(days: number): string {
   return new Date(Date.now() - days * 86_400_000).toISOString();
+}
+
+/**
+ * Local YYYY-MM-DD offset by N days. The "due" ops compare DATE columns
+ * (next_follow_up_date) against date literals so "today" means the user's
+ * local day, not the UTC day.
+ */
+function localYMD(offsetDays: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
 }
 
 /**
@@ -516,11 +537,11 @@ function serverSortSpec(
     },
     accounts: {
       name: { column: "name" },
-      status: { column: "status" },
       customer_status: { column: "customer_status" },
       account_type: { column: "account_type" },
       state: { column: "billing_state" },
       contract_end: { column: "current_contract_end_date" },
+      next_follow_up_date: { column: "next_follow_up_date" },
       acv: { column: "acv" },
       // Only reachable when the query targets v_accounts_with_activity
       // (any last_activity use flips the table — see useNexusReport).
@@ -569,8 +590,10 @@ function filterColumn(entity: NexusReportEntity, field: string): string | null {
     },
     accounts: {
       owner: "owner_user_id",
-      status: "status",
       customer_status: "customer_status",
+      sales_active: "sales_active",
+      sales_status: "sales_status",
+      next_follow_up_date: "next_follow_up_date",
       industry: "industry_category",
       account_type: "account_type",
       partner_type: "partner_type",
@@ -675,6 +698,18 @@ function applyFilters(entity: NexusReportEntity, query: any, filters: NexusRepor
         if (Number.isFinite(n) && n > 0) query = query.gte(col, daysAgoISO(n));
         break;
       }
+      case "due_within_days": {
+        // Future window: today .. today+N inclusive (date column).
+        const n = Number(f.value);
+        if (Number.isFinite(n) && n >= 0) {
+          query = query.gte(col, localYMD(0)).lte(col, localYMD(n));
+        }
+        break;
+      }
+      case "overdue":
+        // Strictly before today; NULLs never satisfy <, so they're excluded.
+        query = query.lt(col, localYMD(0));
+        break;
       default:
         break;
     }
@@ -688,6 +723,17 @@ function text(value: unknown): ReportCell {
   const s =
     value === null || value === undefined || value === "" ? "—" : String(value);
   return { kind: "text", text: s };
+}
+
+/** Date cell that renders red when the date has already passed (overdue). */
+function dueDateText(value: unknown): ReportCell {
+  if (!value) return text(null);
+  const ymd = String(value).slice(0, 10); // YYYY-MM-DD compares lexically
+  return {
+    kind: "text",
+    text: formatDate(ymd),
+    tone: ymd < localYMD(0) ? "danger" : undefined,
+  };
 }
 
 /** Notes can be essays — clamp for a widget cell (CSS truncates the rest). */
@@ -706,7 +752,7 @@ function contactCells(
     name?: string;
     account_type?: string | null;
     billing_state?: string | null;
-    status?: string | null;
+    customer_status?: string | null;
   } | null;
   const owner = r.owner as { full_name?: string | null } | null;
   const la = lastActivity.get(r.id);
@@ -718,7 +764,7 @@ function contactCells(
     email: text(r.email),
     phone: text(r.phone ? formatPhone(String(r.phone)) : null),
     org_type: text(account?.account_type),
-    status: text(account?.status ? statusLabel(account.status as AccountStatus) : null),
+    status: text(account?.customer_status ? customerStatusLabel(account.customer_status as CustomerStatus) : null),
     state: text((r.mailing_state as string | null) ?? account?.billing_state),
     tags: { kind: "tags", tags: tags.get(r.id) ?? [] },
     notes: noteText(r.notes),
@@ -738,7 +784,6 @@ function accountCells(
   const lt = lastTouch.get(r.id);
   return {
     name: text(r.name),
-    status: text(r.status ? statusLabel(r.status as AccountStatus) : null),
     customer_status: text(customerStatusLabel(r.customer_status as CustomerStatus | null)),
     account_type: text(r.account_type),
     industry: text(
@@ -749,6 +794,7 @@ function accountCells(
     phone: text(r.phone ? formatPhone(String(r.phone)) : null),
     state: text(r.billing_state),
     contract_end: text(formatDate(r.current_contract_end_date as string | null)),
+    next_follow_up_date: dueDateText(r.next_follow_up_date),
     acv: text(r.acv == null ? null : formatCurrency(Number(r.acv))),
     notes: noteText(r.notes),
     // Present only when the query targeted v_accounts_with_activity (the
@@ -810,10 +856,11 @@ function importCells(r: RawRecord): Record<string, ReportCell> {
 const SELECTS: Record<NexusReportEntity, string> = {
   contacts:
     "id, first_name, last_name, title, email, phone, mailing_state, notes, created_at, " +
-    "account:accounts!account_id(id, name, account_type, billing_state, status), " +
+    "account:accounts!account_id(id, name, account_type, billing_state, customer_status), " +
     "owner:user_profiles!owner_user_id(id, full_name)",
   accounts:
-    "id, name, status, customer_status, account_type, industry, industry_category, phone, billing_state, " +
+    "id, name, customer_status, sales_active, sales_status, next_follow_up_date, " +
+    "account_type, industry, industry_category, phone, billing_state, " +
     "current_contract_end_date, acv, notes, created_at, " +
     "owner:user_profiles!owner_user_id(id, full_name)",
   opportunities:
@@ -829,8 +876,12 @@ const SELECTS: Record<NexusReportEntity, string> = {
 // VIEW (FK metadata lives on the table — same reason opportunities/api.ts
 // selects plain columns from v_opportunities_with_activity), so this select
 // has NO embeds; owner names are merged by id after the fetch.
+// NOTE: v_accounts_with_activity snapshots accounts.* at CREATE — the view
+// must be recreated after the sales_active/sales_status/next_follow_up_date
+// column migration or these selects will 400 on the activity path.
 const ACCOUNTS_ACTIVITY_SELECT =
-  "id, name, status, customer_status, account_type, industry, industry_category, phone, billing_state, " +
+  "id, name, customer_status, sales_active, sales_status, next_follow_up_date, " +
+  "account_type, industry, industry_category, phone, billing_state, " +
   "current_contract_end_date, acv, notes, created_at, owner_user_id, last_activity_at";
 
 const TABLES: Record<NexusReportEntity, string> = {
@@ -1055,11 +1106,39 @@ export function buildViewAllLink(rawConfig: unknown): string {
     entity === "contacts"
       ? { owner: "owner", tags: "tags" }
       : entity === "accounts"
-        ? { owner: "owner", status: "status", customer_status: "customer", industry: "industry" }
+        ? { owner: "owner", customer_status: "customer", industry: "industry" }
         : { owner: "owner", stage: "stage", team: "team", business_type: "business_type" };
 
   const params = new URLSearchParams();
   for (const f of filters) {
+    // Sales-working filters map to the accounts list's dedicated params
+    // (?sales=active|inactive&sub=…&follow_up=due|overdue — 2026-07
+    // restructure) rather than the generic in-list form.
+    if (entity === "accounts" && f.field === "sales_active" && f.op === "eq") {
+      params.set("sales", f.value === false ? "inactive" : "active");
+      continue;
+    }
+    if (
+      entity === "accounts" &&
+      f.field === "sales_status" &&
+      f.op === "in" &&
+      Array.isArray(f.value) &&
+      f.value.length
+    ) {
+      params.set("sub", (f.value as string[]).join(","));
+      continue;
+    }
+    if (entity === "accounts" && f.field === "next_follow_up_date") {
+      if (f.op === "due_within_days") {
+        params.set("follow_up", "due");
+        continue;
+      }
+      if (f.op === "overdue") {
+        params.set("follow_up", "overdue");
+        continue;
+      }
+      return base; // not representable — fall back to the plain list
+    }
     const param = paramMap[f.field];
     if (!param || f.op !== "in" || !Array.isArray(f.value) || !f.value.length) {
       return base; // not representable — fall back to the plain list
@@ -1078,7 +1157,7 @@ export function buildViewAllLink(rawConfig: unknown): string {
     entity === "contacts"
       ? { name: "last_name", account: "account.name", title: "title", email: "email" }
       : entity === "accounts"
-        ? { name: "name", status: "status", customer_status: "customer_status", contract_end: "current_contract_end_date" }
+        ? { name: "name", customer_status: "customer_status", contract_end: "current_contract_end_date", next_follow_up_date: "next_follow_up_date" }
         : {
             name: "name",
             account: "account.name",

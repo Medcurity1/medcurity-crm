@@ -120,6 +120,27 @@ export function NotificationSettingsPanel() {
       </Section>
 
       <Section
+        icon={<Bell className="h-4 w-4" />}
+        title="Account follow-up reminders"
+        desc="One grouped reminder per day when accounts you're working have follow-up dates due — never a separate ping per account."
+      >
+        <EmailRow
+          optKey="follow_up_due_bell"
+          label="Daily bell notification"
+          desc="A single in-app notification each morning with your due and overdue follow-up count."
+          prefs={prefs}
+          defaultOn
+        />
+        <EmailRow
+          optKey="follow_up_due_digest"
+          label="Follow-ups in the morning digest"
+          desc="Adds an account follow-ups section to the daily task digest email (if the digest is on)."
+          prefs={prefs}
+          defaultOn
+        />
+      </Section>
+
+      <Section
         icon={<Smartphone className="h-4 w-4" />}
         title="Phone notifications (Pushover)"
         desc="Get instant phone alerts when a visitor requests a human. Requires the Pushover app ($4.99 one-time). Enter your Pushover user key below."

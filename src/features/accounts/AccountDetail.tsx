@@ -30,14 +30,16 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  statusLabel,
   customerStatusLabel,
+  salesStatusLabel,
   formatDate,
   formatDateTime,
   formatCurrency,
   industryCategoryLabel,
   employeesToFteRange,
+  daysUntil,
 } from "@/lib/formatters";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { AccountContacts } from "./AccountContacts";
@@ -91,6 +93,27 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className="text-sm font-medium">{value ?? "\u2014"}</span>
     </div>
+  );
+}
+
+/**
+ * Sales working-state chip: shows the sub-status while the account is
+ * actively worked, "Active" if worked with no sub-status yet, and a grey
+ * "Inactive" otherwise (the sub-status is kept as history but not shown).
+ */
+function SalesStatusChip({
+  salesActive,
+  salesStatus,
+}: {
+  salesActive: boolean;
+  salesStatus: string | null;
+}) {
+  return (
+    <StatusBadge
+      value={salesActive ? salesStatus ?? "" : "inactive"}
+      variant="salesStatus"
+      label={salesActive ? (salesStatus ? salesStatusLabel(salesStatus) : "Active") : "Inactive"}
+    />
   );
 }
 
@@ -274,9 +297,21 @@ export function AccountDetail() {
               invalidateKeys={[["account", account.id]]}
             />
             <StatusBadge
-              value={account.status}
-              variant="status"
-              label={statusLabel(account.status)}
+              value={account.customer_status}
+              variant="customerStatus"
+              label={customerStatusLabel(account.customer_status)}
+            />
+            {(account.account_type ?? "").startsWith("Partner") && (
+              <Badge
+                variant="secondary"
+                className="font-medium bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300"
+              >
+                Partner
+              </Badge>
+            )}
+            <SalesStatusChip
+              salesActive={account.sales_active ?? false}
+              salesStatus={account.sales_status ?? null}
             />
             <Button variant="outline" size="sm" onClick={() => navigate(`/opportunities/new?account_id=${id}`)}>
               <Plus className="h-4 w-4 mr-1" />
@@ -376,19 +411,38 @@ export function AccountDetail() {
         </Card>
         <Card>
           <CardHeader className="pb-1 pt-3 px-4">
-            <CardTitle className="text-xs text-muted-foreground font-medium">Status</CardTitle>
+            <CardTitle className="text-xs text-muted-foreground font-medium">Sales Status</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
-            <StatusBadge
-              value={account.status}
-              variant="status"
-              label={statusLabel(account.status)}
+            <SalesStatusChip
+              salesActive={account.sales_active ?? false}
+              salesStatus={account.sales_status ?? null}
             />
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-1 pt-3 px-4">
-            <CardTitle className="text-xs text-muted-foreground font-medium">Customer Status</CardTitle>
+            <CardTitle className="text-xs text-muted-foreground font-medium">Next Follow Up</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            <InlineEdit
+              value={account.next_follow_up_date ?? null}
+              type="date"
+              onSave={saveField("next_follow_up_date")}
+              className={
+                account.next_follow_up_date && (daysUntil(account.next_follow_up_date) ?? 0) < 0
+                  ? "text-red-600 dark:text-red-400"
+                  : undefined
+              }
+            />
+            {account.next_follow_up_date && (daysUntil(account.next_follow_up_date) ?? 0) < 0 && (
+              <p className="text-[10px] text-red-600 dark:text-red-400 mt-1">Overdue</p>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-1 pt-3 px-4">
+            <CardTitle className="text-xs text-muted-foreground font-medium">Account Status</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
             <StatusBadge
@@ -551,9 +605,7 @@ export function AccountDetail() {
           "parent_account_id",
           // Auto-set / read-only on detail
           "account_number",
-          "lifecycle_status",
           "industry_category",
-          "status",
           "renewal_type",
           "active_since",
           "current_contract_start_date",
@@ -595,6 +647,7 @@ export function AccountDetail() {
           "partner_type",
         ]}
         inlineEditTypes={{
+          next_follow_up_date: "date",
           fte_count: "number",
           employees: "number",
           number_of_providers: "number",

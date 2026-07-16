@@ -6,8 +6,8 @@ import {
   formatDateTime,
   formatCurrency,
   industryCategoryLabel,
-  lifecycleLabel,
-  statusLabel,
+  customerStatusLabel,
+  salesStatusLabel,
   renewalTypeLabel,
   leadSourceLabel,
   paymentFrequencyLabel,
@@ -268,8 +268,8 @@ function resolveEnumLabel(entity: string, key: string, value: unknown): string |
   const v = String(value);
   try {
     if (entity === "accounts") {
-      if (key === "lifecycle_status") return lifecycleLabel(v as never);
-      if (key === "status") return statusLabel(v as never);
+      if (key === "customer_status") return customerStatusLabel(v as never);
+      if (key === "sales_status") return salesStatusLabel(v);
       if (key === "renewal_type") return renewalTypeLabel(v as never);
       if (key === "industry_category") return industryCategoryLabel(v as never);
       if (key === "lead_source") return leadSourceLabel(v as never);

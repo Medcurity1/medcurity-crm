@@ -22,8 +22,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatCurrency, formatDate, stageLabel } from "@/lib/formatters";
-import type { OpportunityStage } from "@/types/crm";
+import { formatCurrency, formatDate, stageLabel, customerStatusLabel } from "@/lib/formatters";
+import type { OpportunityStage, CustomerStatus } from "@/types/crm";
 import {
   downloadCsv,
   todayStamp,
@@ -39,11 +39,10 @@ import { PreviewNote, PREVIEW_LIMIT } from "./PreviewNote";
 
 /**
  * Lost Customers — Existing Business closed-lost deals.
- * The SF spec requires Account Status = Inactive, but in staging
- * no accounts are currently flagged inactive (lifecycle_status
- * backfill is a separate data-quality item), so the filter is
- * optional here. When "Inactive only" is on, we hide rows whose
- * account is not inactive. When off, all closed-lost renewals show.
+ * The SF spec requires Account Status = Inactive; in staging the
+ * equivalent is a Former Customer (customer_status = former_client).
+ * When "Former customers only" is on, we hide rows whose account is
+ * not a former customer. When off, all closed-lost renewals show.
  */
 interface LostRow {
   id: string;
@@ -110,11 +109,13 @@ export function LostCustomers() {
           id: o.id as string,
           account_id: o.account_id as string | null,
           account_name: a?.name ?? "",
-          // Show the SF-aligned account.status (active/inactive/pending/discovery/churned)
-          // not the deprecated lifecycle_status (prospect/customer/former_customer)
+          // Account Status = the derived customer_status (client / prospect /
+          // former_client); "former_client" is the staging equivalent of SF's
+          // Inactive. Stored raw here so the filter below can match; labelled
+          // for display in the table + CSV.
           opportunity_name: (o.name as string) ?? "",
           stage: (o.stage as OpportunityStage | null) ?? ("closed_lost" as OpportunityStage),
-          account_status: a?.status ?? "",
+          account_status: a?.customer_status ?? "",
           fiscal_period: fiscalPeriod(closeDate),
           amount: o.amount as number | null,
           probability: o.probability as number | null,
@@ -131,15 +132,10 @@ export function LostCustomers() {
           type: typeLabel(o.kind as string | null),
         };
       });
-      // Match SF's "Lost Customers" report filter: account.status = Inactive.
-      // (We were previously matching the wrong field — lifecycle_status
-      // which uses prospect/customer/former_customer.)
+      // Match SF's "Lost Customers" report filter: former customers only
+      // (customer_status = former_client, the staging analog of SF Inactive).
       return inactiveOnly
-        ? mapped.filter(
-            (r) =>
-              r.account_status === "inactive" ||
-              r.account_status === "churned",
-          )
+        ? mapped.filter((r) => r.account_status === "former_client")
         : mapped;
     },
   });
@@ -170,7 +166,7 @@ export function LostCustomers() {
       r.account_name,
       r.opportunity_name,
       r.stage ? stageLabel(r.stage) : "",
-      r.account_status,
+      r.account_status ? customerStatusLabel(r.account_status as CustomerStatus) : "",
       r.fiscal_period,
       csvCurrency(r.amount),
       r.probability ?? "",
@@ -199,8 +195,8 @@ export function LostCustomers() {
         title="Lost Customers"
         description={
           inactiveOnly
-            ? "Existing Business closed-lost on inactive accounts."
-            : "All Existing Business closed-lost deals. Toggle 'Inactive only' to match the SF spec strictly."
+            ? "Existing Business closed-lost on former-customer accounts."
+            : "All Existing Business closed-lost deals. Toggle 'Former customers only' to match the SF spec strictly."
         }
         actions={
           <div className="flex items-center gap-2">
@@ -210,7 +206,7 @@ export function LostCustomers() {
                 checked={inactiveOnly}
                 onChange={(e) => setInactiveOnly(e.target.checked)}
               />
-              Inactive only
+              Former customers only
             </label>
             <Select value={range} onValueChange={(v) => setRange(v as DateRangeKey)}>
               <SelectTrigger className="w-48">
@@ -301,7 +297,11 @@ export function LostCustomers() {
                         </Link>
                       </TableCell>
                       <TableCell>{r.stage ? stageLabel(r.stage) : ""}</TableCell>
-                      <TableCell>{r.account_status}</TableCell>
+                      <TableCell>
+                        {r.account_status
+                          ? customerStatusLabel(r.account_status as CustomerStatus)
+                          : ""}
+                      </TableCell>
                       <TableCell>{r.fiscal_period}</TableCell>
                       <TableCell className="text-right">
                         {formatCurrency(Number(r.amount ?? 0))}

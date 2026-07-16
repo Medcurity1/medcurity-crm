@@ -11,6 +11,7 @@ import {
   Loader2,
   Mail,
   Info,
+  PhoneCall,
   Trash2,
   X,
 } from "lucide-react";
@@ -40,6 +41,7 @@ const typeIcon: Record<Notification["type"], ComponentType<{ className?: string 
   meddy_buying_intent: Bot,
   meddy_missed_chat: Bot,
   meddy_contact_received: Bot,
+  follow_up_due: PhoneCall,
 };
 
 const typeColor: Record<Notification["type"], string> = {
@@ -55,6 +57,7 @@ const typeColor: Record<Notification["type"], string> = {
   meddy_buying_intent: "text-amber-500 dark:text-amber-400",
   meddy_missed_chat: "text-red-500 dark:text-red-400",
   meddy_contact_received: "text-green-600 dark:text-green-400",
+  follow_up_due: "text-teal-600 dark:text-teal-400",
 };
 
 export function NotificationsDropdown() {

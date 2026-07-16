@@ -4,7 +4,9 @@ import type { PartnerAccount } from "@/types/crm";
 
 interface PartnerFilters {
   search?: string;
-  status?: string | string[];
+  // Account Status (customer_status: client/prospect/former_client) — the
+  // partners list surfaces this in place of the retired accounts.status field.
+  customerStatus?: string | string[];
   // "umbrella" = partners that have members under them
   // "member"   = accounts that are a member of someone
   // "top_level"= umbrella AND not a member of anyone else
@@ -59,11 +61,12 @@ export function usePartners(filters?: PartnerFilters) {
       if (filters?.search) {
         query = query.ilike("name", `%${filters.search}%`);
       }
-      if (filters?.status) {
-        if (Array.isArray(filters.status)) {
-          if (filters.status.length > 0) query = query.in("status", filters.status);
+      if (filters?.customerStatus) {
+        if (Array.isArray(filters.customerStatus)) {
+          if (filters.customerStatus.length > 0)
+            query = query.in("customer_status", filters.customerStatus);
         } else {
-          query = query.eq("status", filters.status);
+          query = query.eq("customer_status", filters.customerStatus);
         }
       }
       if (filters?.partnerType && filters.partnerType.length > 0) {

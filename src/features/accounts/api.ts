@@ -5,11 +5,15 @@ import { buildPersonSearchClause } from "@/lib/search-clause";
 
 interface AccountFilters {
   search?: string;
-  lifecycle_status?: string;
-  /** Single status (legacy) or array of statuses (multi-select). */
-  status?: string | string[];
   /** Automatic customer status: client | prospect | former_client. */
   customerStatus?: string | string[];
+  /** Sales working state: "true" = actively worked, "false" = not. */
+  salesActive?: "true" | "false";
+  /** Filter to one or many sales_status values. */
+  salesStatus?: string[];
+  /** next_follow_up_date window: due = set and within 7 days (includes
+   *  overdue), overdue = set and strictly before today. */
+  followUp?: "due" | "overdue";
   /** Filter to one or many owners. "mine" = current user. Arrays do an IN. */
   ownerId?: string | "mine" | string[];
   /** Single industry (legacy) or array of industries (multi-select). */
@@ -24,13 +28,37 @@ interface AccountFilters {
   sortDirection?: "asc" | "desc";
 }
 
+// Sortable account columns. The sort key comes straight from the URL
+// (?sort=…), which can be stale — a bookmarked link, an open tab, or a
+// saved view created when a now-retired column (e.g. the old 'status' /
+// 'lifecycle_status') was sortable. An unknown column passed to PostgREST
+// .order() 400s and breaks the ENTIRE list, so anything not on this list
+// falls back to name rather than reaching the query.
+const SORTABLE_ACCOUNT_COLUMNS = new Set([
+  "name",
+  "phone",
+  "customer_status",
+  "sales_status",
+  "next_follow_up_date",
+  "billing_state",
+  "industry",
+  "created_at",
+  "updated_at",
+  "fte_count",
+  "employees",
+  "annual_revenue",
+]);
+
 export function useAccounts(filters?: AccountFilters) {
   return useQuery({
     queryKey: ["accounts", filters],
     queryFn: async () => {
       const page = filters?.page ?? 0;
       const pageSize = filters?.pageSize ?? 25;
-      const sortCol = filters?.sortColumn ?? "name";
+      const requestedSort = filters?.sortColumn ?? "name";
+      const sortCol = SORTABLE_ACCOUNT_COLUMNS.has(requestedSort)
+        ? requestedSort
+        : "name";
       const sortAsc = (filters?.sortDirection ?? "asc") === "asc";
       let query = supabase
         .from("accounts")
@@ -88,22 +116,35 @@ export function useAccounts(filters?: AccountFilters) {
         }
         query = query.or(orParts.join(","));
       }
-      if (filters?.lifecycle_status) {
-        query = query.eq("lifecycle_status", filters.lifecycle_status);
-      }
-      if (filters?.status) {
-        if (Array.isArray(filters.status)) {
-          if (filters.status.length > 0) query = query.in("status", filters.status);
-        } else {
-          query = query.eq("status", filters.status);
-        }
-      }
       if (filters?.customerStatus) {
         if (Array.isArray(filters.customerStatus)) {
           if (filters.customerStatus.length > 0)
             query = query.in("customer_status", filters.customerStatus);
         } else {
           query = query.eq("customer_status", filters.customerStatus);
+        }
+      }
+      if (filters?.salesActive === "true") {
+        query = query.eq("sales_active", true);
+      } else if (filters?.salesActive === "false") {
+        query = query.eq("sales_active", false);
+      }
+      if (filters?.salesStatus && filters.salesStatus.length > 0) {
+        query = query.in("sales_status", filters.salesStatus);
+      }
+      if (filters?.followUp) {
+        // Local calendar date (not UTC) — follow-ups are day-granular and
+        // reps think in their own timezone.
+        const localIso = (d: Date) =>
+          `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        const today = new Date();
+        query = query.not("next_follow_up_date", "is", null);
+        if (filters.followUp === "due") {
+          const plus7 = new Date(today);
+          plus7.setDate(plus7.getDate() + 7);
+          query = query.lte("next_follow_up_date", localIso(plus7));
+        } else {
+          query = query.lt("next_follow_up_date", localIso(today));
         }
       }
       if (Array.isArray(filters?.ownerId)) {

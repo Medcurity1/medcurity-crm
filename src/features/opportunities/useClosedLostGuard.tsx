@@ -70,7 +70,7 @@ export function useClosedLostGuard() {
         p_reason: "Rep confirmed not contracted when closing a deal Lost",
       });
       if (error) throw error;
-      toast.success(`${pending.accountName} marked Former Client.`);
+      toast.success(`${pending.accountName} marked Former Customer.`);
       qc.invalidateQueries({ queryKey: ["accounts"] });
       qc.invalidateQueries({ queryKey: ["accounts", pending.accountId] });
     } catch (e) {
@@ -82,23 +82,26 @@ export function useClosedLostGuard() {
   }, [pending, qc]);
 
   const dialog = (
-    <Dialog open={!!pending} onOpenChange={(o) => { if (!o && !busy) setPending(null); }}>
-      <DialogContent className="sm:max-w-md">
+    // REQUIRED prompt: outside-click / Escape / X are all disabled while
+    // pending — the two buttons are the only exits, so the active → former
+    // question can't be dismissed by accident.
+    <Dialog open={!!pending} onOpenChange={() => {}}>
+      <DialogContent className="sm:max-w-md" showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle>Is {pending?.accountName ?? "this account"} still a client?</DialogTitle>
+          <DialogTitle>Is {pending?.accountName ?? "this account"} still a customer?</DialogTitle>
           <DialogDescription>
-            {pending?.accountName ?? "This account"} is currently a Client and you just marked a
+            {pending?.accountName ?? "This account"} is currently a Customer and you just marked a
             deal Closed Lost. If they still have any active contract with Medcurity (for example,
-            they declined this but kept another product), leave them as a Client. If they've fully
-            ended their contract, mark them a Former Client.
+            they declined this but kept another product), leave them as a Customer. If they've fully
+            ended their contract, mark them a Former Customer.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="gap-2 sm:gap-2">
           <Button variant="outline" onClick={() => setPending(null)} disabled={busy}>
-            Still a client
+            Still a customer
           </Button>
           <Button variant="destructive" onClick={markFormer} disabled={busy}>
-            {busy ? "Saving…" : "Mark Former Client"}
+            {busy ? "Saving…" : "Mark Former Customer"}
           </Button>
         </DialogFooter>
       </DialogContent>

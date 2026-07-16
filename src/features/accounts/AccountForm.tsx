@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
 import { useAccount, useCreateAccount, useUpdateAccount, useUsers, useAccountsList } from "./api";
 import { PicklistSelect } from "@/features/picklists/PicklistSelect";
 import { useAuth } from "@/features/auth/AuthProvider";
@@ -22,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -121,6 +124,26 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
 
   const [sameAsBilling, setSameAsBilling] = useState(false);
 
+  // Open-opportunity check (edit only): an account with a deal in flight
+  // should carry a Next Follow Up Date, enforced with the same
+  // touched-fields grandfathering as the sales-status rule below.
+  const { data: openOpp } = useQuery({
+    queryKey: ["account_open_opp", id],
+    enabled: isEditing && !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("opportunities")
+        .select("id")
+        .eq("account_id", id!)
+        .not("stage", "in", "(closed_won,closed_lost)")
+        .is("archived_at", null)
+        .limit(1);
+      if (error) throw error;
+      return data?.[0] ?? null;
+    },
+  });
+  const hasOpenOpp = !!openOpp;
+
   const {
     register,
     handleSubmit,
@@ -133,8 +156,9 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
     defaultValues: isEditing && account
       ? {
           name: account.name,
-          lifecycle_status: account.lifecycle_status,
-          status: account.status ?? "discovery",
+          sales_active: account.sales_active ?? false,
+          sales_status: account.sales_status ?? "",
+          next_follow_up_date: account.next_follow_up_date ?? "",
           owner_user_id: account.owner_user_id,
           website: account.website ?? "",
           industry: account.industry ?? "",
@@ -189,8 +213,9 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
         }
       : {
           name: "",
-          lifecycle_status: "prospect",
-          status: "discovery",
+          sales_active: false,
+          sales_status: "",
+          next_follow_up_date: "",
           // Default to current rep so "My Accounts" filter works on day 1.
           owner_user_id: user?.id ?? null,
           website: "",
@@ -337,13 +362,57 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
     return v;
   }
 
+  // Sub-statuses that mean "being actively worked" — an account in one of
+  // these needs a Next Follow Up Date ('prospecting' is the pre-outreach
+  // pool and is exempt).
+  const WORKING_SALES_STATUSES = ["identified_outreach", "engaged", "nurture"];
+
+  // Grandfathering (mirrors the partner_type conditional + the admin
+  // required-fields ratchet): the date is only demanded when the user is
+  // the one putting the account into a "needs follow-up" state in THIS
+  // save — a create, a change to the sales fields, or clearing a date that
+  // was set. Pre-existing accounts already in that state save untouched.
+  function followUpDateRequired(values: {
+    sales_active?: boolean;
+    sales_status?: string | null;
+    next_follow_up_date?: string | null;
+  }): boolean {
+    // The open-opp branch also demands sales_active: with it false, both the
+    // form (toggle-off clears the input) and the DB trigger wipe the date, so
+    // requiring one would be unsatisfiable.
+    const needsFollowUp =
+      (values.sales_active ?? false) &&
+      (WORKING_SALES_STATUSES.includes(values.sales_status || "") ||
+        (isEditing && hasOpenOpp));
+    if (!needsFollowUp) return false;
+    const salesTouched =
+      !isEditing ||
+      (values.sales_active ?? false) !== (account?.sales_active ?? false) ||
+      (values.sales_status || "") !== (account?.sales_status ?? "");
+    const clearedDate =
+      isEditing && !!account?.next_follow_up_date && !values.next_follow_up_date;
+    return salesTouched || clearedDate;
+  }
+
+  const watchedSalesActive = watch("sales_active") ?? false;
+  const watchedSalesStatus = watch("sales_status") || "";
+  const watchedFollowUpDate = watch("next_follow_up_date") || "";
+  const followUpRequiredNow = followUpDateRequired({
+    sales_active: watchedSalesActive,
+    sales_status: watchedSalesStatus,
+    next_follow_up_date: watchedFollowUpDate,
+  });
+
   async function onSubmit(values: AccountFormValues) {
     // Check dynamic required fields. In edit mode, a field that was
     // already empty on the original account is grandfathered — it only
     // blocks the save if we're clearing a value that used to be there.
     // See src/lib/requiredFields.ts for the full rationale.
     const missingFields = getMissingRequiredFields(
-      requiredKeys,
+      // `status` and `lifecycle_status` are fully retired (columns dropped) —
+      // a stale required_field_config row for either must not brick account
+      // saves. Neither is on the form anymore.
+      requiredKeys.filter((k) => k !== "status" && k !== "lifecycle_status"),
       values,
       account as Record<string, unknown> | undefined
     );
@@ -364,10 +433,24 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
       return;
     }
 
+    // Actively-worked accounts (or accounts with a deal in flight) need a
+    // Next Follow Up Date — but only when this save is what puts them in
+    // that state (see followUpDateRequired for the grandfather rule).
+    if (followUpDateRequired(values) && !values.next_follow_up_date) {
+      toast.error(
+        "Next Follow Up Date is required — this account is being actively worked. Set one in the Sales Status section."
+      );
+      return;
+    }
+
     const payload: Record<string, unknown> = {
       name: values.name,
-      lifecycle_status: values.lifecycle_status,
-      status: emptyToNull(values.status),
+      // `status` and `lifecycle_status` are retired (columns dropped); the
+      // form never reads or writes them. Account-hood is derived automatically
+      // into customer_status.
+      sales_active: values.sales_active ?? false,
+      sales_status: emptyToNull(values.sales_status),
+      next_follow_up_date: emptyToNull(values.next_follow_up_date),
       owner_user_id: values.owner_user_id ?? null,
       website: emptyToNull(values.website),
       industry: emptyToNull(values.industry),
@@ -485,21 +568,43 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="account_type">
+                  <Label>
                     Account Type<RequiredIndicator fieldKey="account_type" requiredFields={requiredKeys} />
                   </Label>
-                  <PicklistSelect
-                    id="account_type"
-                    fieldKey="accounts.account_type"
-                    value={watch("account_type")}
-                    onChange={(v) => setValue("account_type", v ?? "")}
-                    allowClear
-                    placeholder="Select type…"
-                  />
+                  <div className="flex items-center gap-2 pt-1.5">
+                    <Checkbox
+                      id="is_partner"
+                      checked={(watch("account_type") ?? "").startsWith("Partner")}
+                      onCheckedChange={(v) => {
+                        if (v === true) {
+                          setValue("account_type", "Partner", { shouldDirty: true });
+                        } else {
+                          // Legacy-preservation rule: only the two canonical
+                          // partner values clear to empty. Any other stored
+                          // value (CHC, Direct, …) is restored untouched so
+                          // unchecking never destroys legacy data.
+                          const stored = account?.account_type ?? "";
+                          const clearable =
+                            stored === "" || stored === "Partner" || stored === "Partner - Alliance";
+                          setValue("account_type", clearable ? "" : stored, { shouldDirty: true });
+                        }
+                      }}
+                    />
+                    <Label htmlFor="is_partner" className="cursor-pointer text-sm font-normal">
+                      Partner
+                    </Label>
+                  </div>
+                  {!!account?.account_type &&
+                    !account.account_type.startsWith("Partner") &&
+                    !(watch("account_type") ?? "").startsWith("Partner") && (
+                      <p className="text-xs text-muted-foreground">
+                        Legacy type: {account.account_type}
+                      </p>
+                    )}
                   <p className="text-xs text-muted-foreground">
-                    Use this to mark partner accounts. Client / Prospect / Former
-                    Client is set automatically from deal history (see Customer
-                    Status on the account).
+                    Use this to mark partner accounts. Customer / Prospect /
+                    Former Customer is set automatically from deal history (see
+                    Account Status on the account).
                   </p>
                 </div>
 
@@ -507,33 +612,72 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                     needed). It's still auto-assigned by the DB trigger and the
                     column/data are untouched — just no longer shown here. */}
 
-                <div className="space-y-2">
-                  <Label>Status<RequiredIndicator fieldKey="status" requiredFields={requiredKeys} /></Label>
-                  <Select
-                    value={watch("status") ?? "discovery"}
-                    onValueChange={(v) =>
-                      setValue("status", v as NonNullable<AccountFormValues["status"]>)
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="discovery">Discovery</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="active">Active</SelectItem>
-                      <SelectItem value="inactive">Inactive</SelectItem>
-                      <SelectItem value="churned">Churned</SelectItem>
-                    </SelectContent>
-                  </Select>
+                {/* ---- Sales Status (replaces the retired `status` field) ----
+                    sales_active is also auto-set by a DB trigger from
+                    call-list membership; the form just reads/writes the
+                    columns. The old status/lifecycle_status columns are fully
+                    retired — customer-hood is derived automatically into
+                    customer_status; dashboard/ARR/churn views read that now. */}
+                <div className="space-y-2 md:col-span-2">
+                  <Label>Sales Status</Label>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="flex items-center gap-2 pt-1.5">
+                      <Switch
+                        id="sales_active"
+                        checked={watchedSalesActive}
+                        onCheckedChange={(v) => {
+                          setValue("sales_active", v === true, { shouldDirty: true });
+                          // Mirrors the DB trigger: going inactive clears the
+                          // follow-up date.
+                          if (v !== true) {
+                            setValue("next_follow_up_date", "", { shouldDirty: true });
+                          }
+                        }}
+                      />
+                      <Label htmlFor="sales_active" className="cursor-pointer text-sm font-normal">
+                        {watchedSalesActive ? "Active — being worked" : "Inactive"}
+                      </Label>
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="sales_status" className="text-xs text-muted-foreground">
+                        Sub-Status
+                      </Label>
+                      <PicklistSelect
+                        id="sales_status"
+                        fieldKey="accounts.sales_status"
+                        value={watchedSalesStatus}
+                        onChange={(v) => setValue("sales_status", v ?? "", { shouldDirty: true })}
+                        allowClear
+                        placeholder="Select…"
+                        disabled={!watchedSalesActive}
+                        className={!watchedSalesActive ? "opacity-60" : undefined}
+                      />
+                      {!watchedSalesActive && !!watchedSalesStatus && (
+                        <p className="text-[11px] text-muted-foreground">
+                          Kept as history while inactive
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="next_follow_up_date" className="text-xs text-muted-foreground">
+                        Next Follow Up Date
+                        {followUpRequiredNow && (
+                          <span className="text-destructive ml-0.5">
+                            *{" "}
+                            <span className="text-xs font-normal text-muted-foreground">
+                              (required)
+                            </span>
+                          </span>
+                        )}
+                      </Label>
+                      <Input
+                        id="next_follow_up_date"
+                        type="date"
+                        {...register("next_follow_up_date")}
+                      />
+                    </div>
+                  </div>
                 </div>
-
-                {/* "Customer Type" (lifecycle_status) intentionally removed
-                    from the UI. The SF-imported `status` field (Active /
-                    Inactive / Pending / Discovery / Churned) is the single
-                    source of truth. lifecycle_status remains on the column
-                    so existing dashboard/ARR/churn views don't break — it
-                    will be retired in a follow-up once views migrate. */}
 
                 <div className="space-y-2">
                   <Label>Industry<RequiredIndicator fieldKey="industry_category" requiredFields={requiredKeys} /></Label>

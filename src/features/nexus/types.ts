@@ -55,7 +55,11 @@ export type NexusFilterOp =
   | "not_empty"
   /** value = number of days; e.g. Last Activity > 14 days ago. */
   | "older_than_days"
-  | "newer_than_days";
+  | "newer_than_days"
+  /** value = number of days AHEAD; date between today and today+N. */
+  | "due_within_days"
+  /** date strictly before today (no value; NULLs never match). */
+  | "overdue";
 
 export interface NexusReportFilter {
   field: string;

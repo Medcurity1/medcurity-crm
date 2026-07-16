@@ -2,7 +2,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Pencil, Archive, ChevronDown, Phone, Mail, UserRoundCog, History, MapPin, Plus, Copy, Check } from "lucide-react";
+import { Pencil, Archive, ChevronDown, Phone, Mail, UserRoundCog, History, MapPin, Plus, Copy, Check, ListPlus } from "lucide-react";
 import { formatPhone } from "@/components/PhoneInput";
 import { InlineEdit } from "@/components/InlineEdit";
 import { useContact, useUpdateContact, useArchiveContact, useOriginatingLead } from "./api";
@@ -16,6 +16,7 @@ import { VerifiedBadge } from "@/components/VerifiedBadge";
 import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
+import { AddToListDialog } from "@/features/lead-lists/AddToListDialog";
 import { QueryError } from "@/components/QueryError";
 import { RecordId } from "@/components/RecordId";
 import { Button } from "@/components/ui/button";
@@ -132,6 +133,7 @@ export function ContactDetail() {
   const archiveMutation = useArchiveContact();
   const [showArchive, setShowArchive] = useState(false);
   const [showChangeOwner, setShowChangeOwner] = useState(false);
+  const [showAddToList, setShowAddToList] = useState(false);
   const { addRecent } = useRecentRecords();
 
   useEffect(() => {
@@ -210,6 +212,10 @@ export function ContactDetail() {
               </Badge>
             )}
             <ContactFlagBadges contact={contact} />
+            <Button variant="outline" size="sm" onClick={() => setShowAddToList(true)}>
+              <ListPlus className="h-4 w-4 mr-1" />
+              Add to List
+            </Button>
             <Button variant="outline" size="sm" onClick={() => setShowChangeOwner(true)}>
               <UserRoundCog className="h-4 w-4 mr-1" />
               Change Owner
@@ -611,6 +617,12 @@ export function ContactDetail() {
         confirmLabel="Archive"
         destructive
         onConfirm={handleArchive}
+      />
+
+      <AddToListDialog
+        open={showAddToList}
+        onOpenChange={setShowAddToList}
+        contactIds={[contact.id]}
       />
 
       <ChangeOwnerDialog

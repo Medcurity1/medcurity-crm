@@ -89,7 +89,6 @@ import {
   formatCurrency,
   formatDate,
   stageLabel,
-  lifecycleLabel,
   activityLabel,
   kindLabel,
   teamLabel,
@@ -161,10 +160,9 @@ export interface RelationLookups {
 // ---------------------------------------------------------------------------
 
 const ENUM_LABEL_MAP: Record<string, (v: string) => string> = {
-  lifecycle_status: (v) => lifecycleLabel(v as Parameters<typeof lifecycleLabel>[0]),
   status: (v) => {
-    // "status" is used for both accounts (AccountStatus) and leads (LeadStatus).
-    // Try lead status labels first, fall back to account status, then raw value.
+    // "status" is a leads-only enum now (accounts.status is retired). Account
+    // customer-hood is the separate customer_status field below.
     const leadLabels: Record<string, string> = {
       new: "New",
       contacted: "Contacted",
@@ -172,14 +170,27 @@ const ENUM_LABEL_MAP: Record<string, (v: string) => string> = {
       unqualified: "Unqualified",
       converted: "Converted",
     };
-    const accountLabels: Record<string, string> = {
-      discovery: "Discovery",
-      pending: "Pending",
-      active: "Active",
-      inactive: "Inactive",
-      churned: "Churned",
+    return leadLabels[v] ?? v;
+  },
+  // Keyed by the actual column key (NOT "status", which is shared between
+  // leads and accounts). "Account Status" wording per the 2026-07 status
+  // restructure — stored values unchanged, only labels moved.
+  customer_status: (v) => {
+    const labels: Record<string, string> = {
+      client: "Customer",
+      prospect: "Prospect",
+      former_client: "Former Customer",
     };
-    return leadLabels[v] ?? accountLabels[v] ?? v;
+    return labels[v] ?? v;
+  },
+  sales_status: (v) => {
+    const labels: Record<string, string> = {
+      prospecting: "Prospecting",
+      identified_outreach: "Identified Outreach",
+      engaged: "Engaged",
+      nurture: "Nurture",
+    };
+    return labels[v] ?? v;
   },
   stage: (v) => stageLabel(v as Parameters<typeof stageLabel>[0]),
   team: (v) => teamLabel(v as Parameters<typeof teamLabel>[0]),
@@ -802,6 +813,23 @@ function FilterValueInput({
     );
   }
 
+  // Relative-date op: the value is a day count (N), not a date.
+  if (operator === "due_within_days") {
+    return (
+      <div className="flex items-center gap-2">
+        <Input
+          type="number"
+          min={0}
+          className="w-24"
+          placeholder="N"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        <span className="text-xs text-muted-foreground">days from today</span>
+      </div>
+    );
+  }
+
   // Relation filter types: a type-to-search combobox (accounts are searched
   // server-side; contacts/owners/opps filter over the loaded lookups).
   if (isRelationFilterType(filterCol.type)) {
@@ -893,7 +921,7 @@ function FilterRow({
   const entity = getEntityDef(entityKey);
   const filterCol = getFilterColumnDef(entityKey, filter.field);
   const operators = filterCol ? getOperatorsForType(filterCol.type) : [];
-  const needsValue = !["is_null", "is_not_null"].includes(filter.operator);
+  const needsValue = !["is_null", "is_not_null", "overdue"].includes(filter.operator);
 
   return (
     <div className="flex items-end gap-2 flex-wrap">
@@ -936,10 +964,14 @@ function FilterRow({
             // single value and a comma-separated list — clear it so a stale
             // single value doesn't sit in the multi-select (or vice versa).
             const crossesMulti = (op === "in") !== (filter.operator === "in");
+            // Same for "due within N days": it stores a day count where the
+            // other date ops store a date — don't let one leak into the other.
+            const crossesRelative =
+              (op === "due_within_days") !== (filter.operator === "due_within_days");
             onChange(index, {
               ...filter,
               operator: op as ReportFilter["operator"],
-              value: crossesMulti ? "" : filter.value,
+              value: crossesMulti || crossesRelative ? "" : filter.value,
             });
           }}
         >

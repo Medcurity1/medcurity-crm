@@ -40,7 +40,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { statusLabel, customerStatusLabel, formatRelativeDate, formatName, INDUSTRY_CATEGORY_LABELS } from "@/lib/formatters";
+import { customerStatusLabel, salesStatusLabel, formatRelativeDate, formatDate, formatName, daysUntil, INDUSTRY_CATEGORY_LABELS } from "@/lib/formatters";
 import { formatPhone } from "@/components/PhoneInput";
 
 // "Contract End" (contract_end / current_contract_end_date) was replaced by
@@ -60,8 +60,9 @@ const ACCOUNTS_COLUMNS: ColumnDescriptor[] = [
   { key: "name", label: "Name", sortKey: "name", locked: true },
   { key: "primary_contact", label: "Primary Contact" },
   { key: "phone", label: "Phone", sortKey: "phone" },
-  { key: "status", label: "Status", sortKey: "status" },
-  { key: "customer_status", label: "Customer Status", sortKey: "customer_status" },
+  { key: "customer_status", label: "Account Status", sortKey: "customer_status" },
+  { key: "sales", label: "Sales Status", sortKey: "sales_status" },
+  { key: "next_follow_up", label: "Next Follow Up", sortKey: "next_follow_up_date" },
   { key: "owner", label: "Owner" },
   { key: "state", label: "State", sortKey: "billing_state" },
   { key: "industry", label: "Industry", sortKey: "industry" },
@@ -85,8 +86,12 @@ export function AccountsList() {
   // setPage(0) / setSearch (users on slow networks were losing
   // keystrokes on the list page).
   const [search, setSearch] = useDebouncedUrlState("q", "");
-  const [statusFilter, setStatusFilter] = useUrlArrayState("status");
   const [customerStatusFilter, setCustomerStatusFilter] = useUrlArrayState("customer");
+  // Sales working-state filters (status restructure): ?sales=active|inactive,
+  // ?sub=<comma-list of sales_status values>, ?follow_up=due|overdue.
+  const [salesFilter, setSalesFilter] = useUrlState("sales", "all");
+  const [subStatusFilter, setSubStatusFilter] = useUrlArrayState("sub");
+  const [followUpFilter, setFollowUpFilter] = useUrlState("follow_up", "all");
   const [ownerFilter, setOwnerFilter] = useUrlArrayState("owner");
   const [industryFilter, setIndustryFilter] = useUrlArrayState("industry");
   const [stateFilter, setStateFilter] = useUrlArrayState("state");
@@ -105,8 +110,12 @@ export function AccountsList() {
 
   const { data: result, isLoading, isError, isFetching, refetch } = useAccounts({
     search: search || undefined,
-    status: statusFilter.length > 0 ? statusFilter : undefined,
     customerStatus: customerStatusFilter.length > 0 ? customerStatusFilter : undefined,
+    salesActive:
+      salesFilter === "active" ? "true" : salesFilter === "inactive" ? "false" : undefined,
+    salesStatus: subStatusFilter.length > 0 ? subStatusFilter : undefined,
+    followUp:
+      followUpFilter === "due" || followUpFilter === "overdue" ? followUpFilter : undefined,
     ownerId: ownerFilter.length > 0 ? ownerFilter : undefined,
     industryCategory: industryFilter.length > 0 ? industryFilter : undefined,
     billingState: stateFilter.length > 0 ? stateFilter : undefined,
@@ -142,10 +151,6 @@ export function AccountsList() {
     // object, but the debounced useDebouncedUrlState serializes its
     // own writes so there's no race with this one.
     if (page !== 0) setPage(0);
-  };
-  const handleStatusChange = (value: string[]) => {
-    setStatusFilter(value);
-    setPage(0);
   };
   const handleIndustryChange = (value: string[]) => {
     setIndustryFilter(value);
@@ -240,8 +245,10 @@ export function AccountsList() {
   // first account".
   const hasActiveFilters =
     !!search ||
-    statusFilter.length > 0 ||
     customerStatusFilter.length > 0 ||
+    salesFilter !== "all" ||
+    subStatusFilter.length > 0 ||
+    followUpFilter !== "all" ||
     ownerFilter.length > 0 ||
     industryFilter.length > 0 ||
     stateFilter.length > 0 ||
@@ -283,9 +290,6 @@ export function AccountsList() {
           : "—"}
       </span>
     ),
-    status: (a) => (
-      <StatusBadge value={a.status} variant="status" label={statusLabel(a.status)} />
-    ),
     customer_status: (a) => (
       <StatusBadge
         value={a.customer_status}
@@ -293,6 +297,28 @@ export function AccountsList() {
         label={customerStatusLabel(a.customer_status)}
       />
     ),
+    sales: (a) => (
+      <StatusBadge
+        value={a.sales_active ? a.sales_status ?? "" : "inactive"}
+        variant="salesStatus"
+        label={
+          a.sales_active
+            ? a.sales_status
+              ? salesStatusLabel(a.sales_status)
+              : "Active"
+            : "Inactive"
+        }
+      />
+    ),
+    next_follow_up: (a) => {
+      if (!a.next_follow_up_date) return <span className="text-muted-foreground">—</span>;
+      const overdue = (daysUntil(a.next_follow_up_date) ?? 0) < 0;
+      return (
+        <span className={overdue ? "text-red-600 dark:text-red-400 font-medium" : "text-muted-foreground"}>
+          {formatDate(a.next_follow_up_date)}
+        </span>
+      );
+    },
     owner: (a) => (
       <span className="text-muted-foreground">{a.owner?.full_name ?? "Unassigned"}</span>
     ),
@@ -343,33 +369,69 @@ export function AccountsList() {
           />
         </div>
         <MultiSelect
-          value={statusFilter}
-          onChange={handleStatusChange}
-          placeholder="All Statuses"
-          triggerClassName="w-40"
-          options={[
-            { value: "discovery", label: "Discovery" },
-            { value: "pending", label: "Pending" },
-            { value: "active", label: "Active" },
-            { value: "inactive", label: "Inactive" },
-            { value: "churned", label: "Churned" },
-          ]}
-        />
-
-        <MultiSelect
           value={customerStatusFilter}
           onChange={(v) => {
             setCustomerStatusFilter(v);
             setPage(0);
           }}
-          placeholder="Customer Status"
+          placeholder="Account Status"
           triggerClassName="w-44"
           options={[
-            { value: "client", label: "Client" },
+            { value: "client", label: "Customer" },
             { value: "prospect", label: "Prospect" },
-            { value: "former_client", label: "Former Client" },
+            { value: "former_client", label: "Former Customer" },
           ]}
         />
+
+        <Select
+          value={salesFilter}
+          onValueChange={(v) => {
+            setSalesFilter(v);
+            setPage(0);
+          }}
+        >
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="Sales Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Sales</SelectItem>
+            <SelectItem value="active">Sales Active</SelectItem>
+            <SelectItem value="inactive">Sales Inactive</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <MultiSelect
+          value={subStatusFilter}
+          onChange={(v) => {
+            setSubStatusFilter(v);
+            setPage(0);
+          }}
+          placeholder="Sub-Status"
+          triggerClassName="w-44"
+          options={[
+            { value: "prospecting", label: salesStatusLabel("prospecting") },
+            { value: "identified_outreach", label: salesStatusLabel("identified_outreach") },
+            { value: "engaged", label: salesStatusLabel("engaged") },
+            { value: "nurture", label: salesStatusLabel("nurture") },
+          ]}
+        />
+
+        <Select
+          value={followUpFilter}
+          onValueChange={(v) => {
+            setFollowUpFilter(v);
+            setPage(0);
+          }}
+        >
+          <SelectTrigger className="w-44">
+            <SelectValue placeholder="Follow Up" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Follow Ups</SelectItem>
+            <SelectItem value="due">Due (next 7 days)</SelectItem>
+            <SelectItem value="overdue">Overdue</SelectItem>
+          </SelectContent>
+        </Select>
 
         <MultiSelect
           value={ownerFilter}

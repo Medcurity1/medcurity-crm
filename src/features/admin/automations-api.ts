@@ -204,6 +204,9 @@ export interface RenewalAuditRow {
   contract_length_months: number | null;
   contract_year: number | null;
   cycle_count: number | null;
+  // v_renewal_audit keeps this column NAMED lifecycle_status for shape
+  // stability, but it is now sourced from accounts.customer_status
+  // (values: client / prospect / former_client). Label via customerStatusLabel.
   lifecycle_status: string | null;
   renewal_type: string | null;
   auto_renew: boolean | null;
@@ -321,7 +324,7 @@ export interface RenewalPreviewRow {
     | "anniversary_outside_window"
     | "before_baseline"
     | "has_live_renewal"
-    | "account_not_active"
+    | "account_not_customer"
     | "account_do_not_auto_renew"
     | "one_time_project"
     | "no_close_date"
@@ -371,7 +374,7 @@ export function useRenewalPreview() {
 
 /**
  * Lightweight account picker for the test_account_id selector. We
- * deliberately don't filter by lifecycle_status here — Brayden's test
+ * deliberately don't filter by customer_status here — Brayden's test
  * account may be a prospect with one manually-flipped closed_won opp.
  */
 export function useAccountsForPicker() {
@@ -380,7 +383,7 @@ export function useAccountsForPicker() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("accounts")
-        .select("id, name, lifecycle_status")
+        .select("id, name, customer_status")
         .is("archived_at", null)
         .order("name", { ascending: true })
         .limit(2000);
@@ -388,7 +391,7 @@ export function useAccountsForPicker() {
       return (data ?? []) as Array<{
         id: string;
         name: string;
-        lifecycle_status: string | null;
+        customer_status: string | null;
       }>;
     },
   });

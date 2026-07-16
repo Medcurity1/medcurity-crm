@@ -56,6 +56,13 @@ interface Conn {
   token_expires_at: string | null;
 }
 
+interface FollowUpRow {
+  id: string;
+  name: string | null;
+  sales_status: string | null;
+  next_follow_up_date: string; // DATE column — already YYYY-MM-DD
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -127,24 +134,55 @@ function taskRowHtml(t: TaskRow): string {
   ].join("");
 }
 
-function buildDigestHtml(overdue: TaskRow[], dueToday: TaskRow[]): string {
-  const section = (title: string, color: string, rows: TaskRow[]) =>
-    rows.length === 0
+function followUpRowHtml(a: FollowUpRow, todayP: string): string {
+  const overdue = a.next_follow_up_date < todayP;
+  const dateLabel = new Date(`${a.next_follow_up_date}T12:00:00Z`).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+  return [
+    `<tr><td style="padding:10px 0;border-bottom:1px solid #eef1f5">`,
+    `<a href="${APP_BASE}/accounts/${a.id}" style="color:#127ebf;text-decoration:none;font-weight:bold;font-size:14px">${escapeHtml(a.name ?? "Account")}</a>`,
+    `<div style="font-size:12px;color:${overdue ? "#b91c1c" : "#888"};margin-top:2px">`,
+    overdue ? `Overdue &middot; was due ${escapeHtml(dateLabel)}` : `Follow up ${escapeHtml(dateLabel)}`,
+    a.sales_status ? ` &middot; ${escapeHtml(a.sales_status.replace(/_/g, " "))}` : "",
+    `</div></td></tr>`,
+  ].join("");
+}
+
+function buildDigestHtml(
+  overdue: TaskRow[],
+  dueToday: TaskRow[],
+  followUps: FollowUpRow[],
+  todayP: string,
+): string {
+  const section = (title: string, color: string, rowsHtml: string, count: number) =>
+    count === 0
       ? ""
-      : `<h3 style="margin:18px 0 2px;font-size:13px;color:${color};text-transform:uppercase;letter-spacing:.5px">${title} (${rows.length})</h3>` +
-        `<table style="width:100%;border-collapse:collapse">${rows.map(taskRowHtml).join("")}</table>`;
+      : `<h3 style="margin:18px 0 2px;font-size:13px;color:${color};text-transform:uppercase;letter-spacing:.5px">${title} (${count})</h3>` +
+        `<table style="width:100%;border-collapse:collapse">${rowsHtml}</table>`;
 
   return [
     `<div style="margin:0 auto;max-width:560px;font-family:Arial,Helvetica,sans-serif">`,
     `<div style="background:#14181f;border-radius:10px 10px 0 0;padding:13px 24px">`,
     `<span style="font-size:19px;font-weight:bold;color:#dfe6ef;letter-spacing:1px">Pulse</span>`,
-    `<span style="float:right;color:#8d99ad;font-size:12px;line-height:23px">Daily task digest</span>`,
+    `<span style="float:right;color:#8d99ad;font-size:12px;line-height:23px">Daily digest</span>`,
     `</div>`,
     `<div style="border:1px solid #e2e6ec;border-top:0;border-radius:0 0 10px 10px;padding:22px 24px;background:#ffffff">`,
     `<p style="margin:0 0 6px;font-size:14px;color:#444">Here's what's on your plate today.</p>`,
-    section("Overdue", "#b91c1c", overdue),
-    section("Due today", "#1d4ed8", dueToday),
+    section("Overdue", "#b91c1c", overdue.map(taskRowHtml).join(""), overdue.length),
+    section("Due today", "#1d4ed8", dueToday.map(taskRowHtml).join(""), dueToday.length),
+    section(
+      "Account follow-ups due",
+      "#0e7c7b",
+      followUps.map((a) => followUpRowHtml(a, todayP)).join(""),
+      followUps.length,
+    ),
     `<a href="${APP_BASE}/activities?type=task&owner=me" style="display:inline-block;margin-top:18px;background:#1d4ed8;color:#ffffff;padding:10px 26px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:bold">View all my tasks</a>`,
+    followUps.length > 0
+      ? `<a href="${APP_BASE}/accounts?follow_up=due&sales=active" style="display:inline-block;margin-top:18px;margin-left:10px;color:#0e7c7b;padding:10px 12px;text-decoration:none;font-size:14px;font-weight:bold">View follow-ups &rarr;</a>`
+      : "",
     `<p style="margin:18px 0 0;font-size:11px;color:#9aa3af">Daily digest from Pulse. Turn this off any time in My Settings &rarr; Notifications.</p>`,
     `</div></div>`,
   ].join("");
@@ -182,6 +220,7 @@ async function digestForUser(
   supabase: SupabaseClient,
   userId: string,
   todayP: string,
+  includeFollowUps: boolean,
 ): Promise<"sent" | "no_tasks" | "no_outlook" | "error"> {
   const { data: tasks } = await supabase
     .from("activities")
@@ -196,7 +235,25 @@ async function digestForUser(
   const due = ((tasks ?? []) as unknown as TaskRow[]).filter(
     (t) => t.due_at && pacificYMD(new Date(t.due_at)) <= todayP,
   );
-  if (due.length === 0) return "no_tasks";
+
+  // Account follow-ups due (account restructure, Summer Q6): DATE column,
+  // so plain string compare against the Pacific YMD is correct.
+  let followUps: FollowUpRow[] = [];
+  if (includeFollowUps) {
+    const { data: fuRows } = await supabase
+      .from("accounts")
+      .select("id, name, sales_status, next_follow_up_date")
+      .eq("owner_user_id", userId)
+      .eq("sales_active", true)
+      .is("archived_at", null)
+      .not("next_follow_up_date", "is", null)
+      .lte("next_follow_up_date", todayP)
+      .order("next_follow_up_date", { ascending: true })
+      .limit(50);
+    followUps = (fuRows ?? []) as FollowUpRow[];
+  }
+
+  if (due.length === 0 && followUps.length === 0) return "no_tasks";
 
   const overdue = due.filter((t) => pacificYMD(new Date(t.due_at!)) < todayP);
   const dueToday = due.filter((t) => pacificYMD(new Date(t.due_at!)) === todayP);
@@ -212,8 +269,11 @@ async function digestForUser(
     return "no_outlook";
   }
 
-  const subject = `Your tasks for today (${due.length})`;
-  const html = buildDigestHtml(overdue, dueToday);
+  const subject =
+    followUps.length > 0
+      ? `Your day: ${due.length} task${due.length === 1 ? "" : "s"}, ${followUps.length} follow-up${followUps.length === 1 ? "" : "s"}`
+      : `Your tasks for today (${due.length})`;
+  const html = buildDigestHtml(overdue, dueToday, followUps, todayP);
   try {
     const token = await ensureValidOutlookToken(supabase, conn as Conn);
     let res = await sendMail(token, conn.email_address, subject, html);
@@ -239,7 +299,9 @@ serve(async () => {
     { auth: { persistSession: false } },
   );
 
-  // Everyone who opted into the daily digest.
+  // Everyone who opted into the daily digest. follow_up_due_digest is a
+  // second, default-on pref gating just the account follow-ups section
+  // (Summer Q6: both channels optional).
   const { data: prefRows } = await supabase
     .from("user_notification_prefs")
     .select("user_id, prefs");
@@ -248,12 +310,18 @@ serve(async () => {
       const v = (r.prefs ?? {})["email_task_digest"];
       return v === true || v === "true";
     })
-    .map((r) => r.user_id as string);
+    .map((r) => ({
+      userId: r.user_id as string,
+      includeFollowUps: (() => {
+        const v = (r.prefs ?? {})["follow_up_due_digest"];
+        return !(v === false || v === "false");
+      })(),
+    }));
 
   const todayP = pacificYMD(new Date());
   const out = { candidates: digestUsers.length, sent: 0, no_tasks: 0, no_outlook: 0, error: 0 };
-  for (const userId of digestUsers) {
-    const r = await digestForUser(supabase, userId, todayP);
+  for (const u of digestUsers) {
+    const r = await digestForUser(supabase, u.userId, todayP, u.includeFollowUps);
     out[r]++;
   }
 

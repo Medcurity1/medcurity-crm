@@ -72,6 +72,24 @@ const SYSTEM_FIELDS = new Set<string>([
   "lifecycle_source",
   "lifecycle_status_override",
   "lifecycle_status_override_reason",
+  // Derived/automated status fields the account form never submits —
+  // requiring one would block every account create (customer_status is
+  // computed from deal history; status is being retired and its form
+  // field is gone; the overrides are popup-managed). NOTE: SYSTEM_FIELDS
+  // is name-based across entities, so this also hides leads.status —
+  // fine: it's default-valued, requiring it was always a no-op, and
+  // leads are slated for removal.
+  "status",
+  "lifecycle_status",
+  "customer_status",
+  "customer_status_override",
+  "customer_status_override_reason",
+  "customer_status_override_at",
+  "customer_status_override_by",
+  "customer_status_derived_at",
+  // Sales toggle is a boolean with a default; "required" is meaningless
+  // and the toggle-off flow would fight it.
+  "sales_active",
   // Big jsonb blob — managed via Custom Fields admin, not required-fields
   "custom_fields",
   // External-system IDs (SF migration leftovers; not user-edited)

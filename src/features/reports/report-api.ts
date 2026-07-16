@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import type { ReportConfig, ReportFilter, SavedReport } from "@/types/crm";
-import { getEntityDef, getColumnDef } from "./report-config";
+import { getEntityDef, getColumnDef, type ReportFilterOperator } from "./report-config";
 import { useAuth } from "@/features/auth/AuthProvider";
 
 // ---------------------------------------------------------------------------
@@ -218,6 +218,19 @@ function resolveFilterField(entityKey: string, field: string): string {
   return fkMap[entityKey]?.[field] ?? field;
 }
 
+/**
+ * Local YYYY-MM-DD offset by N days. The relative-date operators compare
+ * date columns against date literals (not timestamps) so "today" means the
+ * user's local day — the same local-time rule resolveRange() follows.
+ */
+function localYMD(offsetDays: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function applyFilter(
   query: any,
@@ -227,7 +240,9 @@ function applyFilter(
   const field = resolveFilterField(entityKey, filter.field);
   const value = filter.value;
 
-  switch (filter.operator) {
+  // Cast: relative-date ops aren't in crm.ts's ReportFilter union yet (see
+  // ReportFilterOperator in report-config.ts) but arrive via saved JSON.
+  switch (filter.operator as ReportFilterOperator) {
     case "eq":
       return query.eq(field, value);
     case "neq":
@@ -254,6 +269,15 @@ function applyFilter(
       if (inVals.length === 0) return query;
       return query.in(field, inVals);
     }
+    case "due_within_days": {
+      // Relative window: today .. today+N inclusive. Non-numeric N = no-op.
+      const days = Number(value);
+      if (!Number.isFinite(days) || days < 0) return query;
+      return query.gte(field, localYMD(0)).lte(field, localYMD(days));
+    }
+    case "overdue":
+      // Strictly before today; NULLs never satisfy <, so they're excluded.
+      return query.lt(field, localYMD(0));
     case "is_null":
       return query.is(field, null);
     case "is_not_null":
@@ -288,10 +312,16 @@ async function runReportQuery(config: ReportConfig): Promise<ReportResult> {
     query = applyFilter(query, config.entity, filter);
   }
 
-  // Apply sort
-  if (config.sort?.field) {
-    const colDef = getColumnDef(config.entity, config.sort.field);
-    const sortField = colDef?.joinTable
+  // Apply sort — guard against a stale sort field that no longer maps to a
+  // registered column (e.g. a saved report sorted by a since-retired column
+  // like the old accounts.status/lifecycle_status). An unknown field passed
+  // to PostgREST .order() 400s the ENTIRE report, so fall back to the default
+  // sort when the field isn't in the registry.
+  const displaySortDef = config.sort?.field
+    ? getColumnDef(config.entity, config.sort.field)
+    : undefined;
+  if (config.sort?.field && displaySortDef) {
+    const sortField = displaySortDef.joinTable
       ? resolveFilterField(config.entity, config.sort.field)
       : config.sort.field;
     query = query.order(sortField, { ascending: config.sort.direction === "asc" });
@@ -336,9 +366,13 @@ export async function fetchAllReportRows(
     for (const filter of config.filters) {
       query = applyFilter(query, config.entity, filter);
     }
-    if (config.sort?.field) {
-      const colDef = getColumnDef(config.entity, config.sort.field);
-      const sortField = colDef?.joinTable
+    // Same stale-sort-field guard as fetchReportData (a retired column must
+    // not reach .order() and 400 the export).
+    const exportSortDef = config.sort?.field
+      ? getColumnDef(config.entity, config.sort.field)
+      : undefined;
+    if (config.sort?.field && exportSortDef) {
+      const sortField = exportSortDef.joinTable
         ? resolveFilterField(config.entity, config.sort.field)
         : config.sort.field;
       query = query.order(sortField, { ascending: config.sort.direction === "asc" });
