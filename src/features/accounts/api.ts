@@ -28,13 +28,37 @@ interface AccountFilters {
   sortDirection?: "asc" | "desc";
 }
 
+// Sortable account columns. The sort key comes straight from the URL
+// (?sort=…), which can be stale — a bookmarked link, an open tab, or a
+// saved view created when a now-retired column (e.g. the old 'status' /
+// 'lifecycle_status') was sortable. An unknown column passed to PostgREST
+// .order() 400s and breaks the ENTIRE list, so anything not on this list
+// falls back to name rather than reaching the query.
+const SORTABLE_ACCOUNT_COLUMNS = new Set([
+  "name",
+  "phone",
+  "customer_status",
+  "sales_status",
+  "next_follow_up_date",
+  "billing_state",
+  "industry",
+  "created_at",
+  "updated_at",
+  "fte_count",
+  "employees",
+  "annual_revenue",
+]);
+
 export function useAccounts(filters?: AccountFilters) {
   return useQuery({
     queryKey: ["accounts", filters],
     queryFn: async () => {
       const page = filters?.page ?? 0;
       const pageSize = filters?.pageSize ?? 25;
-      const sortCol = filters?.sortColumn ?? "name";
+      const requestedSort = filters?.sortColumn ?? "name";
+      const sortCol = SORTABLE_ACCOUNT_COLUMNS.has(requestedSort)
+        ? requestedSort
+        : "name";
       const sortAsc = (filters?.sortDirection ?? "asc") === "asc";
       let query = supabase
         .from("accounts")

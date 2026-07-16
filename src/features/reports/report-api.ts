@@ -312,10 +312,16 @@ async function runReportQuery(config: ReportConfig): Promise<ReportResult> {
     query = applyFilter(query, config.entity, filter);
   }
 
-  // Apply sort
-  if (config.sort?.field) {
-    const colDef = getColumnDef(config.entity, config.sort.field);
-    const sortField = colDef?.joinTable
+  // Apply sort — guard against a stale sort field that no longer maps to a
+  // registered column (e.g. a saved report sorted by a since-retired column
+  // like the old accounts.status/lifecycle_status). An unknown field passed
+  // to PostgREST .order() 400s the ENTIRE report, so fall back to the default
+  // sort when the field isn't in the registry.
+  const displaySortDef = config.sort?.field
+    ? getColumnDef(config.entity, config.sort.field)
+    : undefined;
+  if (config.sort?.field && displaySortDef) {
+    const sortField = displaySortDef.joinTable
       ? resolveFilterField(config.entity, config.sort.field)
       : config.sort.field;
     query = query.order(sortField, { ascending: config.sort.direction === "asc" });
@@ -360,9 +366,13 @@ export async function fetchAllReportRows(
     for (const filter of config.filters) {
       query = applyFilter(query, config.entity, filter);
     }
-    if (config.sort?.field) {
-      const colDef = getColumnDef(config.entity, config.sort.field);
-      const sortField = colDef?.joinTable
+    // Same stale-sort-field guard as fetchReportData (a retired column must
+    // not reach .order() and 400 the export).
+    const exportSortDef = config.sort?.field
+      ? getColumnDef(config.entity, config.sort.field)
+      : undefined;
+    if (config.sort?.field && exportSortDef) {
+      const sortField = exportSortDef.joinTable
         ? resolveFilterField(config.entity, config.sort.field)
         : config.sort.field;
       query = query.order(sortField, { ascending: config.sort.direction === "asc" });
