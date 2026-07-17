@@ -10,6 +10,8 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Queued / requested
 
+- [QUEUED] 2026-07-17 · Nathan · Reports based on tags ("soon" project): let the main Reports tab filter/group by contact tags (today tags only report via the Contacts-list filter+export and the Nexus custom-report widget).
+
 - [STAGING] 2026-07-17 · Nathan · Jordan-list promotion prep — BUILT + VERIFIED end-to-end on staging (commit c2f9c35; test: email-only CSV → lead matched → promoted → contact tagged + filterable, test tag deleted after): (a) tag-on-promote in Bulk Promote From File (p_tag_ids on bulk_promote_imports, TagPicker w/ create-new in dialog); (b) email-or-ID matching (resolve_lead_ids_by_email, mirrors Bulk Archive); (c) archive_lead_as_duplicate now fills the keeper contact's blank fields from the dupe lead + ORs do-not-contact; (d) NEW Admin → Tags manager (usage counts via tag_usage_counts, rename, delete) — answers "where do I see/delete all tags"; (e) AddToListDialog placeholder de-personalized. Run plan for Jordan's list: upload → preview → promote with batch tag → sweep skipped dupes in Admin → Data Cleanup.
 
 - [QUEUED] 2026-07-17 · Nathan · Deploy-proof stale tabs: version-check banner/auto-recover so open tabs never glitch after a deploy. IMPORTANT (Nathan, 7/17): a plain refresh did NOT fix his Safari — cached assets survived reloads until website data was manually removed — so the fix must actually purge cached files (cache-busted asset URLs verified fresh, or Clear-Site-Data header on a recovery endpoint), not just call location.reload(). Deferred by Nathan to "sometime in the future".
@@ -25,6 +27,8 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 - [QUEUED] 2026-07-10 · (found while wiring pg_cron, migration 20260710178000) · task-digest per-day send dedup: function has no idempotency guard (docs/audit/2026-06-24-full-audit.md), which is why its GitHub Actions schedule trigger was removed rather than kept redundant. Add a same-day guard (e.g. task_digest_log(user_id, digest_date) checked before send) so the GH schedule can be safely restored as a true backup, matching sync-emails/meddy-sweep/task-reminders · supabase/functions/task-digest/index.ts:235-263
 
 ## Ideas / someday
+
+- [IDEA] 2026-07-17 · Nathan · AI smart lists: Ask AI assembles/curates a call list from natural language ("every non-customer in Washington", etc.) — lists over reports because membership can be edited without touching contact data. Builds on the tags + lists + reports infrastructure; ties into the CRM AI layer idea below. Nathan: "if it's somewhat ai powered in the future and extra easy to use that could be super cool."
 
 - [IDEA] 2026-07-11 · Nathan · Account Snake mini-game (classic snake; eat accounts to grow your book of business; hide on the Accounts nav label) — Deal Merger won the pick, Nathan said snake "maybe another time"
 - [IDEA] 2026-07-08 · Molly · FTE autofill reverse direction (opportunity → account) — one-way account→opp shipped; Molly's original ask was bidirectional
