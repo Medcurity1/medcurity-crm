@@ -147,3 +147,67 @@ export function useRemoveTag() {
     onSuccess: () => invalidateTagViews(qc),
   });
 }
+
+/** Usage counts for every tag (Admin → Tags). Server-side aggregate so
+ * counts stay exact past PostgREST's row cap. */
+export function useTagUsageCounts() {
+  return useQuery({
+    queryKey: ["tag-usage-counts"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("tag_usage_counts");
+      if (error) throw error;
+      const map = new Map<string, number>();
+      for (const r of (data ?? []) as { tag_id: string; uses: number }[]) {
+        map.set(r.tag_id, Number(r.uses));
+      }
+      return map;
+    },
+  });
+}
+
+/** Rename / recolor a tag (Admin → Tags). Renames propagate everywhere the
+ * tag is applied, since contacts reference the tag id. */
+export function useUpdateTag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, name, color }: { id: string; name?: string; color?: string | null }) => {
+      const patch: Record<string, unknown> = {};
+      if (name !== undefined) {
+        const trimmed = name.trim();
+        if (!trimmed) throw new Error("Tag name is required");
+        patch.name = trimmed;
+      }
+      if (color !== undefined) patch.color = color;
+      const { data, error } = await supabase
+        .from("tags")
+        .update(patch)
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data as Tag;
+    },
+    onSuccess: (qcData, _vars) => {
+      void qcData;
+      qc.invalidateQueries({ queryKey: ["tags"] });
+      invalidateTagViews(qc);
+    },
+  });
+}
+
+/** Delete a tag entirely (Admin → Tags). contact_tags rows cascade, so the
+ * tag silently disappears from every contact it was applied to. */
+export function useDeleteTag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("tags").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tags"] });
+      qc.invalidateQueries({ queryKey: ["tag-usage-counts"] });
+      invalidateTagViews(qc);
+    },
+  });
+}

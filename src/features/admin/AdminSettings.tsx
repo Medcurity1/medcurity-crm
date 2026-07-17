@@ -19,6 +19,7 @@ import { SystemInfo } from "./SystemInfo";
 import { RequestsInbox } from "@/features/requests/RequestsInbox";
 import { RoutingEditor } from "@/features/requests/RoutingEditor";
 import { AiAssistantAdmin } from "./AiAssistantAdmin";
+import { TagManager } from "@/features/tags/TagManager";
 import { Loader2 } from "lucide-react";
 
 // The heaviest admin panels are lazy-loaded (with a Suspense boundary around
@@ -43,6 +44,7 @@ const NexusAdminPanel = lazy(() => import("@/features/nexus/NexusAdminPanel").th
  */
 const TOP_TABS = [
   "object-manager",
+  "tags",
   "users",
   "permissions",
   "integrations",
@@ -243,6 +245,9 @@ export function AdminSettings() {
         </div>)}
 
         {/* ---------- USERS / PERMISSIONS ---------- */}
+        {/* ---------- TAGS ---------- */}
+        {activeTab === "tags" && <TagManager />}
+
         {activeTab === "users" && (<div>
           <Card className="p-6">
             <div className="space-y-1 mb-6">

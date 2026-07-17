@@ -19,6 +19,7 @@ import {
   TextCursorInput,
   ListChecks,
   Asterisk,
+  Tags as TagsIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -55,7 +56,10 @@ const OBJECT_MANAGER_SUB_ITEMS: NavItem[] = [
 const NAV_GROUPS: NavGroup[] = [
   {
     label: "Data model",
-    items: [{ value: "object-manager", label: "Object Manager", icon: Database }],
+    items: [
+      { value: "object-manager", label: "Object Manager", icon: Database },
+      { value: "tags", label: "Tags", icon: TagsIcon },
+    ],
   },
   {
     label: "People & access",

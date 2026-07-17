@@ -329,7 +329,7 @@ function ImportsList() {
         `and its history follows it. Duplicates of existing contacts are skipped automatically.`,
     )) return;
     try {
-      const r = await bulkPromoteMutation.mutateAsync(Array.from(selectedIds));
+      const r = await bulkPromoteMutation.mutateAsync({ ids: Array.from(selectedIds) });
       setSelectedIds(new Set());
       const parts = [`${r.promoted} promoted`];
       if (r.skipped_duplicate) parts.push(`${r.skipped_duplicate} skipped (already a contact)`);

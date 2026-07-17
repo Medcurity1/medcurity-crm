@@ -268,9 +268,17 @@ export interface BulkPromoteResult {
 export function useBulkPromoteImports() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (ids: string[]): Promise<BulkPromoteResult> => {
+    mutationFn: async ({
+      ids,
+      tagIds,
+    }: {
+      ids: string[];
+      /** Optional batch-tracking tags applied to every contact created. */
+      tagIds?: string[];
+    }): Promise<BulkPromoteResult> => {
       const { data, error } = await supabase.rpc("bulk_promote_imports", {
         p_lead_ids: ids,
+        p_tag_ids: tagIds?.length ? tagIds : null,
       });
       if (error) throw error;
       return data as BulkPromoteResult;
@@ -449,4 +457,22 @@ export function useUsers() {
       return data;
     },
   });
+}
+
+/**
+ * Resolve lead ids from a list of emails (Bulk Promote From File accepts
+ * either column — Jordan's clean lists come back keyed by email). Admin-only
+ * RPC, case-insensitive, chunked to keep each call snappy.
+ */
+export async function resolveLeadIdsByEmail(emails: string[]): Promise<string[]> {
+  const out = new Set<string>();
+  const CHUNK = 2000;
+  for (let i = 0; i < emails.length; i += CHUNK) {
+    const { data, error } = await supabase.rpc("resolve_lead_ids_by_email", {
+      p_emails: emails.slice(i, i + CHUNK),
+    });
+    if (error) throw error;
+    for (const id of (data ?? []) as string[]) out.add(id);
+  }
+  return [...out];
 }
