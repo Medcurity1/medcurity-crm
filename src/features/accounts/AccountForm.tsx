@@ -428,7 +428,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
     // Conditional, not in required_field_config — only applies to partners.
     if ((values.account_type ?? "").startsWith("Partner") && !values.partner_type) {
       toast.error(
-        "Partner Type is required for partner accounts — pick one in the Partner Information section."
+        "Partner Type is required for partner accounts — pick one in the Partner details box under the Partner checkbox."
       );
       return;
     }
@@ -607,6 +607,55 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                     Account Status on the account).
                   </p>
                 </div>
+
+                {/* ---- Partner details (Summer 7/16): shown only when the
+                     Partner box is checked, right where it's checked. Replaces
+                     the old bottom "Partner Information" section. ---- */}
+                {(watch("account_type") ?? "").startsWith("Partner") && (
+                  <div className="md:col-span-2 rounded-md border border-border bg-muted/30 p-4 space-y-4">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      Partner details
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="partnership_status">Partnership Status</Label>
+                        <PicklistSelect
+                          id="partnership_status"
+                          fieldKey="accounts.partnership_status"
+                          value={watch("partnership_status") ?? ""}
+                          onChange={(v) => setValue("partnership_status", v ?? "")}
+                          allowClear
+                          placeholder="Select status…"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="partner_type">
+                          {/* Always required here — this box only renders for
+                              partner accounts (Rachel's rule). */}
+                          Partner Type
+                          <span className="text-destructive ml-0.5">*</span>
+                        </Label>
+                        <PicklistSelect
+                          id="partner_type"
+                          fieldKey="accounts.partner_type"
+                          value={watch("partner_type") ?? ""}
+                          onChange={(v) => setValue("partner_type", v ?? "")}
+                          allowClear
+                          placeholder="Select type…"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="relationship_notes">Relationship Notes</Label>
+                      <Textarea
+                        id="relationship_notes"
+                        rows={4}
+                        placeholder="Partnership plan, history, and next steps with this partner…"
+                        {...register("relationship_notes")}
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {/* Account Number field removed from the form (Summer: not
                     needed). It's still auto-assigned by the DB trigger and the
@@ -1006,28 +1055,27 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
               </div>
             </CollapsibleFormSection>
 
-            {/* ---- 6. Partner Information (collapsible) ---- */}
-            <CollapsibleFormSection title="Partner Information">
+            {/* ---- Former "Partner Information" section removed (Summer
+                 7/16): partnership_status / partner_type / relationship_notes
+                 now live under the Partner checkbox in Basic Information;
+                 lead_source + lead_source_detail moved to Additional
+                 Information below. partner_account + partner_prospect were
+                 dropped from the form entirely (unused per Summer) — the
+                 columns and their data are untouched, same pattern as the
+                 Account Number removal. ---- */}
+
+            {/* ---- 7. Additional Information (collapsible, collapsed by default)
+                 Priority Account moved up to Basic Information for visibility. ---- */}
+            <CollapsibleFormSection title="Additional Information" defaultOpen={false}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="partner_account">Partner Account<RequiredIndicator fieldKey="partner_account" requiredFields={requiredKeys} /></Label>
-                  <Input id="partner_account" {...register("partner_account")} />
-                </div>
-                <div className="flex items-center gap-2 pt-6">
-                  <Checkbox
-                    id="partner_prospect"
-                    checked={watch("partner_prospect") ?? false}
-                    onCheckedChange={(v) => setValue("partner_prospect", v === true)}
-                  />
-                  <Label htmlFor="partner_prospect" className="text-sm font-normal cursor-pointer">
-                    Partner Prospect
-                  </Label>
-                </div>
                 <div className="space-y-2">
                   <Label>Lead Source<RequiredIndicator fieldKey="lead_source" requiredFields={requiredKeys} /></Label>
                   {/* Admin-managed picklist (Joe: Source = CHANNEL only — mql/sql
                       retired). Options seeded by 20260715150000; a stored legacy
-                      value still displays via PicklistSelect's "(legacy)" entry. */}
+                      value still displays via PicklistSelect's "(legacy)" entry.
+                      Moved here from the retired Partner Information section
+                      (Summer 7/16) — attribution is account-general, not
+                      partner-specific. */}
                   <PicklistSelect
                     fieldKey="accounts.lead_source"
                     value={watch("lead_source") ?? null}
@@ -1040,57 +1088,6 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                   <Label htmlFor="lead_source_detail">Lead Source Detail<RequiredIndicator fieldKey="lead_source_detail" requiredFields={requiredKeys} /></Label>
                   <Input id="lead_source_detail" {...register("lead_source_detail")} />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="partnership_status">Partnership Status</Label>
-                  <PicklistSelect
-                    id="partnership_status"
-                    fieldKey="accounts.partnership_status"
-                    value={watch("partnership_status") ?? ""}
-                    onChange={(v) => setValue("partnership_status", v ?? "")}
-                    allowClear
-                    placeholder="Select status…"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="partner_type">
-                    Partner Type
-                    {/* Conditionally required (Rachel's rule): only when the
-                        account is marked as a partner. Same mark as the other
-                        required fields so it's obvious BEFORE hitting Save. */}
-                    {(watch("account_type") ?? "").startsWith("Partner") && (
-                      <span className="text-destructive ml-0.5">
-                        *{" "}
-                        <span className="text-xs font-normal text-muted-foreground">
-                          (required for partners)
-                        </span>
-                      </span>
-                    )}
-                  </Label>
-                  <PicklistSelect
-                    id="partner_type"
-                    fieldKey="accounts.partner_type"
-                    value={watch("partner_type") ?? ""}
-                    onChange={(v) => setValue("partner_type", v ?? "")}
-                    allowClear
-                    placeholder="Select type…"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2 mt-4">
-                <Label htmlFor="relationship_notes">Relationship Notes</Label>
-                <Textarea
-                  id="relationship_notes"
-                  rows={4}
-                  placeholder="Partnership plan, history, and next steps with this partner…"
-                  {...register("relationship_notes")}
-                />
-              </div>
-            </CollapsibleFormSection>
-
-            {/* ---- 7. Additional Information (collapsible, collapsed by default)
-                 Priority Account moved up to Basic Information for visibility. ---- */}
-            <CollapsibleFormSection title="Additional Information" defaultOpen={false}>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Project Segment<RequiredIndicator fieldKey="project_segment" requiredFields={requiredKeys} /></Label>
                   <Select
