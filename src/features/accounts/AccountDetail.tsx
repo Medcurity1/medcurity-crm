@@ -11,6 +11,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { VerifiedBadge } from "@/components/VerifiedBadge";
 import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { SalesStatusControl } from "./SalesStatusControl";
 import { ArchiveDialog } from "@/components/ArchiveDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
 import { QueryError } from "@/components/QueryError";
@@ -32,7 +33,6 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   customerStatusLabel,
-  salesStatusLabel,
   formatDate,
   formatDateTime,
   formatCurrency,
@@ -102,22 +102,6 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
  * actively worked, "Active" if worked with no sub-status yet, and a grey
  * "Inactive" otherwise (the sub-status is kept as history but not shown).
  */
-function SalesStatusChip({
-  salesActive,
-  salesStatus,
-}: {
-  salesActive: boolean;
-  salesStatus: string | null;
-}) {
-  return (
-    <StatusBadge
-      value={salesActive ? salesStatus ?? "" : "inactive"}
-      variant="salesStatus"
-      label={salesActive ? (salesStatus ? salesStatusLabel(salesStatus) : "Active") : "Inactive"}
-    />
-  );
-}
-
 function EditableField({
   label,
   value,
@@ -310,10 +294,7 @@ export function AccountDetail() {
                 Partner
               </Badge>
             )}
-            <SalesStatusChip
-              salesActive={account.sales_active ?? false}
-              salesStatus={account.sales_status ?? null}
-            />
+            <SalesStatusControl account={account} />
             <Button variant="outline" size="sm" onClick={() => navigate(`/opportunities/new?account_id=${id}`)}>
               <Plus className="h-4 w-4 mr-1" />
               New Opportunity
@@ -419,10 +400,7 @@ export function AccountDetail() {
             <CardTitle className="text-xs text-muted-foreground font-medium">Sales Status</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
-            <SalesStatusChip
-              salesActive={account.sales_active ?? false}
-              salesStatus={account.sales_status ?? null}
-            />
+            <SalesStatusControl account={account} />
           </CardContent>
         </Card>
         <Card>
