@@ -453,7 +453,9 @@ function ProductForm() {
           placeholder={
             category === "bug"
               ? "What's broken, where it happens, and how to reproduce it if you can..."
-              : "What's the idea, the problem it solves, and any detail that helps the reviewer decide..."
+              : category === "enhancement"
+                ? "What's the idea, the problem it solves, and any detail that helps the reviewer decide..."
+                : "Describe what's broken or what you'd like improved..."
           }
         />
       </div>
@@ -462,7 +464,9 @@ function ProductForm() {
       <p className="text-xs text-muted-foreground">
         {category === "bug"
           ? "Bug reports skip review and are filed straight to the product team's Jira board, attachments included. The product team approves or denies from there."
-          : "Enhancements are reviewed inside the CRM. If approved, the request is filed to the product team's Jira board, attachments included."}
+          : category === "enhancement"
+            ? "Enhancements are reviewed inside the CRM. If approved, the request is filed to the product team's Jira board, attachments included."
+            : "Bugs go straight to the product team's Jira board; enhancements are reviewed and approved first."}
       </p>
       <div className="flex justify-end pt-2">
         <Button onClick={submit} disabled={create.isPending} className="gap-2">

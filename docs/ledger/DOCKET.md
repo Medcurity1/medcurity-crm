@@ -10,7 +10,7 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Queued / requested
 
-- [QUEUED] 2026-07-17 · Nathan · Deploy-proof stale tabs: "new version available — refresh" banner (or auto-reload) so open tabs never glitch after a deploy. Trigger: 2026-07-17 Safari incident (stale cached files post-restructure-deploy showed "Something went wrong / Importing a module script failed" until website data was cleared).
+- [QUEUED] 2026-07-17 · Nathan · Deploy-proof stale tabs: version-check banner/auto-recover so open tabs never glitch after a deploy. IMPORTANT (Nathan, 7/17): a plain refresh did NOT fix his Safari — cached assets survived reloads until website data was manually removed — so the fix must actually purge cached files (cache-busted asset URLs verified fresh, or Clear-Site-Data header on a recovery endpoint), not just call location.reload(). Deferred by Nathan to "sometime in the future".
 - [QUEUED] 2026-07-17 · Summer (via Nathan) · Batch of CRM change requests — Nathan to relay after Rachel's form change lands. Several already visible in the prod Requests widget (Rural Hospital industry option, delete/merge duplicate accounts, Notes field on Contacts, Active tab, ...).
 - [QUEUED] 2026-07-10 · (sweep follow-up) · Add per-day dedup guard to task-digest (task_digest_log(user_id, digest_date)) so the GH schedule can be restored as true redundancy alongside pg_cron without double-emailing reps
 - [QUEUED] 2026-07-10 · (found in prod verify) · Dedupe the Standard Price Book duplicate NULL-tier rows (pre-existing import quirk on the SRA; the BA SRA mirror inherited 11 identical $799 rows there — pricing correct, cosmetic only) · small idempotent migration
