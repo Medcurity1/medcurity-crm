@@ -81,7 +81,7 @@ import {
 import { useUpdateLead, useBulkUpdateOwner } from "@/features/leads/api";
 import { useUsers } from "@/features/accounts/api";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { formatDate } from "@/lib/formatters";
+import { formatDate, INDUSTRY_CATEGORY_OPTIONS } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import type { LeadList, LeadListMember, Lead } from "@/types/crm";
 
@@ -124,33 +124,10 @@ const RATING_OPTIONS = [
   { value: "cold", label: "❄️ Cold" },
 ];
 
-const INDUSTRY_OPTIONS = [
-  { value: "behavioral_health", label: "Behavioral Health" },
-  { value: "dental", label: "Dental" },
-  { value: "fqhc", label: "FQHC" },
-  { value: "healthcare_consulting", label: "Healthcare Consulting" },
-  { value: "healthcare_it_vendor", label: "Healthcare IT Vendor" },
-  { value: "home_health", label: "Home Health" },
-  { value: "hospice", label: "Hospice" },
-  { value: "hospital", label: "Hospital" },
-  { value: "imaging_center", label: "Imaging Center" },
-  { value: "insurance_payer", label: "Insurance / Payer" },
-  { value: "lab_services", label: "Lab Services" },
-  { value: "long_term_care", label: "Long-Term Care" },
-  { value: "managed_service_provider", label: "Managed Service Provider" },
-  { value: "medical_group", label: "Medical Group" },
-  { value: "pediatrics", label: "Pediatrics" },
-  { value: "pharmacy", label: "Pharmacy" },
-  { value: "public_health_agency", label: "Public Health Agency" },
-  { value: "rural_health_clinic", label: "Rural Health Clinic" },
-  { value: "skilled_nursing", label: "Skilled Nursing" },
-  { value: "specialty_clinic", label: "Specialty Clinic" },
-  { value: "telemedicine", label: "Telemedicine" },
-  { value: "tribal_health", label: "Tribal Health" },
-  { value: "urgent_care", label: "Urgent Care" },
-  { value: "other_healthcare", label: "Other Healthcare" },
-  { value: "other", label: "Other" },
-];
+// Shared, complete industry list (was a hand-maintained subset that was
+// missing rural_hospital and the whole May 6 enum expansion — Summer's
+// 2026-07-16 "Rural Hospital in the industry tab" request).
+const INDUSTRY_OPTIONS = INDUSTRY_CATEGORY_OPTIONS;
 
 const TIME_ZONE_OPTIONS = [
   { value: "eastern", label: "Eastern" },

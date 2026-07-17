@@ -13,7 +13,7 @@ import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { getMissingRequiredFields, formatFieldLabel } from "@/lib/requiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { accountSchema, type AccountFormValues } from "./schema";
-import { FTE_RANGES, employeesToFteRange } from "@/lib/formatters";
+import { FTE_RANGES, employeesToFteRange, INDUSTRY_CATEGORY_OPTIONS } from "@/lib/formatters";
 import { US_STATES } from "@/lib/us-states";
 import { looksLikeUsZip, zipToTimeZone } from "@/lib/us-zip";
 import { PhoneInput } from "@/components/PhoneInput";
@@ -691,95 +691,14 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                       <SelectValue placeholder="Select industry..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {/* Sorted alphabetically by display label so users
-                          can find values quickly. "None" pinned at top
-                          and "Other" / "Other Healthcare" pinned at the
-                          bottom intentionally. Full list mirrors the
-                          industry_category enum (see
-                          20260418000001_field_decisions_april_18.sql +
-                          20260506000002_industry_category_expand.sql). */}
+{/* "None" pinned at top; the full list derives from
+                          INDUSTRY_CATEGORY_OPTIONS (lib/formatters.ts) —
+                          alphabetical, catch-alls last, always complete
+                          vs the industry_category enum. */}
                       <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="accounting">Accounting</SelectItem>
-                      <SelectItem value="allergy_immunology">Allergy &amp; Immunology</SelectItem>
-                      <SelectItem value="anesthesiology">Anesthesiology</SelectItem>
-                      <SelectItem value="association">Association</SelectItem>
-                      <SelectItem value="audiology">Audiology</SelectItem>
-                      <SelectItem value="behavioral_health">Behavioral Health</SelectItem>
-                      <SelectItem value="business_associate">Business Associate</SelectItem>
-                      <SelectItem value="cardiology">Cardiology</SelectItem>
-                      <SelectItem value="chiropractic">Chiropractic</SelectItem>
-                      <SelectItem value="colon_rectal">Colon &amp; Rectal</SelectItem>
-                      <SelectItem value="community_health_center">Community Health Center</SelectItem>
-                      <SelectItem value="consulting">Consulting</SelectItem>
-                      <SelectItem value="dental">Dental</SelectItem>
-                      <SelectItem value="dermatology">Dermatology</SelectItem>
-                      <SelectItem value="direct_care">Direct Care</SelectItem>
-                      <SelectItem value="emergency_medicine">Emergency Medicine</SelectItem>
-                      <SelectItem value="endocrinology">Endocrinology</SelectItem>
-                      <SelectItem value="ent_otolaryngology">ENT / Otolaryngology</SelectItem>
-                      <SelectItem value="family_medicine">Family Medicine</SelectItem>
-                      <SelectItem value="fqhc">FQHC</SelectItem>
-                      <SelectItem value="gastroenterology">Gastroenterology</SelectItem>
-                      <SelectItem value="general_surgery">General Surgery</SelectItem>
-                      <SelectItem value="geriatrics">Geriatrics</SelectItem>
-                      <SelectItem value="government">Government</SelectItem>
-                      <SelectItem value="group_purchasing_organization">Group Purchasing Organization (GPO)</SelectItem>
-                      <SelectItem value="healthcare_consulting">Healthcare Consulting</SelectItem>
-                      <SelectItem value="healthcare_it_vendor">Healthcare IT Vendor</SelectItem>
-                      <SelectItem value="higher_education">Higher Education</SelectItem>
-                      <SelectItem value="home_health">Home Health</SelectItem>
-                      <SelectItem value="hospice">Hospice</SelectItem>
-                      <SelectItem value="hospital">Hospital</SelectItem>
-                      <SelectItem value="imaging_center">Imaging Center</SelectItem>
-                      <SelectItem value="insurance_payer">Insurance / Payer</SelectItem>
-                      <SelectItem value="internal_medicine">Internal Medicine</SelectItem>
-                      <SelectItem value="lab_services">Lab Services</SelectItem>
-                      <SelectItem value="long_term_care">Long-Term Care</SelectItem>
-                      <SelectItem value="managed_service_provider">Managed Service Provider</SelectItem>
-                      <SelectItem value="medical_device">Medical Device</SelectItem>
-                      <SelectItem value="medical_group">Medical Group</SelectItem>
-                      <SelectItem value="medical_practice">Medical Practice</SelectItem>
-                      <SelectItem value="mental_health">Mental Health</SelectItem>
-                      <SelectItem value="multi_specialty">Multi-Specialty</SelectItem>
-                      <SelectItem value="naturopathy">Naturopathy</SelectItem>
-                      <SelectItem value="nephrology">Nephrology</SelectItem>
-                      <SelectItem value="neurology">Neurology</SelectItem>
-                      <SelectItem value="non_profit">Non-Profit</SelectItem>
-                      <SelectItem value="oncology">Oncology</SelectItem>
-                      <SelectItem value="ophthalmology">Ophthalmology</SelectItem>
-                      <SelectItem value="optometry">Optometry</SelectItem>
-                      <SelectItem value="orthopedics">Orthopedics</SelectItem>
-                      <SelectItem value="pain_management">Pain Management</SelectItem>
-                      <SelectItem value="pediatrics">Pediatrics</SelectItem>
-                      <SelectItem value="pharmaceuticals">Pharmaceuticals</SelectItem>
-                      <SelectItem value="pharmacy">Pharmacy</SelectItem>
-                      <SelectItem value="physical_therapy">Physical Therapy</SelectItem>
-                      <SelectItem value="plastic_surgery">Plastic Surgery</SelectItem>
-                      <SelectItem value="podiatry">Podiatry</SelectItem>
-                      <SelectItem value="primary_care">Primary Care</SelectItem>
-                      <SelectItem value="primary_care_association">Primary Care Association (PCA)</SelectItem>
-                      <SelectItem value="psychiatry">Psychiatry</SelectItem>
-                      <SelectItem value="public_health_agency">Public Health Agency</SelectItem>
-                      <SelectItem value="pulmonology">Pulmonology</SelectItem>
-                      <SelectItem value="radiology">Radiology</SelectItem>
-                      <SelectItem value="rehabilitation">Rehabilitation</SelectItem>
-                      <SelectItem value="reproductive_medicine">Reproductive Medicine</SelectItem>
-                      <SelectItem value="rheumatology">Rheumatology</SelectItem>
-                      <SelectItem value="rural_health_clinic">Rural Health Clinic</SelectItem>
-                      <SelectItem value="rural_hospital">Rural Hospital</SelectItem>
-                      <SelectItem value="skilled_nursing">Skilled Nursing</SelectItem>
-                      <SelectItem value="sleep_medicine">Sleep Medicine</SelectItem>
-                      <SelectItem value="specialty_clinic">Specialty Clinic</SelectItem>
-                      <SelectItem value="technology">Technology</SelectItem>
-                      <SelectItem value="telemedicine">Telemedicine</SelectItem>
-                      <SelectItem value="tribal_health">Tribal Health</SelectItem>
-                      <SelectItem value="university_hospital">University Hospital</SelectItem>
-                      <SelectItem value="urgent_care">Urgent Care</SelectItem>
-                      <SelectItem value="urology">Urology</SelectItem>
-                      <SelectItem value="vascular">Vascular</SelectItem>
-                      <SelectItem value="women_health">Women&apos;s Health</SelectItem>
-                      <SelectItem value="other_healthcare">Other Healthcare</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
+                      {INDUSTRY_CATEGORY_OPTIONS.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

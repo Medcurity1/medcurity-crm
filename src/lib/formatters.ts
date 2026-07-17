@@ -278,38 +278,108 @@ export const ALL_STAGES: OpportunityStage[] = [
 // dropdown, filter dropdown). Matches the picklist the form already
 // surfaces; collecting the labels here prevents the
 // "text column vs enum column" bug that hit accounts.industry.
+// Complete: mirrors all 81 enum values (original 25 + May 6 expansion),
+// labels adopted from AccountForm's curated dropdown (2026-07-17, closing
+// the display/filter gap Summer hit with Rural Hospital in lead lists).
+// Alphabetical by label; the two catch-alls pinned last so derived option
+// lists keep them at the bottom.
 export const INDUSTRY_CATEGORY_LABELS: Record<IndustryCategory, string> = {
-  hospital: "Hospital",
-  medical_group: "Medical Group",
+  accounting: "Accounting",
+  allergy_immunology: "Allergy & Immunology",
+  anesthesiology: "Anesthesiology",
+  association: "Association",
+  audiology: "Audiology",
+  behavioral_health: "Behavioral Health",
+  business_associate: "Business Associate",
+  cardiology: "Cardiology",
+  chiropractic: "Chiropractic",
+  colon_rectal: "Colon & Rectal",
+  community_health_center: "Community Health Center",
+  consulting: "Consulting",
+  dental: "Dental",
+  dermatology: "Dermatology",
+  direct_care: "Direct Care",
+  emergency_medicine: "Emergency Medicine",
+  endocrinology: "Endocrinology",
+  ent_otolaryngology: "ENT / Otolaryngology",
+  family_medicine: "Family Medicine",
   fqhc: "FQHC",
-  rural_health_clinic: "Rural Health Clinic",
-  // Added 2026-07-08 (Jordan): value already existed on the Postgres enum
-  // (20260506000002_industry_category_expand.sql) and in AccountForm's
-  // dropdown — this label + the IndustryCategory union entry were the only
-  // missing pieces.
-  rural_hospital: "Rural Hospital",
-  skilled_nursing: "Skilled Nursing",
-  long_term_care: "Long-Term Care",
+  gastroenterology: "Gastroenterology",
+  general_surgery: "General Surgery",
+  geriatrics: "Geriatrics",
+  government: "Government",
+  group_purchasing_organization: "Group Purchasing Organization (GPO)",
+  healthcare_consulting: "Healthcare Consulting",
+  healthcare_it_vendor: "Healthcare IT Vendor",
+  higher_education: "Higher Education",
   home_health: "Home Health",
   hospice: "Hospice",
-  behavioral_health: "Behavioral Health",
-  dental: "Dental",
-  pediatrics: "Pediatrics",
-  specialty_clinic: "Specialty Clinic",
-  urgent_care: "Urgent Care",
+  hospital: "Hospital",
   imaging_center: "Imaging Center",
+  insurance_payer: "Insurance / Payer",
+  internal_medicine: "Internal Medicine",
   lab_services: "Lab Services",
+  long_term_care: "Long-Term Care",
+  managed_service_provider: "Managed Service Provider",
+  medical_device: "Medical Device",
+  medical_group: "Medical Group",
+  medical_practice: "Medical Practice",
+  mental_health: "Mental Health",
+  multi_specialty: "Multi-Specialty",
+  naturopathy: "Naturopathy",
+  nephrology: "Nephrology",
+  neurology: "Neurology",
+  non_profit: "Non-Profit",
+  oncology: "Oncology",
+  ophthalmology: "Ophthalmology",
+  optometry: "Optometry",
+  orthopedics: "Orthopedics",
+  pain_management: "Pain Management",
+  pediatrics: "Pediatrics",
+  pharmaceuticals: "Pharmaceuticals",
   pharmacy: "Pharmacy",
+  physical_therapy: "Physical Therapy",
+  plastic_surgery: "Plastic Surgery",
+  podiatry: "Podiatry",
+  primary_care: "Primary Care",
+  primary_care_association: "Primary Care Association (PCA)",
+  psychiatry: "Psychiatry",
+  public_health_agency: "Public Health Agency",
+  pulmonology: "Pulmonology",
+  radiology: "Radiology",
+  rehabilitation: "Rehabilitation",
+  reproductive_medicine: "Reproductive Medicine",
+  rheumatology: "Rheumatology",
+  rural_health_clinic: "Rural Health Clinic",
+  rural_hospital: "Rural Hospital",
+  skilled_nursing: "Skilled Nursing",
+  sleep_medicine: "Sleep Medicine",
+  specialty_clinic: "Specialty Clinic",
+  technology: "Technology",
   telemedicine: "Telemedicine",
   tribal_health: "Tribal Health",
-  public_health_agency: "Public Health Agency",
-  healthcare_it_vendor: "Healthcare IT Vendor",
-  managed_service_provider: "Managed Service Provider",
-  healthcare_consulting: "Healthcare Consulting",
-  insurance_payer: "Insurance Payer",
+  university_hospital: "University Hospital",
+  urgent_care: "Urgent Care",
+  urology: "Urology",
+  vascular: "Vascular",
+  women_health: "Women's Health",
   other_healthcare: "Other Healthcare",
   other: "Other",
 };
+
+/**
+ * Industry options for pickers/filters, derived from the labels map:
+ * alphabetical by label with the "Other Healthcare" / "Other" catch-alls
+ * pinned to the bottom. THE one options list — never hand-maintain a
+ * per-page copy (that's how rural_hospital went missing from lead lists).
+ */
+export const INDUSTRY_CATEGORY_OPTIONS: { value: IndustryCategory; label: string }[] =
+  (Object.entries(INDUSTRY_CATEGORY_LABELS) as [IndustryCategory, string][])
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => {
+      const pin = (v: string) => (v === "other" ? 2 : v === "other_healthcare" ? 1 : 0);
+      return pin(a.value) - pin(b.value) || a.label.localeCompare(b.label);
+    });
 
 export function industryCategoryLabel(v: IndustryCategory | null | undefined): string {
   if (!v) return "—";
