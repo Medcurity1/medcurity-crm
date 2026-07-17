@@ -13,7 +13,7 @@ import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { getMissingRequiredFields, formatFieldLabel } from "@/lib/requiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { accountSchema, type AccountFormValues } from "./schema";
-import { FTE_RANGES, employeesToFteRange } from "@/lib/formatters";
+import { FTE_RANGES, employeesToFteRange, INDUSTRY_CATEGORY_OPTIONS } from "@/lib/formatters";
 import { US_STATES } from "@/lib/us-states";
 import { looksLikeUsZip, zipToTimeZone } from "@/lib/us-zip";
 import { PhoneInput } from "@/components/PhoneInput";
@@ -428,7 +428,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
     // Conditional, not in required_field_config — only applies to partners.
     if ((values.account_type ?? "").startsWith("Partner") && !values.partner_type) {
       toast.error(
-        "Partner Type is required for partner accounts — pick one in the Partner Information section."
+        "Partner Type is required for partner accounts — pick one in the Partner details box under the Partner checkbox."
       );
       return;
     }
@@ -608,6 +608,55 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                   </p>
                 </div>
 
+                {/* ---- Partner details (Summer 7/16): shown only when the
+                     Partner box is checked, right where it's checked. Replaces
+                     the old bottom "Partner Information" section. ---- */}
+                {(watch("account_type") ?? "").startsWith("Partner") && (
+                  <div className="md:col-span-2 rounded-md border border-border bg-muted/30 p-4 space-y-4">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      Partner details
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="partnership_status">Partnership Status</Label>
+                        <PicklistSelect
+                          id="partnership_status"
+                          fieldKey="accounts.partnership_status"
+                          value={watch("partnership_status") ?? ""}
+                          onChange={(v) => setValue("partnership_status", v ?? "")}
+                          allowClear
+                          placeholder="Select status…"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="partner_type">
+                          {/* Always required here — this box only renders for
+                              partner accounts (Rachel's rule). */}
+                          Partner Type
+                          <span className="text-destructive ml-0.5">*</span>
+                        </Label>
+                        <PicklistSelect
+                          id="partner_type"
+                          fieldKey="accounts.partner_type"
+                          value={watch("partner_type") ?? ""}
+                          onChange={(v) => setValue("partner_type", v ?? "")}
+                          allowClear
+                          placeholder="Select type…"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="relationship_notes">Relationship Notes</Label>
+                      <Textarea
+                        id="relationship_notes"
+                        rows={4}
+                        placeholder="Partnership plan, history, and next steps with this partner…"
+                        {...register("relationship_notes")}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {/* Account Number field removed from the form (Summer: not
                     needed). It's still auto-assigned by the DB trigger and the
                     column/data are untouched — just no longer shown here. */}
@@ -691,95 +740,14 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                       <SelectValue placeholder="Select industry..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {/* Sorted alphabetically by display label so users
-                          can find values quickly. "None" pinned at top
-                          and "Other" / "Other Healthcare" pinned at the
-                          bottom intentionally. Full list mirrors the
-                          industry_category enum (see
-                          20260418000001_field_decisions_april_18.sql +
-                          20260506000002_industry_category_expand.sql). */}
+{/* "None" pinned at top; the full list derives from
+                          INDUSTRY_CATEGORY_OPTIONS (lib/formatters.ts) —
+                          alphabetical, catch-alls last, always complete
+                          vs the industry_category enum. */}
                       <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="accounting">Accounting</SelectItem>
-                      <SelectItem value="allergy_immunology">Allergy &amp; Immunology</SelectItem>
-                      <SelectItem value="anesthesiology">Anesthesiology</SelectItem>
-                      <SelectItem value="association">Association</SelectItem>
-                      <SelectItem value="audiology">Audiology</SelectItem>
-                      <SelectItem value="behavioral_health">Behavioral Health</SelectItem>
-                      <SelectItem value="business_associate">Business Associate</SelectItem>
-                      <SelectItem value="cardiology">Cardiology</SelectItem>
-                      <SelectItem value="chiropractic">Chiropractic</SelectItem>
-                      <SelectItem value="colon_rectal">Colon &amp; Rectal</SelectItem>
-                      <SelectItem value="community_health_center">Community Health Center</SelectItem>
-                      <SelectItem value="consulting">Consulting</SelectItem>
-                      <SelectItem value="dental">Dental</SelectItem>
-                      <SelectItem value="dermatology">Dermatology</SelectItem>
-                      <SelectItem value="direct_care">Direct Care</SelectItem>
-                      <SelectItem value="emergency_medicine">Emergency Medicine</SelectItem>
-                      <SelectItem value="endocrinology">Endocrinology</SelectItem>
-                      <SelectItem value="ent_otolaryngology">ENT / Otolaryngology</SelectItem>
-                      <SelectItem value="family_medicine">Family Medicine</SelectItem>
-                      <SelectItem value="fqhc">FQHC</SelectItem>
-                      <SelectItem value="gastroenterology">Gastroenterology</SelectItem>
-                      <SelectItem value="general_surgery">General Surgery</SelectItem>
-                      <SelectItem value="geriatrics">Geriatrics</SelectItem>
-                      <SelectItem value="government">Government</SelectItem>
-                      <SelectItem value="group_purchasing_organization">Group Purchasing Organization (GPO)</SelectItem>
-                      <SelectItem value="healthcare_consulting">Healthcare Consulting</SelectItem>
-                      <SelectItem value="healthcare_it_vendor">Healthcare IT Vendor</SelectItem>
-                      <SelectItem value="higher_education">Higher Education</SelectItem>
-                      <SelectItem value="home_health">Home Health</SelectItem>
-                      <SelectItem value="hospice">Hospice</SelectItem>
-                      <SelectItem value="hospital">Hospital</SelectItem>
-                      <SelectItem value="imaging_center">Imaging Center</SelectItem>
-                      <SelectItem value="insurance_payer">Insurance / Payer</SelectItem>
-                      <SelectItem value="internal_medicine">Internal Medicine</SelectItem>
-                      <SelectItem value="lab_services">Lab Services</SelectItem>
-                      <SelectItem value="long_term_care">Long-Term Care</SelectItem>
-                      <SelectItem value="managed_service_provider">Managed Service Provider</SelectItem>
-                      <SelectItem value="medical_device">Medical Device</SelectItem>
-                      <SelectItem value="medical_group">Medical Group</SelectItem>
-                      <SelectItem value="medical_practice">Medical Practice</SelectItem>
-                      <SelectItem value="mental_health">Mental Health</SelectItem>
-                      <SelectItem value="multi_specialty">Multi-Specialty</SelectItem>
-                      <SelectItem value="naturopathy">Naturopathy</SelectItem>
-                      <SelectItem value="nephrology">Nephrology</SelectItem>
-                      <SelectItem value="neurology">Neurology</SelectItem>
-                      <SelectItem value="non_profit">Non-Profit</SelectItem>
-                      <SelectItem value="oncology">Oncology</SelectItem>
-                      <SelectItem value="ophthalmology">Ophthalmology</SelectItem>
-                      <SelectItem value="optometry">Optometry</SelectItem>
-                      <SelectItem value="orthopedics">Orthopedics</SelectItem>
-                      <SelectItem value="pain_management">Pain Management</SelectItem>
-                      <SelectItem value="pediatrics">Pediatrics</SelectItem>
-                      <SelectItem value="pharmaceuticals">Pharmaceuticals</SelectItem>
-                      <SelectItem value="pharmacy">Pharmacy</SelectItem>
-                      <SelectItem value="physical_therapy">Physical Therapy</SelectItem>
-                      <SelectItem value="plastic_surgery">Plastic Surgery</SelectItem>
-                      <SelectItem value="podiatry">Podiatry</SelectItem>
-                      <SelectItem value="primary_care">Primary Care</SelectItem>
-                      <SelectItem value="primary_care_association">Primary Care Association (PCA)</SelectItem>
-                      <SelectItem value="psychiatry">Psychiatry</SelectItem>
-                      <SelectItem value="public_health_agency">Public Health Agency</SelectItem>
-                      <SelectItem value="pulmonology">Pulmonology</SelectItem>
-                      <SelectItem value="radiology">Radiology</SelectItem>
-                      <SelectItem value="rehabilitation">Rehabilitation</SelectItem>
-                      <SelectItem value="reproductive_medicine">Reproductive Medicine</SelectItem>
-                      <SelectItem value="rheumatology">Rheumatology</SelectItem>
-                      <SelectItem value="rural_health_clinic">Rural Health Clinic</SelectItem>
-                      <SelectItem value="rural_hospital">Rural Hospital</SelectItem>
-                      <SelectItem value="skilled_nursing">Skilled Nursing</SelectItem>
-                      <SelectItem value="sleep_medicine">Sleep Medicine</SelectItem>
-                      <SelectItem value="specialty_clinic">Specialty Clinic</SelectItem>
-                      <SelectItem value="technology">Technology</SelectItem>
-                      <SelectItem value="telemedicine">Telemedicine</SelectItem>
-                      <SelectItem value="tribal_health">Tribal Health</SelectItem>
-                      <SelectItem value="university_hospital">University Hospital</SelectItem>
-                      <SelectItem value="urgent_care">Urgent Care</SelectItem>
-                      <SelectItem value="urology">Urology</SelectItem>
-                      <SelectItem value="vascular">Vascular</SelectItem>
-                      <SelectItem value="women_health">Women&apos;s Health</SelectItem>
-                      <SelectItem value="other_healthcare">Other Healthcare</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
+                      {INDUSTRY_CATEGORY_OPTIONS.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1087,28 +1055,27 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
               </div>
             </CollapsibleFormSection>
 
-            {/* ---- 6. Partner Information (collapsible) ---- */}
-            <CollapsibleFormSection title="Partner Information">
+            {/* ---- Former "Partner Information" section removed (Summer
+                 7/16): partnership_status / partner_type / relationship_notes
+                 now live under the Partner checkbox in Basic Information;
+                 lead_source + lead_source_detail moved to Additional
+                 Information below. partner_account + partner_prospect were
+                 dropped from the form entirely (unused per Summer) — the
+                 columns and their data are untouched, same pattern as the
+                 Account Number removal. ---- */}
+
+            {/* ---- 7. Additional Information (collapsible, collapsed by default)
+                 Priority Account moved up to Basic Information for visibility. ---- */}
+            <CollapsibleFormSection title="Additional Information" defaultOpen={false}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="partner_account">Partner Account<RequiredIndicator fieldKey="partner_account" requiredFields={requiredKeys} /></Label>
-                  <Input id="partner_account" {...register("partner_account")} />
-                </div>
-                <div className="flex items-center gap-2 pt-6">
-                  <Checkbox
-                    id="partner_prospect"
-                    checked={watch("partner_prospect") ?? false}
-                    onCheckedChange={(v) => setValue("partner_prospect", v === true)}
-                  />
-                  <Label htmlFor="partner_prospect" className="text-sm font-normal cursor-pointer">
-                    Partner Prospect
-                  </Label>
-                </div>
                 <div className="space-y-2">
                   <Label>Lead Source<RequiredIndicator fieldKey="lead_source" requiredFields={requiredKeys} /></Label>
                   {/* Admin-managed picklist (Joe: Source = CHANNEL only — mql/sql
                       retired). Options seeded by 20260715150000; a stored legacy
-                      value still displays via PicklistSelect's "(legacy)" entry. */}
+                      value still displays via PicklistSelect's "(legacy)" entry.
+                      Moved here from the retired Partner Information section
+                      (Summer 7/16) — attribution is account-general, not
+                      partner-specific. */}
                   <PicklistSelect
                     fieldKey="accounts.lead_source"
                     value={watch("lead_source") ?? null}
@@ -1121,57 +1088,6 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                   <Label htmlFor="lead_source_detail">Lead Source Detail<RequiredIndicator fieldKey="lead_source_detail" requiredFields={requiredKeys} /></Label>
                   <Input id="lead_source_detail" {...register("lead_source_detail")} />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="partnership_status">Partnership Status</Label>
-                  <PicklistSelect
-                    id="partnership_status"
-                    fieldKey="accounts.partnership_status"
-                    value={watch("partnership_status") ?? ""}
-                    onChange={(v) => setValue("partnership_status", v ?? "")}
-                    allowClear
-                    placeholder="Select status…"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="partner_type">
-                    Partner Type
-                    {/* Conditionally required (Rachel's rule): only when the
-                        account is marked as a partner. Same mark as the other
-                        required fields so it's obvious BEFORE hitting Save. */}
-                    {(watch("account_type") ?? "").startsWith("Partner") && (
-                      <span className="text-destructive ml-0.5">
-                        *{" "}
-                        <span className="text-xs font-normal text-muted-foreground">
-                          (required for partners)
-                        </span>
-                      </span>
-                    )}
-                  </Label>
-                  <PicklistSelect
-                    id="partner_type"
-                    fieldKey="accounts.partner_type"
-                    value={watch("partner_type") ?? ""}
-                    onChange={(v) => setValue("partner_type", v ?? "")}
-                    allowClear
-                    placeholder="Select type…"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2 mt-4">
-                <Label htmlFor="relationship_notes">Relationship Notes</Label>
-                <Textarea
-                  id="relationship_notes"
-                  rows={4}
-                  placeholder="Partnership plan, history, and next steps with this partner…"
-                  {...register("relationship_notes")}
-                />
-              </div>
-            </CollapsibleFormSection>
-
-            {/* ---- 7. Additional Information (collapsible, collapsed by default)
-                 Priority Account moved up to Basic Information for visibility. ---- */}
-            <CollapsibleFormSection title="Additional Information" defaultOpen={false}>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Project Segment<RequiredIndicator fieldKey="project_segment" requiredFields={requiredKeys} /></Label>
                   <Select

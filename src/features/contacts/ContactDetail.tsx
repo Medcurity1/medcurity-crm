@@ -14,7 +14,7 @@ import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
 import { VerifiedBadge } from "@/components/VerifiedBadge";
 import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ArchiveDialog } from "@/components/ArchiveDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
 import { AddToListDialog } from "@/features/lead-lists/AddToListDialog";
 import { QueryError } from "@/components/QueryError";
@@ -122,7 +122,7 @@ export function ContactDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
+  const canWrite = !!profile?.role && profile.role !== "read_only";
   const { data: contact, isLoading, isError, error, refetch } = useContact(id);
   const { data: originatingLead } = useOriginatingLead(id);
   const { data: contactTags = [] } = useContactTags(id);
@@ -174,13 +174,13 @@ export function ContactDetail() {
 
   const contactId = contact.id;
 
-  function handleArchive() {
+  function handleArchive(reason: string) {
     if (!id) return;
     archiveMutation.mutate(
-      { id },
+      { id, reason },
       {
         onSuccess: () => {
-          toast.success("Contact archived");
+          toast.success("Contact archived — an admin can restore it if needed");
           navigate("/contacts");
         },
         onError: (err) => {
@@ -224,7 +224,10 @@ export function ContactDetail() {
               <Pencil className="h-4 w-4 mr-1" />
               Edit
             </Button>
-            {isAdmin && (
+            {/* Archive opened to all write roles 2026-07-17 (Nathan, for
+                Summer's cleanup ask) — reason required, DB-enforced for
+                non-admins in migration 20260717000004. */}
+            {canWrite && (
               <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>
                 <Archive className="h-4 w-4 mr-1" />
                 Archive
@@ -377,6 +380,30 @@ export function ContactDetail() {
           </CardContent>
         </Card>
       </div>
+
+      {/* --------- Notes (just below the key-info tiles) ---------
+          Summer (2026-07-16): notes were buried in the collapsed
+          "Notes & Next Steps" layout section at the bottom; migration
+          20260717000002 removed the duplicate notes row from that
+          layout so this card is the one place notes render. */}
+      <Card className="mb-6">
+        <CardHeader className="pb-1 pt-3 px-4">
+          <CardTitle className="text-xs text-muted-foreground font-medium">Notes</CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-3">
+          <InlineEdit
+            value={contact.notes ?? null}
+            type="textarea"
+            placeholder="Add notes..."
+            onSave={async (v) => {
+              await updateMutation.mutateAsync({
+                id: contactId,
+                notes: v === "" ? null : v,
+              } as Parameters<typeof updateMutation.mutateAsync>[0]);
+            }}
+          />
+        </CardContent>
+      </Card>
 
       <DetailPageLayout
         sidePanels={[
@@ -609,14 +636,12 @@ export function ContactDetail() {
 
       </DetailPageLayout>
 
-      <ConfirmDialog
+      <ArchiveDialog
         open={showArchive}
         onOpenChange={setShowArchive}
-        title="Archive Contact"
-        description="This will hide the contact from active views."
-        confirmLabel="Archive"
-        destructive
-        onConfirm={handleArchive}
+        entityLabel="Contact"
+        onArchive={handleArchive}
+        pending={archiveMutation.isPending}
       />
 
       <AddToListDialog

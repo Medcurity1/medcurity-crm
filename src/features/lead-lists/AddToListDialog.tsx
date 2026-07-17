@@ -135,7 +135,7 @@ export function AddToListDialog({
               id="new-list-name"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="e.g., Summer's October call list"
+              placeholder="e.g., October cold call list"
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();

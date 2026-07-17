@@ -52,14 +52,17 @@ function jiraBaseUrl(): string {
   return (Deno.env.get("JIRA_BASE_URL") ?? "").trim().replace(/\/+$/, "");
 }
 
-async function createJiraIssue(title: string, descriptionText: string) {
+async function createJiraIssue(
+  title: string,
+  descriptionText: string,
+  issueTypeName: string,
+) {
   const auth = jiraAuth();
   const base = jiraBaseUrl();
   if (!auth || !base) {
     throw new Error("Jira not configured (JIRA_EMAIL, JIRA_API_TOKEN, JIRA_BASE_URL)");
   }
   const projectKey = (Deno.env.get("JIRA_PROJECT_KEY") ?? "MSD").trim();
-  const issueTypeName = (Deno.env.get("JIRA_ISSUE_TYPE") ?? "Enhancement").trim();
 
   // Resolve issue-type name -> id (required for team-managed projects).
   let issueTypeField: { id: string } | { name: string } = { name: issueTypeName };
@@ -161,6 +164,60 @@ async function moveToBoard(issueKey: string) {
   } catch (e) {
     console.log("[jira] move to board error:", (e as Error).message);
   }
+}
+
+/** Jira issue type for a request: bugs file as Bug, everything else as
+ * the enhancement type. Both names overridable via env for project quirks. */
+// deno-lint-ignore no-explicit-any
+function issueTypeFor(reqRow: any): string {
+  const category = ((reqRow.details ?? {}) as Record<string, unknown>).category;
+  return category === "bug"
+    ? (Deno.env.get("JIRA_ISSUE_TYPE_BUG") ?? "Bug").trim()
+    : (Deno.env.get("JIRA_ISSUE_TYPE") ?? "Enhancement").trim();
+}
+
+/**
+ * The full "put this request on the product board" routine shared by
+ * approve and file_bug: create the issue (skipped when a prior partial
+ * attempt already persisted a key — retries never double-file), persist
+ * the key immediately, transition + board it, and push attachments.
+ * Throws only on issue creation failure; the rest is best-effort.
+ */
+// deno-lint-ignore no-explicit-any
+async function fileRequestToJira(svc: any, reqRow: any, requestId: string) {
+  let jiraKey: string | null = reqRow.jira_issue_key ?? null;
+  let jiraUrl: string | null = reqRow.jira_issue_url ?? null;
+  if (jiraKey) return { jiraKey, jiraUrl };
+
+  const requesterName = reqRow.requester_name ?? "Unknown";
+  const descText =
+    `Requester: ${requesterName}\nPriority: ${reqRow.priority}\n\n${reqRow.description ?? ""}`;
+
+  const jira = await createJiraIssue(reqRow.title, descText, issueTypeFor(reqRow));
+  jiraKey = jira.key;
+  jiraUrl = jira.url;
+  await svc
+    .from("requests")
+    .update({ jira_issue_key: jiraKey, jira_issue_url: jiraUrl })
+    .eq("id", requestId);
+  await transitionJiraIssue(jiraKey);
+  await moveToBoard(jiraKey);
+
+  const { data: atts } = await svc
+    .from("request_attachments")
+    .select("original_filename, storage_path")
+    .eq("request_id", requestId);
+  for (const a of atts ?? []) {
+    const { data: blob } = await svc.storage
+      .from("request-attachments")
+      .download(a.storage_path);
+    if (blob) {
+      await uploadJiraAttachment(jiraKey, blob, a.original_filename);
+    } else {
+      console.log(`[jira] attachment missing in storage: ${a.storage_path}`);
+    }
+  }
+  return { jiraKey, jiraUrl };
 }
 
 // ── Anthropic summary ────────────────────────────────────────────────
@@ -423,9 +480,7 @@ serve(async (req) => {
       .select("role")
       .eq("id", caller.id)
       .single();
-    if (!profile || !["admin", "super_admin"].includes(profile.role)) {
-      return json({ error: "Not authorized" }, 403);
-    }
+    const isAdmin = !!profile && ["admin", "super_admin"].includes(profile.role);
 
     const body = await req.json();
     const { action, requestId, note, regenerate } = body as {
@@ -442,6 +497,14 @@ serve(async (req) => {
       .eq("id", requestId)
       .single();
     if (loadErr || !reqRow) return json({ error: "Request not found" }, 404);
+
+    // Auth: reviewing actions stay admin-only. file_bug is the one
+    // exception — it fires from the submitter's own client right after
+    // they submit a bug, so the requester may file THEIR OWN request.
+    const isOwnRequest = reqRow.requester_user_id === caller.id;
+    if (action === "file_bug" ? !(isAdmin || isOwnRequest) : !isAdmin) {
+      return json({ error: "Not authorized" }, 403);
+    }
 
     // ── design prompt (collateral) ──
     if (action === "design_prompt") {
@@ -463,6 +526,58 @@ serve(async (req) => {
       return json({ error: "Not a product request" }, 400);
     }
 
+    // ── file_bug: bug reports skip approval, straight to Jira ──
+    // Called by the submitter's client immediately after submit. When Jira
+    // isn't configured (e.g. staging) it leaves the request pending and
+    // reports filed:false — the client then falls back to the normal
+    // reviewer-email flow, so nothing is ever silently dropped.
+    if (action === "file_bug") {
+      const category = ((reqRow.details ?? {}) as Record<string, unknown>).category;
+      if (category !== "bug") return json({ error: "Not a bug request" }, 400);
+      if (reqRow.status !== "pending") {
+        return json({ error: `Request is already ${reqRow.status}` }, 409);
+      }
+      if (!jiraAuth() || !jiraBaseUrl()) {
+        return json({ filed: false, jiraConfigured: false, jiraKey: null, jiraUrl: null });
+      }
+
+      // Same CAS claim as approve so concurrent invocations can't
+      // double-file. Bugs land as 'completed' — handed off to Jira, where
+      // the product team approves or denies.
+      const { data: claimed, error: claimErr } = await svc
+        .from("requests")
+        .update({
+          status: "completed",
+          decision_note: "Bug report — filed straight to Jira (no approval step)",
+          completed_at: new Date().toISOString(),
+          completed_by: caller.id,
+        })
+        .eq("id", requestId)
+        .eq("status", "pending")
+        .select()
+        .maybeSingle();
+      if (claimErr) return json({ error: claimErr.message }, 500);
+      if (!claimed) return json({ error: "Request is no longer pending" }, 409);
+
+      try {
+        const { jiraKey, jiraUrl } = await fileRequestToJira(svc, reqRow, requestId);
+        return json({ filed: true, jiraConfigured: true, jiraKey, jiraUrl });
+      } catch (e) {
+        // Filing failed — roll back to pending so the reviewers' manual
+        // approve (which files as Bug type) remains available.
+        await svc
+          .from("requests")
+          .update({
+            status: "pending",
+            completed_at: null,
+            completed_by: null,
+            decision_note: null,
+          })
+          .eq("id", requestId);
+        return json({ error: `Jira filing failed: ${(e as Error).message}` }, 502);
+      }
+    }
+
     // ── summarize ──
     if (action === "summarize") {
       if (reqRow.ai_summary) return json({ summary: reqRow.ai_summary });
@@ -482,9 +597,6 @@ serve(async (req) => {
       if (reqRow.status !== "pending") {
         return json({ error: `Request is already ${reqRow.status}` }, 409);
       }
-      const requesterName = reqRow.requester_name ?? "Unknown";
-      const descText =
-        `Requester: ${requesterName}\nPriority: ${reqRow.priority}\n\n${reqRow.description ?? ""}`;
 
       // Claim the row FIRST with a compare-and-swap (status='pending'), so
       // two concurrent approvals can't both proceed and file two Jira
@@ -505,43 +617,17 @@ serve(async (req) => {
       if (!claimed) return json({ error: "Request is no longer pending" }, 409);
 
       // Reuse a Jira key from a prior partial attempt if present, so a
-      // retry never files a duplicate ticket.
+      // retry never files a duplicate ticket. (Bug-category requests that
+      // fell back to manual approval file as the Bug issue type.)
       let jiraKey: string | null = reqRow.jira_issue_key ?? null;
       let jiraUrl: string | null = reqRow.jira_issue_url ?? null;
       let jiraConfigured = false;
       if (jiraAuth() && jiraBaseUrl()) {
         jiraConfigured = true;
         try {
-          if (!jiraKey) {
-            const jira = await createJiraIssue(reqRow.title, descText);
-            jiraKey = jira.key;
-            jiraUrl = jira.url;
-            // Persist the key immediately so any later failure can't cause
-            // a re-file on retry. (transition/board are non-throwing.)
-            await svc
-              .from("requests")
-              .update({ jira_issue_key: jiraKey, jira_issue_url: jiraUrl })
-              .eq("id", requestId);
-            await transitionJiraIssue(jiraKey);
-            await moveToBoard(jiraKey);
-
-            // Push the request's attachments onto the ticket (best-effort,
-            // mirrors Nexus). Files live in the request-attachments bucket.
-            const { data: atts } = await svc
-              .from("request_attachments")
-              .select("original_filename, storage_path")
-              .eq("request_id", requestId);
-            for (const a of atts ?? []) {
-              const { data: blob } = await svc.storage
-                .from("request-attachments")
-                .download(a.storage_path);
-              if (blob) {
-                await uploadJiraAttachment(jiraKey, blob, a.original_filename);
-              } else {
-                console.log(`[jira] attachment missing in storage: ${a.storage_path}`);
-              }
-            }
-          }
+          const filed = await fileRequestToJira(svc, reqRow, requestId);
+          jiraKey = filed.jiraKey;
+          jiraUrl = filed.jiraUrl;
         } catch (e) {
           // Jira creation failed — roll the claim back to pending so the
           // admin can retry (matches the "stays pending on Jira failure"

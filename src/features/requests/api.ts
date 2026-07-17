@@ -56,6 +56,20 @@ export const CRM_CHANGE_TYPES = [
   "Bug fix",
 ];
 
+// Product requests split into two workflows (Rachel, Jul 2026): an
+// Enhancement is reviewed + approved before it's filed to Jira; a Bug
+// files straight to Jira on submit with no approval step.
+export const PRODUCT_CATEGORIES = [
+  { value: "enhancement", label: "Enhancement" },
+  { value: "bug", label: "Bug" },
+] as const;
+export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number]["value"];
+
+export const PRODUCT_CATEGORY_LABELS: Record<string, string> = {
+  enhancement: "Enhancement",
+  bug: "Bug",
+};
+
 // ── Queries ──────────────────────────────────────────────────────────
 interface RequestFilters {
   type?: RequestType | RequestType[];
@@ -255,6 +269,12 @@ export interface CreateRequestResult {
   request: CrmRequest;
   /** Names of any files that failed to upload (request itself succeeded). */
   failedUploads: string[];
+  /**
+   * Set when a product BUG was auto-filed to Jira on submit. Null for
+   * enhancements, and for bugs that fell back to the manual review flow
+   * (Jira unconfigured or filing failed — the request stays pending).
+   */
+  bugFiled: { jiraKey: string | null; jiraUrl: string | null } | null;
 }
 
 export function useCreateRequest() {
@@ -284,16 +304,41 @@ export function useCreateRequest() {
         ? await uploadRequestAttachments(data.id, input.files)
         : [];
 
+      // Product BUGS skip the approval flow: file straight to Jira right
+      // now (server-side — needs secrets). Attachments are already up, so
+      // they ride along onto the ticket. If filing fails or Jira isn't
+      // configured, the request stays pending and falls through to the
+      // normal reviewer email below so a human picks it up.
+      let bugFiled: CreateRequestResult["bugFiled"] = null;
+      if (input.type === "product" && input.details?.category === "bug") {
+        try {
+          const res = (await invokeRequestAction({
+            action: "file_bug",
+            requestId: data.id,
+          })) as {
+            filed: boolean;
+            jiraKey: string | null;
+            jiraUrl: string | null;
+          };
+          if (res.filed) bugFiled = { jiraKey: res.jiraKey, jiraUrl: res.jiraUrl };
+        } catch {
+          bugFiled = null;
+        }
+      }
+
       // Fire the email notice (one email from marketing@ to all routed
       // recipients). Best-effort: the in-app bell is the reliable channel,
       // so an email failure must never fail the submission. The function
       // is idempotent server-side (email_notified_at CAS), so repeats are
-      // harmless.
-      void supabase.functions
-        .invoke("request-email-notify", { body: { requestId: data.id } })
-        .catch(() => {});
+      // harmless. Skipped when a bug already went straight to Jira — the
+      // reviewers have nothing to approve.
+      if (!bugFiled) {
+        void supabase.functions
+          .invoke("request-email-notify", { body: { requestId: data.id } })
+          .catch(() => {});
+      }
 
-      return { request: data as CrmRequest, failedUploads };
+      return { request: data as CrmRequest, failedUploads, bugFiled };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["requests"] });
@@ -338,7 +383,7 @@ export function useCompleteRequest() {
  * generic "non-2xx" string).
  */
 async function invokeRequestAction(payload: {
-  action: "approve" | "summarize" | "design_prompt";
+  action: "approve" | "summarize" | "design_prompt" | "file_bug";
   requestId: string;
   note?: string | null;
   regenerate?: boolean;

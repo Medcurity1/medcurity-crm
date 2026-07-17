@@ -70,20 +70,34 @@ export type OpportunityBusinessType =
   | "existing_business_new_service"
   | "opportunity";
 
-// NOTE: the Postgres enum + accounts/schema.ts's Zod mirror + AccountForm's
-// dropdown already carry ~55 more values from the May 6 expansion
-// (20260506000002_industry_category_expand.sql — community_health_center,
-// cardiology, dermatology, etc.) that were never added here. This union only
-// picks up "rural_hospital" (2026-07-08, Jordan's "Rural Hospital" request) —
-// the rest of that gap is a pre-existing, separate issue, not fixed here.
+// Full mirror of the public.industry_category Postgres enum: the original
+// 25 (20260418000001) + the 56 added May 6 (20260506000002). Kept in sync
+// with accounts/schema.ts's Zod mirror; every UI options list derives from
+// INDUSTRY_CATEGORY_LABELS in lib/formatters.ts (closed the ~55-value
+// display/filter gap 2026-07-17, Summer's "Rural Hospital in lead lists"
+// request — do NOT hand-maintain per-page industry lists again).
 export type IndustryCategory =
-  | "hospital" | "medical_group" | "fqhc" | "rural_health_clinic" | "rural_hospital"
-  | "skilled_nursing" | "long_term_care" | "home_health" | "hospice"
-  | "behavioral_health" | "dental" | "pediatrics" | "specialty_clinic"
-  | "urgent_care" | "imaging_center" | "lab_services" | "pharmacy"
-  | "telemedicine" | "tribal_health" | "public_health_agency"
-  | "healthcare_it_vendor" | "managed_service_provider"
-  | "healthcare_consulting" | "insurance_payer"
+  | "accounting" | "allergy_immunology" | "anesthesiology" | "association"
+  | "audiology" | "behavioral_health" | "business_associate" | "cardiology"
+  | "chiropractic" | "colon_rectal" | "community_health_center" | "consulting"
+  | "dental" | "dermatology" | "direct_care" | "emergency_medicine"
+  | "endocrinology" | "ent_otolaryngology" | "family_medicine" | "fqhc"
+  | "gastroenterology" | "general_surgery" | "geriatrics" | "government"
+  | "group_purchasing_organization" | "healthcare_consulting"
+  | "healthcare_it_vendor" | "higher_education" | "home_health" | "hospice"
+  | "hospital" | "imaging_center" | "insurance_payer" | "internal_medicine"
+  | "lab_services" | "long_term_care" | "managed_service_provider"
+  | "medical_device" | "medical_group" | "medical_practice" | "mental_health"
+  | "multi_specialty" | "naturopathy" | "nephrology" | "neurology"
+  | "non_profit" | "oncology" | "ophthalmology" | "optometry" | "orthopedics"
+  | "pain_management" | "pediatrics" | "pharmaceuticals" | "pharmacy"
+  | "physical_therapy" | "plastic_surgery" | "podiatry" | "primary_care"
+  | "primary_care_association" | "psychiatry" | "public_health_agency"
+  | "pulmonology" | "radiology" | "rehabilitation" | "reproductive_medicine"
+  | "rheumatology" | "rural_health_clinic" | "rural_hospital"
+  | "skilled_nursing" | "sleep_medicine" | "specialty_clinic" | "technology"
+  | "telemedicine" | "tribal_health" | "university_hospital" | "urgent_care"
+  | "urology" | "vascular" | "women_health"
   | "other_healthcare" | "other";
 
 export type ProjectSegment =

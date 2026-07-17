@@ -11,6 +11,8 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { VerifiedBadge } from "@/components/VerifiedBadge";
 import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { SalesStatusControl } from "./SalesStatusControl";
+import { ArchiveDialog } from "@/components/ArchiveDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
 import { QueryError } from "@/components/QueryError";
 import { RecordId } from "@/components/RecordId";
@@ -31,7 +33,6 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   customerStatusLabel,
-  salesStatusLabel,
   formatDate,
   formatDateTime,
   formatCurrency,
@@ -101,22 +102,6 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
  * actively worked, "Active" if worked with no sub-status yet, and a grey
  * "Inactive" otherwise (the sub-status is kept as history but not shown).
  */
-function SalesStatusChip({
-  salesActive,
-  salesStatus,
-}: {
-  salesActive: boolean;
-  salesStatus: string | null;
-}) {
-  return (
-    <StatusBadge
-      value={salesActive ? salesStatus ?? "" : "inactive"}
-      variant="salesStatus"
-      label={salesActive ? (salesStatus ? salesStatusLabel(salesStatus) : "Active") : "Inactive"}
-    />
-  );
-}
-
 function EditableField({
   label,
   value,
@@ -265,13 +250,13 @@ export function AccountDetail() {
     );
   };
 
-  function handleArchive() {
+  function handleArchive(reason: string) {
     if (!id) return;
     archiveMutation.mutate(
-      { id },
+      { id, reason },
       {
         onSuccess: () => {
-          toast.success("Account archived");
+          toast.success("Account archived — an admin can restore it if needed");
           navigate("/accounts");
         },
         onError: (err) => {
@@ -309,10 +294,7 @@ export function AccountDetail() {
                 Partner
               </Badge>
             )}
-            <SalesStatusChip
-              salesActive={account.sales_active ?? false}
-              salesStatus={account.sales_status ?? null}
-            />
+            <SalesStatusControl account={account} />
             <Button variant="outline" size="sm" onClick={() => navigate(`/opportunities/new?account_id=${id}`)}>
               <Plus className="h-4 w-4 mr-1" />
               New Opportunity
@@ -329,7 +311,11 @@ export function AccountDetail() {
               <Pencil className="h-4 w-4 mr-1" />
               Edit
             </Button>
-            {isAdmin && (
+            {/* Archive opened to all write roles 2026-07-17 (Nathan, for
+                Summer's duplicate cleanup) — reason required, DB-enforced
+                for non-admins in migration 20260717000004. Delete stays
+                admin-only. */}
+            {canWrite && (
               <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>
                 <Archive className="h-4 w-4 mr-1" />
                 Archive
@@ -414,10 +400,7 @@ export function AccountDetail() {
             <CardTitle className="text-xs text-muted-foreground font-medium">Sales Status</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
-            <SalesStatusChip
-              salesActive={account.sales_active ?? false}
-              salesStatus={account.sales_status ?? null}
-            />
+            <SalesStatusControl account={account} />
           </CardContent>
         </Card>
         <Card>
@@ -530,7 +513,31 @@ export function AccountDetail() {
             // screenshots).
             value: "partners",
             label: "Partner",
-            content: <AccountPartners accountId={account.id} />,
+            content: (
+              <div className="space-y-4">
+                {/* Partner details for partner-typed accounts (Summer 7/16):
+                    replaces the retired bottom "Partner Information" layout
+                    section. Edited via the account Edit form, where these
+                    fields sit under the Partner checkbox. */}
+                {(account.account_type ?? "").startsWith("Partner") && (
+                  <div className="rounded-md border border-border p-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="block text-xs text-muted-foreground">Partnership Status</span>
+                      {account.partnership_status ?? "—"}
+                    </div>
+                    <div>
+                      <span className="block text-xs text-muted-foreground">Partner Type</span>
+                      {account.partner_type ?? "—"}
+                    </div>
+                    <div className="md:col-span-2">
+                      <span className="block text-xs text-muted-foreground">Relationship Notes</span>
+                      <span className="whitespace-pre-wrap">{account.relationship_notes ?? "—"}</span>
+                    </div>
+                  </div>
+                )}
+                <AccountPartners accountId={account.id} />
+              </div>
+            ),
           },
           {
             value: "tasks",
@@ -767,14 +774,12 @@ export function AccountDetail() {
 
       </DetailPageLayout>
 
-      <ConfirmDialog
+      <ArchiveDialog
         open={showArchive}
         onOpenChange={setShowArchive}
-        title="Archive Account"
-        description="This will hide the account from active views. An admin can restore it later."
-        confirmLabel="Archive"
-        destructive
-        onConfirm={handleArchive}
+        entityLabel="Account"
+        onArchive={handleArchive}
+        pending={archiveMutation.isPending}
       />
 
       <ConfirmDialog

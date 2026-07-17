@@ -100,6 +100,18 @@ serve(async (req) => {
     if (claimErr) return json({ error: claimErr.message }, 500);
     if (!reqRow) return json({ skipped: "already notified or not found" });
 
+    // Product BUG reports skip the approval email — they file straight to
+    // Jira on submit. Only the fallback path (filing failed/unconfigured,
+    // request still pending with no ticket) emails the reviewers like a
+    // normal product request. Keep the claim stamp either way: a filed
+    // bug must never email later.
+    const isBug =
+      reqRow.type === "product" &&
+      ((reqRow.details ?? {}) as Record<string, unknown>).category === "bug";
+    if (isBug && (reqRow.status !== "pending" || reqRow.jira_issue_key)) {
+      return json({ skipped: "bug auto-filed to Jira" });
+    }
+
     async function unclaim() {
       await svc
         .from("requests")
@@ -147,7 +159,7 @@ serve(async (req) => {
       return json({ error: `token refresh failed: ${(e as Error).message}` }, 502);
     }
 
-    const label = TYPE_LABEL[reqRow.type] ?? "request";
+    const label = isBug ? "product bug report" : (TYPE_LABEL[reqRow.type] ?? "request");
     const subject = `New ${label}: ${reqRow.title}`;
     const html = [
       `<p>A new <strong>${escapeHtml(label)}</strong> is waiting for review.</p>`,

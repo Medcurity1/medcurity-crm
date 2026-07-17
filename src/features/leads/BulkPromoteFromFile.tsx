@@ -10,17 +10,24 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { Loader2, UserCheck, AlertTriangle } from "lucide-react";
+import { Loader2, UserCheck, AlertTriangle, X } from "lucide-react";
 import { toast } from "sonner";
 import { parseCsv } from "@/features/playbook/csv";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+import type { Tag } from "@/types/crm";
+import { TagPicker } from "@/features/tags/TagPicker";
+import { tagColorClass } from "@/features/tags/TagChips";
 import {
   useCountPromotable,
   useBulkPromoteImports,
+  resolveLeadIdsByEmail,
   type PromotePreview,
   type BulkPromoteResult,
 } from "./api";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Promotion is heavy per row (dedup + account match/create + contact insert),
 // so keep batches small. Preview is a cheap count, so it can go wider.
@@ -30,22 +37,35 @@ const PREVIEW_CHUNK = 2000;
 interface ParsedFile {
   fileName: string;
   rowCount: number;
+  /** Final lead ids to work: explicit ID column ∪ ids resolved from emails. */
   ids: string[];
+  emailCount: number;
+  emailMatched: number;
 }
 
-function extractIds(fileName: string, text: string): ParsedFile | null {
+// Accepts an "ID" column, an "Email" column, or both (same ergonomics as
+// Bulk Archive From File — Jordan's clean lists come back keyed by email).
+function extractIdsAndEmails(text: string): { ids: string[]; emails: string[]; rowCount: number } | null {
   const rows = parseCsv(text);
   if (rows.length < 2) return null;
   const header = rows[0].map((h) => h.trim().toLowerCase());
   const idCol = header.findIndex((h) => h === "id");
+  const emailCol = header.findIndex(
+    (h) => h === "email" || h === "e-mail" || h === "email_address",
+  );
   const ids = new Set<string>();
+  const emails = new Set<string>();
   for (const r of rows.slice(1)) {
     if (idCol >= 0) {
       const id = (r[idCol] ?? "").trim();
       if (UUID_RE.test(id)) ids.add(id.toLowerCase());
     }
+    if (emailCol >= 0) {
+      const e = (r[emailCol] ?? "").trim().toLowerCase();
+      if (EMAIL_RE.test(e)) emails.add(e);
+    }
   }
-  return { fileName, rowCount: rows.length - 1, ids: [...ids] };
+  return { ids: [...ids], emails: [...emails], rowCount: rows.length - 1 };
 }
 
 function chunk(ids: string[], n: number): string[][] {
@@ -67,6 +87,7 @@ export function BulkPromoteFromFile({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [batchTags, setBatchTags] = useState<Tag[]>([]);
   const countPromotable = useCountPromotable();
   const promote = useBulkPromoteImports();
 
@@ -76,6 +97,7 @@ export function BulkPromoteFromFile({
     setParseError(null);
     setConfirmOpen(false);
     setProgress(null);
+    setBatchTags([]);
   }
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -87,13 +109,41 @@ export function BulkPromoteFromFile({
     setParsed(null);
     try {
       const text = await file.text();
-      const p = extractIds(file.name, text);
-      if (!p || p.ids.length === 0) {
-        setParseError("Couldn't find any lead IDs in that file. Expected an 'ID' column.");
+      const p = extractIdsAndEmails(text);
+      if (!p || (p.ids.length === 0 && p.emails.length === 0)) {
+        setParseError(
+          "Couldn't find any lead IDs or emails in that file. Expected an 'ID' or 'Email' column.",
+        );
         return;
       }
-      setParsed(p);
+      // Emails → lead ids server-side, merged with any explicit ids.
+      let emailMatched = 0;
+      const ids = new Set(p.ids);
+      if (p.emails.length > 0) {
+        setRunning(true);
+        try {
+          const resolved = await resolveLeadIdsByEmail(p.emails);
+          emailMatched = resolved.length;
+          for (const id of resolved) ids.add(id);
+        } finally {
+          setRunning(false);
+        }
+      }
+      if (ids.size === 0) {
+        setParseError(
+          "None of the emails in that file matched an existing lead (and no ID column was present).",
+        );
+        return;
+      }
+      setParsed({
+        fileName: file.name,
+        rowCount: p.rowCount,
+        ids: [...ids],
+        emailCount: p.emails.length,
+        emailMatched,
+      });
     } catch (err) {
+      setRunning(false);
       setParseError("Failed to read the file: " + (err as Error).message);
     }
   }
@@ -139,8 +189,9 @@ export function BulkPromoteFromFile({
     setProgress({ done: 0, total: parsed.ids.length });
     try {
       let done = 0;
+      const tagIds = batchTags.map((t) => t.id);
       for (const b of batches) {
-        const r = await promote.mutateAsync(b);
+        const r = await promote.mutateAsync({ ids: b, tagIds });
         agg.promoted += r.promoted;
         agg.skipped_duplicate += r.skipped_duplicate;
         agg.skipped_ambiguous += r.skipped_ambiguous;
@@ -184,7 +235,8 @@ export function BulkPromoteFromFile({
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
               Upload a verified <span className="font-medium">"good"</span> list (e.g. a MillionVerifier OK
-              export). We match its rows to your existing leads by ID and promote them to{" "}
+              export). We match its rows to your existing leads by <span className="font-medium">ID or
+              email</span> and promote them to{" "}
               <span className="font-medium">Contacts</span> — matching or creating an account, and skipping
               anyone who's already a contact. Nothing happens until you review the preview and confirm.
             </p>
@@ -204,7 +256,43 @@ export function BulkPromoteFromFile({
               <div className="rounded-md border bg-muted/30 p-3 text-sm space-y-1">
                 <div className="font-medium truncate">{parsed.fileName}</div>
                 <div className="text-muted-foreground">
-                  {parsed.rowCount.toLocaleString()} rows · {parsed.ids.length.toLocaleString()} IDs
+                  {parsed.rowCount.toLocaleString()} rows · {parsed.ids.length.toLocaleString()} leads matched
+                  {parsed.emailCount > 0 && (
+                    <> · {parsed.emailMatched.toLocaleString()} of {parsed.emailCount.toLocaleString()} emails found</>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {parsed && (
+              <div className="space-y-2">
+                <Label>Tag the new contacts (recommended)</Label>
+                <p className="text-xs text-muted-foreground">
+                  Every contact this run creates gets these tags — so the batch stays
+                  filterable later (e.g. "Jordan Clean Jul 2026").
+                </p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {batchTags.map((t) => (
+                    <Badge key={t.id} className={cn("gap-1 border-transparent", tagColorClass(t.color))}>
+                      {t.name}
+                      <button
+                        type="button"
+                        onClick={() => setBatchTags((prev) => prev.filter((x) => x.id !== t.id))}
+                        className="opacity-70 hover:opacity-100"
+                        aria-label={`Remove ${t.name}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                  <TagPicker
+                    appliedTagIds={batchTags.map((t) => t.id)}
+                    onPick={(tag) =>
+                      setBatchTags((prev) =>
+                        prev.some((x) => x.id === tag.id) ? prev : [...prev, tag],
+                      )
+                    }
+                  />
                 </div>
               </div>
             )}
