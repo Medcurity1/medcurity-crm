@@ -11,6 +11,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { VerifiedBadge } from "@/components/VerifiedBadge";
 import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ArchiveDialog } from "@/components/ArchiveDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
 import { QueryError } from "@/components/QueryError";
 import { RecordId } from "@/components/RecordId";
@@ -265,13 +266,13 @@ export function AccountDetail() {
     );
   };
 
-  function handleArchive() {
+  function handleArchive(reason: string) {
     if (!id) return;
     archiveMutation.mutate(
-      { id },
+      { id, reason },
       {
         onSuccess: () => {
-          toast.success("Account archived");
+          toast.success("Account archived — an admin can restore it if needed");
           navigate("/accounts");
         },
         onError: (err) => {
@@ -329,7 +330,11 @@ export function AccountDetail() {
               <Pencil className="h-4 w-4 mr-1" />
               Edit
             </Button>
-            {isAdmin && (
+            {/* Archive opened to all write roles 2026-07-17 (Nathan, for
+                Summer's duplicate cleanup) — reason required, DB-enforced
+                for non-admins in migration 20260717000004. Delete stays
+                admin-only. */}
+            {canWrite && (
               <Button variant="outline" size="sm" onClick={() => setShowArchive(true)}>
                 <Archive className="h-4 w-4 mr-1" />
                 Archive
@@ -791,14 +796,12 @@ export function AccountDetail() {
 
       </DetailPageLayout>
 
-      <ConfirmDialog
+      <ArchiveDialog
         open={showArchive}
         onOpenChange={setShowArchive}
-        title="Archive Account"
-        description="This will hide the account from active views. An admin can restore it later."
-        confirmLabel="Archive"
-        destructive
-        onConfirm={handleArchive}
+        entityLabel="Account"
+        onArchive={handleArchive}
+        pending={archiveMutation.isPending}
       />
 
       <ConfirmDialog
