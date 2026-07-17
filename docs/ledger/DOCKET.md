@@ -4,13 +4,12 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Staging — awaiting prod go-ahead
 
-(nothing awaiting prod — the account-status restructure shipped to prod 2026-07-15 in e01ed6a; see SHIPPED.md)
+- [STAGING] 2026-07-16 · Rachel (via Requests form, high) · Product request Bug/Enhancement split — Bug files straight to Jira (verified on staging: MSD-918 test ticket, safe to delete), Enhancement keeps the email-approval flow. Staging commit 1aa1051, verified end-to-end 2026-07-17. Promote-ready: staging filed as issue type "Bug" against the real MSD project, so prod needs no new Jira config.
 
 (The 2026-07-15 batch — Joe Lead Source, Rachel Assessor, Summer email fix — shipped to prod in 5bc05df; the 7/10 Lead-Source-required + 7/11 ClickUp items were already on prod via 9d6b6a7. See SHIPPED.md.)
 
 ## Queued / requested
 
-- [IN PROGRESS] 2026-07-16 · Rachel (via Requests form, high) · Product request form: split into Bug vs Enhancement — Enhancement keeps the email-approval flow, Bug files straight to Jira with no approval (product team triages there). Built 2026-07-17, pushing to staging.
 - [QUEUED] 2026-07-17 · Nathan · Deploy-proof stale tabs: "new version available — refresh" banner (or auto-reload) so open tabs never glitch after a deploy. Trigger: 2026-07-17 Safari incident (stale cached files post-restructure-deploy showed "Something went wrong / Importing a module script failed" until website data was cleared).
 - [QUEUED] 2026-07-17 · Summer (via Nathan) · Batch of CRM change requests — Nathan to relay after Rachel's form change lands. Several already visible in the prod Requests widget (Rural Hospital industry option, delete/merge duplicate accounts, Notes field on Contacts, Active tab, ...).
 - [QUEUED] 2026-07-10 · (sweep follow-up) · Add per-day dedup guard to task-digest (task_digest_log(user_id, digest_date)) so the GH schedule can be restored as true redundancy alongside pg_cron without double-emailing reps
