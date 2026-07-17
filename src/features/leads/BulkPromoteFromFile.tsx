@@ -31,8 +31,11 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Promotion is heavy per row (dedup + account match/create + contact insert),
 // so keep batches small. Preview is a cheap count, so it can go wider.
-const PROMOTE_CHUNK = 300;
-const PREVIEW_CHUNK = 2000;
+// Sized down 2026-07-17 after Jordan's 13k file hit statement timeouts:
+// with migration 20260717000006's indexed dedup each call is subsecond,
+// but smaller chunks keep every call far from the 8s limit regardless.
+const PROMOTE_CHUNK = 150;
+const PREVIEW_CHUNK = 1000;
 
 interface ParsedFile {
   fileName: string;
