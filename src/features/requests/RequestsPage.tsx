@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
-import { Palette, Package, Wrench, Send, Check, Plus, Paperclip, X } from "lucide-react";
+import { Palette, Package, Wrench, Send, Check, Plus, Paperclip, X, Bug, Sparkles } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/PageHeader";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Card } from "@/components/ui/card";
@@ -23,6 +24,7 @@ import {
   COLLATERAL_AUDIENCES,
   COLLATERAL_FORMATS,
   CRM_CHANGE_TYPES,
+  type ProductCategory,
 } from "./api";
 
 function PrioritySelect({
@@ -292,16 +294,76 @@ function CollateralForm() {
 }
 
 // ── Product ──────────────────────────────────────────────────────────
+
+/** Bug vs Enhancement chooser — two selectable cards (Rachel, Jul 2026). */
+function ProductCategoryPicker({
+  value,
+  onChange,
+}: {
+  value: ProductCategory | "";
+  onChange: (v: ProductCategory) => void;
+}) {
+  const options: Array<{
+    value: ProductCategory;
+    label: string;
+    blurb: string;
+    icon: typeof Bug;
+  }> = [
+    {
+      value: "bug",
+      label: "Bug",
+      blurb: "Something is broken. Goes straight to the product team's Jira — no approval step.",
+      icon: Bug,
+    },
+    {
+      value: "enhancement",
+      label: "Enhancement",
+      blurb: "An idea or improvement. Reviewed and approved before it's filed to Jira.",
+      icon: Sparkles,
+    },
+  ];
+  return (
+    <div className="space-y-2">
+      <Label>
+        What kind of request is this? <span className="text-destructive">*</span>
+      </Label>
+      <div className="grid grid-cols-2 gap-2">
+        {options.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => onChange(o.value)}
+            aria-pressed={value === o.value}
+            className={cn(
+              "rounded-lg border p-3 text-left transition-colors",
+              value === o.value
+                ? "border-primary bg-primary/5 ring-1 ring-primary"
+                : "border-border hover:bg-muted/50",
+            )}
+          >
+            <span className="flex items-center gap-1.5 text-sm font-medium">
+              <o.icon className="h-4 w-4" /> {o.label}
+            </span>
+            <span className="mt-1 block text-xs text-muted-foreground">{o.blurb}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ProductForm() {
   const { profile } = useAuth();
   const create = useCreateRequest();
   const [submitted, setSubmitted] = useState(false);
+  const [category, setCategory] = useState<ProductCategory | "">("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<RequestPriority>("low");
   const [files, setFiles] = useState<File[]>([]);
 
   function reset() {
+    setCategory("");
     setTitle("");
     setDescription("");
     setPriority("low");
@@ -309,6 +371,10 @@ function ProductForm() {
   }
 
   function submit() {
+    if (!category) {
+      toast.error("Choose Bug or Enhancement first.");
+      return;
+    }
     if (!title.trim() || !description.trim()) {
       toast.error("Add a title and a description.");
       return;
@@ -320,6 +386,7 @@ function ProductForm() {
         description: description.trim(),
         priority,
         requesterName: profile?.full_name ?? null,
+        details: { category },
         files,
       },
       {
@@ -328,6 +395,14 @@ function ProductForm() {
             toast.warning(
               `Request submitted, but these files failed to upload: ${res.failedUploads.join(", ")}`,
             );
+          } else if (res.bugFiled) {
+            toast.success(
+              res.bugFiled.jiraKey
+                ? `Bug filed to Jira (${res.bugFiled.jiraKey}).`
+                : "Bug filed to Jira.",
+            );
+          } else if (category === "bug") {
+            toast.success("Bug submitted — the product team will file it to Jira.");
           } else {
             toast.success("Request submitted");
           }
@@ -352,19 +427,42 @@ function ProductForm() {
   return (
     <div className="space-y-4">
       <FromLine />
+      <ProductCategoryPicker value={category} onChange={setCategory} />
       <div className="space-y-2">
         <Label htmlFor="p-title">Title <span className="text-destructive">*</span></Label>
-        <Input id="p-title" maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Short name for the product idea or change" />
+        <Input
+          id="p-title"
+          maxLength={200}
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder={
+            category === "bug"
+              ? "Short name for what's broken"
+              : "Short name for the product idea or change"
+          }
+        />
       </div>
       <div className="space-y-2">
         <Label htmlFor="p-desc">Description <span className="text-destructive">*</span></Label>
-        <Textarea id="p-desc" rows={5} maxLength={4000} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What's the idea, the problem it solves, and any detail that helps the reviewer decide..." />
+        <Textarea
+          id="p-desc"
+          rows={5}
+          maxLength={4000}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder={
+            category === "bug"
+              ? "What's broken, where it happens, and how to reproduce it if you can..."
+              : "What's the idea, the problem it solves, and any detail that helps the reviewer decide..."
+          }
+        />
       </div>
       <AttachmentPicker files={files} onChange={setFiles} maxSizeMB={25} />
       <PrioritySelect value={priority} onChange={setPriority} />
       <p className="text-xs text-muted-foreground">
-        Product requests are reviewed inside the CRM. If approved, the request is filed
-        to the product team's Jira board, attachments included.
+        {category === "bug"
+          ? "Bug reports skip review and are filed straight to the product team's Jira board, attachments included. The product team approves or denies from there."
+          : "Enhancements are reviewed inside the CRM. If approved, the request is filed to the product team's Jira board, attachments included."}
       </p>
       <div className="flex justify-end pt-2">
         <Button onClick={submit} disabled={create.isPending} className="gap-2">

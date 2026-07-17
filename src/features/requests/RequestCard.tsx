@@ -29,6 +29,7 @@ import type { CrmRequest, RequestPriority, RequestStatus } from "@/types/crm";
 import {
   REQUEST_TYPE_LABELS,
   STATUS_LABELS,
+  PRODUCT_CATEGORY_LABELS,
   useCompleteRequest,
   useApproveProductRequest,
   useDenyProductRequest,
@@ -84,9 +85,22 @@ function detailFields(r: CrmRequest): Array<[string, string]> {
         ]
       : r.type === "crm"
         ? [["Type of change", str("change_type")]]
-        : [];
+        : r.type === "product"
+          ? [["Request type", PRODUCT_CATEGORY_LABELS[str("category") ?? ""] ?? null]]
+          : [];
   return rows.filter((x): x is [string, string] => x[1] !== null);
 }
+
+/** 'bug' | 'enhancement' from the details jsonb (product requests). */
+function productCategory(r: CrmRequest): string | null {
+  const v = ((r.details ?? {}) as Record<string, unknown>).category;
+  return typeof v === "string" && PRODUCT_CATEGORY_LABELS[v] ? v : null;
+}
+
+const CATEGORY_BADGE: Record<string, string> = {
+  bug: "bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-300",
+  enhancement: "bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-300",
+};
 
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -180,6 +194,16 @@ function RequestDetailDialog({
             <Badge variant="outline" className="text-[10px]">
               {REQUEST_TYPE_LABELS[request.type]}
             </Badge>
+            {productCategory(request) && (
+              <Badge
+                className={cn(
+                  "text-[10px] border-transparent",
+                  CATEGORY_BADGE[productCategory(request)!],
+                )}
+              >
+                {PRODUCT_CATEGORY_LABELS[productCategory(request)!]}
+              </Badge>
+            )}
             <Badge className={cn("text-[10px] border-transparent", PRIORITY_BADGE[request.priority])}>
               {request.priority}
             </Badge>
@@ -450,6 +474,16 @@ export function RequestCard({
           {showType && (
             <Badge variant="outline" className="shrink-0 text-[10px]">
               {REQUEST_TYPE_LABELS[request.type]}
+            </Badge>
+          )}
+          {productCategory(request) && (
+            <Badge
+              className={cn(
+                "shrink-0 text-[10px] border-transparent",
+                CATEGORY_BADGE[productCategory(request)!],
+              )}
+            >
+              {PRODUCT_CATEGORY_LABELS[productCategory(request)!]}
             </Badge>
           )}
           <Badge

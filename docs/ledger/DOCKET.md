@@ -10,6 +10,9 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Queued / requested
 
+- [IN PROGRESS] 2026-07-16 · Rachel (via Requests form, high) · Product request form: split into Bug vs Enhancement — Enhancement keeps the email-approval flow, Bug files straight to Jira with no approval (product team triages there). Built 2026-07-17, pushing to staging.
+- [QUEUED] 2026-07-17 · Nathan · Deploy-proof stale tabs: "new version available — refresh" banner (or auto-reload) so open tabs never glitch after a deploy. Trigger: 2026-07-17 Safari incident (stale cached files post-restructure-deploy showed "Something went wrong / Importing a module script failed" until website data was cleared).
+- [QUEUED] 2026-07-17 · Summer (via Nathan) · Batch of CRM change requests — Nathan to relay after Rachel's form change lands. Several already visible in the prod Requests widget (Rural Hospital industry option, delete/merge duplicate accounts, Notes field on Contacts, Active tab, ...).
 - [QUEUED] 2026-07-10 · (sweep follow-up) · Add per-day dedup guard to task-digest (task_digest_log(user_id, digest_date)) so the GH schedule can be restored as true redundancy alongside pg_cron without double-emailing reps
 - [QUEUED] 2026-07-10 · (found in prod verify) · Dedupe the Standard Price Book duplicate NULL-tier rows (pre-existing import quirk on the SRA; the BA SRA mirror inherited 11 identical $799 rows there — pricing correct, cosmetic only) · small idempotent migration
 - [QUEUED] 2026-07-08 · (found in review) · Frontend IndustryCategory union missing ~55 enum values from the May 6 DB expansion (same display/filter gap Rural Hospital had) · chip task_63bbc3ee pending
