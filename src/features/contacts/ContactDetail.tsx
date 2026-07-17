@@ -378,6 +378,30 @@ export function ContactDetail() {
         </Card>
       </div>
 
+      {/* --------- Notes (just below the key-info tiles) ---------
+          Summer (2026-07-16): notes were buried in the collapsed
+          "Notes & Next Steps" layout section at the bottom; migration
+          20260717000002 removed the duplicate notes row from that
+          layout so this card is the one place notes render. */}
+      <Card className="mb-6">
+        <CardHeader className="pb-1 pt-3 px-4">
+          <CardTitle className="text-xs text-muted-foreground font-medium">Notes</CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-3">
+          <InlineEdit
+            value={contact.notes ?? null}
+            type="textarea"
+            placeholder="Add notes..."
+            onSave={async (v) => {
+              await updateMutation.mutateAsync({
+                id: contactId,
+                notes: v === "" ? null : v,
+              } as Parameters<typeof updateMutation.mutateAsync>[0]);
+            }}
+          />
+        </CardContent>
+      </Card>
+
       <DetailPageLayout
         sidePanels={[
           {
