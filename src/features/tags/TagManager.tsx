@@ -117,12 +117,15 @@ export function TagManager() {
                       </Button>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-2">
-                      <Badge className={cn("border-transparent", tagColorClass(t.color))}>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Badge className={cn("shrink-0 border-transparent", tagColorClass(t.color))}>
                         {t.name}
                       </Badge>
                       {t.description && (
-                        <span className="truncate text-xs text-muted-foreground">
+                        <span
+                          className="max-w-md truncate text-xs text-muted-foreground"
+                          title={t.description}
+                        >
                           {t.description}
                         </span>
                       )}
