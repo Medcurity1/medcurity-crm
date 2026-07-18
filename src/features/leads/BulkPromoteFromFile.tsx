@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Loader2, UserCheck, AlertTriangle, X } from "lucide-react";
 import { toast } from "sonner";
@@ -95,6 +96,10 @@ export function BulkPromoteFromFile({
   // toast — a run with silent skips/errors looked like success (2026-07-17:
   // 205 rows failed invisibly). Now the dialog stays open and itemizes.
   const [result, setResult] = useState<BulkPromoteResult | null>(null);
+  // Opt-in: promote ambiguous-company leads as account-less contacts
+  // instead of skipping them (Nathan 2026-07-17, for clearing batches
+  // stuck on duplicate/same-named accounts).
+  const [ambiguousAccountless, setAmbiguousAccountless] = useState(false);
   const countPromotable = useCountPromotable();
   const promote = useBulkPromoteImports();
 
@@ -106,6 +111,7 @@ export function BulkPromoteFromFile({
     setProgress(null);
     setBatchTags([]);
     setResult(null);
+    setAmbiguousAccountless(false);
   }
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -202,8 +208,10 @@ export function BulkPromoteFromFile({
       let done = 0;
       const tagIds = batchTags.map((t) => t.id);
       for (const b of batches) {
-        const r = await promote.mutateAsync({ ids: b, tagIds });
+        const r = await promote.mutateAsync({ ids: b, tagIds, ambiguousAccountless });
         agg.promoted += r.promoted;
+        agg.promoted_ambiguous_accountless =
+          (agg.promoted_ambiguous_accountless ?? 0) + (r.promoted_ambiguous_accountless ?? 0);
         agg.skipped_duplicate += r.skipped_duplicate;
         agg.skipped_ambiguous += r.skipped_ambiguous;
         agg.skipped_other += r.skipped_other;
@@ -315,6 +323,27 @@ export function BulkPromoteFromFile({
               </div>
             )}
 
+            {parsed && (
+              <div className="flex items-start gap-2 rounded-md border p-3">
+                <Checkbox
+                  id="ambiguous-accountless"
+                  checked={ambiguousAccountless}
+                  onCheckedChange={(v) => setAmbiguousAccountless(v === true)}
+                  className="mt-0.5"
+                />
+                <div className="space-y-0.5">
+                  <Label htmlFor="ambiguous-accountless" className="cursor-pointer">
+                    Promote ambiguous companies without an account
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    When a lead's company matches more than one account, promote the person
+                    anyway with no account attached (instead of skipping). The company name
+                    stays on the linked lead; attach the right account later.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {preview && (
               <div className="rounded-md border border-emerald-300/50 bg-emerald-50 p-3 text-sm dark:bg-emerald-950/20">
                 <div className="font-semibold text-emerald-800 dark:text-emerald-200">Preview</div>
@@ -348,6 +377,10 @@ export function BulkPromoteFromFile({
                   <li>
                     <span className="font-medium text-foreground">{result.promoted.toLocaleString()}</span>{" "}
                     promoted to contacts
+                    {(result.promoted_ambiguous_accountless ?? 0) > 0 && (
+                      <> — {result.promoted_ambiguous_accountless!.toLocaleString()} of them without an
+                      account (ambiguous company)</>
+                    )}
                   </li>
                   {result.skipped_duplicate > 0 && (
                     <li>{result.skipped_duplicate.toLocaleString()} skipped — already contacts</li>
@@ -390,7 +423,9 @@ export function BulkPromoteFromFile({
                 {(result.ambiguous_detail?.length ?? 0) > 0 && (
                   <div className="space-y-1">
                     <div className="text-xs font-medium">
-                      Ambiguous companies (first {result.ambiguous_detail!.length}):
+                      {(result.promoted_ambiguous_accountless ?? 0) > 0
+                        ? `Promoted account-less — ambiguous company (first ${result.ambiguous_detail!.length}):`
+                        : `Ambiguous companies (first ${result.ambiguous_detail!.length}):`}
                     </div>
                     <div className="max-h-32 overflow-y-auto rounded border bg-background/60 p-2 text-xs font-mono space-y-1">
                       {result.ambiguous_detail!.map((a) => (
