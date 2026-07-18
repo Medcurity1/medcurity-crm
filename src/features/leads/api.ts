@@ -269,6 +269,9 @@ export interface BulkPromoteResult {
   error_detail?: Array<{ lead_id: string; error: string; code?: string }>;
   /** Leads skipped because their company matches more than one account. */
   ambiguous_detail?: Array<{ lead_id: string; company: string | null }>;
+  /** Of `promoted`: how many came in account-less because their company was
+   * ambiguous and the caller opted in via ambiguousAccountless. */
+  promoted_ambiguous_accountless?: number;
 }
 export function useBulkPromoteImports() {
   const qc = useQueryClient();
@@ -276,14 +279,20 @@ export function useBulkPromoteImports() {
     mutationFn: async ({
       ids,
       tagIds,
+      ambiguousAccountless,
     }: {
       ids: string[];
       /** Optional batch-tracking tags applied to every contact created. */
       tagIds?: string[];
+      /** When a lead's company matches MORE THAN ONE account, promote it
+       * anyway with NO account attached (instead of skipping). Off by
+       * default — Nathan 2026-07-17, for bulk-clearing ambiguous batches. */
+      ambiguousAccountless?: boolean;
     }): Promise<BulkPromoteResult> => {
       const { data, error } = await supabase.rpc("bulk_promote_imports", {
         p_lead_ids: ids,
         p_tag_ids: tagIds?.length ? tagIds : null,
+        p_ambiguous_accountless: ambiguousAccountless ?? false,
       });
       if (error) throw error;
       return data as BulkPromoteResult;
