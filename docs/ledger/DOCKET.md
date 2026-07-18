@@ -10,8 +10,6 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Queued / requested
 
-- [STAGING — awaiting Nathan's prod go-ahead] 2026-07-17 · Nathan · **Promote-ambiguous-without-account option** (migration 20260717000011): opt-in checkbox on Bulk Promote From File — ambiguous-company leads promote as ACCOUNT-LESS contacts instead of skipping (default unchanged: skip). Result reports promoted_ambiguous_accountless separately; summary lists each with lead link. For clearing the 34 leads stuck on duplicate/same-named accounts (Optum ×8, HonorHealth, Cascadia, CHS Inc vs ", Inc.", ...). STAGING-VERIFIED both ways with a purpose-built two-account fixture: OFF → 1 skipped+itemized; ON → 1 promoted account-less+itemized; contact confirmed account-less. Account-dupe cleanup (CHS/Summit/Cascadia pairs) noted for Summer separately.
-
 - [QUEUED] 2026-07-17 · Nathan · Reports based on tags ("soon" project): let the main Reports tab filter/group by contact tags (today tags only report via the Contacts-list filter+export and the Nexus custom-report widget).
 
 
