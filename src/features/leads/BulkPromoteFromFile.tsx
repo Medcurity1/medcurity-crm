@@ -91,6 +91,10 @@ export function BulkPromoteFromFile({
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [batchTags, setBatchTags] = useState<Tag[]>([]);
+  // Persistent post-run summary. The old flow closed the dialog with only a
+  // toast — a run with silent skips/errors looked like success (2026-07-17:
+  // 205 rows failed invisibly). Now the dialog stays open and itemizes.
+  const [result, setResult] = useState<BulkPromoteResult | null>(null);
   const countPromotable = useCountPromotable();
   const promote = useBulkPromoteImports();
 
@@ -101,6 +105,7 @@ export function BulkPromoteFromFile({
     setConfirmOpen(false);
     setProgress(null);
     setBatchTags([]);
+    setResult(null);
   }
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -110,6 +115,7 @@ export function BulkPromoteFromFile({
     setParseError(null);
     setPreview(null);
     setParsed(null);
+    setResult(null);
     try {
       const text = await file.text();
       const p = extractIdsAndEmails(text);
@@ -187,6 +193,8 @@ export function BulkPromoteFromFile({
       skipped_other: 0,
       errors: 0,
       last_error: null,
+      error_detail: [],
+      ambiguous_detail: [],
     };
     setRunning(true);
     setProgress({ done: 0, total: parsed.ids.length });
@@ -201,16 +209,23 @@ export function BulkPromoteFromFile({
         agg.skipped_other += r.skipped_other;
         agg.errors += r.errors;
         if (r.last_error) agg.last_error = r.last_error;
+        if (r.error_detail?.length && agg.error_detail!.length < 25) {
+          agg.error_detail!.push(...r.error_detail.slice(0, 25 - agg.error_detail!.length));
+        }
+        if (r.ambiguous_detail?.length && agg.ambiguous_detail!.length < 25) {
+          agg.ambiguous_detail!.push(
+            ...r.ambiguous_detail.slice(0, 25 - agg.ambiguous_detail!.length),
+          );
+        }
         done += b.length;
         setProgress({ done, total: parsed.ids.length });
       }
-      toast.success(
-        `Promoted ${agg.promoted.toLocaleString()} to contacts` +
-          (agg.skipped_duplicate ? ` · ${agg.skipped_duplicate.toLocaleString()} already contacts` : "") +
-          (agg.errors ? ` · ${agg.errors.toLocaleString()} errors` : ""),
-      );
-      reset();
-      onOpenChange(false);
+      toast.success(`Promoted ${agg.promoted.toLocaleString()} to contacts.`);
+      // Keep the dialog open on the itemized summary — every bucket visible,
+      // nothing silently swallowed. Close is the user's call.
+      setResult(agg);
+      setPreview(null);
+      setConfirmOpen(false);
     } catch (err) {
       toast.error("Promote failed: " + (err as Error).message);
     } finally {
@@ -316,6 +331,82 @@ export function BulkPromoteFromFile({
                 {preview.promotable === 0 && (
                   <div className="mt-1 text-xs text-emerald-900/70 dark:text-emerald-100/70">
                     Nothing to promote — none of these matched a promotable lead.
+                  </div>
+                )}
+                <div className="mt-1 text-xs text-emerald-900/70 dark:text-emerald-100/70">
+                  Preview is an upper bound: rows can still be skipped at promote time
+                  (e.g. a company name matching two accounts) — the run summary itemizes
+                  anything that doesn't make it.
+                </div>
+              </div>
+            )}
+
+            {result && (
+              <div className="rounded-md border bg-muted/30 p-3 text-sm space-y-2">
+                <div className="font-semibold">Run summary</div>
+                <ul className="space-y-0.5 text-muted-foreground">
+                  <li>
+                    <span className="font-medium text-foreground">{result.promoted.toLocaleString()}</span>{" "}
+                    promoted to contacts
+                  </li>
+                  {result.skipped_duplicate > 0 && (
+                    <li>{result.skipped_duplicate.toLocaleString()} skipped — already contacts</li>
+                  )}
+                  {result.skipped_ambiguous > 0 && (
+                    <li>
+                      {result.skipped_ambiguous.toLocaleString()} skipped — company name matches more
+                      than one account (safer by hand)
+                    </li>
+                  )}
+                  {result.skipped_other > 0 && (
+                    <li>{result.skipped_other.toLocaleString()} skipped — already converted or archived</li>
+                  )}
+                  {result.errors > 0 && (
+                    <li className="text-destructive">{result.errors.toLocaleString()} failed with errors</li>
+                  )}
+                </ul>
+                {(result.error_detail?.length ?? 0) > 0 && (
+                  <div className="space-y-1">
+                    <div className="text-xs font-medium text-destructive">
+                      Failed rows (first {result.error_detail!.length}):
+                    </div>
+                    <div className="max-h-40 overflow-y-auto rounded border bg-background/60 p-2 text-xs font-mono space-y-1">
+                      {result.error_detail!.map((e) => (
+                        <div key={e.lead_id}>
+                          <a
+                            className="text-primary underline-offset-2 hover:underline"
+                            href={`/leads/${e.lead_id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {e.lead_id.slice(0, 8)}…
+                          </a>{" "}
+                          {e.error}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {(result.ambiguous_detail?.length ?? 0) > 0 && (
+                  <div className="space-y-1">
+                    <div className="text-xs font-medium">
+                      Ambiguous companies (first {result.ambiguous_detail!.length}):
+                    </div>
+                    <div className="max-h-32 overflow-y-auto rounded border bg-background/60 p-2 text-xs font-mono space-y-1">
+                      {result.ambiguous_detail!.map((a) => (
+                        <div key={a.lead_id}>
+                          <a
+                            className="text-primary underline-offset-2 hover:underline"
+                            href={`/leads/${a.lead_id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {a.lead_id.slice(0, 8)}…
+                          </a>{" "}
+                          {a.company ?? "—"}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

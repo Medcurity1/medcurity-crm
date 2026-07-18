@@ -264,6 +264,11 @@ export interface BulkPromoteResult {
    * returns this so the UI can surface WHY rows errored instead of a bare
    * count. */
   last_error: string | null;
+  /** Per-row failure detail, capped at 25 per chunk: which lead, what error.
+   * Added 2026-07-17 after 205 rows failed with only an opaque count. */
+  error_detail?: Array<{ lead_id: string; error: string; code?: string }>;
+  /** Leads skipped because their company matches more than one account. */
+  ambiguous_detail?: Array<{ lead_id: string; company: string | null }>;
 }
 export function useBulkPromoteImports() {
   const qc = useQueryClient();

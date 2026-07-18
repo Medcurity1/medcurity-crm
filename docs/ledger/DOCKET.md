@@ -10,6 +10,8 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Queued / requested
 
+- [STAGING — awaiting Nathan's prod go-ahead] 2026-07-17 · Nathan (ultracode investigation) · **Account-less promote restored + promote diagnostics** (migration 20260717000010 + dialog): reverts 000009's fabricated "(import)" accounts back to the 2026-06-16 account-less decision; bulk promote result now returns per-row error_detail/ambiguous_detail (capped 25) and the dialog stays open on an itemized all-buckets run summary with per-lead links; preview labeled as upper bound; tag_usage_counts live-only + role guard. STAGING-VERIFIED: "Unknown"-company lead bulk-promoted → account-less contact, tag applied, summary panel rendered. NOTE: prod still runs 000009 until approved — the 232 stuck leads should NOT be re-run on prod before this ships. Root cause of the 205 silent errors: schema-level causes fully ruled out (audit); the instrumented run on prod data will name it per-lead.
+
 - [QUEUED] 2026-07-17 · Nathan · Reports based on tags ("soon" project): let the main Reports tab filter/group by contact tags (today tags only report via the Contacts-list filter+export and the Nexus custom-report widget).
 
 
