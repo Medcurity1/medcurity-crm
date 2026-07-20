@@ -136,24 +136,33 @@ channel?.addEventListener("message", (e: MessageEvent) => {
   if (!msg || !msg.type) return;
 
   // A booting tab is asking for the session — share ours if we hold it.
+  // (getItem wrapped: Safari's strictest privacy modes throw on ANY storage
+  // touch, and an exception inside this handler would kill the mirror.)
   if (msg.type === "request") {
-    const v = sessionStorage.getItem(AUTH_STORAGE_KEY);
+    let v: string | null = null;
+    try {
+      v = sessionStorage.getItem(AUTH_STORAGE_KEY);
+    } catch {
+      /* storage blocked */
+    }
     if (v) channel?.postMessage({ type: "set", key: AUTH_STORAGE_KEY, value: v });
     return;
   }
 
   if (msg.type === "set" && msg.key) {
+    let current: string | null = null;
+    try {
+      current = sessionStorage.getItem(msg.key);
+    } catch {
+      /* storage blocked */
+    }
     if (msg.key === AUTH_STORAGE_KEY) {
       // Don't resurrect a session right after a sign-out, and never overwrite a
       // newer session with an older one (a stale 'set' that raced a refresh).
       if (Date.now() - signedOutAt < SIGNOUT_TOMBSTONE_MS) return;
-      if (
-        sessionExpiresAt(msg.value ?? null) <
-        sessionExpiresAt(sessionStorage.getItem(msg.key))
-      )
-        return;
+      if (sessionExpiresAt(msg.value ?? null) < sessionExpiresAt(current)) return;
     }
-    if (sessionStorage.getItem(msg.key) === msg.value) return; // already in sync
+    if (current === msg.value) return; // already in sync
     lastSeen[msg.key] = msg.value ?? null; // suppress echo on the write below
     try {
       sessionStorage.setItem(msg.key, msg.value as string);
@@ -183,7 +192,13 @@ channel?.addEventListener("message", (e: MessageEvent) => {
 export async function initCrossTabSession(): Promise<void> {
   if (typeof window === "undefined") return;
   if (!useSessionStore) return; // localStorage fallback: nothing to coordinate
-  if (sessionStorage.getItem(AUTH_STORAGE_KEY)) return; // tab already has one
+  try {
+    if (sessionStorage.getItem(AUTH_STORAGE_KEY)) return; // tab already has one
+  } catch {
+    // Storage blocked (Safari "Block All Cookies"/Lockdown) — boot
+    // signed-out rather than dying before first paint.
+    return;
+  }
 
   // 1. One-time legacy migration (deploy day): move the old localStorage
   // session into sessionStorage and delete it, so we don't keep falling back

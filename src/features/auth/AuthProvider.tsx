@@ -24,14 +24,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadedUserId = useRef<string | null>(null);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session?.user) {
-        fetchProfile(session.user.id);
-      } else {
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => {
+        setSession(session);
+        if (session?.user) {
+          fetchProfile(session.user.id);
+        } else {
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        // Without this, a getSession failure (e.g. storage blocked) left
+        // loading=true forever → infinite "Loading..." spinner. Treat as
+        // signed-out; the login page is a better dead end than a spinner.
+        console.error("getSession failed at boot:", err);
         setLoading(false);
-      }
-    });
+      });
 
     const {
       data: { subscription },
@@ -72,21 +81,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function fetchProfile(userId: string) {
-    const { data, error } = await supabase
-      .from("user_profiles")
-      .select("*")
-      .eq("id", userId)
-      .single();
+    // try/finally: a THROWN failure (network drop — supabase-js rejects, it
+    // doesn't return an error object for those) previously skipped
+    // setLoading(false) and stranded the app on the loading screen.
+    try {
+      const { data, error } = await supabase
+        .from("user_profiles")
+        .select("*")
+        .eq("id", userId)
+        .single();
 
-    if (error || !data) {
-      console.error("Failed to fetch user profile:", error);
+      if (error || !data) {
+        console.error("Failed to fetch user profile:", error);
+        loadedUserId.current = null;
+        setProfile(null);
+      } else {
+        loadedUserId.current = userId;
+        setProfile(data as UserProfile);
+      }
+    } catch (err) {
+      console.error("Failed to fetch user profile:", err);
       loadedUserId.current = null;
       setProfile(null);
-    } else {
-      loadedUserId.current = userId;
-      setProfile(data as UserProfile);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   async function signOut() {

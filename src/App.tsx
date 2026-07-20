@@ -10,6 +10,12 @@ import { LoginPage } from "@/features/auth/LoginPage";
 import { ForgotPasswordPage } from "@/features/auth/ForgotPasswordPage";
 import { ResetPasswordPage } from "@/features/auth/ResetPasswordPage";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { setClientErrorAppVersion } from "@/lib/clientErrorLogger";
+import { BUILD_ID } from "@/lib/buildInfo";
+
+// Stamp client-error telemetry with the running build so "was this fixed
+// by the next deploy?" is answerable from the log.
+setClientErrorAppVersion(BUILD_ID);
 
 // Lazy-loaded route components for code splitting
 //
