@@ -26,7 +26,7 @@ export interface FilterColumnDef {
   /** Human-readable label shown in the UI dropdown. */
   label: string;
   /** Column type — drives which operators & value inputs are shown. */
-  type: ColumnDef["type"] | RelationFilterType;
+  type: ColumnDef["type"] | RelationFilterType | "tags";
   /** For enum columns, the set of valid values. */
   enumValues?: string[];
   /**
@@ -250,6 +250,9 @@ const contactFilterColumns: FilterColumnDef[] = [
   { filterKey: "mailing_country", label: "Mailing Country", type: "text" },
   { filterKey: "created_at", label: "Created", type: "date" },
   { filterKey: "updated_at", label: "Updated", type: "date" },
+  // Virtual column (Nathan 2026-07-17 "reports based on tags"): resolved via
+  // a contact_tags!inner embed in report-api, not a flat column.
+  { filterKey: "_tags", label: "Tags", type: "tags" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -727,6 +730,7 @@ export function isRelationFilterType(type: string): type is RelationFilterType {
  */
 function resolveOperatorType(type: FilterColumnDef["type"]): ColumnDef["type"] {
   if (isRelationFilterType(type)) return "enum";
+  if (type === "tags") return "enum"; // handled before this in getOperatorsForType
   return type;
 }
 
@@ -767,6 +771,10 @@ export const FILTER_OPERATORS: Array<{
 ];
 
 export function getOperatorsForType(type: FilterColumnDef["type"]) {
+  // Tags are a multi-value relation — exactly one sensible operator.
+  if (type === "tags") {
+    return [{ value: "in", label: "has any of", applicableTo: [] as Array<ColumnDef["type"]> }];
+  }
   const resolved = resolveOperatorType(type);
   return FILTER_OPERATORS.filter((op) => op.applicableTo.includes(resolved));
 }

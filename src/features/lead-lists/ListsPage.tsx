@@ -33,7 +33,19 @@ import {
   useRemoveFromList,
   useSearchContactsForList,
   useBulkAddContactsToList,
+  useSmartListMembers,
+  useFreezeSmartList,
+  parseSmartRules,
+  smartRuleChips,
+  smartRulesEmpty,
+  type SmartListRules,
 } from "./lead-lists-api";
+import { MultiSelect } from "@/components/MultiSelect";
+import { useTags } from "@/features/tags/api";
+import { useUsers } from "@/features/accounts/api";
+import { US_STATES } from "@/lib/us-states";
+import { customerStatusLabel } from "@/lib/formatters";
+import type { CustomerStatus } from "@/types/crm";
 
 /**
  * Lists — lives as the second tab of the Reports hub (Nathan 2026-07-20:
@@ -108,7 +120,7 @@ export function ListsPage() {
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-medium truncate">{l.name}</span>
-                      <Badge variant="secondary">{counts?.[l.id] ?? 0}</Badge>
+                      <Badge variant="secondary">{l.is_dynamic ? "auto" : (counts?.[l.id] ?? 0)}</Badge>
                     </div>
                     {l.description && (
                       <p className="text-xs text-muted-foreground truncate">{l.description}</p>
@@ -131,7 +143,11 @@ export function ListsPage() {
           </Card>
 
           {selected ? (
-            <ListDetail key={selected.id} list={selected} onDeleted={() => setSelectedId(null)} />
+            selected.is_dynamic ? (
+              <SmartListDetail key={selected.id} list={selected} onDeleted={() => setSelectedId(null)} onFrozen={(id) => setSelectedId(id)} />
+            ) : (
+              <ListDetail key={selected.id} list={selected} onDeleted={() => setSelectedId(null)} />
+            )
           ) : (
             <Card>
               <CardContent className="py-16 text-center text-sm text-muted-foreground">
@@ -327,6 +343,158 @@ function ListDetail({ list, onDeleted }: { list: LeadList; onDeleted: () => void
   );
 }
 
+function SmartListDetail({
+  list,
+  onDeleted,
+  onFrozen,
+}: {
+  list: LeadList;
+  onDeleted: () => void;
+  onFrozen: (newListId: string) => void;
+}) {
+  const { data, isLoading } = useSmartListMembers(list);
+  const deleteMutation = useDeleteLeadList();
+  const freezeMutation = useFreezeSmartList();
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const { data: tags } = useTags();
+  const { data: users } = useUsers();
+
+  const rules = parseSmartRules(list);
+  const chips = smartRuleChips(
+    rules,
+    (id) => tags?.find((t) => t.id === id)?.name ?? "?",
+    (id) => users?.find((u) => u.id === id)?.full_name ?? "?",
+    (v) => customerStatusLabel(v as CustomerStatus),
+  );
+  const rows = data?.rows ?? [];
+
+  return (
+    <Card>
+      <CardContent className="py-4 space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h3 className="text-lg font-semibold truncate">
+              {list.name}
+              <Badge variant="outline" className="ml-2 align-middle">
+                <Sparkles className="h-3 w-3 mr-1" />
+                Smart list
+              </Badge>
+            </h3>
+            {list.description && (
+              <p className="text-sm text-muted-foreground">{list.description}</p>
+            )}
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {chips.map((c) => (
+                <Badge key={c} variant="secondary" className="font-normal">{c}</Badge>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+              <Pencil className="h-4 w-4 mr-1" />
+              Edit rules
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={freezeMutation.isPending || rows.length === 0}
+              onClick={() =>
+                freezeMutation.mutate(list, {
+                  onSuccess: (r) => {
+                    toast.success(`Froze ${r.added.toLocaleString()} contacts into "${r.list.name}"`);
+                    onFrozen(r.list.id);
+                  },
+                  onError: (e) => toast.error((e as Error).message),
+                })
+              }
+            >
+              {freezeMutation.isPending ? "Freezing…" : "Freeze into regular list"}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setDeleteOpen(true)}>
+              <Trash2 className="h-4 w-4 mr-1" />
+              Delete
+            </Button>
+          </div>
+        </div>
+
+        {isLoading ? (
+          <Skeleton className="h-32 w-full" />
+        ) : rows.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            Nobody matches these rules right now — the moment someone does
+            (say, they get the tag), they appear here automatically.
+          </p>
+        ) : (
+          <>
+            <p className="text-xs text-muted-foreground">
+              {data?.capped ? "2,000+" : rows.length.toLocaleString()} matching
+              contact{rows.length === 1 ? "" : "s"} — updates by itself as
+              contacts change.
+            </p>
+            <div className="border rounded-lg overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Account</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Phone</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.slice(0, 200).map((r) => (
+                    <TableRow key={r.id}>
+                      <TableCell>
+                        <Link to={`/contacts/${r.id}`} className="font-medium text-primary hover:underline">
+                          {r.first_name} {r.last_name}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="text-sm">{r.account?.name ?? "—"}</TableCell>
+                      <TableCell className="text-sm">{r.email ?? "—"}</TableCell>
+                      <TableCell className="text-sm">{r.phone ? formatPhone(r.phone) : "—"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            {rows.length > 200 && (
+              <p className="text-xs text-muted-foreground">
+                Showing the first 200 — freeze the list (or export a report) to work the full set.
+              </p>
+            )}
+          </>
+        )}
+
+        <p className="text-xs text-muted-foreground">
+          Smart lists are rule-driven, so people can&apos;t be added or removed by
+          hand — freeze it into a regular list to take over manually. Never
+          touches anyone&apos;s status.
+        </p>
+      </CardContent>
+
+      <CreateOrRenameListDialog open={editOpen} onOpenChange={setEditOpen} existing={list} />
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title={`Delete "${list.name}"?`}
+        description="The smart list's rules go away; the contacts themselves are untouched. This can't be undone."
+        confirmLabel="Delete list"
+        destructive
+        onConfirm={() =>
+          deleteMutation.mutate(list.id, {
+            onSuccess: () => {
+              toast.success("List deleted");
+              onDeleted();
+            },
+            onError: (e) => toast.error((e as Error).message),
+          })
+        }
+      />
+    </Card>
+  );
+}
+
 function CreateOrRenameListDialog({
   open,
   onOpenChange,
@@ -341,20 +509,48 @@ function CreateOrRenameListDialog({
   const { user } = useAuth();
   const createMutation = useCreateLeadList();
   const updateMutation = useUpdateLeadList();
+  const { data: tags } = useTags();
+  const { data: users } = useUsers();
+
+  const existingRules: SmartListRules = existing?.is_dynamic
+    ? parseSmartRules(existing)
+    : {};
+
   const [name, setName] = useState(existing?.name ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
   const [working, setWorking] = useState(existing?.is_working_list ?? false);
+  const [smart, setSmart] = useState(existing?.is_dynamic ?? false);
+  const [tagIds, setTagIds] = useState<string[]>(existingRules.tag_ids ?? []);
+  const [states, setStates] = useState<string[]>(existingRules.states ?? []);
+  const [ownerIds, setOwnerIds] = useState<string[]>(existingRules.owner_ids ?? []);
+  const [statuses, setStatuses] = useState<string[]>(existingRules.customer_status ?? []);
+  const [hasPhone, setHasPhone] = useState(!!existingRules.has_phone);
+  const [hasEmail, setHasEmail] = useState(!!existingRules.has_email);
+
+  const rules: SmartListRules = {
+    tag_ids: tagIds.length ? tagIds : undefined,
+    states: states.length ? states : undefined,
+    owner_ids: ownerIds.length ? ownerIds : undefined,
+    customer_status: statuses.length ? statuses : undefined,
+    has_phone: hasPhone || undefined,
+    has_email: hasEmail || undefined,
+  };
 
   async function submit() {
     const trimmed = name.trim();
     if (!trimmed) return;
+    if (smart && smartRulesEmpty(rules)) {
+      toast.error("Pick at least one rule — an empty smart list would match everyone.");
+      return;
+    }
     try {
       if (existing) {
         await updateMutation.mutateAsync({
           id: existing.id,
           name: trimmed,
           description: description.trim() || null,
-          is_working_list: working,
+          is_working_list: smart ? false : working,
+          ...(existing.is_dynamic ? { filter_config: rules as Record<string, unknown> } : {}),
         });
         toast.success("List updated");
       } else {
@@ -363,9 +559,13 @@ function CreateOrRenameListDialog({
           name: trimmed,
           description: description.trim() || undefined,
           owner_user_id: user.id,
-          is_working_list: working,
+          is_dynamic: smart,
+          // Smart lists are never working call lists — a rule change could
+          // mass-flip account statuses.
+          is_working_list: smart ? false : working,
+          filter_config: smart ? (rules as Record<string, unknown>) : null,
         });
-        toast.success("List created");
+        toast.success(smart ? "Smart list created" : "List created");
         onCreated?.(created.id);
         setName("");
         setDescription("");
@@ -378,13 +578,17 @@ function CreateOrRenameListDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{existing ? "Rename list" : "New list"}</DialogTitle>
+          <DialogTitle>
+            {existing ? (existing.is_dynamic ? "Edit smart list" : "Rename list") : "New list"}
+          </DialogTitle>
           <DialogDescription>
             {existing
-              ? "Update the list's name or description."
-              : "A list groups contacts however you like - by itself it never changes anyone\'s status."}
+              ? existing.is_dynamic
+                ? "Change the rules — membership updates itself."
+                : "Update the list's name or description."
+              : "A list groups contacts however you like — by itself it never changes anyone's status."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 py-2">
@@ -406,16 +610,95 @@ function CreateOrRenameListDialog({
               onChange={(e) => setDescription(e.target.value)}
             />
           </div>
-          <div className="flex items-start justify-between gap-3 rounded-md border p-3">
-            <div>
-              <p className="text-sm font-medium">Working call list</p>
-              <p className="text-xs text-muted-foreground">
-                On: adding people marks their accounts as actively worked
-                (Sales Status). Off: just a list - nobody's status changes.
-              </p>
+
+          {!existing && (
+            <div className="flex items-start justify-between gap-3 rounded-md border p-3">
+              <div>
+                <p className="text-sm font-medium inline-flex items-center gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Smart list
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Rule-based and self-updating: tag someone (or they match the
+                  rules) and they appear on it automatically. You can freeze it
+                  into a regular list anytime.
+                </p>
+              </div>
+              <Switch checked={smart} onCheckedChange={setSmart} />
             </div>
-            <Switch checked={working} onCheckedChange={setWorking} />
-          </div>
+          )}
+
+          {(smart || existing?.is_dynamic) && (
+            <div className="space-y-3 rounded-md border p-3">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Include contacts that match…
+              </p>
+              <div className="space-y-1.5">
+                <Label>Any of these tags</Label>
+                <MultiSelect
+                  value={tagIds}
+                  onChange={setTagIds}
+                  placeholder="Any tag"
+                  options={(tags ?? []).map((t) => ({ value: t.id, label: t.name }))}
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>State</Label>
+                  <MultiSelect
+                    value={states}
+                    onChange={setStates}
+                    placeholder="Any state"
+                    options={US_STATES.map((st) => ({ value: st.code, label: st.name }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Owner</Label>
+                  <MultiSelect
+                    value={ownerIds}
+                    onChange={setOwnerIds}
+                    placeholder="Any owner"
+                    options={(users ?? []).map((u) => ({ value: u.id, label: u.full_name ?? "Unknown" }))}
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Account status</Label>
+                <MultiSelect
+                  value={statuses}
+                  onChange={setStatuses}
+                  placeholder="Any status"
+                  options={(["prospect", "client", "former_client"] as CustomerStatus[]).map((v) => ({
+                    value: v,
+                    label: customerStatusLabel(v),
+                  }))}
+                />
+              </div>
+              <div className="flex flex-wrap gap-4">
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch checked={hasPhone} onCheckedChange={setHasPhone} />
+                  Has a phone
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch checked={hasEmail} onCheckedChange={setHasEmail} />
+                  Has an email
+                </label>
+              </div>
+            </div>
+          )}
+
+          {!smart && !existing?.is_dynamic && (
+            <div className="flex items-start justify-between gap-3 rounded-md border p-3">
+              <div>
+                <p className="text-sm font-medium">Working call list</p>
+                <p className="text-xs text-muted-foreground">
+                  On: adding people marks their accounts as actively worked
+                  (Sales Status). Off: just a list — nobody's status changes.
+                </p>
+              </div>
+              <Switch checked={working} onCheckedChange={setWorking} />
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>

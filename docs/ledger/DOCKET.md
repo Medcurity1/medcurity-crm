@@ -11,7 +11,7 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Queued / requested
 
-- [QUEUED] 2026-07-17 · Nathan · Reports based on tags ("soon" project): let the main Reports tab filter/group by contact tags (today tags only report via the Contacts-list filter+export and the Nexus custom-report widget).
+(the 2026-07-17 "Reports based on tags" ask shipped 2026-07-20 inside the unified Reports+Lists build — Builder Tags filter; see SHIPPED)
 
 
 (the 2026-07-17/20 Safari loading item moved to Staging above — shipped 2026-07-20 in deeaae3)

@@ -295,12 +295,40 @@ export interface ReportResult {
 /** Entities that support the `archived_at` soft-delete column. */
 const ARCHIVABLE_ENTITIES = ["accounts", "contacts", "opportunities", "leads"];
 
+
+/** The virtual Tags filter (field "_tags") can't ride the flat applyFilter
+ * path — it resolves through a contact_tags!inner embed. Split it out. */
+function extractTagFilter(config: ReportConfig): { tagIds: string[] | null; rest: ReportConfig["filters"] } {
+  if (config.entity !== "contacts") return { tagIds: null, rest: config.filters };
+  const tagFilter = config.filters.find((f) => f.field === "_tags");
+  const rest = config.filters.filter((f) => f.field !== "_tags");
+  const ids = tagFilter
+    ? String(tagFilter.value ?? "").split(",").map((v) => v.trim()).filter(Boolean)
+    : [];
+  return { tagIds: ids.length ? ids : null, rest };
+}
+
+function dedupeById(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  const seen = new Set<unknown>();
+  const out: Record<string, unknown>[] = [];
+  for (const r of rows) {
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    out.push(r);
+  }
+  return out;
+}
+
 async function runReportQuery(config: ReportConfig): Promise<ReportResult> {
   const entityDef = getEntityDef(config.entity);
-  const selectStr = buildSelectString(config.entity, config.columns);
+  const { tagIds, rest } = extractTagFilter(config);
+  const selectStr =
+    buildSelectString(config.entity, config.columns) +
+    (tagIds ? ", contact_tags!inner(tag_id)" : "");
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let query: any = supabase.from(entityDef.table).select(selectStr, { count: "exact" });
+  if (tagIds) query = query.in("contact_tags.tag_id", tagIds);
 
   // Exclude archived rows for entities that have archived_at
   if (ARCHIVABLE_ENTITIES.includes(config.entity)) {
@@ -313,8 +341,8 @@ async function runReportQuery(config: ReportConfig): Promise<ReportResult> {
     query = query.is("import_status", null);
   }
 
-  // Apply filters
-  for (const filter of config.filters) {
+  // Apply filters (the virtual _tags filter was already applied above)
+  for (const filter of rest) {
     query = applyFilter(query, config.entity, filter);
   }
 
@@ -340,9 +368,17 @@ async function runReportQuery(config: ReportConfig): Promise<ReportResult> {
   const { data, error, count } = await query;
   if (error) throw error;
 
+  // The inner tag embed returns one row per matching tag — dedupe. The
+  // header count for >1000-row tag-filtered runs can slightly overcount
+  // (it counts the multiplied rows); cosmetic only.
+  const rows = tagIds
+    ? dedupeById((data ?? []) as Record<string, unknown>[])
+    : ((data ?? []) as Record<string, unknown>[]);
+  const total = tagIds && (data ?? []).length < 1000 ? rows.length : (count ?? 0);
+
   return {
-    data: (data ?? []) as Record<string, unknown>[],
-    count: count ?? 0,
+    data: rows,
+    count: total,
   };
 }
 
@@ -358,10 +394,14 @@ export async function fetchAllReportRows(
   config: ReportConfig,
 ): Promise<Record<string, unknown>[]> {
   const entityDef = getEntityDef(config.entity);
-  const selectStr = buildSelectString(config.entity, config.columns);
+  const { tagIds, rest } = extractTagFilter(config);
+  const selectStr =
+    buildSelectString(config.entity, config.columns) +
+    (tagIds ? ", contact_tags!inner(tag_id)" : "");
   const PAGE = 1000;
   const MAX_ROWS = 100_000;
   const all: Record<string, unknown>[] = [];
+  const seen = new Set<unknown>();
 
   for (let from = 0; from < MAX_ROWS; from += PAGE) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -369,7 +409,13 @@ export async function fetchAllReportRows(
     if (ARCHIVABLE_ENTITIES.includes(config.entity)) {
       query = query.is("archived_at", null);
     }
-    for (const filter of config.filters) {
+    // Pending imports stay out of contact exports too (pen filter — the
+    // display path got this on 2026-07-20; the export path was missed).
+    if (config.entity === "contacts") {
+      query = query.is("import_status", null);
+    }
+    if (tagIds) query = query.in("contact_tags.tag_id", tagIds);
+    for (const filter of rest) {
       query = applyFilter(query, config.entity, filter);
     }
     // Same stale-sort-field guard as fetchReportData (a retired column must
@@ -392,7 +438,15 @@ export async function fetchAllReportRows(
     const { data, error } = await query;
     if (error) throw error;
     const rows = (data ?? []) as Record<string, unknown>[];
-    all.push(...rows);
+    for (const r of rows) {
+      // The tag inner-embed multiplies rows per matching tag; the id
+      // tiebreaker makes duplicates adjacent so the Set stays cheap.
+      if (tagIds) {
+        if (seen.has(r.id)) continue;
+        seen.add(r.id);
+      }
+      all.push(r);
+    }
     if (rows.length < PAGE) break;
   }
   if (all.length >= MAX_ROWS) {
@@ -401,6 +455,44 @@ export async function fetchAllReportRows(
     );
   }
   return all;
+}
+
+/** Every matching row's id (cheap ids-only pager) — powers "Save results
+ * as a list". Same filters/caps as the export pager. */
+export async function fetchAllReportIds(config: ReportConfig): Promise<string[]> {
+  const entityDef = getEntityDef(config.entity);
+  const { tagIds, rest } = extractTagFilter(config);
+  const selectStr = "id" + (tagIds ? ", contact_tags!inner(tag_id)" : "");
+  const PAGE = 1000;
+  const MAX_ROWS = 100_000;
+  const ids: string[] = [];
+  const seen = new Set<string>();
+
+  for (let from = 0; from < MAX_ROWS; from += PAGE) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let query: any = supabase.from(entityDef.table).select(selectStr);
+    if (ARCHIVABLE_ENTITIES.includes(config.entity)) {
+      query = query.is("archived_at", null);
+    }
+    if (config.entity === "contacts") {
+      query = query.is("import_status", null);
+    }
+    if (tagIds) query = query.in("contact_tags.tag_id", tagIds);
+    for (const filter of rest) {
+      query = applyFilter(query, config.entity, filter);
+    }
+    query = query.order("id", { ascending: true }).range(from, from + PAGE - 1);
+    const { data, error } = await query;
+    if (error) throw error;
+    const rows = (data ?? []) as { id: string }[];
+    for (const r of rows) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      ids.push(r.id);
+    }
+    if (rows.length < PAGE) break;
+  }
+  return ids;
 }
 
 export function useRunReport(config: ReportConfig | null, enabled: boolean) {

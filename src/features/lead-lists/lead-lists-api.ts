@@ -170,8 +170,162 @@ export function useRemoveFromList() {
   });
 }
 
-// (Smart-list + lead-side hooks removed 2026-07-20 with the lead type;
-// v_lead_last_activity was dropped in migration 20260720170000.)
+// ---------------------------------------------------------------------------
+// Smart lists v2 (2026-07-20, contact-based). A smart list stores RULES in
+// lead_lists.filter_config (is_dynamic = true) and resolves membership live
+// at read time — tag someone and they appear in every matching smart list
+// instantly. No lead_list_members rows; "freeze" materializes into a
+// regular list. Query composition mirrors useContacts' proven patterns
+// (contact_tags!inner embed; accounts!inner for customer_status).
+// ---------------------------------------------------------------------------
+
+export interface SmartListRules {
+  /** Has ANY of these tags. */
+  tag_ids?: string[];
+  /** contacts.mailing_state in (state codes). */
+  states?: string[];
+  /** contacts.owner_user_id in. */
+  owner_ids?: string[];
+  /** Account relationship (via the account join). */
+  customer_status?: string[];
+  has_phone?: boolean;
+  has_email?: boolean;
+}
+
+export interface SmartMemberRow {
+  id: string;
+  first_name: string | null;
+  last_name: string;
+  email: string | null;
+  phone: string | null;
+  account: { name: string } | null;
+}
+
+export function parseSmartRules(list: LeadList): SmartListRules {
+  return ((list.filter_config ?? {}) as SmartListRules) || {};
+}
+
+/** Human chips for the rules summary. Resolvers are passed in so this
+ * stays a pure helper. */
+export function smartRuleChips(
+  rules: SmartListRules,
+  tagName: (id: string) => string,
+  userName: (id: string) => string,
+  statusLabel: (v: string) => string,
+): string[] {
+  const chips: string[] = [];
+  if (rules.tag_ids?.length) chips.push(`Tag: ${rules.tag_ids.map(tagName).join(" or ")}`);
+  if (rules.states?.length) chips.push(`State: ${rules.states.join(", ")}`);
+  if (rules.owner_ids?.length) chips.push(`Owner: ${rules.owner_ids.map(userName).join(", ")}`);
+  if (rules.customer_status?.length)
+    chips.push(`Status: ${rules.customer_status.map(statusLabel).join(" or ")}`);
+  if (rules.has_phone) chips.push("Has a phone");
+  if (rules.has_email) chips.push("Has an email");
+  return chips;
+}
+
+const SMART_FETCH_CAP = 2000;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildSmartQuery(rules: SmartListRules, selectCols: string): any {
+  const needsTags = !!rules.tag_ids?.length;
+  const needsAccount = !!rules.customer_status?.length;
+  const select =
+    selectCols +
+    (needsTags ? ", contact_tags!inner(tag_id)" : "") +
+    (needsAccount ? ", accounts!account_id!inner(customer_status)" : "");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let q: any = supabase
+    .from("contacts")
+    .select(select)
+    .is("archived_at", null)
+    .is("import_status", null);
+  if (needsTags) q = q.in("contact_tags.tag_id", rules.tag_ids);
+  if (needsAccount) q = q.in("accounts.customer_status", rules.customer_status);
+  if (rules.states?.length) q = q.in("mailing_state", rules.states);
+  if (rules.owner_ids?.length) q = q.in("owner_user_id", rules.owner_ids);
+  if (rules.has_phone) q = q.not("phone", "is", null);
+  if (rules.has_email) q = q.not("email", "is", null);
+  return q;
+}
+
+/** A smart list needs at least one rule — an empty rule set would be
+ * "every contact in the CRM", which is never what someone meant. */
+export function smartRulesEmpty(rules: SmartListRules): boolean {
+  return (
+    !rules.tag_ids?.length &&
+    !rules.states?.length &&
+    !rules.owner_ids?.length &&
+    !rules.customer_status?.length &&
+    !rules.has_phone &&
+    !rules.has_email
+  );
+}
+
+/** Live members of a smart list (deduped — a multi-tag match returns one
+ * row per matching tag through the inner embed). Capped at SMART_FETCH_CAP;
+ * `capped` tells the UI to say "2,000+". */
+export function useSmartListMembers(list: LeadList | null) {
+  const rules = list ? parseSmartRules(list) : null;
+  return useQuery({
+    queryKey: ["smart-list-members", list?.id, rules],
+    enabled: !!list && list.is_dynamic,
+    queryFn: async () => {
+      if (!rules || smartRulesEmpty(rules)) {
+        return { rows: [] as SmartMemberRow[], capped: false };
+      }
+      const { data, error } = await buildSmartQuery(
+        rules,
+        "id, first_name, last_name, email, phone, account:accounts!account_id(name)",
+      )
+        .order("last_name", { ascending: true, nullsFirst: false })
+        .limit(SMART_FETCH_CAP);
+      if (error) throw error;
+      const seen = new Set<string>();
+      const rows: SmartMemberRow[] = [];
+      for (const r of (data ?? []) as unknown as SmartMemberRow[]) {
+        if (seen.has(r.id)) continue;
+        seen.add(r.id);
+        rows.push(r);
+      }
+      return { rows, capped: (data ?? []).length >= SMART_FETCH_CAP };
+    },
+  });
+}
+
+/** Freeze a smart list: materialize its CURRENT members into a brand-new
+ * regular list you can hand-edit ("start with a full group"). */
+export function useFreezeSmartList() {
+  const qc = useQueryClient();
+  const createList = useCreateLeadList();
+  const bulkAdd = useBulkAddContactsToList();
+  return useMutation({
+    mutationFn: async (list: LeadList) => {
+      const rules = parseSmartRules(list);
+      if (smartRulesEmpty(rules)) throw new Error("This smart list has no rules yet.");
+      const { data, error } = await buildSmartQuery(rules, "id").limit(SMART_FETCH_CAP);
+      if (error) throw error;
+      const ids = [...new Set(((data ?? []) as { id: string }[]).map((r) => r.id))];
+      if (!ids.length) throw new Error("No contacts match this smart list right now.");
+      const { data: auth } = await supabase.auth.getUser();
+      const frozen = await createList.mutateAsync({
+        name: `${list.name} (frozen ${new Date().toLocaleDateString()})`,
+        description: `Snapshot of smart list "${list.name}"`,
+        owner_user_id: auth.user!.id,
+        is_dynamic: false,
+      });
+      for (let i = 0; i < ids.length; i += 500) {
+        await bulkAdd.mutateAsync({ list_id: frozen.id, contact_ids: ids.slice(i, i + 500) });
+      }
+      return { list: frozen, added: ids.length };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["lead-lists"] });
+      qc.invalidateQueries({ queryKey: ["lead-list-member-counts"] });
+    },
+  });
+}
+
 
 export interface ContactListCandidate {
   id: string;
