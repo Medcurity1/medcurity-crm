@@ -353,10 +353,12 @@ export function useLeadListMembers(listId: string | undefined) {
     queryKey: ["lead-list-members", listId],
     queryFn: async () => {
       if (!listId) throw new Error("Missing list ID");
+      // Contact-only since the lead-type retirement (2026-07-20): migration
+      // 20260720150000 repointed promoted-lead members and dropped the rest.
       const { data, error } = await supabase
         .from("lead_list_members")
         .select(
-          "*, lead:leads(id, first_name, last_name, email, phone, company, status, qualification, rating, source, industry_category, owner_user_id, state, city, employees, score, do_not_market_to), contact:contacts(id, first_name, last_name, email, phone, account:accounts(name))",
+          "*, contact:contacts(id, first_name, last_name, email, phone, account:accounts(name))",
         )
         .eq("list_id", listId)
         .order("added_at", { ascending: false });

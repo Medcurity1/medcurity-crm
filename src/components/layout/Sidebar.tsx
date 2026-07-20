@@ -5,6 +5,7 @@ import {
   Building2,
   Users,
   Inbox,
+  ListChecks,
   Handshake,
   Target,
   Kanban,
@@ -88,6 +89,8 @@ const navItems: NavItem[] = [
   { to: "/meddy", icon: Bot, label: "Meddy", secret: "meddysweeper" },
   { to: "/accounts", icon: Building2, label: "Accounts" },
   { to: "/contacts", icon: Users, label: "Contacts" },
+  // Lists management home (lead-type retirement D2: pure contact lists).
+  { to: "/lists", icon: ListChecks, label: "Lists" },
   { to: "/opportunities", icon: Target, label: "Opportunities", secret: "dealmerger" },
   { to: "/pipeline", icon: Kanban, label: "Pipeline", secret: "pipeline" },
   { to: "/partners", icon: Handshake, label: "Partners" },
