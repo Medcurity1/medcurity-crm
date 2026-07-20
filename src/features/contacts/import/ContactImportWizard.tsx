@@ -248,11 +248,15 @@ export function ContactImportWizard({
       qc.invalidateQueries({ queryKey: ["accounts"] });
       qc.invalidateQueries({ queryKey: ["activities"] });
       qc.invalidateQueries({ queryKey: ["imports-pen"] });
+      const suppressedNote = agg.suppressed
+        ? ` · ${agg.suppressed.toLocaleString()} blocked (previously Avoided)`
+        : "";
       toast.success(
         penMode
-          ? `${agg.created.toLocaleString()} landed in Imports · ${agg.updated.toLocaleString()} updated existing · ${agg.skipped.toLocaleString()} already contacts`
+          ? `${agg.created.toLocaleString()} landed in Imports · ${agg.updated.toLocaleString()} updated existing · ${agg.skipped.toLocaleString()} already contacts${suppressedNote}`
           : `Imported ${agg.created.toLocaleString()} new · ${agg.updated.toLocaleString()} updated` +
-              (agg.events_stamped ? ` · ${agg.events_stamped.toLocaleString()} events logged` : ""),
+              (agg.events_stamped ? ` · ${agg.events_stamped.toLocaleString()} events logged` : "") +
+              suppressedNote,
       );
     } catch (err) {
       toast.error("Import failed: " + (err as Error).message);

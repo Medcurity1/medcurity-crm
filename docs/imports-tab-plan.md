@@ -40,6 +40,8 @@ Nathan's direction (2026-07-20): plan it in pieces — "remove this part here, c
 
 The pen stops being a separate record type: **imports become contacts with a pen flag** (e.g. `contacts.import_status = 'pending'`), hidden from normal contact views/search/reports until promoted. Promote = clear the flag (+ account match/create). Archive/avoid = the contact archive + suppression flags that already exist. Payoff: suppression, MQL, dedup, activities, search all become single-entity — the lead branch of every one of them disappears instead of being rewritten.
 
+**STATUS 2026-07-20 EVENING: ALL PIECES SHIPPED TO STAGING** (incl. the Lists home for D2, the avoid-reimport guard, and both adversarial audits' fixes — see SHIPPED.md). **PROD CUTOVER ORDER (matters):** promote the batch → migrations run (incl. the self-verifying suppression invariant + the hardened lists migration) → Nathan hand-deploys `inbound-lead` (`supabase functions deploy inbound-lead --no-verify-jwt`) → Nathan clicks "Archive all legacy" on prod's straggler pile — the new suppression-sync trigger mirrors those archives/avoids into the snapshot automatically, so sweep-after-migrations is SAFE (audit #2 resolved).
+
 ### The pieces, in order (each independently shippable)
 
 1. **Pen v2 schema (additive, invisible).** `contacts.import_status` flag + partial index; default contact list/search/reports/dedup exclude flagged rows (UI/query-level hiding — reps are trusted internal users; no contacts-RLS surgery). Nothing uses it yet. (S)
