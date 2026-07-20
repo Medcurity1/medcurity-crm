@@ -13,9 +13,9 @@ Logged 2026-07-20 (Nathan). Distills the June rename/revert history plus a full 
 
 **Imports = admin-only landing pen for new lists.** New raw lists (SF/CSV import, possibly website form) land here, get cleaned (dedup warnings, mark-avoid, verify), then bulk-promoted to Contacts (+Accounts) or archived. All that machinery is already built and battle-tested. "Lead" disappears from the user-facing app, then from the schema.
 
-## Phase 1 — finish the rename (small, ~half day incl. verification, staging first)
+## Phase 1 — finish the rename ✅ SHIPPED TO STAGING 2026-07-20 (commit 775080a)
 
-Labels/routes only. **No DB changes.**
+Labels/routes only. **No DB changes.** As built: sidebar "Imports" + Inbox icon; canonical `/imports*` routes with a permanent `/leads/*` forwarder (task emails, bookmarks, activity links, Promoted-from callouts keep working); page title/filters/dialogs/toasts de-lead-ified; Quick Create "Import" entry now admin-only (reps previously saw "Lead" and bounced off the AdminGate). Deep `/leads/:id` links in Home recents / activity rows / reports ride the forwarder until Phase 2 removes those surfaces.
 
 1. `src/components/layout/Sidebar.tsx:113-115` — label "Leads" → "Imports", icon `UserPlus` → `Inbox` (restores the chunk-2 look).
 2. Routes (`src/App.tsx:130-136`): add `/imports`, `/imports/new`, `/imports/:id`, `/imports/:id/edit`; keep `/leads/*` as permanent redirects — task-digest + task-reminders emails, the ContactDetail "Promoted from import" callout, activity-timeline links, and bookmarks all hardcode `/leads/:id`.
@@ -25,16 +25,35 @@ Labels/routes only. **No DB changes.**
 
 Verify on staging: nav + badge, global search, quick create, `g l`, `/leads/:id` deep-link redirect, bulk promote + bulk archive + mark-avoid still green, task-email links resolve.
 
-## Phase 2 — retire the lead type (the queued in-office-Tuesday project, ~full day)
+## Phase 2 — retire the lead type (REPLANNED 2026-07-20: incremental pieces, no full-day marathon)
 
-### Decisions first (Nathan/team)
+Nathan's direction (2026-07-20): plan it in pieces — "remove this part here, change that part there" — so everything keeps working at every step. Each piece is its own staging commit + verification; ship in any session, no in-office-Tuesday needed.
 
-- **D1 — website form destination.** The `inbound-lead` edge fn (`supabase/functions/inbound-lead/index.ts:159-181`) inserts website inquiries into `leads` today. Once leads die: (a) land them in the Imports pen (status quo behavior, but pen is admin-only → reps don't see hand-raisers), or (b) create a contact directly (unverified, tagged `website`, maybe + a task/notification so a rep responds fast). **Recommend (b)** — a website inquiry is a hand-raiser, not a purchased-list row. Decide before Phase 2.
-- **D2 — lead lists.** `lead_list_members` is polymorphic (`lead_id` OR `contact_id`). Drop the lead half; lists become pure contact lists (smart lists that query `leads` get retired or repointed).
-- **D3 — history.** Keep the `leads` table as a frozen read-only archive at first (tombstones keep `contacts.original_lead_id`, carried activities, and the "Promoted from import" callout meaningful); physically drop/convert it in a later cleanup once nothing references it. Don't convert archived junk (bounces, dead purchased-list rows) into archived contacts.
-- **D4 — Molly confirm.** Campaigns are tag-on-contacts now; confirm nothing of hers still reads leads.
+### Decisions — ANSWERED by Nathan 2026-07-20
 
-### Teardown checklist (from the 2026-07-20 surface-area map)
+- **D1 — website form → Contacts. YES.** `inbound-lead` creates a regular, visible contact tagged `website` (hand-raisers must reach reps — NOT hidden in the admin-only pen). Implementation wrinkle resolved: pen membership will be its own flag on contacts, independent of visibility semantics; website contacts don't get it. Open sub-question for Nathan: should a website submission also create a task/notification, and for whom?
+- **D2 — lists become contact lists. YES.** Drop the lead half of `lead_list_members`; migrate existing lead members to their promoted contacts where one exists.
+- **D3 — frozen history. YES.** `leads` table stays as a read-only archive (tombstones keep `contacts.original_lead_id`, carried activities, "Promoted from import" callouts). No physical drop; no converting archived junk into archived contacts.
+- **D4 — Molly. Aware of the change** (campaigns are tag-on-contacts already).
+
+### Target architecture (the June plan, confirmed)
+
+The pen stops being a separate record type: **imports become contacts with a pen flag** (e.g. `contacts.import_status = 'pending'`), hidden from normal contact views/search/reports until promoted. Promote = clear the flag (+ account match/create). Archive/avoid = the contact archive + suppression flags that already exist. Payoff: suppression, MQL, dedup, activities, search all become single-entity — the lead branch of every one of them disappears instead of being rewritten.
+
+### The pieces, in order (each independently shippable)
+
+1. **Pen v2 schema (additive, invisible).** `contacts.import_status` flag + partial index; default contact list/search/reports/dedup exclude flagged rows (UI/query-level hiding — reps are trusted internal users; no contacts-RLS surgery). Nothing uses it yet. (S)
+2. **Website form (D1).** `inbound-lead` edge fn → regular contact, tagged `website`, + the notify/task behavior Nathan picks. ⚠️ `inbound-lead` is NOT in the CI edge-fn auto-deploy list — hand-deploy to both envs. (S)
+3. **+ 4. Pen cutover (the big piece, ship together).** SF/CSV importer's `leads` entity → writes pen-flagged contacts; Imports tab repoints to pen-flagged contacts; bulk actions ported (promote → clear flag + account attach, reusing the battle-tested `bulk_promote_imports` account-matching logic; archive → contact archive + reason; avoid → contact `do_not_contact`/`do_not_market` + archive reason); filters port; lists per D2. Prod has ZERO pending leads, so the cutover has no data to migrate there — **clean/archive staging's leftover lead rows first as the rehearsal**. (M-L, the one half-day-ish piece)
+5. **Read-path sweep.** Remove lead queries/UI: GlobalSearch leads group, HomePage lead recents + lead-task links, KPIs `total_leads`/`new_leads_month` (drop — dying concept), Report Builder leads dataset, TeamDashboard/KpiWidget/ReportsDiagnostic lead queries, activities lead scope (historical lead-linked rows render read-only; new ones impossible), DataCleanup lead-dup panel, automations `leads` trigger entity, Picklists/RequiredFields/ObjectManager entries, DuplicateWarning lead branch. Nathan pre-cleared the obvious disappearances. (M, several small commits)
+6. **Edge fns.** `sync-emails` lead-match branch out (it currently throws on error); `nexus-activity` lead fallback out; `task-digest`/`task-reminders` lead joins out (verify zero lead-linked open tasks on prod first). (S)
+7. **Suppression migration + invariant.** Ensure every archived/never-promoted lead carrying suppression signal (`do_not_market_to`, `do_not_contact`, `avoid_reason` unsubscribed/bounced) has its email covered at contact level or via a standalone suppression row, THEN drop the leads UNION branch from `v_marketing_suppression`. **Invariant: unique suppressed-email count before == after** (same check that protected the 7/15 status restructure — 21,440 emails). (S-M, verification-heavy)
+8. **DB freeze.** Revoke writes on `leads`; drop lead-only functions/triggers (`bulk_promote_imports` et al. once replaced, `convert_lead`, dedup finders, `carry_lead_activities_to_contact`, `trg_leads_*`), enums `lead_status`/`lead_qualification`/`lead_type`/`lead_rating` (**keep `lead_source`** — contacts/opps use it), `v_lead_last_activity`. Table + FKs stay per D3. (S)
+9. **Types/tests/dirs.** `types/crm.ts` lead types, formatters/StatusBadge lead variants, retire `src/features/leads/` + `src/features/lead-lists/` (fold survivors into an imports feature dir), fix `tests/requiredFields.test.ts` (imports leadSchema), `tests/anonViewGrants.test.ts`, `tests/reportsConfig.test.ts`, `tests/activityTimelineGrouping.test.ts`. (S)
+
+Verify-migration subagent pass at the end; promote to prod as pieces accumulate (Nathan's call per batch, as always).
+
+### Reference: full surface-area checklist by area (from the 2026-07-20 map — use as the completeness check for the pieces above)
 
 **A. Nav/routing/labels** — done in Phase 1.
 
@@ -78,4 +97,4 @@ Verify on staging: nav + badge, global search, quick create, `g l`, `/leads/:id`
 
 ### Sequencing
 
-Phase 1 rename → D1-D4 decisions → repoint ingestion (B) → **staging data pass** (staging DB still has lead rows; prod was the one cleaned — run the same promote/archive sweep or truncate on staging first as the rehearsal) → strip reports/dashboards/suppression (C) → activities/contacts/lists (D/E) → DB teardown (F) → types/tests/dirs (G/H). Verify-migration subagent cross-checks at the end; suppression-count before/after is the key invariant.
+Superseded by "The pieces, in order" above (2026-07-20 replan). Key operational notes that survive: staging's DB still has lead rows (prod is the clean one) — clean staging before the pen cutover as the rehearsal; the suppression-count invariant is the one non-negotiable check.

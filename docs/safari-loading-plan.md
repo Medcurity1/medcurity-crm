@@ -2,6 +2,8 @@
 
 Logged 2026-07-20 (Nathan). Supersedes and absorbs the 2026-07-17 DOCKET item "Deploy-proof stale tabs" (no longer deferred). Investigation session: 2026-07-20, full boot-path + live-header audit.
 
+**✅ IMPLEMENTED, SHIPPED TO STAGING 2026-07-20 (commit deeaae3).** All six layers below, plus the UpdateBanner (layer 2's healthy-tab variant). Implementation deltas from the plan as written: (a) the global error/rejection handlers in main.tsx deliberately do NOT match Safari's generic `"Load failed"` — it fires for ANY offline fetch and a page reload there would toss in-progress work; Safari's dynamic-import failures say "Importing a module script failed", which was already matched. `"load failed"`/`"networkerror"` ARE matched where a render actually crashed (route ErrorBoundary — pre-existing — and the new RootErrorBoundary). (b) The lock cap is a custom `timeoutNavigatorLock` passed as `auth.lock` (10s AbortController on `navigator.locks.request`, proceed lock-less on timeout) rather than auth-js's `lockAcquireTimeout` option. (c) Healthy-but-stale tabs get a dismissible "Pulse was updated — Refresh" banner (bfcache restore / >15min-hidden → visible checks against /version.json), never a forced reload.
+
 ## Symptoms
 
 - CRM intermittently fails to load in Safari (Nathan's machine; Chrome fine). Not a hard block — unreliable.

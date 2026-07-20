@@ -4,7 +4,8 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Staging — awaiting prod go-ahead
 
-(nothing awaiting prod — Rachel's Bug/Enhancement split, Summer's 5-item batch, and the Jordan-list promotion prep all shipped to prod 2026-07-17 in 8bbec0f; see SHIPPED.md)
+- [STAGING] 2026-07-20 · Nathan · **Imports tab restore (Phase 1)** — Leads → Imports rename, /imports routes + permanent /leads/* forwarder, admin-only Quick Create entry · commit 775080a · plan: docs/imports-tab-plan.md
+- [STAGING] 2026-07-20 · Nathan · **Safari/stale-tab loading reliability** — 6-layer boot recovery (inline HTML recovery + version.json fresh-check, auth lock 10s cap, header fix, storage guards, spinner escape hatch, update banner) · commit deeaae3 · plan: docs/safari-loading-plan.md · promote soon-ish: prod Safari users hit this today
 
 (The 2026-07-15 batch — Joe Lead Source, Rachel Assessor, Summer email fix — shipped to prod in 5bc05df; the 7/10 Lead-Source-required + 7/11 ClickUp items were already on prod via 9d6b6a7. See SHIPPED.md.)
 
@@ -13,11 +14,11 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 - [QUEUED] 2026-07-17 · Nathan · Reports based on tags ("soon" project): let the main Reports tab filter/group by contact tags (today tags only report via the Contacts-list filter+export and the Nexus custom-report widget).
 
 
-- [QUEUED] 2026-07-20 · Nathan · Safari/stale-tab loading reliability (absorbs the 7/17 "deploy-proof stale tabs" item — no longer deferred; 7/20: even clearing website data stopped fixing it). Diagnosed 2026-07-20: (1) Safari-restored stale HTML → deleted hashed chunks, with 3 gaps in the recovery net; (2) supabase auth Web Lock with no timeout → frozen Safari tab hangs every tab at "Loading..."; (3) unguarded boot-time storage reads. Fix = 6-layer plan honoring the 7/17 must-verify-fresh requirement (build-stamp fresh-check, inline HTML recovery, lock timeout, globalHeaders no-cache, storage guards) · plan: docs/safari-loading-plan.md · ~half day, frontend+config only
+(the 2026-07-17/20 Safari loading item moved to Staging above — shipped 2026-07-20 in deeaae3)
 - [QUEUED] 2026-07-17 · Summer (via Nathan) · Batch of CRM change requests — Nathan to relay after Rachel's form change lands. Several already visible in the prod Requests widget (Rural Hospital industry option, delete/merge duplicate accounts, Notes field on Contacts, Active tab, ...).
 - [QUEUED] 2026-07-10 · (sweep follow-up) · Add per-day dedup guard to task-digest (task_digest_log(user_id, digest_date)) so the GH schedule can be restored as true redundancy alongside pg_cron without double-emailing reps
 - [QUEUED] 2026-07-10 · (found in prod verify) · Dedupe the Standard Price Book duplicate NULL-tier rows (pre-existing import quirk on the SRA; the BA SRA mirror inherited 11 identical $799 rows there — pricing correct, cosmetic only) · small idempotent migration
-- [QUEUED] 2026-06, replanned 2026-07-20 · Nathan · Imports tab restore + lead-type retirement. Prod leads fully worked by Nathan as of 7/20 (every lead promoted or archived); Molly's campaigns now target contacts by tag, so the June blocker is gone. Phase 1 = finish the June rename (labels/routes only, ~half day; page internals are already "Imports"); Phase 2 = retire the lead type (the original in-office-Tuesday ~full-day teardown; decisions D1-D4 first: website-form destination, lead lists → contact lists, keep leads table as frozen archive, Molly confirm) · plan: docs/imports-tab-plan.md
+- [QUEUED] 2026-06, replanned 2026-07-20 · Nathan · **Lead-type retirement (Phase 2)** — now planned as 9 independently-shippable pieces (no full-day marathon; Nathan 7/20): pen-flag schema → website-form-to-Contacts (D1 yes; sub-question: notify/task on submission?) → pen cutover to contacts (the one bigger piece; clean staging leads first as rehearsal) → read-path sweep → edge fns → suppression migration (unique-email invariant) → DB freeze → types/tests. D1-D4 all answered 7/20 (website→contacts tagged, lists→contact lists, leads table frozen as history, Molly aware). Phase 1 rename is on staging (775080a) · plan: docs/imports-tab-plan.md
 (the two 2026-06-29 Summer items — surface derived Client/Prospect/Former label + required closed-lost prompt — shipped as part of the account-status restructure, prod 2026-07-15 e01ed6a; see SHIPPED.md)
 - [QUEUED] 2026-06 · Brayden · Guided account-creation / require-at-the-right-moment flow (partially delivered via the 2026-07-08 Closed Won gate; the guided create popup itself still open)
 - [QUEUED] 2026-06-24 · (audit) · Deferred audit items: PandaDoc webhook, suppression enforcement (+ over-suppression decision), leadership-numbers fixes · docs/audit/
