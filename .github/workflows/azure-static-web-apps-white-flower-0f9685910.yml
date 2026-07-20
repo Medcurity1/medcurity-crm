@@ -62,7 +62,7 @@ jobs:
         # merging changes to these does NOT ship them anywhere:
         #   clickup-services-sync  --no-verify-jwt  (pg_cron caller)
         #   crm-mcp                --no-verify-jwt  (prod-only read-only MCP)
-        #   inbound-lead           --no-verify-jwt  (public website form)
+        #   (inbound-lead moved INTO this CI list 2026-07-20 — see below.)
         #   nexus-activity         --no-verify-jwt  (Nexus feed shim)
         #   pandadoc-sync          --no-verify-jwt  (PandaDoc webhook)
         # WARNING: clickup-sf-id-sync is live on prod (cron migration
@@ -99,6 +99,11 @@ jobs:
           npx supabase functions deploy playbook-mailchimp
           npx supabase functions deploy ask-ai
           npx supabase functions deploy invite-user
+          # inbound-lead joins CI on PROD at the lead-retirement cutover
+          # (2026-07-20): the contacts-version IS the intended live behavior
+          # now, so the fn swap ships atomically with the promote instead of
+          # as a dangling manual step. X-API-Key still gates callers.
+          npx supabase functions deploy inbound-lead --no-verify-jwt
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ secrets.PRODUCTION_SUPABASE_PROJECT_REF }}
