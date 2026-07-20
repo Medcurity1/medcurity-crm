@@ -11,7 +11,7 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Queued / requested
 
-- [BLOCKED: Nathan/Joe decision] 2026-07-20 · Joe (via Nathan) · **Sept renewal opps missing on prod — INVESTIGATED (read-only), automation is HEALTHY; absence is the 2026-07-11 "fresh start" baseline working as designed.** Prod facts: enabled=true, ran 2026-07-20 09:00 UTC, 0 errors; creates only contracts whose 120-day window OPENS after baseline (hence Nov-10+ opps exist). v_renewal_audit: 77 in-window missing_renewal (Jul 7 / Aug 20 / SEPT 24 / Oct 25 / Nov 1 — all flagged auto-eligible) + 113 past_due_no_renewal (older backlog). Options: (a) keep the fresh-start call → team works the 77 by hand (audit view is the list); (b) reverse → one config change (baseline_date=NULL or rewind) + one manual run auto-creates the eligible cohort (generator skip rules still apply) — PROD change, needs Nathan's explicit go. Found regardless: v_renewal_audit's note text ("will be created on the next run") ignores the baseline gate — misleading; fix wording (small). The 113 past-due = separate renewals-team decision.
+(Joe's Sept-renewals item RESOLVED on prod 2026-07-20 evening — see SHIPPED)
 
 (the 2026-07-17 "Reports based on tags" ask shipped 2026-07-20 inside the unified Reports+Lists build — Builder Tags filter; see SHIPPED)
 
