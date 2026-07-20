@@ -39,7 +39,6 @@ const AccountDetail = lazy(() => import("@/features/accounts/AccountDetail").the
 const AccountForm = lazy(() => import("@/features/accounts/AccountForm").then(m => ({ default: m.AccountForm })));
 const ImportsPen = lazy(() => import("@/features/leads/ImportsPen").then(m => ({ default: m.ImportsPen })));
 const LeadDetail = lazy(() => import("@/features/leads/LeadDetail").then(m => ({ default: m.LeadDetail })));
-const LeadForm = lazy(() => import("@/features/leads/LeadForm").then(m => ({ default: m.LeadForm })));
 const ContactsList = lazy(() => import("@/features/contacts/ContactsList").then(m => ({ default: m.ContactsList })));
 const ContactDetail = lazy(() => import("@/features/contacts/ContactDetail").then(m => ({ default: m.ContactDetail })));
 const ContactForm = lazy(() => import("@/features/contacts/ContactForm").then(m => ({ default: m.ContactForm })));
@@ -105,6 +104,12 @@ function LeadsPathRedirect() {
   );
 }
 
+/** Old edit URLs land on the read-only legacy detail instead. */
+function LegacyImportEditRedirect() {
+  const loc = useLocation();
+  return <Navigate to={loc.pathname.replace(/\/edit$/, "")} replace />;
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -153,9 +158,12 @@ export default function App() {
                       route too — the component also guards, this is
                       belt-and-suspenders. */}
                   <Route path="imports" element={<AdminGate><ImportsPen /></AdminGate>} />
-                  <Route path="imports/new" element={<AdminGate><LeadForm /></AdminGate>} />
+                  {/* The leads table is FROZEN history: no create/edit routes
+                      (review finding #10 — /imports/new could still write a
+                      lead row). Detail stays read-only for legacy links. */}
+                  <Route path="imports/new" element={<Navigate to="/contacts/new" replace />} />
                   <Route path="imports/:id" element={<AdminGate><LeadDetail /></AdminGate>} />
-                  <Route path="imports/:id/edit" element={<AdminGate><LeadForm /></AdminGate>} />
+                  <Route path="imports/:id/edit" element={<LegacyImportEditRedirect />} />
                   <Route path="leads/*" element={<LeadsPathRedirect />} />
                   <Route path="playbook" element={<AdminGate><PlaybookPage /></AdminGate>} />
                   <Route path="partners" element={<PartnersPage />} />

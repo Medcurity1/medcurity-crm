@@ -642,6 +642,9 @@ export const NEXUS_METRICS: NexusMetricDef[] = [
           .from("contacts")
           .select("*", { count: "exact", head: true })
           .is("archived_at", null)
+          // A bulk import day isn't a real new-contacts spike — pen rows
+          // count once promoted (lead-type retirement, 2026-07-20).
+          .is("import_status", null)
           .gte("created_at", range.start.toISOString())
           .lt("created_at", range.end.toISOString());
         if (owner) q = q.eq("owner_user_id", owner);

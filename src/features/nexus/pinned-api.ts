@@ -173,6 +173,7 @@ export async function searchPinnableRecords(term: string): Promise<PinSearchResu
       .from("contacts")
       .select("id, first_name, last_name, account:accounts!account_id(name)")
       .is("archived_at", null)
+      .is("import_status", null)
       .or(`first_name.ilike.%${safe}%,last_name.ilike.%${safe}%,email.ilike.%${safe}%`)
       .limit(5),
     supabase

@@ -268,6 +268,8 @@ export function useArchiveAllPendingImports() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["leads"] });
+      // The Imports pen's legacy strip reads its own stats key.
+      qc.invalidateQueries({ queryKey: ["imports-pen"] });
     },
   });
 }

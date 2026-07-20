@@ -89,27 +89,8 @@ const TEMPLATES: AutomationTemplate[] = [
       is_active: true,
     },
   },
-  {
-    name: "Qualified Lead -> Schedule Demo",
-    description:
-      "When a lead is qualified, create a task to schedule a demo.",
-    input: {
-      name: "Qualified Lead -> Schedule Demo",
-      description: "Automatically create a demo scheduling task when a lead is qualified.",
-      trigger_entity: "leads",
-      trigger_event: "status_changed",
-      trigger_conditions: [{ field: "status", operator: "eq", value: "qualified" }],
-      actions: [
-        {
-          type: "create_activity",
-          activity_type: "task",
-          subject: "Schedule demo with qualified lead",
-          due_offset_days: 3,
-        },
-      ],
-      is_active: true,
-    },
-  },
+  // "Qualified Lead -> Schedule Demo" quick-start removed 2026-07-20 with
+  // the lead type (it targeted the now-frozen leads table).
   {
     name: "Contract Expiring -> Renewal Reminder",
     description:

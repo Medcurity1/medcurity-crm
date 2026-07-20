@@ -121,12 +121,14 @@ function usePenStats() {
           .eq("import_status", "pending")
           .is("archived_at", null),
         // Promoted-through-the-pen: flag cleared, provenance kept.
-        // (import_company is the provenance marker, so companyless promotes
-        // aren't counted here — cosmetic undercount, acceptable.)
+        // imported_at (stamped only by the wizard) excludes website-form
+        // contacts, which also carry import_company but never sat in the
+        // pen; companyless promotes still undercount — cosmetic.
         supabase
           .from("contacts")
           .select("id", { count: "exact", head: true })
           .not("import_company", "is", null)
+          .not("imported_at", "is", null)
           .is("import_status", null)
           .is("archived_at", null),
         // Archived pen rows KEEP import_status='pending' (only promote

@@ -586,11 +586,13 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     format: "number",
     requiredRole: ["admin"],
     query: async (supabase) => {
+      // MQL lives on contacts since the lead-type retirement (2026-07-20).
       const { count, error } = await supabase
-        .from("leads")
+        .from("contacts")
         .select("*", { count: "exact", head: true })
-        .eq("qualification", "mql")
-        .is("archived_at", null);
+        .not("mql_date", "is", null)
+        .is("archived_at", null)
+        .is("import_status", null);
       if (error) throw error;
       return count ?? 0;
     },
@@ -603,11 +605,13 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     format: "number",
     requiredRole: ["admin"],
     query: async (supabase) => {
+      // SQL lives on contacts since the lead-type retirement (2026-07-20).
       const { count, error } = await supabase
-        .from("leads")
+        .from("contacts")
         .select("*", { count: "exact", head: true })
-        .eq("qualification", "sql")
-        .is("archived_at", null);
+        .not("sql_date", "is", null)
+        .is("archived_at", null)
+        .is("import_status", null);
       if (error) throw error;
       return count ?? 0;
     },

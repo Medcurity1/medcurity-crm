@@ -976,7 +976,8 @@ function recentRecordPath(r: RecentRecord): string {
     case "opportunity":
       return `/opportunities/${r.id}`;
     case "lead":
-      return `/leads/${r.id}`;
+      // Legacy entries recorded before the lead-type retirement.
+      return `/imports/${r.id}`;
   }
 }
 
@@ -1022,7 +1023,7 @@ function RecentRecordsWidget() {
           </p>
         ) : (
           <div className="space-y-2">
-            {records.map((r) => {
+            {records.filter((r) => r.entity !== "lead").map((r) => {
               const Icon = recentRecordIcon(r.entity);
               return (
                 <Link

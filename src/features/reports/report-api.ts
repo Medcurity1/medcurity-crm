@@ -307,6 +307,12 @@ async function runReportQuery(config: ReportConfig): Promise<ReportResult> {
     query = query.is("archived_at", null);
   }
 
+  // Pending imports live in the Imports pen, not in contact reports
+  // (lead-type retirement, 2026-07-20).
+  if (config.entity === "contacts") {
+    query = query.is("import_status", null);
+  }
+
   // Apply filters
   for (const filter of config.filters) {
     query = applyFilter(query, config.entity, filter);

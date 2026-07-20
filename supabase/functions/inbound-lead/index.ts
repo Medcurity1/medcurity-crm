@@ -136,6 +136,10 @@ serve(async (req) => {
     const noteLines: string[] = [];
     const inDescription = description || Description;
     if (inDescription) noteLines.push(String(inDescription));
+    // Company also goes in the notes: import_company alone renders nowhere
+    // on a non-pending contact, and the rep must be able to see the org
+    // the hand-raiser typed (review finding #2).
+    if (inCompany) noteLines.push(`Company: ${inCompany}`);
     const inIndustry = industry || Industry;
     if (inIndustry) noteLines.push(`Industry: ${inIndustry}`);
     const inWebsite = website || sfWebsite;
@@ -176,12 +180,12 @@ serve(async (req) => {
     // up-to-3 email columns)? Case-insensitive ILIKE with LIKE
     // metacharacters (% _ \) escaped so a legal underscore in an address
     // matches literally instead of acting as a wildcard.
-    let existing: { id: string } | null = null;
+    let existing: { id: string; import_status: string | null } | null = null;
     if (inEmail) {
       const emailPattern = String(inEmail).replace(/[\\%_]/g, "\\$&");
       const { data } = await supabase
         .from("contacts")
-        .select("id")
+        .select("id, import_status")
         .or(
           `email.ilike.${emailPattern},email2.ilike.${emailPattern},email3.ilike.${emailPattern}`,
         )
@@ -194,12 +198,28 @@ serve(async (req) => {
     if (existing) {
       // A repeat submission is still a hand-raiser: no duplicate contact,
       // but the same follow-up signals fire on the existing record.
+      //
+      // If the match is a PENDING pen row (they were on some imported list
+      // and just raised their hand on the website), PROMOTE it out of the
+      // pen account-less — a hand-raiser must be visible in Contacts, not
+      // buried in the admin-only pen (review finding #3).
+      const wasPending = existing.import_status === "pending";
+      if (wasPending) {
+        const { error: promoteError } = await supabase
+          .from("contacts")
+          .update({ import_status: null })
+          .eq("id", existing.id);
+        if (promoteError) {
+          console.error("pen self-promote failed:", promoteError);
+        }
+      }
       await ensureWebsiteTag(supabase, existing.id);
       await sendInquiryBells(supabase, {
         contactId: existing.id,
         name: `${inFirstName} ${inLastName}`,
         company: inCompany,
-        repeat: true,
+        // A pen row surfacing via the form is effectively a FIRST arrival.
+        repeat: !wasPending,
       });
 
       return jsonResponse(
@@ -251,8 +271,16 @@ serve(async (req) => {
         success: true,
         action: "created",
         contact_id: newContact.id,
-        // Back-compat alias (pre-2026-07-20 integrations read lead_id).
+        // Back-compat aliases (pre-2026-07-20 integrations read lead_id
+        // and the lead object — keep BOTH until the website side is
+        // confirmed; review finding #4).
         lead_id: newContact.id,
+        lead: {
+          id: newContact.id,
+          first_name: newContact.first_name,
+          last_name: newContact.last_name,
+          email: newContact.email,
+        },
         contact: {
           id: newContact.id,
           first_name: newContact.first_name,
