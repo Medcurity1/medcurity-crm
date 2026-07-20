@@ -370,7 +370,7 @@ function ImportsList() {
     ),
     name: (lead) => (
       <Link
-        to={`/leads/${lead.id}`}
+        to={`/imports/${lead.id}`}
         className="font-medium text-primary hover:underline block truncate"
         title={`${lead.first_name ?? ""} ${lead.last_name ?? ""}`.trim()}
         onClick={(e) => e.stopPropagation()}
@@ -423,8 +423,8 @@ function ImportsList() {
   return (
     <div>
       <PageHeader
-        title="Leads"
-        description="Leads and imported lists. Promote the good ones to Contacts; archive the rest."
+        title="Imports"
+        description="Imported lists to clean up. Promote the good ones to Contacts; archive the rest."
         actions={
           <div className="flex items-center gap-2">
             <Button onClick={() => navigate("/admin?tab=data-import")}>
@@ -443,7 +443,7 @@ function ImportsList() {
                 Bulk archive from file
               </Button>
             )}
-            <Button variant="outline" onClick={() => navigate("/leads/new")}>
+            <Button variant="outline" onClick={() => navigate("/imports/new")}>
               <Plus className="h-4 w-4 mr-2" />
               Add one
             </Button>
@@ -526,7 +526,7 @@ function ImportsList() {
           placeholder="All Owners"
           triggerClassName="w-40"
           options={[
-            { value: "mine", label: "My Leads" },
+            { value: "mine", label: "My Imports" },
             ...(users ?? []).map((u) => ({
               value: u.id,
               label: u.full_name ?? "Unknown",
@@ -681,7 +681,7 @@ function ImportsList() {
       ) : isError ? (
         <EmptyState
           icon={AlertTriangle}
-          title="Couldn't load leads"
+          title="Couldn't load imports"
           description="Something went wrong loading this list. This is usually a momentary hiccup — try again."
         >
           <Button onClick={() => refetch()} disabled={isFetching}>
@@ -701,7 +701,7 @@ function ImportsList() {
             !search && !statusFilter.length && !sourceFilter.length && !qualificationFilter.length
               ? {
                   label: "New Import",
-                  onClick: () => navigate("/leads/new"),
+                  onClick: () => navigate("/imports/new"),
                 }
               : undefined
           }
@@ -748,7 +748,7 @@ function ImportsList() {
                   <TableRow
                     key={lead.id}
                     className="cursor-pointer"
-                    onClick={() => navigate(`/leads/${lead.id}`)}
+                    onClick={() => navigate(`/imports/${lead.id}`)}
                   >
                     {cols.visibleColumns.map((c) => (
                       <TableCell

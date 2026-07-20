@@ -7,7 +7,8 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Building2, Users, UserPlus, Target } from "lucide-react";
+import { Building2, Users, Inbox, Target } from "lucide-react";
+import { useAuth } from "@/features/auth/AuthProvider";
 
 interface QuickCreateDialogProps {
   open: boolean;
@@ -20,24 +21,28 @@ const createOptions = [
     icon: Building2,
     path: "/accounts/new",
     description: "Create a new company or organization",
+    adminOnly: false,
   },
   {
     label: "Contact",
     icon: Users,
     path: "/contacts/new",
     description: "Add a new person",
+    adminOnly: false,
   },
   {
-    label: "Lead",
-    icon: UserPlus,
-    path: "/leads/new",
-    description: "Track a new prospect",
+    label: "Import",
+    icon: Inbox,
+    path: "/imports/new",
+    description: "Add a raw list record to clean up and promote",
+    adminOnly: true,
   },
   {
     label: "Opportunity",
     icon: Target,
     path: "/opportunities/new",
     description: "Start a new deal",
+    adminOnly: false,
   },
 ];
 
@@ -46,6 +51,9 @@ export function QuickCreateDialog({
   onOpenChange,
 }: QuickCreateDialogProps) {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
+  const options = createOptions.filter((o) => isAdmin || !o.adminOnly);
 
   function handleSelect(path: string) {
     onOpenChange(false);
@@ -63,7 +71,7 @@ export function QuickCreateDialog({
       <CommandList>
         <CommandEmpty>No matching record type.</CommandEmpty>
         <CommandGroup heading="Create New">
-          {createOptions.map((option) => (
+          {options.map((option) => (
             <CommandItem
               key={option.path}
               value={option.label}

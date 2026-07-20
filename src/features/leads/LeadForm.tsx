@@ -313,12 +313,12 @@ function LeadFormInner({ lead }: { lead: Lead | undefined }) {
     try {
       if (isEditing && id) {
         await updateMutation.mutateAsync({ id, ...payload } as Parameters<typeof updateMutation.mutateAsync>[0]);
-        toast.success("Lead updated");
-        navigate(`/leads/${id}`);
+        toast.success("Import updated");
+        navigate(`/imports/${id}`);
       } else {
         const result = await createMutation.mutateAsync(payload as Parameters<typeof createMutation.mutateAsync>[0]);
-        toast.success("Lead created");
-        navigate(`/leads/${result.id}`);
+        toast.success("Import created");
+        navigate(`/imports/${result.id}`);
       }
     } catch (err) {
       console.error("Failed to save lead:", err);

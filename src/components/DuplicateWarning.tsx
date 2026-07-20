@@ -178,7 +178,7 @@ export function DuplicateWarning({
                 id: d.id,
                 label: `${d.first_name} ${d.last_name}`,
                 detail: [d.email, d.company].filter(Boolean).join(" - "),
-                href: `/leads/${d.id}`,
+                href: `/imports/${d.id}`,
               })
             );
           }
@@ -205,7 +205,7 @@ export function DuplicateWarning({
                 id: d.id,
                 label: `${d.first_name} ${d.last_name}`,
                 detail: [d.email, d.company].filter(Boolean).join(" - "),
-                href: `/leads/${d.id}`,
+                href: `/imports/${d.id}`,
               }));
             }
           }

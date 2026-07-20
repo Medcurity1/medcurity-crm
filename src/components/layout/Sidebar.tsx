@@ -4,7 +4,7 @@ import {
   Home,
   Building2,
   Users,
-  UserPlus,
+  Inbox,
   Handshake,
   Target,
   Kanban,
@@ -110,9 +110,10 @@ const adminItems: NavItem[] = [
   // "Playbook"). AI ideas + Smartlead cold email + newsletters. Route stays
   // /playbook for stable deep-links. Admin-only (for now).
   { to: "/playbook", icon: Megaphone, label: "Campaigns", badge: { label: "Admin", className: ADMIN_BADGE } },
-  // Leads = the admin-only working list / import drop zone. Kept the
-  // "Leads" name (reps don't see it; admins manage + promote to Contacts).
-  { to: "/leads", icon: UserPlus, label: "Leads", badge: { label: "Admin", className: ADMIN_BADGE } },
+  // Imports = the admin-only landing pen for raw lists (renamed from
+  // "Leads" 2026-07-20 after the prod lead cleanup; reps don't see it —
+  // admins clean + promote to Contacts or archive).
+  { to: "/imports", icon: Inbox, label: "Imports", badge: { label: "Admin", className: ADMIN_BADGE } },
   { to: "/archive", icon: Archive, label: "Archive", badge: { label: "Admin", className: ADMIN_BADGE } },
   { to: "/admin", icon: Settings, label: "Admin Settings", badge: { label: "Admin", className: ADMIN_BADGE } },
 ];

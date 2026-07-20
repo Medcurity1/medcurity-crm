@@ -476,7 +476,7 @@ export function BulkPromoteFromFile({
       <ConfirmDialog
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
-        title={`Promote ${preview?.promotable.toLocaleString() ?? 0} leads to contacts?`}
+        title={`Promote ${preview?.promotable.toLocaleString() ?? 0} imports to contacts?`}
         description="Each becomes a Contact (with a matched or newly-created Account). Anyone already a contact is skipped. This runs immediately and can't be bulk-undone."
         confirmLabel="Promote them"
         onConfirm={runPromote}

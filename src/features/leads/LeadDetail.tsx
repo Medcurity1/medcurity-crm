@@ -164,7 +164,7 @@ export function LeadDetail() {
       {
         onSuccess: () => {
           toast.success("Import archived");
-          navigate("/leads");
+          navigate("/imports");
         },
         onError: (err) => {
           toast.error("Failed to archive import: " + (err as Error).message);
@@ -184,11 +184,11 @@ export function LeadDetail() {
       {fromListId && (
         <button
           type="button"
-          onClick={() => navigate("/leads")}
+          onClick={() => navigate("/imports")}
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-3"
         >
           <ChevronLeft className="h-4 w-4" />
-          Back to Leads
+          Back to Imports
         </button>
       )}
 
@@ -274,7 +274,7 @@ export function LeadDetail() {
                 so reps can't accidentally rewrite history. The contact
                 that took over is the working record. */}
             {!isConverted && !isAvoided && (
-              <Button variant="outline" size="sm" onClick={() => navigate(`/leads/${id}/edit`)}>
+              <Button variant="outline" size="sm" onClick={() => navigate(`/imports/${id}/edit`)}>
                 <Pencil className="h-4 w-4 mr-1" />
                 Edit
               </Button>
@@ -308,7 +308,7 @@ export function LeadDetail() {
                           {
                             onSuccess: () => {
                               toast.success("Marked Avoid and archived");
-                              navigate("/leads");
+                              navigate("/imports");
                             },
                             onError: (e) => toast.error((e as Error).message),
                           },
@@ -739,8 +739,8 @@ export function LeadDetail() {
       <ConfirmDialog
         open={showArchive}
         onOpenChange={setShowArchive}
-        title="Archive Lead"
-        description="This will hide the lead from active views. An admin can restore it later."
+        title="Archive Import"
+        description="This will hide the import from active views. An admin can restore it later."
         confirmLabel="Archive"
         destructive
         onConfirm={handleArchive}
@@ -768,7 +768,7 @@ export function LeadDetail() {
             }
           );
         }}
-        title="Change Lead Owner"
+        title="Change Import Owner"
       />
     </div>
   );

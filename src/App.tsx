@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ReactNode } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
@@ -86,6 +86,19 @@ function AdminGate({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/** /leads/* → /imports/* forwarder. Old URLs live in task-reminder emails,
+ * bookmarks, activity links, and "Promoted from" callouts — keep them
+ * working permanently. */
+function LeadsPathRedirect() {
+  const loc = useLocation();
+  return (
+    <Navigate
+      to={loc.pathname.replace(/^\/leads/, "/imports") + loc.search + loc.hash}
+      replace
+    />
+  );
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -127,13 +140,15 @@ export default function App() {
                   <Route path="accounts/new" element={<AccountForm />} />
                   <Route path="accounts/:id" element={<AccountDetail />} />
                   <Route path="accounts/:id/edit" element={<AccountForm />} />
-                  {/* Leads (admin-only working/import list). Gate the list
-                      route too, matching the other leads routes — the
-                      component also guards, this is belt-and-suspenders. */}
-                  <Route path="leads" element={<AdminGate><LeadsList /></AdminGate>} />
-                  <Route path="leads/new" element={<AdminGate><LeadForm /></AdminGate>} />
-                  <Route path="leads/:id" element={<AdminGate><LeadDetail /></AdminGate>} />
-                  <Route path="leads/:id/edit" element={<AdminGate><LeadForm /></AdminGate>} />
+                  {/* Imports (admin-only working/import list — formerly
+                      "Leads"). Gate the list route too, matching the other
+                      imports routes — the component also guards, this is
+                      belt-and-suspenders. */}
+                  <Route path="imports" element={<AdminGate><LeadsList /></AdminGate>} />
+                  <Route path="imports/new" element={<AdminGate><LeadForm /></AdminGate>} />
+                  <Route path="imports/:id" element={<AdminGate><LeadDetail /></AdminGate>} />
+                  <Route path="imports/:id/edit" element={<AdminGate><LeadForm /></AdminGate>} />
+                  <Route path="leads/*" element={<LeadsPathRedirect />} />
                   <Route path="playbook" element={<AdminGate><PlaybookPage /></AdminGate>} />
                   <Route path="partners" element={<PartnersPage />} />
                   <Route path="contacts" element={<ContactsList />} />

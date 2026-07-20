@@ -308,7 +308,7 @@ export function BulkArchiveFromFile({
       <ConfirmDialog
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
-        title={`Archive ${preview?.to_archive.toLocaleString() ?? 0} leads?`}
+        title={`Archive ${preview?.to_archive.toLocaleString() ?? 0} imports?`}
         description={`They'll be archived with the reason "${reason.trim() || "bulk cleaning"}" and excluded from future imports. You can still find them in the Archive tab. This runs immediately.`}
         confirmLabel="Archive them"
         destructive

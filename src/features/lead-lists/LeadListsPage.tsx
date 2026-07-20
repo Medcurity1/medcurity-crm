@@ -1880,7 +1880,7 @@ function ListDetailView({
                   onClick={() => {
                     if (r.lead) {
                       navigate(
-                        `/leads/${r.lead.id}?from=list:${list.id}`,
+                        `/imports/${r.lead.id}?from=list:${list.id}`,
                       );
                     }
                   }}
@@ -2057,7 +2057,7 @@ function renderCell(
     case "name":
       return (
         <Link
-          to={`/leads/${l.id}`}
+          to={`/imports/${l.id}`}
           className="text-primary hover:underline font-medium"
           onClick={(e) => e.stopPropagation()}
         >

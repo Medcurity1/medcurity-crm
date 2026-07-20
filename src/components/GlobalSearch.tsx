@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Building2, Users, Target, Search, UserPlus } from "lucide-react";
+import { Building2, Users, Target, Search, Inbox } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -90,14 +90,14 @@ const recentIcons: Record<RecentRecord["entity"], typeof Building2> = {
   account: Building2,
   contact: Users,
   opportunity: Target,
-  lead: UserPlus,
+  lead: Inbox,
 };
 
 const recentPaths: Record<RecentRecord["entity"], string> = {
   account: "/accounts",
   contact: "/contacts",
   opportunity: "/opportunities",
-  lead: "/leads",
+  lead: "/imports",
 };
 
 export function GlobalSearch() {
@@ -405,14 +405,14 @@ export function GlobalSearch() {
           )}
 
           {rankedLeads.length > 0 && (
-            <CommandGroup heading="Leads">
+            <CommandGroup heading="Imports">
               {rankedLeads.map((lead) => (
                 <CommandItem
                   key={lead.id}
                   value={`lead-${lead.first_name} ${lead.last_name}-${lead.id}`}
-                  onSelect={() => handleSelect(`/leads/${lead.id}`)}
+                  onSelect={() => handleSelect(`/imports/${lead.id}`)}
                 >
-                  <UserPlus className="h-4 w-4 text-muted-foreground" />
+                  <Inbox className="h-4 w-4 text-muted-foreground" />
                   <span className="flex-1 truncate">
                     {lead.first_name} {lead.last_name}
                     {lead.company && (
