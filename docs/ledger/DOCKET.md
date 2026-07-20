@@ -11,6 +11,8 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Queued / requested
 
+- [IN PROGRESS] 2026-07-20 · Joe (via Nathan) · **Sept renewal opportunities missing on prod** — "automated task in Pulse creating renewal Opportunities... Sept renewal opps aren't there." Investigating the prod renewal automation (read-only; known history: the fail-soft cron-install trap, see pulse-scheduled-jobs).
+
 (the 2026-07-17 "Reports based on tags" ask shipped 2026-07-20 inside the unified Reports+Lists build — Builder Tags filter; see SHIPPED)
 
 

@@ -293,6 +293,27 @@ export function useSmartListMembers(list: LeadList | null) {
   });
 }
 
+/** Additive-only Sales-Status activation for ACTIVE smart lists: flips
+ * matching accounts to actively-worked (never off — a rule change must
+ * not mass-deactivate). Fired when an active smart list is opened or its
+ * rules change; idempotent and cheap. */
+export function useActivateAccountsForContacts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (contactIds: string[]) => {
+      if (!contactIds.length) return 0;
+      const { data, error } = await supabase.rpc("activate_accounts_for_contacts", {
+        p_contact_ids: contactIds,
+      });
+      if (error) throw error;
+      return (data as number) ?? 0;
+    },
+    onSuccess: (n) => {
+      if (n > 0) qc.invalidateQueries({ queryKey: ["accounts"] });
+    },
+  });
+}
+
 /** Freeze a smart list: materialize its CURRENT members into a brand-new
  * regular list you can hand-edit ("start with a full group"). */
 export function useFreezeSmartList() {

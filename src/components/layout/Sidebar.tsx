@@ -93,7 +93,6 @@ const navItems: NavItem[] = [
   { to: "/opportunities", icon: Target, label: "Opportunities", secret: "dealmerger" },
   { to: "/pipeline", icon: Kanban, label: "Pipeline", secret: "pipeline" },
   { to: "/partners", icon: Handshake, label: "Partners" },
-  { to: "/calendar", icon: CalendarIcon, label: "Calendar" },
   { to: "/activities", icon: Clock, label: "Activities" },
   { to: "/products", icon: Package, label: "Products" },
   { to: "/renewals", icon: RefreshCw, label: "Renewals" },
@@ -101,6 +100,9 @@ const navItems: NavItem[] = [
   // Forecasting + Analytics moved into /reports as tabs (2026-04-17).
   // "New" badge retired 2026-07-02 (Nathan).
   { to: "/requests", icon: MessageSquarePlus, label: "Requests" },
+  // Calendar demoted below Requests (Nathan 2026-07-20: rarely used;
+  // bumps Reports/Requests up without reordering anything else).
+  { to: "/calendar", icon: CalendarIcon, label: "Calendar" },
   // Nexus: the customizable widget dashboard (Jordan V4). Lives at /nexus
   // while it's being tested; the classic Home dashboard is back at "/"
   // (Nathan, 2026-07-03).

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -35,6 +35,7 @@ import {
   useBulkAddContactsToList,
   useSmartListMembers,
   useFreezeSmartList,
+  useActivateAccountsForContacts,
   parseSmartRules,
   smartRuleChips,
   smartRulesEmpty,
@@ -355,6 +356,15 @@ function SmartListDetail({
   const { data, isLoading } = useSmartListMembers(list);
   const deleteMutation = useDeleteLeadList();
   const freezeMutation = useFreezeSmartList();
+  const activateAccounts = useActivateAccountsForContacts();
+  // ACTIVE smart list: additive Sales-Status reconcile whenever the live
+  // membership resolves (open/rule-change). Only ever flips accounts ON.
+  const memberIdsKey = (data?.rows ?? []).map((r) => r.id).join(",");
+  useEffect(() => {
+    if (!list.is_working_list || !data?.rows?.length) return;
+    activateAccounts.mutate(data.rows.map((r) => r.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list.id, list.is_working_list, memberIdsKey]);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const { data: tags } = useTags();
@@ -380,6 +390,11 @@ function SmartListDetail({
                 <Sparkles className="h-3 w-3 mr-1" />
                 Smart list
               </Badge>
+              {list.is_working_list && (
+                <Badge variant="outline" className="ml-2 align-middle text-amber-600 dark:text-amber-400 border-amber-500/40">
+                  Active working list
+                </Badge>
+              )}
             </h3>
             {list.description && (
               <p className="text-sm text-muted-foreground">{list.description}</p>
@@ -467,9 +482,9 @@ function SmartListDetail({
         )}
 
         <p className="text-xs text-muted-foreground">
-          Smart lists are rule-driven, so people can&apos;t be added or removed by
-          hand — freeze it into a regular list to take over manually. Never
-          touches anyone&apos;s status.
+          {list.is_working_list
+            ? "Rule-driven and ACTIVE: matching contacts mark their accounts as actively worked (on-only — dropping off the rules never deactivates anyone). Freeze it into a regular list to take over manually."
+            : "Smart lists are rule-driven, so people can't be added or removed by hand — freeze it into a regular list to take over manually. Never touches anyone's status."}
         </p>
       </CardContent>
 
@@ -549,7 +564,7 @@ function CreateOrRenameListDialog({
           id: existing.id,
           name: trimmed,
           description: description.trim() || null,
-          is_working_list: smart ? false : working,
+          is_working_list: working,
           ...(existing.is_dynamic ? { filter_config: rules as Record<string, unknown> } : {}),
         });
         toast.success("List updated");
@@ -560,9 +575,7 @@ function CreateOrRenameListDialog({
           description: description.trim() || undefined,
           owner_user_id: user.id,
           is_dynamic: smart,
-          // Smart lists are never working call lists — a rule change could
-          // mass-flip account statuses.
-          is_working_list: smart ? false : working,
+          is_working_list: working,
           filter_config: smart ? (rules as Record<string, unknown>) : null,
         });
         toast.success(smart ? "Smart list created" : "List created");
@@ -687,18 +700,19 @@ function CreateOrRenameListDialog({
             </div>
           )}
 
-          {!smart && !existing?.is_dynamic && (
-            <div className="flex items-start justify-between gap-3 rounded-md border p-3">
-              <div>
-                <p className="text-sm font-medium">Working call list</p>
-                <p className="text-xs text-muted-foreground">
-                  On: adding people marks their accounts as actively worked
-                  (Sales Status). Off: just a list — nobody's status changes.
-                </p>
-              </div>
-              <Switch checked={working} onCheckedChange={setWorking} />
+          <div className="flex items-start justify-between gap-3 rounded-md border p-3">
+            <div>
+              <p className="text-sm font-medium">
+                {smart || existing?.is_dynamic ? "Active working list" : "Working call list"}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {smart || existing?.is_dynamic
+                  ? "On: contacts matching the rules mark their accounts as actively worked (applied when the list updates or is opened — it only ever turns accounts ON; dropping off the rules never deactivates anyone)."
+                  : "On: adding people marks their accounts as actively worked (Sales Status). Off: just a list — nobody's status changes."}
+              </p>
             </div>
-          )}
+            <Switch checked={working} onCheckedChange={setWorking} />
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
