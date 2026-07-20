@@ -383,32 +383,18 @@ function useMqlRowsQtd(quarterStart: string, quarterEnd: string) {
     queryKey: ["team-dashboard", "mql-rows", quarterStart, quarterEnd],
     enabled: !!quarterStart && !!quarterEnd,
     queryFn: async (): Promise<{ event_date: string }[]> => {
-      // Pull from both leads + contacts deduped by date count (we just need
-      // dates — uniqueness across leads/contacts already handled in the
-      // dashboard's `mql_unique_qtd` aggregate; for the running-total chart
-      // a simple union of dates is enough for the visual.)
-      const [{ data: lRows, error: lErr }, { data: cRows, error: cErr }] = await Promise.all([
-        supabase
-          .from("leads")
-          .select("mql_date")
-          .not("mql_date", "is", null)
-          .gte("mql_date", quarterStart)
-          .lte("mql_date", quarterEnd)
-          .is("archived_at", null),
-        supabase
-          .from("contacts")
-          .select("mql_date")
-          .not("mql_date", "is", null)
-          .gte("mql_date", quarterStart)
-          .lte("mql_date", quarterEnd)
-          .is("archived_at", null),
-      ]);
-      if (lErr) throw lErr;
+      // MQL is a contacts-only concept since the lead-type retirement
+      // (2026-07-20; promoted imports carried their mql_date onto the
+      // contact, so history is preserved here).
+      const { data: cRows, error: cErr } = await supabase
+        .from("contacts")
+        .select("mql_date")
+        .not("mql_date", "is", null)
+        .gte("mql_date", quarterStart)
+        .lte("mql_date", quarterEnd)
+        .is("archived_at", null);
       if (cErr) throw cErr;
-      const all = [
-        ...(lRows ?? []).map((r: any) => ({ event_date: r.mql_date })),
-        ...(cRows ?? []).map((r: any) => ({ event_date: r.mql_date })),
-      ];
+      const all = (cRows ?? []).map((r: any) => ({ event_date: r.mql_date }));
       return all;
     },
   });

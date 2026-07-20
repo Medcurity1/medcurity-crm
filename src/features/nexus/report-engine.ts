@@ -127,7 +127,7 @@ const IMPORT_ENTITY_OPTIONS = [
   { value: "contacts", label: "Contacts" },
   { value: "accounts", label: "Accounts" },
   { value: "opportunities", label: "Opportunities" },
-  { value: "leads", label: "Leads" },
+  // "leads" retired 2026-07-20 — imports are contacts now.
 ];
 
 const IMPORT_MODE_OPTIONS = [

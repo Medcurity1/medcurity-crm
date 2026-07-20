@@ -341,7 +341,7 @@ const ENTITY_DETAIL_ROUTES: Record<string, string | null> = {
   accounts: "/accounts",
   contacts: "/contacts",
   opportunities: "/opportunities",
-  leads: "/leads",
+  leads: "/imports",
   activities: null, // no dedicated detail page
   opportunity_products: null,
 };

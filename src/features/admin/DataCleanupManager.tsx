@@ -50,9 +50,6 @@ import { Input } from "@/components/ui/input";
 import { formatCurrency, customerStatusLabel } from "@/lib/formatters";
 import type { CustomerStatus } from "@/types/crm";
 import {
-  useLeadContactDuplicates,
-  useLeadDuplicateCounts,
-  useArchiveLeadAsDuplicate,
   useAccountDuplicateGroups,
   useMergeAccounts,
   useDismissAccountDuplicate,
@@ -60,13 +57,13 @@ import {
   useRestoreAccountDuplicateDismissal,
   useAccountMergeHistory,
   useUndoAccountMerge,
-  type DuplicateTier,
   type AccountDuplicateGroupRow,
   type AccountMatchBy,
-  type LeadContactDuplicate,
 } from "./data-cleanup-api";
 
-type Section = "accounts" | "leads" | "history";
+// "leads" section retired 2026-07-20 with the lead type (the pen dedups at
+// import/promote time instead).
+type Section = "accounts" | "history";
 
 export function DataCleanupManager() {
   const [section, setSection] = useState<Section>("accounts");
@@ -77,16 +74,12 @@ export function DataCleanupManager() {
         <SectionButton active={section === "accounts"} onClick={() => setSection("accounts")}>
           Duplicate accounts
         </SectionButton>
-        <SectionButton active={section === "leads"} onClick={() => setSection("leads")}>
-          Leads that match a contact
-        </SectionButton>
         <SectionButton active={section === "history"} onClick={() => setSection("history")}>
           Merge history
         </SectionButton>
       </div>
 
       {section === "accounts" && <AccountDuplicatesPanel />}
-      {section === "leads" && <LeadDuplicatesPanel />}
       {section === "history" && <MergeHistoryPanel />}
     </div>
   );
@@ -473,200 +466,6 @@ function DismissedGroups() {
   );
 }
 
-/* ======================= Leads that duplicate a contact ===================== */
-
-function LeadDuplicatesPanel() {
-  const [tier, setTier] = useState<Exclude<DuplicateTier, "all">>("email");
-  const { data: counts } = useLeadDuplicateCounts();
-  const { data: rows, isLoading, isError, error } = useLeadContactDuplicates(tier);
-  const archiveMutation = useArchiveLeadAsDuplicate();
-
-  const [retireTarget, setRetireTarget] = useState<LeadContactDuplicate | null>(null);
-  const [bulkOpen, setBulkOpen] = useState(false);
-  const [q, setQ] = useState("");
-
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    if (!needle) return rows ?? [];
-    return (rows ?? []).filter((d) =>
-      [
-        d.lead_first_name, d.lead_last_name, d.lead_email, d.lead_company,
-        d.contact_first_name, d.contact_last_name, d.contact_email,
-        d.contact_account_name,
-      ].some((v) => (v ?? "").toLowerCase().includes(needle)),
-    );
-  }, [rows, q]);
-
-  function retire(d: LeadContactDuplicate) {
-    archiveMutation.mutate(
-      { leadId: d.lead_id, contactId: d.contact_id },
-      {
-        onSuccess: () => toast.success("Lead retired as a duplicate."),
-        onError: (err: Error) => toast.error("Couldn't retire lead", { description: err.message }),
-      }
-    );
-  }
-
-  async function retireAllCertain() {
-    setBulkOpen(false);
-    const list = filtered;
-    let ok = 0;
-    let fail = 0;
-    for (const d of list) {
-      try {
-        await archiveMutation.mutateAsync({ leadId: d.lead_id, contactId: d.contact_id });
-        ok++;
-      } catch {
-        fail++;
-      }
-    }
-    if (fail === 0) toast.success(`Retired ${ok} duplicate lead${ok === 1 ? "" : "s"}.`);
-    else toast.warning(`Retired ${ok}, ${fail} failed.`);
-  }
-
-  return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        These leads look like people who already exist as a contact. Retiring a lead
-        archives it as a duplicate and keeps the contact — nothing is deleted.
-      </p>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <SectionButton active={tier === "email"} onClick={() => setTier("email")}>
-          Same email — certain{counts ? ` (${counts.email_certain})` : ""}
-        </SectionButton>
-        <SectionButton active={tier === "name"} onClick={() => setTier("name")}>
-          Same name — review{counts ? ` (${counts.name_review})` : ""}
-        </SectionButton>
-        {tier === "email" && filtered.length > 0 && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="ml-auto"
-            onClick={() => setBulkOpen(true)}
-            disabled={archiveMutation.isPending}
-          >
-            Retire all {filtered.length} certain matches
-          </Button>
-        )}
-      </div>
-
-      {(rows?.length ?? 0) > 0 && (
-        <div className="relative max-w-sm">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search by name, email, or company…"
-            className="pl-8"
-          />
-        </div>
-      )}
-
-      {tier === "name" && (
-        <div className="rounded-md border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-950/20 dark:text-yellow-200">
-          <AlertTriangle className="mr-1 inline h-4 w-4" />
-          These match by name only (no email). Two different people can share a name —
-          check each one before retiring.
-        </div>
-      )}
-
-      {isLoading ? (
-        <PanelLoading />
-      ) : isError ? (
-        <PanelError message={(error as Error)?.message} />
-      ) : (rows?.length ?? 0) === 0 ? (
-        <EmptyState
-          icon={<CheckCircle2 className="h-6 w-6 text-green-600" />}
-          title="Nothing here"
-          body={
-            tier === "email"
-              ? "No leads share an email with an existing contact."
-              : "No leads share a name with an existing contact."
-          }
-        />
-      ) : filtered.length === 0 ? (
-        <div className="rounded-md border p-6 text-center text-sm text-muted-foreground">
-          No matches for "{q}".
-        </div>
-      ) : (
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Lead</TableHead>
-                <TableHead className="w-8" />
-                <TableHead>Already a contact</TableHead>
-                <TableHead className="text-right">Action</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((d) => (
-                <TableRow key={d.lead_id}>
-                  <TableCell>
-                    <Link to={`/leads/${d.lead_id}`} target="_blank" className="font-medium text-primary hover:underline">
-                      {personName(d.lead_first_name, d.lead_last_name)}
-                    </Link>
-                    <div className="text-xs text-muted-foreground">
-                      {[d.lead_email, d.lead_company].filter(Boolean).join(" · ") || "—"}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    <ArrowRight className="h-4 w-4" />
-                  </TableCell>
-                  <TableCell>
-                    <Link to={`/contacts/${d.contact_id}`} target="_blank" className="font-medium text-primary hover:underline">
-                      {personName(d.contact_first_name, d.contact_last_name)}
-                    </Link>
-                    <div className="text-xs text-muted-foreground">
-                      {[d.contact_email, d.contact_account_name].filter(Boolean).join(" · ") || "—"}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setRetireTarget(d)}
-                      disabled={archiveMutation.isPending}
-                    >
-                      Retire lead
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
-
-      <ConfirmDialog
-        open={!!retireTarget}
-        onOpenChange={(o) => !o && setRetireTarget(null)}
-        title="Retire this lead?"
-        description={
-          retireTarget
-            ? `"${personName(retireTarget.lead_first_name, retireTarget.lead_last_name)}" will be archived as a duplicate of the contact "${personName(retireTarget.contact_first_name, retireTarget.contact_last_name)}". The contact is kept; nothing is deleted.`
-            : ""
-        }
-        confirmLabel="Retire lead"
-        onConfirm={() => {
-          if (retireTarget) retire(retireTarget);
-          setRetireTarget(null);
-        }}
-      />
-
-      <ConfirmDialog
-        open={bulkOpen}
-        onOpenChange={setBulkOpen}
-        title={`Retire all ${filtered.length} certain matches?`}
-        description="Each of these leads shares an email with an existing contact, so they're safe to retire. They'll be archived as duplicates and the contacts kept. Nothing is deleted."
-        confirmLabel="Retire all"
-        onConfirm={retireAllCertain}
-      />
-    </div>
-  );
-}
-
 /* ============================ Merge history ============================ */
 
 function MergeHistoryPanel() {
@@ -793,10 +592,6 @@ function EmptyState({
       <div className="max-w-sm text-sm text-muted-foreground">{body}</div>
     </Card>
   );
-}
-
-function personName(first: string | null, last: string | null) {
-  return [first, last].filter(Boolean).join(" ").trim() || "(no name)";
 }
 
 function fmtDate(iso: string) {

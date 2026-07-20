@@ -669,9 +669,13 @@ export const ENTITY_DEFS: Record<string, EntityDef> = {
     joins: "*, product:products!product_id(name, code), opportunity:opportunities!opportunity_id(name)",
   },
 
+  // RETIRED 2026-07-20 (lead-type retirement): kept ONLY so saved reports
+  // built before the cutover keep rendering (against the frozen, all-
+  // archived leads table → empty results) instead of crashing getEntityDef.
+  // Hidden from pickers via the ENTITY_KEYS filter below.
   leads: {
     key: "leads",
-    label: "Leads",
+    label: "Leads (retired)",
     table: "leads",
     columns: leadColumns,
     filterColumns: leadFilterColumns,
@@ -680,7 +684,10 @@ export const ENTITY_DEFS: Record<string, EntityDef> = {
   },
 };
 
-export const ENTITY_KEYS = Object.keys(ENTITY_DEFS) as Array<keyof typeof ENTITY_DEFS>;
+// 'leads' is def-only (legacy saved reports) — never offered in pickers.
+export const ENTITY_KEYS = Object.keys(ENTITY_DEFS).filter(
+  (k) => k !== "leads",
+) as Array<keyof typeof ENTITY_DEFS>;
 
 export function getEntityDef(entityKey: string): EntityDef {
   const def = ENTITY_DEFS[entityKey];

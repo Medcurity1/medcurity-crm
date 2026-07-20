@@ -136,7 +136,7 @@ function getRecordLink(
   }
   if (a.lead_id && a.lead) {
     return {
-      to: `/leads/${a.lead_id}`,
+      to: `/imports/${a.lead_id}`,
       label: "Lead",
       name: `${a.lead.first_name} ${a.lead.last_name}`,
     };

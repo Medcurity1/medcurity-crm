@@ -141,6 +141,19 @@ export function NotificationSettingsPanel() {
       </Section>
 
       <Section
+        icon={<Bell className="h-4 w-4" />}
+        title="Website inquiries"
+        desc="When someone submits the website contact form, they land in Contacts automatically — this controls whether you also get a bell about it."
+      >
+        <EmailRow
+          optKey="website_inquiry_bell"
+          label="Bell on new website inquiry"
+          desc="An in-app notification linking to the new (or returning) contact. Off by default — Nathan, Summer, and Molly start with it on."
+          prefs={prefs}
+        />
+      </Section>
+
+      <Section
         icon={<Smartphone className="h-4 w-4" />}
         title="Phone notifications (Pushover)"
         desc="Get instant phone alerts when a visitor requests a human. Requires the Pushover app ($4.99 one-time). Enter your Pushover user key below."

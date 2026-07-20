@@ -9,9 +9,11 @@
 //     (NOT hidden in the Imports pen). The raw company string is kept on
 //     import_company for the rep to attach the right account; we never
 //     auto-create accounts from a public form (bot/spam safety).
-//   - Nathan 7/20: notify AND task — a submission creates one follow-up
-//     task and a bell notification for each admin (repeat submissions the
-//     same day don't re-ping).
+//   - Nathan 7/20 (revised): NO task (the website already pings the team
+//     externally; task ownership differs every time). Bell notification
+//     only, to users who opted in via My Settings → Notifications
+//     ("website_inquiry_bell" pref — seeded ON for Nathan, Summer, Molly
+//     by migration 20260720130000; anyone can flip it).
 //   - Tagged "Website" for reporting.
 // Endpoint name/auth/payload/response shape are unchanged so the website
 // integration needs no changes (lead_id is still returned, aliasing the
@@ -193,11 +195,10 @@ serve(async (req) => {
       // A repeat submission is still a hand-raiser: no duplicate contact,
       // but the same follow-up signals fire on the existing record.
       await ensureWebsiteTag(supabase, existing.id);
-      await createFollowUps(supabase, {
+      await sendInquiryBells(supabase, {
         contactId: existing.id,
         name: `${inFirstName} ${inLastName}`,
         company: inCompany,
-        email: inEmail ?? null,
         repeat: true,
       });
 
@@ -229,11 +230,10 @@ serve(async (req) => {
     }
 
     await ensureWebsiteTag(supabase, newContact.id);
-    await createFollowUps(supabase, {
+    await sendInquiryBells(supabase, {
       contactId: newContact.id,
       name: `${newContact.first_name} ${newContact.last_name}`,
       company: inCompany,
-      email: newContact.email,
       repeat: false,
     });
 
@@ -303,81 +303,58 @@ async function ensureWebsiteTag(supabase: SupabaseClient, contactId: string) {
   }
 }
 
-/** Nathan 7/20: BOTH a task and a notification per submission.
- * One follow-up task (owner = oldest active admin, deterministic; the task
- * body says to reassign freely) + a bell notification for every active
- * admin. Idempotent per person per day via activities(source, external_id),
- * so a double-submit can't double-task or re-ping. Failures are logged,
- * never fatal. */
-async function createFollowUps(
+/** Nathan 7/20 (revised): bell notifications ONLY — no task (ownership
+ * differs every time; the website already pings the team externally).
+ * Recipients = active users whose website_inquiry_bell pref is on
+ * (opt-in; seeded ON for Nathan/Summer/Molly). A one-hour guard on the
+ * same contact link keeps a double-submit from double-pinging. Failures
+ * are logged, never fatal. */
+async function sendInquiryBells(
   supabase: SupabaseClient,
   args: {
     contactId: string;
     name: string;
     company: string | null;
-    email: string | null;
     repeat: boolean;
   },
 ) {
   try {
-    const { data: admins } = await supabase
-      .from("user_profiles")
-      .select("id, role, created_at")
-      .in("role", ["admin", "super_admin"])
-      .eq("is_active", true)
-      .order("created_at", { ascending: true });
-    if (!admins || admins.length === 0) return;
+    const { data: optedIn } = await supabase
+      .from("user_notification_prefs")
+      .select("user_id, user_profiles!inner(is_active)")
+      .eq("prefs->>website_inquiry_bell", "true")
+      .eq("user_profiles.is_active", true);
+    if (!optedIn || optedIn.length === 0) return;
 
-    const who = args.company ? `${args.name} (${args.company})` : args.name;
-    const dayKey = new Date().toISOString().slice(0, 10);
-    const externalId = `website:${(args.email ?? args.contactId).toLowerCase()}:${dayKey}`;
+    const link = `/contacts/${args.contactId}`;
 
-    // Task — skip if one already exists for this person today.
-    const { data: existingTask } = await supabase
-      .from("activities")
+    // Double-submit guard: if anyone was already pinged about this contact
+    // in the last hour, don't ping again.
+    const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const { data: recent } = await supabase
+      .from("notifications")
       .select("id")
-      .eq("source", "website_form")
-      .eq("external_id", externalId)
+      .eq("link", link)
+      .gte("created_at", cutoff)
       .limit(1)
       .maybeSingle();
-    if (existingTask) return;
+    if (recent) return;
 
-    const due = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    const { error: taskError } = await supabase.from("activities").insert({
-      contact_id: args.contactId,
-      owner_user_id: admins[0].id,
-      activity_type: "task",
-      subject: args.repeat
-        ? `Website inquiry (repeat): ${who}`
-        : `Website inquiry: ${who}`,
-      body:
-        "Came in through the website form — respond quickly. " +
-        "Reassign this task if it should be someone else's.",
-      activity_date: new Date().toISOString(),
-      due_at: due.toISOString(),
-      source: "website_form",
-      external_id: externalId,
-    });
-    if (taskError) {
-      console.error("follow-up task insert failed:", taskError);
-    }
-
-    // Bell for every admin (only alongside a fresh task, so a repeat
-    // submission the same day doesn't re-ping everyone).
+    const who = args.company ? `${args.name} (${args.company})` : args.name;
     const { error: notifError } = await supabase.from("notifications").insert(
-      admins.map((a) => ({
-        user_id: a.id,
+      optedIn.map((r) => ({
+        user_id: r.user_id,
         type: "system",
         title: args.repeat ? "Website inquiry (repeat)" : "New website inquiry",
         message: who,
-        link: `/contacts/${args.contactId}`,
+        link,
       })),
     );
     if (notifError) {
       console.error("notifications insert failed:", notifError);
     }
   } catch (err) {
-    console.error("createFollowUps failed:", err);
+    console.error("sendInquiryBells failed:", err);
   }
 }
 

@@ -7,7 +7,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Building2, Users, Inbox, Target } from "lucide-react";
+import { Building2, Users, Target } from "lucide-react";
 import { useAuth } from "@/features/auth/AuthProvider";
 
 interface QuickCreateDialogProps {
@@ -30,13 +30,8 @@ const createOptions = [
     description: "Add a new person",
     adminOnly: false,
   },
-  {
-    label: "Import",
-    icon: Inbox,
-    path: "/imports/new",
-    description: "Add a raw list record to clean up and promote",
-    adminOnly: true,
-  },
+  // No "Import" entry: a hand-entered person is a Contact by definition
+  // (the Imports pen is only for raw LISTS, which come in via the wizard).
   {
     label: "Opportunity",
     icon: Target,

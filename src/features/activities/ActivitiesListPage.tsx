@@ -206,7 +206,7 @@ function getRecordLink(
     const personName = `${fn} ${ln}`.trim();
     const label = personName || a.lead?.company || "Import";
     return {
-      to: `/leads/${a.lead_id}`,
+      to: `/imports/${a.lead_id}`,
       label,
       sublabel: personName && a.lead?.company ? a.lead.company : undefined,
     };
