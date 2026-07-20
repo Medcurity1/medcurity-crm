@@ -23,6 +23,7 @@ import {
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Search } from "lucide-react";
 import { formatPhone } from "@/components/PhoneInput";
 import { leadSourceLabel } from "@/lib/formatters";
@@ -213,6 +214,15 @@ export function ImportsPen() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [legacyPromoteOpen, setLegacyPromoteOpen] = useState(false);
   const [legacyArchiveOpen, setLegacyArchiveOpen] = useState(false);
+  // One shared in-app confirmation for every destructive bulk action
+  // (in-app instead of window.confirm: consistent with the rest of Pulse).
+  const [confirmAction, setConfirmAction] = useState<null | {
+    title: string;
+    description: string;
+    confirmLabel: string;
+    destructive?: boolean;
+    run: () => Promise<void>;
+  }>(null);
 
   const { data, isLoading, isError, refetch, isFetching } = usePendingImports({
     search, ownerFilter, page, pageSize,
@@ -254,90 +264,104 @@ export function ImportsPen() {
     return parts.join(" · ");
   };
 
-  const handlePromote = async () => {
+  const handlePromote = () => {
     const ids = Array.from(selectedIds);
-    if (
-      !confirm(
-        `Promote ${ids.length} import(s) to Contacts?\n\n` +
-          `Each one is matched to an existing account by company name (or a new account is created). ` +
-          `Rows whose company matches MULTIPLE accounts stay pending — you'll be offered a follow-up to ` +
-          `promote those without an account.`,
-      )
-    )
-      return;
-    try {
-      const r = await promoteMutation.mutateAsync({ ids });
-      toast.success(promoteToastParts(r));
-      if (r.skipped_ambiguous > 0) {
-        if (
-          confirm(
-            `${r.skipped_ambiguous} import(s) matched MULTIPLE accounts by company name.\n\n` +
-              `Promote them now WITHOUT an account (you can attach the right account later)?`,
-          )
-        ) {
-          const r2 = await promoteMutation.mutateAsync({ ids, allowAmbiguousAccountless: true });
-          toast.success(promoteToastParts(r2));
+    setConfirmAction({
+      title: `Promote ${ids.length} import(s) to Contacts?`,
+      description:
+        "Each one is matched to an existing account by company name (or a new account is created). " +
+        "Rows whose company matches multiple accounts stay pending — you'll be offered a follow-up " +
+        "to promote those without an account.",
+      confirmLabel: "Promote",
+      run: async () => {
+        try {
+          const r = await promoteMutation.mutateAsync({ ids });
+          toast.success(promoteToastParts(r));
+          setSelectedIds(new Set());
+          if (r.skipped_ambiguous > 0) {
+            setConfirmAction({
+              title: `${r.skipped_ambiguous} matched multiple accounts`,
+              description:
+                "Their company name matches more than one account, so they were left pending " +
+                "rather than guessing. Promote them now WITHOUT an account? You can attach the " +
+                "right account on each contact afterwards.",
+              confirmLabel: "Promote without account",
+              run: async () => {
+                try {
+                  const r2 = await promoteMutation.mutateAsync({ ids, allowAmbiguousAccountless: true });
+                  toast.success(promoteToastParts(r2));
+                } catch (e) {
+                  toast.error((e as Error).message);
+                }
+              },
+            });
+          }
+        } catch (e) {
+          toast.error((e as Error).message);
         }
-      }
-      setSelectedIds(new Set());
-    } catch (e) {
-      toast.error((e as Error).message);
-    }
+      },
+    });
   };
 
-  const handleAvoid = async (reason: string, label: string) => {
+  const handleAvoid = (reason: string, label: string) => {
     const ids = Array.from(selectedIds);
-    if (
-      !confirm(
-        `Mark ${ids.length} import(s) as Avoid (${label})? They'll be archived and flagged ` +
-          `Do Not Contact so they're never marketed to again.`,
-      )
-    )
-      return;
-    try {
-      const n = await archiveMutation.mutateAsync({
-        ids, reason: `avoid: ${reason}`, markDoNotContact: true,
-      });
-      setSelectedIds(new Set());
-      toast.success(`${n} marked Avoid and archived`);
-    } catch (e) {
-      toast.error((e as Error).message);
-    }
+    setConfirmAction({
+      title: `Mark ${ids.length} import(s) as Avoid (${label})?`,
+      description:
+        "They'll be archived and flagged Do Not Contact so they're never marketed to again.",
+      confirmLabel: "Mark Avoid",
+      destructive: true,
+      run: async () => {
+        try {
+          const n = await archiveMutation.mutateAsync({
+            ids, reason: `avoid: ${reason}`, markDoNotContact: true,
+          });
+          setSelectedIds(new Set());
+          toast.success(`${n} marked Avoid and archived`);
+        } catch (e) {
+          toast.error((e as Error).message);
+        }
+      },
+    });
   };
 
-  const handleArchive = async () => {
+  const handleArchive = () => {
     const ids = Array.from(selectedIds);
-    if (
-      !confirm(
-        `Archive ${ids.length} import(s)? They're set aside (restorable by an admin) and stay ` +
-          `out of Contacts.`,
-      )
-    )
-      return;
-    try {
-      const n = await archiveMutation.mutateAsync({ ids, reason: "import cleanup" });
-      setSelectedIds(new Set());
-      toast.success(`${n} import(s) archived`);
-    } catch (e) {
-      toast.error((e as Error).message);
-    }
+    setConfirmAction({
+      title: `Archive ${ids.length} import(s)?`,
+      description: "They're set aside (restorable by an admin) and stay out of Contacts.",
+      confirmLabel: "Archive",
+      destructive: true,
+      run: async () => {
+        try {
+          const n = await archiveMutation.mutateAsync({ ids, reason: "import cleanup" });
+          setSelectedIds(new Set());
+          toast.success(`${n} import(s) archived`);
+        } catch (e) {
+          toast.error((e as Error).message);
+        }
+      },
+    });
   };
 
-  const handleLegacySweep = async () => {
+  const handleLegacySweep = () => {
     const n = stats?.legacy ?? 0;
-    if (
-      !confirm(
-        `Archive ALL ${n.toLocaleString()} legacy import rows (the old pre-cutover pile)?\n\n` +
-          `This is the one-time sweep. Archived rows stay restorable from the Archive tab.`,
-      )
-    )
-      return;
-    try {
-      const count = await legacySweep.mutateAsync("lead-type retirement: legacy pile sweep");
-      toast.success(`${count.toLocaleString()} legacy row(s) archived`);
-    } catch (e) {
-      toast.error((e as Error).message);
-    }
+    setConfirmAction({
+      title: `Archive all ${n.toLocaleString()} legacy import rows?`,
+      description:
+        "The one-time sweep of the old pre-cutover pile (everything not yet promoted). " +
+        "Archived rows stay restorable from the Archive tab.",
+      confirmLabel: "Archive all",
+      destructive: true,
+      run: async () => {
+        try {
+          const count = await legacySweep.mutateAsync("lead-type retirement: legacy pile sweep");
+          toast.success(`${count.toLocaleString()} legacy row(s) archived`);
+        } catch (e) {
+          toast.error((e as Error).message);
+        }
+      },
+    });
   };
 
   return (
@@ -523,6 +547,20 @@ export function ImportsPen() {
           />
         </>
       )}
+
+      <ConfirmDialog
+        open={!!confirmAction}
+        onOpenChange={(o) => { if (!o) setConfirmAction(null); }}
+        title={confirmAction?.title ?? ""}
+        description={confirmAction?.description ?? ""}
+        confirmLabel={confirmAction?.confirmLabel ?? "Confirm"}
+        destructive={confirmAction?.destructive ?? false}
+        onConfirm={() => {
+          const a = confirmAction;
+          setConfirmAction(null);
+          if (a) void a.run();
+        }}
+      />
 
       <BulkActionBar
         selectedCount={selectedIds.size}
