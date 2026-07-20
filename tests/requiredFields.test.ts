@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { getMissingRequiredFields, formatFieldLabel } from "@/lib/requiredFields";
 import { accountSchema } from "@/features/accounts/schema";
-import { leadSchema } from "@/features/leads/schema";
 import { opportunitySchema } from "@/features/opportunities/schema";
 
 describe("getMissingRequiredFields", () => {
@@ -122,7 +121,6 @@ describe("required numeric fields through the form schemas", () => {
   // end-to-end behavior: blank survives parsing as null (flagged),
   // explicit 0 stays 0 (a real value, never flagged).
   const minimalAccount = { name: "Acme" };
-  const minimalLead = { first_name: "Ada", last_name: "Lovelace", status: "new" };
   const minimalOpp = {
     account_id: "6f9619ff-8b86-4d01-b42d-00cf4fc964ff",
     team: "sales",
@@ -160,11 +158,8 @@ describe("required numeric fields through the form schemas", () => {
     expect(getMissingRequiredFields(["employees"], parsed, original)).toEqual(["employees"]);
   });
 
-  it("flags a required lead numeric field left blank on create", () => {
-    const parsed = leadSchema.parse({ ...minimalLead, employees: "" });
-    expect(parsed.employees).toBeNull();
-    expect(getMissingRequiredFields(["employees"], parsed)).toEqual(["employees"]);
-  });
+  // (lead schema test removed 2026-07-20 with the lead type; the account
+  // and opportunity cases above pin the same blank-numeric behavior.)
 
   it("flags a blank opportunity amount on create, but not an explicit 0", () => {
     const blank = opportunitySchema.parse({ ...minimalOpp, amount: "" });
