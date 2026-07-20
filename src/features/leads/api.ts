@@ -252,6 +252,26 @@ export function useMarkImportAvoid() {
   });
 }
 
+/** Archive EVERY still-pending import in one shot (admin only; set-based
+ * server-side sweep, migration 20260720100000). Backs the "Archive all
+ * pending" header action — the pen-emptying tool for the lead-type
+ * retirement (staging rehearsal now, prod straggler sweep at cutover). */
+export function useArchiveAllPendingImports() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (reason: string) => {
+      const { data, error } = await supabase.rpc("archive_all_pending_leads", {
+        p_reason: reason,
+      });
+      if (error) throw error;
+      return (data as number) ?? 0;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    },
+  });
+}
+
 /** One-click bulk promotion of selected imports into Contacts. Returns a
  * counts summary (promoted / skipped_duplicate / skipped_other / errors). */
 export interface BulkPromoteResult {

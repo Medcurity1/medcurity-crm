@@ -5,7 +5,7 @@ import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { UserPlus, Plus, Search, X, ListChecks, Save, UserCheck, Upload, Ban, AlertTriangle, Archive } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { useLeads, useArchiveLead, useBulkUpdateOwner, useBulkDeleteLeads, useBulkPromoteImports, useMarkImportAvoid } from "./api";
+import { useLeads, useArchiveLead, useBulkUpdateOwner, useBulkDeleteLeads, useBulkPromoteImports, useMarkImportAvoid, useArchiveAllPendingImports } from "./api";
 import { BulkArchiveFromFile } from "./BulkArchiveFromFile";
 import { BulkPromoteFromFile } from "./BulkPromoteFromFile";
 import {
@@ -246,6 +246,7 @@ function ImportsList() {
   const bulkDeleteMutation = useBulkDeleteLeads();
   const bulkPromoteMutation = useBulkPromoteImports();
   const markAvoidMutation = useMarkImportAvoid();
+  const archiveAllMutation = useArchiveAllPendingImports();
 
   const leads = result?.data;
   const totalCount = result?.count ?? 0;
@@ -307,6 +308,27 @@ function ImportsList() {
     const ids = Array.from(selectedIds);
     await Promise.all(ids.map((id) => archiveMutation.mutateAsync({ id })));
     setSelectedIds(new Set());
+  };
+
+  const handleArchiveAllPending = async () => {
+    const n = quickStats?.total ?? 0;
+    if (
+      !confirm(
+        `Archive ALL ${n.toLocaleString()} pending import(s)?\n\n` +
+          `This empties the whole working pile (everything not yet promoted). ` +
+          `Archived imports can be restored from the Archive tab.`,
+      )
+    )
+      return;
+    try {
+      const count = await archiveAllMutation.mutateAsync(
+        "bulk sweep: archive all pending (Imports tab)",
+      );
+      setSelectedIds(new Set());
+      toast.success(`${count.toLocaleString()} import(s) archived`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
   };
 
   const handleBulkDelete = async () => {
@@ -441,6 +463,17 @@ function ImportsList() {
               <Button variant="outline" onClick={() => setBulkArchiveOpen(true)}>
                 <Archive className="h-4 w-4 mr-2" />
                 Bulk archive from file
+              </Button>
+            )}
+            {isAdmin && (
+              <Button
+                variant="outline"
+                onClick={handleArchiveAllPending}
+                disabled={archiveAllMutation.isPending || !quickStats?.total}
+                title="Empty the pen: archive every import that hasn't been promoted"
+              >
+                <Archive className="h-4 w-4 mr-2" />
+                {archiveAllMutation.isPending ? "Archiving…" : "Archive all pending"}
               </Button>
             )}
             <Button variant="outline" onClick={() => navigate("/imports/new")}>
