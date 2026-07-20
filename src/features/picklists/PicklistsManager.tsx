@@ -64,22 +64,13 @@ const FIELDS: { key: string; label: string; entity: string; help?: string }[] = 
   { key: "accounts.industry",               label: "Industry",          entity: "Account" },
   { key: "accounts.renewal_type",           label: "Renewal Type",      entity: "Account" },
   // Contact
+  // leads.* picklists retired 2026-07-20 with the lead type (values kept in DB for frozen rows).
   { key: "contacts.credential",             label: "Credential",        entity: "Contact" },
   { key: "contacts.time_zone",              label: "Time Zone",         entity: "Contact" },
   { key: "contacts.type",                   label: "Contact Type",      entity: "Contact" },
   { key: "contacts.business_relationship_tag", label: "Relationship Tag", entity: "Contact" },
   { key: "contacts.lead_source",            label: "Lead Source",       entity: "Contact" },
   // Lead
-  { key: "leads.status",                    label: "Status",            entity: "Lead" },
-  { key: "leads.source",                    label: "Source",            entity: "Lead" },
-  { key: "leads.qualification",             label: "Qualification",     entity: "Lead" },
-  { key: "leads.type",                      label: "Lead Type",         entity: "Lead" },
-  { key: "leads.project_segment",           label: "Lead Segment",      entity: "Lead" },
-  { key: "leads.industry_category",         label: "Industry",          entity: "Lead" },
-  { key: "leads.credential",                label: "Credential",        entity: "Lead" },
-  { key: "leads.time_zone",                 label: "Time Zone",         entity: "Lead" },
-  { key: "leads.business_relationship_tag", label: "Relationship Tag",  entity: "Lead" },
-  { key: "leads.rating",                    label: "Lead Rating",       entity: "Lead" },
 ];
 
 export function PicklistsManager() {

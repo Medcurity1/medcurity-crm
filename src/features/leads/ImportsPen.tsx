@@ -143,7 +143,8 @@ function usePenStats() {
         supabase
           .from("leads")
           .select("id", { count: "exact", head: true })
-          .is("archived_at", null),
+          .is("archived_at", null)
+          .neq("status", "converted"),
       ]);
       for (const r of [pending, promoted, archived, legacy]) {
         if (r.error) throw r.error;

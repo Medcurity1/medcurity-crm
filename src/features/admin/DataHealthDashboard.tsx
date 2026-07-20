@@ -183,7 +183,7 @@ function entityPath(entity: string): string {
     case "accounts": return "/accounts";
     case "contacts": return "/contacts";
     case "opportunities": return "/opportunities";
-    case "leads": return "/leads";
+    case "leads": return "/imports";
     default: return "/";
   }
 }

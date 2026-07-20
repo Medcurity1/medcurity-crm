@@ -44,7 +44,7 @@ type ExportTarget = {
 const EXPORT_TARGETS: ExportTarget[] = [
   { table: "accounts", label: "Accounts", filename: "accounts" },
   { table: "contacts", label: "Contacts", filename: "contacts" },
-  { table: "leads", label: "Leads", filename: "leads" },
+  { table: "leads", label: "Leads (frozen archive)", filename: "leads" },
   { table: "opportunities", label: "Opportunities", filename: "opportunities" },
   { table: "opportunity_products", label: "Opportunity Products", filename: "opportunity_products" },
   { table: "products", label: "Products", filename: "products" },
@@ -55,7 +55,7 @@ const EXPORT_TARGETS: ExportTarget[] = [
   { table: "activities", label: "Activities", filename: "activities" },
   { table: "tasks", label: "Tasks", filename: "tasks" },
   { table: "events", label: "Events", filename: "events" },
-  { table: "lead_lists", label: "Lead Lists", filename: "lead_lists" },
+  { table: "lead_lists", label: "Contact Lists", filename: "lead_lists" },
   { table: "lead_list_members", label: "Lead List Members", filename: "lead_list_members" },
   { table: "audit_log", label: "Audit Log", filename: "audit_log" },
 ];

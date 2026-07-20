@@ -217,7 +217,7 @@ const ENTITY_TABS: { value: EntityType; label: string }[] = [
   { value: "accounts", label: "Accounts" },
   { value: "contacts", label: "Contacts" },
   { value: "opportunities", label: "Opportunities" },
-  { value: "leads", label: "Leads" },
+  // leads retired 2026-07-20 — existing config rows keep their entity.
   { value: "opportunity_close", label: "Closing a Deal (Closed Won)" },
 ];
 
