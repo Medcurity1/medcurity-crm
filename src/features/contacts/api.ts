@@ -40,6 +40,8 @@ export function useContacts(filters?: ContactFilters) {
             tagJoin,
           { count: hasTagFilter ? "exact" : "estimated" },
         )
+        // Pending imports live in the Imports pen, not the contacts list.
+        .is("import_status", null)
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (sortCol.startsWith("account.")) {

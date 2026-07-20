@@ -523,7 +523,9 @@ export const KPI_REGISTRY: KpiDefinition[] = [
       const { count, error } = await supabase
         .from("contacts")
         .select("*", { count: "exact", head: true })
-        .is("archived_at", null);
+        .is("archived_at", null)
+        // Pending imports aren't contacts yet.
+        .is("import_status", null);
       if (error) throw error;
       return count ?? 0;
     },

@@ -180,7 +180,9 @@ export function GlobalSearch() {
       let q = supabase
         .from("contacts")
         .select("id, first_name, last_name, email")
-        .is("archived_at", null);
+        .is("archived_at", null)
+        // Pending imports are pen-only until promoted.
+        .is("import_status", null);
       if (orClause) q = q.or(orClause);
       const { data, error } = await q.limit(FETCH_LIMIT);
       if (error) throw error;

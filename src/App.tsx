@@ -37,7 +37,7 @@ const NotFound = lazy(() => import("@/features/NotFound").then(m => ({ default: 
 const AccountsList = lazy(() => import("@/features/accounts/AccountsList").then(m => ({ default: m.AccountsList })));
 const AccountDetail = lazy(() => import("@/features/accounts/AccountDetail").then(m => ({ default: m.AccountDetail })));
 const AccountForm = lazy(() => import("@/features/accounts/AccountForm").then(m => ({ default: m.AccountForm })));
-const LeadsList = lazy(() => import("@/features/leads/LeadsList").then(m => ({ default: m.LeadsList })));
+const ImportsPen = lazy(() => import("@/features/leads/ImportsPen").then(m => ({ default: m.ImportsPen })));
 const LeadDetail = lazy(() => import("@/features/leads/LeadDetail").then(m => ({ default: m.LeadDetail })));
 const LeadForm = lazy(() => import("@/features/leads/LeadForm").then(m => ({ default: m.LeadForm })));
 const ContactsList = lazy(() => import("@/features/contacts/ContactsList").then(m => ({ default: m.ContactsList })));
@@ -146,11 +146,13 @@ export default function App() {
                   <Route path="accounts/new" element={<AccountForm />} />
                   <Route path="accounts/:id" element={<AccountDetail />} />
                   <Route path="accounts/:id/edit" element={<AccountForm />} />
-                  {/* Imports (admin-only working/import list — formerly
-                      "Leads"). Gate the list route too, matching the other
-                      imports routes — the component also guards, this is
+                  {/* Imports (admin-only pen — formerly "Leads"). The list
+                      is the contacts-backed pen (ImportsPen); /imports/:id
+                      stays on LeadDetail for LEGACY old-pen rows (pen rows
+                      are contacts and link to /contacts/:id). Gate the list
+                      route too — the component also guards, this is
                       belt-and-suspenders. */}
-                  <Route path="imports" element={<AdminGate><LeadsList /></AdminGate>} />
+                  <Route path="imports" element={<AdminGate><ImportsPen /></AdminGate>} />
                   <Route path="imports/new" element={<AdminGate><LeadForm /></AdminGate>} />
                   <Route path="imports/:id" element={<AdminGate><LeadDetail /></AdminGate>} />
                   <Route path="imports/:id/edit" element={<AdminGate><LeadForm /></AdminGate>} />

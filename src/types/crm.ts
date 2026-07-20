@@ -371,6 +371,12 @@ export interface Contact {
   lead_source: LeadSource | null;
   lead_source_detail?: string | null;
   original_lead_id: string | null;
+  /** Imports-pen membership: 'pending' = raw imported row awaiting
+   * clean/promote (hidden from normal contact surfaces); null = regular. */
+  import_status?: "pending" | null;
+  /** Raw company string from the import file (promote-time matching +
+   * provenance; survives promotion). */
+  import_company?: string | null;
   mql_date: string | null;
   sql_date: string | null;
   custom_fields: Record<string, unknown>;

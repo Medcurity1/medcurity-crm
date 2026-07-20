@@ -16,6 +16,10 @@ export interface ContactImportOptions {
   dup_mode: "update" | "skip";
   owner_user_id?: string | null;
   event?: ContactImportEvent | null;
+  /** Pen mode: new people land as PENDING imports (import_status='pending',
+   * no account resolution — that happens at promote time). Rows matching an
+   * existing live contact behave exactly as without pen. */
+  pen?: boolean;
 }
 
 // Result shape from import_contacts_rows (per chunk). Classification counts
