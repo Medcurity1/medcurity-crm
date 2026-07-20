@@ -40,7 +40,6 @@ const AccountForm = lazy(() => import("@/features/accounts/AccountForm").then(m 
 const ImportsPen = lazy(() => import("@/features/leads/ImportsPen").then(m => ({ default: m.ImportsPen })));
 const LeadDetail = lazy(() => import("@/features/leads/LeadDetail").then(m => ({ default: m.LeadDetail })));
 const ContactsList = lazy(() => import("@/features/contacts/ContactsList").then(m => ({ default: m.ContactsList })));
-const ListsPage = lazy(() => import("@/features/lead-lists/ListsPage").then(m => ({ default: m.ListsPage })));
 const ContactDetail = lazy(() => import("@/features/contacts/ContactDetail").then(m => ({ default: m.ContactDetail })));
 const ContactForm = lazy(() => import("@/features/contacts/ContactForm").then(m => ({ default: m.ContactForm })));
 const OpportunitiesList = lazy(() => import("@/features/opportunities/OpportunitiesList").then(m => ({ default: m.OpportunitiesList })));
@@ -169,7 +168,8 @@ export default function App() {
                   <Route path="playbook" element={<AdminGate><PlaybookPage /></AdminGate>} />
                   <Route path="partners" element={<PartnersPage />} />
                   <Route path="contacts" element={<ContactsList />} />
-                  <Route path="lists" element={<ListsPage />} />
+                  {/* Lists moved into the Reports hub (Nathan 2026-07-20). */}
+                  <Route path="lists" element={<Navigate to="/reports?tab=lists" replace />} />
                   <Route path="contacts/new" element={<ContactForm />} />
                   <Route path="contacts/:id" element={<ContactDetail />} />
                   <Route path="contacts/:id/edit" element={<ContactForm />} />

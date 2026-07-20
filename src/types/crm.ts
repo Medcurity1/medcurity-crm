@@ -906,6 +906,9 @@ export interface LeadList {
   name: string;
   description: string | null;
   owner_user_id: string;
+  /** true = working call list: membership drives accounts.sales_active.
+   * false (default) = neutral categorization - never touches status. */
+  is_working_list: boolean;
   is_dynamic: boolean;
   filter_config: Record<string, unknown> | null;
   created_at: string;

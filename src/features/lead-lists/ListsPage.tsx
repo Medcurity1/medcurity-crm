@@ -4,13 +4,13 @@ import { toast } from "sonner";
 import {
   ListChecks, Plus, Pencil, Trash2, X, Search, UserPlus2, Sparkles,
 } from "lucide-react";
-import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -36,15 +36,11 @@ import {
 } from "./lead-lists-api";
 
 /**
- * Lists — the management home for call/contact lists (lead-type retirement
- * D2: lists are pure CONTACT lists now). The add-to-list flows on Contacts
- * and account Sales Status already existed; this page restores the missing
- * half: see every list, prune members, rename, delete, and add contacts
- * from the list side. The Cold Call widget reads the same lists.
- *
- * Note: removing a contact from its LAST list can auto-deactivate the
- * account's working status (Summer's design — membership drives
- * sales_active). That's intended; the footnote below says so.
+ * Lists — lives as the second tab of the Reports hub (Nathan 2026-07-20:
+ * reports answer "who matches", lists are what you curate from them).
+ * Regular lists are NEUTRAL — membership never touches status. Lists
+ * flagged is_working_list (Summer's call lists) keep the 7/15 behavior:
+ * membership drives accounts.sales_active (migration 20260720190000).
  */
 
 export function ListsPage() {
@@ -60,16 +56,21 @@ export function ListsPage() {
 
   return (
     <div>
-      <PageHeader
-        title="Lists"
-        description="Call and contact lists. Adding a contact to a list marks its account as actively worked; the Cold Call widget pulls from these."
-        actions={
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            New list
-          </Button>
-        }
-      />
+      {/* Slim header — this page lives inside the Reports hub tab, which
+          already renders the page-level header. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+        <p className="text-sm text-muted-foreground max-w-2xl">
+          A list is exactly what you put in it — adding or removing people never
+          changes their status. Lists marked{" "}
+          <span className="font-medium">working call list</span> are the
+          exception: those drive the account&apos;s Sales Status and feed the
+          Cold Call widget.
+        </p>
+        <Button onClick={() => setCreateOpen(true)}>
+          <Plus className="h-4 w-4 mr-2" />
+          New list
+        </Button>
+      </div>
 
       <CreateOrRenameListDialog
         open={createOpen}
@@ -112,10 +113,15 @@ export function ListsPage() {
                     {l.description && (
                       <p className="text-xs text-muted-foreground truncate">{l.description}</p>
                     )}
+                    {l.is_working_list && (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">
+                        Working call list
+                      </span>
+                    )}
                     {l.is_dynamic && (
                       <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground mt-0.5">
                         <Sparkles className="h-3 w-3" />
-                        was a smart list (now static)
+                        smart list
                       </span>
                     )}
                   </button>
@@ -165,7 +171,14 @@ function ListDetail({ list, onDeleted }: { list: LeadList; onDeleted: () => void
       <CardContent className="py-4 space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0">
-            <h3 className="text-lg font-semibold truncate">{list.name}</h3>
+            <h3 className="text-lg font-semibold truncate">
+              {list.name}
+              {list.is_working_list && (
+                <Badge variant="outline" className="ml-2 align-middle text-amber-600 dark:text-amber-400 border-amber-500/40">
+                  Working call list
+                </Badge>
+              )}
+            </h3>
             {list.description && (
               <p className="text-sm text-muted-foreground">{list.description}</p>
             )}
@@ -278,8 +291,9 @@ function ListDetail({ list, onDeleted }: { list: LeadList; onDeleted: () => void
         )}
 
         <p className="text-xs text-muted-foreground">
-          Heads up: removing a contact from its last list can switch its account back to
-          not-actively-worked (that’s how Sales Status stays honest).
+          {list.is_working_list
+            ? "Working call list: adding people marks their accounts as actively worked, and removing an account's last working-list contact switches it back (that's how Sales Status stays honest)."
+            : "Regular list: adding or removing people never changes anyone's status."}
         </p>
       </CardContent>
 
@@ -292,7 +306,11 @@ function ListDetail({ list, onDeleted }: { list: LeadList; onDeleted: () => void
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         title={`Delete “${list.name}”?`}
-        description="The list and its memberships go away; the contacts themselves are untouched. This can't be undone."
+        description={
+          list.is_working_list
+            ? "The list and its memberships go away; the contacts themselves are untouched. Accounts this call list marked as actively-worked keep that status - review Sales Status if needed. This can't be undone."
+            : "The list and its memberships go away; the contacts themselves are untouched. This can't be undone."
+        }
         confirmLabel="Delete list"
         destructive
         onConfirm={() =>
@@ -325,6 +343,7 @@ function CreateOrRenameListDialog({
   const updateMutation = useUpdateLeadList();
   const [name, setName] = useState(existing?.name ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
+  const [working, setWorking] = useState(existing?.is_working_list ?? false);
 
   async function submit() {
     const trimmed = name.trim();
@@ -335,6 +354,7 @@ function CreateOrRenameListDialog({
           id: existing.id,
           name: trimmed,
           description: description.trim() || null,
+          is_working_list: working,
         });
         toast.success("List updated");
       } else {
@@ -343,6 +363,7 @@ function CreateOrRenameListDialog({
           name: trimmed,
           description: description.trim() || undefined,
           owner_user_id: user.id,
+          is_working_list: working,
         });
         toast.success("List created");
         onCreated?.(created.id);
@@ -363,7 +384,7 @@ function CreateOrRenameListDialog({
           <DialogDescription>
             {existing
               ? "Update the list's name or description."
-              : "A list groups contacts for calling or outreach."}
+              : "A list groups contacts however you like - by itself it never changes anyone\'s status."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 py-2">
@@ -384,6 +405,16 @@ function CreateOrRenameListDialog({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
+          </div>
+          <div className="flex items-start justify-between gap-3 rounded-md border p-3">
+            <div>
+              <p className="text-sm font-medium">Working call list</p>
+              <p className="text-xs text-muted-foreground">
+                On: adding people marks their accounts as actively worked
+                (Sales Status). Off: just a list - nobody's status changes.
+              </p>
+            </div>
+            <Switch checked={working} onCheckedChange={setWorking} />
           </div>
         </div>
         <DialogFooter>

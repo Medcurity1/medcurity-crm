@@ -28,7 +28,8 @@ export function useCreateLeadList() {
       description?: string;
       owner_user_id: string;
       is_dynamic?: boolean;
-      filter_config?: Record<string, unknown> | null; // inert since 2026-07-20
+      is_working_list?: boolean;
+      filter_config?: Record<string, unknown> | null;
     }) => {
       const { data, error } = await supabase
         .from("lead_lists")
@@ -37,6 +38,7 @@ export function useCreateLeadList() {
           description: values.description ?? null,
           owner_user_id: values.owner_user_id,
           is_dynamic: values.is_dynamic ?? false,
+          is_working_list: values.is_working_list ?? false,
           filter_config: values.filter_config ?? null,
         })
         .select()
@@ -59,7 +61,8 @@ export function useUpdateLeadList() {
       name?: string;
       description?: string | null;
       is_dynamic?: boolean;
-      filter_config?: Record<string, unknown> | null; // inert since 2026-07-20
+      is_working_list?: boolean;
+      filter_config?: Record<string, unknown> | null;
     }) => {
       const { id, ...patch } = values;
       const { data, error } = await supabase
