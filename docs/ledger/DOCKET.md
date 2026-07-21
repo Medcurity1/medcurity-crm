@@ -10,7 +10,9 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Queued / requested
 
-(Joe's Sept-renewals item RESOLVED on prod 2026-07-20 evening — see SHIPPED)
+(Joe's Sept-renewals item RESOLVED on prod 2026-07-20 evening — see SHIPPED; the follow-up 113/97 past-due reconciliation ALSO resolved same night, past-due = 0 — see SHIPPED)
+
+- [QUEUED] 2026-07-20 · (found during the renewal reconciliation) · **155 pre-audit-horizon renewal parents need a deliberate review** — closed-wons (mostly 2024 vintage, some multi-year) whose contract_end anchors sit -187..-541 days back. The audit view can't see them (it windows on close_date ≤18mo; the generator windows on anchor), so they've been silently out of automation scope for months. Most are certainly superseded-by-later-deals or churned, but that's an anchor-based suppression sweep (mirror of 20260721000001's predicates, anchor-windowed) + a human skim, NOT something to let the cron decide — which is why lookback was right-sized to 90 (20260721000002). Ask Joe whether he wants them classified with written reasons like the 97, or left as history. Also worth deciding: should v_renewal_audit gain an anchor-based horizon so multi-year contracts (close outside 18mo, contract_end recent) stop being invisible?
 
 (the 2026-07-17 "Reports based on tags" ask shipped 2026-07-20 inside the unified Reports+Lists build — Builder Tags filter; see SHIPPED)
 
