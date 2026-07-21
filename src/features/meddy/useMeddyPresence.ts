@@ -31,6 +31,10 @@ export function useMeddyPresence(enabled: boolean) {
     if (!enabled) return;
     let cancelled = false;
     const beat = () => {
+      // Don't burn a heartbeat (auth.getUser round-trip + writes) on hidden/
+      // background tabs. onVisible re-beats the instant the tab is foregrounded,
+      // and the pg_cron sweep + presence channel cover a genuinely gone session.
+      if (document.visibilityState !== "visible") return;
       staffAction("heartbeat")
         .then(() => {
           if (!cancelled) {

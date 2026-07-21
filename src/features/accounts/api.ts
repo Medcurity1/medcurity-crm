@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import type { Account, AccountContract } from "@/types/crm";
 import { buildPersonSearchClause } from "@/lib/search-clause";
@@ -52,6 +52,10 @@ const SORTABLE_ACCOUNT_COLUMNS = new Set([
 export function useAccounts(filters?: AccountFilters) {
   return useQuery({
     queryKey: ["accounts", filters],
+    // Keep the previous page's rows on screen while paging/sorting/filtering
+    // fetches the next set, instead of flashing the whole table to skeletons
+    // on every interaction (the queryKey changes with page/sort/filter).
+    placeholderData: keepPreviousData,
     queryFn: async () => {
       const page = filters?.page ?? 0;
       const pageSize = filters?.pageSize ?? 25;
@@ -202,10 +206,20 @@ export function useAccounts(filters?: AccountFilters) {
       // columns blank instead of breaking the whole list.
       const ids = rows.map((a) => a.id);
       if (ids.length > 0) {
-        const { data: la } = await supabase
-          .from("v_account_last_activity")
-          .select("account_id, last_activity_at")
-          .in("account_id", ids);
+        // These two lookups don't depend on each other, so fire them together
+        // to drop a round-trip off the list-load waterfall.
+        const [{ data: la }, { data: pc }] = await Promise.all([
+          supabase
+            .from("v_account_last_activity")
+            .select("account_id, last_activity_at")
+            .in("account_id", ids),
+          supabase
+            .from("contacts")
+            .select("id, first_name, last_name, account_id")
+            .in("account_id", ids)
+            .eq("is_primary", true)
+            .is("archived_at", null),
+        ]);
         const lastByAccount = new Map<string, string>();
         for (const r of la ?? []) {
           if (r.last_activity_at) {
@@ -214,12 +228,6 @@ export function useAccounts(filters?: AccountFilters) {
         }
         for (const a of rows) a.last_activity_at = lastByAccount.get(a.id) ?? null;
 
-        const { data: pc } = await supabase
-          .from("contacts")
-          .select("id, first_name, last_name, account_id")
-          .in("account_id", ids)
-          .eq("is_primary", true)
-          .is("archived_at", null);
         const primaryByAccount = new Map<string, { id: string; first_name: string; last_name: string }>();
         for (const c of pc ?? []) {
           if (c.account_id) {
@@ -452,6 +460,10 @@ export function useBulkUpdateOwner() {
 export function useAccountsList() {
   return useQuery({
     queryKey: ["accounts_list"],
+    // The full roster barely changes intra-session and is expensive to
+    // (serial-)fetch, so hold it for 5 min rather than re-fetching the whole
+    // paged list on every form remount past the global 30s window.
+    staleTime: 5 * 60 * 1000,
     queryFn: async () => {
       // Page through ALL non-archived accounts. PostgREST caps a
       // single response at 1000 rows by default, so without explicit

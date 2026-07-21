@@ -4,7 +4,7 @@ import { useAuth } from "./AuthProvider";
 import { Button } from "@/components/ui/button";
 
 export function ProtectedRoute() {
-  const { session, loading, profile, signOut } = useAuth();
+  const { session, loading, profile, profileError, signOut } = useAuth();
 
   // Escape hatch: auth resolution normally takes well under a second. If
   // it's wedged (Safari has hung here on a stuck cross-tab lock), offer a
@@ -46,6 +46,38 @@ export function ProtectedRoute() {
 
   if (!session) {
     return <Navigate to="/login" replace />;
+  }
+
+  // The profile row FAILED TO LOAD (network/auth blip), as distinct from not
+  // existing. This is recoverable — offer a Reload (cache-busting, mirroring
+  // the slow-loader escape hatch above) rather than the Sign-Out-only
+  // "Account Not Provisioned" dead-end below.
+  if (profileError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="max-w-md text-center space-y-4">
+          <h2 className="text-xl font-semibold">Couldn't load your profile</h2>
+          <p className="text-muted-foreground">
+            Something went wrong loading your account. This is usually a
+            temporary connection hiccup — reloading normally fixes it.
+          </p>
+          <div className="flex items-center justify-center gap-2">
+            <Button
+              onClick={() => {
+                const url = new URL(window.location.href);
+                url.searchParams.set("_r", String(Date.now()));
+                window.location.replace(url.toString());
+              }}
+            >
+              Reload
+            </Button>
+            <Button variant="outline" onClick={() => signOut()}>
+              Sign Out
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (!profile) {

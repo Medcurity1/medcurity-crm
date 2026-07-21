@@ -12,6 +12,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import type { Opportunity, OpportunityStage } from "@/types/crm";
 import { PageHeader } from "@/components/PageHeader";
+import { QueryError } from "@/components/QueryError";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -108,7 +109,8 @@ export function ForecastPage() {
   const [year, setYear] = useState(now.getFullYear());
   const [quarter, setQuarter] = useState(getCurrentQuarter());
 
-  const { data: opps, isLoading } = useForecastOpportunities(year, quarter);
+  const { data: opps, isLoading, isError, isFetching, refetch } =
+    useForecastOpportunities(year, quarter);
 
   const summary = useMemo(() => {
     const list = opps ?? [];
@@ -243,6 +245,14 @@ export function ForecastPage() {
         }
       />
 
+      {isError ? (
+        <QueryError
+          message="Couldn't load the forecast."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
+      ) : (
+        <>
       {isLoading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -362,6 +372,8 @@ export function ForecastPage() {
           </CardContent>
         </Card>
       </div>
+        </>
+      )}
     </div>
   );
 }

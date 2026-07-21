@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import type { Contact } from "@/types/crm";
 import { buildPersonSearchClause } from "@/lib/search-clause";
@@ -23,6 +23,10 @@ interface ContactFilters {
 export function useContacts(filters?: ContactFilters) {
   return useQuery({
     queryKey: ["contacts", filters],
+    // Keep the current page's rows visible while paging/sorting/filtering
+    // fetches the next set, instead of flashing the table to skeletons on
+    // every interaction (the queryKey changes with page/sort/filter).
+    placeholderData: keepPreviousData,
     queryFn: async () => {
       const page = filters?.page ?? 0;
       const pageSize = filters?.pageSize ?? 25;

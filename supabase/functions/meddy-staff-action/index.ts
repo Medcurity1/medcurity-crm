@@ -43,6 +43,31 @@ const svc = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { persistSession: false },
 });
 
+// broadcast() (_shared/meddy-core.ts) awaits a plain fetch to the Realtime
+// endpoint with no timeout, so a slow/hung endpoint can freeze a staff
+// action mid-flight (a rep clicking Take Over / Send sees it hang with no
+// error). Bound every awaited broadcast here to ~5s, mirroring the
+// AbortController timeout on the Claude-call helper (aiComplete). Broadcasts
+// are best-effort fire-and-forget — broadcast() swallows its own errors — so
+// a timed-out broadcast just logs and continues; it never fails the action.
+const BROADCAST_TIMEOUT_MS = 5_000;
+function bcast(
+  topic: string,
+  event: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      console.warn(`broadcast ${topic}/${event} timed out after ${BROADCAST_TIMEOUT_MS}ms`);
+      resolve();
+    }, BROADCAST_TIMEOUT_MS);
+    broadcast(topic, event, payload).finally(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Use POST" }, 405);
@@ -113,7 +138,7 @@ Deno.serve(async (req) => {
               sender_type: "system",
               is_internal: true,
             });
-            await broadcast("meddy:dashboard", "new-message", {
+            await bcast("meddy:dashboard", "new-message", {
               conversationId: conv.id,
               internal: true,
             });
@@ -126,10 +151,10 @@ Deno.serve(async (req) => {
             sender_type: "system",
             is_internal: true,
           });
-          await broadcast(`meddy:conv:${conv.visitor_id}`, "show-form", {
+          await bcast(`meddy:conv:${conv.visitor_id}`, "show-form", {
             reason: "agent_requested",
           });
-          await broadcast("meddy:dashboard", "new-message", {
+          await bcast("meddy:dashboard", "new-message", {
             conversationId: conv.id,
             internal: true,
           });
@@ -150,20 +175,25 @@ Deno.serve(async (req) => {
           .eq("id", conv.id);
 
         // Whispers go to the dashboard only; normal agent messages also
-        // reach the visitor's widget channel (server.js:5671-5677).
-        await broadcast("meddy:dashboard", "new-message", {
-          conversationId: conv.id,
-          role: "human",
-          senderName: profile.full_name,
-          internal: isInternal,
-        });
-        if (!isInternal) {
-          await broadcast(`meddy:conv:${conv.visitor_id}`, "new-message", {
+        // reach the visitor's widget channel (server.js:5671-5677). The two
+        // channels are independent, so fire them concurrently.
+        await Promise.all([
+          bcast("meddy:dashboard", "new-message", {
+            conversationId: conv.id,
             role: "human",
-            content,
             senderName: profile.full_name,
-          });
-        }
+            internal: isInternal,
+          }),
+          ...(isInternal
+            ? []
+            : [
+                bcast(`meddy:conv:${conv.visitor_id}`, "new-message", {
+                  role: "human",
+                  content,
+                  senderName: profile.full_name,
+                }),
+              ]),
+        ]);
         return json({ success: true });
       }
 
@@ -194,19 +224,26 @@ Deno.serve(async (req) => {
           content: TAKEOVER_SYSTEM_MESSAGE,
           sender_type: "system",
         });
-        await broadcast(`meddy:conv:${conv.visitor_id}`, "new-message", {
-          role: "assistant",
-          content: TAKEOVER_SYSTEM_MESSAGE,
-          senderType: "system",
-        });
-        await broadcast(`meddy:conv:${conv.visitor_id}`, "taken-over", {
-          displayName: profile.full_name,
-        });
-        await broadcast("meddy:dashboard", "conversation_taken_over", {
-          conversationId: conv.id,
-          userId: caller.id,
-          displayName: profile.full_name,
-        });
+        // The two visitor-channel broadcasts MUST stay ordered — the widget
+        // renders new-message then taken-over sequentially. The dashboard
+        // broadcast is independent, so run it concurrently with that pair.
+        await Promise.all([
+          (async () => {
+            await bcast(`meddy:conv:${conv.visitor_id}`, "new-message", {
+              role: "assistant",
+              content: TAKEOVER_SYSTEM_MESSAGE,
+              senderType: "system",
+            });
+            await bcast(`meddy:conv:${conv.visitor_id}`, "taken-over", {
+              displayName: profile.full_name,
+            });
+          })(),
+          bcast("meddy:dashboard", "conversation_taken_over", {
+            conversationId: conv.id,
+            userId: caller.id,
+            displayName: profile.full_name,
+          }),
+        ]);
         return json({ success: true });
       }
 
@@ -236,7 +273,7 @@ Deno.serve(async (req) => {
             sender_type: "system",
             is_internal: true,
           });
-          await broadcast("meddy:dashboard", "conversation_agents_updated", {
+          await bcast("meddy:dashboard", "conversation_agents_updated", {
             conversationId: conv.id,
           });
         }
@@ -251,8 +288,8 @@ Deno.serve(async (req) => {
           .from("meddy_conversations")
           .update({ status: "closed" })
           .eq("id", conv.id);
-        await broadcast(`meddy:conv:${conv.visitor_id}`, "conversation-closed", {});
-        await broadcast("meddy:dashboard", "conversation_closed", {
+        await bcast(`meddy:conv:${conv.visitor_id}`, "conversation-closed", {});
+        await bcast("meddy:dashboard", "conversation_closed", {
           conversationId: conv.id,
         });
         return json({ success: true });
@@ -265,7 +302,7 @@ Deno.serve(async (req) => {
           .from("meddy_conversations")
           .update({ status: "active" })
           .eq("id", conv.id);
-        await broadcast("meddy:dashboard", "conversation_reopened", {
+        await bcast("meddy:dashboard", "conversation_reopened", {
           conversationId: conv.id,
         });
         return json({ success: true });
@@ -306,7 +343,7 @@ Deno.serve(async (req) => {
             await notifyWaitingVisitors();
           }
         }
-        await broadcast("meddy:dashboard", "team_status_changed", {
+        await bcast("meddy:dashboard", "team_status_changed", {
           userId: caller.id,
           available,
         });
@@ -382,7 +419,7 @@ Deno.serve(async (req) => {
           .lt("last_seen", cutoff)
           .select("user_id");
         if ((flipped ?? []).length > 0) {
-          await broadcast("meddy:dashboard", "team_status_changed", {
+          await bcast("meddy:dashboard", "team_status_changed", {
             userId: targetId,
             available: false,
           });
@@ -412,6 +449,6 @@ async function notifyWaitingVisitors() {
     .neq("status", "closed")
     .gte("updated_at", cutoff);
   for (const w of waiting ?? []) {
-    await broadcast(`meddy:conv:${w.visitor_id}`, "agents-unavailable", {});
+    await bcast(`meddy:conv:${w.visitor_id}`, "agents-unavailable", {});
   }
 }

@@ -320,7 +320,12 @@ export function AddContactDialog({
             className="w-full"
             onClick={() => {
               onOpenChange(false);
-              navigate(`/contacts/new?account_id=${accountId}`);
+              // Defer one frame so Radix restores body pointer-events before
+              // this navigate unmounts the dialog portal (avoids a stranded
+              // pointer-events:none lock that makes the page unclickable).
+              requestAnimationFrame(() =>
+                navigate(`/contacts/new?account_id=${accountId}`)
+              );
             }}
           >
             <Plus className="h-4 w-4 mr-1" />

@@ -379,7 +379,17 @@ export function ActivityForm({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        // Don't let a stray outside-click / Esc silently discard a
+        // filled-in activity — only the explicit Cancel/X should close.
+        onInteractOutside={(e) => {
+          if (form.formState.isDirty) e.preventDefault();
+        }}
+        onEscapeKeyDown={(e) => {
+          if (form.formState.isDirty) e.preventDefault();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit Activity" : "Log Activity"}</DialogTitle>
         </DialogHeader>

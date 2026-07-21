@@ -345,7 +345,13 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
       // send the user to /contacts/X first, leaving the dialog in a
       // half-unmounted state — observed 2026-05-26).
       onOpenChange(false);
-      navigate(`/contacts/${result.contact.id}`, { replace: true });
+      // Defer one frame so Radix's close/cleanup lifecycle commits (restoring
+      // body pointer-events) before this navigate unmounts the dialog's portal
+      // subtree — a same-tick close+navigate can strand pointer-events:none and
+      // leave the destination page unclickable until a full refresh.
+      requestAnimationFrame(() =>
+        navigate(`/contacts/${result.contact.id}`, { replace: true })
+      );
     } catch (err) {
       toast.error("Failed to promote: " + (err as Error).message);
     }

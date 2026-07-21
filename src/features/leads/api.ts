@@ -189,10 +189,28 @@ export function useBulkUpdateOwner() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ ids, owner_user_id }: { ids: string[]; owner_user_id: string }) => {
-      const promises = ids.map((id) =>
-        supabase.from("leads").update({ owner_user_id }).eq("id", id)
-      );
-      await Promise.all(promises);
+      // Bulk UPDATE per chunk + verify affected count. A per-row RLS denial
+      // or missing id doesn't throw (PostgREST just won't match it), so the
+      // old Promise.all(per-row) reported success even when nothing changed.
+      // De-dup first so a duplicate id doesn't make the verify false-fail.
+      const uniqueIds = Array.from(new Set(ids));
+      const CHUNK = 100;
+      let updated = 0;
+      for (let i = 0; i < uniqueIds.length; i += CHUNK) {
+        const batch = uniqueIds.slice(i, i + CHUNK);
+        const { data, error } = await supabase
+          .from("leads")
+          .update({ owner_user_id })
+          .in("id", batch)
+          .select("id");
+        if (error) throw error;
+        updated += (data ?? []).length;
+      }
+      if (updated < uniqueIds.length) {
+        throw new Error(
+          `Reassigned ${updated} of ${uniqueIds.length}. ${uniqueIds.length - updated} could not be updated (permission denied or no longer exist).`
+        );
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["leads"] });

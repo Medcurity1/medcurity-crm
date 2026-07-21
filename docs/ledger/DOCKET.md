@@ -4,11 +4,13 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Staging — awaiting prod go-ahead
 
-(nothing awaiting prod — the ENTIRE 7/20 bundle promoted in merge 750527e, Nathan's evening go; see SHIPPED)
+- [STAGING] 2026-07-21 · Nathan (Molly's cross-browser slowness/glitch reports) · **Everyday speed & reliability sweep (23 fixes: stranded pointer-events guard, global fetch timeout, profile-load recovery, bulk-reassign verify, keepPreviousData lists, server-search account picker, RLS InitPlan wraps 20260721170000, + more — see SHIPPED 7/21).** Molly is on PROD, so she keeps hitting these until this batch (and the 7/20 boot-recovery/perf batches) get promoted — needs Nathan's prod go-ahead.
 
 (The 2026-07-15 batch — Joe Lead Source, Rachel Assessor, Summer email fix — shipped to prod in 5bc05df; the 7/10 Lead-Source-required + 7/11 ClickUp items were already on prod via 9d6b6a7. See SHIPPED.md.)
 
 ## Queued / requested
+
+- [QUEUED] 2026-07-21 · (7/21 perf/reliability fleet — confirmed-low or unverified findings deferred with eyes open) · (a) meddy visitor-message realtime subscription is unfiltered — every open staff tab runs a DB round-trip per visitor message company-wide; fix = broadcast channel scoped to joined conversations (mirror meddy:dashboard private-channel pattern) or a client-side joined-conversation Set gate · src/hooks/useNotificationToasts.ts:217; (b) feature-level dynamic imports inside queryFns/export handlers have no stale-chunk recovery (verifier: unclear) · e.g. reports/standard/ActivePipeline.tsx; (c) RLS InitPlan wraps for the aux tables (opportunity_products, stage_history, products, user_profiles, audit_logs, …) — 20260721170000 deliberately covered only the 5 big tables; (d) AccountDetail child lists select('*') unbounded on opportunities/contacts; (e) OpportunityContacts fires one activities query per stakeholder (N+1); (f) last-activity views aggregate the whole activities table on unscoped sort paths; (g) RenewalsQueue unvirtualized double table + ~13 full-list filter passes per totals memo; (h) LeadDetail masks transient load failures as "Import not found"; (i) duplicate dashboard-metrics cache keys (TeamDashboard vs standard report); (j) HomePage chunk prefetch fires for deep-linkers who never visit Home (deliberate boot-waterfall tradeoff — revisit only if boot profiling says so).
 
 (Joe's Sept-renewals item RESOLVED on prod 2026-07-20 evening — see SHIPPED; the follow-up 113/97 past-due reconciliation ALSO resolved same night, past-due = 0 — see SHIPPED)
 
