@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { employeesToFteRange } from "./formatters";
 
 /**
  * Close-readiness gate (Rachel's request).
@@ -89,6 +90,27 @@ export interface CloseReadinessOpportunity {
   /** Any attached line item with products.product_family ILIKE 'service%' —
    *  the same signal recalc_opportunity_amount splits totals on. */
   has_service_line_items?: boolean;
+  /** Deal-level FTE snapshot. When the ACCOUNT is missing its FTE range but
+   *  the deal carries one (or a count it can be derived from), the FTE rule
+   *  is satisfied — and checkCloseReadiness back-fills the account from the
+   *  deal, which is the data-completeness outcome the gate exists for
+   *  (Molly, 2026-07-21: the deal had FTE filled in and still couldn't
+   *  close because the account didn't). */
+  fte_range?: string | null;
+  fte_count?: number | string | null;
+}
+
+/** The deal-side FTE value that satisfies (and back-fills) a blank account
+ *  range: the explicit range, else a range derived from the count. */
+export function opportunityFteRange(
+  opp: CloseReadinessOpportunity | null | undefined,
+  deriveFromCount: (n: number) => string | null,
+): string | null {
+  if (!opp) return null;
+  if (!isBlank(opp.fte_range)) return String(opp.fte_range);
+  const n = Number(opp.fte_count ?? 0);
+  if (Number.isFinite(n) && n > 0) return deriveFromCount(n);
+  return null;
 }
 
 /**
@@ -159,7 +181,12 @@ export function evaluateCloseReadiness(
   }
 
   if (want("account_fte_range") && isBlank(account.fte_range)) {
-    missing.push(LABELS.account_fte_range);
+    // The deal's own FTE snapshot satisfies the rule — the account gets
+    // back-filled from it in checkCloseReadiness (the write lives there so
+    // this evaluator stays pure/testable).
+    if (!opportunityFteRange(opportunity, employeesToFteRange)) {
+      missing.push(LABELS.account_fte_range);
+    }
   }
 
   if (want("contact_email")) {
@@ -240,32 +267,38 @@ export async function checkCloseReadiness(
 
   const keys = await getEnforcedCloseKeys(supabase);
 
-  // Resolve opportunity-level inputs for the assessor rule (only when
-  // that rule is enforced — mirrors the conditional contacts fetch).
+  // Resolve opportunity-level inputs when any rule that reads the deal is
+  // enforced: the assessor rule, or the FTE rule (deal-level FTE satisfies
+  // a blank account and gets back-filled below).
   let opp: CloseReadinessOpportunity | null = null;
-  if (keys.includes("assigned_assessor") && opportunity != null) {
+  const needsOpp =
+    keys.includes("assigned_assessor") || keys.includes("account_fte_range");
+  if (needsOpp && opportunity != null) {
     if (typeof opportunity === "string") {
       const { data: oppRow, error: oppErr } = await supabase
         .from("opportunities")
-        .select("services_included, service_amount, assigned_assessor_id")
+        .select("services_included, service_amount, assigned_assessor_id, fte_range, fte_count")
         .eq("id", opportunity)
         .maybeSingle();
       if (oppErr || !oppRow) {
         return { ready: false, missing: ["Opportunity information could not be loaded"] };
       }
-      const { data: lines, error: linesErr } = await supabase
-        .from("opportunity_products")
-        .select("product:products!product_id(product_family)")
-        .eq("opportunity_id", opportunity);
-      if (linesErr) {
-        return { ready: false, missing: ["Opportunity information could not be loaded"] };
+      let hasServiceLine = false;
+      if (keys.includes("assigned_assessor")) {
+        const { data: lines, error: linesErr } = await supabase
+          .from("opportunity_products")
+          .select("product:products!product_id(product_family)")
+          .eq("opportunity_id", opportunity);
+        if (linesErr) {
+          return { ready: false, missing: ["Opportunity information could not be loaded"] };
+        }
+        hasServiceLine = (lines ?? []).some((l) => {
+          const fam =
+            (l as { product?: { product_family?: string | null } | null }).product
+              ?.product_family ?? "";
+          return fam.toLowerCase().startsWith("service");
+        });
       }
-      const hasServiceLine = (lines ?? []).some((l) => {
-        const fam =
-          (l as { product?: { product_family?: string | null } | null }).product
-            ?.product_family ?? "";
-        return fam.toLowerCase().startsWith("service");
-      });
       opp = { ...oppRow, has_service_line_items: hasServiceLine };
     } else {
       opp = opportunity;
@@ -274,12 +307,45 @@ export async function checkCloseReadiness(
 
   const { data: account, error: acctErr } = await supabase
     .from("accounts")
-    .select("phone, fte_range, billing_street, billing_city, billing_state, billing_zip")
+    .select("phone, fte_range, employees, billing_street, billing_city, billing_state, billing_zip")
     .eq("id", accountId)
     .maybeSingle();
 
   if (acctErr) {
     return { ready: false, missing: ["Account information could not be loaded"] };
+  }
+
+  // Back-fill: the account is missing its FTE range but the deal being
+  // closed carries one — copy it up (plus the raw count when the account
+  // has none) so closing the deal COMPLETES the account record instead of
+  // being blocked by it. Best-effort: if the write fails we still allow
+  // the close — the data demonstrably exists on the deal.
+  if (
+    keys.includes("account_fte_range") &&
+    account &&
+    isBlank((account as CloseReadinessAccount).fte_range)
+  ) {
+    const oppFte = opportunityFteRange(opp, employeesToFteRange);
+    if (oppFte) {
+      const patch: Record<string, unknown> = { fte_range: oppFte };
+      const acctEmployees = Number(
+        (account as { employees?: number | null }).employees ?? 0,
+      );
+      const oppCount = Number(opp?.fte_count ?? 0);
+      if ((!Number.isFinite(acctEmployees) || acctEmployees <= 0) && oppCount > 0) {
+        patch.employees = oppCount;
+      }
+      const { error: backfillErr } = await supabase
+        .from("accounts")
+        .update(patch)
+        .eq("id", accountId);
+      if (backfillErr) {
+        console.warn(
+          "[closeReadiness] couldn't back-fill account FTE from the deal:",
+          backfillErr.message,
+        );
+      }
+    }
   }
 
   let contacts: CloseReadinessContact[] = [];

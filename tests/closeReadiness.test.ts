@@ -53,6 +53,37 @@ describe("evaluateCloseReadiness (pure decision logic)", () => {
     ]);
   });
 
+  it("deal-level fte_range satisfies a blank account FTE (Molly 7/21)", () => {
+    expect(
+      evaluateCloseReadiness(ALL, { ...fullAccount, fte_range: null }, [emailedContact], {
+        fte_range: "1-20",
+      }),
+    ).toEqual([]);
+  });
+
+  it("deal-level fte_count derives a range and satisfies a blank account FTE", () => {
+    expect(
+      evaluateCloseReadiness(ALL, { ...fullAccount, fte_range: "" }, [emailedContact], {
+        fte_count: 2,
+      }),
+    ).toEqual([]);
+  });
+
+  it("a deal with neither FTE value still flags the blank account range", () => {
+    expect(
+      evaluateCloseReadiness(ALL, { ...fullAccount, fte_range: null }, [emailedContact], {
+        fte_range: "  ",
+        fte_count: 0,
+      }),
+    ).toEqual(["FTE range"]);
+  });
+
+  it("account FTE present wins regardless of deal values", () => {
+    expect(
+      evaluateCloseReadiness(ALL, fullAccount, [emailedContact], { fte_range: null }),
+    ).toEqual([]);
+  });
+
   it("requires street, city, state AND zip for the billing address", () => {
     for (const missingCol of ["billing_street", "billing_city", "billing_state", "billing_zip"] as const) {
       const acct = { ...fullAccount, [missingCol]: "" };

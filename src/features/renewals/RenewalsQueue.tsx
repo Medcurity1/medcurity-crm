@@ -15,6 +15,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { useUsers } from "@/features/leads/api";
 import { PageHeader } from "@/components/PageHeader";
+import { RenewalClaimPanel } from "./RenewalClaimPanel";
 import { EmptyState } from "@/components/EmptyState";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -1138,6 +1139,13 @@ export function RenewalsQueue() {
         title="Renewals"
         description="Contracts coming up for renewal and the renewals you've already won"
       />
+
+      {/* Temporary claim panel for the generated-renewal backlog — renders
+          only while unclaimed auto-created renewals exist, then disappears
+          (Summer/Molly via Nathan 7/21). */}
+      <div className="mb-4">
+        <RenewalClaimPanel />
+      </div>
 
       {/* Filter rail — persists across both tabs. */}
       <div className="flex flex-wrap items-end gap-3 mb-4">

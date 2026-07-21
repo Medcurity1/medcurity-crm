@@ -96,6 +96,7 @@ jobs:
           npx supabase functions deploy playbook-smartlead
           npx supabase functions deploy playbook-mailchimp
           npx supabase functions deploy ask-ai
+          npx supabase functions deploy partner-contract-summary
           npx supabase functions deploy invite-user
           # STAGING-ONLY (2026-07-20, lead-type retirement piece 2): the
           # public website-form endpoint, now writing contacts. Prod stays
