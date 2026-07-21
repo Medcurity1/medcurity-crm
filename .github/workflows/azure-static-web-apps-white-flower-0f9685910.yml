@@ -104,6 +104,10 @@ jobs:
           # now, so the fn swap ships atomically with the promote instead of
           # as a dangling manual step. X-API-Key still gates callers.
           npx supabase functions deploy inbound-lead --no-verify-jwt
+          # nexus-activity joins CI too (2026-07-20): the retirement version
+          # drops the lead-fallback; the old prod copy was logging onto
+          # archived tombstone leads.
+          npx supabase functions deploy nexus-activity --no-verify-jwt
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ secrets.PRODUCTION_SUPABASE_PROJECT_REF }}
