@@ -16,10 +16,12 @@
 --  4. In-flight: a past-due parent whose account has EXACTLY ONE open,
 --     unlinked opp (and no later closed-won) links that opp as its
 --     renewal — the tracked chain resumes.
---  5. lookback_days 30 → 550: the generator can now heal any miss inside
---     the audit's 18-month horizon forever (suppressions prevent every
---     deliberate-skip class from re-creating, so a wide window is safe).
---     After this, the two genuine misses are created by the next run.
+--  5. lookback_days 30 → 550 (check constraint widened from 365 to 730
+--     first — the old cap predates suppressions): the generator can now
+--     heal any miss inside the audit's 18-month horizon forever
+--     (suppressions prevent every deliberate-skip class from
+--     re-creating, so a wide window is safe). After this, the two
+--     genuine misses are created by the next run.
 --  6. v_renewal_audit re-emitted: suppressed parents leave the
 --     missing/past-due nag lists and appear under explicit
 --     suppressed_churned / suppressed_superseded / suppressed_deleted
@@ -143,13 +145,26 @@ update public.opportunities child
  where child.id = so.open_opp_id
    and child.renewal_from_opportunity_id is null;
 
--- 5. Wide catch-up window, permanently.
+-- 5. Wide catch-up window, permanently. The 365-day cap from
+--    20260625000009 predates renewal_suppressions; with every
+--    deliberate-skip class suppressed, generator reach should match the
+--    audit's 18-month horizon so anything it surfaces is also fixable.
+alter table public.renewal_automation_config
+  drop constraint if exists renewal_automation_config_lookback_days_check;
+alter table public.renewal_automation_config
+  add constraint renewal_automation_config_lookback_days_check
+  check (lookback_days between 0 and 730);
+
 update public.renewal_automation_config
    set lookback_days = 550
  where id = 1;
 
--- 6. Re-emit v_renewal_audit with suppression awareness.
-create or replace view public.v_renewal_audit
+-- 6. Re-emit v_renewal_audit with suppression awareness. Drop+create
+--    (not or-replace) per the 20260715232000 convention; no dependent
+--    objects and no explicit grants exist (security_invoker + defaults).
+drop view if exists public.v_renewal_audit;
+
+create view public.v_renewal_audit
   with (security_invoker = on)
 as
 with cfg as (
