@@ -76,8 +76,7 @@ export function ListsPage() {
           A list is exactly what you put in it — adding or removing people never
           changes their status. Lists marked{" "}
           <span className="font-medium">working call list</span> are the
-          exception: those drive the account&apos;s Sales Status and feed the
-          Cold Call widget.
+          exception: those drive the account&apos;s Sales Status.
         </p>
         <Button onClick={() => setCreateOpen(true)}>
           <Plus className="h-4 w-4 mr-2" />
@@ -353,6 +352,8 @@ function SmartListDetail({
   onDeleted: () => void;
   onFrozen: (newListId: string) => void;
 }) {
+  const { profile } = useAuth();
+  const canWrite = ["sales", "renewals", "admin", "super_admin"].includes(profile?.role ?? "");
   const { data, isLoading } = useSmartListMembers(list);
   const deleteMutation = useDeleteLeadList();
   const freezeMutation = useFreezeSmartList();
@@ -361,7 +362,8 @@ function SmartListDetail({
   // membership resolves (open/rule-change). Only ever flips accounts ON.
   const memberIdsKey = (data?.rows ?? []).map((r) => r.id).join(",");
   useEffect(() => {
-    if (!list.is_working_list || !data?.rows?.length) return;
+    // read_only viewers skip the reconcile (the RPC would reject them).
+    if (!canWrite || !list.is_working_list || !data?.rows?.length) return;
     activateAccounts.mutate(data.rows.map((r) => r.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list.id, list.is_working_list, memberIdsKey]);

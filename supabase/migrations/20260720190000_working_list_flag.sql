@@ -14,14 +14,14 @@ alter table public.lead_lists
 comment on column public.lead_lists.is_working_list is
   'true = working call list: membership drives accounts.sales_active (add → activate; removing an account''s last working-list contact → deactivate, unless client/partner). false (default) = neutral categorization; membership never touches status.';
 
--- One-time backfill: every pre-flag list was a call list by design.
--- Guarded so re-runs (or a later flip-off) aren''t undone: only rows
--- created before this migration''s flag existed get forced true, and only
--- when the column was just added (fresh default false everywhere).
+-- One-time backfill: every list that exists when this migration APPLIES
+-- was a call list by design (the ALTER above just added the column, so
+-- every row is false). Review fix 2026-07-20: the original hard date
+-- guard (created_at < '2026-07-21') would have silently neutralized any
+-- prod list created between 5pm PT and the promote — and was redundant.
 update public.lead_lists
    set is_working_list = true
- where is_working_list = false
-   and created_at < '2026-07-21';
+ where is_working_list = false;
 
 -- Re-emit of trg_list_member_sales_active (20260715120000:117-172) with
 -- the working-list gate on BOTH branches. Same fail-soft wrapper and the

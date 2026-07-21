@@ -132,6 +132,11 @@ export function AddToListDialog({
               >
                 <ListChecks className="h-4 w-4 mr-2" />
                 {l.name}
+                {l.is_working_list && !filterWorking && (
+                  <span className="ml-2 text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                    working
+                  </span>
+                )}
               </Button>
             ))
           )}

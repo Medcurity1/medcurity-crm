@@ -334,6 +334,9 @@ export function useFreezeSmartList() {
         description: `Snapshot of smart list "${list.name}"`,
         owner_user_id: auth.user!.id,
         is_dynamic: false,
+        // An ACTIVE smart list freezes into an ACTIVE (working) regular
+        // list — "take over manually" keeps driving status (review fix).
+        is_working_list: list.is_working_list,
       });
       for (let i = 0; i < ids.length; i += 500) {
         await bulkAdd.mutateAsync({ list_id: frozen.id, contact_ids: ids.slice(i, i + 500) });
@@ -422,16 +425,25 @@ export function useBulkAddContactsToList() {
       contact_ids: string[];
     }) => {
       if (!contact_ids.length) return { added: 0, requested: 0 };
-      const rows = contact_ids.map((contact_id) => ({ list_id, contact_id }));
-      const { error, count } = await supabase
-        .from("lead_list_members")
-        .upsert(rows, {
-          onConflict: "list_id,contact_id",
-          ignoreDuplicates: true,
-          count: "exact",
-        });
-      if (error) throw error;
-      return { added: count ?? 0, requested: contact_ids.length };
+      // Chunked (review fix): "Save as list" can hand this tens of
+      // thousands of ids — one giant upsert would run a huge statement
+      // and fire the working-list trigger per row inside it.
+      let added = 0;
+      for (let i = 0; i < contact_ids.length; i += 500) {
+        const rows = contact_ids
+          .slice(i, i + 500)
+          .map((contact_id) => ({ list_id, contact_id }));
+        const { error, count } = await supabase
+          .from("lead_list_members")
+          .upsert(rows, {
+            onConflict: "list_id,contact_id",
+            ignoreDuplicates: true,
+            count: "exact",
+          });
+        if (error) throw error;
+        added += count ?? 0;
+      }
+      return { added, requested: contact_ids.length };
     },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({

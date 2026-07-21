@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useUrlNumberState, useUrlArrayState, useUrlState, useUrlSortState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Users, Plus, Search, UploadCloud } from "lucide-react";
+import { Users, Plus, Search, UploadCloud, ListChecks } from "lucide-react";
 import { useContacts, useArchiveContact, useBulkUpdateOwner, useBulkDeleteContacts } from "./api";
 import { toast } from "sonner";
 import { useUsers, useStatesInUse } from "@/features/accounts/api";
@@ -55,7 +55,6 @@ import {
   ContextMenuContent,
   ContextMenuItem,
 } from "@/components/ui/context-menu";
-import { ListChecks } from "lucide-react";
 
 const CONTACTS_COLUMNS: ColumnDescriptor[] = [
   { key: "select", label: "Select", locked: true, headClassName: "w-10" },
