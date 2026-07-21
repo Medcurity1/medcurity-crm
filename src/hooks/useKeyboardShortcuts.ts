@@ -106,7 +106,7 @@ export function useKeyboardShortcuts({
           const routes: Record<string, string> = {
             h: "/",
             a: "/accounts",
-            l: "/leads",
+            l: "/imports",
             o: "/opportunities",
             p: "/pipeline",
             r: "/reports",

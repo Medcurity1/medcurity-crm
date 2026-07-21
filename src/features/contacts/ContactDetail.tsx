@@ -192,6 +192,17 @@ export function ContactDetail() {
 
   return (
     <div>
+      {contact.import_status === "pending" && (
+        <div className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+          <span className="font-medium">Pending import.</span>{" "}
+          This person came in on a raw list and hasn't been promoted yet — they're hidden from the
+          normal Contacts views. Promote or archive them from the{" "}
+          <Link to="/imports" className="text-primary hover:underline">Imports tab</Link>.
+          {contact.import_company && (
+            <span className="text-muted-foreground"> Listed company: {contact.import_company}</span>
+          )}
+        </div>
+      )}
       {/* --------- Header --------- */}
       <PageHeader
         title={formatName(contact.first_name, contact.last_name)}
@@ -274,7 +285,7 @@ export function ContactDetail() {
         <div className="mb-4 rounded-md border bg-muted/30 px-3 py-2 text-sm flex items-center gap-2">
           <span className="text-muted-foreground">Promoted from import:</span>
           <Link
-            to={`/leads/${originatingLead.id}`}
+            to={`/imports/${originatingLead.id}`}
             className="text-primary hover:underline font-medium"
           >
             {[originatingLead.first_name, originatingLead.last_name]

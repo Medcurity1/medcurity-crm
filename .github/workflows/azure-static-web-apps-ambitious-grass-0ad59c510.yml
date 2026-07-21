@@ -59,7 +59,9 @@ jobs:
         # merging changes to these does NOT ship them anywhere:
         #   clickup-services-sync  --no-verify-jwt  (pg_cron caller)
         #   crm-mcp                --no-verify-jwt  (prod-only read-only MCP)
-        #   inbound-lead           --no-verify-jwt  (public website form)
+        #   (inbound-lead is the exception since 2026-07-20: STAGING CI
+        #   deploys it below so the lead-retirement contacts-version is
+        #   testable; PROD keeps it manual-only — Nathan deploys at cutover.)
         #   nexus-activity         --no-verify-jwt  (Nexus feed shim)
         #   pandadoc-sync          --no-verify-jwt  (PandaDoc webhook)
         # WARNING: clickup-sf-id-sync is live on prod (cron migration
@@ -96,6 +98,14 @@ jobs:
           npx supabase functions deploy playbook-mailchimp
           npx supabase functions deploy ask-ai
           npx supabase functions deploy invite-user
+          # STAGING-ONLY (2026-07-20, lead-type retirement piece 2): the
+          # public website-form endpoint, now writing contacts. Prod stays
+          # manual-deploy; the X-API-Key secret gates callers either way.
+          npx supabase functions deploy inbound-lead --no-verify-jwt
+          # nexus-activity joins CI too (2026-07-20): the retirement version
+          # drops the lead-fallback; the old prod copy was logging onto
+          # archived tombstone leads.
+          npx supabase functions deploy nexus-activity --no-verify-jwt
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ secrets.STAGING_SUPABASE_PROJECT_REF }}

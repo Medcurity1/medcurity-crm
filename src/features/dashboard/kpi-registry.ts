@@ -523,7 +523,9 @@ export const KPI_REGISTRY: KpiDefinition[] = [
       const { count, error } = await supabase
         .from("contacts")
         .select("*", { count: "exact", head: true })
-        .is("archived_at", null);
+        .is("archived_at", null)
+        // Pending imports aren't contacts yet.
+        .is("import_status", null);
       if (error) throw error;
       return count ?? 0;
     },
@@ -557,16 +559,20 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     },
   },
   {
+    // Key kept as total_leads so saved dashboard configs don't break —
+    // the lead type is retired; this now counts the Imports pen.
     id: "total_leads",
-    label: "Total Leads",
+    label: "Pending Imports",
     category: "team",
     icon: UserPlus,
     format: "number",
     requiredRole: ["admin"],
+    link: "/imports",
     query: async (supabase) => {
       const { count, error } = await supabase
-        .from("leads")
+        .from("contacts")
         .select("*", { count: "exact", head: true })
+        .eq("import_status", "pending")
         .is("archived_at", null);
       if (error) throw error;
       return count ?? 0;
@@ -580,11 +586,13 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     format: "number",
     requiredRole: ["admin"],
     query: async (supabase) => {
+      // MQL lives on contacts since the lead-type retirement (2026-07-20).
       const { count, error } = await supabase
-        .from("leads")
+        .from("contacts")
         .select("*", { count: "exact", head: true })
-        .eq("qualification", "mql")
-        .is("archived_at", null);
+        .not("mql_date", "is", null)
+        .is("archived_at", null)
+        .is("import_status", null);
       if (error) throw error;
       return count ?? 0;
     },
@@ -597,27 +605,33 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     format: "number",
     requiredRole: ["admin"],
     query: async (supabase) => {
+      // SQL lives on contacts since the lead-type retirement (2026-07-20).
       const { count, error } = await supabase
-        .from("leads")
+        .from("contacts")
         .select("*", { count: "exact", head: true })
-        .eq("qualification", "sql")
-        .is("archived_at", null);
+        .not("sql_date", "is", null)
+        .is("archived_at", null)
+        .is("import_status", null);
       if (error) throw error;
       return count ?? 0;
     },
   },
   {
+    // Key kept as new_leads_month for saved dashboards; counts contacts
+    // that arrived through the pen or website this month.
     id: "new_leads_month",
-    label: "New Leads This Month",
+    label: "New Imports This Month",
     category: "team",
     icon: UserPlus,
     format: "number",
     requiredRole: ["admin"],
+    link: "/imports",
     query: async (supabase) => {
       const monthStart = getMonthStart(new Date());
       const { count, error } = await supabase
-        .from("leads")
+        .from("contacts")
         .select("*", { count: "exact", head: true })
+        .or("import_status.eq.pending,import_company.not.is.null")
         .is("archived_at", null)
         .gte("created_at", monthStart.toISOString());
       if (error) throw error;

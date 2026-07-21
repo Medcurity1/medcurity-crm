@@ -29,12 +29,20 @@ export function AddToListDialog({
   onOpenChange,
   contactIds,
   onAdded,
+  defaultWorking = false,
+  filterWorking = false,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   contactIds: string[];
   /** Called after a successful add (e.g. to clear a bulk selection). */
   onAdded?: () => void;
+  /** Inline-created lists get is_working_list = this. The Sales Status
+   * work-it-through-a-call-list flow passes true. */
+  defaultWorking?: boolean;
+  /** Show only working call lists (that flow promises activation, and a
+   * neutral list would not deliver it). */
+  filterWorking?: boolean;
 }) {
   const { profile } = useAuth();
   const { data: lists } = useLeadLists();
@@ -47,7 +55,7 @@ export function AddToListDialog({
   }, [open]);
 
   const staticLists = (lists ?? [])
-    .filter((l) => !l.is_dynamic)
+    .filter((l) => !l.is_dynamic && (!filterWorking || l.is_working_list))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const isPending = bulkAdd.isPending || createMutation.isPending;
@@ -85,6 +93,7 @@ export function AddToListDialog({
         name: newName.trim(),
         owner_user_id: profile!.id,
         is_dynamic: false,
+        is_working_list: defaultWorking,
       });
       listId = list.id;
     } catch {
@@ -102,8 +111,9 @@ export function AddToListDialog({
             Add {contactIds.length} contact{contactIds.length === 1 ? "" : "s"} to a list
           </DialogTitle>
           <DialogDescription>
-            Pick a static list, or create a new one. Smart lists update
-            automatically and can't be added to manually.
+            {filterWorking
+              ? "Pick a working call list (or create one) - adding contacts marks their accounts as actively worked."
+              : "Pick a list, or create a new one. Regular lists never change anyone's status; smart lists update themselves and can't be added to by hand."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2 max-h-[40vh] overflow-y-auto">
@@ -122,6 +132,11 @@ export function AddToListDialog({
               >
                 <ListChecks className="h-4 w-4 mr-2" />
                 {l.name}
+                {l.is_working_list && !filterWorking && (
+                  <span className="ml-2 text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                    working
+                  </span>
+                )}
               </Button>
             ))
           )}

@@ -141,20 +141,24 @@ async function fetchMetric(metric: DashboardKpiMetric): Promise<MetricResult> {
       };
     }
     case "new_leads_week": {
+      // Key kept for saved widgets; counts new pen/website arrivals since
+      // the lead-type retirement (2026-07-20).
       const { count, error } = await supabase
-        .from("leads")
+        .from("contacts")
         .select("id", { count: "exact", head: true })
+        .or("import_status.eq.pending,import_company.not.is.null")
         .is("archived_at", null)
         .gte("created_at", sevenDaysAgo);
       if (error) throw error;
       return { value: count ?? 0 };
     }
     case "mql_count_week": {
+      // MQL lives on contacts since the lead-type retirement (2026-07-20).
       const { count, error } = await supabase
-        .from("leads")
+        .from("contacts")
         .select("id", { count: "exact", head: true })
         .is("archived_at", null)
-        .eq("qualification", "mql")
+        .is("import_status", null)
         .gte("mql_date", sevenDaysAgo.slice(0, 10));
       if (error) throw error;
       return { value: count ?? 0 };

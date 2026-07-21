@@ -1,259 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
-import type { LeadList, LeadListMember, Lead } from "@/types/crm";
-import { buildIndustryOrClause } from "@/features/leads/industry-keywords";
+import type { LeadList, LeadListMember } from "@/types/crm";
 import { buildPersonSearchClause } from "@/lib/search-clause";
 
-// Shape of filter_config for dynamic ("smart") lists. Each key maps onto
-// columns on `leads` (or supporting views). Stored as jsonb on
-// lead_lists.filter_config so we can keep adding facets without a schema
-// migration. Keep the keys in lockstep with `applyFilters` below.
-export interface LeadListFilterConfig {
-  // Categorical (multi-select)
-  status?: string[];
-  source?: string[];
-  qualification?: string[];
-  rating?: string[];
-  industry_category?: string[];
-  owner_user_id?: string[];
-  business_relationship_tag?: string[];
-  credential?: string[];
-  time_zone?: string[];
-  type?: string[];
-
-  // Geographic
-  state?: string[];
-  country?: string[];
-  /** Substring match on city, case-insensitive. */
-  city?: string;
-  /** Prefix match on zip — supports "981" to mean "all 981xx". */
-  zip_prefix?: string;
-
-  // Numeric ranges
-  employees_min?: number;
-  employees_max?: number;
-  annual_revenue_min?: number;
-  annual_revenue_max?: number;
-  score_min?: number;
-  score_max?: number;
-
-  // Date ranges (ISO date strings, inclusive)
-  created_after?: string;
-  created_before?: string;
-  mql_after?: string;
-  mql_before?: string;
-  last_activity_after?: string;
-  last_activity_before?: string;
-
-  // Booleans
-  do_not_market_to?: boolean;
-  do_not_contact?: boolean;
-  priority_lead?: boolean;
-  cold_lead?: boolean;
-  /** true = email IS NOT NULL; false = email IS NULL */
-  has_email?: boolean;
-  has_phone?: boolean;
-  has_linkedin?: boolean;
-  /** true = exclude leads that are members of any other lead_list. */
-  exclude_in_other_lists?: boolean;
-
-  /** Free-text filter applied to first/last/company/email/title/phone. */
-  search?: string;
-}
-
-// ---------------------------------------------------------------------------
-// Filter application — shared between useSmartListLeads and useLeadsByFilter
-// so a smart list and the static-list "Add Leads" picker behave identically.
-// Returns the augmented PostgREST query builder.
-// ---------------------------------------------------------------------------
-
-/**
- * Apply every filter from `filterConfig` to a leads-table query builder.
- * Returns the same builder for chaining. Order matters only for the
- * `or()` search clause — it must come last so it doesn't clobber prior
- * `eq/in` clauses' implicit AND grouping.
- *
- * Typed loosely (generic `T`) so the same helper can flow through both
- * `select("*")` and `select("*, owner:user_profiles(...)")` builders
- * without TypeScript collapsing the relationship metadata to `never`.
- */
-function applyFilters<T>(
-  qIn: T,
-  fc: LeadListFilterConfig | null | undefined,
-): T {
-  // Internally we work with a loose builder so every chained method
-  // (`in`, `ilike`, `gte`, `or`, ...) typechecks regardless of which
-  // overload of `select(...)` produced it. The shape we return matches
-  // the input exactly, since each chained method on a PostgREST builder
-  // returns the same builder back.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let q: any = qIn;
-  if (!fc) return q as T;
-
-  // Categorical multi-selects — only apply when non-empty so an empty
-  // array doesn't accidentally produce a 0-row result.
-  if (fc.status?.length) q = q.in("status", fc.status);
-  if (fc.source?.length) q = q.in("source", fc.source);
-  if (fc.qualification?.length) q = q.in("qualification", fc.qualification);
-  if (fc.rating?.length) q = q.in("rating", fc.rating);
-  if (fc.industry_category?.length) {
-    // Match BOTH the normalized enum column AND legacy free-text column
-    // — SF-imported leads sit with `industry_category=null` and a free-text
-    // value in `industry`. See `buildIndustryOrClause` for the keyword map.
-    const orClause = buildIndustryOrClause(fc.industry_category);
-    if (orClause) q = q.or(orClause);
-  }
-  if (fc.owner_user_id?.length) q = q.in("owner_user_id", fc.owner_user_id);
-  if (fc.business_relationship_tag?.length)
-    q = q.in("business_relationship_tag", fc.business_relationship_tag);
-  if (fc.credential?.length) q = q.in("credential", fc.credential);
-  if (fc.time_zone?.length) q = q.in("time_zone", fc.time_zone);
-  if (fc.type?.length) q = q.in("type", fc.type);
-
-  // Geographic
-  if (fc.state?.length) q = q.in("state", fc.state);
-  if (fc.country?.length) q = q.in("country", fc.country);
-  if (fc.city) {
-    const safe = fc.city.replace(/[(),]/g, " ");
-    q = q.ilike("city", `%${safe}%`);
-  }
-  if (fc.zip_prefix) {
-    const safe = fc.zip_prefix.replace(/[(),%]/g, "");
-    q = q.ilike("zip", `${safe}%`);
-  }
-
-  // Numeric ranges — gte/lte are inclusive (matches user expectation
-  // when typing "Min: 100" and "Max: 500").
-  if (typeof fc.employees_min === "number")
-    q = q.gte("employees", fc.employees_min);
-  if (typeof fc.employees_max === "number")
-    q = q.lte("employees", fc.employees_max);
-  if (typeof fc.annual_revenue_min === "number")
-    q = q.gte("annual_revenue", fc.annual_revenue_min);
-  if (typeof fc.annual_revenue_max === "number")
-    q = q.lte("annual_revenue", fc.annual_revenue_max);
-  if (typeof fc.score_min === "number") q = q.gte("score", fc.score_min);
-  if (typeof fc.score_max === "number") q = q.lte("score", fc.score_max);
-
-  // Date ranges (ISO yyyy-mm-dd). Stored timestamps are timestamptz, so
-  // a date string like "2026-04-01" will be implicitly cast to midnight UTC.
-  if (fc.created_after) q = q.gte("created_at", fc.created_after);
-  if (fc.created_before) q = q.lte("created_at", fc.created_before);
-  if (fc.mql_after) q = q.gte("mql_date", fc.mql_after);
-  if (fc.mql_before) q = q.lte("mql_date", fc.mql_before);
-  // last_activity_after / last_activity_before are handled in a post-fetch
-  // join below, since PostgREST can't `gte` on a derived view through a
-  // single from() call without a foreign-key relationship that doesn't
-  // exist (v_lead_last_activity is a view, not a table). The hooks below
-  // do that join client-side after fetching.
-
-  // Booleans
-  if (typeof fc.do_not_market_to === "boolean")
-    q = q.eq("do_not_market_to", fc.do_not_market_to);
-  if (typeof fc.do_not_contact === "boolean")
-    q = q.eq("do_not_contact", fc.do_not_contact);
-  if (typeof fc.priority_lead === "boolean")
-    q = q.eq("priority_lead", fc.priority_lead);
-  if (typeof fc.cold_lead === "boolean") q = q.eq("cold_lead", fc.cold_lead);
-
-  if (fc.has_email === true) q = q.not("email", "is", null);
-  else if (fc.has_email === false) q = q.is("email", null);
-  if (fc.has_phone === true) q = q.not("phone", "is", null);
-  else if (fc.has_phone === false) q = q.is("phone", null);
-  if (fc.has_linkedin === true) q = q.not("linkedin_url", "is", null);
-  else if (fc.has_linkedin === false) q = q.is("linkedin_url", null);
-
-  // Free-text search — kept last so it's the outermost OR group.
-  if (fc.search) {
-    const orClause = buildPersonSearchClause(fc.search, [
-      "first_name",
-      "last_name",
-      "company",
-      "email",
-      "title",
-      "phone",
-    ]);
-    if (orClause) q = q.or(orClause);
-  }
-  return q as T;
-}
-
-/**
- * Returns true if `lead` should be kept after applying the filters that
- * can't be expressed in PostgREST directly: last_activity range,
- * exclude_in_other_lists. Pass pre-fetched lookup maps so the hook only
- * fires one supplemental query each.
- */
-function postFilter(
-  lead: Lead,
-  fc: LeadListFilterConfig | null | undefined,
-  lookups: {
-    lastActivityByLead: Map<string, string>;
-    leadsInOtherLists: Set<string>;
-  },
-): boolean {
-  if (!fc) return true;
-  if (fc.last_activity_after) {
-    const ts = lookups.lastActivityByLead.get(lead.id);
-    if (!ts || ts < fc.last_activity_after) return false;
-  }
-  if (fc.last_activity_before) {
-    const ts = lookups.lastActivityByLead.get(lead.id);
-    if (!ts || ts > fc.last_activity_before) return false;
-  }
-  if (fc.exclude_in_other_lists && lookups.leadsInOtherLists.has(lead.id)) {
-    return false;
-  }
-  return true;
-}
-
-/** Fetch the supplemental lookup maps used by `postFilter`. */
-async function fetchLookups(
-  fc: LeadListFilterConfig | null | undefined,
-  excludingListId: string | undefined,
-): Promise<{
-  lastActivityByLead: Map<string, string>;
-  leadsInOtherLists: Set<string>;
-}> {
-  const lastActivityByLead = new Map<string, string>();
-  const leadsInOtherLists = new Set<string>();
-  if (!fc) {
-    return { lastActivityByLead, leadsInOtherLists };
-  }
-
-  // last_activity range — pull the whole map; small per-tenant.
-  if (fc.last_activity_after || fc.last_activity_before) {
-    const { data } = await supabase
-      .from("v_lead_last_activity")
-      .select("lead_id, last_activity_at");
-    for (const row of (data ?? []) as Array<{
-      lead_id: string | null;
-      last_activity_at: string | null;
-    }>) {
-      if (row.lead_id && row.last_activity_at) {
-        lastActivityByLead.set(row.lead_id, row.last_activity_at);
-      }
-    }
-  }
-
-  // exclude_in_other_lists — pull all members across all OTHER lists.
-  if (fc.exclude_in_other_lists) {
-    let q = supabase
-      .from("lead_list_members")
-      .select("lead_id, list_id")
-      .not("lead_id", "is", null);
-    if (excludingListId) q = q.neq("list_id", excludingListId);
-    const { data } = await q;
-    for (const row of (data ?? []) as Array<{ lead_id: string | null }>) {
-      if (row.lead_id) leadsInOtherLists.add(row.lead_id);
-    }
-  }
-  return { lastActivityByLead, leadsInOtherLists };
-}
-
-// ---------------------------------------------------------------------------
-// Lead Lists CRUD
-// ---------------------------------------------------------------------------
+// (Smart-list filter machinery removed 2026-07-20 with the lead type —
+// lists are static contact lists; filter_config is inert history.)
 
 export function useLeadLists() {
   return useQuery({
@@ -277,7 +28,8 @@ export function useCreateLeadList() {
       description?: string;
       owner_user_id: string;
       is_dynamic?: boolean;
-      filter_config?: LeadListFilterConfig | null;
+      is_working_list?: boolean;
+      filter_config?: Record<string, unknown> | null;
     }) => {
       const { data, error } = await supabase
         .from("lead_lists")
@@ -286,6 +38,7 @@ export function useCreateLeadList() {
           description: values.description ?? null,
           owner_user_id: values.owner_user_id,
           is_dynamic: values.is_dynamic ?? false,
+          is_working_list: values.is_working_list ?? false,
           filter_config: values.filter_config ?? null,
         })
         .select()
@@ -308,7 +61,8 @@ export function useUpdateLeadList() {
       name?: string;
       description?: string | null;
       is_dynamic?: boolean;
-      filter_config?: LeadListFilterConfig | null;
+      is_working_list?: boolean;
+      filter_config?: Record<string, unknown> | null;
     }) => {
       const { id, ...patch } = values;
       const { data, error } = await supabase
@@ -353,10 +107,12 @@ export function useLeadListMembers(listId: string | undefined) {
     queryKey: ["lead-list-members", listId],
     queryFn: async () => {
       if (!listId) throw new Error("Missing list ID");
+      // Contact-only since the lead-type retirement (2026-07-20): migration
+      // 20260720150000 repointed promoted-lead members and dropped the rest.
       const { data, error } = await supabase
         .from("lead_list_members")
         .select(
-          "*, lead:leads(id, first_name, last_name, email, phone, company, status, qualification, rating, source, industry_category, owner_user_id, state, city, employees, score, do_not_market_to), contact:contacts(id, first_name, last_name, email, phone, account:accounts(name))",
+          "*, contact:contacts(id, first_name, last_name, email, phone, account:accounts(name))",
         )
         .eq("list_id", listId)
         .order("added_at", { ascending: false });
@@ -385,34 +141,8 @@ export function useLeadListMemberCount() {
   });
 }
 
-export function useAddToList() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (values: {
-      list_id: string;
-      lead_id?: string | null;
-      contact_id?: string | null;
-    }) => {
-      const { data, error } = await supabase
-        .from("lead_list_members")
-        .insert({
-          list_id: values.list_id,
-          lead_id: values.lead_id ?? null,
-          contact_id: values.contact_id ?? null,
-        })
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
-    },
-    onSuccess: (_data, vars) => {
-      qc.invalidateQueries({
-        queryKey: ["lead-list-members", vars.list_id],
-      });
-      qc.invalidateQueries({ queryKey: ["lead-list-member-counts"] });
-    },
-  });
-}
+// (useAddToList removed 2026-07-20 — pen/lists are contact-only; use
+// useBulkAddContactsToList.)
 
 export function useRemoveFromList() {
   const qc = useQueryClient();
@@ -441,120 +171,185 @@ export function useRemoveFromList() {
 }
 
 // ---------------------------------------------------------------------------
-// Smart (dynamic) lists — live-query leads from the filter_config rather
-// than reading the membership join. Re-runs whenever filter_config or
-// any underlying lead changes (since query key includes config + we
-// invalidate on lead updates).
+// Smart lists v2 (2026-07-20, contact-based). A smart list stores RULES in
+// lead_lists.filter_config (is_dynamic = true) and resolves membership live
+// at read time — tag someone and they appear in every matching smart list
+// instantly. No lead_list_members rows; "freeze" materializes into a
+// regular list. Query composition mirrors useContacts' proven patterns
+// (contact_tags!inner embed; accounts!inner for customer_status).
 // ---------------------------------------------------------------------------
 
-export function useSmartListLeads(
-  listId: string | undefined,
-  filterConfig: LeadListFilterConfig | null | undefined,
-) {
+export interface SmartListRules {
+  /** Has ANY of these tags. */
+  tag_ids?: string[];
+  /** contacts.mailing_state in (state codes). */
+  states?: string[];
+  /** contacts.owner_user_id in. */
+  owner_ids?: string[];
+  /** Account relationship (via the account join). */
+  customer_status?: string[];
+  has_phone?: boolean;
+  has_email?: boolean;
+}
+
+export interface SmartMemberRow {
+  id: string;
+  first_name: string | null;
+  last_name: string;
+  email: string | null;
+  phone: string | null;
+  account: { name: string } | null;
+}
+
+export function parseSmartRules(list: LeadList): SmartListRules {
+  return ((list.filter_config ?? {}) as SmartListRules) || {};
+}
+
+/** Human chips for the rules summary. Resolvers are passed in so this
+ * stays a pure helper. */
+export function smartRuleChips(
+  rules: SmartListRules,
+  tagName: (id: string) => string,
+  userName: (id: string) => string,
+  statusLabel: (v: string) => string,
+): string[] {
+  const chips: string[] = [];
+  if (rules.tag_ids?.length) chips.push(`Tag: ${rules.tag_ids.map(tagName).join(" or ")}`);
+  if (rules.states?.length) chips.push(`State: ${rules.states.join(", ")}`);
+  if (rules.owner_ids?.length) chips.push(`Owner: ${rules.owner_ids.map(userName).join(", ")}`);
+  if (rules.customer_status?.length)
+    chips.push(`Status: ${rules.customer_status.map(statusLabel).join(" or ")}`);
+  if (rules.has_phone) chips.push("Has a phone");
+  if (rules.has_email) chips.push("Has an email");
+  return chips;
+}
+
+const SMART_FETCH_CAP = 2000;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildSmartQuery(rules: SmartListRules, selectCols: string): any {
+  const needsTags = !!rules.tag_ids?.length;
+  const needsAccount = !!rules.customer_status?.length;
+  const select =
+    selectCols +
+    (needsTags ? ", contact_tags!inner(tag_id)" : "") +
+    (needsAccount ? ", accounts!account_id!inner(customer_status)" : "");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let q: any = supabase
+    .from("contacts")
+    .select(select)
+    .is("archived_at", null)
+    .is("import_status", null);
+  if (needsTags) q = q.in("contact_tags.tag_id", rules.tag_ids);
+  if (needsAccount) q = q.in("accounts.customer_status", rules.customer_status);
+  if (rules.states?.length) q = q.in("mailing_state", rules.states);
+  if (rules.owner_ids?.length) q = q.in("owner_user_id", rules.owner_ids);
+  if (rules.has_phone) q = q.not("phone", "is", null);
+  if (rules.has_email) q = q.not("email", "is", null);
+  return q;
+}
+
+/** A smart list needs at least one rule — an empty rule set would be
+ * "every contact in the CRM", which is never what someone meant. */
+export function smartRulesEmpty(rules: SmartListRules): boolean {
+  return (
+    !rules.tag_ids?.length &&
+    !rules.states?.length &&
+    !rules.owner_ids?.length &&
+    !rules.customer_status?.length &&
+    !rules.has_phone &&
+    !rules.has_email
+  );
+}
+
+/** Live members of a smart list (deduped — a multi-tag match returns one
+ * row per matching tag through the inner embed). Capped at SMART_FETCH_CAP;
+ * `capped` tells the UI to say "2,000+". */
+export function useSmartListMembers(list: LeadList | null) {
+  const rules = list ? parseSmartRules(list) : null;
   return useQuery({
-    queryKey: ["smart-list-leads", listId, filterConfig],
+    queryKey: ["smart-list-members", list?.id, rules],
+    enabled: !!list && list.is_dynamic,
     queryFn: async () => {
-      let q = supabase
-        .from("leads")
-        .select(
-          "id, first_name, last_name, email, phone, company, title, status, qualification, rating, source, industry_category, owner_user_id, state, city, country, zip, employees, annual_revenue, score, mql_date, created_at, do_not_market_to, do_not_contact, priority_lead, cold_lead, linkedin_url, business_relationship_tag, credential, time_zone, type, owner:user_profiles!owner_user_id(id, full_name)",
-        )
-        .is("archived_at", null)
+      if (!rules || smartRulesEmpty(rules)) {
+        return { rows: [] as SmartMemberRow[], capped: false };
+      }
+      const { data, error } = await buildSmartQuery(
+        rules,
+        "id, first_name, last_name, email, phone, account:accounts!account_id(name)",
+      )
         .order("last_name", { ascending: true, nullsFirst: false })
-        .limit(1000);
-
-      q = applyFilters(q, filterConfig);
-
-      const [{ data, error }, lookups] = await Promise.all([
-        q,
-        fetchLookups(filterConfig, listId),
-      ]);
+        .limit(SMART_FETCH_CAP);
       if (error) throw error;
-      const rows = (data ?? []) as unknown as Lead[];
-      // Annotate with last_activity_at so the table can render that
-      // column without each row triggering its own round-trip.
-      return rows
-        .filter((l) => postFilter(l, filterConfig, lookups))
-        .map((l) => ({
-          ...l,
-          last_activity_at: lookups.lastActivityByLead.get(l.id) ?? null,
-        })) as Array<Lead & {
-        last_activity_at: string | null;
-      }>;
+      const seen = new Set<string>();
+      const rows: SmartMemberRow[] = [];
+      for (const r of (data ?? []) as unknown as SmartMemberRow[]) {
+        if (seen.has(r.id)) continue;
+        seen.add(r.id);
+        rows.push(r);
+      }
+      return { rows, capped: (data ?? []).length >= SMART_FETCH_CAP };
     },
-    enabled: !!listId,
   });
 }
 
-// ---------------------------------------------------------------------------
-// Search leads for adding to lists
-// ---------------------------------------------------------------------------
-
-export function useSearchLeadsForList(search: string) {
-  return useQuery({
-    queryKey: ["lead-search-for-list", search],
-    queryFn: async () => {
-      if (!search || search.length < 2) return [];
-      const orClause = buildPersonSearchClause(search, [
-        "first_name",
-        "last_name",
-        "company",
-        "email",
-      ]);
-      let q = supabase
-        .from("leads")
-        .select("id, first_name, last_name, email, company, status")
-        .is("archived_at", null);
-      if (orClause) q = q.or(orClause);
-      const { data, error } = await q.limit(20);
+/** Additive-only Sales-Status activation for ACTIVE smart lists: flips
+ * matching accounts to actively-worked (never off — a rule change must
+ * not mass-deactivate). Fired when an active smart list is opened or its
+ * rules change; idempotent and cheap. */
+export function useActivateAccountsForContacts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (contactIds: string[]) => {
+      if (!contactIds.length) return 0;
+      const { data, error } = await supabase.rpc("activate_accounts_for_contacts", {
+        p_contact_ids: contactIds,
+      });
       if (error) throw error;
-      return data;
+      return (data as number) ?? 0;
     },
-    enabled: search.length >= 2,
+    onSuccess: (n) => {
+      if (n > 0) qc.invalidateQueries({ queryKey: ["accounts"] });
+    },
   });
 }
 
-// ---------------------------------------------------------------------------
-// Filtered leads for bulk-add into a static list. Mirrors the smart-list
-// query shape but doesn't require a list id, so the static-list "Add Leads"
-// dialog can let users pick by criteria the same way smart lists do.
-// ---------------------------------------------------------------------------
-
-export function useLeadsByFilter(
-  filterConfig: LeadListFilterConfig,
-  enabled: boolean,
-  excludingListId?: string,
-) {
-  return useQuery({
-    queryKey: ["leads-by-filter", filterConfig, excludingListId],
-    queryFn: async () => {
-      let q = supabase
-        .from("leads")
-        .select(
-          "id, first_name, last_name, email, phone, company, title, status, qualification, rating, source, industry_category, owner_user_id, state, city, country, zip, employees, annual_revenue, score, mql_date, created_at, do_not_market_to, do_not_contact, priority_lead, cold_lead, linkedin_url, business_relationship_tag, credential, time_zone, type",
-        )
-        .is("archived_at", null)
-        .order("last_name", { ascending: true, nullsFirst: false })
-        .limit(500);
-
-      q = applyFilters(q, filterConfig);
-
-      const [{ data, error }, lookups] = await Promise.all([
-        q,
-        fetchLookups(filterConfig, excludingListId),
-      ]);
+/** Freeze a smart list: materialize its CURRENT members into a brand-new
+ * regular list you can hand-edit ("start with a full group"). */
+export function useFreezeSmartList() {
+  const qc = useQueryClient();
+  const createList = useCreateLeadList();
+  const bulkAdd = useBulkAddContactsToList();
+  return useMutation({
+    mutationFn: async (list: LeadList) => {
+      const rules = parseSmartRules(list);
+      if (smartRulesEmpty(rules)) throw new Error("This smart list has no rules yet.");
+      const { data, error } = await buildSmartQuery(rules, "id").limit(SMART_FETCH_CAP);
       if (error) throw error;
-      const rows = (data ?? []) as unknown as Lead[];
-      return rows.filter((l) => postFilter(l, filterConfig, lookups));
+      const ids = [...new Set(((data ?? []) as { id: string }[]).map((r) => r.id))];
+      if (!ids.length) throw new Error("No contacts match this smart list right now.");
+      const { data: auth } = await supabase.auth.getUser();
+      const frozen = await createList.mutateAsync({
+        name: `${list.name} (frozen ${new Date().toLocaleDateString()})`,
+        description: `Snapshot of smart list "${list.name}"`,
+        owner_user_id: auth.user!.id,
+        is_dynamic: false,
+        // An ACTIVE smart list freezes into an ACTIVE (working) regular
+        // list — "take over manually" keeps driving status (review fix).
+        is_working_list: list.is_working_list,
+      });
+      for (let i = 0; i < ids.length; i += 500) {
+        await bulkAdd.mutateAsync({ list_id: frozen.id, contact_ids: ids.slice(i, i + 500) });
+      }
+      return { list: frozen, added: ids.length };
     },
-    enabled,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["lead-lists"] });
+      qc.invalidateQueries({ queryKey: ["lead-list-member-counts"] });
+    },
   });
 }
 
-// ---------------------------------------------------------------------------
-// Contact members — call-list curation. Same membership table, contact_id
-// side of the (lead_id | contact_id) pair.
-// ---------------------------------------------------------------------------
 
 export interface ContactListCandidate {
   id: string;
@@ -586,7 +381,10 @@ export function useSearchContactsForList(search: string, listId?: string) {
         .select(
           "id, first_name, last_name, email, title, account:accounts!account_id(name)",
         )
-        .is("archived_at", null);
+        .is("archived_at", null)
+        // Pending imports stay in the pen until promoted — a call list
+        // should never pull someone whose email isn't cleaned yet.
+        .is("import_status", null);
       if (orClause) q = q.or(orClause);
       const [{ data, error }, membersRes] = await Promise.all([
         q.order("last_name", { ascending: true, nullsFirst: false }).limit(50),
@@ -627,16 +425,25 @@ export function useBulkAddContactsToList() {
       contact_ids: string[];
     }) => {
       if (!contact_ids.length) return { added: 0, requested: 0 };
-      const rows = contact_ids.map((contact_id) => ({ list_id, contact_id }));
-      const { error, count } = await supabase
-        .from("lead_list_members")
-        .upsert(rows, {
-          onConflict: "list_id,contact_id",
-          ignoreDuplicates: true,
-          count: "exact",
-        });
-      if (error) throw error;
-      return { added: count ?? 0, requested: contact_ids.length };
+      // Chunked (review fix): "Save as list" can hand this tens of
+      // thousands of ids — one giant upsert would run a huge statement
+      // and fire the working-list trigger per row inside it.
+      let added = 0;
+      for (let i = 0; i < contact_ids.length; i += 500) {
+        const rows = contact_ids
+          .slice(i, i + 500)
+          .map((contact_id) => ({ list_id, contact_id }));
+        const { error, count } = await supabase
+          .from("lead_list_members")
+          .upsert(rows, {
+            onConflict: "list_id,contact_id",
+            ignoreDuplicates: true,
+            count: "exact",
+          });
+        if (error) throw error;
+        added += count ?? 0;
+      }
+      return { added, requested: contact_ids.length };
     },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({

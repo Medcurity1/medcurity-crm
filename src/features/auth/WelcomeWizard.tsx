@@ -11,7 +11,6 @@ import {
 import {
   Home,
   Building2,
-  UserPlus,
   Target,
   BarChart3,
   Command,
@@ -150,7 +149,6 @@ function StepNavigation() {
       label: "Accounts & Contacts",
       desc: "Manage your relationships",
     },
-    { icon: UserPlus, label: "Leads", desc: "Track and convert prospects" },
     {
       icon: Target,
       label: "Opportunities & Pipeline",

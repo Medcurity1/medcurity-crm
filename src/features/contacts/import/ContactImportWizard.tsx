@@ -76,9 +76,13 @@ function chunk<T>(arr: T[], n: number): T[][] {
 export function ContactImportWizard({
   open,
   onOpenChange,
+  penMode = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Land NEW people in the Imports pen (import_status='pending') instead
+   * of creating live contacts + accounts. Used by the Imports tab. */
+  penMode?: boolean;
 }) {
   const { profile } = useAuth();
   const { data: users } = useUsers();
@@ -190,6 +194,7 @@ export function ContactImportWizard({
   function buildOptions(): ContactImportOptions {
     return {
       dup_mode: dupMode,
+      pen: penMode || undefined,
       owner_user_id: effectiveOwner || null,
       event: eventOn
         ? {
@@ -242,9 +247,16 @@ export function ContactImportWizard({
       qc.invalidateQueries({ queryKey: ["contacts"] });
       qc.invalidateQueries({ queryKey: ["accounts"] });
       qc.invalidateQueries({ queryKey: ["activities"] });
+      qc.invalidateQueries({ queryKey: ["imports-pen"] });
+      const suppressedNote = agg.suppressed
+        ? ` · ${agg.suppressed.toLocaleString()} blocked (previously Avoided)`
+        : "";
       toast.success(
-        `Imported ${agg.created.toLocaleString()} new · ${agg.updated.toLocaleString()} updated` +
-          (agg.events_stamped ? ` · ${agg.events_stamped.toLocaleString()} events logged` : ""),
+        penMode
+          ? `${agg.created.toLocaleString()} landed in Imports · ${agg.updated.toLocaleString()} updated existing · ${agg.skipped.toLocaleString()} already contacts${suppressedNote}`
+          : `Imported ${agg.created.toLocaleString()} new · ${agg.updated.toLocaleString()} updated` +
+              (agg.events_stamped ? ` · ${agg.events_stamped.toLocaleString()} events logged` : "") +
+              suppressedNote,
       );
     } catch (err) {
       toast.error("Import failed: " + (err as Error).message);
@@ -266,10 +278,13 @@ export function ContactImportWizard({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <UploadCloud className="h-5 w-5 text-indigo-600" />
-              Import Contacts {result ? "" : `— Step ${step} of 4`}
+              {penMode ? "Import a List" : "Import Contacts"} {result ? "" : `— Step ${step} of 4`}
             </DialogTitle>
             <DialogDescription>
-              {step === 1 && "Upload a CSV of people. We'll match them to your contacts by email."}
+              {step === 1 &&
+                (penMode
+                  ? "Upload a CSV of people. New ones land in the Imports pen for cleanup; anyone already a contact is matched by email."
+                  : "Upload a CSV of people. We'll match them to your contacts by email.")}
               {step === 2 && "Tell us which column is which. We guessed based on the headers."}
               {step === 3 && "Choose how to handle duplicates — and optionally log an event for everyone."}
               {step === 4 && !result && "Review what will happen, then import."}

@@ -37,7 +37,8 @@ const ENTITIES = [
   { value: "accounts", label: "Accounts" },
   { value: "contacts", label: "Contacts" },
   { value: "opportunities", label: "Opportunities" },
-  { value: "leads", label: "Leads" },
+  // "leads" retired 2026-07-20 — existing lead automations keep their
+  // stored entity; new ones can't target the frozen table.
 ] as const;
 
 const EVENTS = [

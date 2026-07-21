@@ -22,7 +22,7 @@ interface StubResult {
 function makeBuilder(result: StubResult) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const b: any = {};
-  for (const m of ["select", "eq", "not", "is", "gte", "lt", "lte", "range"]) {
+  for (const m of ["select", "eq", "not", "is", "gte", "lt", "lte", "range", "or"]) {
     b[m] = () => b;
   }
   b.then = (

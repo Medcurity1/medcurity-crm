@@ -10,7 +10,7 @@ import type { CustomerStatus } from "@/types/crm";
    Types
    ================================================================ */
 
-type EntityType = "accounts" | "contacts" | "leads";
+type EntityType = "accounts" | "contacts";
 
 interface DuplicateRecord {
   id: string;
@@ -154,63 +154,8 @@ export function DuplicateWarning({
         }
       }
 
-      if (entity === "leads") {
-        const hasEmail = email && email.trim().length >= 3;
-        const hasCompany = company && company.trim().length >= 2;
-
-        if (hasEmail || hasCompany) {
-          const { data, error } = await supabase.rpc("find_duplicate_leads", {
-            // Pass null (not "") for blanks. The company match uses LIKE, so an
-            // empty string becomes '%%' and matches EVERY lead with a company —
-            // showing a wall of false duplicates. null no-ops that clause.
-            lead_email: email?.trim() || null,
-            lead_company: company?.trim() || null,
-          });
-          if (!error && data && data.length > 0) {
-            results = data.map(
-              (d: {
-                id: string;
-                first_name: string;
-                last_name: string;
-                email: string | null;
-                company: string | null;
-              }) => ({
-                id: d.id,
-                label: `${d.first_name} ${d.last_name}`,
-                detail: [d.email, d.company].filter(Boolean).join(" - "),
-                href: `/leads/${d.id}`,
-              })
-            );
-          }
-          // Fallback
-          if (
-            error?.message?.includes("function") ||
-            error?.code === "42883"
-          ) {
-            let query = supabase
-              .from("leads")
-              .select("id, first_name, last_name, email, company")
-              .is("archived_at", null)
-              .limit(5);
-
-            if (hasEmail) {
-              query = query.ilike("email", `%${email!.trim()}%`);
-            } else if (hasCompany) {
-              query = query.ilike("company", `%${company!.trim()}%`);
-            }
-
-            const { data: fallback } = await query;
-            if (fallback) {
-              results = fallback.map((d) => ({
-                id: d.id,
-                label: `${d.first_name} ${d.last_name}`,
-                detail: [d.email, d.company].filter(Boolean).join(" - "),
-                href: `/leads/${d.id}`,
-              }));
-            }
-          }
-        }
-      }
+      // (The leads dedup branch is gone — the lead type is retired and
+      // its finder RPCs were dropped in 20260720170000.)
 
       // Cross-table email check for new contacts: warn if this email is
       // already a (pending) Import or was archived as Avoid, so a rep

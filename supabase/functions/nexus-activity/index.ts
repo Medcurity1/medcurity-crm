@@ -179,19 +179,10 @@ serve(async (req) => {
       }
     }
 
-    if (!contactId) {
-      const { data: lead } = await supabase
-        .from("leads")
-        .select("id")
-        .ilike("email", normalizedEmail)
-        .neq("status", "converted")
-        .limit(1)
-        .maybeSingle();
-      if (lead) {
-        leadId = lead.id;
-        matched = "lead";
-      }
-    }
+    // Lead-type retirement (2026-07-20): no lead fallback — the leads
+    // table is frozen history. Unmatched recipients return no_match, same
+    // as before for never-seen addresses. (leadId plumbing left in place
+    // for the activity insert's lead_id: null.)
 
     if (matched === "none") {
       // Don't auto-create — return 200 so Nexus stops retrying.

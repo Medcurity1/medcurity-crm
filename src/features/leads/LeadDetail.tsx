@@ -2,7 +2,7 @@ import { useParams, useNavigate, Link, useSearchParams, Navigate } from "react-r
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Pencil, Archive, ChevronDown, ChevronLeft, Phone, Mail, ArrowRightLeft, UserRoundCog, History, MapPin, Ban } from "lucide-react";
+import { Pencil, Archive, ChevronDown, ChevronLeft, Phone, Mail, ArrowRightLeft, History, MapPin, Ban } from "lucide-react";
 import { InlineEdit } from "@/components/InlineEdit";
 import { useLead, useUpdateLead, useArchiveLead, useMarkImportAvoid } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
@@ -12,7 +12,6 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Badge } from "@/components/ui/badge";
 import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
 import { RecordId } from "@/components/RecordId";
 import { formatPhone } from "@/components/PhoneInput";
 import { ConvertLeadDialog } from "./ConvertLeadDialog";
@@ -31,7 +30,7 @@ import { toast } from "sonner";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
 import { TasksPanel } from "@/features/activities/TasksPanel";
 import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
-import type { LeadSource, LeadQualification } from "@/types/crm";
+import type { LeadSource } from "@/types/crm";
 import { LayoutDrivenDetail } from "@/features/layouts/LayoutDrivenDetail";
 import { looksLikeUsZip, zipToTimeZone } from "@/lib/us-zip";
 import {
@@ -106,7 +105,6 @@ export function LeadDetail() {
   const markAvoid = useMarkImportAvoid();
   const [showArchive, setShowArchive] = useState(false);
   const [showConvert, setShowConvert] = useState(false);
-  const [showChangeOwner, setShowChangeOwner] = useState(false);
   const { addRecent } = useRecentRecords();
 
   // Breadcrumb back to a lead list when arriving via ?from=list:<id>.
@@ -164,7 +162,7 @@ export function LeadDetail() {
       {
         onSuccess: () => {
           toast.success("Import archived");
-          navigate("/leads");
+          navigate("/imports");
         },
         onError: (err) => {
           toast.error("Failed to archive import: " + (err as Error).message);
@@ -184,11 +182,11 @@ export function LeadDetail() {
       {fromListId && (
         <button
           type="button"
-          onClick={() => navigate("/leads")}
+          onClick={() => navigate("/imports")}
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-3"
         >
           <ChevronLeft className="h-4 w-4" />
-          Back to Leads
+          Back to Imports
         </button>
       )}
 
@@ -231,50 +229,15 @@ export function LeadDetail() {
                 Avoided{lead.avoid_reason ? `: ${lead.avoid_reason.replace(/_/g, " ")}` : ""}
               </Badge>
             )}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm">
-                  Qualify
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent>
-                {(["mql", "sql", "sal"] as LeadQualification[]).map((q) => (
-                  <DropdownMenuItem
-                    key={q}
-                    onClick={() => {
-                      if (!id) return;
-                      updateMutation.mutate(
-                        {
-                          id,
-                          qualification: q,
-                          qualification_date: new Date().toISOString(),
-                        } as Parameters<typeof updateMutation.mutate>[0],
-                        {
-                          onSuccess: () =>
-                            toast.success(`Marked as ${qualificationLabel(q)}`),
-                          onError: (err) =>
-                            toast.error(
-                              "Failed to update qualification: " +
-                                (err as Error).message
-                            ),
-                        }
-                      );
-                    }}
-                  >
-                    Mark as {qualificationLabel(q)}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button variant="outline" size="sm" onClick={() => setShowChangeOwner(true)}>
-              <UserRoundCog className="h-4 w-4 mr-1" />
-              Change Owner
-            </Button>
+            {/* Qualify + Change Owner removed 2026-07-20: the leads table is
+                frozen (write policies dropped) — direct edits would fail.
+                The RPC-backed actions below (Promote / Mark Avoid / Archive)
+                still work for prod's cutover stragglers. */}
             {/* Converted leads are tombstones — read-only. Hide Edit
                 so reps can't accidentally rewrite history. The contact
                 that took over is the working record. */}
             {!isConverted && !isAvoided && (
-              <Button variant="outline" size="sm" onClick={() => navigate(`/leads/${id}/edit`)}>
+              <Button variant="outline" size="sm" onClick={() => navigate(`/imports/${id}/edit`)}>
                 <Pencil className="h-4 w-4 mr-1" />
                 Edit
               </Button>
@@ -308,7 +271,7 @@ export function LeadDetail() {
                           {
                             onSuccess: () => {
                               toast.success("Marked Avoid and archived");
-                              navigate("/leads");
+                              navigate("/imports");
                             },
                             onError: (e) => toast.error((e as Error).message),
                           },
@@ -471,28 +434,9 @@ export function LeadDetail() {
         // Converted leads are tombstones — disable inline edit by
         // omitting onInlineSave. Reps can still see all fields but
         // can't modify them.
-        onInlineSave={isConverted ? undefined : async (fieldKey, newValue) => {
-          const patch: Record<string, unknown> = {
-            id: lead.id,
-            [fieldKey]: newValue === "" ? null : newValue,
-          };
-          // When the rep inline-edits the zip, also bump country (if
-          // empty) and time_zone (always — corrections should update
-          // the tz, not be silently ignored).
-          if (fieldKey === "zip") {
-            const zip = (newValue ?? "").trim();
-            if (looksLikeUsZip(zip)) {
-              if (!lead.country) {
-                patch.country = "United States";
-              }
-              const tz = zipToTimeZone(zip);
-              if (tz) patch.time_zone = tz;
-            }
-          }
-          await updateMutation.mutateAsync(
-            patch as Parameters<typeof updateMutation.mutateAsync>[0],
-          );
-        }}
+        // Frozen table (2026-07-20): inline edit disabled for ALL rows —
+        // direct writes are blocked by RLS now. View-only history.
+        onInlineSave={undefined}
         inlineEditExcluded={[
           "first_name",
           "last_name",
@@ -739,8 +683,8 @@ export function LeadDetail() {
       <ConfirmDialog
         open={showArchive}
         onOpenChange={setShowArchive}
-        title="Archive Lead"
-        description="This will hide the lead from active views. An admin can restore it later."
+        title="Archive Import"
+        description="This will hide the import from active views. An admin can restore it later."
         confirmLabel="Archive"
         destructive
         onConfirm={handleArchive}
@@ -754,22 +698,6 @@ export function LeadDetail() {
         />
       )}
 
-      <ChangeOwnerDialog
-        open={showChangeOwner}
-        onOpenChange={setShowChangeOwner}
-        currentOwnerId={lead.owner_user_id}
-        onConfirm={(newOwnerId) => {
-          if (!id) return;
-          updateMutation.mutate(
-            { id, owner_user_id: newOwnerId },
-            {
-              onSuccess: () => toast.success("Owner updated"),
-              onError: (err) => toast.error("Failed to update owner: " + (err as Error).message),
-            }
-          );
-        }}
-        title="Change Lead Owner"
-      />
     </div>
   );
 }

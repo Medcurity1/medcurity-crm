@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useUrlNumberState, useUrlArrayState, useUrlState, useUrlSortState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Users, Plus, Search, UploadCloud } from "lucide-react";
+import { Users, Plus, Search, UploadCloud, ListChecks } from "lucide-react";
 import { useContacts, useArchiveContact, useBulkUpdateOwner, useBulkDeleteContacts } from "./api";
 import { toast } from "sonner";
 import { useUsers, useStatesInUse } from "@/features/accounts/api";
@@ -49,6 +49,12 @@ import { useTags, useApplyTag, useContactTagsMap } from "@/features/tags/api";
 import { TagChips } from "@/features/tags/TagChips";
 import { TagPicker } from "@/features/tags/TagPicker";
 import { AddToListDialog } from "@/features/lead-lists/AddToListDialog";
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+} from "@/components/ui/context-menu";
 
 const CONTACTS_COLUMNS: ColumnDescriptor[] = [
   { key: "select", label: "Select", locked: true, headClassName: "w-10" },
@@ -76,6 +82,10 @@ export function ContactsList() {
   const [page, setPage] = useUrlNumberState("page", 0);
   const [pageSize, setPageSize] = useUrlNumberState("size", 25);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Right-click "Add to list": targets the clicked contact — or the whole
+  // selection when the clicked row is part of it (Nathan 2026-07-20).
+  const [ctxListIds, setCtxListIds] = useState<string[]>([]);
+  const [ctxListOpen, setCtxListOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [addToListOpen, setAddToListOpen] = useState(false);
   // Bulk delete is confirmed via the app ConfirmDialog (not window.confirm)
@@ -473,17 +483,38 @@ export function ContactsList() {
               </TableHeader>
               <TableBody>
                 {contacts.map((contact) => (
-                  <TableRow key={contact.id} className="cursor-pointer transition-colors hover:bg-muted/40" onClick={() => navigate(`/contacts/${contact.id}`)}>
-                    {cols.visibleColumns.map((c) => (
-                      <TableCell
-                        key={c.key}
-                        className={c.align === "right" ? "text-right" : undefined}
-                        onClick={c.key === "select" ? (e) => e.stopPropagation() : undefined}
+                  <ContextMenu key={contact.id}>
+                    <ContextMenuTrigger asChild>
+                      <TableRow className="cursor-pointer transition-colors hover:bg-muted/40" onClick={() => navigate(`/contacts/${contact.id}`)}>
+                        {cols.visibleColumns.map((c) => (
+                          <TableCell
+                            key={c.key}
+                            className={c.align === "right" ? "text-right" : undefined}
+                            onClick={c.key === "select" ? (e) => e.stopPropagation() : undefined}
+                          >
+                            {cellRenderers[c.key]?.(contact)}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent>
+                      <ContextMenuItem
+                        onSelect={() => {
+                          const ids =
+                            selectedIds.has(contact.id) && selectedIds.size > 1
+                              ? Array.from(selectedIds)
+                              : [contact.id];
+                          setCtxListIds(ids);
+                          setCtxListOpen(true);
+                        }}
                       >
-                        {cellRenderers[c.key]?.(contact)}
-                      </TableCell>
-                    ))}
-                  </TableRow>
+                        <ListChecks className="h-4 w-4" />
+                        {selectedIds.has(contact.id) && selectedIds.size > 1
+                          ? `Add ${selectedIds.size} selected to list…`
+                          : "Add to list…"}
+                      </ContextMenuItem>
+                    </ContextMenuContent>
+                  </ContextMenu>
                 ))}
               </TableBody>
             </Table>
@@ -533,6 +564,12 @@ export function ContactsList() {
         onOpenChange={setAddToListOpen}
         contactIds={Array.from(selectedIds)}
         onAdded={() => setSelectedIds(new Set())}
+      />
+
+      <AddToListDialog
+        open={ctxListOpen}
+        onOpenChange={setCtxListOpen}
+        contactIds={ctxListIds}
       />
 
       <ConfirmDialog

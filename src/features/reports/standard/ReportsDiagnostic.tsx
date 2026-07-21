@@ -166,37 +166,30 @@ export function ReportsDiagnostic() {
             .gte("close_date", `${today.getUTCFullYear()}-01-01`),
         ),
 
-        // ---------- LEADS ----------
+        // ---------- IMPORTS PEN (lead type retired 2026-07-20) ----------
         count(
-          "All leads",
-          "total rows in public.leads",
+          "Pending imports (pen)",
+          "contacts with import_status='pending', not archived",
+          supabase
+            .from("contacts")
+            .select("*", opts)
+            .eq("import_status", "pending")
+            .is("archived_at", null),
+        ),
+        count(
+          "  ... promoted via pen",
+          "import_company kept, pen flag cleared",
+          supabase
+            .from("contacts")
+            .select("*", opts)
+            .not("import_company", "is", null)
+            .is("import_status", null)
+            .is("archived_at", null),
+        ),
+        count(
+          "Legacy leads table (frozen)",
+          "total rows in public.leads — history only, all archived post-retirement",
           supabase.from("leads").select("*", opts),
-        ),
-        count(
-          "  ... live (archived_at IS NULL)",
-          "non-archived leads",
-          supabase.from("leads").select("*", opts).is("archived_at", null),
-        ),
-        count(
-          "  ... mql_date IS NOT NULL",
-          "leads that were ever MQL",
-          supabase
-            .from("leads")
-            .select("*", opts)
-            .is("archived_at", null)
-            .not("mql_date", "is", null),
-        ),
-        count(
-          `MQL Leads QTD (${qStart} → ${qEnd})`,
-          "mql_date in current quarter AND not converted",
-          supabase
-            .from("leads")
-            .select("*", opts)
-            .is("archived_at", null)
-            .not("mql_date", "is", null)
-            .neq("status", "converted")
-            .gte("mql_date", qStart)
-            .lte("mql_date", qEnd),
         ),
 
         // ---------- CONTACTS ----------

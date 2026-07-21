@@ -122,6 +122,8 @@ export function AddContactDialog({
         .from("contacts")
         .select(CONTACT_SELECT)
         .is("archived_at", null)
+        // Pending imports stay in the pen until promoted.
+        .is("import_status", null)
         .order("last_name")
         .limit(25);
       const orClause = buildPersonSearchClause(q, [

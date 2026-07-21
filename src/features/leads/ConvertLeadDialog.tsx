@@ -325,17 +325,17 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
         } catch (err) {
           console.error("Failed to attach products to converted opp:", err);
           toast.error(
-            "Lead converted, but products failed to attach. Open the opportunity and add them from the products section.",
+            "Promoted, but products failed to attach. Open the opportunity and add them from the products section.",
           );
         }
       }
 
       toast.success(
         mode === "none"
-          ? "Lead promoted to a contact (no account)"
+          ? "Promoted to a contact (no account)"
           : mode === "existing"
-            ? `Lead converted into existing account "${result.account.name}"`
-            : `Lead converted — new account "${result.account.name}" created`
+            ? `Promoted into existing account "${result.account.name}"`
+            : `Promoted — new account "${result.account.name}" created`
       );
       // Close dialog first, then navigate. Target is the new CONTACT —
       // this is the "newly created record" the rep cares about, and it
@@ -347,7 +347,7 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
       onOpenChange(false);
       navigate(`/contacts/${result.contact.id}`, { replace: true });
     } catch (err) {
-      toast.error("Failed to convert lead: " + (err as Error).message);
+      toast.error("Failed to promote: " + (err as Error).message);
     }
   }
 
@@ -355,9 +355,9 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Convert Lead</DialogTitle>
+          <DialogTitle>Promote to Contact</DialogTitle>
           <DialogDescription>
-            Convert this lead into an Account, Contact, and optionally an Opportunity.
+            Promote this import into an Account, Contact, and optionally an Opportunity.
           </DialogDescription>
         </DialogHeader>
 
@@ -681,12 +681,12 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
             }
           >
             {convertMutation.isPending || addProductsBulkMutation.isPending
-              ? "Converting..."
+              ? "Promoting..."
               : mode === "none"
                 ? "Promote to contact (no account)"
                 : mode === "existing"
-                  ? "Convert into existing account"
-                  : "Convert + create new account"}
+                  ? "Promote into existing account"
+                  : "Promote + create new account"}
           </Button>
         </DialogFooter>
       </DialogContent>

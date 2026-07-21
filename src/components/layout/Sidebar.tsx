@@ -4,7 +4,7 @@ import {
   Home,
   Building2,
   Users,
-  UserPlus,
+  Inbox,
   Handshake,
   Target,
   Kanban,
@@ -88,10 +88,11 @@ const navItems: NavItem[] = [
   { to: "/meddy", icon: Bot, label: "Meddy", secret: "meddysweeper" },
   { to: "/accounts", icon: Building2, label: "Accounts" },
   { to: "/contacts", icon: Users, label: "Contacts" },
+  // Lists live inside Reports (?tab=lists) — one insights tab, no extra
+  // sidebar entry (Nathan 2026-07-20).
   { to: "/opportunities", icon: Target, label: "Opportunities", secret: "dealmerger" },
   { to: "/pipeline", icon: Kanban, label: "Pipeline", secret: "pipeline" },
   { to: "/partners", icon: Handshake, label: "Partners" },
-  { to: "/calendar", icon: CalendarIcon, label: "Calendar" },
   { to: "/activities", icon: Clock, label: "Activities" },
   { to: "/products", icon: Package, label: "Products" },
   { to: "/renewals", icon: RefreshCw, label: "Renewals" },
@@ -99,6 +100,9 @@ const navItems: NavItem[] = [
   // Forecasting + Analytics moved into /reports as tabs (2026-04-17).
   // "New" badge retired 2026-07-02 (Nathan).
   { to: "/requests", icon: MessageSquarePlus, label: "Requests" },
+  // Calendar demoted below Requests (Nathan 2026-07-20: rarely used;
+  // bumps Reports/Requests up without reordering anything else).
+  { to: "/calendar", icon: CalendarIcon, label: "Calendar" },
   // Nexus: the customizable widget dashboard (Jordan V4). Lives at /nexus
   // while it's being tested; the classic Home dashboard is back at "/"
   // (Nathan, 2026-07-03).
@@ -110,9 +114,10 @@ const adminItems: NavItem[] = [
   // "Playbook"). AI ideas + Smartlead cold email + newsletters. Route stays
   // /playbook for stable deep-links. Admin-only (for now).
   { to: "/playbook", icon: Megaphone, label: "Campaigns", badge: { label: "Admin", className: ADMIN_BADGE } },
-  // Leads = the admin-only working list / import drop zone. Kept the
-  // "Leads" name (reps don't see it; admins manage + promote to Contacts).
-  { to: "/leads", icon: UserPlus, label: "Leads", badge: { label: "Admin", className: ADMIN_BADGE } },
+  // Imports = the admin-only landing pen for raw lists (renamed from
+  // "Leads" 2026-07-20 after the prod lead cleanup; reps don't see it —
+  // admins clean + promote to Contacts or archive).
+  { to: "/imports", icon: Inbox, label: "Imports", badge: { label: "Admin", className: ADMIN_BADGE } },
   { to: "/archive", icon: Archive, label: "Archive", badge: { label: "Admin", className: ADMIN_BADGE } },
   { to: "/admin", icon: Settings, label: "Admin Settings", badge: { label: "Admin", className: ADMIN_BADGE } },
 ];

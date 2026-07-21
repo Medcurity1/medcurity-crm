@@ -22,9 +22,133 @@
         rel="stylesheet"
       />
     </noscript>
+    <script>
+      /* Boot recovery. Lives INLINE in the HTML (not in a hashed chunk) so it
+         still works in the worst case: a stale cached index.html pointing at
+         entry chunks a newer deploy already deleted — the case where the
+         in-app recovery in main.tsx never gets to run because main.tsx itself
+         404s. Safari resurrects stale documents from its tab-restore /
+         back-forward cache without revalidating, so this is the layer that
+         catches it. %%BUILD_ID%% is stamped by vite.config.ts. */
+      (function () {
+        window.__appBooted = false;
+        var BUILD = "%%BUILD_ID%%";
+        /* If _rb= is present we already auto-retried once for this URL —
+           don't loop; show the manual fallback instead. */
+        var retried = /[?&]_rb=/.test(location.search);
+        var recovering = false;
+        function show() {
+          if (window.__appBooted) return;
+          var el = document.getElementById("boot-fallback");
+          if (el) el.style.display = "flex";
+        }
+        function bust() {
+          location.replace(
+            location.pathname +
+              (location.search ? location.search + "&" : "?") +
+              "_rb=" +
+              new Date().getTime() +
+              location.hash
+          );
+        }
+        function recover() {
+          if (window.__appBooted || recovering) return;
+          recovering = true;
+          if (retried) {
+            show();
+            return;
+          }
+          /* Verify freshness before reloading: a plain reload can be handed
+             the same stale HTML again (observed on Safari 2026-07-17). If the
+             server's build differs from ours, a cache-busted reload gets the
+             new HTML; if it matches, reloading won't help — show the manual
+             fallback instead of looping. */
+          try {
+            fetch("/version.json?_=" + new Date().getTime(), { cache: "no-store" })
+              .then(function (r) {
+                return r.json();
+              })
+              .then(function (v) {
+                if (window.__appBooted) return;
+                if (v && v.build && v.build !== BUILD) bust();
+                else show();
+              })
+              .catch(function () {
+                if (!window.__appBooted) bust();
+              });
+          } catch (e) {
+            show();
+          }
+        }
+        window.__pulseBootRecover = recover;
+        /* Capture-phase listener sees <script>/<link> load failures (they
+           don't bubble). Only /assets/ URLs — never fires for fonts/APIs. */
+        window.addEventListener(
+          "error",
+          function (e) {
+            var t = e && e.target;
+            var url = t && (t.src || t.href);
+            if (url && String(url).indexOf("/assets/") !== -1) recover();
+          },
+          true
+        );
+        /* Watchdog: something died silently (blocked storage, script error
+           before render). On a genuinely slow connection this briefly shows
+           the "taking a while" card, which the app removes when it mounts. */
+        setTimeout(recover, 20000);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <div
+      id="boot-fallback"
+      style="
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        align-items: center;
+        justify-content: center;
+        background: #f8fafc;
+        color: #0f172a;
+        font-family: system-ui, -apple-system, sans-serif;
+        text-align: center;
+        padding: 24px;
+      "
+    >
+      <div>
+        <div style="font-size: 18px; font-weight: 600; margin-bottom: 8px">
+          Pulse is taking a while to load
+        </div>
+        <div
+          style="
+            font-size: 14px;
+            color: #475569;
+            max-width: 340px;
+            margin: 0 auto 16px;
+          "
+        >
+          This is usually a one-time hiccup after an update. Reloading normally
+          fixes it.
+        </div>
+        <button
+          onclick="location.replace(location.pathname + (location.search ? location.search + '&' : '?') + '_rb=' + new Date().getTime() + location.hash)"
+          style="
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: none;
+            background: #127ebf;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+          "
+        >
+          Reload
+        </button>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ReactNode } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
@@ -10,6 +10,12 @@ import { LoginPage } from "@/features/auth/LoginPage";
 import { ForgotPasswordPage } from "@/features/auth/ForgotPasswordPage";
 import { ResetPasswordPage } from "@/features/auth/ResetPasswordPage";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { setClientErrorAppVersion } from "@/lib/clientErrorLogger";
+import { BUILD_ID } from "@/lib/buildInfo";
+
+// Stamp client-error telemetry with the running build so "was this fixed
+// by the next deploy?" is answerable from the log.
+setClientErrorAppVersion(BUILD_ID);
 
 // Lazy-loaded route components for code splitting
 //
@@ -31,9 +37,8 @@ const NotFound = lazy(() => import("@/features/NotFound").then(m => ({ default: 
 const AccountsList = lazy(() => import("@/features/accounts/AccountsList").then(m => ({ default: m.AccountsList })));
 const AccountDetail = lazy(() => import("@/features/accounts/AccountDetail").then(m => ({ default: m.AccountDetail })));
 const AccountForm = lazy(() => import("@/features/accounts/AccountForm").then(m => ({ default: m.AccountForm })));
-const LeadsList = lazy(() => import("@/features/leads/LeadsList").then(m => ({ default: m.LeadsList })));
+const ImportsPen = lazy(() => import("@/features/leads/ImportsPen").then(m => ({ default: m.ImportsPen })));
 const LeadDetail = lazy(() => import("@/features/leads/LeadDetail").then(m => ({ default: m.LeadDetail })));
-const LeadForm = lazy(() => import("@/features/leads/LeadForm").then(m => ({ default: m.LeadForm })));
 const ContactsList = lazy(() => import("@/features/contacts/ContactsList").then(m => ({ default: m.ContactsList })));
 const ContactDetail = lazy(() => import("@/features/contacts/ContactDetail").then(m => ({ default: m.ContactDetail })));
 const ContactForm = lazy(() => import("@/features/contacts/ContactForm").then(m => ({ default: m.ContactForm })));
@@ -86,6 +91,25 @@ function AdminGate({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/** /leads/* → /imports/* forwarder. Old URLs live in task-reminder emails,
+ * bookmarks, activity links, and "Promoted from" callouts — keep them
+ * working permanently. */
+function LeadsPathRedirect() {
+  const loc = useLocation();
+  return (
+    <Navigate
+      to={loc.pathname.replace(/^\/leads/, "/imports") + loc.search + loc.hash}
+      replace
+    />
+  );
+}
+
+/** Old edit URLs land on the read-only legacy detail instead. */
+function LegacyImportEditRedirect() {
+  const loc = useLocation();
+  return <Navigate to={loc.pathname.replace(/\/edit$/, "")} replace />;
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -127,16 +151,25 @@ export default function App() {
                   <Route path="accounts/new" element={<AccountForm />} />
                   <Route path="accounts/:id" element={<AccountDetail />} />
                   <Route path="accounts/:id/edit" element={<AccountForm />} />
-                  {/* Leads (admin-only working/import list). Gate the list
-                      route too, matching the other leads routes — the
-                      component also guards, this is belt-and-suspenders. */}
-                  <Route path="leads" element={<AdminGate><LeadsList /></AdminGate>} />
-                  <Route path="leads/new" element={<AdminGate><LeadForm /></AdminGate>} />
-                  <Route path="leads/:id" element={<AdminGate><LeadDetail /></AdminGate>} />
-                  <Route path="leads/:id/edit" element={<AdminGate><LeadForm /></AdminGate>} />
+                  {/* Imports (admin-only pen — formerly "Leads"). The list
+                      is the contacts-backed pen (ImportsPen); /imports/:id
+                      stays on LeadDetail for LEGACY old-pen rows (pen rows
+                      are contacts and link to /contacts/:id). Gate the list
+                      route too — the component also guards, this is
+                      belt-and-suspenders. */}
+                  <Route path="imports" element={<AdminGate><ImportsPen /></AdminGate>} />
+                  {/* The leads table is FROZEN history: no create/edit routes
+                      (review finding #10 — /imports/new could still write a
+                      lead row). Detail stays read-only for legacy links. */}
+                  <Route path="imports/new" element={<Navigate to="/contacts/new" replace />} />
+                  <Route path="imports/:id" element={<AdminGate><LeadDetail /></AdminGate>} />
+                  <Route path="imports/:id/edit" element={<LegacyImportEditRedirect />} />
+                  <Route path="leads/*" element={<LeadsPathRedirect />} />
                   <Route path="playbook" element={<AdminGate><PlaybookPage /></AdminGate>} />
                   <Route path="partners" element={<PartnersPage />} />
                   <Route path="contacts" element={<ContactsList />} />
+                  {/* Lists moved into the Reports hub (Nathan 2026-07-20). */}
+                  <Route path="lists" element={<Navigate to="/reports?tab=lists" replace />} />
                   <Route path="contacts/new" element={<ContactForm />} />
                   <Route path="contacts/:id" element={<ContactDetail />} />
                   <Route path="contacts/:id/edit" element={<ContactForm />} />

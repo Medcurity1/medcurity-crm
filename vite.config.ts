@@ -2,11 +2,35 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+import fs from "fs";
+
+// Build identity: the CI commit sha on deploys, a per-build local id
+// otherwise. Stamped into the bundle (__BUILD_ID__), into index.html's
+// inline boot-recovery script (%%BUILD_ID%%), and emitted as /version.json
+// so a running client can ask "is there a newer build than me?".
+const buildId =
+  (process.env.GITHUB_SHA || "").slice(0, 12) ||
+  `local-${Date.now().toString(36)}`;
 
 export default defineConfig({
+  define: {
+    __BUILD_ID__: JSON.stringify(buildId),
+  },
   plugins: [
     react(),
     tailwindcss(),
+    {
+      name: "build-version",
+      transformIndexHtml(html) {
+        return html.replace(/%%BUILD_ID%%/g, buildId);
+      },
+      writeBundle() {
+        fs.writeFileSync(
+          path.resolve(__dirname, "dist/version.json"),
+          JSON.stringify({ build: buildId }),
+        );
+      },
+    },
     {
       name: "preload-app-chunk",
       transformIndexHtml: {

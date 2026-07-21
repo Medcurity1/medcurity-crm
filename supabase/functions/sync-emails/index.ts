@@ -1213,7 +1213,14 @@ async function syncConnection(
     const unmatchedAddresses = Array.from(externalAddresses).filter(
       (a) => !contactMap.has(a)
     );
-    const leadMap = await matchLeadsByEmail(supabase, unmatchedAddresses);
+    // Lead-type retirement (2026-07-20): leads are frozen history — emails
+    // never match/log onto them anymore. Empty map keeps the downstream
+    // loop shape untouched (matchLeadsByEmail + helpers removed in the
+    // dedicated cleanup piece; touching this outage-prone fn is kept
+    // minimal on purpose).
+    void matchLeadsByEmail; // retained, deliberately unused
+    void unmatchedAddresses;
+    const leadMap = new Map<string, LeadMatch>();
 
     // 7. Create activities for matched emails (dedup aware).
     //    Per Brayden 2026-04-17: when multiple contacts on the same account

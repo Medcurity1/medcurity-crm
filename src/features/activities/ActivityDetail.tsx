@@ -184,7 +184,7 @@ export function ActivityDetail() {
             {activity.lead && (
               <RelatedLink
                 label="Lead"
-                to={`/leads/${activity.lead.id}`}
+                to={`/imports/${activity.lead.id}`}
                 name={`${activity.lead.first_name ?? ""} ${activity.lead.last_name ?? ""}`.trim() || activity.lead.company || ""}
               />
             )}

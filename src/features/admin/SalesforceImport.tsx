@@ -4731,7 +4731,9 @@ export function SalesforceImport() {
                 <SelectItem value="opportunity_products">
                   Opportunity Line Items (OpportunityLineItem.csv)
                 </SelectItem>
-                <SelectItem value="leads">Leads</SelectItem>
+                {/* "leads" retired 2026-07-20 (lead-type retirement): raw
+                    lists go through Imports → Import a list (the pen). The
+                    importer branches stay for typing but are unpickable. */}
                 <SelectItem value="tasks">
                   Tasks / Activities (Task.csv)
                 </SelectItem>

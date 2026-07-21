@@ -26,7 +26,7 @@ export interface FilterColumnDef {
   /** Human-readable label shown in the UI dropdown. */
   label: string;
   /** Column type — drives which operators & value inputs are shown. */
-  type: ColumnDef["type"] | RelationFilterType;
+  type: ColumnDef["type"] | RelationFilterType | "tags";
   /** For enum columns, the set of valid values. */
   enumValues?: string[];
   /**
@@ -250,6 +250,9 @@ const contactFilterColumns: FilterColumnDef[] = [
   { filterKey: "mailing_country", label: "Mailing Country", type: "text" },
   { filterKey: "created_at", label: "Created", type: "date" },
   { filterKey: "updated_at", label: "Updated", type: "date" },
+  // Virtual column (Nathan 2026-07-17 "reports based on tags"): resolved via
+  // a contact_tags!inner embed in report-api, not a flat column.
+  { filterKey: "_tags", label: "Tags", type: "tags" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -669,9 +672,13 @@ export const ENTITY_DEFS: Record<string, EntityDef> = {
     joins: "*, product:products!product_id(name, code), opportunity:opportunities!opportunity_id(name)",
   },
 
+  // RETIRED 2026-07-20 (lead-type retirement): kept ONLY so saved reports
+  // built before the cutover keep rendering (against the frozen, all-
+  // archived leads table → empty results) instead of crashing getEntityDef.
+  // Hidden from pickers via the ENTITY_KEYS filter below.
   leads: {
     key: "leads",
-    label: "Leads",
+    label: "Leads (retired)",
     table: "leads",
     columns: leadColumns,
     filterColumns: leadFilterColumns,
@@ -680,7 +687,10 @@ export const ENTITY_DEFS: Record<string, EntityDef> = {
   },
 };
 
-export const ENTITY_KEYS = Object.keys(ENTITY_DEFS) as Array<keyof typeof ENTITY_DEFS>;
+// 'leads' is def-only (legacy saved reports) — never offered in pickers.
+export const ENTITY_KEYS = Object.keys(ENTITY_DEFS).filter(
+  (k) => k !== "leads",
+) as Array<keyof typeof ENTITY_DEFS>;
 
 export function getEntityDef(entityKey: string): EntityDef {
   const def = ENTITY_DEFS[entityKey];
@@ -720,6 +730,7 @@ export function isRelationFilterType(type: string): type is RelationFilterType {
  */
 function resolveOperatorType(type: FilterColumnDef["type"]): ColumnDef["type"] {
   if (isRelationFilterType(type)) return "enum";
+  if (type === "tags") return "enum"; // handled before this in getOperatorsForType
   return type;
 }
 
@@ -760,6 +771,10 @@ export const FILTER_OPERATORS: Array<{
 ];
 
 export function getOperatorsForType(type: FilterColumnDef["type"]) {
+  // Tags are a multi-value relation — exactly one sensible operator.
+  if (type === "tags") {
+    return [{ value: "in", label: "has any of", applicableTo: [] as Array<ColumnDef["type"]> }];
+  }
   const resolved = resolveOperatorType(type);
   return FILTER_OPERATORS.filter((op) => op.applicableTo.includes(resolved));
 }

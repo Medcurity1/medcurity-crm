@@ -1,7 +1,23 @@
 // inbound-lead Edge Function
 //
-// Public API endpoint for the Medcurity website to push new leads into the CRM.
-// Replaces the Salesforce "Medcurity Website API" Connected App.
+// Public API endpoint for the Medcurity website to push new inquiries into
+// the CRM. Replaces the Salesforce "Medcurity Website API" Connected App.
+//
+// LEAD-TYPE RETIREMENT (2026-07-20, piece 2 of docs/imports-tab-plan.md):
+// submissions now land as CONTACTS, not leads. Per Nathan's decisions:
+//   - D1: a website inquiry is a hand-raiser → a REGULAR, visible contact
+//     (NOT hidden in the Imports pen). The raw company string is kept on
+//     import_company for the rep to attach the right account; we never
+//     auto-create accounts from a public form (bot/spam safety).
+//   - Nathan 7/20 (revised): NO task (the website already pings the team
+//     externally; task ownership differs every time). Bell notification
+//     only, to users who opted in via My Settings → Notifications
+//     ("website_inquiry_bell" pref — seeded ON for Nathan, Summer, Molly
+//     by migration 20260720130000; anyone can flip it).
+//   - Tagged "Website" for reporting.
+// Endpoint name/auth/payload/response shape are unchanged so the website
+// integration needs no changes (lead_id is still returned, aliasing the
+// contact id).
 //
 // Authentication: API key via X-API-Key header (set as INBOUND_LEAD_API_KEY secret).
 // No user JWT required — this is called by the website backend, not a browser.
@@ -18,7 +34,7 @@
 //   Body: { first_name, last_name, email, ... }
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -103,40 +119,54 @@ serve(async (req) => {
     } = body;
 
     // Support both camelCase (SF-style) and snake_case field names
-    const leadFirstName = first_name || FirstName;
-    const leadLastName = last_name || LastName;
-    const leadEmail = email || Email;
+    const inFirstName = first_name || FirstName;
+    const inLastName = last_name || LastName;
+    const inEmail = email || Email;
+    const inCompany = company || Company || null;
 
-    if (!leadFirstName || !leadLastName) {
+    if (!inFirstName || !inLastName) {
       return jsonResponse(
         { error: "Missing required fields: first_name and last_name" },
         400,
       );
     }
 
-    // ── Build the lead record ────────────────────────────────────────
-    const leadRecord: Record<string, unknown> = {
-      first_name: leadFirstName,
-      last_name: leadLastName,
-      email: leadEmail || null,
+    // Fields with no contact column live in the notes so nothing the
+    // website sends is dropped (leads had dedicated columns for these).
+    const noteLines: string[] = [];
+    const inDescription = description || Description;
+    if (inDescription) noteLines.push(String(inDescription));
+    // Company also goes in the notes: import_company alone renders nowhere
+    // on a non-pending contact, and the rep must be able to see the org
+    // the hand-raiser typed (review finding #2).
+    if (inCompany) noteLines.push(`Company: ${inCompany}`);
+    const inIndustry = industry || Industry;
+    if (inIndustry) noteLines.push(`Industry: ${inIndustry}`);
+    const inWebsite = website || sfWebsite;
+    if (inWebsite) noteLines.push(`Website: ${inWebsite}`);
+    const inEmployees = employees || NumberOfEmployees;
+    if (inEmployees) noteLines.push(`Employees: ${inEmployees}`);
+    const inRevenue = annual_revenue || AnnualRevenue;
+    if (inRevenue) noteLines.push(`Annual revenue: ${inRevenue}`);
+
+    const contactRecord: Record<string, unknown> = {
+      first_name: inFirstName,
+      last_name: inLastName,
+      email: inEmail || null,
       phone: phone || Phone || null,
-      company: company || Company || null,
       title: title || Title || null,
-      industry: industry || Industry || null,
-      website: website || sfWebsite || null,
-      description: description || Description || null,
-      employees: employees || NumberOfEmployees || null,
-      annual_revenue: annual_revenue || AnnualRevenue || null,
-      street: street || Street || null,
-      city: city || City || null,
-      state: state || State || null,
-      zip: zip || PostalCode || null,
-      country: country || sfCountry || "United States",
-      source: mapLeadSource(source || LeadSource),
+      mailing_street: street || Street || null,
+      mailing_city: city || City || null,
+      mailing_state: state || State || null,
+      mailing_zip: zip || PostalCode || null,
+      mailing_country: country || sfCountry || "United States",
+      lead_source: mapLeadSource(source || LeadSource),
       lead_source_detail: lead_source_detail || LeadSource || null,
-      status: "new",
-      qualification: "unqualified",
-      score: 0,
+      notes: noteLines.length ? noteLines.join("\n") : null,
+      // Raw company string, promote-style: a rep attaches the right
+      // account while working the follow-up task. Never auto-created
+      // from a public form.
+      import_company: inCompany,
       custom_fields: {},
     };
 
@@ -146,56 +176,93 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    // Deduplicate: check if a lead with this email already exists.
-    // Case-insensitive so a website resubmission with different casing —
-    // John@x.com vs john@x.com — doesn't slip through as a fresh duplicate.
-    // We use ILIKE for the case-fold, but escape LIKE metacharacters (% _ \)
-    // first so an email with a legal underscore (john_doe@x.com) matches
-    // literally instead of acting as a wildcard (which would false-positive
-    // and silently drop a real new lead).
-    if (leadEmail) {
-      const emailPattern = leadEmail.replace(/[\\%_]/g, "\\$&");
-      const { data: existing } = await supabase
-        .from("leads")
-        .select("id, email, status")
-        .ilike("email", emailPattern)
-        .neq("status", "converted")
+    // Deduplicate: does a live contact already have this email (any of the
+    // up-to-3 email columns)? Case-insensitive ILIKE with LIKE
+    // metacharacters (% _ \) escaped so a legal underscore in an address
+    // matches literally instead of acting as a wildcard.
+    let existing: { id: string; import_status: string | null } | null = null;
+    if (inEmail) {
+      const emailPattern = String(inEmail).replace(/[\\%_]/g, "\\$&");
+      const { data } = await supabase
+        .from("contacts")
+        .select("id, import_status")
+        .or(
+          `email.ilike.${emailPattern},email2.ilike.${emailPattern},email3.ilike.${emailPattern}`,
+        )
+        .is("archived_at", null)
         .limit(1)
         .maybeSingle();
-
-      if (existing) {
-        return jsonResponse(
-          {
-            success: true,
-            action: "duplicate_skipped",
-            message: `Lead with email ${leadEmail} already exists`,
-            lead_id: existing.id,
-          },
-          200,
-        );
-      }
+      existing = data ?? null;
     }
 
-    const { data: newLead, error: insertError } = await supabase
-      .from("leads")
-      .insert(leadRecord)
+    if (existing) {
+      // A repeat submission is still a hand-raiser: no duplicate contact,
+      // but the same follow-up signals fire on the existing record.
+      //
+      // If the match is a PENDING pen row (they were on some imported list
+      // and just raised their hand on the website), PROMOTE it out of the
+      // pen account-less — a hand-raiser must be visible in Contacts, not
+      // buried in the admin-only pen (review finding #3).
+      const wasPending = existing.import_status === "pending";
+      if (wasPending) {
+        const { error: promoteError } = await supabase
+          .from("contacts")
+          .update({ import_status: null })
+          .eq("id", existing.id);
+        if (promoteError) {
+          console.error("pen self-promote failed:", promoteError);
+        }
+      }
+      await ensureWebsiteTag(supabase, existing.id);
+      await sendInquiryBells(supabase, {
+        contactId: existing.id,
+        name: `${inFirstName} ${inLastName}`,
+        company: inCompany,
+        // A pen row surfacing via the form is effectively a FIRST arrival.
+        repeat: !wasPending,
+      });
+
+      return jsonResponse(
+        {
+          success: true,
+          action: "duplicate_skipped",
+          message: `Contact with email ${inEmail} already exists`,
+          contact_id: existing.id,
+          // Back-compat alias (pre-2026-07-20 integrations read lead_id).
+          lead_id: existing.id,
+        },
+        200,
+      );
+    }
+
+    const { data: newContact, error: insertError } = await supabase
+      .from("contacts")
+      .insert(contactRecord)
       .select("id, email, first_name, last_name")
       .single();
 
     if (insertError) {
-      console.error("Failed to insert lead:", insertError);
+      console.error("Failed to insert contact:", insertError);
       return jsonResponse(
-        { error: "Failed to create lead: " + insertError.message },
+        { error: "Failed to create contact: " + insertError.message },
         500,
       );
     }
 
+    await ensureWebsiteTag(supabase, newContact.id);
+    await sendInquiryBells(supabase, {
+      contactId: newContact.id,
+      name: `${newContact.first_name} ${newContact.last_name}`,
+      company: inCompany,
+      repeat: false,
+    });
+
     // ── Log it ───────────────────────────────────────────────────────
     await supabase.from("audit_logs").insert({
-      entity: "leads",
-      record_id: newLead.id,
+      entity: "contacts",
+      record_id: newContact.id,
       action: "create",
-      new_data: leadRecord,
+      new_data: contactRecord,
       performed_by: null, // system / API
     }).then(() => {/* ignore audit errors */});
 
@@ -203,12 +270,22 @@ serve(async (req) => {
       {
         success: true,
         action: "created",
-        lead_id: newLead.id,
+        contact_id: newContact.id,
+        // Back-compat aliases (pre-2026-07-20 integrations read lead_id
+        // and the lead object — keep BOTH until the website side is
+        // confirmed; review finding #4).
+        lead_id: newContact.id,
         lead: {
-          id: newLead.id,
-          first_name: newLead.first_name,
-          last_name: newLead.last_name,
-          email: newLead.email,
+          id: newContact.id,
+          first_name: newContact.first_name,
+          last_name: newContact.last_name,
+          email: newContact.email,
+        },
+        contact: {
+          id: newContact.id,
+          first_name: newContact.first_name,
+          last_name: newContact.last_name,
+          email: newContact.email,
         },
       },
       201,
@@ -218,6 +295,96 @@ serve(async (req) => {
     return jsonResponse({ error: String(err) }, 500);
   }
 });
+
+/** Get-or-create the "Website" tag and attach it (idempotent via the
+ * (contact_id, tag_id) primary key). Failures are logged, never fatal —
+ * the contact itself is the payload that matters. */
+async function ensureWebsiteTag(supabase: SupabaseClient, contactId: string) {
+  try {
+    let tagId: string | null = null;
+    const { data: tag } = await supabase
+      .from("tags")
+      .select("id")
+      .ilike("name", "website")
+      .limit(1)
+      .maybeSingle();
+    if (tag) {
+      tagId = tag.id;
+    } else {
+      const { data: created } = await supabase
+        .from("tags")
+        .insert({ name: "Website", description: "Came in via the website form" })
+        .select("id")
+        .single();
+      tagId = created?.id ?? null;
+    }
+    if (tagId) {
+      await supabase
+        .from("contact_tags")
+        .upsert(
+          { contact_id: contactId, tag_id: tagId },
+          { onConflict: "contact_id,tag_id", ignoreDuplicates: true },
+        );
+    }
+  } catch (err) {
+    console.error("ensureWebsiteTag failed:", err);
+  }
+}
+
+/** Nathan 7/20 (revised): bell notifications ONLY — no task (ownership
+ * differs every time; the website already pings the team externally).
+ * Recipients = active users whose website_inquiry_bell pref is on
+ * (opt-in; seeded ON for Nathan/Summer/Molly). A one-hour guard on the
+ * same contact link keeps a double-submit from double-pinging. Failures
+ * are logged, never fatal. */
+async function sendInquiryBells(
+  supabase: SupabaseClient,
+  args: {
+    contactId: string;
+    name: string;
+    company: string | null;
+    repeat: boolean;
+  },
+) {
+  try {
+    const { data: optedIn } = await supabase
+      .from("user_notification_prefs")
+      .select("user_id, user_profiles!inner(is_active)")
+      .eq("prefs->>website_inquiry_bell", "true")
+      .eq("user_profiles.is_active", true);
+    if (!optedIn || optedIn.length === 0) return;
+
+    const link = `/contacts/${args.contactId}`;
+
+    // Double-submit guard: if anyone was already pinged about this contact
+    // in the last hour, don't ping again.
+    const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const { data: recent } = await supabase
+      .from("notifications")
+      .select("id")
+      .eq("link", link)
+      .gte("created_at", cutoff)
+      .limit(1)
+      .maybeSingle();
+    if (recent) return;
+
+    const who = args.company ? `${args.name} (${args.company})` : args.name;
+    const { error: notifError } = await supabase.from("notifications").insert(
+      optedIn.map((r) => ({
+        user_id: r.user_id,
+        type: "system",
+        title: args.repeat ? "Website inquiry (repeat)" : "New website inquiry",
+        message: who,
+        link,
+      })),
+    );
+    if (notifError) {
+      console.error("notifications insert failed:", notifError);
+    }
+  } catch (err) {
+    console.error("sendInquiryBells failed:", err);
+  }
+}
 
 /**
  * Map incoming source values to the CRM's lead_source enum.

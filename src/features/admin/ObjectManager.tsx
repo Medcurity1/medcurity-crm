@@ -49,7 +49,7 @@ interface FieldRow {
 const ENTITY_LABELS: Record<string, string> = {
   accounts: "Account",
   contacts: "Contact",
-  leads: "Lead",
+  leads: "Lead (retired)",
   opportunities: "Opportunity",
   opportunity_products: "Opportunity Product",
   products: "Product",

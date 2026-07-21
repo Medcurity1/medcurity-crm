@@ -175,7 +175,7 @@ export function DoNotEmail() {
                   <TableRow><TableCell colSpan={7} className="p-6 text-sm text-muted-foreground text-center">Nothing to suppress in this category.</TableCell></TableRow>
                 ) : (
                   rows.slice(0, PREVIEW_LIMIT).map((r) => {
-                    const href = r.source_kind === "lead" ? `/leads/${r.source_id}` : `/contacts/${r.source_id}`;
+                    const href = r.source_kind === "lead" ? `/imports/${r.source_id}` : `/contacts/${r.source_id}`;
                     return (
                       <TableRow key={`${r.source_kind}-${r.source_id}-${r.reason}`}>
                         <TableCell><Link target="_blank" rel="noopener noreferrer" to={href} className="text-primary hover:underline">{r.first_name}</Link></TableCell>

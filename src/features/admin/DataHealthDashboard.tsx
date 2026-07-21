@@ -36,7 +36,6 @@ import { toast } from "sonner";
 import { useBulkUpdateOwner as useBulkUpdateAccountOwner } from "@/features/accounts/api";
 import { useBulkUpdateOwner as useBulkUpdateContactOwner } from "@/features/contacts/api";
 import { useBulkUpdateOwner as useBulkUpdateOpportunityOwner } from "@/features/opportunities/api";
-import { useBulkUpdateOwner as useBulkUpdateLeadOwner } from "@/features/leads/api";
 
 /* ---------- Types ---------- */
 
@@ -102,7 +101,9 @@ function useDataHealthCheck() {
         .from("data_health_check")
         .select("*");
       if (error) throw error;
-      return data as DataHealthRow[];
+      // The lead type is retired (2026-07-20): the frozen leads table's
+      // health rows are noise, and its write paths are gone.
+      return (data as DataHealthRow[]).filter((r) => r.entity !== "leads");
     },
   });
 }
@@ -183,7 +184,7 @@ function entityPath(entity: string): string {
     case "accounts": return "/accounts";
     case "contacts": return "/contacts";
     case "opportunities": return "/opportunities";
-    case "leads": return "/leads";
+    case "leads": return "/imports";
     default: return "/";
   }
 }
@@ -231,8 +232,6 @@ function useEntityBulkOwnerMutation(entity: string) {
   const accountsMut = useBulkUpdateAccountOwner();
   const contactsMut = useBulkUpdateContactOwner();
   const opportunitiesMut = useBulkUpdateOpportunityOwner();
-  const leadsMut = useBulkUpdateLeadOwner();
-
   switch (entity) {
     case "accounts":
       return accountsMut;
@@ -240,8 +239,7 @@ function useEntityBulkOwnerMutation(entity: string) {
       return contactsMut;
     case "opportunities":
       return opportunitiesMut;
-    case "leads":
-      return leadsMut;
+    // leads: frozen table, write policies dropped — no owner assignment.
     default:
       return null;
   }

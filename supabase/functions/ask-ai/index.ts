@@ -199,7 +199,10 @@ serve(async (req) => {
     async search_contacts(a) {
       let q = userClient.from("contacts")
         .select("id, first_name, last_name, title, email, account_id, owner_user_id, do_not_call, no_longer_employed", { count: "exact" })
-        .is("archived_at", null).limit(cap(a.limit));
+        .is("archived_at", null)
+        // Pending imports (the pen) aren't working contacts yet.
+        .is("import_status", null)
+        .limit(cap(a.limit));
       if (a.query) {
         // Strip PostgREST filter metacharacters so a search term can't inject
         // extra OR-conditions into the string-built .or() clause.

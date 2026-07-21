@@ -118,7 +118,7 @@ function getTaskRelated(
         ? `${name} · ${task.lead.company}`
         : task.lead.company
       : name || "Lead";
-    return { label, href: `/leads/${task.lead.id}` };
+    return { label, href: `/imports/${task.lead.id}` };
   }
   return null;
 }

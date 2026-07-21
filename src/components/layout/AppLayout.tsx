@@ -19,6 +19,7 @@ import { useNotificationToasts } from "@/hooks/useNotificationToasts";
 import { useMeddyPresence } from "@/features/meddy/useMeddyPresence";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { UpdateBanner } from "@/components/UpdateBanner";
 import { FriendlyLoading } from "@/components/FriendlyLoading";
 import { IdleWarningDialog } from "@/components/IdleWarningDialog";
 import { AnnouncementBanner } from "@/components/AnnouncementBanner";
@@ -247,6 +248,9 @@ export function AppLayout() {
             the persistent shell so it stays until dismissed, even across
             navigation. No-op when ACTIVE_ANNOUNCEMENT is null. */}
         <AnnouncementBanner />
+        {/* "New build available" nudge for stale long-lived / bfcache-restored
+            tabs (checks /version.json; see UpdateBanner). */}
+        <UpdateBanner />
         {/* One-time desktop-notification permission nudge (snoozes 14
             days on "Not now"; disappears forever once answered). */}
         <NotificationPermissionPrompt />

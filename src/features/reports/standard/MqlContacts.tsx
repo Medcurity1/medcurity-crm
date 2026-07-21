@@ -5,6 +5,7 @@ import { ArrowLeft, Download } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
+import { AddToListDialog } from "@/features/lead-lists/AddToListDialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -113,6 +114,7 @@ export function MqlContacts() {
   });
 
   const total = useMemo(() => (rows ?? []).length, [rows]);
+  const [listOpen, setListOpen] = useState(false);
 
   function exportCsv() {
     const header = [
@@ -168,6 +170,14 @@ export function MqlContacts() {
                 ))}
               </SelectContent>
             </Select>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isLoading || !rows?.length}
+              onClick={() => setListOpen(true)}
+            >
+              Save as list
+            </Button>
             <Button variant="outline" size="sm" onClick={exportCsv} disabled={isLoading}>
               <Download className="h-4 w-4 mr-1" />
               Export CSV
@@ -255,6 +265,11 @@ export function MqlContacts() {
           </div>
         </CardContent>
       </Card>
+      <AddToListDialog
+        open={listOpen}
+        onOpenChange={setListOpen}
+        contactIds={[...new Set((rows ?? []).map((r) => r.contact_id))]}
+      />
     </div>
   );
 }

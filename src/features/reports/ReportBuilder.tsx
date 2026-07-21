@@ -74,11 +74,14 @@ import {
   useSavedReportFolders,
   useRunReport,
   fetchAllReportRows,
+  fetchAllReportIds,
   useCreateReport,
   useUpdateReport,
   useDeleteReport,
 } from "./report-api";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { useTags } from "@/features/tags/api";
+import { AddToListDialog } from "@/features/lead-lists/AddToListDialog";
 import { useUsers, useAccounts } from "@/features/accounts/api";
 import { RelationCombobox } from "./RelationCombobox";
 import { useContacts } from "@/features/contacts/api";
@@ -341,7 +344,7 @@ const ENTITY_DETAIL_ROUTES: Record<string, string | null> = {
   accounts: "/accounts",
   contacts: "/contacts",
   opportunities: "/opportunities",
-  leads: "/leads",
+  leads: "/imports",
   activities: null, // no dedicated detail page
   opportunity_products: null,
 };
@@ -749,6 +752,27 @@ function ColumnPicker({
 // Filter components — now use filterColumns + relation lookups
 // ---------------------------------------------------------------------------
 
+function TagsFilterValueInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const { data: tags } = useTags();
+  const selected = value ? value.split(",").map((v) => v.trim()).filter(Boolean) : [];
+  return (
+    <div className="w-52">
+      <MultiSelect
+        options={(tags ?? []).map((t) => ({ value: t.id, label: t.name }))}
+        value={selected}
+        onChange={(next) => onChange(next.join(","))}
+        placeholder="Pick tags"
+      />
+    </div>
+  );
+}
+
 function FilterValueInput({
   filterCol,
   value,
@@ -788,6 +812,9 @@ function FilterValueInput({
   // that applyFilter() splits into an IN list. For enums we offer a multi-pick;
   // for free-text/number we take a comma-separated entry. (Summer's request.)
   if (operator === "in") {
+    if (filterCol.type === "tags") {
+      return <TagsFilterValueInput value={value} onChange={onChange} />;
+    }
     if (filterCol.type === "enum" && filterCol.enumValues) {
       const selected = value
         ? value.split(",").map((v) => v.trim()).filter(Boolean)
@@ -1988,6 +2015,11 @@ export function ReportBuilder() {
 
   // Save dialog
   const [saveOpen, setSaveOpen] = useState(false);
+  // "Save results as a list" (contacts entity): resolve the FULL id set
+  // (not just the 1,000-row display cap), then reuse the add-to-list dialog.
+  const [listIds, setListIds] = useState<string[]>([]);
+  const [listOpen, setListOpen] = useState(false);
+  const [listFetching, setListFetching] = useState(false);
   const [saveMode, setSaveMode] = useState<"create" | "update">("create");
 
   // Queries
@@ -2324,6 +2356,31 @@ export function ReportBuilder() {
                             <FileSpreadsheet className="h-4 w-4 mr-1.5" />
                             {exporting ? "Exporting…" : "Export Excel"}
                           </Button>
+                          {config.entity === "contacts" && (
+                            <Button
+                              variant="outline"
+                              disabled={listFetching}
+                              onClick={async () => {
+                                if (!queryConfig) return;
+                                setListFetching(true);
+                                try {
+                                  const ids = await fetchAllReportIds(queryConfig);
+                                  if (!ids.length) {
+                                    toast.error("No contacts in this result to save.");
+                                    return;
+                                  }
+                                  setListIds(ids);
+                                  setListOpen(true);
+                                } catch (e) {
+                                  toast.error((e as Error).message);
+                                } finally {
+                                  setListFetching(false);
+                                }
+                              }}
+                            >
+                              {listFetching ? "Gathering…" : "Save as list"}
+                            </Button>
+                          )}
                         </>
                       )}
                     </div>
@@ -2347,6 +2404,12 @@ export function ReportBuilder() {
           </div>
         </div>
       </div>
+
+      <AddToListDialog
+        open={listOpen}
+        onOpenChange={setListOpen}
+        contactIds={listIds}
+      />
 
       <SaveReportDialog
         open={saveOpen}

@@ -11,79 +11,8 @@ import { supabase } from "@/lib/supabase";
 
 /* ============================ Lead ↔ Contact ============================ */
 
-export type DuplicateTier = "email" | "name" | "all";
-
-export interface LeadContactDuplicate {
-  match_tier: "email" | "name";
-  lead_id: string;
-  lead_first_name: string | null;
-  lead_last_name: string | null;
-  lead_email: string | null;
-  lead_company: string | null;
-  lead_status: string | null;
-  lead_created_at: string;
-  contact_id: string;
-  contact_first_name: string | null;
-  contact_last_name: string | null;
-  contact_email: string | null;
-  contact_account_id: string | null;
-  contact_account_name: string | null;
-  contact_created_at: string;
-}
-
-export function useLeadContactDuplicates(tier: DuplicateTier) {
-  return useQuery({
-    queryKey: ["data-cleanup", "lead-dups", tier],
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc(
-        "find_leads_duplicating_contact",
-        { p_tier: tier, p_limit: 1000, p_offset: 0 }
-      );
-      if (error) throw error;
-      return (data ?? []) as LeadContactDuplicate[];
-    },
-  });
-}
-
-export function useLeadDuplicateCounts() {
-  return useQuery({
-    queryKey: ["data-cleanup", "lead-dups", "counts"],
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc(
-        "count_leads_duplicating_contact"
-      );
-      if (error) throw error;
-      const row = (data ?? [])[0] as
-        | { email_certain: number; name_review: number }
-        | undefined;
-      return {
-        email_certain: Number(row?.email_certain ?? 0),
-        name_review: Number(row?.name_review ?? 0),
-      };
-    },
-  });
-}
-
-export function useArchiveLeadAsDuplicate() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (args: { leadId: string; contactId: string }) => {
-      const { data, error } = await supabase.rpc("archive_lead_as_duplicate", {
-        p_lead_id: args.leadId,
-        p_contact_id: args.contactId,
-      });
-      if (error) throw error;
-      return data as Record<string, unknown>;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["data-cleanup", "lead-dups"] });
-      qc.invalidateQueries({ queryKey: ["leads"] });
-      qc.invalidateQueries({ queryKey: ["contacts"] });
-    },
-  });
-}
-
-/* ============================ Account merge ============================ */
+// (Lead↔contact dedup hooks removed 2026-07-20 with the lead type;
+// their RPCs were dropped in migration 20260720170000.)
 
 export interface AccountDuplicateGroupRow {
   group_key: string;

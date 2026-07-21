@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Building2, Users, Target, Search, UserPlus } from "lucide-react";
+import { Building2, Users, Target, Search, Inbox } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -11,7 +11,6 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { supabase } from "@/lib/supabase";
-import { useAuth } from "@/features/auth/AuthProvider";
 import { formatCurrency, customerStatusLabel } from "@/lib/formatters";
 import { buildPersonSearchClause } from "@/lib/search-clause";
 import { useRecentRecords, type RecentRecord } from "@/hooks/useRecentRecords";
@@ -19,15 +18,12 @@ import type {
   Account,
   Contact,
   Opportunity,
-  Lead,
   OpportunityStage,
-  LeadStatus,
 } from "@/types/crm";
 
 type AccountResult = Pick<Account, "id" | "name" | "customer_status">;
 type ContactResult = Pick<Contact, "id" | "first_name" | "last_name" | "email">;
 type OpportunityResult = Pick<Opportunity, "id" | "name" | "stage" | "amount">;
-type LeadResult = Pick<Lead, "id" | "first_name" | "last_name" | "email" | "company" | "status">;
 
 // Snappier search: results start after a single character and with a shorter
 // debounce, so typing "M" to find Mary feels instant instead of laggy.
@@ -76,43 +72,31 @@ const stageLabels: Record<OpportunityStage, string> = {
   verbal_commit: "Verbal Commit",
 };
 
-const leadStatusLabels: Record<LeadStatus, string> = {
-  new: "New",
-  contacted: "Contacted",
-  qualified: "Qualified",
-  unqualified: "Unqualified",
-  converted: "Converted",
-};
-
 // Icon + route per recent-record entity (see useRecentRecords) for the
 // "Recent" group shown before the user types anything.
 const recentIcons: Record<RecentRecord["entity"], typeof Building2> = {
   account: Building2,
   contact: Users,
   opportunity: Target,
-  lead: UserPlus,
+  lead: Inbox,
 };
 
 const recentPaths: Record<RecentRecord["entity"], string> = {
   account: "/accounts",
   contact: "/contacts",
   opportunity: "/opportunities",
-  lead: "/leads",
+  lead: "/imports",
 };
 
 export function GlobalSearch() {
-  const { profile } = useAuth();
-  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const [open, setOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const navigate = useNavigate();
   const { records: allRecents, refresh: refreshRecents } = useRecentRecords();
-  // Leads are admin-only everywhere else in the app — keep the Recent
-  // group consistent with that gate.
-  const recentRecords = isAdmin
-    ? allRecents
-    : allRecents.filter((r) => r.entity !== "lead");
+  // The lead type is retired — stale "lead" recents (from before the
+  // cutover) stay hidden for everyone.
+  const recentRecords = allRecents.filter((r) => r.entity !== "lead");
 
   // This palette instance lives in the top bar for the whole session, so
   // its recents snapshot goes stale — re-read storage every time it opens.
@@ -180,7 +164,9 @@ export function GlobalSearch() {
       let q = supabase
         .from("contacts")
         .select("id, first_name, last_name, email")
-        .is("archived_at", null);
+        .is("archived_at", null)
+        // Pending imports are pen-only until promoted.
+        .is("import_status", null);
       if (orClause) q = q.or(orClause);
       const { data, error } = await q.limit(FETCH_LIMIT);
       if (error) throw error;
@@ -204,33 +190,8 @@ export function GlobalSearch() {
     enabled: searchEnabled,
   });
 
-  const { data: leads, isFetching: leadsFetching, isError: leadsError } = useQuery({
-    queryKey: ["global-search", "leads", debouncedQuery],
-    queryFn: async () => {
-      const orClause = buildPersonSearchClause(debouncedQuery, [
-        "first_name",
-        "last_name",
-        "email",
-        "company",
-      ]);
-      // Hide converted + archived leads from global search.
-      // A converted lead is a tombstone — the person now lives as a
-      // contact, and surfacing both in search makes reps think the
-      // conversion didn't take. Archived leads are user-archived and
-      // intentionally out of working views.
-      let q = supabase
-        .from("leads")
-        .select("id, first_name, last_name, email, company, status")
-        .is("archived_at", null)
-        .is("converted_at", null);
-      if (orClause) q = q.or(orClause);
-      const { data, error } = await q.limit(FETCH_LIMIT);
-      if (error) throw error;
-      return data as LeadResult[];
-    },
-    // Leads are admin-only — don't surface them in non-admins' search.
-    enabled: searchEnabled && isAdmin,
-  });
+  // (The leads search group is gone — the lead type is retired. Pending
+  // imports are searched from the Imports tab; promoted ones are contacts.)
 
   function handleSelect(path: string) {
     handleOpenChange(false);
@@ -252,26 +213,17 @@ export function GlobalSearch() {
     0,
     RESULTS_PER_ENTITY,
   );
-  const rankedLeads = rankResults(
-    leads,
-    debouncedQuery,
-    (r) => `${r.first_name ?? ""} ${r.last_name ?? ""} ${r.company ?? ""}`.trim(),
-  ).slice(0, RESULTS_PER_ENTITY);
-
   const hasResults =
     rankedAccounts.length > 0 ||
     rankedContacts.length > 0 ||
-    rankedOpportunities.length > 0 ||
-    rankedLeads.length > 0;
+    rankedOpportunities.length > 0;
 
   // Distinguish "still searching" and "search failed" from "genuinely empty"
   // so the palette never flashes a false "No results" mid-keystroke or hides
   // a real error as an empty CRM.
   const anyFetching =
-    searchEnabled &&
-    (accountsFetching || contactsFetching || opportunitiesFetching || (isAdmin && leadsFetching));
-  const anyError =
-    accountsError || contactsError || opportunitiesError || (isAdmin && leadsError);
+    searchEnabled && (accountsFetching || contactsFetching || opportunitiesFetching);
+  const anyError = accountsError || contactsError || opportunitiesError;
 
   return (
     <>
@@ -404,29 +356,6 @@ export function GlobalSearch() {
             </CommandGroup>
           )}
 
-          {rankedLeads.length > 0 && (
-            <CommandGroup heading="Leads">
-              {rankedLeads.map((lead) => (
-                <CommandItem
-                  key={lead.id}
-                  value={`lead-${lead.first_name} ${lead.last_name}-${lead.id}`}
-                  onSelect={() => handleSelect(`/leads/${lead.id}`)}
-                >
-                  <UserPlus className="h-4 w-4 text-muted-foreground" />
-                  <span className="flex-1 truncate">
-                    {lead.first_name} {lead.last_name}
-                    {lead.company && (
-                      <span className="text-muted-foreground"> — {lead.company}</span>
-                    )}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {leadStatusLabels[lead.status]}
-                    {lead.email && ` · ${lead.email}`}
-                  </span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          )}
         </CommandList>
       </CommandDialog>
     </>

@@ -202,8 +202,8 @@ export function SalesStatusControl({ account }: { account: Account }) {
           </div>
           <div className="border-t pt-3">
             <p className="mb-2 text-xs text-muted-foreground">
-              Or work it through a call list — adding a contact to a list
-              marks the account Active automatically.
+              Or work it through a call list — adding a contact to a working
+              call list marks the account Active automatically.
             </p>
             <Button
               variant="outline"
@@ -284,6 +284,8 @@ export function SalesStatusControl({ account }: { account: Account }) {
         open={listDialogOpen}
         onOpenChange={setListDialogOpen}
         contactIds={Array.from(pickedIds)}
+        defaultWorking
+        filterWorking
       />
     </>
   );

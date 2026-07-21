@@ -18,8 +18,15 @@ const STORAGE_KEY = "medcurity_theme_mode";
 
 function readMode(): ThemeMode {
   if (typeof window === "undefined") return "system";
-  const raw = window.localStorage.getItem(STORAGE_KEY);
-  return raw === "light" || raw === "dark" || raw === "system" ? raw : "system";
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    return raw === "light" || raw === "dark" || raw === "system" ? raw : "system";
+  } catch {
+    // Safari "Block All Cookies" throws on any localStorage touch. This
+    // runs before first paint (initTheme in main.tsx) — it must never throw,
+    // or the whole app dies to a blank page.
+    return "system";
+  }
 }
 
 function resolveMode(mode: ThemeMode): "light" | "dark" {
