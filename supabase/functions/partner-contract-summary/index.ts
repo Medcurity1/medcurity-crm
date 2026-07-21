@@ -52,7 +52,7 @@ Bullet points quoting EVERY commercial figure in the document exactly as written
 Other Notable Clauses
 At most 3 bullets for anything a salesperson should know (exclusivity, territory limits, branding requirements, confidentiality obligations that affect day-to-day work). Omit boilerplate.
 
-Rules: never invent or infer a number that is not in the document; write "Not specified" for missing items; keep the whole summary under 250 words.`;
+Rules: never invent or infer a number that is not in the document; write "Not specified" for missing items; keep the whole summary under 250 words; plain text only — no markdown, no asterisks, no # headings.`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });

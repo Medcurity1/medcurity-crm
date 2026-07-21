@@ -142,7 +142,12 @@ export function PartnerContractSummary({ accountId }: { accountId: string }) {
                   below and refresh if the contract changed.
                 </p>
               )}
-              <div className="text-sm whitespace-pre-wrap">{summary.summary_md}</div>
+              {/* Model output is plain text by instruction, but strip any
+                  markdown bold markers defensively so headings never render
+                  with literal asterisks. */}
+              <div className="text-sm whitespace-pre-wrap">
+                {summary.summary_md.replace(/\*\*/g, "")}
+              </div>
               <p className="text-xs text-muted-foreground">
                 AI-generated from {summary.source_filename} ·{" "}
                 {formatDate(summary.generated_at)} · verify pricing against the
