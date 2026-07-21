@@ -4,8 +4,7 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Staging — awaiting prod go-ahead
 
-- [STAGING] 2026-07-20 · Nathan · **Imports tab restore (Phase 1)** — Leads → Imports rename, /imports routes + permanent /leads/* forwarder, admin-only Quick Create entry · commit 775080a · plan: docs/imports-tab-plan.md
-- [STAGING] 2026-07-20 · Nathan · **Safari/stale-tab loading reliability** — 6-layer boot recovery (inline HTML recovery + version.json fresh-check, auth lock 10s cap, header fix, storage guards, spinner escape hatch, update banner) · commit deeaae3 · plan: docs/safari-loading-plan.md · **Nathan 7/20: hold on staging — prod promote requires his fresh explicit go (NOT yet given)**; suggested pre-promote field test: Nathan uses staging in his Safari
+(nothing awaiting prod — the ENTIRE 7/20 bundle promoted in merge 750527e, Nathan's evening go; see SHIPPED)
 
 (The 2026-07-15 batch — Joe Lead Source, Rachel Assessor, Summer email fix — shipped to prod in 5bc05df; the 7/10 Lead-Source-required + 7/11 ClickUp items were already on prod via 9d6b6a7. See SHIPPED.md.)
 
