@@ -5,7 +5,7 @@
 // is added to or removed from an account. For PARTNER-typed accounts it keeps
 // the one-row-per-account partner_contract_summaries table true:
 //
-//   • newest attached contract → a 2-3 sentence blurb with exact pricing terms
+//   • newest attached contract → 4-6 at-a-glance fragments w/ exact pricing terms
 //   • attachments that aren't contracts → ignored (model replies a sentinel)
 //   • no contract attached → no summary row (banner disappears)
 //   • nothing new since the current summary → ZERO AI calls (cheap no-op)
@@ -46,7 +46,11 @@ const NOT_A_CONTRACT = "NOT_A_CONTRACT";
 
 const PROMPT = `You are looking at a document attached to a partner's profile in Medcurity's internal CRM.
 
-If this document is a partnership contract or agreement (referral agreement, reseller/partner agreement, MSA or similar between Medcurity and the partner): write a 2-3 sentence plain-text blurb for the top of the partner's profile. Cover (a) the nature of the partnership and its term/renewal, and (b) the key pricing and commercial terms, quoting exact figures from the document (fees, percentages, rates, minimums). Never invent or round a number. No markdown, no asterisks, no headings, no bullet points — just the sentences.
+If this document is a partnership contract or agreement (referral agreement, reseller/partner agreement, MSA or similar between Medcurity and the partner): return 4 to 6 ultra-short fragments, ONE PER LINE, for an at-a-glance strip on the partner's profile:
+- first: partnership type + term/renewal (example: Referral partnership thru Dec 2027, auto-renews, 60-day notice)
+- then: EVERY pricing/commercial term, exact figures as written (examples: 15% first-year referral fee, paid quarterly / $500 per onsite assessment / Min 4 referrals per year)
+- last, if stated: territory / exclusivity (example: WA + OR only, non-exclusive)
+Each fragment 3-9 words. No sentences, no bullet characters, no markdown, no headings. Never invent or round a number.
 
 If this document is NOT such a contract or agreement (a proposal, invoice, marketing material, report, or anything else), reply with exactly: ${NOT_A_CONTRACT}`;
 

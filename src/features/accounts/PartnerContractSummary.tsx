@@ -43,24 +43,33 @@ export function PartnerContractBanner({ accountId }: { accountId: string }) {
   if (!summary) return null;
 
   return (
-    <div className="relative overflow-hidden rounded-lg border border-primary/25 bg-gradient-to-r from-primary/[0.08] via-violet-500/[0.06] to-transparent px-4 py-3 mt-2">
+    <div className="relative overflow-hidden rounded-lg border border-primary/25 bg-gradient-to-r from-primary/[0.08] via-violet-500/[0.06] to-transparent px-4 py-2.5 mt-2">
       {/* soft glow accent in the corner, pure decoration */}
       <div
         aria-hidden
         className="pointer-events-none absolute -top-10 -right-10 h-28 w-28 rounded-full bg-primary/10 blur-2xl"
       />
       <div className="flex items-start gap-2.5">
-        <Sparkles className="h-4 w-4 mt-0.5 shrink-0 text-primary" />
-        <div className="min-w-0">
-          <p className="text-sm leading-relaxed">
-            {summary.summary_md.replace(/\*\*/g, "")}
-          </p>
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            AI summary of {summary.source_filename} ·{" "}
-            {formatDate(summary.generated_at)} · verify pricing against the
-            contract before quoting it
-          </p>
-        </div>
+        <Sparkles className="h-4 w-4 mt-[3px] shrink-0 text-primary" />
+        {/* At-a-glance fragment strip (Nathan 7/21): the model returns one
+            short fragment per line; render them dot-separated in small text.
+            No how-it-was-made caption — the AI styling says it all. */}
+        <p
+          className="min-w-0 text-[13px] leading-relaxed"
+          title={`From ${summary.source_filename} · ${formatDate(summary.generated_at)}`}
+        >
+          {summary.summary_md
+            .replace(/\*\*/g, "")
+            .split(/\n+/)
+            .map((f) => f.replace(/^[-•\s]+/, "").trim())
+            .filter(Boolean)
+            .map((f, i) => (
+              <span key={i} className="whitespace-nowrap">
+                {i > 0 && <span className="text-primary/50 mx-2">·</span>}
+                <span className="whitespace-normal">{f}</span>
+              </span>
+            ))}
+        </p>
       </div>
     </div>
   );
