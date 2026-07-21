@@ -65,7 +65,7 @@ export function PartnerContractBanner({ accountId }: { accountId: string }) {
             .filter(Boolean)
             .map((f, i) => (
               <span key={i} className="whitespace-nowrap">
-                {i > 0 && <span className="text-primary/50 mx-2">·</span>}
+                {i > 0 && <span className="mx-2 opacity-70">·</span>}
                 <span className="whitespace-normal">{f}</span>
               </span>
             ))}
