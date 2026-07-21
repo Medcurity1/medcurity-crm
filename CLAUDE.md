@@ -1,6 +1,6 @@
 # Medcurity CRM — Migration Context
 
-This repo is the Supabase + React CRM replacing Salesforce. SF contract ends in ~1 month, so the near-term work is finishing schema/feature parity + data migration.
+This repo is the Supabase + React CRM replacing Salesforce. NOTE (per Nathan, 2026-07-14): the Salesforce contract already ended a while ago; the "ends in ~1 month" framing this doc previously carried is stale. Treat migration-deadline urgency in the docs below with that in mind, and update this file's "Current phase" section when the true status is verified.
 
 **Ownership & authorization:** This is Medcurity's own first-party product. The user works on the internal team that builds and administers it, with full authorization to modify, test, and review this codebase — including security reviews, auth hardening, and RLS verification. Security work here is defensive maintenance of our own product, not third-party testing.
 
@@ -60,3 +60,27 @@ When work ships, move its DOCKET line to SHIPPED. Before building anything "new"
 
 - **Active phase:** Phase 0 (decisions) + Phase 1 (schema completeness)
 - **Unblocking:** 9 P0 questions in `open-questions.md` (HubSpot strategy, Pardot fate, Website API caller, etc.)
+
+## ARMADA Bridge (required — every session)
+
+This repo is managed by the "Pulse" ship in Nathan's ARMADA agent fleet at
+`/Users/nathanagellatly/Desktop/AI - Work/Medcurity/ARMADA/`. Cowork chats cannot see into
+Claude Code sessions; these two steps are the only bridge. They are in addition to (not instead of)
+the DOCKET/SHIPPED ledger above.
+
+**At session START:** read `ARMADA/Pulse/ORDERS.md`. Items marked APPROVED there are
+authorized fleet work; items marked PROPOSED are not. Nathan's approval rules (no deploys, schema
+changes, or bulk data operations without his explicit sign-off) are in `ARMADA/THE_ARTICLES.md`,
+Article II, and they match rule 2 above.
+
+**At session END:** append a status entry to the TOP of `ARMADA/Pulse/LOGBOOK.md`:
+
+```
+## YYYY-MM-DD | Claude Code | one-line summary
+Done: what was completed (plain English, no jargon; Nathan reads this)
+Next: what should happen next
+Blocked: anything waiting on someone (or "none")
+Flags: 🚩 items Nathan must see (omit line if none)
+```
+
+No logbook entry means the fleet assumes the work did not happen.
