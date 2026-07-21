@@ -62,9 +62,9 @@ jobs:
         # merging changes to these does NOT ship them anywhere:
         #   clickup-services-sync  --no-verify-jwt  (pg_cron caller)
         #   crm-mcp                --no-verify-jwt  (prod-only read-only MCP)
-        #   (inbound-lead moved INTO this CI list 2026-07-20 — see below.)
-        #   nexus-activity         --no-verify-jwt  (Nexus feed shim)
         #   pandadoc-sync          --no-verify-jwt  (PandaDoc webhook)
+        # (inbound-lead and nexus-activity both moved INTO this CI list
+        #  2026-07-20 for the lead-retirement cutover — see below.)
         # WARNING: clickup-sf-id-sync is live on prod (cron migration
         # 20260429000002 + scripts/migration/clickup-prod-bootstrap*.sql
         # POST to it daily) but its source was never committed to this

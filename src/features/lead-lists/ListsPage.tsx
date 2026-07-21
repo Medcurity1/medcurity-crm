@@ -544,6 +544,28 @@ function CreateOrRenameListDialog({
   const [hasPhone, setHasPhone] = useState(!!existingRules.has_phone);
   const [hasEmail, setHasEmail] = useState(!!existingRules.has_email);
 
+  // The dialog instance persists across opens (it isn't keyed/remounted), so
+  // every field must re-initialize on open — otherwise the Working/Smart
+  // toggles and rules leak from the previous creation into the next one, and
+  // a list meant to be neutral silently becomes a status-flipping working list.
+  useEffect(() => {
+    if (!open) return;
+    const r: SmartListRules = existing?.is_dynamic ? parseSmartRules(existing) : {};
+    setName(existing?.name ?? "");
+    setDescription(existing?.description ?? "");
+    setWorking(existing?.is_working_list ?? false);
+    setSmart(existing?.is_dynamic ?? false);
+    setTagIds(r.tag_ids ?? []);
+    setStates(r.states ?? []);
+    setOwnerIds(r.owner_ids ?? []);
+    setStatuses(r.customer_status ?? []);
+    setHasPhone(!!r.has_phone);
+    setHasEmail(!!r.has_email);
+    // Reset only when the dialog OPENS — a background lists refetch while the
+    // user is typing must not clobber their edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   const rules: SmartListRules = {
     tag_ids: tagIds.length ? tagIds : undefined,
     states: states.length ? states : undefined,
