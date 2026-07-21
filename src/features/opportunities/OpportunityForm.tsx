@@ -679,6 +679,12 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
         service_amount: Number(values.service_amount ?? 0),
         assigned_assessor_id: values.assigned_assessor_id ?? null,
         has_service_line_items: lineItemsHaveService,
+        // Deal-level FTE satisfies (and back-fills) a blank account FTE —
+        // Molly's case: FTE filled on the form, account not set, save blocked.
+        // blankableNumber leaves fte_count loosely typed; normalize like
+        // service_amount above (blank/0 -> null = "no FTE signal").
+        fte_range: typeof values.fte_range === "string" ? values.fte_range : null,
+        fte_count: Number(values.fte_count ?? 0) > 0 ? Number(values.fte_count) : null,
       });
       if (!ready) {
         toast.error(formatCloseReadinessMessage(missing));
