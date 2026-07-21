@@ -46,7 +46,7 @@ import { toast } from "sonner";
 import { AccountContacts } from "./AccountContacts";
 import { AccountOpportunities } from "./AccountOpportunities";
 import { AccountPartners } from "./AccountPartners";
-import { PartnerContractSummary } from "./PartnerContractSummary";
+import { PartnerContractBanner } from "./PartnerContractSummary";
 import { AccountAttachments } from "./AccountAttachments";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
 import { TasksPanel } from "@/features/activities/TasksPanel";
@@ -487,6 +487,14 @@ export function AccountDetail() {
         ]}
       >
 
+      {/* AI blurb of the attached partner contract — a thin banner between
+          the header cards and the tabs (Jordan Mayer 7/21). Renders nothing
+          unless a summary exists; kept current automatically on document
+          add/delete. Partner-typed accounts only. */}
+      {(account.account_type ?? "").startsWith("Partner") && (
+        <PartnerContractBanner accountId={account.id} />
+      )}
+
       {/* Related tabs at the top. Collapsed by default so the page doesn't
           lead with a wall of related-record data before the user has seen
           the account's own fields. */}
@@ -520,13 +528,6 @@ export function AccountDetail() {
                     replaces the retired bottom "Partner Information" layout
                     section. Edited via the account Edit form, where these
                     fields sit under the Partner checkbox. */}
-                {/* Contract section: AI summary of the attached partner
-                    contract with its pricing specifics (Jordan Mayer 7/21).
-                    Partner-typed accounts only — same gate as the fields
-                    grid below. */}
-                {(account.account_type ?? "").startsWith("Partner") && (
-                  <PartnerContractSummary accountId={account.id} />
-                )}
                 {(account.account_type ?? "").startsWith("Partner") && (
                   <div className="rounded-md border border-border p-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                     <div>

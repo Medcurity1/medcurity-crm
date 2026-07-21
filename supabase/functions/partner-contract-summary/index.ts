@@ -1,20 +1,23 @@
 // partner-contract-summary Edge Function
 //
-// Generates (or regenerates) the AI summary of a partner's contract document
-// for the Partner tab of the account page. The caller picks which
-// account_attachments row is "the contract"; we send the PDF itself to Claude
-// (native document input — no extraction pipeline) and upsert one summary row
-// per account.
+// AUTOMATIC evaluator (redesigned per Nathan 2026-07-21; originally a manual
+// pick-and-generate). Called fire-and-forget by the app whenever a document
+// is added to or removed from an account. For PARTNER-typed accounts it keeps
+// the one-row-per-account partner_contract_summaries table true:
 //
-// Guardrails:
-//   1. Real user required; the attachment lookup runs under the CALLER's JWT,
-//      so a user can only summarize documents RLS already lets them see.
-//   2. Generation costs money → restricted to CRM write roles (read_only is
-//      rejected). Role is read from user_profiles, never from client input.
-//   3. The service-role client touches ONLY storage download + the summary
-//      upsert — never data reads on the user's behalf.
-//   4. PDF only, capped at 15 MB (Claude's document input takes PDFs; other
-//      formats get a clear error instead of a garbage summary).
+//   • newest attached contract → a 2-3 sentence blurb with exact pricing terms
+//   • attachments that aren't contracts → ignored (model replies a sentinel)
+//   • no contract attached → no summary row (banner disappears)
+//   • nothing new since the current summary → ZERO AI calls (cheap no-op)
+//
+// AI-cost guardrails: non-partner accounts exit before any AI; at most
+// MAX_CANDIDATES documents are tried per evaluation, newest first with
+// contract-ish filenames ranked ahead; a candidate is only ever sent to the
+// model once per evaluation; unchanged state short-circuits entirely.
+//
+// Security: real user required; the account + attachment reads run under the
+// CALLER's JWT (RLS-bounded); generation is restricted to CRM write roles;
+// the service-role client touches only storage download + the summary row.
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -34,25 +37,38 @@ function json(body: unknown, status = 200): Response {
 
 const BUCKET = "account-attachments";
 const MAX_PDF_BYTES = 15 * 1024 * 1024;
+const MAX_CANDIDATES = 3;
 const DEFAULT_MODEL = "claude-sonnet-5";
 const FALLBACK_MODEL = "claude-haiku-4-5-20251001"; // known-good if the preferred id is rejected
 const WRITE_ROLES = new Set(["sales", "renewals", "admin", "super_admin"]);
 const AI_TIMEOUT_MS = 120_000;
+const NOT_A_CONTRACT = "NOT_A_CONTRACT";
 
-const PROMPT = `You are summarizing a partner agreement for Medcurity's internal CRM. The reader is a Medcurity teammate looking at this partner's profile.
+const PROMPT = `You are looking at a document attached to a partner's profile in Medcurity's internal CRM.
 
-Write in plain text with these three sections (use these exact headings):
+If this document is a partnership contract or agreement (referral agreement, reseller/partner agreement, MSA or similar between Medcurity and the partner): write a 2-3 sentence plain-text blurb for the top of the partner's profile. Cover (a) the nature of the partnership and its term/renewal, and (b) the key pricing and commercial terms, quoting exact figures from the document (fees, percentages, rates, minimums). Never invent or round a number. No markdown, no asterisks, no headings, no bullet points — just the sentences.
 
-Overview
-2-4 sentences: who the agreement is between, its purpose, the term (start/end dates), how it renews, and any termination-notice requirement.
+If this document is NOT such a contract or agreement (a proposal, invoice, marketing material, report, or anything else), reply with exactly: ${NOT_A_CONTRACT}`;
 
-Pricing & Commercial Terms
-Bullet points quoting EVERY commercial figure in the document exactly as written: commission percentages, referral fees, revenue shares, per-unit or tiered pricing, discounts, minimums, payment terms and timing. This section matters most — do not omit or round any number. If the document contains no pricing at all, write "Not specified in this document."
+interface Attachment {
+  id: string;
+  original_filename: string;
+  storage_path: string;
+  mimetype: string | null;
+  size_bytes: number | null;
+  created_at: string;
+}
 
-Other Notable Clauses
-At most 3 bullets for anything a salesperson should know (exclusivity, territory limits, branding requirements, confidentiality obligations that affect day-to-day work). Omit boilerplate.
+function isPdf(a: Attachment): boolean {
+  return (
+    (a.mimetype ?? "").toLowerCase() === "application/pdf" ||
+    a.original_filename.toLowerCase().endsWith(".pdf")
+  );
+}
 
-Rules: never invent or infer a number that is not in the document; write "Not specified" for missing items; keep the whole summary under 250 words; plain text only — no markdown, no asterisks, no # headings.`;
+function contractish(name: string): boolean {
+  return /contract|agreement|msa|partner|reseller|referral/i.test(name);
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -79,62 +95,92 @@ serve(async (req) => {
     .eq("id", user.id)
     .maybeSingle();
   if (!me?.role || !WRITE_ROLES.has(me.role)) {
-    return json({ error: "forbidden", message: "Your role can't generate summaries." }, 403);
+    return json({ error: "forbidden" }, 403);
   }
 
-  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!anthropicKey) return json({ error: "ai_unavailable", message: "AI is not configured." }, 503);
-
-  let body: { account_id?: string; attachment_id?: string };
+  let body: { account_id?: string };
   try {
     body = await req.json();
   } catch {
     return json({ error: "bad_request", message: "Invalid JSON body." }, 400);
   }
   const accountId = body.account_id;
-  const attachmentId = body.attachment_id;
-  if (!accountId || !attachmentId) {
-    return json({ error: "bad_request", message: "account_id and attachment_id are required." }, 400);
+  if (!accountId) return json({ error: "bad_request", message: "account_id is required." }, 400);
+
+  // Partner-typed accounts only — every other account exits before any AI.
+  const { data: acct } = await userClient
+    .from("accounts")
+    .select("id, account_type")
+    .eq("id", accountId)
+    .maybeSingle();
+  if (!acct) return json({ error: "not_found" }, 404);
+  if (!(acct.account_type ?? "").startsWith("Partner")) {
+    return json({ ok: true, skipped: "not_partner" });
   }
 
-  // Attachment lookup under the CALLER's RLS — proves both that the row
-  // exists on this account and that this user is allowed to see it.
-  const { data: att, error: attErr } = await userClient
+  const { data: attRows, error: attErr } = await userClient
     .from("account_attachments")
-    .select("id, account_id, original_filename, storage_path, mimetype, size_bytes")
-    .eq("id", attachmentId)
+    .select("id, original_filename, storage_path, mimetype, size_bytes, created_at")
+    .eq("account_id", accountId)
+    .order("created_at", { ascending: false });
+  if (attErr) return json({ error: "lookup_failed", message: attErr.message }, 500);
+
+  const pdfs = ((attRows ?? []) as Attachment[]).filter(
+    (a) => isPdf(a) && (a.size_bytes ?? 0) <= MAX_PDF_BYTES,
+  );
+
+  const { data: current } = await svc
+    .from("partner_contract_summaries")
+    .select("attachment_id, generated_at")
     .eq("account_id", accountId)
     .maybeSingle();
-  if (attErr) return json({ error: "lookup_failed", message: attErr.message }, 500);
-  if (!att) return json({ error: "not_found", message: "Document not found on this account." }, 404);
 
-  const isPdf =
-    (att.mimetype ?? "").toLowerCase() === "application/pdf" ||
-    att.original_filename.toLowerCase().endsWith(".pdf");
-  if (!isPdf) {
-    return json({ error: "unsupported_type", message: "Only PDF contracts can be summarized. Upload the contract as a PDF." }, 422);
-  }
-  if ((att.size_bytes ?? 0) > MAX_PDF_BYTES) {
-    return json({ error: "too_large", message: "This PDF is over 15 MB — too large to summarize." }, 422);
+  // No eligible documents at all → no summary.
+  if (pdfs.length === 0) {
+    if (current) await svc.from("partner_contract_summaries").delete().eq("account_id", accountId);
+    return json({ ok: true, summary: null, reason: "no_documents" });
   }
 
-  const { data: blob, error: dlErr } = await svc.storage.from(BUCKET).download(att.storage_path);
-  if (dlErr || !blob) {
-    return json({ error: "download_failed", message: dlErr?.message ?? "Couldn't read the file." }, 500);
-  }
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  if (bytes.byteLength > MAX_PDF_BYTES) {
-    return json({ error: "too_large", message: "This PDF is over 15 MB — too large to summarize." }, 422);
-  }
-  // Chunked base64 (spreading a multi-MB array into fromCharCode blows the stack).
-  let binary = "";
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-  }
-  const b64 = btoa(binary);
+  const currentSourceStillAttached =
+    !!current && pdfs.some((a) => a.id === current.attachment_id);
 
-  async function summarize(model: string): Promise<Response> {
+  // Unchanged state → zero AI: the current summary's source is still attached
+  // and nothing newer has arrived since it was generated.
+  if (
+    current &&
+    currentSourceStillAttached &&
+    !pdfs.some(
+      (a) =>
+        a.id !== current.attachment_id &&
+        new Date(a.created_at) > new Date(current.generated_at),
+    )
+  ) {
+    return json({ ok: true, unchanged: true });
+  }
+
+  // Candidates: docs newer than the current summary (or all, when there is
+  // no summary), contract-ish filenames first, then newest-first. Bounded.
+  const pool = current
+    ? pdfs.filter(
+        (a) =>
+          a.id !== current.attachment_id &&
+          (!currentSourceStillAttached ||
+            new Date(a.created_at) > new Date(current.generated_at)),
+      )
+    : pdfs;
+  const candidates = [...pool]
+    .sort((x, y) => {
+      const cx = contractish(x.original_filename) ? 0 : 1;
+      const cy = contractish(y.original_filename) ? 0 : 1;
+      if (cx !== cy) return cx - cy;
+      return new Date(y.created_at).getTime() - new Date(x.created_at).getTime();
+    })
+    .slice(0, MAX_CANDIDATES);
+
+  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!anthropicKey) return json({ error: "ai_unavailable" }, 503);
+
+  async function ask(model: string, b64: string): Promise<Response> {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), AI_TIMEOUT_MS);
     try {
@@ -148,15 +194,12 @@ serve(async (req) => {
         },
         body: JSON.stringify({
           model,
-          max_tokens: 1000,
+          max_tokens: 400,
           messages: [
             {
               role: "user",
               content: [
-                {
-                  type: "document",
-                  source: { type: "base64", media_type: "application/pdf", data: b64 },
-                },
+                { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } },
                 { type: "text", text: PROMPT },
               ],
             },
@@ -168,49 +211,65 @@ serve(async (req) => {
     }
   }
 
-  let model = DEFAULT_MODEL;
-  let res: Response;
-  try {
-    res = await summarize(model);
-    if (res.status === 400 || res.status === 404) {
-      // Unknown-model class of errors → one fallback attempt.
-      model = FALLBACK_MODEL;
-      res = await summarize(model);
+  for (const cand of candidates) {
+    const { data: blob, error: dlErr } = await svc.storage.from(BUCKET).download(cand.storage_path);
+    if (dlErr || !blob) continue;
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    if (bytes.byteLength > MAX_PDF_BYTES) continue;
+    let binary = "";
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
     }
-  } catch (e) {
-    const aborted = (e as DOMException | null)?.name === "AbortError";
-    return json(
-      { error: "ai_failed", message: aborted ? "The summary took too long — try again." : (e as Error).message },
-      504,
-    );
+    const b64 = btoa(binary);
+
+    let model = DEFAULT_MODEL;
+    let res: Response;
+    try {
+      res = await ask(model, b64);
+      if (res.status === 400 || res.status === 404) {
+        model = FALLBACK_MODEL;
+        res = await ask(model, b64);
+      }
+    } catch {
+      continue; // timeout/network on this candidate — try the next
+    }
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      console.error("anthropic error", res.status, detail.slice(0, 300));
+      continue;
+    }
+    const out = await res.json();
+    const text = (out?.content ?? [])
+      .filter((c: { type: string }) => c.type === "text")
+      .map((c: { text: string }) => c.text)
+      .join("\n")
+      .trim();
+    if (!text || text.toUpperCase().includes(NOT_A_CONTRACT)) continue;
+
+    const row = {
+      account_id: accountId,
+      attachment_id: cand.id,
+      source_filename: cand.original_filename,
+      summary_md: text,
+      model,
+      generated_by: user.id,
+      generated_at: new Date().toISOString(),
+    };
+    const { error: upErr } = await svc
+      .from("partner_contract_summaries")
+      .upsert(row, { onConflict: "account_id" });
+    if (upErr) return json({ error: "save_failed", message: upErr.message }, 500);
+    return json({ ok: true, summary: row });
   }
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    console.error("anthropic error", res.status, detail.slice(0, 500));
-    return json({ error: "ai_failed", message: "The AI couldn't process this document." }, 502);
+
+  // No candidate was a contract. Keep an existing summary whose source is
+  // still attached; otherwise there is no valid contract → no summary.
+  if (current && currentSourceStillAttached) {
+    return json({ ok: true, unchanged: true, reason: "no_new_contract" });
   }
-
-  const out = await res.json();
-  const summary = (out?.content ?? [])
-    .filter((c: { type: string }) => c.type === "text")
-    .map((c: { text: string }) => c.text)
-    .join("\n")
-    .trim();
-  if (!summary) return json({ error: "ai_failed", message: "The AI returned an empty summary." }, 502);
-
-  const row = {
-    account_id: accountId,
-    attachment_id: attachmentId,
-    source_filename: att.original_filename,
-    summary_md: summary,
-    model,
-    generated_by: user.id,
-    generated_at: new Date().toISOString(),
-  };
-  const { error: upErr } = await svc
-    .from("partner_contract_summaries")
-    .upsert(row, { onConflict: "account_id" });
-  if (upErr) return json({ error: "save_failed", message: upErr.message }, 500);
-
-  return json({ ok: true, summary: row });
+  if (current) {
+    await svc.from("partner_contract_summaries").delete().eq("account_id", accountId);
+  }
+  return json({ ok: true, summary: null, reason: "no_contract_found" });
 });

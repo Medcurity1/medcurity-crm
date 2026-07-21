@@ -9,6 +9,27 @@ import { useAuth } from "@/features/auth/AuthProvider";
 
 const BUCKET = "account-attachments";
 
+/**
+ * Re-evaluate the partner contract AI summary after any document change.
+ * Fire-and-forget: the edge function no-ops fast (and AI-free) for
+ * non-partner accounts and for unchanged document sets, so calling it on
+ * every add/delete is cheap. When it does regenerate (or clear) the
+ * summary, refresh the banner's query.
+ */
+function reevaluatePartnerContractSummary(
+  qc: ReturnType<typeof useQueryClient>,
+  accountId: string,
+) {
+  void supabase.functions
+    .invoke("partner-contract-summary", { body: { account_id: accountId } })
+    .then(() =>
+      qc.invalidateQueries({ queryKey: ["partner-contract-summary", accountId] }),
+    )
+    .catch((e) =>
+      console.warn("[partner-contract-summary] evaluation failed:", e?.message),
+    );
+}
+
 export interface AccountAttachment {
   id: string;
   account_id: string;
@@ -77,7 +98,10 @@ export function useUploadAccountAttachments(accountId: string) {
       }
       return failed;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["account-attachments", accountId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["account-attachments", accountId] });
+      reevaluatePartnerContractSummary(qc, accountId);
+    },
   });
 }
 
@@ -107,7 +131,14 @@ export function useDeleteAccountAttachment(accountId: string) {
         console.warn("Account attachment storage cleanup failed (row deleted):", rmErr.message);
       }
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["account-attachments", accountId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["account-attachments", accountId] });
+      // Deleting the summarized contract cascades the summary row away in
+      // the DB; this evaluation then either summarizes the next-best
+      // contract or leaves the banner gone.
+      qc.invalidateQueries({ queryKey: ["partner-contract-summary", accountId] });
+      reevaluatePartnerContractSummary(qc, accountId);
+    },
   });
 }
 
