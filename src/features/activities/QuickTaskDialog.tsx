@@ -187,9 +187,29 @@ export function QuickTaskDialog({
     );
   }
 
+  // Guard against a stray outside-click/Esc discarding a filled-in task —
+  // handleClose reset()s everything, so a mis-click would silently wipe it.
+  // Any field diverging from its empty default counts as dirty.
+  const dirty =
+    !!subject.trim() ||
+    !!dueAt ||
+    !!notes.trim() ||
+    reminder !== EMPTY_REMINDER ||
+    recur.mode !== "none" ||
+    priority !== "normal" ||
+    attach !== EMPTY_TASK_RECORD;
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        onInteractOutside={(e) => {
+          if (dirty) e.preventDefault();
+        }}
+        onEscapeKeyDown={(e) => {
+          if (dirty) e.preventDefault();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Add Task</DialogTitle>
           <DialogDescription>

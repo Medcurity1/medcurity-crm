@@ -53,6 +53,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { toast } from "sonner";
 import { Plus, MoreVertical, Pencil, Trash2, DollarSign, Hash, TrendingUp } from "lucide-react";
 import { OPEN_STAGES, formatCurrency, stageLabel } from "@/lib/formatters";
@@ -318,6 +319,64 @@ function PipelineKanban({
   );
 }
 
+// Shared tab body: stats + board, but swaps in a retryable QueryError when the
+// query fails instead of silently painting an all-empty board (a rep would
+// think their deals vanished). Recovery is one click instead of a full reload.
+function PipelineTabBody({
+  pipeline,
+  isLoading,
+  isError,
+  onRetry,
+  isRetrying,
+  stages,
+}: {
+  pipeline: ActivePipelineRow[] | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  onRetry: () => void;
+  isRetrying: boolean;
+  stages?: OpportunityStage[];
+}) {
+  if (isError) {
+    return (
+      <QueryError
+        message="Couldn't load this pipeline."
+        onRetry={onRetry}
+        isRetrying={isRetrying}
+      />
+    );
+  }
+
+  return (
+    <>
+      <PipelineStats items={pipeline ?? []} />
+      <PipelineKanban pipeline={pipeline} isLoading={isLoading} stages={stages} />
+    </>
+  );
+}
+
+// Renewals is the non-default tab. Calling its hook inside the child (which
+// Radix only mounts once the tab is activated) keeps the initial Sales-tab
+// load from firing a second, hidden active_pipeline fetch on every mount.
+function RenewalsPipelineTab({
+  ownerUserId,
+}: {
+  ownerUserId: string | undefined;
+}) {
+  const { data: pipeline, isLoading, isError, isFetching, refetch } =
+    useActivePipeline({ kind: "renewal", owner_user_id: ownerUserId });
+
+  return (
+    <PipelineTabBody
+      pipeline={pipeline}
+      isLoading={isLoading}
+      isError={isError}
+      onRetry={() => refetch()}
+      isRetrying={isFetching}
+    />
+  );
+}
+
 function CustomViewTab({
   view,
   ownerUserId,
@@ -325,22 +384,23 @@ function CustomViewTab({
   view: PipelineView;
   ownerUserId: string | undefined;
 }) {
-  const { data: pipeline, isLoading } = useCustomPipeline({
-    stages: view.config.stages,
-    team_filter: view.config.team_filter,
-    kind_filter: view.config.kind_filter,
-    owner_user_id: ownerUserId,
-  });
+  const { data: pipeline, isLoading, isError, isFetching, refetch } =
+    useCustomPipeline({
+      stages: view.config.stages,
+      team_filter: view.config.team_filter,
+      kind_filter: view.config.kind_filter,
+      owner_user_id: ownerUserId,
+    });
 
   return (
-    <>
-      <PipelineStats items={pipeline ?? []} />
-      <PipelineKanban
-        pipeline={pipeline}
-        isLoading={isLoading}
-        stages={view.config.stages}
-      />
-    </>
+    <PipelineTabBody
+      pipeline={pipeline}
+      isLoading={isLoading}
+      isError={isError}
+      onRetry={() => refetch()}
+      isRetrying={isFetching}
+      stages={view.config.stages}
+    />
   );
 }
 
@@ -380,16 +440,19 @@ export function PipelineBoard() {
   // intent, set by the renewal automation and the form. `team` was
   // drifting (all SF-imported renewals had team='sales'), which made
   // every renewal show up in the Sales tab.
-  const { data: salesPipeline, isLoading: salesLoading } = useActivePipeline({
+  //
+  // Only the default Sales tab fetches eagerly here; the Renewals tab's hook
+  // lives in RenewalsPipelineTab so it fetches only once that tab is opened.
+  const {
+    data: salesPipeline,
+    isLoading: salesLoading,
+    isError: salesError,
+    isFetching: salesFetching,
+    refetch: refetchSales,
+  } = useActivePipeline({
     kind: "new_business",
     owner_user_id: ownerUserId,
   });
-
-  const { data: renewalsPipeline, isLoading: renewalsLoading } =
-    useActivePipeline({
-      kind: "renewal",
-      owner_user_id: ownerUserId,
-    });
 
   function handleEditView(view: PipelineView) {
     setEditingView(view);
@@ -514,16 +577,17 @@ export function PipelineBoard() {
         </div>
 
         <TabsContent value="sales" className="mt-4">
-          <PipelineStats items={salesPipeline ?? []} />
-          <PipelineKanban pipeline={salesPipeline} isLoading={salesLoading} />
+          <PipelineTabBody
+            pipeline={salesPipeline}
+            isLoading={salesLoading}
+            isError={salesError}
+            onRetry={() => refetchSales()}
+            isRetrying={salesFetching}
+          />
         </TabsContent>
 
         <TabsContent value="renewals" className="mt-4">
-          <PipelineStats items={renewalsPipeline ?? []} />
-          <PipelineKanban
-            pipeline={renewalsPipeline}
-            isLoading={renewalsLoading}
-          />
+          <RenewalsPipelineTab ownerUserId={ownerUserId} />
         </TabsContent>
 
         {pipelineViews?.map((view) => (

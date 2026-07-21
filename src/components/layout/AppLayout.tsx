@@ -12,6 +12,9 @@ import { QuickCreateDialog } from "@/components/QuickCreateDialog";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { useFrozenAnimationGuard } from "@/hooks/useFrozenAnimationGuard";
 const QuickTaskDialog = lazy(() => import("@/features/activities/QuickTaskDialog").then((m) => ({ default: m.QuickTaskDialog })));
+// Lazy + month-gated so the fireworks-canvas chunk never ships in the eager
+// App chunk outside January (the only window it can ever activate).
+const NewYearCelebration = lazy(() => import("@/components/seasonal/NewYearCelebration").then((m) => ({ default: m.NewYearCelebration })));
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useUserPreferences } from "@/hooks/useUserPreferences";
 import { useIdleLogout } from "@/hooks/useIdleLogout";
@@ -24,7 +27,6 @@ import { FriendlyLoading } from "@/components/FriendlyLoading";
 import { IdleWarningDialog } from "@/components/IdleWarningDialog";
 import { AnnouncementBanner } from "@/components/AnnouncementBanner";
 import { NotificationPermissionPrompt } from "@/components/NotificationPermissionPrompt";
-import { NewYearCelebration } from "@/components/seasonal/NewYearCelebration";
 
 const pathMap: Record<string, string> = {
   "": "Home",
@@ -149,6 +151,22 @@ export function AppLayout() {
   useEffect(() => {
     if (isMobile) setCollapsed(true);
   }, [isMobile, location.pathname]);
+
+  // Durable guard against a stranded Radix pointer-events lock. A modal
+  // dialog that closes and navigate()s in the same tick can force-unmount its
+  // portal mid-close, skipping the DismissableLayer cleanup that restores
+  // interactivity — leaving pointer-events:none on <body> so the whole page
+  // is unclickable until a full refresh (observed with ConvertLeadDialog /
+  // AddContactDialog). On every route change, clear a stray lock — but ONLY
+  // when no Radix layer is legitimately open, so we never fight a dialog
+  // that's still up. Covers every navigate-on-close site and layer type.
+  useEffect(() => {
+    if (document.body.style.pointerEvents !== "none") return;
+    const openLayer = document.querySelector(
+      '[data-state="open"][role="dialog"], [data-state="open"][role="alertdialog"]'
+    );
+    if (!openLayer) document.body.style.pointerEvents = "";
+  }, [location.pathname]);
 
   const handleToggle = useCallback(() => setCollapsed((c) => !c), []);
   const handleOverlayClick = useCallback(() => setCollapsed(true), []);
@@ -319,8 +337,14 @@ export function AppLayout() {
         onOpenChange={setShowShortcutsHelp}
       />
 
-      {/* One-time January fireworks (first login of the new year). */}
-      <NewYearCelebration />
+      {/* One-time January fireworks (first login of the new year). Gated on
+          the month BEFORE the import so the chunk is only ever fetched during
+          January; the component still self-gates on first-of-year/localStorage. */}
+      {new Date().getMonth() === 0 && (
+        <Suspense fallback={null}>
+          <NewYearCelebration />
+        </Suspense>
+      )}
     </div>
   );
 }

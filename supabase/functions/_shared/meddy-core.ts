@@ -161,9 +161,14 @@ export async function broadcast(
 ): Promise<void> {
   const url = Deno.env.get("SUPABASE_URL")!;
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  // Broadcasts are best-effort; a hung Realtime endpoint must never stall
+  // the calling action, so the fetch itself is aborted at 5s.
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 5_000);
   try {
     await fetch(`${url}/realtime/v1/api/broadcast`, {
       method: "POST",
+      signal: ac.signal,
       headers: {
         apikey: key,
         Authorization: `Bearer ${key}`,
@@ -180,6 +185,8 @@ export async function broadcast(
     });
   } catch (e) {
     console.warn(`broadcast ${topic}/${event} failed:`, (e as Error).message);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

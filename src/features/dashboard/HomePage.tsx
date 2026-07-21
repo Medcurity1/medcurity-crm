@@ -50,6 +50,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
   Sheet,
@@ -217,6 +218,12 @@ function useMyTasks(userId: string) {
     openTasks: openQuery.data,
     completedTasks: completedQuery.data,
     isLoading: openQuery.isLoading || completedQuery.isLoading,
+    isError: openQuery.isError || completedQuery.isError,
+    isFetching: openQuery.isFetching || completedQuery.isFetching,
+    refetch: () => {
+      openQuery.refetch();
+      completedQuery.refetch();
+    },
   };
 }
 
@@ -268,7 +275,8 @@ const RECENT_ACTIVITY_TINTS: Record<ActivityType, string> = {
 };
 
 function RecentActivitySection() {
-  const { data: activities, isLoading } = useRecentActivity();
+  const { data: activities, isLoading, isError, isFetching, refetch } =
+    useRecentActivity();
 
   return (
     <Card>
@@ -288,6 +296,13 @@ function RecentActivitySection() {
               </div>
             ))}
           </div>
+        ) : isError ? (
+          <QueryError
+            compact
+            message="Couldn't load recent activity."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : !activities?.length ? (
           <p className="text-sm text-muted-foreground">No recent activity.</p>
         ) : (
@@ -423,8 +438,14 @@ function getTaskAccount(
 }
 
 function MyTasksSection({ userId }: { userId: string }) {
-  const { openTasks: openTaskData, completedTasks: completedTaskData, isLoading } =
-    useMyTasks(userId);
+  const {
+    openTasks: openTaskData,
+    completedTasks: completedTaskData,
+    isLoading,
+    isError,
+    isFetching,
+    refetch,
+  } = useMyTasks(userId);
   const qc = useQueryClient();
 
   // Two paired mutations so an accidental check-off has a one-click
@@ -502,6 +523,13 @@ function MyTasksSection({ userId }: { userId: string }) {
               </div>
             ))}
           </div>
+        ) : isError ? (
+          <QueryError
+            compact
+            message="Couldn't load your tasks."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : !displayOpen.length && !displayCompleted.length ? (
           <p className="text-sm text-muted-foreground">No tasks assigned to you.</p>
         ) : (
@@ -620,7 +648,8 @@ function MyTasksSection({ userId }: { userId: string }) {
 }
 
 function MyOpenOpportunitiesSection({ userId }: { userId: string }) {
-  const { data: opps, isLoading } = useMyOpenOpportunities(userId);
+  const { data: opps, isLoading, isError, isFetching, refetch } =
+    useMyOpenOpportunities(userId);
 
   return (
     <Card>
@@ -640,6 +669,13 @@ function MyOpenOpportunitiesSection({ userId }: { userId: string }) {
               <Skeleton key={i} className="h-10 w-full" />
             ))}
           </div>
+        ) : isError ? (
+          <QueryError
+            compact
+            message="Couldn't load your opportunities."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : !opps?.length ? (
           <p className="text-sm text-muted-foreground">
             No open opportunities assigned to you.
@@ -858,7 +894,7 @@ function DashboardCustomizeSheet({
 // ---------------------------------------------------------------------------
 
 function PipelineSummaryWidget() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["dashboard", "pipeline-summary"],
     queryFn: async () => {
       const { data: opps, error } = await supabase
@@ -887,6 +923,13 @@ function PipelineSummaryWidget() {
       <CardContent>
         {isLoading ? (
           <Skeleton className="h-24 w-full" />
+        ) : isError ? (
+          <QueryError
+            compact
+            message="Couldn't load the pipeline summary."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : !data || Object.keys(data).length === 0 ? (
           <p className="text-sm text-muted-foreground">No open pipeline.</p>
         ) : (
@@ -912,7 +955,7 @@ function PipelineSummaryWidget() {
 // ---------------------------------------------------------------------------
 
 function UpcomingRenewalsWidget() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["dashboard", "upcoming-renewals-widget"],
     queryFn: async () => {
       const { data: rows, error } = await supabase
@@ -939,6 +982,13 @@ function UpcomingRenewalsWidget() {
       <CardContent>
         {isLoading ? (
           <Skeleton className="h-24 w-full" />
+        ) : isError ? (
+          <QueryError
+            compact
+            message="Couldn't load upcoming renewals."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : !data?.length ? (
           <p className="text-sm text-muted-foreground">No upcoming renewals.</p>
         ) : (

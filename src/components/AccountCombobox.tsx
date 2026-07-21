@@ -1,14 +1,13 @@
-// Searchable single-select account picker over the already-cached
-// useAccountsList() data. Replaces the plain <Select> account dropdowns
-// (OpportunityForm, ContactForm) that couldn't be typed into — with
-// thousands of accounts, scroll-to-find was unusable.
+// Searchable single-select account picker.
 //
-// Unlike reports/RelationCombobox (which searches server-side because the
-// ReportBuilder only had a capped 25-row lookup), the full accounts list is
-// already in the react-query cache here, so cmdk's default client-side
-// filtering over item values (= account names) is all we need.
+// Searches accounts SERVER-SIDE (typed query + a small LIMIT), mirroring
+// reports/RelationCombobox. The previous version fetched the ENTIRE
+// non-archived roster (~thousands of rows) into every opp/contact form via
+// useAccountsList and rendered one un-virtualized <CommandItem> per account,
+// spiking the popover open on the hottest create/edit flows. Server search
+// keeps the list to ~50 rows and the payload tiny.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -16,7 +15,7 @@ import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
-import { useAccountsList } from "@/features/accounts/api";
+import { useAccounts, useAccount } from "@/features/accounts/api";
 
 export function AccountCombobox({
   value,
@@ -32,15 +31,30 @@ export function AccountCombobox({
   allowClear?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const { data: accounts } = useAccountsList();
+  const [search, setSearch] = useState("");
 
-  // Resolve the trigger label from the same cached list. A set value that
-  // isn't in the (non-archived) list — e.g. editing a contact whose account
-  // was archived later — still shows a marker instead of pretending nothing
-  // is selected.
+  // Debounce the typed query so we fire one server search after the user
+  // pauses, not one per keystroke.
+  const [debounced, setDebounced] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const { data, isFetching } = useAccounts({
+    search: debounced || undefined,
+    pageSize: 50,
+  });
+  const accounts = data?.data ?? [];
+
+  // Always resolve the currently-selected account's label, even when it isn't
+  // in the (search-narrowed) result page — fetch it by id. Works for archived
+  // accounts too (e.g. editing a contact whose account was archived later).
+  const { data: selectedAccount } = useAccount(value ?? undefined);
   const selectedLabel = value
-    ? accounts?.find((a) => a.id === value)?.name ??
-      (accounts ? "(archived account)" : "Loading…")
+    ? accounts.find((a) => a.id === value)?.name ??
+      selectedAccount?.name ??
+      "Loading…"
     : "";
 
   return (
@@ -59,12 +73,16 @@ export function AccountCombobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-        {/* Default cmdk filtering ON — items carry the account name as their
-            value, so typing narrows by name with no extra wiring. */}
-        <Command>
-          <CommandInput placeholder="Search accounts…" />
+        {/* shouldFilter off — the server already narrowed to matches; cmdk must
+            not re-filter the 50-row page against the raw input. */}
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder="Search accounts…"
+            value={search}
+            onValueChange={setSearch}
+          />
           <CommandList>
-            <CommandEmpty>No matches.</CommandEmpty>
+            <CommandEmpty>{isFetching ? "Searching…" : "No matches."}</CommandEmpty>
             <CommandGroup>
               {allowClear && (
                 <CommandItem
@@ -78,10 +96,11 @@ export function AccountCombobox({
                   <span className="text-muted-foreground">— None —</span>
                 </CommandItem>
               )}
-              {(accounts ?? []).map((a) => (
+              {accounts.map((a) => (
                 <CommandItem
                   key={a.id}
-                  value={a.name}
+                  // Unique value (name::id) so same-named accounts don't collide.
+                  value={`${a.name}::${a.id}`}
                   onSelect={() => {
                     onChange(a.id);
                     setOpen(false);

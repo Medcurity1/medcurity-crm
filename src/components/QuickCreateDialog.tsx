@@ -52,7 +52,10 @@ export function QuickCreateDialog({
 
   function handleSelect(path: string) {
     onOpenChange(false);
-    navigate(path);
+    // Defer navigation one frame so Radix's close lifecycle commits (restoring
+    // the body pointer-events lock) before the route change unmounts anything —
+    // otherwise a same-tick close+navigate can strand pointer-events:none.
+    requestAnimationFrame(() => navigate(path));
   }
 
   return (

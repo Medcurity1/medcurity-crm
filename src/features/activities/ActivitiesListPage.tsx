@@ -110,7 +110,11 @@ function useActivitiesList(filters: ListFilters) {
             "contact:contacts!contact_id(id, first_name, last_name), " +
             "opportunity:opportunities!opportunity_id(id, name, account:accounts!account_id(id, name)), " +
             "lead:leads!lead_id(id, first_name, last_name, company)",
-          { count: "exact" }
+          // Estimated (not exact) count to match every other everyday list
+          // (accounts/contacts/opportunities). count=exact makes Postgres
+          // COUNT the whole filtered set in-request on every load/keystroke,
+          // which is costly on this fast-growing table.
+          { count: "estimated" }
         )
         // Hide soft-deleted activities so the list reflects deletes.
         .is("archived_at", null)

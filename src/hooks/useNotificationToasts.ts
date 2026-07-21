@@ -48,6 +48,18 @@ const URGENT_TYPES = new Set([
   "support_human_requested",
 ]);
 
+// Bound the dedup memory: this hook lives for the whole signed-in session, so an
+// always-open multi-day tab would otherwise grow seenIds forever. Keep only the
+// most recent ids — far more than any realistic backlog of unread notifications.
+const MAX_SEEN_IDS = 500;
+function rememberSeen(set: Set<string>, id: string) {
+  set.add(id);
+  while (set.size > MAX_SEEN_IDS) {
+    // Set preserves insertion order, so values().next() is the oldest entry.
+    set.delete(set.values().next().value as string);
+  }
+}
+
 function showOsNotification(title: string, body: string, tag: string, urgent: boolean) {
   try {
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
@@ -83,13 +95,13 @@ export function useNotificationToasts() {
       "BroadcastChannel" in window ? new BroadcastChannel("pulse-notif-dedup") : null;
     if (dedupChannel) {
       dedupChannel.onmessage = (e) => {
-        if (e.data?.id) seenIds.current.add(String(e.data.id));
+        if (e.data?.id) rememberSeen(seenIds.current, String(e.data.id));
       };
     }
 
     function deliver(n: NotificationRow) {
       if (seenIds.current.has(n.id)) return;
-      seenIds.current.add(n.id);
+      rememberSeen(seenIds.current, n.id);
       dedupChannel?.postMessage({ id: n.id });
 
       // High-fives are pure delight: confetti rains + ONE short chime + a quick
@@ -177,7 +189,7 @@ export function useNotificationToasts() {
         .eq("is_read", false)
         .order("created_at", { ascending: false })
         .limit(50);
-      for (const r of data ?? []) seenIds.current.add(r.id);
+      for (const r of data ?? []) rememberSeen(seenIds.current, r.id);
       primed.current = true;
     }
 

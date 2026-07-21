@@ -49,7 +49,6 @@ export function InlineEdit({
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
   const savedRef = useRef(false);
-  const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!editing) {
@@ -65,12 +64,6 @@ export function InlineEdit({
       }
     }
   }, [editing]);
-
-  useEffect(() => {
-    return () => {
-      if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
-    };
-  }, []);
 
   function startEdit() {
     savedRef.current = false;
@@ -121,11 +114,12 @@ export function InlineEdit({
   }
 
   function handleBlur() {
-    // Delay a tick to allow click-based cancel/other handlers to fire first
-    if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
-    blurTimerRef.current = setTimeout(() => {
-      void commitSave();
-    }, 150);
+    // Commit synchronously on blur — no setTimeout. A deferred commit was
+    // silently dropped whenever the component unmounted within the delay
+    // (e.g. edit a field, then immediately click a nav link/Back). The
+    // Escape-cancel path is safe because cancelEdit() sets savedRef first,
+    // so commitSave() early-returns here.
+    void commitSave();
   }
 
   if (editing) {

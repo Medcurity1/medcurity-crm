@@ -667,7 +667,9 @@ export function ContactDetail() {
         currentOwnerId={contact.owner_user_id}
         onConfirm={(newOwnerId) => {
           if (!id) return;
-          updateMutation.mutate(
+          // mutateAsync so the dialog can await the save and stay open
+          // (showing the inline error) when it fails.
+          return updateMutation.mutateAsync(
             { id, owner_user_id: newOwnerId },
             {
               onSuccess: () => toast.success("Owner updated"),
