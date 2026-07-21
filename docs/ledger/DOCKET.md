@@ -4,7 +4,7 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Staging — awaiting prod go-ahead
 
-- [STAGING] 2026-07-21 · Nathan (Molly's cross-browser slowness/glitch reports) · **Everyday speed & reliability sweep (23 fixes: stranded pointer-events guard, global fetch timeout, profile-load recovery, bulk-reassign verify, keepPreviousData lists, server-search account picker, RLS InitPlan wraps 20260721170000, + more — see SHIPPED 7/21).** Molly is on PROD, so she keeps hitting these until this batch (and the 7/20 boot-recovery/perf batches) get promoted — needs Nathan's prod go-ahead.
+- [BLOCKED on Azure] 2026-07-21 · Nathan ("yes push please") · **Perf/reliability sweep PROMOTED to prod (merge ae445ce, exactly 608cf25 — later parallel-session Staging commits deliberately excluded). DB migration 20260721170000 + edge functions ARE LIVE on prod (attempt 1 green through those steps). The SWA FRONTEND upload keeps failing Azure-side** ("problems communicating with our content server" — 3 attempts on run 29846414131 + this morning's 05b288c run; staging uploads fine; azure.status shows no incident = silent partial degradation). Old frontend + new DB verified compatible (policy semantics identical), prod healthy meanwhile. Retrying the failed job on a spaced cadence until an upload lands — THEN Molly finally gets the frontend fixes. If Azure stays broken >1 day: check the SWA resource in the Azure portal (deployment token / region health).
 
 (The 2026-07-15 batch — Joe Lead Source, Rachel Assessor, Summer email fix — shipped to prod in 5bc05df; the 7/10 Lead-Source-required + 7/11 ClickUp items were already on prod via 9d6b6a7. See SHIPPED.md.)
 
