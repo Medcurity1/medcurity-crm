@@ -310,6 +310,32 @@ function extractTagFilter(config: ReportConfig): { tagGroups: string[][] | null;
   return { tagGroups: groups.length ? groups : null, rest };
 }
 
+/** Server-side application of the tag groups. One group rides the plain
+ * contact_tags!inner embed. Two or more groups need one ALIASED inner embed
+ * per group (ct0, ct1, …) — stacking `.in()` calls on a single embed ANDs
+ * the conditions on the same one-tag-per-row join row, which is impossible
+ * for disjoint groups and silently returns zero rows (sweep finding,
+ * 2026-07-20). Each aliased inner join independently requires "has a tag
+ * from this group", which is the intended AND-across-rows semantics.
+ * Inner embeds multiply result rows; callers already dedupeById. */
+function tagEmbeds(tagGroups: string[][] | null): {
+  select: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  apply: (q: any) => any;
+} {
+  if (!tagGroups || tagGroups.length === 0) return { select: "", apply: (q) => q };
+  if (tagGroups.length === 1) {
+    return {
+      select: ", contact_tags!inner(tag_id)",
+      apply: (q) => q.in("contact_tags.tag_id", tagGroups[0]),
+    };
+  }
+  return {
+    select: ", " + tagGroups.map((_, i) => `ct${i}:contact_tags!inner(tag_id)`).join(", "),
+    apply: (q) => tagGroups.reduce((acc, g, i) => acc.in(`ct${i}.tag_id`, g), q),
+  };
+}
+
 function dedupeById(rows: Record<string, unknown>[]): Record<string, unknown>[] {
   const seen = new Set<unknown>();
   const out: Record<string, unknown>[] = [];
@@ -324,13 +350,12 @@ function dedupeById(rows: Record<string, unknown>[]): Record<string, unknown>[] 
 async function runReportQuery(config: ReportConfig): Promise<ReportResult> {
   const entityDef = getEntityDef(config.entity);
   const { tagGroups, rest } = extractTagFilter(config);
-  const selectStr =
-    buildSelectString(config.entity, config.columns) +
-    (tagGroups ? ", contact_tags!inner(tag_id)" : "");
+  const embeds = tagEmbeds(tagGroups);
+  const selectStr = buildSelectString(config.entity, config.columns) + embeds.select;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let query: any = supabase.from(entityDef.table).select(selectStr, { count: "exact" });
-  if (tagGroups) for (const g of tagGroups) query = query.in("contact_tags.tag_id", g);
+  query = embeds.apply(query);
 
   // Exclude archived rows for entities that have archived_at
   if (ARCHIVABLE_ENTITIES.includes(config.entity)) {
@@ -397,9 +422,8 @@ export async function fetchAllReportRows(
 ): Promise<Record<string, unknown>[]> {
   const entityDef = getEntityDef(config.entity);
   const { tagGroups, rest } = extractTagFilter(config);
-  const selectStr =
-    buildSelectString(config.entity, config.columns) +
-    (tagGroups ? ", contact_tags!inner(tag_id)" : "");
+  const embeds = tagEmbeds(tagGroups);
+  const selectStr = buildSelectString(config.entity, config.columns) + embeds.select;
   const PAGE = 1000;
   const MAX_ROWS = 100_000;
   const all: Record<string, unknown>[] = [];
@@ -416,7 +440,7 @@ export async function fetchAllReportRows(
     if (config.entity === "contacts") {
       query = query.is("import_status", null);
     }
-    if (tagGroups) for (const g of tagGroups) query = query.in("contact_tags.tag_id", g);
+    query = embeds.apply(query);
     for (const filter of rest) {
       query = applyFilter(query, config.entity, filter);
     }
@@ -464,7 +488,8 @@ export async function fetchAllReportRows(
 export async function fetchAllReportIds(config: ReportConfig): Promise<string[]> {
   const entityDef = getEntityDef(config.entity);
   const { tagGroups, rest } = extractTagFilter(config);
-  const selectStr = "id" + (tagGroups ? ", contact_tags!inner(tag_id)" : "");
+  const embeds = tagEmbeds(tagGroups);
+  const selectStr = "id" + embeds.select;
   const PAGE = 1000;
   const MAX_ROWS = 100_000;
   const ids: string[] = [];
@@ -479,7 +504,7 @@ export async function fetchAllReportIds(config: ReportConfig): Promise<string[]>
     if (config.entity === "contacts") {
       query = query.is("import_status", null);
     }
-    if (tagGroups) for (const g of tagGroups) query = query.in("contact_tags.tag_id", g);
+    query = embeds.apply(query);
     for (const filter of rest) {
       query = applyFilter(query, config.entity, filter);
     }

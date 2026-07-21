@@ -947,6 +947,9 @@ export function useNexusReport(rawConfig: unknown, previewCount: number) {
       // Archive convention: import_runs has no archived_at; everything
       // else hides archived rows, matching the list pages.
       if (entity !== "imports") query = query.is("archived_at", null);
+      // Pending pen imports stay out of Nexus contact widgets, matching
+      // every other contact read surface (lead-type retirement, 2026-07-20).
+      if (entity === "contacts") query = query.is("import_status", null);
       query = applyFilters(entity, query, filters);
 
       // "Called By": resolve the chosen users to the contact ids they've

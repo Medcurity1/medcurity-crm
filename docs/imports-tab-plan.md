@@ -1,5 +1,7 @@
 # Imports Tab Restore + Lead-Type Retirement — Plan
 
+**✅ COMPLETE — SHIPPED TO PROD 2026-07-20 evening (merge 750527e).** All 9 pieces plus the Lists home, suppression freeze, DB freeze, and dead-code purge are live on production; prod had zero pending leads at cutover so no straggler sweep was needed. This document is the historical plan of record. See docs/ledger/SHIPPED.md for the shipped entries.
+
 Logged 2026-07-20 (Nathan). Distills the June rename/revert history plus a full surface-area map of everything the lead concept touches, so both phases can be executed without rediscovery. Investigation session: 2026-07-20.
 
 ## History (why this is round 2)

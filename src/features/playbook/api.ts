@@ -707,6 +707,9 @@ export async function fetchRecipientsByTag(tagId: string): Promise<Recipient[]> 
       .select("id, first_name, last_name, email, account_id, do_not_contact, no_longer_employed, account:accounts!account_id(name), contact_tags!inner(tag_id)")
       .eq("contact_tags.tag_id", tagId)
       .is("archived_at", null)
+      // Pending pen imports are not campaign-able people yet (pen cutover,
+      // 2026-07-20) — same filter as every other contact read surface.
+      .is("import_status", null)
       .not("email", "is", null)
       .order("id", { ascending: true }) // stable order so range paging can't skip/dupe
       .range(page * PAGE, (page + 1) * PAGE - 1);
