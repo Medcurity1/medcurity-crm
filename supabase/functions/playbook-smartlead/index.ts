@@ -262,6 +262,68 @@ function mergeTemplate(tpl: string, vars: { first_name: string; last_name: strin
     .replace(/\{\{\s*company\s*\}\}/gi, vars.company);
 }
 
+/** Random 32-byte hex secret for a campaign's webhook registration
+ *  (Campaigns overhaul Phase 2, S5) — gates campaign-webhooks' inbound
+ *  ?token= query param and, when Smartlead echoes it back, its optional
+ *  HMAC signature verification. Generated fresh per launch; never reused
+ *  across campaigns. */
+function generateWebhookSecret(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Best-effort: register ONE Smartlead webhook covering every event type the
+ * campaign-webhooks function reacts to. Returns the Smartlead-assigned
+ * webhook id on success, or null on ANY failure (404 — endpoint doesn't
+ * exist on this Smartlead plan/tier; 403 — plan limitation; network error;
+ * unexpected response shape). A launch must succeed whether or not webhooks
+ * are available — the future daily reconciliation sweep (not built in this
+ * slice) is the fallback for accounts without webhook support.
+ *
+ * Endpoint shape (unverified beyond "matches the /campaigns/{id}/<noun>
+ * pattern every other Smartlead call in this file already uses" — e.g.
+ * /campaigns/{id}/sequences, /campaigns/{id}/schedule,
+ * /campaigns/{id}/email-accounts, /campaigns/{id}/status): POST
+ * /campaigns/{id}/webhooks with {name, webhook_url, event_types}. If this
+ * 404s against the real API (Smartlead's webhook API may require a Pro
+ * plan, or use a different path), registerCampaignWebhook simply returns
+ * null and launch() proceeds webhook-less — verify against a real account
+ * post-deploy via the `webhook-status` diagnostic action below.
+ */
+async function registerCampaignWebhook(smartleadCampaignId: number, secret: string): Promise<number | null> {
+  try {
+    const webhookUrl = `${SUPABASE_URL}/functions/v1/campaign-webhooks?token=${secret}`;
+    const res = (await smartleadFetch(`/campaigns/${smartleadCampaignId}/webhooks`, {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({
+        id: null,
+        name: "Pulse campaign events",
+        webhook_url: webhookUrl,
+        event_types: [
+          "EMAIL_SENT",
+          "EMAIL_OPENED",
+          "EMAIL_CLICKED",
+          "EMAIL_REPLIED",
+          "EMAIL_BOUNCED",
+          "EMAIL_UNSUBSCRIBED",
+        ],
+      }),
+    })) as Record<string, unknown>;
+    const rawId = res?.id ?? res?.webhook_id
+      ?? (res?.data as Record<string, unknown> | undefined)?.id;
+    if (typeof rawId === "number") return rawId;
+    if (typeof rawId === "string" && /^\d+$/.test(rawId)) return Number(rawId);
+    console.warn("playbook launch: webhook registration returned no usable id; continuing webhook-less");
+    return null;
+  } catch (err) {
+    console.warn("playbook launch: webhook registration failed (continuing webhook-less):", (err as Error).message);
+    return null;
+  }
+}
+
 /** Fallback task title when a step's manual_task_title_template is blank
  *  (SequenceEditor doesn't require one) — keeps every spawned task usable
  *  even for a hand-built sequence with no task copy written yet. */
@@ -868,6 +930,16 @@ async function launch(p: LaunchInput) {
   const campaignId = createRes.id;
   await delay();
 
+  // 1.5. Webhook registration (Phase 2, S5) — best-effort, right after
+  // create so it's registered before any leads/sends happen. A failure here
+  // (404/403/plan limitation) must NEVER fail the launch — see
+  // registerCampaignWebhook's doc comment. webhookId stays null when
+  // registration didn't succeed, and the campaigns row below only persists
+  // webhook_secret alongside a real webhookId (no orphaned secret sitting
+  // on a row nothing will ever call in with).
+  const webhookSecret = generateWebhookSecret();
+  const webhookId = await registerCampaignWebhook(campaignId, webhookSecret);
+
   // Everything after the create is wrapped: any failure best-effort DELETES
   // the just-created Smartlead campaign (and the Pulse campaigns row, if it
   // already exists by that point), so we never leave an orphaned campaign
@@ -1043,6 +1115,8 @@ async function launch(p: LaunchInput) {
         // The EXACT launched steps (any email edits already folded in) —
         // this is the frozen record the tracker + Phase 2 engine read.
         steps,
+        smartlead_webhook_id: webhookId,
+        webhook_secret: webhookId != null ? webhookSecret : null,
         notes: emailSequence
           .map((s, i) => `Step ${s.seq_number ?? i + 1}: ${s.subject ?? ""}`)
           .join("\n"),
@@ -1235,9 +1309,50 @@ Deno.serve(async (req) => {
       // already be gone); the Pulse row is always removed.
       const pulseId = body.id as string;
       const slId = body.smartlead_campaign_id as number | undefined;
+      // Best-effort webhook deregistration (Phase 2, S5) — look up
+      // smartlead_webhook_id before the row is gone. Never fails the
+      // overall delete; a leftover webhook just posts to a URL that will
+      // 401 forever (no campaigns row will ever match its secret again).
+      if (slId && pulseId) {
+        try {
+          const { data: campRow } = await svc
+            .from("campaigns")
+            .select("smartlead_webhook_id")
+            .eq("id", pulseId)
+            .maybeSingle();
+          if (campRow?.smartlead_webhook_id) {
+            try {
+              await smartleadFetch(`/campaigns/${slId}/webhooks/${campRow.smartlead_webhook_id}`, { method: "DELETE" });
+            } catch { /* best-effort */ }
+          }
+        } catch { /* best-effort */ }
+      }
       if (slId) { try { await smartleadFetch(`/campaigns/${slId}`, { method: "DELETE" }); } catch { /* best-effort */ } }
       if (pulseId) await svc.from("campaigns").delete().eq("id", pulseId);
       return json({ success: true });
+    }
+    if (action === "webhook-status") {
+      // Diagnostic (Phase 2, S5): given a Pulse campaign id, list that
+      // Smartlead campaign's registered webhooks (raw API response) — for
+      // verifying webhook-tier availability against a real Smartlead
+      // account after deploy. Not used by any UI in this slice.
+      const pulseId = body.id as string;
+      if (!pulseId) throw new Error("id is required");
+      const { data: campRow, error: campErr } = await svc
+        .from("campaigns")
+        .select("smartlead_campaign_id, smartlead_webhook_id, webhook_secret")
+        .eq("id", pulseId)
+        .single();
+      if (campErr || !campRow?.smartlead_campaign_id) {
+        throw new Error("Campaign not found or not linked to Smartlead: " + (campErr?.message ?? pulseId));
+      }
+      const webhooks = await smartleadFetch(`/campaigns/${campRow.smartlead_campaign_id}/webhooks`);
+      return json({
+        smartlead_campaign_id: campRow.smartlead_campaign_id,
+        registered_webhook_id: campRow.smartlead_webhook_id,
+        has_secret: !!campRow.webhook_secret,
+        webhooks,
+      });
     }
     return json({ error: `Unknown action: ${action}` }, 400);
   } catch (e) {
