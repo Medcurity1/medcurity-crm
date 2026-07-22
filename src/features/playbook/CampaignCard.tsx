@@ -78,6 +78,10 @@ export function CampaignCard({
       { id: c.id, action },
       {
         onSuccess: (r) => {
+          if (r.warning) {
+            toast.warning(r.warning);
+            return;
+          }
           if (action === "start") {
             const tasks = r.tasks_created ?? 0;
             toast.success(`Campaign started${tasks ? ` — ${pluralize(tasks, "call/LinkedIn task")} scheduled.` : "."}`);

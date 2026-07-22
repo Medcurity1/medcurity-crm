@@ -568,7 +568,7 @@ async function spawnCampaignTasks(campaignId: string): Promise<{ tasksCreated: n
  * JS client's upsert() for a real bulk "different value per row" update.
  */
 async function backfillFirstSendDates(
-  enrollmentsInOrder: { id: string; enroll_position: number }[],
+  enrollmentsInOrder: { id: string; enroll_position: number; first_send_at?: string | null }[],
   anchorDate: string,
   leadsPerDay: number,
   sendDays: number[],
@@ -576,13 +576,32 @@ async function backfillFirstSendDates(
   if (!enrollmentsInOrder.length) return;
   const sorted = [...enrollmentsInOrder].sort((a, b) => a.enroll_position - b.enroll_position);
   const dates = computeFirstSendDates(sorted.length, anchorDate, leadsPerDay, sendDays);
-  const rows = sorted.map((e, i) => ({ id: e.id, first_send_at: dates[i] }));
+
+  // NOT an upsert: .upsert() with only {id, first_send_at} is an INSERT
+  // under the hood for PostgREST's constraint check, and campaign_enrollments
+  // has NOT NULL columns (campaign_id) the partial row can't satisfy — the
+  // whole batch fails with a not-null violation. (Found live 2026-07-22: the
+  // silent version of this left every enrollment date NULL and zero tasks
+  // spawned.) Instead, group ids by their computed date — there are only
+  // ceil(n / leadsPerDay) distinct dates — and issue one real UPDATE per
+  // date. Rows that already have a first_send_at are left alone (re-running
+  // Start must never re-date someone whose schedule is already live).
+  const idsByDate = new Map<string, string[]>();
+  sorted.forEach((e, i) => {
+    if (e.first_send_at) return;
+    const d = dates[i];
+    if (!idsByDate.has(d)) idsByDate.set(d, []);
+    idsByDate.get(d)!.push(e.id);
+  });
   const BATCH = 500;
-  for (let i = 0; i < rows.length; i += BATCH) {
-    const { error } = await svc
-      .from("campaign_enrollments")
-      .upsert(rows.slice(i, i + BATCH), { onConflict: "id" });
-    if (error) console.error("backfillFirstSendDates: batch update failed:", error.message);
+  for (const [date, ids] of idsByDate) {
+    for (let i = 0; i < ids.length; i += BATCH) {
+      const { error } = await svc
+        .from("campaign_enrollments")
+        .update({ first_send_at: date })
+        .in("id", ids.slice(i, i + BATCH));
+      if (error) throw new Error("first_send_at backfill failed: " + error.message);
+    }
   }
 }
 
@@ -698,7 +717,7 @@ async function setCampaignStatus(p: SetStatusInput, archivedBy: string | null) {
   }
   const { data: campaign, error: campErr } = await svc
     .from("campaigns")
-    .select("id, status, smartlead_campaign_id, leads_per_day, settings")
+    .select("id, status, smartlead_campaign_id, leads_per_day, settings, anchor_date")
     .eq("id", p.id)
     .single();
   if (campErr || !campaign) throw new Error("Campaign not found: " + (campErr?.message ?? p.id));
@@ -714,12 +733,23 @@ async function setCampaignStatus(p: SetStatusInput, archivedBy: string | null) {
   const newStatus = PULSE_STATUS_FOR_ACTION[p.action];
   let tasksCreated = 0;
   let tasksCancelled = 0;
+  let warning: string | undefined;
 
-  if (p.action === "start" && campaign.status === "draft") {
-    const anchorDate = todayISODate();
+  if (p.action === "start" || p.action === "resume") {
+    // Retry-safe: runs on every start AND resume, not just draft→start. A
+    // draft start anchors to today; anything else (re-click, resume) keeps
+    // the stored anchor and only fills what's missing — backfill skips
+    // enrollments that already have a date, and spawnCampaignTasks is
+    // idempotent, so this can never re-date someone's live schedule. Running
+    // it on resume gives the tracker a natural retry path if a start's
+    // scheduling half ever failed (the card shows Pause/Resume by then).
+    const isDraft = campaign.status === "draft";
+    const anchorDate = isDraft
+      ? todayISODate()
+      : ((campaign.anchor_date as string | null) ?? todayISODate());
     const { data: enrollments, error: eErr } = await svc
       .from("campaign_enrollments")
-      .select("id, enroll_position")
+      .select("id, enroll_position, first_send_at")
       .eq("campaign_id", p.id)
       .order("enroll_position", { ascending: true });
     if (eErr) throw new Error("Could not load enrollments: " + eErr.message);
@@ -730,15 +760,38 @@ async function setCampaignStatus(p: SetStatusInput, archivedBy: string | null) {
       ? (scheduleSettings.days_of_week as number[])
       : [1, 2, 3, 4, 5];
 
-    await svc.from("campaigns").update({ anchor_date: anchorDate, status: newStatus }).eq("id", p.id);
-    await backfillFirstSendDates(
-      (enrollments ?? []) as { id: string; enroll_position: number }[],
-      anchorDate,
-      campaign.leads_per_day ?? 20,
-      sendDays,
-    );
-    const spawned = await spawnCampaignTasks(p.id);
-    tasksCreated = spawned.tasksCreated;
+    await svc
+      .from("campaigns")
+      .update(isDraft ? { anchor_date: anchorDate, status: newStatus } : { status: newStatus })
+      .eq("id", p.id);
+
+    // The campaign IS started in Smartlead by this point — a bookkeeping
+    // failure below must not present as "start failed". One internal retry,
+    // then report as a warning; everything here is idempotent, so pausing
+    // and resuming the campaign re-runs it safely.
+    const fillSchedule = async () => {
+      await backfillFirstSendDates(
+        (enrollments ?? []) as { id: string; enroll_position: number; first_send_at?: string | null }[],
+        anchorDate,
+        campaign.leads_per_day ?? 20,
+        sendDays,
+      );
+      const spawned = await spawnCampaignTasks(p.id);
+      tasksCreated = spawned.tasksCreated;
+    };
+    try {
+      try {
+        await fillSchedule();
+      } catch (firstErr) {
+        console.error("set-campaign-status: scheduling failed, retrying once:", (firstErr as Error).message);
+        await new Promise((r) => setTimeout(r, 1000));
+        await fillSchedule();
+      }
+    } catch (postErr) {
+      console.error("set-campaign-status: scheduling failed after retry:", (postErr as Error).message);
+      warning =
+        "The campaign started, but scheduling its call/LinkedIn tasks hit a snag — pause and resume it to finish scheduling.";
+    }
   } else if (p.action === "stop") {
     await svc.from("campaigns").update({ status: newStatus }).eq("id", p.id);
     await svc
@@ -759,6 +812,7 @@ async function setCampaignStatus(p: SetStatusInput, archivedBy: string | null) {
     status: newStatus,
     tasks_created: tasksCreated,
     tasks_cancelled: tasksCancelled,
+    ...(warning ? { warning } : {}),
   };
 }
 

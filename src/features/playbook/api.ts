@@ -290,6 +290,7 @@ export function useSetCampaignStatus() {
         status: string;
         tasks_created?: number;
         tasks_cancelled?: number;
+        warning?: string;
       };
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] }),
