@@ -386,7 +386,7 @@ Fable session planning/managing; build work delegated to subagents with tight sp
 ### Phase 1 slices (current work)
 
 - **S1 — Unify the two campaign models.** `campaigns` (20260625000001) becomes the single source of
-  truth; migrate `playbook_campaigns` rows in (same ids, origin='legacy_import'|'pulse'|
+  truth; migrate `playbook_campaigns` rows in (same ids, origin='legacy'|'pulse'|
   'smartlead_import', status map planned→draft, in_progress→active, complete→completed), add the
   legacy columns campaigns lacks (metrics, analyzed_at, analysis_json, adaptive_enabled, notes, …),
   repoint FKs (campaign_adaptations), archive-rename the old table (reversible), update api.ts hooks +

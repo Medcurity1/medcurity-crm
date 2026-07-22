@@ -11,6 +11,10 @@
 //                     when starting immediately — spawn the CALL/LINKEDIN/
 //                     EMAIL_HYBRID steps as tasks (Campaigns overhaul S3)
 //   - delete-campaign: delete in Smartlead + remove the Pulse row
+//   - set-campaign-status: start/pause/resume/stop from the tracker (S4) —
+//                     mirrors Smartlead's status, and on start-a-draft/stop
+//                     also does the local first_send_at backfill + task
+//                     spawn, or enrollment/task cancellation, respectively
 //
 // Campaigns unification (2026-07-22): reads/writes `campaigns`, not the
 // retired `playbook_campaigns` (now playbook_campaigns_archived_20260722 —
@@ -66,6 +70,24 @@ async function callerIsAdmin(authHeader: string | null): Promise<boolean> {
   });
   const { data, error } = await asUser.rpc("is_admin");
   return !error && data === true;
+}
+
+/** The caller's user id (for archived_by on tasks cancelled by a Stop
+ *  action), or null for a service-role/no-JWT caller — archived_by is
+ *  nullable, so a null here just means "system cancelled it" rather than a
+ *  named person. Best-effort: never throws. */
+async function callerUserId(authHeader: string | null): Promise<string | null> {
+  if (!authHeader) return null;
+  try {
+    const asUser = createClient(SUPABASE_URL, ANON_KEY, {
+      global: { headers: { Authorization: authHeader } },
+      auth: { persistSession: false },
+    });
+    const { data } = await asUser.auth.getUser();
+    return data?.user?.id ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -565,6 +587,182 @@ async function backfillFirstSendDates(
 }
 
 /**
+ * Cancel every still-pending campaign-generated task tied to this campaign's
+ * enrollments (CALL/LINKEDIN/EMAIL_HYBRID tasks spawned by spawnCampaignTasks)
+ * — used by a Stop action. "Pending" = is_campaign_generated, not already
+ * completed, not already archived. Uses the SAME archive convention as the
+ * rest of the app's task cancel/delete path (useArchiveActivity in
+ * src/features/activities/api.ts): stamps archived_at/archived_by/
+ * archive_reason rather than deleting the row, so the task stays visible in
+ * Archive Manager for audit. Batched (500/query) on both the read and the
+ * write side.
+ */
+async function cancelPendingCampaignTasks(
+  campaignId: string,
+  archivedBy: string | null,
+): Promise<{ tasksCancelled: number }> {
+  const { data: enrollments, error: enrErr } = await svc
+    .from("campaign_enrollments")
+    .select("id")
+    .eq("campaign_id", campaignId);
+  if (enrErr) {
+    console.error("cancelPendingCampaignTasks: couldn't load enrollments:", enrErr.message);
+    return { tasksCancelled: 0 };
+  }
+  const enrollmentIds = (enrollments ?? []).map((e) => e.id as string);
+  if (!enrollmentIds.length) return { tasksCancelled: 0 };
+
+  let cancelled = 0;
+  const BATCH = 500;
+  const now = new Date().toISOString();
+  for (let i = 0; i < enrollmentIds.length; i += BATCH) {
+    const idBatch = enrollmentIds.slice(i, i + BATCH);
+    const { data: pending, error: findErr } = await svc
+      .from("activities")
+      .select("id")
+      .in("campaign_enrollment_id", idBatch)
+      .eq("is_campaign_generated", true)
+      .is("completed_at", null)
+      .is("archived_at", null);
+    if (findErr) {
+      console.error("cancelPendingCampaignTasks: task lookup failed:", findErr.message);
+      continue;
+    }
+    const taskIds = (pending ?? []).map((t) => t.id as string);
+    if (!taskIds.length) continue;
+    const { error: updErr } = await svc
+      .from("activities")
+      .update({
+        archived_at: now,
+        archived_by: archivedBy,
+        archive_reason: "Campaign stopped",
+      })
+      .in("id", taskIds);
+    if (updErr) {
+      console.error("cancelPendingCampaignTasks: archive update failed:", updErr.message);
+      continue;
+    }
+    cancelled += taskIds.length;
+  }
+  return { tasksCancelled: cancelled };
+}
+
+interface SetStatusInput {
+  id: string;
+  action: "start" | "pause" | "resume" | "stop";
+}
+
+// action -> Smartlead's /campaigns/{id}/status payload value. Same endpoint
+// shape as the existing autoStart call in launch() below (POST, {status}).
+const SMARTLEAD_STATUS_FOR_ACTION: Record<SetStatusInput["action"], string> = {
+  start: "START",
+  resume: "START",
+  pause: "PAUSED",
+  stop: "STOPPED",
+};
+// action -> the Pulse campaigns.status value it lands on.
+const PULSE_STATUS_FOR_ACTION: Record<SetStatusInput["action"], "active" | "paused" | "stopped"> = {
+  start: "active",
+  resume: "active",
+  pause: "paused",
+  stop: "stopped",
+};
+// campaign_enrollments statuses a Stop should NOT touch — already at rest.
+const ENROLLMENT_TERMINAL_STATUSES = ["completed", "stopped", "replied", "bounced"];
+
+/**
+ * Start / pause / resume / stop a campaign from the tracker (Campaigns
+ * overhaul S4). For a Smartlead-linked campaign (smartlead_campaign_id set),
+ * mirrors the action to Smartlead first — same POST .../status call the
+ * launch() autoStart path already uses — then updates the Pulse row. A
+ * non-linked row (e.g. a legacy-origin campaign with no Smartlead
+ * counterpart) just updates the row.
+ *
+ * `start` on a DRAFT additionally closes the draft->live loop this slice was
+ * built for: anchors the campaign to today, backfills every enrollment's
+ * first_send_at (same math as an immediate-start launch), and spawns the
+ * CALL/LINKEDIN/EMAIL_HYBRID tasks off it. `start` on anything already past
+ * draft (shouldn't happen from the UI, but defensive) just re-mirrors the
+ * status — it does NOT re-run the backfill/spawn a second time.
+ *
+ * `stop` additionally moves every non-terminal enrollment to 'stopped' and
+ * archives (never deletes — see cancelPendingCampaignTasks) any pending
+ * campaign-generated task tied to this campaign.
+ *
+ * `pause`/`resume` touch only the campaigns row in this slice — per-
+ * enrollment pause/resume is out of scope for v1 (see the spec).
+ */
+async function setCampaignStatus(p: SetStatusInput, archivedBy: string | null) {
+  if (!p.id || !p.action || !(p.action in SMARTLEAD_STATUS_FOR_ACTION)) {
+    throw new Error("id and a valid action (start|pause|resume|stop) are required");
+  }
+  const { data: campaign, error: campErr } = await svc
+    .from("campaigns")
+    .select("id, status, smartlead_campaign_id, leads_per_day, settings")
+    .eq("id", p.id)
+    .single();
+  if (campErr || !campaign) throw new Error("Campaign not found: " + (campErr?.message ?? p.id));
+
+  if (campaign.smartlead_campaign_id != null) {
+    await smartleadFetch(`/campaigns/${campaign.smartlead_campaign_id}/status`, {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ status: SMARTLEAD_STATUS_FOR_ACTION[p.action] }),
+    });
+  }
+
+  const newStatus = PULSE_STATUS_FOR_ACTION[p.action];
+  let tasksCreated = 0;
+  let tasksCancelled = 0;
+
+  if (p.action === "start" && campaign.status === "draft") {
+    const anchorDate = todayISODate();
+    const { data: enrollments, error: eErr } = await svc
+      .from("campaign_enrollments")
+      .select("id, enroll_position")
+      .eq("campaign_id", p.id)
+      .order("enroll_position", { ascending: true });
+    if (eErr) throw new Error("Could not load enrollments: " + eErr.message);
+
+    const settings = (campaign.settings ?? {}) as Record<string, unknown>;
+    const scheduleSettings = (settings.schedule ?? {}) as Record<string, unknown>;
+    const sendDays = Array.isArray(scheduleSettings.days_of_week)
+      ? (scheduleSettings.days_of_week as number[])
+      : [1, 2, 3, 4, 5];
+
+    await svc.from("campaigns").update({ anchor_date: anchorDate, status: newStatus }).eq("id", p.id);
+    await backfillFirstSendDates(
+      (enrollments ?? []) as { id: string; enroll_position: number }[],
+      anchorDate,
+      campaign.leads_per_day ?? 20,
+      sendDays,
+    );
+    const spawned = await spawnCampaignTasks(p.id);
+    tasksCreated = spawned.tasksCreated;
+  } else if (p.action === "stop") {
+    await svc.from("campaigns").update({ status: newStatus }).eq("id", p.id);
+    await svc
+      .from("campaign_enrollments")
+      .update({ status: "stopped" })
+      .eq("campaign_id", p.id)
+      .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`);
+    const result = await cancelPendingCampaignTasks(p.id, archivedBy);
+    tasksCancelled = result.tasksCancelled;
+  } else {
+    // pause, resume, or start-on-a-non-draft (defensive no-op path above).
+    await svc.from("campaigns").update({ status: newStatus }).eq("id", p.id);
+  }
+
+  return {
+    success: true,
+    id: p.id,
+    status: newStatus,
+    tasks_created: tasksCreated,
+    tasks_cancelled: tasksCancelled,
+  };
+}
+
+/**
  * Launch a campaign into Smartlead (ported from server.js:3294-3541, then
  * extended by S2's suppression re-check and S3's enrollment engine):
  * create -> sequence (rollback/delete on failure) -> schedule -> attach
@@ -968,6 +1166,15 @@ Deno.serve(async (req) => {
     if (action === "import") return json(await importCampaigns());
     if (action === "sync") return json(await syncCampaigns());
     if (action === "launch") return json(await launch(body as unknown as LaunchInput));
+    if (action === "set-campaign-status") {
+      const archivedBy = await callerUserId(auth);
+      return json(
+        await setCampaignStatus(
+          { id: body.id as string, action: body.status_action as SetStatusInput["action"] },
+          archivedBy,
+        ),
+      );
+    }
     if (action === "delete-campaign") {
       // Delete a campaign in Smartlead AND remove the Pulse row. Used to
       // discard a draft. Smartlead delete is best-effort (a campaign may

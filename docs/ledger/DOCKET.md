@@ -10,6 +10,10 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Queued / requested
 
+- [QUEUED] 2026-07-22 · Nathan (outage follow-up) · **Prod compute upgrade decision: Small (2GB) → Medium (4GB).** Prod Supabase OOM-crashed ~11:55 PT today (all services unhealthy, logins timing out for everyone; Nathan's dashboard restart fixed it in ~10 min). Memory graphs: chronic swap use even at baseline + a ~3.3GB memory-commitment spike (~2x limit) at the crash moment. Nathan asking his boss about upgrading after hours (~$15→~$60/mo, applies with a ~2-min restart). Watchdog idea considered and declined by Nathan.
+
+- [QUEUED] 2026-07-22 · (outage follow-up) · **Re-check prod Postgres logs for the 11:22–12:10 PT crash window once Supabase's "Log Ingestion Problems" incident (started 9:29 PT) backfills.** Logs currently stop dead at 11:22:00 with nothing after — even the restart's startup messages are missing, so the kill evidence is stuck in their ingestion backlog. When it lands: search Postgres collection for "terminated"/"recovery"/severity FATAL in that window to name the exact OOM trigger. Also noticed in passing: cron job 6 (meddy_sweep_stale_agents) fires every 1 minute — sanity-check that cadence is intended.
+
 (the ENTIRE 7/21 afternoon batch — ghost-stage fix, partner AI banner, claim tool, FTE gate fix, phone auto-fill — shipped to PROD in merge aaec792 ~16:10 PT; see SHIPPED)
 
 (the 7/22 staging-legacy-jobs item is RESOLVED same day — jobs removed, root cause = angle-bracket-wrapped key from a 7/15 re-paste, NOT a key rotation; see SHIPPED 7/22. Two follow-ups spun out below.)

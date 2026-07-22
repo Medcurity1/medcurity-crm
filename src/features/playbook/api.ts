@@ -252,13 +252,81 @@ export function useCampaigns() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("campaigns")
-        .select("*, owner:user_profiles!owner_user_id(id, full_name)")
+        .select(
+          "*, owner:user_profiles!owner_user_id(id, full_name), template:campaign_templates(name)",
+        )
         // Newest first, id as the tiebreaker (stable ordering within the
         // same created_at, e.g. a bulk-import batch inserted in one pass).
         .order("created_at", { ascending: false })
         .order("id", { ascending: false });
       if (error) throw error;
-      return data as (Campaign & { owner?: { id: string; full_name: string | null } | null })[];
+      return data as (Campaign & {
+        owner?: { id: string; full_name: string | null } | null;
+        template?: { name: string } | null;
+      })[];
+    },
+  });
+}
+
+export type CampaignStatusAction = "start" | "pause" | "resume" | "stop";
+
+/** Start / pause / resume / stop a campaign from the tracker — mirrors the
+ *  Smartlead status on the linked campaign (when there is one) and, for
+ *  start-on-a-draft and stop, does the local bookkeeping (first_send_at
+ *  backfill + task spawn on start; enrollment/task cancellation on stop).
+ *  See the `set-campaign-status` action in playbook-smartlead/index.ts (S4). */
+export function useSetCampaignStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: { id: string; action: CampaignStatusAction }) => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "set-campaign-status", id: p.id, status_action: p.action },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as {
+        success: boolean;
+        id: string;
+        status: string;
+        tasks_created?: number;
+        tasks_cancelled?: number;
+      };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] }),
+    onError: (e) => toast.error("Couldn't update campaign: " + (e as Error).message),
+  });
+}
+
+export interface CampaignEnrollmentStats {
+  total: number;
+  finished: number;
+  replied: number;
+}
+
+/** One grouped fetch of enrollment progress for every visible campaign card
+ *  — totals + finished (completed/stopped/bounced) + replied per
+ *  campaign_id. Single .in() query selecting just campaign_id + status,
+ *  aggregated client-side; fine at tracker-list scale (not a full-database
+ *  scan). */
+export function useCampaignEnrollmentStats(campaignIds: string[]) {
+  const key = [...campaignIds].sort().join(",");
+  return useQuery({
+    queryKey: ["playbook", "campaign-enrollment-stats", key],
+    enabled: campaignIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("campaign_enrollments")
+        .select("campaign_id, status")
+        .in("campaign_id", campaignIds);
+      if (error) throw error;
+      const out: Record<string, CampaignEnrollmentStats> = {};
+      for (const row of (data ?? []) as { campaign_id: string; status: string }[]) {
+        const s = (out[row.campaign_id] ??= { total: 0, finished: 0, replied: 0 });
+        s.total++;
+        if (row.status === "replied") s.replied++;
+        else if (row.status === "completed" || row.status === "stopped" || row.status === "bounced") s.finished++;
+      }
+      return out;
     },
   });
 }

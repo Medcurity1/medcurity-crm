@@ -258,7 +258,7 @@ export function CampaignWizard({
       leads: r.leads_added, failed: r.leads_failed ?? 0,
       suppressionDropped, alreadyEnrolledDropped, enrolled, tasksCreated,
     });
-    let msg = `Campaign launched — ${enrolled} people enrolled, ${tasksCreated} task${tasksCreated === 1 ? "" : "s"} scheduled.`;
+    let msg = `Campaign launched — ${enrolled} ${enrolled === 1 ? "person" : "people"} enrolled, ${tasksCreated} task${tasksCreated === 1 ? "" : "s"} scheduled.`;
     const notes: string[] = [];
     if (suppressionDropped > 0) notes.push(`${suppressionDropped} on the Do-Not-Email list skipped`);
     if (alreadyEnrolledDropped > 0) notes.push(`${alreadyEnrolledDropped} already enrolled elsewhere skipped`);
@@ -308,6 +308,18 @@ export function CampaignWizard({
   const displayStep = mode === "template" ? Math.max(1, step - 1) : step;
   const templateEmailSteps = templateSteps.filter((s) => s.channel === "EMAIL_AUTO");
   const templateTaskSteps = templateSteps.filter((s) => s.channel !== "EMAIL_AUTO");
+  // Every automated email needs real wording before it can go out — block
+  // Continue (template mode) / Launch (AI mode) until subject AND body are
+  // both non-empty on every EMAIL_AUTO step. AI mode already writes copy for
+  // every email it generates, so this rarely fires there; it's a cheap
+  // last-line guard, not the primary flow (see the per-step hint below for
+  // template mode, where a hand-cleared field is the real target).
+  const isEmailStepEmpty = (subject: string | undefined, bodyHtml: string | undefined) =>
+    !subject?.trim() || !plain(bodyHtml ?? "").trim();
+  const incompleteTemplateEmails = templateEmailSteps.filter((s) =>
+    isEmailStepEmpty(s.subject_template, s.body_template));
+  const aiEmailsIncomplete = mode === "ai" && !!campaign &&
+    campaign.sequence.some((e) => isEmailStepEmpty(e.subject, e.body_html));
 
   return (
     <Dialog open={open} onOpenChange={close}>
@@ -483,8 +495,9 @@ export function CampaignWizard({
                 <p className="text-xs font-medium text-muted-foreground">Automated emails — edit for this launch only, the saved template is untouched</p>
                 {templateEmailSteps.map((s) => {
                   const isCode = codeView.has(s.order);
+                  const incomplete = isEmailStepEmpty(s.subject_template, s.body_template);
                   return (
-                    <div key={s.order} className="rounded-md border p-3 space-y-2">
+                    <div key={s.order} className={cn("rounded-md border p-3 space-y-2", incomplete && "border-amber-400/60")}>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-semibold">Day {s.day_offset} email</span>
                         <Button variant="ghost" size="xs" className="h-6" onClick={() => toggleCode(s.order)} title="Toggle preview / HTML">
@@ -504,6 +517,9 @@ export function CampaignWizard({
                           <iframe title={`Day ${s.day_offset} email`} srcDoc={emailSrcDoc(s.body_template ?? "")} sandbox="" className="w-full min-h-[160px]" />
                         </div>
                       )}
+                      {incomplete && (
+                        <p className="text-[11px] text-amber-600">This email still needs wording.</p>
+                      )}
                     </div>
                   );
                 })}
@@ -517,9 +533,16 @@ export function CampaignWizard({
               </div>
             )}
 
+            {incompleteTemplateEmails.length > 0 && (
+              <p className="text-xs text-amber-600">
+                {incompleteTemplateEmails.length === 1
+                  ? "One email above still needs wording before you can continue."
+                  : `${incompleteTemplateEmails.length} emails above still need wording before you can continue.`}
+              </p>
+            )}
             <div className="flex justify-between pt-2">
               <Button variant="ghost" onClick={() => close(false)}>Cancel</Button>
-              <Button onClick={() => setStep(3)} disabled={!templateName.trim()}>
+              <Button onClick={() => setStep(3)} disabled={!templateName.trim() || incompleteTemplateEmails.length > 0}>
                 Recipients <ArrowRight className="h-4 w-4 ml-1" />
               </Button>
             </div>
@@ -628,9 +651,12 @@ export function CampaignWizard({
                   {enrollmentPartition.dropped.length > 0 ? ` (${enrollmentPartition.dropped.length} already enrolled elsewhere excluded)` : ""}
                   {autoStart ? " · will START sending" : " · will be saved as a DRAFT"}
                 </div>
+                {aiEmailsIncomplete && (
+                  <p className="text-xs text-amber-600">One or more emails still need wording — go back to Step 2 to finish them.</p>
+                )}
                 <div className="flex justify-between pt-2">
                   <Button variant="ghost" onClick={() => setStep(3)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
-                  <Button onClick={doLaunch} disabled={launch.isPending}>
+                  <Button onClick={doLaunch} disabled={launch.isPending || aiEmailsIncomplete}>
                     {launch.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Launching…</> : <><Rocket className="h-4 w-4 mr-1" /> {autoStart ? "Launch & start" : "Create draft"}</>}
                   </Button>
                 </div>
