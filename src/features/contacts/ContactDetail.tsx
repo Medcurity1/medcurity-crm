@@ -2,7 +2,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Pencil, Archive, ChevronDown, Phone, Mail, UserRoundCog, History, MapPin, Plus, Copy, Check, ListPlus, Megaphone } from "lucide-react";
+import { Pencil, Archive, ChevronDown, Phone, Mail, UserRoundCog, History, MapPin, Plus, Copy, Check, ListPlus, Megaphone, StickyNote } from "lucide-react";
 import { formatPhone } from "@/components/PhoneInput";
 import { InlineEdit } from "@/components/InlineEdit";
 import { useContact, useUpdateContact, useArchiveContact, useOriginatingLead } from "./api";
@@ -405,15 +405,18 @@ export function ContactDetail() {
           "Notes & Next Steps" layout section at the bottom; migration
           20260717000002 removed the duplicate notes row from that
           layout so this card is the one place notes render. */}
-      <Card className="mb-6">
+      <Card className="mb-6 border-amber-400/40 bg-amber-400/[0.06] dark:bg-amber-300/[0.04]">
         <CardHeader className="pb-1 pt-3 px-4">
-          <CardTitle className="text-xs text-muted-foreground font-medium">Notes</CardTitle>
+          <CardTitle className="text-xs text-muted-foreground font-medium inline-flex items-center gap-1.5">
+            <StickyNote className="h-3.5 w-3.5 text-amber-500/80" />
+            Notes
+          </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-3">
           <InlineEdit
             value={contact.notes ?? null}
             type="textarea"
-            placeholder="Add notes..."
+            placeholder={'Add a quick note — e.g. "Meeting set for the 28th"'}
             onSave={async (v) => {
               await updateMutation.mutateAsync({
                 id: contactId,
