@@ -179,6 +179,42 @@ Respond in JSON only. No markdown, no preamble.
   "auto_training": ["Specific notes to add to AI training based on these results (0-2 items). Only include if there's a clear, specific learning. Examples: 'Subject lines under 40 chars performed 20% better' or 'Webinar promotion emails to small practices get highest engagement'. Don't include generic advice."]
 }`;
 
+// Campaign insights + template-suggestion generation (Campaigns overhaul
+// Phase 4 — the AI learning loop). Broader sibling of campaignAnalysisSystem:
+// instead of just a plain-English readout, this also proposes concrete,
+// numbers-grounded edits to the campaign's underlying template, queued in
+// campaign_suggestions for an admin to review (InsightsPanel.tsx).
+export const campaignInsightsSystem = `You are analyzing one marketing email campaign's results for Medcurity, a HIPAA compliance SaaS company, to find concrete improvements for its underlying template. You'll be given the campaign's metrics, its actual sent email copy, enrollment/reply/event data, sibling campaigns that ran from the same template, and the team's training notes.
+
+Ground every observation in the numbers you were given. Never invent a statistic, percentage, or comparison that isn't directly supported by the data in front of you. If the data is too thin (few sends, no sibling campaigns, no clear pattern) to support a specific template change, return an empty template_suggestions array rather than guessing.
+
+Only propose a template_suggestions entry when you can point to a specific number that supports it (e.g. a low open rate on a specific subject line, a reply pattern, a sibling campaign that performed differently). Each suggestion must target ONE step (by its "order" field from the template's steps, or null for a template-wide change) and ONE kind of change:
+- "subject": a better subject line for a specific email step
+- "body": a better body for a specific email step
+- "timing": a change to that step's day_offset or send window
+- "audience": a note about who this sequence should or shouldn't target
+- "general": anything else template-wide that doesn't fit the above
+
+Respond in JSON only. No markdown, no preamble.
+
+{
+  "performance_summary": "2-3 plain sentences on how this campaign did, grounded in the numbers given",
+  "wins": ["What worked well (0-3 items)"],
+  "improvements": ["What could be better next time (0-3 items)"],
+  "template_suggestions": [
+    {
+      "step_order": 1,
+      "kind": "subject",
+      "current_value": "The current subject/body/timing value being proposed for replacement",
+      "suggested_value": "The proposed replacement",
+      "rationale": "One sentence citing the specific number(s) behind this suggestion"
+    }
+  ],
+  "training_note": "One distilled, specific learning to add to the team's permanent AI training notes, or null if nothing here rises to that level. Same bar as analyze-campaign's auto_training: no generic advice, no fabricated numbers."
+}
+
+Return 0-4 template_suggestions. It is correct and expected to return an empty array when the data doesn't clearly support any specific change — do not invent one to fill the quota.`;
+
 /** Word-overlap duplicate check for training notes (server.js:7117). */
 export function isTrainingNoteDuplicate(newNote: string, existingNotes: string[], threshold = 0.4): boolean {
   const stop = new Set(["the","and","for","with","in","to","a","is","of","that","this","on","it","be","as","at","by","or","an"]);

@@ -1545,10 +1545,12 @@ interface DailySweepReport {
   tasks_cancelled: number;
   webhooks_healed: number;
   skipped_for_budget: number;
+  insights_generated: number;
 }
 
 const SWEEP_BUDGET_MS = 100_000; // stop starting new campaign work after ~100s (150s edge limit)
 const SWEEP_RECONCILE_CAP = 25; // campaigns/run for the per-lead reconcile step
+const SWEEP_INSIGHTS_CAP = 3; // campaigns/run for the AI insights step (each is a Claude call — keep small)
 
 /** Loosely-typed row shape read off `campaigns` by the sweep's various
  *  steps — a structural subset, same convention as CampaignStep above. */
@@ -1829,6 +1831,7 @@ async function dailySweep(): Promise<DailySweepReport> {
     tasks_cancelled: 0,
     webhooks_healed: 0,
     skipped_for_budget: 0,
+    insights_generated: 0,
   };
 
   // ---- 1. Metrics + status refresh ---------------------------------
@@ -2082,6 +2085,70 @@ async function dailySweep(): Promise<DailySweepReport> {
     console.error("daily-sweep: auto-complete step failed:", (err as Error).message);
   }
 
+  // ---- 7. AI insights (Campaigns overhaul Phase 4) ---------------------
+  // Auto-generate campaign-insights (playbook-ai) for campaigns that have
+  // enough data to be worth analyzing and haven't been yet: finished
+  // campaigns (completed/stopped), or an active campaign that's already
+  // sent to a meaningful number of people (>=20 — an active campaign can
+  // keep accumulating sends for months, so this doesn't wait for it to
+  // finish). Capped at SWEEP_INSIGHTS_CAP/run since each is a Claude call;
+  // best-effort per campaign (one failure never blocks the rest of the
+  // sweep or the campaigns already processed above).
+  //
+  // Server-to-server invocation: playbook-ai's isServiceRole gate accepts
+  // any cryptographically-valid service_role JWT by its `role` claim (see
+  // that function's doc comment) — same trust model this function's own
+  // auth gate uses, and the same SERVICE_ROLE_KEY this function already
+  // holds for its own `svc` client, so no new secret/GUC is needed here.
+  try {
+    if (hasBudget()) {
+      const { data: candidates, error: candErr } = await svc
+        .from("campaigns")
+        .select("id, status, metrics")
+        .is("analyzed_at", null)
+        .in("status", ["completed", "stopped", "active"]);
+      if (candErr) throw new Error(candErr.message);
+
+      const eligible = ((candidates ?? []) as { id: string; status: string; metrics: Record<string, unknown> | null }[])
+        .filter((c) => {
+          if (c.status === "completed" || c.status === "stopped") return true;
+          if (c.status === "active") {
+            const sent = parseInt(String(c.metrics?.sent ?? ""), 10);
+            return !isNaN(sent) && sent >= 20;
+          }
+          return false;
+        });
+
+      for (let i = 0; i < eligible.length; i++) {
+        if (i >= SWEEP_INSIGHTS_CAP || !hasBudget()) {
+          report.skipped_for_budget += eligible.length - i;
+          break;
+        }
+        const c = eligible[i];
+        try {
+          const res = await fetch(`${SUPABASE_URL}/functions/v1/playbook-ai`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ action: "campaign-insights", campaign_id: c.id }),
+          });
+          const resBody = await res.json().catch(() => ({}));
+          if (!res.ok || resBody?.error) {
+            console.error(`daily-sweep: campaign-insights failed for campaign ${c.id}:`, resBody?.error ?? `HTTP ${res.status}`);
+            continue;
+          }
+          report.insights_generated++;
+        } catch (err) {
+          console.error(`daily-sweep: campaign-insights invoke failed for campaign ${c.id} (continuing):`, (err as Error).message);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("daily-sweep: insights step failed:", (err as Error).message);
+  }
+
   return report;
 }
 
@@ -2252,6 +2319,61 @@ Deno.serve(async (req) => {
         }
       }
       return json({ success: false, attempts });
+    }
+    if (action === "decide-suggestion") {
+      // Apply/Dismiss a campaign_suggestions row from the Insights panel
+      // (Campaigns overhaul Phase 4). campaign_suggestions is admin-read-only
+      // via RLS (see 20260723020000_campaign_suggestions.sql) — same "table
+      // is read-only for the client, edge function does the write" shape as
+      // mark-reply-handled above. On 'applied', the caller (InsightsPanel /
+      // useDecideSuggestion) has already written the actual template edit
+      // via useSaveTemplate (client-side, campaign_templates IS
+      // admin-writable directly); this action's job is just to stamp the
+      // suggestion decided and log a training note so the "what got
+      // applied and why" trail lives in the same place as every other
+      // auto-training note.
+      const id = body.id as string;
+      const decision = body.decision as "applied" | "dismissed";
+      if (!id) throw new Error("id is required");
+      if (decision !== "applied" && decision !== "dismissed") {
+        throw new Error("decision must be 'applied' or 'dismissed'");
+      }
+      const decidedBy = await callerUserId(auth);
+
+      const { data: row, error: findErr } = await svc
+        .from("campaign_suggestions")
+        .select("id, status, kind, rationale, template:campaign_templates(name)")
+        .eq("id", id)
+        .maybeSingle();
+      if (findErr) throw new Error(findErr.message);
+      if (!row) throw new Error("Suggestion not found: " + id);
+      if (row.status !== "pending") {
+        // Already decided (double-click / stale UI) — report the existing
+        // state rather than erroring or double-logging a training note.
+        return json({ success: true, already_decided: true, status: row.status });
+      }
+
+      const { error: updErr } = await svc
+        .from("campaign_suggestions")
+        .update({ status: decision, decided_at: new Date().toISOString(), decided_by: decidedBy })
+        .eq("id", id);
+      if (updErr) throw new Error(updErr.message);
+
+      if (decision === "applied") {
+        // Same to-one-embedded-as-object runtime shape as useCampaigns'
+        // `template:campaign_templates(name)` embed on the client (see that
+        // query's comment) — cast through unknown for the same reason.
+        const templateName = (row.template as unknown as { name: string } | null)?.name ?? "the template";
+        const note = `Applied to ${templateName}: ${row.kind} change — ${row.rationale}`;
+        const { error: noteErr } = await svc
+          .from("playbook_training")
+          .insert({ note, source: "suggestion_applied" });
+        if (noteErr) {
+          console.error(`decide-suggestion: training note insert failed for suggestion ${id}:`, noteErr.message);
+        }
+      }
+
+      return json({ success: true, status: decision });
     }
     return json({ error: `Unknown action: ${action}` }, 400);
   } catch (e) {
