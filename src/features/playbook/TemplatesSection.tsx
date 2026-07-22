@@ -1,6 +1,11 @@
 // Sequence template gallery — the entry point into the one builder. Each preset
-// (8-Touch, Warming, …) is a starting point you open, view, and (next phase)
-// launch on a list/contact. A "Custom" card starts an empty builder.
+// (8-Touch, Warming, …) is a starting point you open, view, and launch on a
+// list/contact. A "Custom" card starts an empty builder.
+//
+// "Use this template" (preview dialog) and SequenceEditor's "Use this
+// sequence" (Campaigns overhaul S3) both open the SAME CampaignWizard
+// instance in `mode="template"` — this component owns that instance since
+// it's the one place both launch triggers converge.
 
 import { useState } from "react";
 import { Rocket, Flame, Wand2, Sparkles, Clock, Layers, ArrowRight, Pencil, Copy, Trash2 } from "lucide-react";
@@ -20,9 +25,11 @@ import { cn } from "@/lib/utils";
 import { useCampaignTemplates, useDeleteTemplate } from "./api";
 import { SequenceTimeline, SequenceMiniPreview } from "./SequenceTimeline";
 import { SequenceEditor } from "./SequenceEditor";
+import { CampaignWizard } from "./CampaignWizard";
 import type { CampaignTemplate, SequenceStep } from "./types";
 
 type EditorSeed = (Partial<CampaignTemplate> & { steps: SequenceStep[] }) | null;
+type LaunchSeed = { template_id: string | null; name: string; steps: SequenceStep[] };
 
 const CATEGORY: Record<string, { icon: typeof Rocket; accent: string; chip: string; label: string }> = {
   flagship:      { icon: Rocket,   accent: "from-amber-500/20 to-orange-500/10", chip: "bg-amber-500/15 text-amber-600 dark:text-amber-400", label: "Flagship" },
@@ -44,6 +51,19 @@ export function TemplatesSection() {
   // mounted between uses, so without a changing key its internal step state
   // would carry over (e.g. "Customize a copy" showed the last sequence built).
   const [editorNonce, setEditorNonce] = useState(0);
+
+  // Same remount-fresh pattern for the launch wizard (Campaigns overhaul S3):
+  // both "Use this template" (below) and SequenceEditor's "Use this
+  // sequence" (via onLaunch) open this same instance.
+  const [launchOpen, setLaunchOpen] = useState(false);
+  const [launchSeed, setLaunchSeed] = useState<LaunchSeed | null>(null);
+  const [launchNonce, setLaunchNonce] = useState(0);
+
+  const openLaunch = (seed: LaunchSeed) => {
+    setLaunchSeed(seed);
+    setLaunchNonce((n) => n + 1);
+    setLaunchOpen(true);
+  };
 
   const openBlank = () => {
     setEditorSeed(null);
@@ -181,7 +201,13 @@ export function TemplatesSection() {
                       <Pencil className="h-4 w-4 mr-1" /> Edit
                     </Button>
                   )}
-                  <Button variant="ai" disabled title="Launching on a list or contact lands next">
+                  <Button
+                    variant="ai"
+                    onClick={() => {
+                      openLaunch({ template_id: preview.id, name: preview.name, steps: preview.steps });
+                      setPreview(null);
+                    }}
+                  >
                     <span className="ai-icon mr-1"><ArrowRight className="h-4 w-4" /></span>
                     Use this template
                   </Button>
@@ -194,7 +220,25 @@ export function TemplatesSection() {
 
       {/* The one builder — edit/create a sequence. key remounts it fresh
           per open so a reopen never shows the previously-built sequence. */}
-      <SequenceEditor key={editorNonce} open={editorOpen} onOpenChange={setEditorOpen} initial={editorSeed} />
+      <SequenceEditor
+        key={editorNonce}
+        open={editorOpen}
+        onOpenChange={setEditorOpen}
+        initial={editorSeed}
+        onLaunch={(t) => openLaunch({ template_id: t.id, name: t.name, steps: t.steps })}
+      />
+
+      {/* Launch wizard, template mode (Campaigns overhaul S3) — opened from
+          "Use this template" above or SequenceEditor's "Use this sequence"
+          via onLaunch. key remounts it fresh per open, same reason as the
+          editor above. */}
+      <CampaignWizard
+        key={launchNonce}
+        open={launchOpen}
+        onOpenChange={setLaunchOpen}
+        mode="template"
+        templateSeed={launchSeed ?? { template_id: null, name: "", steps: [] }}
+      />
 
       {/* Delete a custom template */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>

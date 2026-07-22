@@ -408,7 +408,18 @@ export function useLaunchCampaign() {
     mutationFn: async (p: {
       campaign_name: string;
       target_audience?: string;
-      sequence: CampaignSequenceEmail[];
+      // AI-wizard path. Omit when `steps` is present (mixed-channel path) —
+      // the server ignores `sequence` entirely once `steps` is set.
+      sequence?: CampaignSequenceEmail[];
+      // Mixed-channel path (Campaigns overhaul S3): the template gallery /
+      // SequenceEditor "Launch this sequence" flow sends the full frozen
+      // step array here instead (email edits already folded in). The server
+      // derives the Smartlead email sequence from the EMAIL_AUTO steps and
+      // spawns CALL/LINKEDIN/EMAIL_HYBRID steps as tasks off it.
+      steps?: SequenceStep[];
+      template_id?: string;
+      // ISO "YYYY-MM-DD" — defaults to today server-side if omitted.
+      anchor_date?: string;
       recipients: Recipient[];
       email_account_id?: number;
       source_idea_id?: string;
@@ -421,6 +432,11 @@ export function useLaunchCampaign() {
       // CampaignRecipients.tsx). The server re-checks suppression itself and
       // only honors an override that's actually listed here.
       suppression_overrides?: string[];
+      // Normalized emails the user deliberately chose to double-enroll
+      // despite already being actively enrolled in another campaign
+      // (per-person "Enroll anyway" — see CampaignRecipients.tsx, S3). The
+      // server re-checks this itself too.
+      enrollment_overrides?: string[];
     }) => {
       const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
         body: { action: "launch", ...p },
@@ -433,6 +449,12 @@ export function useLaunchCampaign() {
         leads_added: number;
         leads_failed: number;
         suppression_dropped?: number;
+        // S3 — always present on a successful launch, but optional here so
+        // older cached edge-function responses (mid-deploy) don't crash a
+        // strict read.
+        already_enrolled_dropped?: number;
+        enrolled?: number;
+        tasks_created?: number;
       };
     },
     onSuccess: () => {
@@ -768,6 +790,58 @@ export async function fetchSuppressionForEmails(emails: string[]): Promise<Suppr
     if (error) throw error;
     for (const row of (data ?? []) as { email: string; reason: string }[]) {
       out.push({ email: row.email, reason: row.reason });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Enrollment engine (Campaigns overhaul S3)
+// ---------------------------------------------------------------------------
+
+export interface ActiveEnrollmentEntry {
+  email: string;
+  campaign_id: string;
+  /** Falls back to a generic label if the joined campaign row is somehow
+   *  missing (e.g. RLS edge case) — should not normally happen. */
+  campaign_name: string;
+}
+
+/** Batched check: which of these emails are ALREADY actively enrolled in
+ *  ANY campaign (not just the one being built)? CampaignRecipients.tsx's
+ *  "already enrolled elsewhere" soft-alert rail — same shape/batching as
+ *  fetchSuppressionForEmails, reading campaign_enrollments instead of
+ *  v_marketing_suppression. Server re-checks this independently before
+ *  enrolling anyone (playbook-smartlead/index.ts's `launch` action). */
+export async function fetchActiveEnrollmentsForEmails(emails: string[]): Promise<ActiveEnrollmentEntry[]> {
+  const normalized = Array.from(new Set(emails.map(normalizeEmail).filter(Boolean)));
+  if (!normalized.length) return [];
+  const BATCH = 500;
+  const out: ActiveEnrollmentEntry[] = [];
+  for (let i = 0; i < normalized.length; i += BATCH) {
+    const batch = normalized.slice(i, i + BATCH);
+    const { data, error } = await supabase
+      .from("campaign_enrollments")
+      .select("email, campaign_id, campaign:campaigns(name)")
+      .eq("status", "active")
+      .in("email", batch);
+    if (error) throw error;
+    // Supabase's query-builder type inference doesn't know campaign_id ->
+    // campaigns.id is many-to-one (no generated Database types in this
+    // project), so it infers `campaign` as an array; PostgREST actually
+    // returns a single embedded object for a to-one relationship at
+    // runtime — cast via `unknown` and read it as the object it really is.
+    for (const row of (data ?? []) as unknown as {
+      email: string | null;
+      campaign_id: string;
+      campaign: { name: string } | null;
+    }[]) {
+      if (!row.email) continue;
+      out.push({
+        email: row.email,
+        campaign_id: row.campaign_id,
+        campaign_name: row.campaign?.name ?? "another campaign",
+      });
     }
   }
   return out;

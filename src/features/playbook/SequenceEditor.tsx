@@ -70,6 +70,7 @@ export function SequenceEditor({
   onOpenChange,
   initial,
   onSaved,
+  onLaunch,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -77,6 +78,10 @@ export function SequenceEditor({
   // pass null to start a blank custom sequence.
   initial: (Partial<CampaignTemplate> & { steps: SequenceStep[] }) | null;
   onSaved?: (t: CampaignTemplate) => void;
+  // "Use this sequence" (new/copy templates only — Campaigns overhaul S3):
+  // fires after the save succeeds, with the now-persisted template, so the
+  // caller can open the launch wizard on real (saved) steps.
+  onLaunch?: (t: CampaignTemplate) => void;
 }) {
   const save = useSaveTemplate();
   const [name, setName] = useState(initial?.name ?? "");
@@ -135,6 +140,33 @@ export function SequenceEditor({
         onSuccess: (t) => {
           toast.success(initial?.id ? "Sequence saved" : "Saved as a template");
           onSaved?.(t);
+          onOpenChange(false);
+        },
+        onError: (e) => toast.error("Save failed: " + (e as Error).message),
+      },
+    );
+  };
+
+  // "Use this sequence" — saves first (same path as "Save as template"),
+  // then hands the caller the persisted template so it can open the launch
+  // wizard on real steps instead of unsaved local state.
+  const handleSaveAndLaunch = () => {
+    if (!name.trim()) {
+      toast.error("Give the sequence a name.");
+      return;
+    }
+    save.mutate(
+      {
+        id: initial?.id,
+        name,
+        description,
+        category: initial?.category ?? "custom",
+        steps,
+      },
+      {
+        onSuccess: (t) => {
+          onSaved?.(t);
+          onLaunch?.(t);
           onOpenChange(false);
         },
         onError: (e) => toast.error("Save failed: " + (e as Error).message),
@@ -310,18 +342,20 @@ export function SequenceEditor({
             </Button>
           ) : (
             <>
-              {/* Save as a reusable card is OPTIONAL — pick it to keep this
-                  sequence in your templates. Otherwise you'd just launch it
-                  once (that launch flow is the next build). */}
+              {/* Both buttons save this as a new campaign_templates row (it
+                  becomes a reusable card in the gallery either way) —
+                  "Use this sequence" additionally opens the launch wizard
+                  (mode="template") on the just-saved steps afterward. */}
               <Button variant="outline" onClick={handleSave} disabled={save.isPending}>
                 {save.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
                 Save as template
               </Button>
               <Button
                 variant="ai"
-                disabled
-                title="Launching on a list or contact is the next build"
+                onClick={handleSaveAndLaunch}
+                disabled={save.isPending}
               >
+                {save.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
                 Use this sequence
               </Button>
             </>
