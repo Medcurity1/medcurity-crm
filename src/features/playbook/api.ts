@@ -965,3 +965,108 @@ export async function fetchActiveEnrollmentsForEmails(emails: string[]): Promise
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Campaign detail sheet (Campaigns overhaul S8) — the full person-by-person
+// view of one campaign, with per-person Pause/Resume/Stop.
+// ---------------------------------------------------------------------------
+
+export interface CampaignEnrollmentRow {
+  id: string;
+  campaign_id: string;
+  contact_id: string | null;
+  account_id: string | null;
+  enroll_position: number;
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  company: string | null;
+  status: string;
+  paused_reason: string | null;
+  current_step: number;
+  first_send_at: string | null;
+  replied_at: string | null;
+  bounced_at: string | null;
+  unsubscribed_at: string | null;
+  last_event_at: string | null;
+  enrolled_at: string;
+}
+
+/** Every enrollment for one campaign, in enroll_position order — the detail
+ *  sheet's People table. Lazy: only enabled while a campaignId is actually
+ *  supplied (i.e. the sheet is open), so a closed sheet never fires this. */
+export function useCampaignEnrollments(campaignId: string | null) {
+  return useQuery({
+    queryKey: ["playbook", "campaign-enrollments", campaignId],
+    enabled: !!campaignId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("campaign_enrollments")
+        .select("id, campaign_id, contact_id, account_id, enroll_position, email, first_name, last_name, company, status, paused_reason, current_step, first_send_at, replied_at, bounced_at, unsubscribed_at, last_event_at, enrolled_at")
+        .eq("campaign_id", campaignId as string)
+        .order("enroll_position", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as CampaignEnrollmentRow[];
+    },
+  });
+}
+
+export interface CampaignEventRow {
+  id: string;
+  event_type: string;
+  email: string | null;
+  occurred_at: string | null;
+  created_at: string;
+}
+
+const CAMPAIGN_DETAIL_EVENTS_LIMIT = 20;
+
+/** Last 20 campaign_events for one campaign, newest first — the detail
+ *  sheet's Recent activity section. Same lazy-enable pattern as
+ *  useCampaignEnrollments. */
+export function useCampaignEvents(campaignId: string | null) {
+  return useQuery({
+    queryKey: ["playbook", "campaign-events", campaignId],
+    enabled: !!campaignId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("campaign_events")
+        .select("id, event_type, email, occurred_at, created_at")
+        .eq("campaign_id", campaignId as string)
+        .order("created_at", { ascending: false })
+        .limit(CAMPAIGN_DETAIL_EVENTS_LIMIT);
+      if (error) throw error;
+      return (data ?? []) as CampaignEventRow[];
+    },
+  });
+}
+
+export type EnrollmentStatusAction = "pause" | "resume" | "stop";
+
+/** Pause / resume / stop ONE person's enrollment — see the `set-enrollment-status`
+ *  action in playbook-smartlead/index.ts (S8). `warning` (best-effort Smartlead
+ *  sync failed, or their Smartlead lead couldn't be found) is returned rather
+ *  than thrown so the caller can toast.warning it instead of toast.error — the
+ *  Pulse-side change still succeeded. */
+export function useSetEnrollmentStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: { enrollment_id: string; action: EnrollmentStatusAction; campaign_id: string }) => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "set-enrollment-status", enrollment_id: p.enrollment_id, status_action: p.action },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as { success: boolean; status: string; warning?: string };
+    },
+    onSuccess: (_r, p) => {
+      qc.invalidateQueries({ queryKey: ["playbook", "campaign-enrollments", p.campaign_id] });
+      // Prefix match — invalidates every campaign's enrollment-stats entry,
+      // not just this one, since the stats key also carries a sorted-ids
+      // suffix this mutation has no cheap way to reconstruct.
+      qc.invalidateQueries({ queryKey: ["playbook", "campaign-enrollment-stats"] });
+      qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] });
+    },
+    onError: (e) => toast.error("Couldn't update this person: " + (e as Error).message),
+  });
+}

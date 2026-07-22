@@ -17,6 +17,7 @@ import { TemplatesSection } from "./TemplatesSection";
 import { CampaignReplies } from "./CampaignReplies";
 import { LoadError } from "./LoadError";
 import { CampaignCard, type CampaignRow } from "./CampaignCard";
+import { CampaignDetailSheet } from "./CampaignDetailSheet";
 import {
   useCampaigns,
   useSmartleadStatus,
@@ -63,6 +64,12 @@ export function CampaignsTab() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [ownerFilter, setOwnerFilter] = useState<"everyone" | "mine">("everyone");
   const [showAllPast, setShowAllPast] = useState(false);
+  // Detail sheet (Campaigns overhaul S8) — `detailCampaign` deliberately
+  // isn't cleared on close (only `detailOpen` toggles), so Radix's own
+  // slide-out animation has real content to animate away rather than the
+  // sheet vanishing instantly.
+  const [detailCampaign, setDetailCampaign] = useState<CampaignRow | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
 
   const inboxLabels = useMemo(() => {
     const m = new Map<string, string>();
@@ -72,6 +79,10 @@ export function CampaignsTab() {
     }
     return m;
   }, [inboxes]);
+
+  function inboxLabelFor(c: CampaignRow): string | null {
+    return c.sending_email_account_id ? inboxLabels.get(c.sending_email_account_id) ?? null : null;
+  }
 
   const filtered = useMemo(() => {
     const rows = (campaigns ?? []) as CampaignRow[];
@@ -89,6 +100,17 @@ export function CampaignsTab() {
   const recentlyEnded = allPast.filter((c) => now - new Date(c.updated_at).getTime() <= RECENTLY_ENDED_MS);
   const olderPast = allPast.filter((c) => now - new Date(c.updated_at).getTime() > RECENTLY_ENDED_MS);
 
+  // Re-resolve the sheet's campaign against the live list on every render so
+  // its header (status chip, metrics) stays current after a Start/Pause/
+  // Stop from either the card or the sheet itself — `detailCampaign` is just
+  // the snapshot captured at click time. Falls back to that snapshot if the
+  // row briefly isn't in `campaigns` yet (e.g. still loading).
+  const liveDetailCampaign = useMemo(() => {
+    if (!detailCampaign) return null;
+    const rows = (campaigns ?? []) as CampaignRow[];
+    return rows.find((c) => c.id === detailCampaign.id) ?? detailCampaign;
+  }, [campaigns, detailCampaign]);
+
   // One grouped enrollment-stats fetch for every campaign currently visible
   // in the filtered list (not just the rendered subset) — cheap at this
   // scale, and means expanding "Show all past" never needs a second fetch.
@@ -104,7 +126,8 @@ export function CampaignsTab() {
         del={del}
         setStatus={setStatus}
         stats={statsById?.[c.id]}
-        inboxLabel={c.sending_email_account_id ? inboxLabels.get(c.sending_email_account_id) ?? null : null}
+        inboxLabel={inboxLabelFor(c)}
+        onOpenDetail={(row) => { setDetailCampaign(row); setDetailOpen(true); }}
       />
     );
   }
@@ -202,6 +225,14 @@ export function CampaignsTab() {
       </div>
 
       <CampaignWizard open={wizardOpen} onOpenChange={setWizardOpen} />
+
+      <CampaignDetailSheet
+        campaign={liveDetailCampaign}
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        setStatus={setStatus}
+        inboxLabel={liveDetailCampaign ? inboxLabelFor(liveDetailCampaign) : null}
+      />
     </div>
   );
 }

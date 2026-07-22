@@ -48,14 +48,18 @@ function displayName(e: EnrollmentForActions, fallbackEmail: string | null): str
 /**
  * Archive every still-pending campaign-generated task tied to one enrollment
  * (never deletes — stamps archived_at/archived_by/archive_reason, same
- * convention as every other task-archive path in this app: archived_by is
- * null since this is a system-triggered archive, not a human action).
+ * convention as every other task-archive path in this app). `archivedBy`
+ * defaults to null (a system-triggered archive — webhook/sweep callers don't
+ * pass one); the per-person Stop action in playbook-smartlead/index.ts (S8)
+ * passes the caller's user id since that archive IS a human action, mirroring
+ * cancelPendingCampaignTasks' campaign-level Stop.
  * Returns the number of tasks archived.
  */
 export async function archivePendingTasksForEnrollment(
   svc: DbClient,
   enrollmentId: string,
   reason: string,
+  archivedBy: string | null = null,
 ): Promise<number> {
   const { data: pending, error: findErr } = await svc
     .from("activities")
@@ -72,7 +76,7 @@ export async function archivePendingTasksForEnrollment(
   if (!ids.length) return 0;
   const { error: updErr } = await svc
     .from("activities")
-    .update({ archived_at: new Date().toISOString(), archived_by: null, archive_reason: reason })
+    .update({ archived_at: new Date().toISOString(), archived_by: archivedBy, archive_reason: reason })
     .in("id", ids);
   if (updErr) {
     console.error("campaign-enrollment-actions: archive update failed:", updErr.message);

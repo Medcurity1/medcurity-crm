@@ -907,6 +907,211 @@ async function setCampaignStatus(p: SetStatusInput, archivedBy: string | null) {
   };
 }
 
+interface SetEnrollmentStatusInput {
+  enrollment_id: string;
+  action: "pause" | "resume" | "stop";
+}
+
+/** Plain-English label for a terminal enrollment status, used in the "nothing
+ *  to change" error message below. */
+const TERMINAL_STATUS_LABEL: Record<string, string> = {
+  completed: "finished",
+  stopped: "was stopped",
+  replied: "ended — they replied",
+  bounced: "ended — the email bounced",
+};
+
+/**
+ * Extract a plausible array of lead objects from Smartlead's
+ * GET /campaigns/{id}/leads response — same "check data/leads/rows, fall
+ * back to top-level array" defensiveness as extractStatRows/extractWebhookRows
+ * above (the exact response shape isn't verified against a live account).
+ */
+function extractLeadRows(res: unknown): Record<string, unknown>[] {
+  if (Array.isArray(res)) return res as Record<string, unknown>[];
+  if (typeof res !== "object" || res === null) return [];
+  const obj = res as Record<string, unknown>;
+  for (const key of ["data", "leads", "rows"]) {
+    if (Array.isArray(obj[key])) return obj[key] as Record<string, unknown>[];
+  }
+  return [];
+}
+
+/**
+ * Resolve a Smartlead lead id for one email within a campaign, for
+ * enrollments enrolled before smartlead_lead_id capture existed (S5) or
+ * whose first EMAIL_SENT webhook never arrived. Smartlead's per-lead listing
+ * appears to nest the actual lead under a `lead` key alongside a
+ * campaign-lead-map id (matches the shape every other Smartlead campaign
+ * sub-resource in this file uses: paginated, `data`/array at the top).
+ * Paginated, capped at 10 pages x 100 (1000 leads/campaign) — enough for any
+ * real campaign here without eating the whole request on a huge one. Returns
+ * null on ANY failure (404/plan limitation/network/no match) — a per-lead
+ * Smartlead pause is always best-effort (see setEnrollmentStatus below).
+ */
+async function resolveSmartleadLeadId(smartleadCampaignId: number, email: string): Promise<number | null> {
+  const target = normalizeEmail(email);
+  if (!target) return null;
+  const PAGE_SIZE = 100;
+  const MAX_PAGES = 10;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const res = await smartleadFetch(`/campaigns/${smartleadCampaignId}/leads?offset=${page * PAGE_SIZE}&limit=${PAGE_SIZE}`);
+    const rows = extractLeadRows(res);
+    for (const raw of rows) {
+      const lead = (typeof raw.lead === "object" && raw.lead !== null) ? raw.lead as Record<string, unknown> : raw;
+      const leadEmail = lead.email ?? lead.lead_email;
+      if (typeof leadEmail !== "string" || normalizeEmail(leadEmail) !== target) continue;
+      const rawId = lead.id ?? raw.lead_id ?? raw.campaign_lead_map_id ?? raw.id;
+      if (typeof rawId === "number") return rawId;
+      if (typeof rawId === "string" && /^\d+$/.test(rawId)) return Number(rawId);
+    }
+    if (rows.length < PAGE_SIZE) break;
+  }
+  return null;
+}
+
+/**
+ * Best-effort pause/resume of ONE lead within a Smartlead campaign — the
+ * per-person analog of setCampaignStatus's campaign-wide POST
+ * /campaigns/{id}/status. Endpoint shape unverified beyond "matches the
+ * /campaigns/{id}/leads/{lead_id}/<verb> pattern Smartlead's own docs
+ * describe for pause/resume-by-lead" — same unverified-but-best-guess
+ * posture as registerCampaignWebhook. Throws on failure (raw Smartlead error
+ * message) so the caller can fold it into a plain-English `warning` — this
+ * must NEVER be swallowed silently on the stop path per the spec.
+ */
+async function smartleadSetLeadPauseState(smartleadCampaignId: number, leadId: number, pause: boolean): Promise<void> {
+  const verb = pause ? "pause" : "resume";
+  await smartleadFetch(`/campaigns/${smartleadCampaignId}/leads/${leadId}/${verb}`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({}),
+  });
+}
+
+/**
+ * Pause / resume / stop ONE person's enrollment from the campaign detail
+ * sheet (Campaigns overhaul S8) — the per-person analog of
+ * setCampaignStatus. Unlike the campaign-wide action, this always does the
+ * Pulse-side bookkeeping regardless of whether the Smartlead side succeeds:
+ * Smartlead's per-lead pause/resume endpoint shape is unverified (see
+ * smartleadSetLeadPauseState's doc comment), so a failure there is reported
+ * back as `warning` — plain English, never silently swallowed — rather than
+ * failing the whole action. The person's Pulse-side state (and, for stop,
+ * their cancelled tasks) is the source of truth either way.
+ *
+ * - stop: enrollment -> 'stopped', archives pending tasks (reason "Stopped
+ *   by user", attributed to the caller).
+ * - pause: enrollment -> 'paused'. Tasks are left alone (they may resume).
+ * - resume: enrollment -> 'active', but only from 'paused' AND only when the
+ *   pause reason is one this action itself can safely clear (paused_by_user
+ *   or meeting_booked) — never resumes someone paused for an unrecognized
+ *   reason without a human actually looking, and never touches a 'replied'/
+ *   'bounced'/etc. enrollment (those are terminal, not "paused").
+ */
+async function setEnrollmentStatus(p: SetEnrollmentStatusInput, archivedBy: string | null) {
+  if (!p.enrollment_id || !["pause", "resume", "stop"].includes(p.action)) {
+    throw new Error("enrollment_id and a valid action (pause|resume|stop) are required");
+  }
+  const { data: enrollment, error: eErr } = await svc
+    .from("campaign_enrollments")
+    .select("id, campaign_id, email, status, paused_reason, smartlead_lead_id")
+    .eq("id", p.enrollment_id)
+    .single();
+  if (eErr || !enrollment) throw new Error("Enrollment not found: " + (eErr?.message ?? p.enrollment_id));
+
+  if (ENROLLMENT_TERMINAL_STATUSES.includes(enrollment.status)) {
+    const label = TERMINAL_STATUS_LABEL[enrollment.status] ?? "already ended";
+    throw new Error(`This person's sequence ${label} — there's nothing to change.`);
+  }
+  if (p.action === "resume" && enrollment.status !== "paused") {
+    throw new Error("This person isn't paused — there's nothing to resume.");
+  }
+  if (p.action === "pause" && enrollment.status !== "active") {
+    throw new Error("This person is already paused.");
+  }
+  if (p.action === "resume") {
+    const reason = enrollment.paused_reason as string | null;
+    if (reason && reason !== "paused_by_user" && reason !== "meeting_booked") {
+      throw new Error("This person was paused automatically for a reason Pulse won't clear on its own — check their status before resuming.");
+    }
+  }
+
+  const { data: campaign, error: cErr } = await svc
+    .from("campaigns")
+    .select("id, name, smartlead_campaign_id")
+    .eq("id", enrollment.campaign_id)
+    .single();
+  if (cErr || !campaign) throw new Error("Campaign not found: " + (cErr?.message ?? enrollment.campaign_id));
+
+  let warning: string | undefined;
+
+  // Best-effort Smartlead side — resolve the lead id if we don't have one
+  // yet, then pause/resume it there. Never blocks the Pulse-side update.
+  if (campaign.smartlead_campaign_id != null) {
+    let leadId = enrollment.smartlead_lead_id as number | null;
+    let lookupError: string | null = null;
+    if (leadId == null && enrollment.email) {
+      try {
+        leadId = await resolveSmartleadLeadId(campaign.smartlead_campaign_id, enrollment.email);
+        if (leadId != null) {
+          await svc.from("campaign_enrollments").update({ smartlead_lead_id: leadId }).eq("id", enrollment.id);
+        }
+      } catch (err) {
+        lookupError = (err as Error).message;
+        console.warn("set-enrollment-status: lead id lookup failed:", lookupError);
+      }
+    }
+    const wantPause = p.action !== "resume"; // pause AND stop both pause the lead in Smartlead
+    if (leadId != null) {
+      try {
+        await smartleadSetLeadPauseState(campaign.smartlead_campaign_id, leadId, wantPause);
+      } catch (err) {
+        warning = p.action === "stop"
+          ? `Stopped in Pulse and their tasks are cancelled, but Smartlead may still send remaining emails — pause them in Smartlead or stop the whole campaign. (Smartlead error: ${(err as Error).message})`
+          : `Updated in Pulse, but couldn't ${wantPause ? "pause" : "resume"} them in Smartlead — they may keep sending/skipping on the old schedule there. (Smartlead error: ${(err as Error).message})`;
+      }
+    } else {
+      // Never a silent fail here either — if the lookup itself errored
+      // (rather than just finding no match), say so with the raw message
+      // rather than the generic "couldn't find them" (those are different
+      // failure modes: one is "this person may not be enrolled in Smartlead
+      // at all", the other is "Smartlead's API didn't cooperate").
+      const detail = lookupError ? ` (Smartlead error: ${lookupError})` : "";
+      warning = p.action === "stop"
+        ? `Stopped in Pulse and their tasks are cancelled, but Pulse couldn't find this person in Smartlead to pause their emails there — check Smartlead directly if needed.${detail}`
+        : `Updated in Pulse, but Pulse couldn't find this person in Smartlead to sync their pause state there — check Smartlead directly if needed.${detail}`;
+    }
+  }
+
+  let newStatus: string;
+  if (p.action === "stop") {
+    newStatus = "stopped";
+    const { error } = await svc
+      .from("campaign_enrollments")
+      .update({ status: "stopped", paused_reason: "stopped_by_user" })
+      .eq("id", enrollment.id);
+    if (error) throw new Error("Couldn't stop this person: " + error.message);
+    await archivePendingTasksForEnrollment(svc, enrollment.id, "Stopped by user", archivedBy);
+  } else if (p.action === "pause") {
+    newStatus = "paused";
+    const { error } = await svc
+      .from("campaign_enrollments")
+      .update({ status: "paused", paused_reason: "paused_by_user" })
+      .eq("id", enrollment.id);
+    if (error) throw new Error("Couldn't pause this person: " + error.message);
+  } else {
+    newStatus = "active";
+    const { error } = await svc
+      .from("campaign_enrollments")
+      .update({ status: "active", paused_reason: null })
+      .eq("id", enrollment.id);
+    if (error) throw new Error("Couldn't resume this person: " + error.message);
+  }
+
+  return { success: true, status: newStatus, ...(warning ? { warning } : {}) };
+}
+
 /**
  * Launch a campaign into Smartlead (ported from server.js:3294-3541, then
  * extended by S2's suppression re-check and S3's enrollment engine):
@@ -1876,6 +2081,15 @@ Deno.serve(async (req) => {
       return json(
         await setCampaignStatus(
           { id: body.id as string, action: body.status_action as SetStatusInput["action"] },
+          archivedBy,
+        ),
+      );
+    }
+    if (action === "set-enrollment-status") {
+      const archivedBy = await callerUserId(auth);
+      return json(
+        await setEnrollmentStatus(
+          { enrollment_id: body.enrollment_id as string, action: body.status_action as SetEnrollmentStatusInput["action"] },
           archivedBy,
         ),
       );
