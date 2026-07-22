@@ -1,12 +1,17 @@
-// playbook-smartlead Edge Function — Smartlead read path (ported from
-// Nexus server.js). Actions:
+// playbook-smartlead Edge Function — Smartlead read + write path (ported
+// from Nexus server.js). Actions:
 //   - status        : is Smartlead configured?
 //   - email-accounts: list sending inboxes (for the campaign wizard)
-//   - import        : pull all Smartlead campaigns -> playbook_campaigns
+//   - import        : pull all Smartlead campaigns -> campaigns
 //                     (create new, refresh metrics/status on existing;
-//                     preserves user-edited title/notes on update)
+//                     preserves user-edited name/notes on update)
 //   - sync          : refresh metrics + status on already-imported campaigns
-// The launch (write) path lands in the next phase.
+//   - launch        : create + start a campaign in Smartlead, record it
+//   - delete-campaign: delete in Smartlead + remove the Pulse row
+//
+// Campaigns unification (2026-07-22): reads/writes `campaigns`, not the
+// retired `playbook_campaigns` (now playbook_campaigns_archived_20260722 —
+// see 20260722100000_campaigns_unify.sql).
 //
 // Auth: admin only (caller JWT). Deploy: supabase functions deploy playbook-smartlead
 
@@ -101,14 +106,23 @@ function notesFromSequences(sequences: unknown): string {
     .join("\n\n");
 }
 
-// Lifecycle rank so import/sync can promote a campaign forward (planned ->
-// in_progress -> complete) without ever demoting it. Returns the new status
-// if it advances the lifecycle, else null (leave as-is).
-const STATUS_RANK: Record<string, number> = { planned: 0, in_progress: 1, complete: 2 };
-function advancedStatus(current: string | null | undefined, mapped: string): string | null {
-  const cur = STATUS_RANK[current ?? "planned"] ?? 0;
-  const next = STATUS_RANK[mapped] ?? 0;
-  return next > cur ? mapped : null;
+/** Translate a launched AI-authored sequence (Smartlead-shaped: seq_number,
+ *  delay_days = "days after previous") into the SequenceStep jsonb shape
+ *  campaigns.steps expects (day_offset = days from campaign start,
+ *  cumulative). Every launch gets real step data instead of an empty array. */
+function sequenceToSteps(sequence: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  let cumulativeDays = 0;
+  return sequence.map((s, i) => {
+    cumulativeDays += Number(s.delay_days) || 0;
+    return {
+      order: Number(s.seq_number) || i + 1,
+      day_offset: cumulativeDays,
+      channel: "EMAIL_AUTO",
+      automation: "AUTO",
+      subject_template: String(s.subject ?? ""),
+      body_template: String(s.body_html ?? ""),
+    };
+  });
 }
 
 async function importCampaigns() {
@@ -119,7 +133,7 @@ async function importCampaigns() {
   for (const camp of campaigns as Record<string, unknown>[]) {
     const campId = camp.id as number;
     const { data: existing } = await svc
-      .from("playbook_campaigns")
+      .from("campaigns")
       .select("id, status, metrics")
       .eq("smartlead_campaign_id", campId)
       .maybeSingle();
@@ -135,22 +149,20 @@ async function importCampaigns() {
 
     if (existing) {
       const merged = { ...(existing.metrics ?? {}), ...metrics };
-      const patch: Record<string, unknown> = { metrics: merged };
-      // Promote the lifecycle forward (planned -> in_progress -> complete),
-      // never backward, so a launched draft that's now sending in Smartlead
-      // stops being shown (and deletable) as "planned".
-      const adv = advancedStatus(existing.status as string | null, status);
-      if (adv) patch.status = adv;
-      await svc.from("playbook_campaigns").update(patch).eq("id", existing.id);
+      // Mirror Smartlead's status directly (bidirectional — Smartlead is
+      // the source of truth for a linked campaign's send state, including
+      // pause/resume, not just forward lifecycle progress).
+      await svc.from("campaigns").update({ metrics: merged, status }).eq("id", existing.id);
       updated++;
     } else {
-      await svc.from("playbook_campaigns").insert({
-        title: (camp.name as string) || "Smartlead Campaign " + campId,
-        platform: "smartlead",
+      await svc.from("campaigns").insert({
+        name: (camp.name as string) || "Smartlead Campaign " + campId,
+        origin: "smartlead_import",
         status,
         smartlead_campaign_id: campId,
         notes,
         metrics,
+        steps: [],
       });
       created++;
     }
@@ -160,7 +172,7 @@ async function importCampaigns() {
 
 async function syncCampaigns() {
   const { data: existing } = await svc
-    .from("playbook_campaigns")
+    .from("campaigns")
     .select("id, smartlead_campaign_id, status, metrics")
     .not("smartlead_campaign_id", "is", null);
   let synced = 0;
@@ -170,10 +182,8 @@ async function syncCampaigns() {
       const analytics = (await fetchCampaignAnalytics(c.smartlead_campaign_id)) as Record<string, unknown>;
       const metrics = buildSmartleadMetrics(analytics);
       const merged = { ...(c.metrics ?? {}), ...metrics };
-      const patch: Record<string, unknown> = { metrics: merged };
-      const adv = advancedStatus(c.status as string | null, mapSmartleadStatus(camp.status as string));
-      if (adv) patch.status = adv;
-      await svc.from("playbook_campaigns").update(patch).eq("id", c.id);
+      const status = mapSmartleadStatus(camp.status as string);
+      await svc.from("campaigns").update({ metrics: merged, status }).eq("id", c.id);
       synced++;
     } catch { /* skip this one */ }
   }
@@ -312,19 +322,24 @@ async function launch(p: LaunchInput) {
 
     // 6. Record in Pulse (BEFORE any START, so a rollback never deletes a
     // live send). Treat a failed insert as fatal so the campaign is rolled
-    // back rather than silently orphaned.
+    // back rather than silently orphaned. Starts as 'draft'; step 9 flips
+    // it to 'active' only once the Smartlead START call actually succeeds,
+    // so the row never claims to be sending when it isn't.
     const { data: inserted, error: insErr } = await svc
-      .from("playbook_campaigns")
+      .from("campaigns")
       .insert({
-        title: p.campaign_name,
-        platform: "smartlead",
-        status: "planned",
+        name: p.campaign_name,
+        origin: "pulse",
+        status: "draft",
         smartlead_campaign_id: campaignId,
+        owner_user_id: p.owner_id ?? null,
+        sending_email_account_id: p.email_account_id != null ? String(p.email_account_id) : null,
+        leads_per_day: Number(p.schedule?.max_new_leads_per_day) || 20,
+        steps: sequenceToSteps(p.sequence),
         notes: p.sequence
           .map((s, i) => `Step ${s.seq_number ?? i + 1}: ${s.subject ?? ""}`)
           .join("\n"),
         adaptive_enabled: !!p.adaptiveEnabled,
-        owner_id: p.owner_id ?? null,
       })
       .select("id")
       .single();
@@ -364,7 +379,7 @@ async function launch(p: LaunchInput) {
 
     // 9. Optionally START (default OFF — leave as a Smartlead draft). Done
     // last so the Pulse record already exists; on success promote to
-    // in_progress.
+    // active.
     if (p.autoStart === true) {
       try {
         await smartleadFetch(`/campaigns/${campaignId}/status`, {
@@ -373,7 +388,7 @@ async function launch(p: LaunchInput) {
           body: JSON.stringify({ status: "START" }),
         });
         autoStarted = true;
-        await svc.from("playbook_campaigns").update({ status: "in_progress" }).eq("id", pulseCampaignId);
+        await svc.from("campaigns").update({ status: "active" }).eq("id", pulseCampaignId);
       } catch { /* leave as draft */ }
     }
   } catch (err) {
@@ -419,7 +434,7 @@ Deno.serve(async (req) => {
       const pulseId = body.id as string;
       const slId = body.smartlead_campaign_id as number | undefined;
       if (slId) { try { await smartleadFetch(`/campaigns/${slId}`, { method: "DELETE" }); } catch { /* best-effort */ } }
-      if (pulseId) await svc.from("playbook_campaigns").delete().eq("id", pulseId);
+      if (pulseId) await svc.from("campaigns").delete().eq("id", pulseId);
       return json({ success: true });
     }
     return json({ error: `Unknown action: ${action}` }, 400);

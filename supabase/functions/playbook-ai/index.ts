@@ -3,6 +3,10 @@
 //   - generate-ideas  : weekly AI marketing ideas (server.js generatePlaybookIdeas)
 // Campaign-writer + analysis + adaptation actions land in later phases.
 //
+// Campaigns unification (2026-07-22): campaign context/analysis reads and
+// writes `campaigns`, not the retired `playbook_campaigns` (now
+// playbook_campaigns_archived_20260722 — see 20260722100000_campaigns_unify.sql).
+//
 // Auth: admin/super_admin only (verified from the caller's JWT). Writes
 // run via the service client (tables are admin-only RLS).
 //
@@ -94,8 +98,8 @@ async function gatherContext(): Promise<{ ctx: PlaybookContext; trainingNotes: {
 
   // Past campaign performance (campaigns with metrics, last 90 days).
   const { data: campaigns } = await svc
-    .from("playbook_campaigns")
-    .select("title, status, notes, metrics, created_at")
+    .from("campaigns")
+    .select("name, status, notes, metrics, created_at")
     .gte("created_at", ninetyAgo)
     .order("created_at", { ascending: false })
     .limit(50);
@@ -103,11 +107,11 @@ async function gatherContext(): Promise<{ ctx: PlaybookContext; trainingNotes: {
     (c) => c.metrics && (c.metrics.sent != null || c.metrics.openRate != null || c.metrics.clickRate != null),
   );
 
-  // "Upcoming events" — planned campaigns not yet launched (Waypoint replacement).
+  // "Upcoming events" — draft campaigns not yet launched (Waypoint replacement).
   const { data: planned } = await svc
-    .from("playbook_campaigns")
-    .select("title, status, created_at")
-    .eq("status", "planned")
+    .from("campaigns")
+    .select("name, status, created_at")
+    .eq("status", "draft")
     .order("created_at", { ascending: false })
     .limit(20);
 
@@ -120,14 +124,14 @@ async function gatherContext(): Promise<{ ctx: PlaybookContext; trainingNotes: {
 
   // Recent campaign analyses (last 5).
   const { data: analyzed } = await svc
-    .from("playbook_campaigns")
-    .select("title, analysis_json")
+    .from("campaigns")
+    .select("name, analysis_json")
     .not("analysis_json", "is", null)
     .order("analyzed_at", { ascending: false })
     .limit(5);
   const recentAnalyses = (analyzed ?? []).map((e) => {
     const a = (e.analysis_json ?? {}) as Record<string, unknown>;
-    return { campaign: e.title, summary: a.summary, performance: a.performance, wins: a.wins, improvements: a.improvements };
+    return { campaign: e.name, summary: a.summary, performance: a.performance, wins: a.wins, improvements: a.improvements };
   });
 
   // Training notes.
@@ -250,13 +254,13 @@ async function generateCampaign(description: string) {
 /** Suggest improvements to a draft campaign, grounded in past performance. */
 async function suggestCampaign(campaign: unknown) {
   const { data: past } = await svc
-    .from("playbook_campaigns")
-    .select("title, metrics")
+    .from("campaigns")
+    .select("name, metrics")
     .not("metrics", "is", null)
     .order("created_at", { ascending: false })
     .limit(20);
   const history = (past ?? [])
-    .map((e) => ({ title: e.title, ...(e.metrics ?? {}) }))
+    .map((e) => ({ name: e.name, ...(e.metrics ?? {}) }))
     .filter((e) => (e as Record<string, unknown>).sent || (e as Record<string, unknown>).openRate);
   try {
     const text = await callClaude({
@@ -298,7 +302,7 @@ async function regenerateEmail(p: {
 
 /** Analyze a completed campaign vs historical averages; auto-add training. */
 async function analyzeCampaign(campaignId: string) {
-  const { data: ev } = await svc.from("playbook_campaigns").select("*").eq("id", campaignId).single();
+  const { data: ev } = await svc.from("campaigns").select("*").eq("id", campaignId).single();
   if (!ev) throw new Error("Campaign not found");
   if (ev.analyzed_at) return { already_analyzed: true, analysis: ev.analysis_json ?? {} };
   const metrics = (ev.metrics ?? {}) as Record<string, string>;
@@ -308,7 +312,7 @@ async function analyzeCampaign(campaignId: string) {
     .from("playbook_ideas").select("title").eq("executed_campaign_id", campaignId).maybeSingle();
 
   const { data: others } = await svc
-    .from("playbook_campaigns").select("metrics").eq("status", "complete").neq("id", campaignId);
+    .from("campaigns").select("metrics").eq("status", "completed").neq("id", campaignId);
   let to = 0, on = 0, tc = 0, cn = 0, tb = 0, bn = 0;
   for (const c of others ?? []) {
     const m = (c.metrics ?? {}) as Record<string, string>;
@@ -322,7 +326,7 @@ async function analyzeCampaign(campaignId: string) {
   const avgClick = cn ? (tc / cn).toFixed(1) + "%" : "N/A";
   const avgBounce = bn ? (tb / bn).toFixed(1) + "%" : "N/A";
 
-  const user = `Campaign: ${ev.title}
+  const user = `Campaign: ${ev.name}
 Sent: ${metrics.sent || "unknown"}
 Open Rate: ${metrics.openRate || "unknown"}
 Click Rate: ${metrics.clickRate || "unknown"}
@@ -359,7 +363,7 @@ Was this from a Playbook idea? ${linked ? "Yes: " + linked.title : "No"}`;
       }
     }
   }
-  await svc.from("playbook_campaigns")
+  await svc.from("campaigns")
     .update({ analysis_json: analysis, analyzed_at: new Date().toISOString() })
     .eq("id", campaignId);
   return { success: true, analysis, training_added: trainingAdded };

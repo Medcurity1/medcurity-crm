@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import type {
   PlaybookTrainingNote,
   PlaybookIdea,
-  PlaybookCampaign,
+  Campaign,
   Newsletter,
   NewsletterType,
   CampaignTemplate,
@@ -250,15 +250,14 @@ export function useCampaigns() {
     queryKey: ["playbook", "campaigns"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("playbook_campaigns")
-        .select("*, owner:user_profiles!owner_id(id, full_name)")
-        // Newest first. created_at alone ties for the whole bulk-import batch
-        // (all imported at once), which let Smartlead's oldest-first order leak
-        // through — so tiebreak by smartlead_campaign_id desc (newer = higher id).
+        .from("campaigns")
+        .select("*, owner:user_profiles!owner_user_id(id, full_name)")
+        // Newest first, id as the tiebreaker (stable ordering within the
+        // same created_at, e.g. a bulk-import batch inserted in one pass).
         .order("created_at", { ascending: false })
-        .order("smartlead_campaign_id", { ascending: false, nullsFirst: false });
+        .order("id", { ascending: false });
       if (error) throw error;
-      return data as (PlaybookCampaign & { owner?: { id: string; full_name: string | null } | null })[];
+      return data as (Campaign & { owner?: { id: string; full_name: string | null } | null })[];
     },
   });
 }

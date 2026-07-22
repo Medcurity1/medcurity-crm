@@ -1,7 +1,8 @@
 // Campaigns tab — sequence templates (top) + the running/past campaign list.
-// Ongoing = planned + active; Past = complete. Import/Sync (Smartlead) sit atop
-// the Ongoing section and refresh both. The visual sequence builder + launch
-// land next; for now campaigns come from the Smartlead import.
+// Ongoing = draft + active + paused; Past = completed + stopped. Import/Sync
+// (Smartlead) sit atop the Ongoing section and refresh both. The visual
+// sequence builder + launch land next; for now campaigns come from the
+// Smartlead import.
 
 import { useState } from "react";
 import { Megaphone, Download, RefreshCw, ExternalLink, Loader2, Plus, Trash2 } from "lucide-react";
@@ -26,15 +27,17 @@ import {
   useDeleteCampaign,
   smartleadUrl,
 } from "./api";
-import type { PlaybookCampaign } from "./types";
+import type { Campaign } from "./types";
 
 const STATUS_LABEL: Record<string, string> = {
-  planned: "Planned",
-  in_progress: "Active",
-  complete: "Complete",
+  draft: "Draft",
+  active: "Active",
+  paused: "Paused",
+  completed: "Complete",
+  stopped: "Stopped",
 };
 
-type CampaignRow = PlaybookCampaign & { owner?: { id: string; full_name: string | null } | null };
+type CampaignRow = Campaign & { owner?: { id: string; full_name: string | null } | null };
 
 function CampaignCard({
   c,
@@ -55,7 +58,7 @@ function CampaignCard({
       <CardContent className="px-4 py-3 space-y-2">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="font-semibold text-sm truncate">{c.title}</h3>
+            <h3 className="font-semibold text-sm truncate">{c.name}</h3>
             <p className="text-xs text-muted-foreground mt-1">
               {c.metrics?.sent != null ? `${c.metrics.sent} sent` : ""}
               {c.metrics?.openRate != null ? ` · ${c.metrics.openRate} open` : ""}
@@ -64,7 +67,7 @@ function CampaignCard({
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {c.status === "complete" && !c.analyzed_at && (
+            {c.status === "completed" && !c.analyzed_at && (
               <Button
                 size="sm" variant="ai" className="h-7 text-xs"
                 disabled={analyze.isPending}
@@ -84,7 +87,7 @@ function CampaignCard({
             <Badge variant="secondary" className="capitalize">
               {STATUS_LABEL[c.status] ?? c.status}
             </Badge>
-            {c.status === "planned" && (
+            {c.status === "draft" && (
               <button
                 type="button"
                 title="Delete campaign"
@@ -113,7 +116,7 @@ function CampaignCard({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this campaign?</AlertDialogTitle>
             <AlertDialogDescription>
-              “{c.title}” will be removed from Pulse and deleted in Smartlead. This can’t be undone.
+              “{c.name}” will be removed from Pulse and deleted in Smartlead. This can’t be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -141,9 +144,12 @@ export function CampaignsTab() {
   const busy = importMut.isPending || syncMut.isPending;
   const [wizardOpen, setWizardOpen] = useState(false);
 
-  // Ongoing = planned + active; Past = complete. The list comes back newest-first.
-  const ongoing = (campaigns ?? []).filter((c) => c.status !== "complete");
-  const past = (campaigns ?? []).filter((c) => c.status === "complete");
+  // Ongoing = draft + active + paused; Past = completed + stopped. The list
+  // comes back newest-first (created_at desc, id as tiebreaker).
+  const ongoing = (campaigns ?? []).filter(
+    (c) => c.status === "draft" || c.status === "active" || c.status === "paused",
+  );
+  const past = (campaigns ?? []).filter((c) => c.status === "completed" || c.status === "stopped");
 
   return (
     <div className="space-y-5 pt-4">
