@@ -112,6 +112,27 @@ export function computeFirstSendDates(
 }
 
 /**
+ * Snap a "YYYY-MM-DD" date FORWARD to the next allowed send day (inclusive —
+ * a date that's already allowed comes back unchanged). Used by taskDueAt so
+ * a non-email step's due date never lands outside the campaign's send days
+ * (default Mon-Fri) — e.g. a Day-12 LinkedIn task computed from a Tuesday
+ * launch used to land on a Sunday; it now rolls forward to the following
+ * Monday. Guarded at 14 days out (two full weeks) so a pathological empty
+ * `sendDays` can't loop forever; falls back to the unsnapped date if the
+ * guard trips (should never happen with a real, non-empty sendDays set).
+ */
+export function snapToWeekday(dateISO: string, sendDays: number[] = DEFAULT_SEND_DAYS): string {
+  const allowed = new Set(sendDays && sendDays.length ? sendDays : DEFAULT_SEND_DAYS);
+  let d = parseDateOnlyUTC(dateISO);
+  let guard = 0;
+  while (!allowed.has(d.getUTCDay()) && guard < 14) {
+    d = addUTCDays(d, 1);
+    guard++;
+  }
+  return toDateOnlyISO(d);
+}
+
+/**
  * Every step's offset relative to "this person's day zero" — the day their
  * first automated email goes out. Baseline = the smallest day_offset among
  * EMAIL_AUTO steps; if a template has no EMAIL_AUTO steps at all (unusual
@@ -173,6 +194,11 @@ function ptUtcOffsetHours(monthIndex0: number): number {
  * The ISO timestamp for a task due on `relativeOffsetDays` days after
  * `firstSendISO`'s calendar date, at `sendWindowStart` (default "09:00")
  * America/Los_Angeles clock time (see the DST-approximation note above).
+ * The resulting calendar date is then snapped FORWARD to the next allowed
+ * `sendDays` weekday (default Mon-Fri) — a non-email step (CALL/LINKEDIN/
+ * EMAIL_HYBRID) must never get a task due on a day nobody's expected to be
+ * working the campaign (e.g. a Day-12 LinkedIn task from a Tuesday launch
+ * landing on a Sunday).
  *
  * `firstSendISO` accepts either a bare "YYYY-MM-DD" (what
  * computeFirstSendDates returns) or a full ISO timestamp (what reading
@@ -183,9 +209,11 @@ export function taskDueAt(
   firstSendISO: string,
   relativeOffsetDays: number,
   sendWindowStart = "09:00",
+  sendDays: number[] = DEFAULT_SEND_DAYS,
 ): string {
   const base = parseDateOnlyUTC(firstSendISO);
-  const target = addUTCDays(base, relativeOffsetDays);
+  const unsnapped = addUTCDays(base, relativeOffsetDays);
+  const target = parseDateOnlyUTC(snapToWeekday(toDateOnlyISO(unsnapped), sendDays));
 
   const [hhRaw, mmRaw] = (sendWindowStart || "09:00").split(":");
   const hh = parseInt(hhRaw, 10);

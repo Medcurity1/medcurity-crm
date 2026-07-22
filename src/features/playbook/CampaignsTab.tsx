@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { CampaignWizard } from "./CampaignWizard";
 import { TemplatesSection } from "./TemplatesSection";
+import { CampaignReplies } from "./CampaignReplies";
 import { LoadError } from "./LoadError";
 import { CampaignCard, type CampaignRow } from "./CampaignCard";
 import {
@@ -111,6 +112,8 @@ export function CampaignsTab() {
   return (
     <div className="space-y-5 pt-4">
       <TemplatesSection />
+
+      <CampaignReplies />
 
       <div className="border-t pt-4 space-y-3">
         {/* Ongoing section header + the Smartlead actions (refresh both sections) */}

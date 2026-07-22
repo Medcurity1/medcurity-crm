@@ -2,7 +2,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Pencil, Archive, ChevronDown, Phone, Mail, UserRoundCog, History, MapPin, Plus, Copy, Check, ListPlus } from "lucide-react";
+import { Pencil, Archive, ChevronDown, Phone, Mail, UserRoundCog, History, MapPin, Plus, Copy, Check, ListPlus, Megaphone } from "lucide-react";
 import { formatPhone } from "@/components/PhoneInput";
 import { InlineEdit } from "@/components/InlineEdit";
 import { useContact, useUpdateContact, useArchiveContact, useOriginatingLead } from "./api";
@@ -17,6 +17,7 @@ import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ArchiveDialog } from "@/components/ArchiveDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
 import { AddToListDialog } from "@/features/lead-lists/AddToListDialog";
+import { QuickCampaignDialog } from "@/features/playbook/QuickCampaignDialog";
 import { QueryError } from "@/components/QueryError";
 import { RecordId } from "@/components/RecordId";
 import { Button } from "@/components/ui/button";
@@ -123,6 +124,7 @@ export function ContactDetail() {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const canWrite = !!profile?.role && profile.role !== "read_only";
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { data: contact, isLoading, isError, error, refetch } = useContact(id);
   const { data: originatingLead } = useOriginatingLead(id);
   const { data: contactTags = [] } = useContactTags(id);
@@ -134,6 +136,7 @@ export function ContactDetail() {
   const [showArchive, setShowArchive] = useState(false);
   const [showChangeOwner, setShowChangeOwner] = useState(false);
   const [showAddToList, setShowAddToList] = useState(false);
+  const [showQuickCampaign, setShowQuickCampaign] = useState(false);
   const { addRecent } = useRecentRecords();
 
   useEffect(() => {
@@ -227,6 +230,12 @@ export function ContactDetail() {
               <ListPlus className="h-4 w-4 mr-1" />
               Add to List
             </Button>
+            {isAdmin && (
+              <Button variant="outline" size="sm" onClick={() => setShowQuickCampaign(true)}>
+                <Megaphone className="h-4 w-4 mr-1" />
+                Start a Campaign
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={() => setShowChangeOwner(true)}>
               <UserRoundCog className="h-4 w-4 mr-1" />
               Change Owner
@@ -660,6 +669,14 @@ export function ContactDetail() {
         onOpenChange={setShowAddToList}
         contactIds={[contact.id]}
       />
+
+      {isAdmin && (
+        <QuickCampaignDialog
+          open={showQuickCampaign}
+          onOpenChange={setShowQuickCampaign}
+          contacts={[contact]}
+        />
+      )}
 
       <ChangeOwnerDialog
         open={showChangeOwner}

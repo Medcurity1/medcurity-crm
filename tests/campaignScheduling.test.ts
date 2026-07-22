@@ -4,6 +4,7 @@ import {
   relativeStepOffsets,
   emailStepsToSmartleadSequence,
   taskDueAt,
+  snapToWeekday,
   type SchedulingStep,
 } from "../supabase/functions/_shared/campaign-scheduling.ts";
 
@@ -175,38 +176,91 @@ describe("emailStepsToSmartleadSequence", () => {
   });
 });
 
+describe("snapToWeekday", () => {
+  it("leaves an already-allowed weekday unchanged", () => {
+    // 2026-07-22 is a Wednesday — already Mon-Fri.
+    expect(snapToWeekday("2026-07-22")).toBe("2026-07-22");
+  });
+
+  it("snaps a Saturday forward to the following Monday (default Mon-Fri)", () => {
+    // 2026-07-18 is a Saturday.
+    expect(snapToWeekday("2026-07-18")).toBe("2026-07-20");
+  });
+
+  it("snaps a Sunday forward to the following Monday (default Mon-Fri)", () => {
+    // 2026-07-19 is a Sunday.
+    expect(snapToWeekday("2026-07-19")).toBe("2026-07-20");
+  });
+
+  it("honors a custom sendDays set (e.g. Tue/Thu only)", () => {
+    // 2026-07-20 is a Monday -> first Tue/Thu on/after it is Tue 2026-07-21.
+    expect(snapToWeekday("2026-07-20", [2, 4])).toBe("2026-07-21");
+  });
+
+  it("defaults to Mon-Fri when sendDays is omitted", () => {
+    expect(snapToWeekday("2026-07-18")).toBe(snapToWeekday("2026-07-18", [1, 2, 3, 4, 5]));
+  });
+});
+
 describe("taskDueAt", () => {
   it("defaults to 09:00 America/Los_Angeles when sendWindowStart is omitted", () => {
+    // 2026-02-15 is a Sunday -> snaps forward to Monday 2026-02-16.
     // Feb -> PST (UTC-8): 09:00 PT = 17:00 UTC.
-    expect(taskDueAt("2026-02-15", 0)).toBe("2026-02-15T17:00:00.000Z");
+    expect(taskDueAt("2026-02-15", 0)).toBe("2026-02-16T17:00:00.000Z");
   });
 
   it("accepts a full ISO timestamp for firstSendISO and uses only its date part", () => {
     // Matches what reading campaign_enrollments.first_send_at back from
     // Postgres looks like, vs. computeFirstSendDates' bare date string.
+    // 2026-07-22 is a Wednesday — no weekend snap.
     expect(taskDueAt("2026-07-22T00:00:00+00:00", 0, "09:00")).toBe("2026-07-22T16:00:00.000Z");
   });
 
   it("honors a custom send_window_start clock time", () => {
+    // 2026-07-01 is a Wednesday — no weekend snap.
     expect(taskDueAt("2026-07-01", 0, "14:30")).toBe("2026-07-01T21:30:00.000Z");
   });
 
   it("adds relativeOffsetDays across a month boundary", () => {
-    // 2026-02-27 + 3 days = 2026-03-02 (Feb 2026 has 28 days).
+    // 2026-02-27 (Friday) + 3 days = 2026-03-02 (Monday, Feb 2026 has 28
+    // days) — already a weekday, so the snap is a no-op here.
     expect(taskDueAt("2026-02-27", 3, "09:00")).toBe("2026-03-02T16:00:00.000Z");
   });
 
+  describe("weekend snap (a non-email step must never land outside sendDays)", () => {
+    it("a Day-12 LinkedIn task from a Tuesday launch used to land on Sunday — now rolls to Monday", () => {
+      // Launch Tue 2026-07-21 (day zero); +12 days = Sun 2026-08-02, which
+      // is not in the default Mon-Fri sendDays -> snaps to Mon 2026-08-03.
+      // August -> PDT (UTC-7): 09:00 PT = 16:00 UTC.
+      expect(taskDueAt("2026-07-21", 12, "09:00")).toBe("2026-08-03T16:00:00.000Z");
+    });
+
+    it("a Saturday-landing offset snaps forward to Monday too", () => {
+      // 2026-07-20 (Mon) + 5 days = Sat 2026-07-25 -> snaps to Mon 2026-07-27.
+      expect(taskDueAt("2026-07-20", 5, "09:00")).toBe("2026-07-27T16:00:00.000Z");
+    });
+
+    it("honors a custom sendDays set instead of the Mon-Fri default", () => {
+      // 2026-07-20 (Mon) + 1 day = Tue 2026-07-21, which IS allowed under
+      // Tue/Thu-only sendDays -> no snap needed.
+      expect(taskDueAt("2026-07-20", 1, "09:00", [2, 4])).toBe("2026-07-21T16:00:00.000Z");
+      // 2026-07-20 (Mon) + 0 days = Mon 2026-07-20, NOT allowed under
+      // Tue/Thu-only sendDays -> snaps forward to Tue 2026-07-21.
+      expect(taskDueAt("2026-07-20", 0, "09:00", [2, 4])).toBe("2026-07-21T16:00:00.000Z");
+    });
+  });
+
   describe("DST boundary months (documented month-based PT approximation)", () => {
-    it("February -> PST, UTC-8", () => {
-      expect(taskDueAt("2026-02-15", 0, "09:00")).toBe("2026-02-15T17:00:00.000Z");
+    it("February -> PST, UTC-8 (2026-02-15 is a Sunday, snaps to Mon 2026-02-16)", () => {
+      expect(taskDueAt("2026-02-15", 0, "09:00")).toBe("2026-02-16T17:00:00.000Z");
     });
-    it("March -> PDT, UTC-7", () => {
-      expect(taskDueAt("2026-03-01", 0, "09:00")).toBe("2026-03-01T16:00:00.000Z");
+    it("March -> PDT, UTC-7 (2026-03-01 is a Sunday, snaps to Mon 2026-03-02)", () => {
+      expect(taskDueAt("2026-03-01", 0, "09:00")).toBe("2026-03-02T16:00:00.000Z");
     });
-    it("November -> still PDT under the approximation, UTC-7", () => {
-      expect(taskDueAt("2026-11-01", 0, "09:00")).toBe("2026-11-01T16:00:00.000Z");
+    it("November -> still PDT under the approximation, UTC-7 (2026-11-01 is a Sunday, snaps to Mon 2026-11-02)", () => {
+      expect(taskDueAt("2026-11-01", 0, "09:00")).toBe("2026-11-02T16:00:00.000Z");
     });
-    it("December -> PST, UTC-8", () => {
+    it("December -> PST, UTC-8 (2026-12-01 is already a Tuesday, no snap)", () => {
       expect(taskDueAt("2026-12-01", 0, "09:00")).toBe("2026-12-01T17:00:00.000Z");
     });
   });

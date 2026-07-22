@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useUrlNumberState, useUrlArrayState, useUrlState, useUrlSortState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Users, Plus, Search, UploadCloud, ListChecks } from "lucide-react";
+import { Users, Plus, Search, UploadCloud, ListChecks, Megaphone } from "lucide-react";
 import { useContacts, useArchiveContact, useBulkUpdateOwner, useBulkDeleteContacts } from "./api";
 import { toast } from "sonner";
 import { useUsers, useStatesInUse } from "@/features/accounts/api";
@@ -49,6 +49,7 @@ import { useTags, useApplyTag, useContactTagsMap } from "@/features/tags/api";
 import { TagChips } from "@/features/tags/TagChips";
 import { TagPicker } from "@/features/tags/TagPicker";
 import { AddToListDialog } from "@/features/lead-lists/AddToListDialog";
+import { QuickCampaignDialog } from "@/features/playbook/QuickCampaignDialog";
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -86,6 +87,10 @@ export function ContactsList() {
   // selection when the clicked row is part of it (Nathan 2026-07-20).
   const [ctxListIds, setCtxListIds] = useState<string[]>([]);
   const [ctxListOpen, setCtxListOpen] = useState(false);
+  // Right-click "Start a campaign…" (Campaigns overhaul S7, admin-only) —
+  // same clicked-vs-selection targeting as "Add to list" above.
+  const [ctxCampaignIds, setCtxCampaignIds] = useState<string[]>([]);
+  const [ctxCampaignOpen, setCtxCampaignOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [addToListOpen, setAddToListOpen] = useState(false);
   // Bulk delete is confirmed via the app ConfirmDialog (not window.confirm)
@@ -513,6 +518,23 @@ export function ContactsList() {
                           ? `Add ${selectedIds.size} selected to list…`
                           : "Add to list…"}
                       </ContextMenuItem>
+                      {isAdmin && (
+                        <ContextMenuItem
+                          onSelect={() => {
+                            const ids =
+                              selectedIds.has(contact.id) && selectedIds.size > 1
+                                ? Array.from(selectedIds)
+                                : [contact.id];
+                            setCtxCampaignIds(ids);
+                            setCtxCampaignOpen(true);
+                          }}
+                        >
+                          <Megaphone className="h-4 w-4" />
+                          {selectedIds.has(contact.id) && selectedIds.size > 1
+                            ? `Start a campaign for ${selectedIds.size} selected…`
+                            : "Start a campaign…"}
+                        </ContextMenuItem>
+                      )}
                     </ContextMenuContent>
                   </ContextMenu>
                 ))}
@@ -571,6 +593,14 @@ export function ContactsList() {
         onOpenChange={setCtxListOpen}
         contactIds={ctxListIds}
       />
+
+      {isAdmin && (
+        <QuickCampaignDialog
+          open={ctxCampaignOpen}
+          onOpenChange={setCtxCampaignOpen}
+          contacts={(contacts ?? []).filter((c) => ctxCampaignIds.includes(c.id))}
+        />
+      )}
 
       <ConfirmDialog
         open={confirmBulkDelete}

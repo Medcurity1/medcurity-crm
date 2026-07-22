@@ -865,6 +865,56 @@ export async function fetchSuppressionForEmails(emails: string[]): Promise<Suppr
 }
 
 // ---------------------------------------------------------------------------
+// Reply feed (Campaigns overhaul S7)
+// ---------------------------------------------------------------------------
+
+const REPLIES_LOOKBACK_DAYS = 30;
+const REPLIES_LIMIT = 50;
+
+export interface CampaignReplyRow {
+  id: string;
+  campaign_id: string | null;
+  enrollment_id: string | null;
+  email: string | null;
+  payload: Record<string, unknown>;
+  occurred_at: string | null;
+  created_at: string;
+  campaign: { id: string; name: string } | null;
+  enrollment: { first_name: string | null; last_name: string | null; contact_id: string | null } | null;
+}
+
+/** Recent EMAIL_REPLIED campaign_events, newest first, last 30 days, capped
+ *  at 50 — the Replies section in CampaignsTab.tsx. One query (campaign +
+ *  enrollment embedded) — campaign_events is admin-only RLS, same as
+ *  everything else this admin-only tab reads. */
+export function useCampaignReplies() {
+  return useQuery({
+    queryKey: ["playbook", "campaign-replies"],
+    queryFn: async () => {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - REPLIES_LOOKBACK_DAYS);
+      const { data, error } = await supabase
+        .from("campaign_events")
+        .select(
+          "id, campaign_id, enrollment_id, email, payload, occurred_at, created_at, " +
+            "campaign:campaigns(id, name), enrollment:campaign_enrollments(first_name, last_name, contact_id)",
+        )
+        .eq("event_type", "EMAIL_REPLIED")
+        .gte("created_at", cutoff.toISOString())
+        .order("created_at", { ascending: false })
+        .limit(REPLIES_LIMIT);
+      if (error) throw error;
+      // Same to-one-embed cast as fetchActiveEnrollmentsForEmails below —
+      // PostgREST returns a single object for both campaign_id -> campaigns
+      // and enrollment_id -> campaign_enrollments, but the query-builder's
+      // type inference (no generated Database types in this project) sees
+      // them as arrays.
+      return (data ?? []) as unknown as CampaignReplyRow[];
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Enrollment engine (Campaigns overhaul S3)
 // ---------------------------------------------------------------------------
 

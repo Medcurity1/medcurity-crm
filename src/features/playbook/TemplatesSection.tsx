@@ -31,7 +31,9 @@ import type { CampaignTemplate, SequenceStep } from "./types";
 type EditorSeed = (Partial<CampaignTemplate> & { steps: SequenceStep[] }) | null;
 type LaunchSeed = { template_id: string | null; name: string; steps: SequenceStep[] };
 
-const CATEGORY: Record<string, { icon: typeof Rocket; accent: string; chip: string; label: string }> = {
+// Exported for QuickCampaignDialog.tsx's compact template picker (Campaigns
+// overhaul S7) — same category -> icon/accent/label mapping, one source.
+export const CATEGORY: Record<string, { icon: typeof Rocket; accent: string; chip: string; label: string }> = {
   flagship:      { icon: Rocket,   accent: "from-amber-500/20 to-orange-500/10", chip: "bg-amber-500/15 text-amber-600 dark:text-amber-400", label: "Flagship" },
   warming:       { icon: Flame,    accent: "from-orange-500/20 to-rose-500/10",  chip: "bg-orange-500/15 text-orange-600 dark:text-orange-400", label: "Warming" },
   post_demo:     { icon: Sparkles, accent: "from-violet-500/20 to-fuchsia-500/10", chip: "bg-violet-500/15 text-violet-600 dark:text-violet-400", label: "Post-demo" },

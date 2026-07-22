@@ -515,7 +515,7 @@ async function spawnCampaignTasks(campaignId: string): Promise<{ tasksCreated: n
 
   const { data: enrollments, error: enrErr } = await svc
     .from("campaign_enrollments")
-    .select("id, first_name, last_name, company, first_send_at")
+    .select("id, first_name, last_name, company, email, first_send_at")
     .eq("campaign_id", campaignId)
     .eq("status", "active")
     .is("tasks_spawned_at", null)
@@ -552,7 +552,10 @@ async function spawnCampaignTasks(campaignId: string): Promise<{ tasksCreated: n
   const rowsByEnrollment = new Map<string, Record<string, unknown>[]>();
   for (const e of enrollments) {
     const vars = {
-      first_name: (e.first_name as string) || "",
+      // A blank first name reads as "Call " (trailing space, no name at
+      // all) in a spawned task title — fall back to the email address so
+      // the task is always identifiable ("Call jane@clinic.org").
+      first_name: (e.first_name as string) || (e.email as string) || "",
       last_name: (e.last_name as string) || "",
       company: (e.company as string) || "",
     };

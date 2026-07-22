@@ -11,6 +11,7 @@ import {
   Inbox,
   Kanban,
   ListTodo,
+  Megaphone,
   Pin,
   Table2,
 } from "lucide-react";
@@ -166,6 +167,12 @@ const TYPE_META: Record<
     description: "Requests routed to you to review, with approve/deny.",
     icon: Inbox,
     defaultName: "Requests",
+  },
+  campaign_touches: {
+    label: "Campaign Touches",
+    description: "Your upcoming campaign-generated calls, LinkedIn, and review-and-send tasks.",
+    icon: Megaphone,
+    defaultName: "Campaign Touches",
   },
 };
 
@@ -520,6 +527,13 @@ function TypeConfigPanel({ type, config, onConfigChange }: TypeConfigPanelProps)
       return (
         <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 p-3">
           Always shows the page owner's open opportunities — nothing to
+          configure.
+        </p>
+      );
+    case "campaign_touches":
+      return (
+        <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 p-3">
+          Always shows the page owner's upcoming campaign tasks — nothing to
           configure.
         </p>
       );

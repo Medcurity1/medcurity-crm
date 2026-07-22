@@ -96,6 +96,7 @@ export function CampaignWizard({
   open, onOpenChange, initialDescription = "", sourceIdeaId,
   mode = "ai",
   templateSeed,
+  initialRecipients,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -108,6 +109,14 @@ export function CampaignWizard({
    *  values are captured fresh rather than stale from a previous open. */
   mode?: "ai" | "template";
   templateSeed?: { template_id: string | null; name: string; steps: SequenceStep[] };
+  /** Pre-seeds the Recipients step (Campaigns overhaul S7 — the right-click
+   *  "Start a campaign…" fast path via QuickCampaignDialog). Recipients
+   *  built this way still run the normal suppression / already-enrolled
+   *  checks — CampaignRecipients.tsx treats `recipients` opaquely regardless
+   *  of source, so seeding this wizard's state is all that's needed. Callers
+   *  should bump the `key` prop on each open, same as templateSeed, so a
+   *  stale list from a previous open never leaks in. */
+  initialRecipients?: Recipient[];
 }) {
   const { profile } = useAuth();
   const [step, setStep] = useState<Step>(mode === "template" ? 2 : 1);
@@ -118,7 +127,7 @@ export function CampaignWizard({
   const [showRegen, setShowRegen] = useState(false);
   const [regenFeedback, setRegenFeedback] = useState("");
   const [codeView, setCodeView] = useState<Set<number>>(new Set());
-  const [recipients, setRecipients] = useState<Recipient[]>([]);
+  const [recipients, setRecipients] = useState<Recipient[]>(initialRecipients ?? []);
   const [suppression, setSuppression] = useState<SuppressionEntry[]>([]);
   const [suppressionOverrides, setSuppressionOverrides] = useState<string[]>([]);
   const [activeEnrollments, setActiveEnrollments] = useState<ActiveEnrollmentEntry[]>([]);
@@ -189,7 +198,8 @@ export function CampaignWizard({
   function reset() {
     setStep(mode === "template" ? 2 : 1);
     setDescription(initialDescription); setCampaign(null); setSuggestions(null); setAppliedSug(new Set());
-    setShowRegen(false); setRegenFeedback(""); setCodeView(new Set()); setRecipients([]); setInboxId("");
+    setShowRegen(false); setRegenFeedback(""); setCodeView(new Set());
+    setRecipients(initialRecipients ?? []); setInboxId("");
     setSuppression([]); setSuppressionOverrides([]);
     setActiveEnrollments([]); setEnrollmentOverrides([]);
     setAutoStart(mode === "template"); setAdaptive(false); setLeadsPerDay(25); setMinGap(15); setLaunchResult(null);
