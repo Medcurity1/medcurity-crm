@@ -409,3 +409,24 @@ Fable session planning/managing; build work delegated to subagents with tight sp
 Phase 2+ (engine: webhooks endpoint + tier probe, daily sweep pg_cron, auto-stop, task re-dating,
 stop/edit mid-flight, solo-campaign right-click fast path, Nexus widget, reply feed, analytics, AI
 insights/adaptation, scale) — specs to be cut when Phase 1 lands.
+
+### PHASE 1 COMPLETE — 2026-07-22, staging, live-verified
+
+All four slices shipped + verified with real Smartlead traffic (commits 306fb72 S1-unify,
+93441b6 S2-suppression, 6626c61 S3-launch-bridge, f662f67 S4-tracker, fc57cd3 backfill fix):
+template → 3-step launch (suppression rail caught a real DNC paste + per-person override worked) →
+draft in Smartlead → Start from tracker (dates computed, 4 merged call/LinkedIn tasks spawned,
+correct Jul29/Aug2/Aug9/Aug13 offsets) → Pause/Resume → Stop (enrollment stopped, all 4 tasks
+archived "Campaign stopped") → delete (both sides). Live-test catch worth remembering: the
+first_send_at bulk-write upsert silently violated NOT NULL → replaced with grouped per-date
+UPDATEs that throw; Start/Resume are retry-safe + idempotent.
+
+Known follow-ups for Phase 2 (docketed in the code, not blockers):
+- Task due dates don't skip weekends / honor domain_rules.start_anchor (Day-12 LinkedIn from a
+  Tue launch lands on a Sunday). Snap non-email steps to weekdays.
+- Task title merge falls back to "" when a pasted recipient has no first_name — fall back to email.
+- Smartlead "did email 1 actually send" confirmation = Phase 2 webhooks/per-lead statistics.
+- Empty-copy templates: seeded 8-Touch/Warming still need Jordan M's real wording.
+
+Phase 2 (engine: webhooks + tier probe, daily sweep, auto-stop on reply, task re-dating,
+right-click solo campaigns, Nexus widget, reply feed) is next.
