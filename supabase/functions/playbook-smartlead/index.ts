@@ -306,6 +306,22 @@ function generateWebhookSecret(): string {
  * null and launch() proceeds webhook-less — verify against a real account
  * post-deploy via the `webhook-status` diagnostic action below.
  */
+// Smartlead's ACTUAL registration enum (verified live 2026-07-22 via the
+// webhook-register diagnostic + api.smartlead.ai/api-reference/webhooks/events
+// — the API rejected our first guess with `Invalid event_types - EMAIL_OPENED`):
+// opens are EMAIL_OPEN, clicks EMAIL_LINK_CLICK, replies EMAIL_REPLY, bounces
+// EMAIL_BOUNCE, unsubscribes LEAD_UNSUBSCRIBED. The receiving side
+// (_shared/webhook-normalize.ts) maps by substring patterns, so these inbound
+// names already canonicalize correctly (EMAIL_REPLY -> EMAIL_REPLIED, etc.).
+const SMARTLEAD_WEBHOOK_EVENT_TYPES = [
+  "EMAIL_SENT",
+  "EMAIL_OPEN",
+  "EMAIL_LINK_CLICK",
+  "EMAIL_REPLY",
+  "EMAIL_BOUNCE",
+  "LEAD_UNSUBSCRIBED",
+];
+
 async function registerCampaignWebhook(smartleadCampaignId: number, secret: string): Promise<number | null> {
   try {
     const webhookUrl = `${SUPABASE_URL}/functions/v1/campaign-webhooks?token=${secret}`;
@@ -316,14 +332,7 @@ async function registerCampaignWebhook(smartleadCampaignId: number, secret: stri
         id: null,
         name: "Pulse campaign events",
         webhook_url: webhookUrl,
-        event_types: [
-          "EMAIL_SENT",
-          "EMAIL_OPENED",
-          "EMAIL_CLICKED",
-          "EMAIL_REPLIED",
-          "EMAIL_BOUNCED",
-          "EMAIL_UNSUBSCRIBED",
-        ],
+        event_types: SMARTLEAD_WEBHOOK_EVENT_TYPES,
       }),
     })) as Record<string, unknown>;
     const rawId = res?.id ?? res?.webhook_id
@@ -1942,11 +1951,7 @@ Deno.serve(async (req) => {
       }
       const secret = (campRow.webhook_secret as string | null) ?? generateWebhookSecret();
       const webhookUrl = `${SUPABASE_URL}/functions/v1/campaign-webhooks?token=${secret}`;
-      const eventTypes = [
-        "EMAIL_SENT", "EMAIL_OPENED", "EMAIL_CLICKED",
-        "EMAIL_REPLIED", "EMAIL_BOUNCED", "EMAIL_UNSUBSCRIBED",
-      ];
-      const base = { name: "Pulse campaign events", webhook_url: webhookUrl, event_types: eventTypes };
+      const base = { name: "Pulse campaign events", webhook_url: webhookUrl, event_types: SMARTLEAD_WEBHOOK_EVENT_TYPES };
       const variants: Array<Record<string, unknown>> = [
         { id: null, ...base },
         { id: null, ...base, categories: [] },
