@@ -10,6 +10,7 @@ import type {
   CampaignTemplate,
   SequenceStep,
 } from "./types";
+import { normalizeEmail, type SuppressionEntry } from "./suppression";
 
 // ---------------------------------------------------------------------------
 // Training notes (the feedback loop) — Phase A
@@ -415,13 +416,24 @@ export function useLaunchCampaign() {
       adaptiveEnabled?: boolean;
       owner_id?: string;
       schedule?: Record<string, unknown>;
+      // Normalized emails the user deliberately chose to include despite
+      // being on the Do-Not-Email list (per-person "Include anyway" — see
+      // CampaignRecipients.tsx). The server re-checks suppression itself and
+      // only honors an override that's actually listed here.
+      suppression_overrides?: string[];
     }) => {
       const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
         body: { action: "launch", ...p },
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-      return data as { smartlead_campaign_id: number; auto_started: boolean; leads_added: number; leads_failed: number };
+      return data as {
+        smartlead_campaign_id: number;
+        auto_started: boolean;
+        leads_added: number;
+        leads_failed: number;
+        suppression_dropped?: number;
+      };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] });
@@ -694,7 +706,14 @@ export function useInsertImage() {
   });
 }
 
-/** Recipients = the (non-archived, contactable) contacts carrying a tag.
+/** Recipients = the (non-archived) contacts carrying a tag, with an email on
+ *  file. Do-Not-Contact / No-Longer-Employed / customer / partner / etc.
+ *  suppression is deliberately NOT filtered here — every recipient source
+ *  (tag, CSV, paste) is expected to run through fetchSuppressionForEmails
+ *  in CampaignRecipients.tsx so the same Do-Not-Email rule applies
+ *  everywhere, not just to contacts pulled by tag (2026-07-22: this used to
+ *  hard-filter do_not_contact/no_longer_employed here, silently, which left
+ *  CSV/paste recipients completely unchecked).
  *  Paginates so a large tag (>1 page) returns EVERY member — a campaign must
  *  never silently mail a truncated list. Hard-stops at 50k as a sanity cap. */
 export async function fetchRecipientsByTag(tagId: string): Promise<Recipient[]> {
@@ -703,7 +722,7 @@ export async function fetchRecipientsByTag(tagId: string): Promise<Recipient[]> 
   for (let page = 0; page < 50; page++) {
     const { data, error } = await supabase
       .from("contacts")
-      .select("id, first_name, last_name, email, account_id, do_not_contact, no_longer_employed, account:accounts!account_id(name), contact_tags!inner(tag_id)")
+      .select("id, first_name, last_name, email, account_id, account:accounts!account_id(name), contact_tags!inner(tag_id)")
       .eq("contact_tags.tag_id", tagId)
       .is("archived_at", null)
       // Pending pen imports are not campaign-able people yet (pen cutover,
@@ -718,7 +737,7 @@ export async function fetchRecipientsByTag(tagId: string): Promise<Recipient[]> 
     if (batch.length < PAGE) break;
   }
   return all
-    .filter((c: Record<string, unknown>) => !c.do_not_contact && !c.no_longer_employed && c.email)
+    .filter((c: Record<string, unknown>) => typeof c.email === "string" && c.email.trim())
     .map((c: Record<string, unknown>) => ({
       email: c.email as string,
       first_name: (c.first_name as string) ?? "",
@@ -727,4 +746,29 @@ export async function fetchRecipientsByTag(tagId: string): Promise<Recipient[]> 
       contact_id: c.id as string,
       account_id: (c.account_id as string) ?? undefined,
     }));
+}
+
+/** Batched Do-Not-Email check: which of these emails are on
+ *  v_marketing_suppression, and why. Matches on normalized
+ *  (lowercased/trimmed) email — every email we send is normalized before
+ *  querying. 500 emails per `.in()` batch (matches the server-side mirror in
+ *  playbook-smartlead/index.ts). Every recipient source is expected to run
+ *  through this after its list is built — see CampaignRecipients.tsx. */
+export async function fetchSuppressionForEmails(emails: string[]): Promise<SuppressionEntry[]> {
+  const normalized = Array.from(new Set(emails.map(normalizeEmail).filter(Boolean)));
+  if (!normalized.length) return [];
+  const BATCH = 500;
+  const out: SuppressionEntry[] = [];
+  for (let i = 0; i < normalized.length; i += BATCH) {
+    const batch = normalized.slice(i, i + BATCH);
+    const { data, error } = await supabase
+      .from("v_marketing_suppression")
+      .select("email, reason")
+      .in("email", batch);
+    if (error) throw error;
+    for (const row of (data ?? []) as { email: string; reason: string }[]) {
+      out.push({ email: row.email, reason: row.reason });
+    }
+  }
+  return out;
 }

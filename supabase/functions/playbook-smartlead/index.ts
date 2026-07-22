@@ -125,6 +125,61 @@ function sequenceToSteps(sequence: Array<Record<string, unknown>>): Array<Record
   });
 }
 
+/**
+ * Marketing-suppression partition — mirrors
+ * src/features/playbook/suppression.ts:partitionSuppression. Deno can't
+ * import that browser-side module here, so this is a small hand-kept copy;
+ * keep the two in sync if the partition rule changes. Works on plain email
+ * strings (the launch action only needs eligible/dropped email sets, not
+ * full Recipient objects) — matching is on normalized (lowercased/trimmed)
+ * email, same as the client twin and fetchSuppressionForEmails.
+ */
+function normalizeEmail(email: string): string {
+  return (email ?? "").trim().toLowerCase();
+}
+function partitionSuppressedEmails(
+  emails: string[],
+  suppression: { email: string; reason: string }[],
+  overrides: string[],
+): { eligible: Set<string>; dropped: string[]; overriddenCount: number } {
+  const suppressedSet = new Set(suppression.map((r) => normalizeEmail(r.email)));
+  const overrideSet = new Set(overrides.map(normalizeEmail));
+  const eligible = new Set<string>();
+  const dropped: string[] = [];
+  let overriddenCount = 0;
+  for (const raw of emails) {
+    const key = normalizeEmail(raw);
+    if (!key || !suppressedSet.has(key)) { eligible.add(key); continue; }
+    if (overrideSet.has(key)) { eligible.add(key); overriddenCount++; }
+    else dropped.push(raw);
+  }
+  return { eligible, dropped, overriddenCount };
+}
+
+/** Batched (500/query) service-role suppression lookup — the server-side
+ *  twin of fetchSuppressionForEmails (src/features/playbook/api.ts). Uses
+ *  `svc` so it sees the full v_marketing_suppression result regardless of
+ *  caller RLS (the view is security_invoker, but service_role bypasses RLS
+ *  the same way every other `svc.from(...)` call in this file does). */
+async function fetchSuppressionForEmails(emails: string[]): Promise<{ email: string; reason: string }[]> {
+  const normalized = Array.from(new Set(emails.map(normalizeEmail).filter(Boolean)));
+  if (!normalized.length) return [];
+  const BATCH = 500;
+  const out: { email: string; reason: string }[] = [];
+  for (let i = 0; i < normalized.length; i += BATCH) {
+    const batch = normalized.slice(i, i + BATCH);
+    const { data, error } = await svc
+      .from("v_marketing_suppression")
+      .select("email, reason")
+      .in("email", batch);
+    if (error) throw new Error("Suppression check failed: " + error.message);
+    for (const row of (data ?? []) as { email: string; reason: string }[]) {
+      out.push({ email: row.email, reason: row.reason });
+    }
+  }
+  return out;
+}
+
 async function importCampaigns() {
   const campaigns = await fetchCampaigns();
   if (!Array.isArray(campaigns)) throw new Error("Unexpected Smartlead response");
@@ -211,15 +266,21 @@ interface LaunchInput {
   autoStart?: boolean;
   adaptiveEnabled?: boolean;
   owner_id?: string;
+  // Normalized emails the caller deliberately included despite being on the
+  // Do-Not-Email list (per-person "Include anyway" in CampaignRecipients.tsx).
+  // The client's own filtering is not trusted — see the suppression re-check
+  // in launch() below.
+  suppression_overrides?: string[];
 }
 
 /**
  * Launch a campaign into Smartlead (ported from server.js:3294-3541):
  * create -> sequence (rollback/delete on failure) -> schedule -> attach
- * inbox -> add leads (400-batch) -> optionally START. autoStart defaults
- * to FALSE so the campaign lands as a Smartlead DRAFT (no emails sent)
- * until the user reviews + starts it. On success, records the campaign in
- * Pulse and logs an email_sent activity on each linked contact.
+ * inbox -> suppression re-check -> add leads (400-batch) -> optionally
+ * START. autoStart defaults to FALSE so the campaign lands as a Smartlead
+ * DRAFT (no emails sent) until the user reviews + starts it. On success,
+ * records the campaign in Pulse and logs an email_sent activity on each
+ * linked contact (suppressed/dropped recipients excluded from both).
  */
 async function launch(p: LaunchInput) {
   if (!p.campaign_name || !p.sequence?.length || !p.recipients?.length) {
@@ -243,6 +304,9 @@ async function launch(p: LaunchInput) {
   let leadsFailed = 0;
   let autoStarted = false;
   let pulseCampaignId: string | null = null;
+  // Declared outside the try so the final return (after the try/catch) can
+  // report it even though it's only computed inside — see step 5 below.
+  let suppressionDropped = 0;
   try {
     // 2. Sequence.
     await smartleadFetch(`/campaigns/${campaignId}/sequences`, {
@@ -288,12 +352,37 @@ async function launch(p: LaunchInput) {
       } catch { /* continue */ }
     }
 
-    // 5. Add leads in batches of 400, retrying a failed batch once before
+    // 5. Suppression re-check (defense in depth). The client already filters
+    // via v_marketing_suppression (fetchSuppressionForEmails +
+    // partitionSuppression in src/features/playbook/), but the server never
+    // trusts the client: re-check every recipient email here with the
+    // service-role client, and drop anything suppressed that the caller
+    // didn't explicitly list in suppression_overrides. Recorded on the
+    // campaigns row below (settings.suppression) and returned so the UI can
+    // toast it.
+    const recipientEmails = p.recipients.map((r) => r.email);
+    const suppressionRows = await fetchSuppressionForEmails(recipientEmails);
+    const overrides = Array.isArray(p.suppression_overrides) ? p.suppression_overrides : [];
+    const { eligible: eligibleEmails, dropped: suppressionDroppedEmails, overriddenCount: suppressionOverriddenCount } =
+      partitionSuppressedEmails(recipientEmails, suppressionRows, overrides);
+    const suppressionChecked = recipientEmails.length;
+    suppressionDropped = suppressionDroppedEmails.length;
+    const recipients = suppressionDropped > 0
+      ? p.recipients.filter((r) => eligibleEmails.has(normalizeEmail(r.email)))
+      : p.recipients;
+    if (recipients.length === 0) {
+      throw new Error(
+        `All ${suppressionChecked} recipient(s) are on the Do-Not-Email list — nothing to send. ` +
+        `Use "Include anyway" on the people you really mean to email.`,
+      );
+    }
+
+    // 6. Add leads in batches of 400, retrying a failed batch once before
     // counting it failed (a single transient blip shouldn't drop ~400 leads).
     const batchSize = 400;
-    const totalBatches = Math.ceil(p.recipients.length / batchSize);
+    const totalBatches = Math.ceil(recipients.length / batchSize);
     for (let i = 0; i < totalBatches; i++) {
-      const batch = p.recipients.slice(i * batchSize, (i + 1) * batchSize);
+      const batch = recipients.slice(i * batchSize, (i + 1) * batchSize);
       const leadList = batch.map((r) => ({
         email: r.email,
         first_name: r.first_name ?? "",
@@ -320,9 +409,9 @@ async function launch(p: LaunchInput) {
       throw new Error("All lead batches failed; campaign created but has no leads.");
     }
 
-    // 6. Record in Pulse (BEFORE any START, so a rollback never deletes a
+    // 7. Record in Pulse (BEFORE any START, so a rollback never deletes a
     // live send). Treat a failed insert as fatal so the campaign is rolled
-    // back rather than silently orphaned. Starts as 'draft'; step 9 flips
+    // back rather than silently orphaned. Starts as 'draft'; step 10 flips
     // it to 'active' only once the Smartlead START call actually succeeds,
     // so the row never claims to be sending when it isn't.
     const { data: inserted, error: insErr } = await svc
@@ -340,6 +429,15 @@ async function launch(p: LaunchInput) {
           .map((s, i) => `Step ${s.seq_number ?? i + 1}: ${s.subject ?? ""}`)
           .join("\n"),
         adaptive_enabled: !!p.adaptiveEnabled,
+        settings: {
+          suppression: {
+            checked: suppressionChecked,
+            dropped: suppressionDropped,
+            overridden: suppressionOverriddenCount,
+            // Capped so a huge suppressed batch can't bloat the row.
+            dropped_emails: suppressionDroppedEmails.slice(0, 200),
+          },
+        },
       })
       .select("id")
       .single();
@@ -348,7 +446,7 @@ async function launch(p: LaunchInput) {
     }
     pulseCampaignId = inserted.id;
 
-    // 7. Mark the source idea executed.
+    // 8. Mark the source idea executed.
     if (p.source_idea_id && pulseCampaignId) {
       await svc
         .from("playbook_ideas")
@@ -356,10 +454,10 @@ async function launch(p: LaunchInput) {
         .eq("id", p.source_idea_id);
     }
 
-    // 8. Log an email activity on each linked contact (timeline visibility).
+    // 9. Log an email activity on each linked contact (timeline visibility).
     // Non-fatal: a bad FK in one row shouldn't fail the whole launch.
     const subject = String(p.sequence[0]?.subject ?? p.campaign_name);
-    const acts = p.recipients
+    const acts = recipients
       .filter((r) => r.contact_id)
       .map((r) => ({
         activity_type: "email",
@@ -377,7 +475,7 @@ async function launch(p: LaunchInput) {
       if (actErr) console.error("playbook launch: activity log insert failed:", actErr.message);
     }
 
-    // 9. Optionally START (default OFF — leave as a Smartlead draft). Done
+    // 10. Optionally START (default OFF — leave as a Smartlead draft). Done
     // last so the Pulse record already exists; on success promote to
     // active.
     if (p.autoStart === true) {
@@ -403,6 +501,7 @@ async function launch(p: LaunchInput) {
     leads_added: leadsAdded,
     leads_failed: leadsFailed,
     auto_started: autoStarted,
+    suppression_dropped: suppressionDropped,
     smartlead_url: `https://app.smartlead.ai/app/email-campaign/${campaignId}/analytics`,
   };
 }

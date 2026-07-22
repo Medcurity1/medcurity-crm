@@ -3,7 +3,7 @@
 // upload, or pasted emails; Launch creates the campaign in Smartlead.
 // autoStart defaults OFF so it lands as a DRAFT for review.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Loader2, Sparkles, Wand2, ArrowLeft, ArrowRight, Rocket, CheckCircle2, AlertTriangle,
   Plus, Trash2, Eye, Code2, RotateCw,
@@ -19,9 +19,11 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useTags } from "@/features/tags/api";
 import { CampaignRecipients } from "./CampaignRecipients";
+import { partitionSuppression, type SuppressionEntry } from "./suppression";
 import {
   useGenerateCampaign, useSuggestCampaign, useRegenerateEmail, useEmailAccounts, useLaunchCampaign,
   type GeneratedCampaign, type Recipient,
@@ -69,12 +71,14 @@ export function CampaignWizard({
   const [regenFeedback, setRegenFeedback] = useState("");
   const [codeView, setCodeView] = useState<Set<number>>(new Set());
   const [recipients, setRecipients] = useState<Recipient[]>([]);
+  const [suppression, setSuppression] = useState<SuppressionEntry[]>([]);
+  const [suppressionOverrides, setSuppressionOverrides] = useState<string[]>([]);
   const [inboxId, setInboxId] = useState("");
   const [autoStart, setAutoStart] = useState(false);
   const [adaptive, setAdaptive] = useState(false);
   const [leadsPerDay, setLeadsPerDay] = useState(25);
   const [minGap, setMinGap] = useState(15);
-  const [launchResult, setLaunchResult] = useState<{ id: number; started: boolean; leads: number; failed: number } | null>(null);
+  const [launchResult, setLaunchResult] = useState<{ id: number; started: boolean; leads: number; failed: number; suppressionDropped: number } | null>(null);
 
   const gen = useGenerateCampaign();
   const suggest = useSuggestCampaign();
@@ -83,9 +87,23 @@ export function CampaignWizard({
   const { data: inboxes } = useEmailAccounts();
   const launch = useLaunchCampaign();
 
+  // The list actually sent to Smartlead: suppressed people are excluded
+  // unless the user checked "Include anyway" on that specific person (see
+  // CampaignRecipients.tsx). The server re-checks this independently before
+  // adding leads — this is the client-side half of the same safety rail.
+  const suppressionPartition = useMemo(
+    () => partitionSuppression(recipients, (r) => r.email, suppression, suppressionOverrides),
+    [recipients, suppression, suppressionOverrides],
+  );
+  const sendableRecipients = useMemo(
+    () => [...suppressionPartition.eligible, ...suppressionPartition.overridden],
+    [suppressionPartition],
+  );
+
   function reset() {
     setStep(1); setDescription(initialDescription); setCampaign(null); setSuggestions(null); setAppliedSug(new Set());
     setShowRegen(false); setRegenFeedback(""); setCodeView(new Set()); setRecipients([]); setInboxId("");
+    setSuppression([]); setSuppressionOverrides([]);
     setAutoStart(false); setAdaptive(false); setLeadsPerDay(25); setMinGap(15); setLaunchResult(null);
   }
   function close(o: boolean) { if (!o) reset(); onOpenChange(o); }
@@ -134,17 +152,28 @@ export function CampaignWizard({
         campaign_name: campaign.campaign_name,
         target_audience: campaign.target_audience,
         sequence: campaign.sequence,
-        recipients,
+        recipients: sendableRecipients,
         email_account_id: inboxId ? Number(inboxId) : undefined,
         source_idea_id: sourceIdeaId,
         autoStart,
         adaptiveEnabled: adaptive,
         owner_id: profile?.id,
         schedule: { max_new_leads_per_day: leadsPerDay, min_time_btw_emails: minGap },
+        suppression_overrides: suppressionOverrides,
       },
       {
         onSuccess: (r) => {
-          setLaunchResult({ id: r.smartlead_campaign_id, started: r.auto_started, leads: r.leads_added, failed: r.leads_failed ?? 0 });
+          const suppressionDropped = r.suppression_dropped ?? 0;
+          setLaunchResult({
+            id: r.smartlead_campaign_id, started: r.auto_started,
+            leads: r.leads_added, failed: r.leads_failed ?? 0, suppressionDropped,
+          });
+          if (suppressionDropped > 0) {
+            toast.success(
+              `${suppressionDropped} suppressed contact${suppressionDropped === 1 ? "" : "s"} ` +
+              `${suppressionDropped === 1 ? "was" : "were"} not added.`,
+            );
+          }
         },
       },
     );
@@ -315,10 +344,19 @@ export function CampaignWizard({
         {/* Step 3 — Recipients */}
         {step === 3 && (
           <div className="space-y-3">
-            <CampaignRecipients recipients={recipients} setRecipients={setRecipients} tags={tags ?? []} />
+            <CampaignRecipients
+              recipients={recipients} setRecipients={setRecipients} tags={tags ?? []}
+              suppression={suppression} setSuppression={setSuppression}
+              suppressionOverrides={suppressionOverrides} setSuppressionOverrides={setSuppressionOverrides}
+            />
+            {recipients.length > 0 && sendableRecipients.length === 0 && (
+              <p className="text-xs text-amber-600">
+                Everyone here is on the Do-Not-Email list. Check "Include anyway" on at least one person above, or add different recipients, to continue.
+              </p>
+            )}
             <div className="flex justify-between pt-2">
               <Button variant="ghost" onClick={() => setStep(2)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
-              <Button onClick={() => setStep(4)} disabled={recipients.length === 0}>Launch step <ArrowRight className="h-4 w-4 ml-1" /></Button>
+              <Button onClick={() => setStep(4)} disabled={sendableRecipients.length === 0}>Launch step <ArrowRight className="h-4 w-4 ml-1" /></Button>
             </div>
           </div>
         )}
@@ -334,6 +372,12 @@ export function CampaignWizard({
                   {launchResult.leads} added{launchResult.failed > 0 ? ` · ${launchResult.failed} failed` : ""} · Smartlead #{launchResult.id}
                 </p>
                 {launchResult.failed > 0 && <p className="text-xs text-amber-600">Some recipients couldn't be added. Check the audience in Smartlead before you start.</p>}
+                {launchResult.suppressionDropped > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {launchResult.suppressionDropped} suppressed contact{launchResult.suppressionDropped === 1 ? "" : "s"}{" "}
+                    {launchResult.suppressionDropped === 1 ? "was" : "were"} not added (Do-Not-Email list).
+                  </p>
+                )}
                 {!launchResult.started && <p className="text-xs text-muted-foreground">Review and start it in Smartlead when you're ready.</p>}
                 <Button size="sm" onClick={() => close(false)}>Done</Button>
               </div>
@@ -369,7 +413,9 @@ export function CampaignWizard({
                   Adaptive monitoring — AI tweaks unsent emails based on performance <span className="text-[11px] italic">(coming soon)</span>
                 </label>
                 <div className={cn("rounded-md p-2 text-xs", autoStart ? "bg-amber-50 text-amber-700" : "bg-muted/40 text-muted-foreground")}>
-                  {campaign.sequence.length} emails · {recipients.length} recipients{autoStart ? " · will START sending" : " · will be saved as a DRAFT"}
+                  {campaign.sequence.length} emails · {sendableRecipients.length} recipients
+                  {suppressionPartition.dropped.length > 0 ? ` (${suppressionPartition.dropped.length} on the Do-Not-Email list excluded)` : ""}
+                  {autoStart ? " · will START sending" : " · will be saved as a DRAFT"}
                 </div>
                 <div className="flex justify-between pt-2">
                   <Button variant="ghost" onClick={() => setStep(3)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>

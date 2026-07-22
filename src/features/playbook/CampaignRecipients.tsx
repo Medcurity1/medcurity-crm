@@ -1,9 +1,17 @@
 // Campaign recipients picker — three sources that all accumulate (with
 // dedup): a contact tag (custom list), a CSV/.txt upload with column mapping,
 // or pasted emails. Shows a managed recipient table.
+//
+// Every source feeds the SAME Do-Not-Email safety check (2026-07-22): once
+// the recipient list is built/deduped, every email is checked against
+// v_marketing_suppression. Suppressed people are excluded from the list this
+// component hands to the wizard unless the user deliberately checks
+// "Include anyway" for that specific person — see suppression.ts for the
+// partition logic (also mirrored server-side in playbook-smartlead/index.ts
+// as a defense-in-depth re-check before anything is sent).
 
-import { useRef, useState } from "react";
-import { Upload, X, Loader2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Upload, X, Loader2, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,25 +19,80 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { fetchRecipientsByTag, type Recipient } from "./api";
+import { fetchRecipientsByTag, fetchSuppressionForEmails, type Recipient } from "./api";
 import { parseCsv, guessField, rowsToRecipients, FIELD_LABEL, type RecipientField } from "./csv";
+import {
+  partitionSuppression, groupSuppressionReasons, normalizeEmail, suppressionReasonLabel,
+  type SuppressionEntry,
+} from "./suppression";
 
 const FIELD_OPTIONS: RecipientField[] = ["email", "first_name", "last_name", "company_name", "skip"];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function CampaignRecipients({
   recipients, setRecipients, tags,
+  suppression, setSuppression,
+  suppressionOverrides, setSuppressionOverrides,
 }: {
   recipients: Recipient[];
   setRecipients: (r: Recipient[]) => void;
   tags: { id: string; name: string }[];
+  suppression: SuppressionEntry[];
+  setSuppression: (rows: SuppressionEntry[]) => void;
+  suppressionOverrides: string[];
+  setSuppressionOverrides: (emails: string[]) => void;
 }) {
   const [recipientTag, setRecipientTag] = useState("");
   const [tagLoading, setTagLoading] = useState(false);
   const [pasted, setPasted] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const [showSuppressed, setShowSuppressed] = useState(false);
+  const [suppressionLoading, setSuppressionLoading] = useState(false);
   const [csv, setCsv] = useState<{ header: string[]; rows: string[][]; mapping: RecipientField[] } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const suppressionReqId = useRef(0);
+
+  // Re-check the Do-Not-Email list any time the built/deduped recipient list
+  // changes — covers all three sources, since they all funnel through
+  // mergeAdd -> setRecipients. "Latest request wins" guard so a fast second
+  // merge (e.g. upload a CSV, then immediately paste more) can't have its
+  // result clobbered by a slower earlier response.
+  useEffect(() => {
+    const id = ++suppressionReqId.current;
+    if (!recipients.length) { setSuppression([]); return; }
+    setSuppressionLoading(true);
+    fetchSuppressionForEmails(recipients.map((r) => r.email))
+      .then((rows) => { if (suppressionReqId.current === id) setSuppression(rows); })
+      .catch((e) => {
+        if (suppressionReqId.current === id) {
+          toast.error("Couldn't check the Do-Not-Email list: " + (e as Error).message);
+        }
+      })
+      .finally(() => { if (suppressionReqId.current === id) setSuppressionLoading(false); });
+  }, [recipients, setSuppression]);
+
+  const partition = useMemo(
+    () => partitionSuppression(recipients, (r) => r.email, suppression, suppressionOverrides),
+    [recipients, suppression, suppressionOverrides],
+  );
+  const reasonsByEmail = useMemo(() => groupSuppressionReasons(suppression), [suppression]);
+  const overrideSet = useMemo(
+    () => new Set(suppressionOverrides.map(normalizeEmail)),
+    [suppressionOverrides],
+  );
+  const suppressedAll = useMemo(
+    () => [...partition.dropped, ...partition.overridden].sort((a, b) => a.email.localeCompare(b.email)),
+    [partition],
+  );
+  const sendableCount = partition.eligible.length + partition.overridden.length;
+  const suppressedCount = partition.dropped.length + partition.overridden.length;
+
+  function toggleOverride(email: string, checked: boolean) {
+    const key = normalizeEmail(email);
+    const set = new Set(suppressionOverrides.map(normalizeEmail));
+    if (checked) set.add(key); else set.delete(key);
+    setSuppressionOverrides([...set]);
+  }
 
   function mergeAdd(incoming: Recipient[]) {
     const byEmail = new Map(recipients.map((r) => [r.email.toLowerCase(), r]));
@@ -84,6 +147,12 @@ export function CampaignRecipients({
     setPasted("");
   }
 
+  function clearAll() {
+    if (!confirm("Clear all recipients?")) return;
+    setRecipients([]);
+    setSuppressionOverrides([]);
+  }
+
   const hasEmailMapped = csv?.mapping.includes("email");
   const shown = showAll ? recipients : recipients.slice(0, 20);
 
@@ -101,7 +170,7 @@ export function CampaignRecipients({
           </Select>
           {tagLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
         </div>
-        <p className="text-[11px] text-muted-foreground">Excludes Do-Not-Contact and No-Longer-Employed automatically.</p>
+        <p className="text-[11px] text-muted-foreground">Do-Not-Email people are checked after you add them, below.</p>
       </div>
 
       {/* Source 2: CSV upload */}
@@ -159,32 +228,104 @@ export function CampaignRecipients({
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium">{recipients.length} recipients</p>
           {recipients.length > 0 && (
-            <Button size="xs" variant="ghost" className="text-destructive"
-              onClick={() => { if (confirm("Clear all recipients?")) setRecipients([]); }}>Clear all</Button>
+            <Button size="xs" variant="ghost" className="text-destructive" onClick={clearAll}>Clear all</Button>
           )}
         </div>
+
+        {recipients.length > 0 && (
+          <p className="text-xs text-muted-foreground flex items-center gap-1">
+            {suppressionLoading ? (
+              <><Loader2 className="h-3 w-3 animate-spin" /> Checking the Do-Not-Email list…</>
+            ) : (
+              <>
+                {recipients.length} selected → <span className="font-medium text-foreground">{sendableCount} eligible</span>
+                {suppressedCount > 0 && (
+                  <>
+                    {" "}· <span className="font-medium text-amber-600">{suppressedCount} on the Do-Not-Email list</span>
+                    {partition.overridden.length > 0 && ` (${partition.overridden.length} included anyway)`}
+                  </>
+                )}
+              </>
+            )}
+          </p>
+        )}
+
         {recipients.length > 0 && (
           <div className="rounded-md border divide-y max-h-52 overflow-y-auto">
-            {shown.map((r) => (
-              <div key={r.email} className="flex items-center justify-between gap-2 px-2 py-1 text-xs">
-                <span className="truncate">
-                  {r.email}
-                  {(r.first_name || r.company_name) && (
-                    <span className="text-muted-foreground"> · {[r.first_name, r.company_name].filter(Boolean).join(", ")}</span>
-                  )}
-                </span>
-                <button type="button" className="text-muted-foreground hover:text-destructive shrink-0"
-                  onClick={() => setRecipients(recipients.filter((x) => x.email !== r.email))}>
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
+            {shown.map((r) => {
+              const key = normalizeEmail(r.email);
+              const isSuppressed = reasonsByEmail.has(key);
+              const isOverridden = overrideSet.has(key);
+              return (
+                <div key={r.email} className="flex items-center justify-between gap-2 px-2 py-1 text-xs">
+                  <span className="truncate">
+                    {r.email}
+                    {(r.first_name || r.company_name) && (
+                      <span className="text-muted-foreground"> · {[r.first_name, r.company_name].filter(Boolean).join(", ")}</span>
+                    )}
+                    {isSuppressed && (
+                      <span className={isOverridden ? "ml-1 text-[10px] text-emerald-600" : "ml-1 text-[10px] text-amber-600"}>
+                        {isOverridden ? "· included anyway" : "· Do-Not-Email"}
+                      </span>
+                    )}
+                  </span>
+                  <button type="button" className="text-muted-foreground hover:text-destructive shrink-0"
+                    onClick={() => setRecipients(recipients.filter((x) => x.email !== r.email))}>
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              );
+            })}
             {recipients.length > 20 && (
               <button type="button" className="w-full px-2 py-1 text-[11px] text-primary hover:underline"
                 onClick={() => setShowAll((v) => !v)}>
                 {showAll ? "Show fewer" : `Show all ${recipients.length}`}
               </button>
             )}
+          </div>
+        )}
+
+        {suppressedCount > 0 && (
+          <div className="rounded-md border">
+            <button
+              type="button"
+              className="w-full flex items-center justify-between gap-2 px-2 py-1.5 text-xs font-medium hover:bg-accent/40"
+              onClick={() => setShowSuppressed((v) => !v)}
+            >
+              <span className="inline-flex items-center gap-1">
+                <ShieldAlert className="h-3.5 w-3.5 text-amber-600" />
+                Review {suppressedCount} on the Do-Not-Email list
+              </span>
+              <span className="text-muted-foreground">{showSuppressed ? "Hide" : "Show"}</span>
+            </button>
+            {showSuppressed && (
+              <div className="divide-y max-h-52 overflow-y-auto border-t">
+                {suppressedAll.map((r) => {
+                  const key = normalizeEmail(r.email);
+                  const reasons = (reasonsByEmail.get(key) ?? []).map(suppressionReasonLabel).join(" · ");
+                  const checked = overrideSet.has(key);
+                  return (
+                    <label key={r.email} className="flex items-center gap-2 px-2 py-1.5 text-xs cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => toggleOverride(r.email, e.target.checked)}
+                      />
+                      <span className="flex-1 min-w-0 truncate">
+                        {r.email}
+                        <span className="text-muted-foreground"> · {reasons || "suppressed"}</span>
+                      </span>
+                      <span className={checked ? "shrink-0 text-[10px] font-medium text-emerald-600" : "shrink-0 text-[10px] font-medium text-muted-foreground"}>
+                        {checked ? "Included anyway" : "Excluded"}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            <p className="px-2 py-1.5 text-[11px] text-muted-foreground border-t">
+              Checked people are added to the campaign anyway. Everyone else here is left out of the send.
+            </p>
           </div>
         )}
       </div>
