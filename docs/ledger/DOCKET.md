@@ -12,6 +12,8 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 (the ENTIRE 7/21 afternoon batch — ghost-stage fix, partner AI banner, claim tool, FTE gate fix, phone auto-fill — shipped to PROD in merge aaec792 ~16:10 PT; see SHIPPED)
 
+- [QUEUED] 2026-07-22 · Nathan (fallout of the staging watchdog fix — see SHIPPED 7/22) · **Staging legacy pg_cron jobs 401 on every cycle since ~7/15** (April hand-pasted keys no longer accepted): `sync-emails-every-10-min` (*/10), `task-reminders-every-5-min` (*/5), `outlook-calendar-reconcile-hourly` — cron.job_run_details reads "succeeded" (handoff-only) while every HTTP call lands UNAUTHORIZED in net._http_response. Decide: (a) **unschedule all three** (staging stops syncing real mailboxes/reminders/calendar — already the de facto state since 7/15; email connections deactivated 7/22 so even a revived sync would no-op), or (b) **re-paste the current staging service key** to revive them AND reactivate the 5 connections. Until decided they burn a useless 401 every 5-10 min. Also worth identifying WHAT rotated ~7/15 (key rotation? edge-fn auth hardening in that week's deploys?) — the same class of breakage could someday hit prod's pasted jobs, and prod's watchdog would catch email but not every job.
+
 
 
 
