@@ -5,12 +5,14 @@ import type {
   PlaybookTrainingNote,
   PlaybookIdea,
   Campaign,
+  CampaignMetrics,
   Newsletter,
   NewsletterType,
   CampaignTemplate,
   SequenceStep,
 } from "./types";
 import { normalizeEmail, type SuppressionEntry } from "./suppression";
+import { isPositiveReplyCategory } from "./reply-extract";
 
 // ---------------------------------------------------------------------------
 // Training notes (the feedback loop) — Phase A
@@ -871,6 +873,18 @@ export async function fetchSuppressionForEmails(emails: string[]): Promise<Suppr
 const REPLIES_LOOKBACK_DAYS = 30;
 const REPLIES_LIMIT = 50;
 
+// Raw campaign_events.event_type values that represent a reply — the
+// webhook path stores Smartlead's RAW event name (verified live 2026-07-22
+// as EMAIL_REPLY, not the canonical EMAIL_REPLIED — see
+// supabase/functions/playbook-smartlead/index.ts's SMARTLEAD_WEBHOOK_EVENT_TYPES
+// comment), while the daily sweep's own event logging (S9,
+// _shared/campaign-enrollment-actions.ts) inserts the same raw name for
+// consistency. Older/future rows might still carry the canonical name, so
+// this checks both — kept in sync manually with
+// _shared/campaign-enrollment-actions.ts's REPLY_EVENT_TYPES (a browser
+// bundle can't import that Deno-side file).
+const REPLY_EVENT_TYPES = ["EMAIL_REPLIED", "EMAIL_REPLY"];
+
 export interface CampaignReplyRow {
   id: string;
   campaign_id: string | null;
@@ -880,13 +894,15 @@ export interface CampaignReplyRow {
   occurred_at: string | null;
   created_at: string;
   campaign: { id: string; name: string } | null;
-  enrollment: { first_name: string | null; last_name: string | null; contact_id: string | null } | null;
+  enrollment: { first_name: string | null; last_name: string | null; contact_id: string | null; reply_category: string | null } | null;
 }
 
-/** Recent EMAIL_REPLIED campaign_events, newest first, last 30 days, capped
- *  at 50 — the Replies section in CampaignsTab.tsx. One query (campaign +
- *  enrollment embedded) — campaign_events is admin-only RLS, same as
- *  everything else this admin-only tab reads. */
+/** Recent reply campaign_events, newest first, last 30 days, capped at 50 —
+ *  the Replies section in CampaignsTab.tsx. One query (campaign + enrollment
+ *  embedded) — campaign_events is admin-only RLS, same as everything else
+ *  this admin-only tab reads. Matches BOTH the raw and canonical event-type
+ *  spelling (REPLY_EVENT_TYPES above) so rows logged by either the real-time
+ *  webhook or the daily sweep (S9) show up here. */
 export function useCampaignReplies() {
   return useQuery({
     queryKey: ["playbook", "campaign-replies"],
@@ -897,9 +913,9 @@ export function useCampaignReplies() {
         .from("campaign_events")
         .select(
           "id, campaign_id, enrollment_id, email, payload, occurred_at, created_at, " +
-            "campaign:campaigns(id, name), enrollment:campaign_enrollments(first_name, last_name, contact_id)",
+            "campaign:campaigns(id, name), enrollment:campaign_enrollments(first_name, last_name, contact_id, reply_category)",
         )
-        .eq("event_type", "EMAIL_REPLIED")
+        .in("event_type", REPLY_EVENT_TYPES)
         .gte("created_at", cutoff.toISOString())
         .order("created_at", { ascending: false })
         .limit(REPLIES_LIMIT);
@@ -910,6 +926,126 @@ export function useCampaignReplies() {
       // type inference (no generated Database types in this project) sees
       // them as arrays.
       return (data ?? []) as unknown as CampaignReplyRow[];
+    },
+  });
+}
+
+/** Mark a reply as handled (Campaigns overhaul Phase 3, S9) — stamps
+ *  payload.handled on the campaign_events row via the playbook-smartlead
+ *  edge function (campaign_events is service-role-write-only; a client can't
+ *  update it directly — see the `mark-reply-handled` action's doc comment).
+ *  The Replies feed dims/groups a handled row rather than removing it. */
+export function useMarkReplyHandled() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (eventId: string) => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "mark-reply-handled", event_id: eventId },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["playbook", "campaign-replies"] }),
+    onError: (e) => toast.error("Couldn't mark handled: " + (e as Error).message),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Campaigns tab "This month" stats strip (Campaigns overhaul Phase 3, S9)
+// ---------------------------------------------------------------------------
+
+const MONTH_STATS_WINDOW_DAYS = 30;
+
+export interface CampaignMonthStats {
+  campaignsLaunched: number;
+  peopleEnrolled: number;
+  replies: number;
+  positiveReplies: number;
+}
+
+/** "This month" strip above Ongoing campaigns in CampaignsTab.tsx — plain
+ *  counts over the last 30 days: campaigns launched (left draft in that
+ *  window), people enrolled, replies received, and replies that read as
+ *  positive (isPositiveReplyCategory — see reply-extract.ts's client twin of
+ *  _shared/reply-category.ts). Two queries (campaigns don't live on the
+ *  enrollments table), but each is a single grouped fetch, not one query per
+ *  number. */
+export function useCampaignsMonthStats() {
+  return useQuery({
+    queryKey: ["playbook", "campaign-month-stats"],
+    queryFn: async (): Promise<CampaignMonthStats> => {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - MONTH_STATS_WINDOW_DAYS);
+      const cutoffIso = cutoff.toISOString();
+
+      const [launchedRes, enrollRes] = await Promise.all([
+        supabase
+          .from("campaigns")
+          .select("id", { count: "exact", head: true })
+          .neq("status", "draft")
+          .gte("created_at", cutoffIso),
+        supabase
+          .from("campaign_enrollments")
+          .select("enrolled_at, replied_at, reply_category")
+          .or(`enrolled_at.gte.${cutoffIso},replied_at.gte.${cutoffIso}`),
+      ]);
+      if (launchedRes.error) throw launchedRes.error;
+      if (enrollRes.error) throw enrollRes.error;
+
+      let peopleEnrolled = 0;
+      let replies = 0;
+      let positiveReplies = 0;
+      for (const row of (enrollRes.data ?? []) as { enrolled_at: string | null; replied_at: string | null; reply_category: string | null }[]) {
+        if (row.enrolled_at && row.enrolled_at >= cutoffIso) peopleEnrolled++;
+        if (row.replied_at && row.replied_at >= cutoffIso) {
+          replies++;
+          if (isPositiveReplyCategory(row.reply_category)) positiveReplies++;
+        }
+      }
+
+      return {
+        campaignsLaunched: launchedRes.count ?? 0,
+        peopleEnrolled,
+        replies,
+        positiveReplies,
+      };
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Template scoreboard (Campaigns overhaul Phase 3, S9)
+// ---------------------------------------------------------------------------
+
+export interface TemplateScoreboardEntry {
+  campaigns: number;
+  replies: number;
+}
+
+/** Lifetime "N campaigns · X replies" per template, for the small stat line
+ *  on each preset card in TemplatesSection.tsx. One query grouping every
+ *  campaign by template_id client-side (cheap at this scale — same
+ *  aggregate-in-app pattern as useCampaignEnrollmentStats). Templates with
+ *  zero linked campaigns simply have no entry — callers hide the line
+ *  entirely rather than showing "0 campaigns". */
+export function useTemplateScoreboard() {
+  return useQuery({
+    queryKey: ["playbook", "template-scoreboard"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("campaigns")
+        .select("template_id, metrics")
+        .not("template_id", "is", null);
+      if (error) throw error;
+      const out: Record<string, TemplateScoreboardEntry> = {};
+      for (const row of (data ?? []) as { template_id: string; metrics: CampaignMetrics | null }[]) {
+        const entry = (out[row.template_id] ??= { campaigns: 0, replies: 0 });
+        entry.campaigns++;
+        const replies = Number(row.metrics?.replies);
+        if (Number.isFinite(replies)) entry.replies += replies;
+      }
+      return out;
     },
   });
 }
@@ -990,6 +1126,7 @@ export interface CampaignEnrollmentRow {
   unsubscribed_at: string | null;
   last_event_at: string | null;
   enrolled_at: string;
+  reply_category: string | null;
 }
 
 /** Every enrollment for one campaign, in enroll_position order — the detail
@@ -1002,7 +1139,7 @@ export function useCampaignEnrollments(campaignId: string | null) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("campaign_enrollments")
-        .select("id, campaign_id, contact_id, account_id, enroll_position, email, first_name, last_name, company, status, paused_reason, current_step, first_send_at, replied_at, bounced_at, unsubscribed_at, last_event_at, enrolled_at")
+        .select("id, campaign_id, contact_id, account_id, enroll_position, email, first_name, last_name, company, status, paused_reason, current_step, first_send_at, replied_at, bounced_at, unsubscribed_at, last_event_at, enrolled_at, reply_category")
         .eq("campaign_id", campaignId as string)
         .order("enroll_position", { ascending: true });
       if (error) throw error;
@@ -1037,6 +1174,57 @@ export function useCampaignEvents(campaignId: string | null) {
         .limit(CAMPAIGN_DETAIL_EVENTS_LIMIT);
       if (error) throw error;
       return (data ?? []) as CampaignEventRow[];
+    },
+  });
+}
+
+export interface CampaignEventStats {
+  sent: number;
+  opened: number;
+  clicked: number;
+  replied: number;
+}
+
+/** Which of the four funnel buckets an event_type string belongs to, or null
+ *  if it's none of them (e.g. a bounce/unsubscribe/category-update row).
+ *  event_type may be the raw Smartlead name (EMAIL_REPLY) or the canonical
+ *  one (EMAIL_REPLIED) — see REPLY_EVENT_TYPES above — so this matches on
+ *  substring the same defensive way _shared/webhook-normalize.ts's
+ *  mapEventType does, rather than an exact-string lookup table. */
+function eventTypeBucket(eventType: string): keyof CampaignEventStats | null {
+  const t = eventType.toLowerCase();
+  if (t.includes("repl")) return "replied";
+  if (t.includes("click")) return "clicked";
+  if (t.includes("open")) return "opened";
+  if (t.includes("sent") || t.includes("send")) return "sent";
+  return null;
+}
+
+/** Total sent/opened/clicked/replied counts across EVERY campaign_events row
+ *  for one campaign (not just the last-20 useCampaignEvents shows) — the
+ *  CampaignDetailSheet's compact "Events seen" funnel row. Deliberately
+ *  honest about what this is: a raw tally of our own event log, not a
+ *  per-step breakdown (Smartlead's sequence-step field isn't reliably
+ *  present — see extractStepNumber's doc comment in playbook-smartlead/
+ *  index.ts) and not the same numbers as campaigns.metrics (Smartlead's own
+ *  server-computed rates, shown separately in the header). Lazy, same
+ *  enable-while-open pattern as the other detail-sheet queries. */
+export function useCampaignEventStats(campaignId: string | null) {
+  return useQuery({
+    queryKey: ["playbook", "campaign-event-stats", campaignId],
+    enabled: !!campaignId,
+    queryFn: async (): Promise<CampaignEventStats> => {
+      const { data, error } = await supabase
+        .from("campaign_events")
+        .select("event_type")
+        .eq("campaign_id", campaignId as string);
+      if (error) throw error;
+      const out: CampaignEventStats = { sent: 0, opened: 0, clicked: 0, replied: 0 };
+      for (const row of (data ?? []) as { event_type: string }[]) {
+        const bucket = eventTypeBucket(row.event_type);
+        if (bucket) out[bucket]++;
+      }
+      return out;
     },
   });
 }

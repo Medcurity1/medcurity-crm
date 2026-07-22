@@ -31,7 +31,7 @@ import { cn } from "@/lib/utils";
 import { SequenceTimeline } from "./SequenceTimeline";
 import { STATUS_META, originHint, CampaignStatusControls, type CampaignRow } from "./CampaignCard";
 import {
-  smartleadUrl, useCampaignEnrollments, useCampaignEvents, useSetEnrollmentStatus,
+  smartleadUrl, useCampaignEnrollments, useCampaignEvents, useCampaignEventStats, useSetEnrollmentStatus,
   useSetCampaignStatus,
   type CampaignEnrollmentRow, type CampaignEventRow, type EnrollmentStatusAction,
 } from "./api";
@@ -47,13 +47,22 @@ const ENROLLMENT_STATUS_META: Record<string, { label: string; className: string 
 
 const ENROLLMENT_TERMINAL = ["completed", "stopped", "replied", "bounced"];
 
+// Covers both the canonical event-type spelling and Smartlead's actual raw
+// names (verified live 2026-07-22 — see playbook-smartlead/index.ts's
+// SMARTLEAD_WEBHOOK_EVENT_TYPES comment) since campaign_events.event_type
+// stores whichever one a given row's source preferred.
 const EVENT_LABEL: Record<string, string> = {
   EMAIL_SENT: "Email sent to",
   EMAIL_OPENED: "Email opened by",
+  EMAIL_OPEN: "Email opened by",
   EMAIL_CLICKED: "Link clicked by",
+  EMAIL_LINK_CLICK: "Link clicked by",
   EMAIL_REPLIED: "Reply from",
+  EMAIL_REPLY: "Reply from",
   EMAIL_BOUNCED: "Email bounced for",
+  EMAIL_BOUNCE: "Email bounced for",
   EMAIL_UNSUBSCRIBED: "Unsubscribed:",
+  LEAD_UNSUBSCRIBED: "Unsubscribed:",
 };
 
 function humanizeEvent(ev: CampaignEventRow): string {
@@ -87,6 +96,7 @@ export function CampaignDetailSheet({
   const campaignId = campaign?.id ?? null;
   const { data: enrollments, isLoading: enrollmentsLoading } = useCampaignEnrollments(campaignId);
   const { data: events, isLoading: eventsLoading } = useCampaignEvents(campaignId);
+  const { data: eventStats } = useCampaignEventStats(campaignId);
   const setEnrollment = useSetEnrollmentStatus();
   const [search, setSearch] = useState("");
   const [stopTarget, setStopTarget] = useState<CampaignEnrollmentRow | null>(null);
@@ -188,6 +198,22 @@ export function CampaignDetailSheet({
             <div className="space-y-2">
               <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Sequence</h4>
               <SequenceTimeline steps={c.steps} />
+            </div>
+          )}
+
+          {/* Engagement funnel — a compact, honest tally of our own event
+              log (campaign_events), NOT a per-step breakdown (Smartlead
+              doesn't reliably tell us which sequence step an event belongs
+              to — see extractStepNumber's doc comment). Separate from the
+              c.metrics numbers in the header above, which are Smartlead's
+              own server-computed rates — the two are different sources and
+              can legitimately disagree slightly. */}
+          {eventStats && (eventStats.sent + eventStats.opened + eventStats.clicked + eventStats.replied > 0) && (
+            <div className="space-y-1">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Engagement</h4>
+              <p className="text-xs text-muted-foreground">
+                Events seen: {eventStats.sent} sent · {eventStats.opened} opens · {eventStats.clicked} clicks · {eventStats.replied} replies
+              </p>
             </div>
           )}
 

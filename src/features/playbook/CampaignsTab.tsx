@@ -27,6 +27,7 @@ import {
   useDeleteCampaign,
   useSetCampaignStatus,
   useCampaignEnrollmentStats,
+  useCampaignsMonthStats,
   useEmailAccounts,
 } from "./api";
 
@@ -117,6 +118,11 @@ export function CampaignsTab() {
   const statsIds = useMemo(() => filtered.map((c) => c.id), [filtered]);
   const { data: statsById } = useCampaignEnrollmentStats(statsIds);
 
+  // "This month" strip (Campaigns overhaul Phase 3, S9) — a quick pulse-check
+  // above the tracker, independent of the owner/everyone filter above (it's
+  // a team-wide number, not a per-view one).
+  const { data: monthStats } = useCampaignsMonthStats();
+
   function renderCard(c: CampaignRow) {
     return (
       <CampaignCard
@@ -137,6 +143,22 @@ export function CampaignsTab() {
       <TemplatesSection />
 
       <CampaignReplies />
+
+      {/* This month — a quick pulse-check, plain-English counts over the
+          last 30 days (Campaigns overhaul Phase 3, S9). Only renders once
+          there's at least one non-zero number, so a brand-new team doesn't
+          see a row of zeroes. */}
+      {monthStats && (monthStats.campaignsLaunched || monthStats.peopleEnrolled || monthStats.replies) ? (
+        <div className="border-t pt-4">
+          <p className="text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">This month:</span>{" "}
+            {monthStats.campaignsLaunched} {monthStats.campaignsLaunched === 1 ? "campaign" : "campaigns"} launched
+            {" · "}{monthStats.peopleEnrolled} {monthStats.peopleEnrolled === 1 ? "person" : "people"} enrolled
+            {" · "}{monthStats.replies} {monthStats.replies === 1 ? "reply" : "replies"}
+            {monthStats.positiveReplies > 0 ? ` (${monthStats.positiveReplies} positive)` : ""}
+          </p>
+        </div>
+      ) : null}
 
       <div className="border-t pt-4 space-y-3">
         {/* Ongoing section header + the Smartlead actions (refresh both sections) */}

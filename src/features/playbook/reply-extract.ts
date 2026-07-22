@@ -31,3 +31,21 @@ export function extractReplyBody(payload: unknown): string | null {
     data.reply, data.reply_body, data.preview_text,
   );
 }
+
+/** Client-side twin of supabase/functions/_shared/reply-category.ts's
+ *  isPositiveReplyCategory (Campaigns overhaul Phase 3, S9) — the Replies
+ *  feed badge and the Campaigns tab month stats strip both need this same
+ *  judgment, but a browser bundle can't import the Deno-side file (its
+ *  program root is supabase/functions/, outside tsconfig.app.json's "src"
+ *  include). Kept in sync manually — same duplication convention as
+ *  mergeTemplate/partitionSuppressedEmails in playbook-smartlead/index.ts.
+ *  If this rule ever changes, update both. */
+export function isPositiveReplyCategory(category: string | null | undefined): boolean {
+  if (!category) return false;
+  const c = category.trim().toLowerCase();
+  if (!c) return false;
+  if (c.includes("not interest")) return false;
+  if (c.includes("interest")) return true;
+  if (c.includes("meeting")) return true;
+  return false;
+}

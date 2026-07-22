@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { useCampaignTemplates, useDeleteTemplate } from "./api";
+import { useCampaignTemplates, useDeleteTemplate, useTemplateScoreboard } from "./api";
 import { SequenceTimeline, SequenceMiniPreview } from "./SequenceTimeline";
 import { SequenceEditor } from "./SequenceEditor";
 import { CampaignWizard } from "./CampaignWizard";
@@ -44,6 +44,7 @@ export const CATEGORY: Record<string, { icon: typeof Rocket; accent: string; chi
 
 export function TemplatesSection() {
   const { data: templates, isLoading } = useCampaignTemplates();
+  const { data: scoreboard } = useTemplateScoreboard();
   const del = useDeleteTemplate();
   const [preview, setPreview] = useState<CampaignTemplate | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -110,6 +111,7 @@ export function TemplatesSection() {
           {(templates ?? []).map((t) => {
             const cat = CATEGORY[t.category] ?? CATEGORY.custom;
             const Icon = cat.icon;
+            const score = scoreboard?.[t.id];
             return (
               <Card
                 key={t.id}
@@ -135,6 +137,14 @@ export function TemplatesSection() {
                       <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{t.duration_days ?? "—"}d</span>
                     </span>
                   </div>
+                  {/* Lifetime scoreboard (Campaigns overhaul Phase 3, S9) —
+                      hidden entirely at zero rather than showing "0
+                      campaigns" on every template that's never been used. */}
+                  {score && score.campaigns > 0 && (
+                    <p className="text-[11px] text-muted-foreground">
+                      {score.campaigns} {score.campaigns === 1 ? "campaign" : "campaigns"} · {score.replies} {score.replies === 1 ? "reply" : "replies"}
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             );
