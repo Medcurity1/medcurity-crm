@@ -138,6 +138,38 @@ async function verifyOptionalSignature(rawBody: string, req: Request, secret: st
 // dateOnly/daysBetweenDateOnly (whole-day shifts, EMAIL_SENT handling below)
 // now come from _shared/campaign-task-shift.ts (see the top-of-file import).
 
+/** Best-effort: is this webhook call a Smartlead lead-category update
+ *  (LEAD_CATEGORY_UPDATED — Interested / Meeting Request / Not Interested /
+ *  Do Not Contact / Information Request, etc.), rather than one of the six
+ *  canonical send-lifecycle events? Matched on the raw type string since
+ *  normalizeWebhookPayload's mapEventType only recognizes the six canonical
+ *  patterns (repl/bounc/unsub/click/open/sent) and correctly leaves this
+ *  unmapped (`type: null`) — a category update isn't a send-lifecycle state
+ *  transition, so it deliberately stays outside that enum. This is a
+ *  narrower, additional check layered on top, not a change to
+ *  normalizeWebhookPayload's contract. (Campaigns overhaul Phase 3, S9.) */
+function isLeadCategoryUpdateEvent(rawType: string | null): boolean {
+  return rawType != null && /categor/i.test(rawType);
+}
+
+/** Best-effort category-string extraction off a LEAD_CATEGORY_UPDATED-ish
+ *  payload — same "read every plausible variant, top-level and nested under
+ *  data" defensiveness as extractStepNumber below. Kept local for the same
+ *  reason: a best-effort extra, not part of webhook-normalize.ts's
+ *  guaranteed contract. */
+function extractCategory(raw: unknown): string | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const body = raw as Record<string, unknown>;
+  const data = (typeof body.data === "object" && body.data !== null && !Array.isArray(body.data))
+    ? body.data as Record<string, unknown>
+    : {};
+  const candidates = [body.category, body.lead_category, body.category_name, data.category, data.lead_category, data.category_name];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim()) return c.trim();
+  }
+  return null;
+}
+
 /** Best-effort seq/step number extraction — Smartlead's field name for
  *  "which sequence email was this" isn't nailed down in the docs we could
  *  verify, so this reads every plausible variant and returns null (meaning
@@ -359,8 +391,26 @@ Deno.serve(async (req) => {
     });
     if (evErr) console.error("campaign-webhooks: campaign_events insert failed:", evErr.message);
 
+    // Lead-category update (S9) — not one of the six canonical send-lifecycle
+    // events (normalized.type stays null for it, by design), so this is
+    // handled BEFORE the "unrecognized event_type" early return below rather
+    // than inside the type switch further down. The generic event row above
+    // already recorded it either way; this additionally persists the
+    // classification onto the enrollment so the Replies feed / month stats
+    // can read it without re-parsing every payload.
+    if (isLeadCategoryUpdateEvent(normalized.rawType) && enrollment) {
+      const category = extractCategory(parsed);
+      if (category) {
+        const { error: catErr } = await svc
+          .from("campaign_enrollments")
+          .update({ reply_category: category })
+          .eq("id", enrollment.id);
+        if (catErr) console.error("campaign-webhooks: reply_category update failed:", catErr.message);
+      }
+    }
+
     if (!normalized.type) {
-      return json({ received: true, note: "unrecognized event_type" });
+      return json({ received: true, note: isLeadCategoryUpdateEvent(normalized.rawType) ? "category updated" : "unrecognized event_type" });
     }
     if (!enrollment) {
       return json({ received: true, note: "no matching enrollment" });
@@ -381,7 +431,7 @@ Deno.serve(async (req) => {
         await stopEnrollmentForReply(svc, enrollment, campaign, normalized.replyBody, normalized.email);
         break;
       case "EMAIL_BOUNCED":
-        await stopEnrollmentForBounce(svc, enrollment);
+        await stopEnrollmentForBounce(svc, enrollment, campaign.id);
         break;
       case "EMAIL_UNSUBSCRIBED":
         await handleUnsubscribed(enrollment);

@@ -313,6 +313,17 @@ function generateWebhookSecret(): string {
 // EMAIL_BOUNCE, unsubscribes LEAD_UNSUBSCRIBED. The receiving side
 // (_shared/webhook-normalize.ts) maps by substring patterns, so these inbound
 // names already canonicalize correctly (EMAIL_REPLY -> EMAIL_REPLIED, etc.).
+// NOT adding LEAD_CATEGORY_UPDATED here (Phase 3, S9's category feature):
+// this array is the live-verified registration enum — the API 400s on an
+// unrecognized value (see the EMAIL_OPENED note above), and registration is
+// ALL-OR-NOTHING per campaign (one bad value fails the whole call, dropping
+// the already-working reply/bounce webhook too). Whether Smartlead sends
+// LEAD_CATEGORY_UPDATED unprompted, or under a different subscribable name,
+// is unverified — campaign-webhooks/index.ts's isLeadCategoryUpdateEvent
+// parses one IF it arrives, but nothing here risks the existing
+// registration to ask for it. The daily sweep's per-lead statistics parse
+// (reconcileCampaignLeads) is the primary, always-on path for category data
+// either way.
 const SMARTLEAD_WEBHOOK_EVENT_TYPES = [
   "EMAIL_SENT",
   "EMAIL_OPEN",
@@ -1572,6 +1583,11 @@ interface LeadStatRow {
   sentAt: string | null;
   repliedAt: string | null;
   bouncedAt: string | null;
+  /** Smartlead's lead-category classification (Interested / Meeting Request
+   *  / Not Interested / etc.), when the statistics endpoint happens to
+   *  include it — unverified field name, same defensive-read posture as
+   *  everything else in this function (Campaigns overhaul Phase 3, S9). */
+  category: string | null;
 }
 
 /** Defensive per-lead-row extraction — Smartlead's exact field names for the
@@ -1593,7 +1609,10 @@ function normalizeLeadStatRow(raw: Record<string, unknown>, nowIso: string): Lea
   let bouncedAt = toIsoOrNullLocal(raw.bounce_time ?? raw.bounced_at ?? raw.email_bounce_time ?? raw.bounce_date);
   if (!bouncedAt && (raw.is_bounced === true || raw.bounced === true)) bouncedAt = nowIso;
 
-  return { email: email || null, sentAt, repliedAt, bouncedAt };
+  const categoryRaw = raw.category ?? raw.lead_category ?? raw.category_name ?? raw.reply_category;
+  const category = typeof categoryRaw === "string" && categoryRaw.trim() ? categoryRaw.trim() : null;
+
+  return { email: email || null, sentAt, repliedAt, bouncedAt, category };
 }
 
 function extractStatRows(res: unknown): Record<string, unknown>[] {
@@ -1681,7 +1700,7 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
 
   const { data: enrollments, error } = await svc
     .from("campaign_enrollments")
-    .select("id, contact_id, account_id, first_name, last_name, email, status, first_send_at")
+    .select("id, contact_id, account_id, first_name, last_name, email, status, first_send_at, reply_category")
     .eq("campaign_id", campaign.id)
     .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`);
   if (error) throw new Error("Enrollment lookup for reconcile failed: " + error.message);
@@ -1696,15 +1715,26 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
   for (const e of enrollments as {
     id: string; contact_id: string | null; account_id: string | null;
     first_name: string | null; last_name: string | null; email: string | null;
-    status: string; first_send_at: string | null;
+    status: string; first_send_at: string | null; reply_category: string | null;
   }[]) {
     const key = e.email ? normalizeEmail(e.email) : "";
     const row = key ? byEmail.get(key) : undefined;
     if (!row) continue;
 
+    // Category (S9) — independent of the reply/bounce/sent branches below;
+    // a category can arrive on the same statistics row as a reply, or on its
+    // own before/after one.
+    if (row.category && row.category !== e.reply_category) {
+      const { error: catErr } = await svc
+        .from("campaign_enrollments")
+        .update({ reply_category: row.category })
+        .eq("id", e.id);
+      if (catErr) console.error(`daily-sweep: reply_category update failed for enrollment ${e.id}:`, catErr.message);
+    }
+
     // (c) bounce — checked first; a bounced lead never sends a real reply.
     if (row.bouncedAt) {
-      const result = await stopEnrollmentForBounce(svc, e);
+      const result = await stopEnrollmentForBounce(svc, e, campaign.id, { occurredAt: row.bouncedAt, source: "daily-sweep" });
       if (result.updated) {
         enrollmentsUpdated++;
         tasksCancelled += result.tasksCancelled;
@@ -1714,7 +1744,7 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
 
     // (b) reply
     if (row.repliedAt) {
-      const result = await stopEnrollmentForReply(svc, e, campaignForActions, null, e.email);
+      const result = await stopEnrollmentForReply(svc, e, campaignForActions, null, e.email, { occurredAt: row.repliedAt, source: "daily-sweep" });
       if (result.updated) {
         enrollmentsUpdated++;
         repliesDetected++;
@@ -2120,6 +2150,32 @@ Deno.serve(async (req) => {
       }
       if (slId) { try { await smartleadFetch(`/campaigns/${slId}`, { method: "DELETE" }); } catch { /* best-effort */ } }
       if (pulseId) await svc.from("campaigns").delete().eq("id", pulseId);
+      return json({ success: true });
+    }
+    if (action === "mark-reply-handled") {
+      // Reply feed "Mark handled" (Campaigns overhaul Phase 3, S9). Rather
+      // than a new column/table, this stamps a `handled` object onto the
+      // campaign_events row's own payload jsonb — campaign_events is
+      // service-role-write-only (see 20260722180000_campaign_events_engine.sql's
+      // RLS: admin can SELECT, nothing else for `authenticated`), so a
+      // client-side "mark handled" has to go through this action rather than
+      // a direct table update. The Replies feed (useCampaignReplies) reads
+      // `payload.handled` to dim/group the row.
+      const eventId = body.event_id as string;
+      if (!eventId) throw new Error("event_id is required");
+      const handledBy = await callerUserId(auth);
+      const { data: row, error: findErr } = await svc
+        .from("campaign_events")
+        .select("id, payload")
+        .eq("id", eventId)
+        .single();
+      if (findErr || !row) throw new Error("Reply not found: " + (findErr?.message ?? eventId));
+      const nextPayload = {
+        ...((row.payload as Record<string, unknown> | null) ?? {}),
+        handled: { at: new Date().toISOString(), by: handledBy },
+      };
+      const { error: updErr } = await svc.from("campaign_events").update({ payload: nextPayload }).eq("id", eventId);
+      if (updErr) throw new Error("Couldn't mark this reply handled: " + updErr.message);
       return json({ success: true });
     }
     if (action === "webhook-status") {

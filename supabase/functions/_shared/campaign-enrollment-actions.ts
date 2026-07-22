@@ -1,15 +1,22 @@
 // Shared "stop this enrollment + archive its pending tasks (+ notify)"
-// routines (Campaigns overhaul Phase 2, S6). Extracted from
-// campaign-webhooks/index.ts's EMAIL_REPLIED/EMAIL_BOUNCED handlers (S5) so
-// the daily-sweep's per-lead reconcile (playbook-smartlead/index.ts, S6)
+// routines (Campaigns overhaul Phase 2, S6; extended Phase 3, S9). Extracted
+// from campaign-webhooks/index.ts's EMAIL_REPLIED/EMAIL_BOUNCED handlers (S5)
+// so the daily-sweep's per-lead reconcile (playbook-smartlead/index.ts, S6)
 // reacts to a reply/bounce it discovers via Smartlead's statistics endpoint
 // EXACTLY the same way the real-time webhook does — same status transition,
 // same task-archive reason string, same bell notification + follow-up task
-// shape for a reply. One implementation, two callers.
+// shape for a reply, same campaign_events row, same contact-timeline
+// activity for a reply. One implementation, two callers.
 //
-// Pure move — no behavior change versus the S5 originals beyond the
-// log-message prefix (was "campaign-webhooks: ...", now
-// "campaign-enrollment-actions: ..." since this file is shared).
+// S9 addition: previously only the real-time webhook (campaign-webhooks/
+// index.ts) logged a campaign_events row — the daily sweep's reconcile
+// called these same routines but left no event trail, so a reply the sweep
+// caught (rather than a live webhook) was invisible in the Replies feed
+// (CampaignReplies.tsx) even though the enrollment itself correctly stopped.
+// recordEventIfMissing/logReplyActivity below close that gap for BOTH
+// callers, guarded so the common webhook path (which already logs its own
+// generic event row for every call, before dispatching here) never ends up
+// with two rows for one reply.
 //
 // `svc` is typed loosely (same DbClient convention as
 // _shared/graph-token.ts / _shared/campaign-task-shift.ts) — each edge
@@ -23,6 +30,124 @@ type DbClient = any;
 // campaign-webhooks/index.ts before this extraction; this is now the single
 // source of truth both import.
 export const ENROLLMENT_TERMINAL_STATUSES = ["completed", "stopped", "replied", "bounced"];
+
+// campaign_events.event_type values that represent a reply/bounce. Two
+// variants each because the webhook path stores Smartlead's RAW event name
+// (campaign-webhooks/index.ts inserts `normalized.rawType ?? normalized.type`,
+// preferring the raw value — verified live 2026-07-22 as EMAIL_REPLY /
+// EMAIL_BOUNCE, not the canonical EMAIL_REPLIED / EMAIL_BOUNCED — see
+// playbook-smartlead/index.ts's SMARTLEAD_WEBHOOK_EVENT_TYPES comment), while
+// older/future rows might carry the canonical name. Used both for the
+// idempotency check below and (kept in sync manually) by
+// src/features/playbook/api.ts's useCampaignReplies filter, since a browser
+// bundle can't import this Deno-side file.
+export const REPLY_EVENT_TYPES = ["EMAIL_REPLIED", "EMAIL_REPLY"];
+export const BOUNCE_EVENT_TYPES = ["EMAIL_BOUNCED", "EMAIL_BOUNCE"];
+
+/** Does a campaign_events row already exist for this enrollment with one of
+ *  `types`? On a lookup failure, returns false (log and proceed to insert
+ *  rather than silently drop the event — a rare duplicate is far better than
+ *  a reply that never shows up anywhere). */
+async function hasExistingEvent(svc: DbClient, enrollmentId: string, types: string[]): Promise<boolean> {
+  const { data, error } = await svc
+    .from("campaign_events")
+    .select("id")
+    .eq("enrollment_id", enrollmentId)
+    .in("event_type", types)
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error("campaign-enrollment-actions: existing-event check failed (inserting anyway):", error.message);
+    return false;
+  }
+  return !!data;
+}
+
+/**
+ * Insert a campaign_events row for this enrollment UNLESS one of `dedupeTypes`
+ * already exists for it. On the real-time webhook path this is normally a
+ * no-op: campaign-webhooks/index.ts already inserts its own (richer, real
+ * Smartlead payload) event row for every call before ever reaching here, so
+ * this check finds it and skips. On the daily-sweep path (which never logs a
+ * generic event row) this is the ONLY place the event gets recorded.
+ */
+async function recordEventIfMissing(
+  svc: DbClient,
+  opts: {
+    enrollmentId: string;
+    campaignId: string;
+    email: string | null;
+    eventType: string;
+    dedupeTypes: string[];
+    occurredAt?: string | null;
+    payload?: Record<string, unknown>;
+  },
+): Promise<void> {
+  if (await hasExistingEvent(svc, opts.enrollmentId, opts.dedupeTypes)) return;
+  const { error } = await svc.from("campaign_events").insert({
+    campaign_id: opts.campaignId,
+    enrollment_id: opts.enrollmentId,
+    event_type: opts.eventType,
+    email: opts.email,
+    payload: opts.payload ?? {},
+    occurred_at: opts.occurredAt ?? new Date().toISOString(),
+  });
+  if (error) console.error("campaign-enrollment-actions: event insert failed:", error.message);
+}
+
+/**
+ * Log a "Replied: <campaign name>" activity on the enrollment's linked
+ * contact, so a reply shows up on the contact's own timeline (not just the
+ * Replies feed / campaign detail sheet). Mirrors the shape of launch()'s
+ * step-9 email-activity insert (playbook-smartlead/index.ts) — same
+ * activity_type/contact_id/account_id/owner_user_id/activity_date fields,
+ * `email_direction: "received"` since this is inbound. Deliberately does NOT
+ * set is_campaign_generated (stays at its default `false`) — that flag marks
+ * a task as a still-pending, archivable campaign step
+ * (archivePendingTasksForEnrollment matches on it), and this is a completed
+ * historical record, not a pending task; leaving it false keeps this row out
+ * of every "cancel pending campaign tasks" sweep.
+ *
+ * Idempotent via an exact-match query (campaign_enrollment_id + activity_type
+ * + subject) rather than reusing the campaign_step_number-null convention —
+ * that convention is the reply FOLLOW-UP TASK's idempotency key (a different
+ * row, activity_type 'task', inserted separately above in
+ * stopEnrollmentForReply), not this one.
+ */
+async function logReplyActivity(
+  svc: DbClient,
+  enrollment: EnrollmentForActions,
+  campaign: CampaignForActions,
+  replyBody: string | null,
+): Promise<void> {
+  if (!enrollment.contact_id) return;
+  const subject = `Replied: ${campaign.name}`;
+  const { data: existing, error: findErr } = await svc
+    .from("activities")
+    .select("id")
+    .eq("campaign_enrollment_id", enrollment.id)
+    .eq("activity_type", "email")
+    .eq("subject", subject)
+    .limit(1)
+    .maybeSingle();
+  if (findErr) {
+    console.error("campaign-enrollment-actions: reply-activity lookup failed (skipping to avoid a dupe):", findErr.message);
+    return;
+  }
+  if (existing) return;
+  const { error: insErr } = await svc.from("activities").insert({
+    activity_type: "email",
+    subject,
+    body: replyBody ? replyBody.slice(0, 2000) : null,
+    email_direction: "received",
+    contact_id: enrollment.contact_id,
+    account_id: enrollment.account_id,
+    owner_user_id: campaign.owner_user_id,
+    campaign_enrollment_id: enrollment.id,
+    activity_date: new Date().toISOString(),
+  });
+  if (insErr) console.error("campaign-enrollment-actions: reply-activity insert failed:", insErr.message);
+}
 
 export interface EnrollmentForActions {
   id: string;
@@ -87,10 +212,19 @@ export async function archivePendingTasksForEnrollment(
 
 /**
  * Stop an enrollment on a reply: status -> 'replied', archive its pending
- * tasks, and (if the campaign has an owner) a bell notification + same-day
- * high-priority follow-up task. Idempotent — a no-op if the enrollment is
- * already in a terminal status (replay-safe for the webhook; re-sweep-safe
- * for the daily sweep).
+ * tasks, log a campaign_events row + a "Replied: <campaign>" activity on the
+ * linked contact (S9 — see recordEventIfMissing/logReplyActivity above), and
+ * (if the campaign has an owner) a bell notification + same-day high-priority
+ * follow-up task. Idempotent — a no-op if the enrollment is already in a
+ * terminal status (replay-safe for the webhook; re-sweep-safe for the daily
+ * sweep).
+ *
+ * `eventMeta` lets a caller that already knows a more precise event time
+ * (the daily sweep reads one off Smartlead's per-lead statistics) and/or
+ * wants the event tagged with its source pass those through; the real-time
+ * webhook caller omits it (its own generic event insert, logged separately
+ * before this runs, already carries the real payload/timestamp — this
+ * function's own insert will find that row and no-op).
  */
 export async function stopEnrollmentForReply(
   svc: DbClient,
@@ -98,6 +232,7 @@ export async function stopEnrollmentForReply(
   campaign: CampaignForActions,
   replyBody: string | null,
   fallbackEmail: string | null,
+  eventMeta?: { occurredAt?: string | null; source?: string },
 ): Promise<{ updated: boolean; tasksCancelled: number }> {
   if (ENROLLMENT_TERMINAL_STATUSES.includes(enrollment.status)) return { updated: false, tasksCancelled: 0 };
 
@@ -106,6 +241,18 @@ export async function stopEnrollmentForReply(
     .update({ status: "replied", replied_at: new Date().toISOString(), paused_reason: "replied" })
     .eq("id", enrollment.id);
   if (error) console.error("campaign-enrollment-actions: reply status update failed:", error.message);
+
+  await recordEventIfMissing(svc, {
+    enrollmentId: enrollment.id,
+    campaignId: campaign.id,
+    email: enrollment.email ?? fallbackEmail,
+    eventType: "EMAIL_REPLY",
+    dedupeTypes: REPLY_EVENT_TYPES,
+    occurredAt: eventMeta?.occurredAt,
+    payload: eventMeta?.source ? { source: eventMeta.source, reply_body: replyBody } : {},
+  });
+
+  await logReplyActivity(svc, enrollment, campaign, replyBody);
 
   const tasksCancelled = await archivePendingTasksForEnrollment(svc, enrollment.id, "Contact replied");
 
@@ -147,12 +294,17 @@ export async function stopEnrollmentForReply(
 
 /**
  * Stop an enrollment on a bounce: status -> 'bounced', archive its pending
- * tasks. No notification (matches the original S5 webhook behavior — a
- * bounce is logged, not paged). Idempotent.
+ * tasks, log a campaign_events row (S9 — see recordEventIfMissing above). No
+ * notification (matches the original S5 webhook behavior — a bounce is
+ * logged, not paged), no contact-timeline activity (that's a reply-only
+ * signal). Idempotent. `eventMeta` — see stopEnrollmentForReply's doc
+ * comment.
  */
 export async function stopEnrollmentForBounce(
   svc: DbClient,
   enrollment: EnrollmentForActions,
+  campaignId?: string,
+  eventMeta?: { occurredAt?: string | null; source?: string },
 ): Promise<{ updated: boolean; tasksCancelled: number }> {
   if (ENROLLMENT_TERMINAL_STATUSES.includes(enrollment.status)) return { updated: false, tasksCancelled: 0 };
   const { error } = await svc
@@ -160,6 +312,19 @@ export async function stopEnrollmentForBounce(
     .update({ status: "bounced", bounced_at: new Date().toISOString() })
     .eq("id", enrollment.id);
   if (error) console.error("campaign-enrollment-actions: bounce status update failed:", error.message);
+
+  if (campaignId) {
+    await recordEventIfMissing(svc, {
+      enrollmentId: enrollment.id,
+      campaignId,
+      email: enrollment.email,
+      eventType: "EMAIL_BOUNCE",
+      dedupeTypes: BOUNCE_EVENT_TYPES,
+      occurredAt: eventMeta?.occurredAt,
+      payload: eventMeta?.source ? { source: eventMeta.source } : {},
+    });
+  }
+
   const tasksCancelled = await archivePendingTasksForEnrollment(svc, enrollment.id, "Email bounced");
   return { updated: true, tasksCancelled };
 }
