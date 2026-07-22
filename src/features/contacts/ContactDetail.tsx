@@ -28,7 +28,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatName, formatDateTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { AccountOpportunities } from "@/features/accounts/AccountOpportunities";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
 import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
 import { TasksPanel } from "@/features/activities/TasksPanel";
@@ -448,21 +447,12 @@ export function ContactDetail() {
         ]}
       >
 
+      {/* Opportunities tab removed (Summer, 7/22): it only mirrored the
+          account's opportunity list — opps live on the Account page. */}
       <CollapsibleTabs
         className="mt-2"
-        defaultValue="opportunities"
+        defaultValue="tasks"
         items={[
-          {
-            value: "opportunities",
-            label: "Opportunities",
-            content: contact.account_id ? (
-              <AccountOpportunities accountId={contact.account_id} />
-            ) : (
-              <p className="text-sm text-muted-foreground p-4">
-                No account linked — link this contact to an account to track opportunities.
-              </p>
-            ),
-          },
           {
             value: "tasks",
             label: "Tasks",

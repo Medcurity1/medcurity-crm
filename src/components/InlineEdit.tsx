@@ -192,12 +192,13 @@ export function InlineEdit({
         className={cn(
           "text-sm font-medium",
           isEmpty && "text-muted-foreground",
+          isEmpty && placeholder && "font-normal italic",
           type === "textarea"
             ? "whitespace-pre-wrap break-words flex-1"
             : "truncate"
         )}
       >
-        {display}
+        {isEmpty && placeholder ? placeholder : display}
       </span>
       <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-auto mt-0.5" />
     </button>

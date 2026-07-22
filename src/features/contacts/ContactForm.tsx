@@ -306,7 +306,7 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
         <CardContent className="pt-6">
           <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2 md:col-span-2">
+              <div className="space-y-2">
                 <Label>Account</Label>
                 <AccountCombobox
                   value={
@@ -322,6 +322,26 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
                   Optional — leave empty for an individual whose company you don't know yet.
                 </p>
                 {errors.account_id && <p className="text-sm text-destructive">{errors.account_id.message}</p>}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Owner<RequiredIndicator fieldKey="owner_user_id" requiredFields={requiredKeys} /></Label>
+                <Select
+                  value={watch("owner_user_id") ?? "unassigned"}
+                  onValueChange={(v) => setValue("owner_user_id", v === "unassigned" ? null : v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select owner" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unassigned">Unassigned</SelectItem>
+                    {users?.map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.full_name ?? u.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-2">
@@ -377,46 +397,6 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
                   still round-trip the loaded value on save so nothing is lost. */}
 
               <div className="space-y-2">
-                <Label htmlFor="phone">
-                  Phone<RequiredIndicator fieldKey="phone" requiredFields={requiredKeys} />
-                </Label>
-                <PhoneInput
-                  id="phone"
-                  value={watch("phone") ?? ""}
-                  onChange={(v) => setValue("phone", v)}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="phone_ext">
-                  Phone Ext<RequiredIndicator fieldKey="phone_ext" requiredFields={requiredKeys} />
-                </Label>
-                <Input
-                  id="phone_ext"
-                  inputMode="numeric"
-                  placeholder="567"
-                  {...register("phone_ext")}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="mobile_phone">
-                  Mobile Phone<RequiredIndicator fieldKey="mobile_phone" requiredFields={requiredKeys} />
-                </Label>
-                <PhoneInput
-                  id="mobile_phone"
-                  value={watch("mobile_phone") ?? ""}
-                  onChange={(v) => setValue("mobile_phone", v)}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="linkedin_url">LinkedIn URL<RequiredIndicator fieldKey="linkedin_url" requiredFields={requiredKeys} /></Label>
-                <Input id="linkedin_url" type="url" placeholder="https://linkedin.com/in/..." {...register("linkedin_url")} />
-                {errors.linkedin_url && <p className="text-sm text-destructive">{errors.linkedin_url.message}</p>}
-              </div>
-
-              <div className="space-y-2">
                 <Label>Credential</Label>
                 <PicklistSelect
                   fieldKey="contacts.credential"
@@ -425,77 +405,115 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
                   allowClear
                 />
               </div>
+            </div>
 
-              <div className="space-y-2">
-                <Label>Time Zone</Label>
-                <PicklistSelect
-                  fieldKey="contacts.time_zone"
-                  value={watch("time_zone") as string | null | undefined}
-                  onChange={(v) => setValue("time_zone", (v ?? "") as never)}
-                  allowClear
-                />
+            {/* Phone & links */}
+            <div className="space-y-3 pt-2">
+              <h3 className="text-sm font-medium text-muted-foreground">Phone & Links</h3>
+              <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr_2fr] gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="phone">
+                    Phone<RequiredIndicator fieldKey="phone" requiredFields={requiredKeys} />
+                  </Label>
+                  <PhoneInput
+                    id="phone"
+                    value={watch("phone") ?? ""}
+                    onChange={(v) => setValue("phone", v)}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="phone_ext">
+                    Ext<RequiredIndicator fieldKey="phone_ext" requiredFields={requiredKeys} />
+                  </Label>
+                  <Input
+                    id="phone_ext"
+                    inputMode="numeric"
+                    placeholder="567"
+                    {...register("phone_ext")}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="mobile_phone">
+                    Mobile Phone<RequiredIndicator fieldKey="mobile_phone" requiredFields={requiredKeys} />
+                  </Label>
+                  <PhoneInput
+                    id="mobile_phone"
+                    value={watch("mobile_phone") ?? ""}
+                    onChange={(v) => setValue("mobile_phone", v)}
+                  />
+                </div>
               </div>
 
               <div className="space-y-2">
-                <Label>Contact Type</Label>
-                <PicklistSelect
-                  fieldKey="contacts.type"
-                  value={watch("type") as string | null | undefined}
-                  onChange={(v) => setValue("type", (v ?? "") as never)}
-                  allowClear
-                />
+                <Label htmlFor="linkedin_url">LinkedIn URL<RequiredIndicator fieldKey="linkedin_url" requiredFields={requiredKeys} /></Label>
+                <Input id="linkedin_url" type="url" placeholder="https://linkedin.com/in/..." {...register("linkedin_url")} />
+                {errors.linkedin_url && <p className="text-sm text-destructive">{errors.linkedin_url.message}</p>}
               </div>
+            </div>
 
-              <div className="space-y-2">
-                <Label>Relationship Tag</Label>
-                <PicklistSelect
-                  fieldKey="contacts.business_relationship_tag"
-                  value={watch("business_relationship_tag") as string | null | undefined}
-                  onChange={(v) =>
-                    setValue("business_relationship_tag", (v ?? "") as never)
-                  }
-                  allowClear
-                />
+            {/* Details */}
+            <div className="space-y-3 pt-2">
+              <h3 className="text-sm font-medium text-muted-foreground">Details</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Time Zone</Label>
+                  <PicklistSelect
+                    fieldKey="contacts.time_zone"
+                    value={watch("time_zone") as string | null | undefined}
+                    onChange={(v) => setValue("time_zone", (v ?? "") as never)}
+                    allowClear
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Relationship Tag</Label>
+                  <PicklistSelect
+                    fieldKey="contacts.business_relationship_tag"
+                    value={watch("business_relationship_tag") as string | null | undefined}
+                    onChange={(v) =>
+                      setValue("business_relationship_tag", (v ?? "") as never)
+                    }
+                    allowClear
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Contact Type</Label>
+                  <PicklistSelect
+                    fieldKey="contacts.type"
+                    value={watch("type") as string | null | undefined}
+                    onChange={(v) => setValue("type", (v ?? "") as never)}
+                    allowClear
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Lead Source</Label>
+                  <PicklistSelect
+                    fieldKey="contacts.lead_source"
+                    value={watch("lead_source") as string | null | undefined}
+                    onChange={(v) => setValue("lead_source", v ?? null)}
+                    allowClear
+                  />
+                </div>
               </div>
+            </div>
 
-              <div className="space-y-2">
-                <Label>Lead Source</Label>
-                <PicklistSelect
-                  fieldKey="contacts.lead_source"
-                  value={watch("lead_source") as string | null | undefined}
-                  onChange={(v) => setValue("lead_source", v ?? null)}
-                  allowClear
-                />
-              </div>
+            {/* Marketing dates */}
+            <div className="space-y-3 pt-2">
+              <h3 className="text-sm font-medium text-muted-foreground">Marketing Dates</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="mql_date">MQL Date<RequiredIndicator fieldKey="mql_date" requiredFields={requiredKeys} /></Label>
+                  <Input id="mql_date" type="date" {...register("mql_date")} />
+                </div>
 
-              <div className="space-y-2">
-                <Label>Owner<RequiredIndicator fieldKey="owner_user_id" requiredFields={requiredKeys} /></Label>
-                <Select
-                  value={watch("owner_user_id") ?? "unassigned"}
-                  onValueChange={(v) => setValue("owner_user_id", v === "unassigned" ? null : v)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select owner" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="unassigned">Unassigned</SelectItem>
-                    {users?.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.full_name ?? u.id}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="mql_date">MQL Date<RequiredIndicator fieldKey="mql_date" requiredFields={requiredKeys} /></Label>
-                <Input id="mql_date" type="date" {...register("mql_date")} />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="sql_date">SQL Date<RequiredIndicator fieldKey="sql_date" requiredFields={requiredKeys} /></Label>
-                <Input id="sql_date" type="date" {...register("sql_date")} />
+                <div className="space-y-2">
+                  <Label htmlFor="sql_date">SQL Date<RequiredIndicator fieldKey="sql_date" requiredFields={requiredKeys} /></Label>
+                  <Input id="sql_date" type="date" {...register("sql_date")} />
+                </div>
               </div>
             </div>
 

@@ -624,19 +624,25 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       return;
     }
 
-    // Rachel (2026-07-15): a deal that includes services must name an
-    // Assigned Assessor — someone has to deliver the SRA/NVA. Uses the
-    // same admin toggle ('opportunities' / assigned_assessor_id in
-    // Admin → Required Fields) and the same grandfather semantics as
-    // every other required field; the services condition lives here
-    // because required_field_config is a flat per-field flag.
+    // Rachel (2026-07-15) + Summer (2026-07-22): a deal that includes
+    // services must name an Assigned Assessor — someone has to deliver the
+    // SRA/NVA — but only by the time it's marked Closed Won. Assessors
+    // aren't known at creation (the project is delegated 3-5 business days
+    // AFTER close), so open-stage saves never block on this. Uses the same
+    // admin toggle ('opportunities' / assigned_assessor_id in Admin →
+    // Required Fields) and the same grandfather semantics as every other
+    // required field; the services + close conditions live here because
+    // required_field_config is a flat per-field flag.
     const valuesHaveServices =
       (values.services_included ?? false) ||
       Number(values.service_amount ?? 0) > 0 ||
       lineItemsHaveService;
+    const closingWon =
+      values.stage === "closed_won" && (!isEditing || opp?.stage !== "closed_won");
     if (
       requiredKeys.includes("assigned_assessor_id") &&
       valuesHaveServices &&
+      closingWon &&
       getMissingRequiredFields(
         ["assigned_assessor_id"],
         values,
@@ -644,7 +650,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       ).length > 0
     ) {
       toast.error(
-        "This deal includes services — pick an Assigned Assessor before saving."
+        "This deal includes services — pick an Assigned Assessor before marking it Closed Won."
       );
       return;
     }
@@ -665,9 +671,8 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     // once the account has complete client info. Gate only the TRANSITION —
     // re-saving an already-won deal is never blocked. Stricter than, and
     // separate from, the admin grandfather rule above. See
-    // src/lib/closeReadiness.ts.
-    const closingWon =
-      values.stage === "closed_won" && (!isEditing || opp?.stage !== "closed_won");
+    // src/lib/closeReadiness.ts. (closingWon is computed above, next to
+    // the assessor check that shares it.)
     if (closingWon) {
       // Pass the deal's IN-FLIGHT values (not a DB fetch) — this save may
       // be the one setting the assessor, and on create the row doesn't
@@ -1166,8 +1171,9 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
 
                 <div className="space-y-2">
                   {/* The required marker only shows when the deal includes
-                      services (Rachel) — the admin toggle alone isn't enough. */}
-                  <Label>Assigned Assessor{dealHasServices && <RequiredIndicator fieldKey="assigned_assessor_id" requiredFields={requiredKeys} />}</Label>
+                      services (Rachel) AND is being closed won (Summer,
+                      7/22) — open-stage saves never require an assessor. */}
+                  <Label>Assigned Assessor{dealHasServices && watch("stage") === "closed_won" && <RequiredIndicator fieldKey="assigned_assessor_id" requiredFields={requiredKeys} />}</Label>
                   <Select
                     value={watch("assigned_assessor_id") ?? "unassigned"}
                     onValueChange={(v) => setValue("assigned_assessor_id", v === "unassigned" ? null : v)}
@@ -1182,7 +1188,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                   </Select>
                   <p className="text-xs text-muted-foreground">
                     For SRA/NVA service assessments
-                    {dealHasServices ? " — required because this deal includes services" : ""}
+                    {dealHasServices ? " — needed before this deal can be marked Closed Won" : ""}
                   </p>
                 </div>
 
