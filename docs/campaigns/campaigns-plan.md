@@ -330,3 +330,82 @@ Reaction: "better than playbook ever was." Looks loved. Concrete asks:
 - Smartlead reply/unsub detection is **daily polling, not webhooks** — v1 uses the daily job; the
   naive single-anchor date math would mis-schedule throttled leads, so we anchor **per-lead** (§5).
 - "Warming sequence" is **undefined** in any doc — §9 proposes a default; needs Nathan's real cadence.
+
+---
+
+## BUILD KICKOFF — 2026-07-22 (Nathan's green light; supersedes stale bits above)
+
+Nathan approved the full overhaul ("build and build until this is done, in the build order you said").
+Fable session planning/managing; build work delegated to subagents with tight specs + review.
+
+### Research corrections (2026-07-22 — these OVERRIDE §5/§6/§8 assumptions)
+
+- **Smartlead HAS webhooks** (account/client/campaign scope): EMAIL_SENT, EMAIL_OPENED, EMAIL_CLICKED,
+  EMAIL_REPLIED (incl. reply body), EMAIL_BOUNCED, EMAIL_UNSUBSCRIBED. HMAC-SHA256 signed; retries
+  1m/5m/15m/1h/6h then **auto-disable after 5 failures** → keep the daily reconcile sweep as the safety
+  net regardless. §6's "no webhooks, daily polling only" is obsolete for Phase 2+.
+- **Custom fields: up to 200 per lead** (not just first/last/company/email) → deep personalization =
+  pre-render Pulse fields into custom_fields at lead upload. §8's 4-field caveat is obsolete.
+- Native per-step **A/B variants** (variant_distribution_type), **per-lead pause/resume/delete**,
+  **reply categories** (Interested/Meeting Request/Not Interested/Do Not Contact/Info Request + AI
+  categorization), `auto_pause_domain_leads_on_reply` (whole-domain courtesy pause),
+  OOO detection settings (ignore-as-reply, auto-reactivate w/ delay), `stop_lead_settings` (stop on
+  reply default), global block list API, warmup-stats API, per-lead message-history + reply-in-thread,
+  spintax. Follow-up threading = omit subject ("Re:").
+- Lead add: 400/batch; `ignore_duplicate_leads_in_other_campaign` **defaults false** = Smartlead blocks
+  cross-campaign dupes by default (backstop for our no-double-enroll rail). Analytics-by-date capped at
+  30-day windows. Rate limits undocumented → keep the serial client + backoff.
+- **API/webhooks require Smartlead Pro plan — VERIFY our tier before Phase 2** (probe from the edge fn;
+  key is staging-only secret).
+- playbook-smartlead-sync.yml "failure" was NOT a bug: GH `schedule:` runs from main (prod) only, and
+  Playbook is staging-only → 403 by design; correctly disabled until promotion. Scheduled metrics
+  refresh moves into the Phase-2 daily engine job (pg_cron on staging) instead.
+
+### Nathan's decisions (2026-07-22)
+
+- **Per-person solo campaigns**: right-click → start = a solo campaign (1 person, own Smartlead campaign).
+  Smartlead-side clutter is fine — Pulse is the tracking surface, staff shouldn't need Smartlead at all.
+  8-Touch = usually solo/small; Warming + drips = bulk lists. Both models first-class.
+- **Tracker**: beautiful Ongoing campaigns tracker incl. recently-ended (≤30 days), status at a glance,
+  pause/edit/stop from inside Pulse. Admins see ALL campaigns; non-admins later see only My Campaigns.
+- **Rep touches surface in the Nexus tab** (widget) as well as Up Next.
+- **Unsubscribe link = per-campaign OPTION, not forced** (some sends are permission-based follow-ups;
+  Nathan reviewing past practice). Opt-outs that do occur must still flow back + stick.
+- **Top-priority rails: never email Do-Not-Email + never double-enroll.** (CSV/paste suppression hole
+  confirmed 2026-07-22 — close server-side in launch, all recipient sources.)
+- **Reply feed lives in the Campaigns tab** (duplication with contact email activity acceptable;
+  implementer picks the best mechanism).
+- **Admin-only until proven** ("we shouldn't put a tool in user's hands if it's not working, hard to
+  use, or not beautiful"). Staging-only until cutover promotion.
+- Senders for now: Summer's side email + the marketing side email (+ main work emails sparingly if
+  volume is low — they perform better). More inboxes purchased only after the machine proves out.
+- Content: Nathan is getting Jordan M's 8-Touch/Warming wording; AI drafts fill gaps until then.
+- Future (docketed): Ask-AI natural-language campaign setup → build clean internal APIs now so AI can
+  drive campaigns later.
+
+### Phase 1 slices (current work)
+
+- **S1 — Unify the two campaign models.** `campaigns` (20260625000001) becomes the single source of
+  truth; migrate `playbook_campaigns` rows in (same ids, origin='legacy_import'|'pulse'|
+  'smartlead_import', status map planned→draft, in_progress→active, complete→completed), add the
+  legacy columns campaigns lacks (metrics, analyzed_at, analysis_json, adaptive_enabled, notes, …),
+  repoint FKs (campaign_adaptations), archive-rename the old table (reversible), update api.ts hooks +
+  playbook-smartlead + playbook-ai. Newsletters confirmed untouched (playbook_newsletters only).
+- **S2 — Suppression enforcement.** Server-side v_marketing_suppression check in launch for ALL
+  sources (tag/CSV/paste); UI soft-alert counts ("50 picked → 47 eligible, 3 suppressed") + review
+  list; keep override explicit + logged.
+- **S3 — Template→launch bridge + enrollments.** "Use this template"/"Use this sequence" live:
+  template steps → launch flow (edit email copy, recipients, inbox, leads/day) → writes `campaigns`
+  (frozen steps) + `campaign_enrollments` (enroll_position by upload order; first_send_at = anchor +
+  floor((pos-1)/leads_per_day) snapped to send days; Smartlead max_new_leads_per_day MUST equal
+  leads_per_day) → pushes EMAIL_AUTO steps to Smartlead → **spawns CALL/LINKEDIN/EMAIL_HYBRID tasks at
+  launch** per enrollment at computed dates (activities recipe w/ campaign_enrollment_id,
+  campaign_step_number, is_campaign_generated; Phase 2 re-dates on drift + cancels on reply).
+- **S4 — Tracker v1.** Unified Ongoing (+ ended ≤30d) view on `campaigns`: status chips,
+  owner, per-campaign enrollment progress, metrics, pause/resume/stop actions (new edge actions →
+  Smartlead PATCH status), styled delete confirm (replaces native confirm()), TrainingPanel padding
+  polish. Admin sees all; groundwork for My Campaigns scoping.
+
+Phase 2+ (engine: webhooks endpoint + tier probe, daily sweep pg_cron, auto-stop, task re-dating,
+stop/edit mid-flight, solo-campaign right-click fast path, Nexus widget, reply feed, analytics, AI
+insights/adaptation, scale) — specs to be cut when Phase 1 lands.
