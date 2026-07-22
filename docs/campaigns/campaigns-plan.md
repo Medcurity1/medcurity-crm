@@ -430,3 +430,28 @@ Known follow-ups for Phase 2 (docketed in the code, not blockers):
 
 Phase 2 (engine: webhooks + tier probe, daily sweep, auto-stop on reply, task re-dating,
 right-click solo campaigns, Nexus widget, reply feed) is next.
+
+### PHASE 2 COMPLETE — 2026-07-22, staging, live-verified with real sending
+
+Commits 5926e5c (S5 webhooks+auto-stop), e688598 (S6 daily sweep + pg_cron 13:10 UTC),
+b1a37e3 (S7 right-click fast path + Nexus widget + Replies feed + weekend snap),
+d6cf6bc + 326af98 (webhook-register diagnostic + the REAL Smartlead event enum:
+EMAIL_SENT / EMAIL_OPEN / EMAIL_LINK_CLICK / EMAIL_REPLY / EMAIL_BOUNCE / LEAD_UNSUBSCRIBED —
+their API rejected the docs-page names; payloads carry NO signature, so the per-campaign
+?token= secret gate is the auth).
+
+Live test (news@accessmedcurity.com → nathang@medcurity.com, Warming template, real send):
+email sent + opened + Nathan replied; webhook registration verified working (id stored,
+all 6 events on — auto-registers at launch now); the reply landed pre-registration, which
+live-proved the S6 sweep instead: per-lead statistics reconcile detected the reply, stopped
+the enrollment (status replied, first_send_at corrected to the real send date), and created
+the owner's "Reply from Nathan Gellatly" high-priority task. Tracker/Replies/right-click all
+deployed; suppression + double-enroll rails unchanged.
+
+Known follow-ups (docketed): sweep-detected replies should also write a campaign_events row
+so the Replies feed shows them (today only webhook-received replies appear); a future send
+will naturally regression-test the real-time webhook path end-to-end; LIVE TEST campaign left
+in the tracker for Nathan to inspect, then delete.
+
+Remaining phases: 3 (analytics depth + reply-feed actions), 4 (AI insights/adaptation),
+5 (scale: multi-inbox, warmup, rep access). Content: Jordan M's copy still pending.
