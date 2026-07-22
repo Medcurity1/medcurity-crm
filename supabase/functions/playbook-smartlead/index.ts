@@ -1922,6 +1922,62 @@ Deno.serve(async (req) => {
         webhooks,
       });
     }
+    if (action === "webhook-register") {
+      // Diagnostic + repair (Phase 2): attempt webhook registration for an
+      // EXISTING campaign, trying several plausible payload shapes, and
+      // return every attempt's raw outcome instead of console-swallowing —
+      // built to pin down the real registration payload Smartlead accepts
+      // (the launch-time attempt failed silently on the first live test).
+      // On the first attempt that yields a usable id, persists
+      // smartlead_webhook_id + webhook_secret on the campaigns row.
+      const pulseId = body.id as string;
+      if (!pulseId) throw new Error("id is required");
+      const { data: campRow, error: campErr } = await svc
+        .from("campaigns")
+        .select("smartlead_campaign_id, webhook_secret")
+        .eq("id", pulseId)
+        .single();
+      if (campErr || !campRow?.smartlead_campaign_id) {
+        throw new Error("Campaign not found or not linked to Smartlead: " + (campErr?.message ?? pulseId));
+      }
+      const secret = (campRow.webhook_secret as string | null) ?? generateWebhookSecret();
+      const webhookUrl = `${SUPABASE_URL}/functions/v1/campaign-webhooks?token=${secret}`;
+      const eventTypes = [
+        "EMAIL_SENT", "EMAIL_OPENED", "EMAIL_CLICKED",
+        "EMAIL_REPLIED", "EMAIL_BOUNCED", "EMAIL_UNSUBSCRIBED",
+      ];
+      const base = { name: "Pulse campaign events", webhook_url: webhookUrl, event_types: eventTypes };
+      const variants: Array<Record<string, unknown>> = [
+        { id: null, ...base },
+        { id: null, ...base, categories: [] },
+        { ...base },
+      ];
+      const attempts: Array<Record<string, unknown>> = [];
+      for (const payload of variants) {
+        try {
+          const res = (await smartleadFetch(`/campaigns/${campRow.smartlead_campaign_id}/webhooks`, {
+            method: "POST",
+            headers: JSON_HEADERS,
+            body: JSON.stringify(payload),
+          })) as Record<string, unknown>;
+          attempts.push({ payload_keys: Object.keys(payload), ok: true, response: res });
+          const rawId = res?.id ?? res?.webhook_id ?? (res?.data as Record<string, unknown> | undefined)?.id;
+          const webhookId = typeof rawId === "number"
+            ? rawId
+            : (typeof rawId === "string" && /^\d+$/.test(rawId) ? Number(rawId) : null);
+          if (webhookId != null) {
+            await svc
+              .from("campaigns")
+              .update({ smartlead_webhook_id: webhookId, webhook_secret: secret })
+              .eq("id", pulseId);
+            return json({ success: true, webhook_id: webhookId, attempts });
+          }
+        } catch (err) {
+          attempts.push({ payload_keys: Object.keys(payload), ok: false, error: (err as Error).message });
+        }
+      }
+      return json({ success: false, attempts });
+    }
     return json({ error: `Unknown action: ${action}` }, 400);
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
