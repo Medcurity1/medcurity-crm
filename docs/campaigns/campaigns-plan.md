@@ -455,3 +455,25 @@ in the tracker for Nathan to inspect, then delete.
 
 Remaining phases: 3 (analytics depth + reply-feed actions), 4 (AI insights/adaptation),
 5 (scale: multi-inbox, warmup, rep access). Content: Jordan M's copy still pending.
+
+### PHASE 3 COMPLETE — 2026-07-22 evening, staging, verified live
+
+Commits 86bdaeb (S8 campaign detail sheet) + 6ace3d0 (S9+S10 replies/analytics):
+- Campaign detail sheet: click any campaign → header w/ shared Start/Pause/Resume/Stop,
+  sequence strip, metrics, searchable People table (per-person status/first-send/step,
+  contact links), per-person Stop/Pause/Resume (Pulse-side always completes; Smartlead
+  per-lead call best-effort with honest warning), recent-events feed. Verified live on the
+  LIVE TEST campaign (Nathan's replied enrollment renders correctly, terminal rows hide controls).
+- Replies completeness: sweep-detected replies/bounces now write campaign_events (idempotent)
+  + replies land on the contact timeline; reply_category column populated from Smartlead lead
+  categories (webhook + sweep); feed actions (Open contact, Mark handled w/ collapsed group);
+  positive-reply helper unit-tested.
+- Analytics: event-tally row in the detail sheet, "This month" stats strip on the tab,
+  per-template lifetime scoreboard (verified live: Warming card shows "1 campaign · 1 reply").
+
+Cosmetic follow-ups noted: detail-sheet First-send renders a day early (date-only value through
+a local-time formatter); Step column shows "Not sent yet" until events carry sequence numbers.
+
+Remaining: Phase 4 (AI insights/adaptation loop — milestone reviews, apply/dismiss suggestions,
+auto-training), Phase 5 (scale: multi-inbox dashboard, warmup badges, timezone windows, rep
+access + My Campaigns RLS). Content: Jordan M's 8-Touch/Warming wording still pending.
