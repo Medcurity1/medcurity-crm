@@ -2,7 +2,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Pencil, Archive, ChevronDown, Phone, Mail, UserRoundCog, History, MapPin, Plus, Copy, Check, ListPlus, Megaphone } from "lucide-react";
+import { Pencil, Archive, ChevronDown, Phone, Mail, UserRoundCog, History, MapPin, Plus, Copy, Check, ListPlus, Megaphone, StickyNote } from "lucide-react";
 import { formatPhone } from "@/components/PhoneInput";
 import { InlineEdit } from "@/components/InlineEdit";
 import { useContact, useUpdateContact, useArchiveContact, useOriginatingLead } from "./api";
@@ -28,7 +28,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatName, formatDateTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { AccountOpportunities } from "@/features/accounts/AccountOpportunities";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
 import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
 import { TasksPanel } from "@/features/activities/TasksPanel";
@@ -406,15 +405,18 @@ export function ContactDetail() {
           "Notes & Next Steps" layout section at the bottom; migration
           20260717000002 removed the duplicate notes row from that
           layout so this card is the one place notes render. */}
-      <Card className="mb-6">
+      <Card className="mb-6 border-amber-400/40 bg-amber-400/[0.06] dark:bg-amber-300/[0.04]">
         <CardHeader className="pb-1 pt-3 px-4">
-          <CardTitle className="text-xs text-muted-foreground font-medium">Notes</CardTitle>
+          <CardTitle className="text-xs text-muted-foreground font-medium inline-flex items-center gap-1.5">
+            <StickyNote className="h-3.5 w-3.5 text-amber-500/80" />
+            Notes
+          </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-3">
           <InlineEdit
             value={contact.notes ?? null}
             type="textarea"
-            placeholder="Add notes..."
+            placeholder={'Add a quick note — e.g. "Meeting set for the 28th"'}
             onSave={async (v) => {
               await updateMutation.mutateAsync({
                 id: contactId,
@@ -448,21 +450,12 @@ export function ContactDetail() {
         ]}
       >
 
+      {/* Opportunities tab removed (Summer, 7/22): it only mirrored the
+          account's opportunity list — opps live on the Account page. */}
       <CollapsibleTabs
         className="mt-2"
-        defaultValue="opportunities"
+        defaultValue="tasks"
         items={[
-          {
-            value: "opportunities",
-            label: "Opportunities",
-            content: contact.account_id ? (
-              <AccountOpportunities accountId={contact.account_id} />
-            ) : (
-              <p className="text-sm text-muted-foreground p-4">
-                No account linked — link this contact to an account to track opportunities.
-              </p>
-            ),
-          },
           {
             value: "tasks",
             label: "Tasks",

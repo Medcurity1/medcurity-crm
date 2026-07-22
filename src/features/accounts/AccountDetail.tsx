@@ -2,7 +2,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Pencil, Archive, ExternalLink, ChevronDown, Phone, UserRoundCog, Plus, MapPin, History, Trash2 } from "lucide-react";
+import { Pencil, Archive, ExternalLink, ChevronDown, Phone, UserRoundCog, Plus, MapPin, History, Trash2, StickyNote } from "lucide-react";
 import { useAccount, useUpdateAccount, useArchiveAccount, useDeleteAccount, useAccountContracts, useClearCustomerStatusOverride } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
@@ -468,6 +468,27 @@ export function AccountDetail() {
             <p className="text-sm font-semibold">
               {account.acv != null ? formatCurrency(account.acv) : "\u2014"}
             </p>
+          </CardContent>
+        </Card>
+        {/* Quick Notes (Summer, 7/22): a jot-a-reminder spot at the top of
+            the account \u2014 "meeting set for the 28th" \u2014 for things that don't
+            warrant an opportunity yet. Binds to accounts.notes; the subtle
+            sticky-note tint separates it from the stat cards. Spans the
+            grid's leftover columns so it adds no vertical space on desktop. */}
+        <Card className="col-span-2 md:col-span-3 lg:col-span-4 border-amber-400/40 bg-amber-400/[0.06] dark:bg-amber-300/[0.04]">
+          <CardHeader className="pb-1 pt-3 px-4">
+            <CardTitle className="text-xs text-muted-foreground font-medium inline-flex items-center gap-1.5">
+              <StickyNote className="h-3.5 w-3.5 text-amber-500/80" />
+              Notes
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            <InlineEdit
+              value={account.notes ?? null}
+              type="textarea"
+              placeholder={'Add a quick note \u2014 e.g. "Meeting set for the 28th"'}
+              onSave={saveField("notes")}
+            />
           </CardContent>
         </Card>
       </div>
