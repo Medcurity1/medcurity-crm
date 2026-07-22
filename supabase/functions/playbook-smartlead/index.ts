@@ -6,6 +6,13 @@
 //                     (create new, refresh metrics/status on existing;
 //                     preserves user-edited name/notes on update)
 //   - sync          : refresh metrics + status on already-imported campaigns
+//   - daily-sweep   : one daily run that makes the system correct even with
+//                     zero webhooks (Campaigns overhaul Phase 2, S6) — sync +
+//                     per-lead reconcile (first-send correction, reply/bounce
+//                     detection) + meeting-booked pause + task-spawn
+//                     catch-up + webhook self-heal + auto-complete. See its
+//                     own doc comment below and
+//                     20260722200000_campaigns_daily_sweep_cron.sql.
 //   - launch        : create + start a campaign in Smartlead, record it,
 //                     enroll every recipient (campaign_enrollments), and —
 //                     when starting immediately — spawn the CALL/LINKEDIN/
@@ -45,6 +52,13 @@ import {
   emailStepsToSmartleadSequence,
   taskDueAt,
 } from "../_shared/campaign-scheduling.ts";
+import { daysBetweenDateOnly, shiftEnrollmentTasks } from "../_shared/campaign-task-shift.ts";
+import {
+  ENROLLMENT_TERMINAL_STATUSES,
+  archivePendingTasksForEnrollment,
+  stopEnrollmentForBounce,
+  stopEnrollmentForReply,
+} from "../_shared/campaign-enrollment-actions.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -749,7 +763,10 @@ const PULSE_STATUS_FOR_ACTION: Record<SetStatusInput["action"], "active" | "paus
   stop: "stopped",
 };
 // campaign_enrollments statuses a Stop should NOT touch — already at rest.
-const ENROLLMENT_TERMINAL_STATUSES = ["completed", "stopped", "replied", "bounced"];
+// ENROLLMENT_TERMINAL_STATUSES itself now comes from
+// _shared/campaign-enrollment-actions.ts (S6) — was duplicated identically
+// in this file and campaign-webhooks/index.ts before that extraction; both
+// import the same list now (see the top-of-file import).
 
 /**
  * Start / pause / resume / stop a campaign from the tracker (Campaigns
@@ -1274,6 +1291,553 @@ async function launch(p: LaunchInput) {
   };
 }
 
+// ============================================================
+// daily-sweep (Campaigns overhaul Phase 2, slice S6)
+// ------------------------------------------------------------
+// Makes the system correct even with zero webhooks — the sweep re-derives
+// everything a webhook would have told us, from Smartlead's own campaign
+// data, once a day. Runs as six independently-wrapped steps (one step's
+// failure never stops the rest) under an overall ~100s runtime budget (the
+// edge function limit is 150s) — any work left over after the budget is
+// simply picked up on the next scheduled run via the oldest-swept-first
+// ordering (campaigns.settings.last_sweep_at).
+//
+// See supabase/migrations/20260722200000_campaigns_daily_sweep_cron.sql for
+// the schedule (13:10 UTC daily) and docs/campaigns/campaigns-plan.md for
+// the overall orchestrator model.
+// ============================================================
+
+interface DailySweepReport {
+  campaigns_synced: number;
+  campaigns_reconciled: number;
+  enrollments_updated: number;
+  replies_detected: number;
+  meetings_paused: number;
+  tasks_created: number;
+  tasks_cancelled: number;
+  webhooks_healed: number;
+  skipped_for_budget: number;
+}
+
+const SWEEP_BUDGET_MS = 100_000; // stop starting new campaign work after ~100s (150s edge limit)
+const SWEEP_RECONCILE_CAP = 25; // campaigns/run for the per-lead reconcile step
+
+/** Loosely-typed row shape read off `campaigns` by the sweep's various
+ *  steps — a structural subset, same convention as CampaignStep above. */
+interface SweepCampaignRow {
+  id: string;
+  name: string;
+  owner_user_id: string | null;
+  smartlead_campaign_id: number;
+  smartlead_webhook_id?: number | null;
+  webhook_secret?: string | null;
+  settings?: Record<string, unknown> | null;
+}
+
+/** First plausible ISO-ish timestamp string among candidate reads, else
+ *  null — small local twin of webhook-normalize.ts's toIsoOrNull (not
+ *  imported: that module deliberately has zero cross-file deps, and this is
+ *  the only place in this file that needs it). Never throws. */
+function toIsoOrNullLocal(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "boolean") return null;
+  const s = typeof v === "string" ? v.trim() : typeof v === "number" ? String(v) : "";
+  if (!s) return null;
+  const asNumber = Number(s);
+  const d = Number.isFinite(asNumber) && /^\d+$/.test(s)
+    ? new Date(asNumber > 1e12 ? asNumber : asNumber * 1000) // ms vs unix-seconds
+    : new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+interface LeadStatRow {
+  email: string | null;
+  sentAt: string | null;
+  repliedAt: string | null;
+  bouncedAt: string | null;
+}
+
+/** Defensive per-lead-row extraction — Smartlead's exact field names for the
+ *  statistics endpoint aren't nailed down in the docs we could verify (same
+ *  situation as webhook-normalize.ts's event-type parsing), so this reads
+ *  every plausible variant: an explicit timestamp field, OR (for
+ *  reply/bounce) a truthy boolean flag with no timestamp at all — in which
+ *  case `nowIso` (the sweep's own run time) stands in for "when", since we
+ *  only just discovered it. */
+function normalizeLeadStatRow(raw: Record<string, unknown>, nowIso: string): LeadStatRow {
+  const emailRaw = raw.lead_email ?? raw.email ?? raw.to_email ?? raw.recipient_email;
+  const email = typeof emailRaw === "string" ? normalizeEmail(emailRaw) : null;
+
+  const sentAt = toIsoOrNullLocal(raw.sent_time ?? raw.sent_at ?? raw.email_sent_time ?? raw.sent_date ?? raw.first_sent_time);
+
+  let repliedAt = toIsoOrNullLocal(raw.reply_time ?? raw.replied_at ?? raw.email_reply_time ?? raw.reply_date);
+  if (!repliedAt && (raw.is_replied === true || raw.replied === true)) repliedAt = nowIso;
+
+  let bouncedAt = toIsoOrNullLocal(raw.bounce_time ?? raw.bounced_at ?? raw.email_bounce_time ?? raw.bounce_date);
+  if (!bouncedAt && (raw.is_bounced === true || raw.bounced === true)) bouncedAt = nowIso;
+
+  return { email: email || null, sentAt, repliedAt, bouncedAt };
+}
+
+function extractStatRows(res: unknown): Record<string, unknown>[] {
+  if (Array.isArray(res)) return res as Record<string, unknown>[];
+  if (typeof res !== "object" || res === null) return [];
+  const obj = res as Record<string, unknown>;
+  for (const key of ["data", "statistics", "rows"]) {
+    if (Array.isArray(obj[key])) return obj[key] as Record<string, unknown>[];
+  }
+  return [];
+}
+
+/** Sentinel thrown when the statistics endpoint 404s — distinguishes "this
+ *  Smartlead plan/tier doesn't expose per-lead statistics for this campaign"
+ *  (skip reconcile for it, metrics stay synced from step 1) from a real
+ *  transient failure (bubble up, logged, campaign retried next run). */
+const STATISTICS_NOT_FOUND = Symbol("STATISTICS_NOT_FOUND");
+
+/** Paginated per-lead statistics fetch, capped at 5 pages x 500 rows (2500
+ *  leads/campaign/run — comfortably above any real Smartlead campaign size
+ *  here) so one huge campaign can't eat the whole sweep's time budget. */
+async function fetchCampaignLeadStatistics(smartleadCampaignId: number): Promise<Record<string, unknown>[]> {
+  const PAGE_SIZE = 500;
+  const MAX_PAGES = 5;
+  const rows: Record<string, unknown>[] = [];
+  for (let page = 0; page < MAX_PAGES; page++) {
+    let res: unknown;
+    try {
+      res = await smartleadFetch(`/campaigns/${smartleadCampaignId}/statistics?offset=${page * PAGE_SIZE}&limit=${PAGE_SIZE}`);
+    } catch (err) {
+      if (page === 0 && /Smartlead API 404/.test((err as Error).message)) {
+        throw STATISTICS_NOT_FOUND;
+      }
+      throw err;
+    }
+    const batch = extractStatRows(res);
+    rows.push(...batch);
+    if (batch.length < PAGE_SIZE) break;
+  }
+  return rows;
+}
+
+interface ReconcileResult {
+  enrollmentsUpdated: number;
+  repliesDetected: number;
+  tasksCancelled: number;
+}
+
+/**
+ * Per-lead reconcile for one campaign (daily-sweep step 2). Matches
+ * Smartlead's per-lead statistics rows against this campaign's non-terminal
+ * enrollments by normalized email, then applies EXACTLY the same
+ * transitions a real-time webhook would have:
+ *   (a) actual first send differs from what we recorded -> correct
+ *       first_send_at + shift pending tasks by the day delta
+ *       (_shared/campaign-task-shift.ts — same helper the EMAIL_SENT webhook
+ *       handler uses)
+ *   (b) lead shows a reply -> stopEnrollmentForReply (same routine the
+ *       EMAIL_REPLIED webhook handler uses)
+ *   (c) lead shows a bounce -> stopEnrollmentForBounce (same routine the
+ *       EMAIL_BOUNCED webhook handler uses)
+ * Bounce is checked before reply (mutually exclusive in practice; bounce is
+ * the more terminal signal if a payload somehow carried both).
+ */
+async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<ReconcileResult> {
+  const nowIso = new Date().toISOString();
+  let statRows: Record<string, unknown>[];
+  try {
+    statRows = await fetchCampaignLeadStatistics(campaign.smartlead_campaign_id);
+  } catch (err) {
+    if (err === STATISTICS_NOT_FOUND) {
+      console.warn(`daily-sweep: /campaigns/${campaign.smartlead_campaign_id}/statistics not available (404) — skipping reconcile for "${campaign.name}" (metrics still synced by step 1)`);
+      return { enrollmentsUpdated: 0, repliesDetected: 0, tasksCancelled: 0 };
+    }
+    throw err;
+  }
+  if (!statRows.length) return { enrollmentsUpdated: 0, repliesDetected: 0, tasksCancelled: 0 };
+
+  const byEmail = new Map<string, LeadStatRow>();
+  for (const raw of statRows) {
+    const row = normalizeLeadStatRow(raw, nowIso);
+    if (row.email) byEmail.set(row.email, row);
+  }
+  if (!byEmail.size) return { enrollmentsUpdated: 0, repliesDetected: 0, tasksCancelled: 0 };
+
+  const { data: enrollments, error } = await svc
+    .from("campaign_enrollments")
+    .select("id, contact_id, account_id, first_name, last_name, email, status, first_send_at")
+    .eq("campaign_id", campaign.id)
+    .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`);
+  if (error) throw new Error("Enrollment lookup for reconcile failed: " + error.message);
+  if (!enrollments?.length) return { enrollmentsUpdated: 0, repliesDetected: 0, tasksCancelled: 0 };
+
+  const campaignForActions = { id: campaign.id, name: campaign.name, owner_user_id: campaign.owner_user_id };
+
+  let enrollmentsUpdated = 0;
+  let repliesDetected = 0;
+  let tasksCancelled = 0;
+
+  for (const e of enrollments as {
+    id: string; contact_id: string | null; account_id: string | null;
+    first_name: string | null; last_name: string | null; email: string | null;
+    status: string; first_send_at: string | null;
+  }[]) {
+    const key = e.email ? normalizeEmail(e.email) : "";
+    const row = key ? byEmail.get(key) : undefined;
+    if (!row) continue;
+
+    // (c) bounce — checked first; a bounced lead never sends a real reply.
+    if (row.bouncedAt) {
+      const result = await stopEnrollmentForBounce(svc, e);
+      if (result.updated) {
+        enrollmentsUpdated++;
+        tasksCancelled += result.tasksCancelled;
+      }
+      continue;
+    }
+
+    // (b) reply
+    if (row.repliedAt) {
+      const result = await stopEnrollmentForReply(svc, e, campaignForActions, null, e.email);
+      if (result.updated) {
+        enrollmentsUpdated++;
+        repliesDetected++;
+        tasksCancelled += result.tasksCancelled;
+      }
+      continue;
+    }
+
+    // (a) first-send date reconcile
+    if (row.sentAt) {
+      const sentDate = row.sentAt.slice(0, 10);
+      const mismatched = !e.first_send_at || e.first_send_at.slice(0, 10) !== sentDate;
+      if (mismatched) {
+        const delta = e.first_send_at ? daysBetweenDateOnly(e.first_send_at, row.sentAt) : 0;
+        const { error: updErr } = await svc
+          .from("campaign_enrollments")
+          .update({ first_send_at: sentDate })
+          .eq("id", e.id);
+        if (updErr) {
+          console.error(`daily-sweep: first_send_at correction failed for enrollment ${e.id}:`, updErr.message);
+          continue;
+        }
+        if (delta !== 0) await shiftEnrollmentTasks(svc, e.id, delta);
+        enrollmentsUpdated++;
+      }
+    }
+  }
+
+  return { enrollmentsUpdated, repliesDetected, tasksCancelled };
+}
+
+/** Extract a plausible array of webhook objects from Smartlead's
+ *  GET /campaigns/{id}/webhooks response (same "check data/webhooks/rows,
+ *  fall back to top-level array" defensiveness as extractStatRows /
+ *  webhook-status's raw passthrough). */
+function extractWebhookRows(res: unknown): Record<string, unknown>[] {
+  if (Array.isArray(res)) return res as Record<string, unknown>[];
+  if (typeof res !== "object" || res === null) return [];
+  const obj = res as Record<string, unknown>;
+  for (const key of ["data", "webhooks", "rows"]) {
+    if (Array.isArray(obj[key])) return obj[key] as Record<string, unknown>[];
+  }
+  return [];
+}
+
+/** Is our webhook still registered AND not explicitly disabled on this
+ *  Smartlead campaign? On an uncertain check (fetch failure, unrecognized
+ *  response shape) this returns true — a false negative here would attempt
+ *  to register a SECOND webhook alongside a perfectly healthy first one,
+ *  which is worse than skipping a heal for one day. */
+async function isWebhookHealthy(smartleadCampaignId: number, webhookId: number): Promise<boolean> {
+  try {
+    const res = await smartleadFetch(`/campaigns/${smartleadCampaignId}/webhooks`);
+    const rows = extractWebhookRows(res);
+    if (!rows.length) return false;
+    return rows.some((w) => {
+      const wid = w.id ?? w.webhook_id;
+      if (wid == null || String(wid) !== String(webhookId)) return false;
+      const enabled = w.is_active ?? w.enabled ?? w.status;
+      if (enabled === undefined) return true;
+      if (typeof enabled === "boolean") return enabled;
+      if (typeof enabled === "string") return !/disab|inactive|paused/i.test(enabled);
+      return true;
+    });
+  } catch (err) {
+    console.warn(`daily-sweep: webhook health check failed for campaign ${smartleadCampaignId} (assuming healthy; best-effort):`, (err as Error).message);
+    return true;
+  }
+}
+
+async function dailySweep(): Promise<DailySweepReport> {
+  const startedAt = Date.now();
+  const hasBudget = () => Date.now() - startedAt < SWEEP_BUDGET_MS;
+
+  const report: DailySweepReport = {
+    campaigns_synced: 0,
+    campaigns_reconciled: 0,
+    enrollments_updated: 0,
+    replies_detected: 0,
+    meetings_paused: 0,
+    tasks_created: 0,
+    tasks_cancelled: 0,
+    webhooks_healed: 0,
+    skipped_for_budget: 0,
+  };
+
+  // ---- 1. Metrics + status refresh ---------------------------------
+  try {
+    const { synced } = await syncCampaigns();
+    report.campaigns_synced = synced;
+  } catch (err) {
+    console.error("daily-sweep: metrics/status sync failed:", (err as Error).message);
+  }
+
+  // ---- 2. Per-lead reconcile (cap 25/run, oldest-swept-first) ------
+  try {
+    const { data: activeCampaigns, error: activeErr } = await svc
+      .from("campaigns")
+      .select("id, name, owner_user_id, smartlead_campaign_id, settings")
+      .eq("status", "active")
+      .not("smartlead_campaign_id", "is", null);
+    if (activeErr) throw new Error(activeErr.message);
+
+    const sorted = ((activeCampaigns ?? []) as SweepCampaignRow[]).slice().sort((a, b) => {
+      const at = (a.settings?.last_sweep_at as string) || "";
+      const bt = (b.settings?.last_sweep_at as string) || "";
+      return at < bt ? -1 : at > bt ? 1 : 0;
+    });
+
+    let reconciledThisRun = 0;
+    for (let i = 0; i < sorted.length; i++) {
+      if (reconciledThisRun >= SWEEP_RECONCILE_CAP || !hasBudget()) {
+        report.skipped_for_budget += sorted.length - i;
+        break;
+      }
+      const camp = sorted[i];
+
+      const { count, error: countErr } = await svc
+        .from("campaign_enrollments")
+        .select("id", { count: "exact", head: true })
+        .eq("campaign_id", camp.id)
+        .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`);
+      if (countErr) {
+        console.error(`daily-sweep: non-terminal-enrollment count failed for campaign ${camp.id}:`, countErr.message);
+        continue;
+      }
+      if (!count) continue; // nothing to reconcile right now — doesn't consume the cap
+
+      try {
+        const result = await reconcileCampaignLeads(camp);
+        report.campaigns_reconciled++;
+        report.enrollments_updated += result.enrollmentsUpdated;
+        report.replies_detected += result.repliesDetected;
+        report.tasks_cancelled += result.tasksCancelled;
+      } catch (err) {
+        console.error(`daily-sweep: reconcile failed for campaign ${camp.id} "${camp.name}" (continuing):`, (err as Error).message);
+      }
+      reconciledThisRun++;
+
+      const nextSettings = { ...(camp.settings ?? {}), last_sweep_at: new Date().toISOString() };
+      const { error: settingsErr } = await svc.from("campaigns").update({ settings: nextSettings }).eq("id", camp.id);
+      if (settingsErr) console.error(`daily-sweep: last_sweep_at update failed for campaign ${camp.id}:`, settingsErr.message);
+    }
+  } catch (err) {
+    console.error("daily-sweep: per-lead reconcile step failed:", (err as Error).message);
+  }
+
+  // ---- 3. Meeting-booked pause --------------------------------------
+  try {
+    const { data: candidates, error: candErr } = await svc
+      .from("campaign_enrollments")
+      .select("id, campaign_id, contact_id, account_id, first_name, last_name, email, status, paused_reason, enrolled_at")
+      .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`)
+      .or("contact_id.not.is.null,account_id.not.is.null");
+    if (candErr) throw new Error(candErr.message);
+
+    const eligible = (candidates ?? []).filter(
+      (e) => !(e.status === "paused" && e.paused_reason === "meeting_booked"),
+    ) as {
+      id: string; campaign_id: string; contact_id: string | null; account_id: string | null;
+      first_name: string | null; last_name: string | null; email: string | null;
+      status: string; paused_reason: string | null; enrolled_at: string;
+    }[];
+
+    if (eligible.length) {
+      // Resolve account_id for enrollments that only carry a contact_id
+      // (contacts.account_id is NOT NULL, so every contact resolves).
+      const missingAccountContactIds = Array.from(new Set(
+        eligible.filter((e) => !e.account_id && e.contact_id).map((e) => e.contact_id as string),
+      ));
+      const contactToAccount = new Map<string, string>();
+      const LOOKUP_BATCH = 500;
+      for (let i = 0; i < missingAccountContactIds.length; i += LOOKUP_BATCH) {
+        const batch = missingAccountContactIds.slice(i, i + LOOKUP_BATCH);
+        const { data: contactRows, error: cErr } = await svc.from("contacts").select("id, account_id").in("id", batch);
+        if (cErr) { console.error("daily-sweep: contact->account lookup failed:", cErr.message); continue; }
+        for (const c of (contactRows ?? []) as { id: string; account_id: string | null }[]) {
+          if (c.account_id) contactToAccount.set(c.id, c.account_id);
+        }
+      }
+
+      const enrollmentAccountId = new Map<string, string>();
+      for (const e of eligible) {
+        const accId = e.account_id ?? (e.contact_id ? contactToAccount.get(e.contact_id) : undefined);
+        if (accId) enrollmentAccountId.set(e.id, accId);
+      }
+      const relevantAccountIds = Array.from(new Set(Array.from(enrollmentAccountId.values())));
+
+      // One batched query for open/won opportunities across every relevant
+      // account (not one query per enrollment).
+      const oppsByAccount = new Map<string, { created_at: string }[]>();
+      for (let i = 0; i < relevantAccountIds.length; i += LOOKUP_BATCH) {
+        const batch = relevantAccountIds.slice(i, i + LOOKUP_BATCH);
+        const { data: opps, error: oErr } = await svc
+          .from("opportunities")
+          .select("account_id, created_at")
+          .in("account_id", batch)
+          .neq("stage", "closed_lost");
+        if (oErr) { console.error("daily-sweep: opportunity lookup failed:", oErr.message); continue; }
+        for (const o of (opps ?? []) as { account_id: string; created_at: string }[]) {
+          const list = oppsByAccount.get(o.account_id) ?? [];
+          list.push({ created_at: o.created_at });
+          oppsByAccount.set(o.account_id, list);
+        }
+      }
+
+      // Batch campaign owner/name lookups once rather than per-pause.
+      const campaignIds = Array.from(new Set(eligible.map((e) => e.campaign_id)));
+      const campaignInfo = new Map<string, { owner_user_id: string | null; name: string }>();
+      for (let i = 0; i < campaignIds.length; i += LOOKUP_BATCH) {
+        const batch = campaignIds.slice(i, i + LOOKUP_BATCH);
+        const { data: campRows, error: campErr } = await svc.from("campaigns").select("id, owner_user_id, name").in("id", batch);
+        if (campErr) { console.error("daily-sweep: campaign lookup for meeting-pause failed:", campErr.message); continue; }
+        for (const c of (campRows ?? []) as { id: string; owner_user_id: string | null; name: string }[]) {
+          campaignInfo.set(c.id, { owner_user_id: c.owner_user_id, name: c.name });
+        }
+      }
+
+      for (let i = 0; i < eligible.length; i++) {
+        if (!hasBudget()) { report.skipped_for_budget += eligible.length - i; break; }
+        const e = eligible[i];
+        const accId = enrollmentAccountId.get(e.id);
+        if (!accId) continue;
+        const opps = oppsByAccount.get(accId) ?? [];
+        const hasQualifyingOpp = opps.some((o) => new Date(o.created_at) > new Date(e.enrolled_at));
+        if (!hasQualifyingOpp) continue;
+
+        const { error: updErr } = await svc
+          .from("campaign_enrollments")
+          .update({ status: "paused", paused_reason: "meeting_booked" })
+          .eq("id", e.id);
+        if (updErr) {
+          console.error(`daily-sweep: meeting-pause update failed for enrollment ${e.id}:`, updErr.message);
+          continue;
+        }
+        report.tasks_cancelled += await archivePendingTasksForEnrollment(svc, e.id, "Opportunity opened");
+        report.meetings_paused++;
+
+        const info = campaignInfo.get(e.campaign_id);
+        if (info?.owner_user_id) {
+          const who = `${e.first_name ?? ""} ${e.last_name ?? ""}`.trim() || e.email || "A contact";
+          const { error: notifErr } = await svc.from("notifications").insert({
+            user_id: info.owner_user_id,
+            type: "engagement",
+            title: "Opportunity opened — sequence paused",
+            message: `${who} has a new opportunity — paused their ${info.name} sequence`,
+            link: `/playbook?campaign=${e.campaign_id}`,
+          });
+          if (notifErr) console.error("daily-sweep: meeting-pause notification insert failed:", notifErr.message);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("daily-sweep: meeting-booked pause step failed:", (err as Error).message);
+  }
+
+  // ---- 4. Task spawn catch-up ----------------------------------------
+  try {
+    const { data: active, error: activeErr } = await svc.from("campaigns").select("id").eq("status", "active");
+    if (activeErr) throw new Error(activeErr.message);
+    for (let i = 0; i < (active?.length ?? 0); i++) {
+      if (!hasBudget()) { report.skipped_for_budget += (active!.length - i); break; }
+      const c = active![i];
+      try {
+        const spawned = await spawnCampaignTasks(c.id);
+        report.tasks_created += spawned.tasksCreated;
+      } catch (err) {
+        console.error(`daily-sweep: task spawn catch-up failed for campaign ${c.id} (continuing):`, (err as Error).message);
+      }
+    }
+  } catch (err) {
+    console.error("daily-sweep: task spawn catch-up step failed:", (err as Error).message);
+  }
+
+  // ---- 5. Webhook health ----------------------------------------------
+  try {
+    const { data: withWebhook, error: whErr } = await svc
+      .from("campaigns")
+      .select("id, smartlead_campaign_id, smartlead_webhook_id, webhook_secret")
+      .eq("status", "active")
+      .not("smartlead_campaign_id", "is", null)
+      .not("smartlead_webhook_id", "is", null);
+    if (whErr) throw new Error(whErr.message);
+    for (let i = 0; i < (withWebhook?.length ?? 0); i++) {
+      if (!hasBudget()) { report.skipped_for_budget += (withWebhook!.length - i); break; }
+      const c = withWebhook![i] as { id: string; smartlead_campaign_id: number; smartlead_webhook_id: number; webhook_secret: string | null };
+      try {
+        const healthy = await isWebhookHealthy(c.smartlead_campaign_id, c.smartlead_webhook_id);
+        if (healthy) continue;
+        const secret = c.webhook_secret ?? generateWebhookSecret();
+        const newId = await registerCampaignWebhook(c.smartlead_campaign_id, secret);
+        if (newId != null) {
+          await svc.from("campaigns").update({ smartlead_webhook_id: newId, webhook_secret: secret }).eq("id", c.id);
+          report.webhooks_healed++;
+        }
+      } catch (err) {
+        console.warn(`daily-sweep: webhook heal failed for campaign ${c.id} (best-effort, continuing):`, (err as Error).message);
+      }
+    }
+  } catch (err) {
+    console.error("daily-sweep: webhook health step failed:", (err as Error).message);
+  }
+
+  // ---- 6. Auto-complete straggler enrollments -------------------------
+  try {
+    const { data: doneCampaigns, error: doneErr } = await svc
+      .from("campaigns")
+      .select("id")
+      .in("status", ["completed", "stopped"]);
+    if (doneErr) throw new Error(doneErr.message);
+    for (const c of doneCampaigns ?? []) {
+      if (!hasBudget()) { report.skipped_for_budget++; break; }
+      const { data: stragglers, error: findErr } = await svc
+        .from("campaign_enrollments")
+        .select("id")
+        .eq("campaign_id", c.id)
+        .eq("status", "active");
+      if (findErr) {
+        console.error(`daily-sweep: auto-complete straggler lookup failed for campaign ${c.id}:`, findErr.message);
+        continue;
+      }
+      const ids = (stragglers ?? []).map((e) => e.id as string);
+      if (!ids.length) continue;
+      const { error: updErr } = await svc.from("campaign_enrollments").update({ status: "completed" }).in("id", ids);
+      if (updErr) {
+        console.error(`daily-sweep: auto-complete update failed for campaign ${c.id}:`, updErr.message);
+        continue;
+      }
+      report.enrollments_updated += ids.length;
+      for (const id of ids) {
+        report.tasks_cancelled += await archivePendingTasksForEnrollment(svc, id, "Campaign completed");
+      }
+    }
+  } catch (err) {
+    console.error("daily-sweep: auto-complete step failed:", (err as Error).message);
+  }
+
+  return report;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -1293,6 +1857,7 @@ Deno.serve(async (req) => {
     }
     if (action === "import") return json(await importCampaigns());
     if (action === "sync") return json(await syncCampaigns());
+    if (action === "daily-sweep") return json(await dailySweep());
     if (action === "launch") return json(await launch(body as unknown as LaunchInput));
     if (action === "set-campaign-status") {
       const archivedBy = await callerUserId(auth);

@@ -43,6 +43,13 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { normalizeWebhookPayload, type CanonicalWebhookEventType } from "../_shared/webhook-normalize.ts";
+import { dateOnly, daysBetweenDateOnly, shiftEnrollmentTasks } from "../_shared/campaign-task-shift.ts";
+import {
+  ENROLLMENT_TERMINAL_STATUSES,
+  archivePendingTasksForEnrollment,
+  stopEnrollmentForBounce,
+  stopEnrollmentForReply,
+} from "../_shared/campaign-enrollment-actions.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -59,12 +66,11 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const svc = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
-// Enrollment statuses a webhook event should NOT act on again — same list
-// as playbook-smartlead's ENROLLMENT_TERMINAL_STATUSES, duplicated here
-// (Deno functions don't share application code across directories except
-// via _shared/) so a replayed webhook after a terminal transition is a
-// clean no-op rather than re-archiving/re-notifying.
-const ENROLLMENT_TERMINAL_STATUSES = ["completed", "stopped", "replied", "bounced"];
+// ENROLLMENT_TERMINAL_STATUSES (statuses a webhook event should NOT act on
+// again) now comes from _shared/campaign-enrollment-actions.ts — was
+// duplicated here identically before the S6 extraction; playbook-smartlead's
+// daily sweep needs the same list, so it's now the single source of truth
+// both import (see the top-of-file import).
 
 function normalizeEmail(email: string | null | undefined): string {
   return (email ?? "").trim().toLowerCase();
@@ -129,26 +135,8 @@ async function verifyOptionalSignature(rawBody: string, req: Request, secret: st
   return true;
 }
 
-// ---------------------------------------------------------------------
-// Small date helpers (whole-day shifts only — see EMAIL_SENT handling).
-// ---------------------------------------------------------------------
-
-function dateOnly(iso: string): string {
-  return iso.slice(0, 10);
-}
-
-/** Whole-day delta between two "YYYY-MM-DD"-prefixed strings (b - a). */
-function daysBetweenDateOnly(aISO: string, bISO: string): number {
-  const a = Date.parse(`${dateOnly(aISO)}T00:00:00Z`);
-  const b = Date.parse(`${dateOnly(bISO)}T00:00:00Z`);
-  return Math.round((b - a) / 86400000);
-}
-
-function addDaysToIso(iso: string, days: number): string {
-  const d = new Date(iso);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString();
-}
+// dateOnly/daysBetweenDateOnly (whole-day shifts, EMAIL_SENT handling below)
+// now come from _shared/campaign-task-shift.ts (see the top-of-file import).
 
 /** Best-effort seq/step number extraction — Smartlead's field name for
  *  "which sequence email was this" isn't nailed down in the docs we could
@@ -174,67 +162,11 @@ function extractStepNumber(raw: unknown): number | null {
   return null;
 }
 
-// ---------------------------------------------------------------------
-// Task archiving (mirrors cancelPendingCampaignTasks in
-// playbook-smartlead/index.ts, scoped to specific enrollment ids instead of
-// a whole campaign). archived_by is null — these are system-triggered by a
-// Smartlead event, not a human action, same convention as an automation-
-// driven archive elsewhere in the app.
-// ---------------------------------------------------------------------
-
-async function archivePendingTasksForEnrollment(enrollmentId: string, reason: string): Promise<number> {
-  const { data: pending, error: findErr } = await svc
-    .from("activities")
-    .select("id")
-    .eq("campaign_enrollment_id", enrollmentId)
-    .eq("is_campaign_generated", true)
-    .is("completed_at", null)
-    .is("archived_at", null);
-  if (findErr) {
-    console.error("campaign-webhooks: pending-task lookup failed:", findErr.message);
-    return 0;
-  }
-  const ids = (pending ?? []).map((t) => t.id as string);
-  if (!ids.length) return 0;
-  const { error: updErr } = await svc
-    .from("activities")
-    .update({ archived_at: new Date().toISOString(), archived_by: null, archive_reason: reason })
-    .in("id", ids);
-  if (updErr) {
-    console.error("campaign-webhooks: archive update failed:", updErr.message);
-    return 0;
-  }
-  return ids.length;
-}
-
-/** Shift every still-pending campaign-generated task's due_at/reminder_at
- *  for one enrollment by `days` whole days — used when Smartlead's actual
- *  send date differs from the date we originally scheduled around. A small
- *  per-enrollment task set (a handful of CALL/LINKEDIN/EMAIL_HYBRID rows at
- *  most), so sequential per-row updates are fine — no batching needed. */
-async function shiftEnrollmentTasks(enrollmentId: string, days: number): Promise<void> {
-  if (!days) return;
-  const { data: tasks, error } = await svc
-    .from("activities")
-    .select("id, due_at, reminder_at")
-    .eq("campaign_enrollment_id", enrollmentId)
-    .eq("is_campaign_generated", true)
-    .is("completed_at", null)
-    .is("archived_at", null);
-  if (error) {
-    console.error("campaign-webhooks: task lookup for re-date failed:", error.message);
-    return;
-  }
-  for (const t of (tasks ?? []) as { id: string; due_at: string | null; reminder_at: string | null }[]) {
-    const updates: Record<string, unknown> = {};
-    if (t.due_at) updates.due_at = addDaysToIso(t.due_at, days);
-    if (t.reminder_at) updates.reminder_at = addDaysToIso(t.reminder_at, days);
-    if (Object.keys(updates).length) {
-      const { error: updErr } = await svc.from("activities").update(updates).eq("id", t.id);
-      if (updErr) console.error("campaign-webhooks: task re-date failed for", t.id, updErr.message);
-    }
-  }
-}
+// archivePendingTasksForEnrollment/shiftEnrollmentTasks now come from
+// _shared/ (see the top-of-file import) — handleEmailSent below calls
+// shiftEnrollmentTasks(svc, ...) directly; handleUnsubscribed (the one
+// per-event handler still local to this file) calls
+// archivePendingTasksForEnrollment(svc, ...) directly.
 
 // ---------------------------------------------------------------------
 // Enrollment shape read/written by the handlers below.
@@ -284,12 +216,6 @@ async function resolveEnrollment(campaignId: string, email: string | null, leadI
   return null;
 }
 
-function displayName(e: Enrollment, fallbackEmail: string | null): string {
-  const name = `${e.first_name ?? ""} ${e.last_name ?? ""}`.trim();
-  if (name) return name;
-  return e.email || fallbackEmail || "A contact";
-}
-
 // ---------------------------------------------------------------------
 // Per-event-type handlers. Each is self-contained and idempotent.
 // ---------------------------------------------------------------------
@@ -310,7 +236,7 @@ async function handleEmailSent(enrollment: Enrollment, leadId: number | null, oc
     if (enrollment.first_send_at) {
       const delta = daysBetweenDateOnly(enrollment.first_send_at, occurredAtIso);
       if (delta !== 0) {
-        await shiftEnrollmentTasks(enrollment.id, delta);
+        await shiftEnrollmentTasks(svc, enrollment.id, delta);
       }
     }
     updates.first_send_at = sendDate;
@@ -327,59 +253,10 @@ async function handleEmailSent(enrollment: Enrollment, leadId: number | null, oc
   }
 }
 
-async function handleReplied(enrollment: Enrollment, campaign: Campaign, replyBody: string | null, fallbackEmail: string | null): Promise<void> {
-  if (ENROLLMENT_TERMINAL_STATUSES.includes(enrollment.status)) return; // replay / already handled
-
-  const { error } = await svc
-    .from("campaign_enrollments")
-    .update({ status: "replied", replied_at: new Date().toISOString(), paused_reason: "replied" })
-    .eq("id", enrollment.id);
-  if (error) console.error("campaign-webhooks: EMAIL_REPLIED status update failed:", error.message);
-
-  await archivePendingTasksForEnrollment(enrollment.id, "Contact replied");
-
-  if (!campaign.owner_user_id) return; // nobody to notify
-  const who = displayName(enrollment, fallbackEmail);
-  const link = `/playbook?campaign=${campaign.id}`;
-
-  const { error: notifErr } = await svc.from("notifications").insert({
-    user_id: campaign.owner_user_id,
-    type: "engagement",
-    title: "Reply received",
-    message: `${who} replied in ${campaign.name} — their sequence stopped`,
-    link,
-  });
-  if (notifErr) console.error("campaign-webhooks: reply notification insert failed:", notifErr.message);
-
-  const nowIso = new Date().toISOString();
-  const { error: taskErr } = await svc.from("activities").insert({
-    activity_type: "task",
-    owner_user_id: campaign.owner_user_id,
-    subject: `Reply from ${who} — ${campaign.name}`,
-    body: replyBody ? replyBody.slice(0, 2000) : null,
-    due_at: nowIso,
-    priority: "high",
-    reminder_schedule: "once",
-    reminder_at: nowIso,
-    reminder_channels: ["in_app", "email"],
-    is_campaign_generated: true,
-    campaign_enrollment_id: enrollment.id,
-    campaign_step_number: null,
-    contact_id: enrollment.contact_id,
-    account_id: enrollment.account_id,
-  });
-  if (taskErr) console.error("campaign-webhooks: reply follow-up task insert failed:", taskErr.message);
-}
-
-async function handleBounced(enrollment: Enrollment): Promise<void> {
-  if (ENROLLMENT_TERMINAL_STATUSES.includes(enrollment.status)) return;
-  const { error } = await svc
-    .from("campaign_enrollments")
-    .update({ status: "bounced", bounced_at: new Date().toISOString() })
-    .eq("id", enrollment.id);
-  if (error) console.error("campaign-webhooks: EMAIL_BOUNCED status update failed:", error.message);
-  await archivePendingTasksForEnrollment(enrollment.id, "Email bounced");
-}
+// handleReplied/handleBounced are now stopEnrollmentForReply/
+// stopEnrollmentForBounce from _shared/campaign-enrollment-actions.ts (see
+// the top-of-file import and the switch statement below) — S6 extraction so
+// the daily-sweep's per-lead reconcile can react identically.
 
 async function handleUnsubscribed(enrollment: Enrollment): Promise<void> {
   if (ENROLLMENT_TERMINAL_STATUSES.includes(enrollment.status)) return;
@@ -388,7 +265,7 @@ async function handleUnsubscribed(enrollment: Enrollment): Promise<void> {
     .update({ status: "stopped", unsubscribed_at: new Date().toISOString(), paused_reason: "unsubscribed" })
     .eq("id", enrollment.id);
   if (error) console.error("campaign-webhooks: EMAIL_UNSUBSCRIBED status update failed:", error.message);
-  await archivePendingTasksForEnrollment(enrollment.id, "Unsubscribed");
+  await archivePendingTasksForEnrollment(svc, enrollment.id, "Unsubscribed");
   if (enrollment.contact_id) {
     const { error: contactErr } = await svc
       .from("contacts")
@@ -501,10 +378,10 @@ Deno.serve(async (req) => {
         await handleEmailSent(enrollment, normalized.leadId, occurredAtIso, parsed);
         break;
       case "EMAIL_REPLIED":
-        await handleReplied(enrollment, campaign, normalized.replyBody, normalized.email);
+        await stopEnrollmentForReply(svc, enrollment, campaign, normalized.replyBody, normalized.email);
         break;
       case "EMAIL_BOUNCED":
-        await handleBounced(enrollment);
+        await stopEnrollmentForBounce(svc, enrollment);
         break;
       case "EMAIL_UNSUBSCRIBED":
         await handleUnsubscribed(enrollment);
