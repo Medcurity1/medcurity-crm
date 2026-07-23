@@ -2484,6 +2484,56 @@ Deno.serve(async (req) => {
       if (updErr) throw new Error("Couldn't mark this reply handled: " + updErr.message);
       return json({ success: true });
     }
+    if (action === "lead-statuses") {
+      // Diagnostic (Phase 3 verification): given a Pulse campaign id, return
+      // every lead Smartlead has for that campaign with its OWN status field
+      // — so we can independently confirm a per-person Stop actually paused
+      // ONLY that lead on Smartlead's side (not the whole campaign, not
+      // ignored). Reads the same /campaigns/{id}/leads listing
+      // resolveSmartleadLeadId walks; returns email + id + every plausible
+      // status-ish field so we don't guess the field name wrong. Also folds
+      // in each lead's Pulse enrollment status for a side-by-side.
+      const pulseId = body.id as string;
+      if (!pulseId) throw new Error("id is required");
+      const { data: campRow, error: campErr } = await svc
+        .from("campaigns")
+        .select("smartlead_campaign_id")
+        .eq("id", pulseId)
+        .single();
+      if (campErr || !campRow?.smartlead_campaign_id) {
+        throw new Error("Campaign not found or not linked to Smartlead: " + (campErr?.message ?? pulseId));
+      }
+      const { data: enrollments } = await svc
+        .from("campaign_enrollments")
+        .select("email, status, smartlead_lead_id")
+        .eq("campaign_id", pulseId);
+      const pulseByEmail = new Map<string, { status: string; smartlead_lead_id: number | null }>();
+      for (const e of (enrollments ?? []) as { email: string; status: string; smartlead_lead_id: number | null }[]) {
+        pulseByEmail.set(normalizeEmail(e.email), { status: e.status, smartlead_lead_id: e.smartlead_lead_id });
+      }
+      const leads: Array<Record<string, unknown>> = [];
+      const PAGE = 100;
+      for (let page = 0; page < 10; page++) {
+        const res = await smartleadFetch(`/campaigns/${campRow.smartlead_campaign_id}/leads?offset=${page * PAGE}&limit=${PAGE}`);
+        const rows = extractLeadRows(res);
+        for (const raw of rows) {
+          const lead = (typeof raw.lead === "object" && raw.lead !== null) ? raw.lead as Record<string, unknown> : raw;
+          const email = String(lead.email ?? lead.lead_email ?? "");
+          leads.push({
+            email,
+            smartlead_lead_id: lead.id ?? raw.lead_id ?? raw.campaign_lead_map_id ?? raw.id ?? null,
+            // Every status-ish field Smartlead might use — we don't yet know
+            // the exact one, so surface them all for inspection.
+            status: raw.status ?? lead.status ?? null,
+            is_paused: raw.is_paused ?? lead.is_paused ?? null,
+            lead_category: raw.lead_category ?? lead.lead_category ?? null,
+            pulse_status: pulseByEmail.get(normalizeEmail(email))?.status ?? null,
+          });
+        }
+        if (rows.length < PAGE) break;
+      }
+      return json({ smartlead_campaign_id: campRow.smartlead_campaign_id, leads });
+    }
     if (action === "webhook-status") {
       // Diagnostic (Phase 2, S5): given a Pulse campaign id, list that
       // Smartlead campaign's registered webhooks (raw API response) — for
