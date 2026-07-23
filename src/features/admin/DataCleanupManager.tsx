@@ -9,7 +9,7 @@
 // every destructive action says exactly what moves and what gets archived
 // before it runs. Nothing is ever hard-deleted.
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
@@ -49,6 +49,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { formatCurrency, customerStatusLabel } from "@/lib/formatters";
 import type { CustomerStatus } from "@/types/crm";
+import { AccountCombobox } from "@/components/AccountCombobox";
 import {
   useAccountDuplicateGroups,
   useMergeAccounts,
@@ -57,13 +58,15 @@ import {
   useRestoreAccountDuplicateDismissal,
   useAccountMergeHistory,
   useUndoAccountMerge,
+  useManualMergePair,
   type AccountDuplicateGroupRow,
   type AccountMatchBy,
+  type ManualMergeAccountInfo,
 } from "./data-cleanup-api";
 
 // "leads" section retired 2026-07-20 with the lead type (the pen dedups at
 // import/promote time instead).
-type Section = "accounts" | "history";
+type Section = "accounts" | "manual" | "history";
 
 export function DataCleanupManager() {
   const [section, setSection] = useState<Section>("accounts");
@@ -74,12 +77,16 @@ export function DataCleanupManager() {
         <SectionButton active={section === "accounts"} onClick={() => setSection("accounts")}>
           Duplicate accounts
         </SectionButton>
+        <SectionButton active={section === "manual"} onClick={() => setSection("manual")}>
+          Merge any two
+        </SectionButton>
         <SectionButton active={section === "history"} onClick={() => setSection("history")}>
           Merge history
         </SectionButton>
       </div>
 
       {section === "accounts" && <AccountDuplicatesPanel />}
+      {section === "manual" && <ManualMergePanel />}
       {section === "history" && <MergeHistoryPanel />}
     </div>
   );
@@ -415,6 +422,247 @@ function AccountDuplicatesPanel() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={runMerge}>Merge accounts</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+/* ============================ Manual pair merge ============================ */
+
+/** Hand-pick any two accounts and merge them (Nathan, 7/22): some duplicates
+ * have names different enough that the finder never pairs them. Reuses the
+ * exact same merge path as the finder — merge_accounts RPC + smart blank-fill
+ * + history row with Undo. */
+function ManualMergePanel() {
+  const [aId, setAId] = useState<string | null>(null);
+  const [bId, setBId] = useState<string | null>(null);
+  const [survivorId, setSurvivorId] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const mergeMutation = useMergeAccounts();
+
+  const samePick = !!aId && aId === bId;
+  const { data: pair, isLoading: pairLoading } = useManualMergePair(aId, samePick ? null : bId);
+
+  // Default the "keep" side to the stronger account (won deal > more
+  // contacts > older) whenever the pair changes — same instinct as the
+  // finder's ordering. The admin can always flip it.
+  useEffect(() => {
+    if (!pair || pair.length !== 2) return;
+    if (survivorId && pair.some((p) => p.id === survivorId)) return;
+    const [a, b] = pair;
+    const stronger =
+      a.has_closed_won !== b.has_closed_won
+        ? (a.has_closed_won ? a : b)
+        : a.contact_count !== b.contact_count
+          ? (a.contact_count > b.contact_count ? a : b)
+          : (a.created_at <= b.created_at ? a : b);
+    setSurvivorId(stronger.id);
+  }, [pair, survivorId]);
+
+  const survivor = pair?.find((p) => p.id === survivorId);
+  const loser = pair?.find((p) => p.id !== survivorId);
+  const ready = !!survivor && !!loser;
+
+  function reset() {
+    setAId(null);
+    setBId(null);
+    setSurvivorId(null);
+  }
+
+  function runManualMerge() {
+    if (!survivor || !loser) return;
+    setConfirmOpen(false);
+    mergeMutation.mutate(
+      {
+        survivorId: survivor.id,
+        loserIds: [loser.id],
+        reason: `Manual merge: "${loser.name}" into "${survivor.name}"`,
+      },
+      {
+        onSuccess: () => {
+          toast.success(`Merged "${loser.name}" into "${survivor.name}" — undo is in Merge history`);
+          reset();
+        },
+        onError: (err) => toast.error("Merge failed: " + (err as Error).message),
+      }
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        For duplicates the finder can't see — accounts whose names are too different to
+        match automatically. Pick any two accounts, choose which one stays, and merge.
+        Everything moves over (contacts, opportunities, activities, files, partner links),
+        blank fields on the keeper are filled from the other account, and the duplicate is
+        archived — undoable from Merge history.
+      </p>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <span className="text-sm font-medium">First account</span>
+          <AccountCombobox value={aId} onChange={setAId} placeholder="Search any account…" allowClear />
+        </div>
+        <div className="space-y-2">
+          <span className="text-sm font-medium">Second account</span>
+          <AccountCombobox value={bId} onChange={setBId} placeholder="Search any account…" allowClear />
+        </div>
+      </div>
+
+      {samePick && (
+        <p className="text-sm text-destructive">That's the same account twice — pick two different ones.</p>
+      )}
+
+      {!samePick && aId && bId && pairLoading && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Comparing the two accounts…
+        </div>
+      )}
+
+      {ready && pair && (
+        <Card className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-28">Keep?</TableHead>
+                  <TableHead>Account</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Owner</TableHead>
+                  <TableHead className="text-right">Contacts</TableHead>
+                  <TableHead className="text-right">Opps</TableHead>
+                  <TableHead className="text-right">Won $</TableHead>
+                  <TableHead>Created</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pair.map((r: ManualMergeAccountInfo) => {
+                  const isSurvivor = r.id === survivorId;
+                  return (
+                    <TableRow key={r.id} className={isSurvivor ? "bg-green-50 dark:bg-green-950/20" : ""}>
+                      <TableCell>
+                        {isSurvivor ? (
+                          <Badge className="bg-green-600 hover:bg-green-600">
+                            <CheckCircle2 className="mr-1 h-3 w-3" /> Keep
+                          </Badge>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => setSurvivorId(r.id)}
+                          >
+                            Keep this one
+                          </Button>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Link
+                          to={`/accounts/${r.id}`}
+                          target="_blank"
+                          className="font-medium text-primary hover:underline"
+                        >
+                          {r.name}
+                        </Link>
+                        {r.account_number && (
+                          <span className="ml-2 text-xs text-muted-foreground">#{r.account_number}</span>
+                        )}
+                        {r.has_closed_won && (
+                          <Badge variant="outline" className="ml-2 text-xs">
+                            Has won deal
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="capitalize text-sm">
+                        {r.customer_status
+                          ? customerStatusLabel(r.customer_status as CustomerStatus)
+                          : "—"}
+                      </TableCell>
+                      <TableCell className="text-sm">{r.owner_name ?? "—"}</TableCell>
+                      <TableCell className="text-right">{r.contact_count}</TableCell>
+                      <TableCell className="text-right">{r.opportunity_count}</TableCell>
+                      <TableCell className="text-right">
+                        {r.total_won_amount ? formatCurrency(r.total_won_amount) : "—"}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{fmtDate(r.created_at)}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t p-3">
+            <p className="text-xs text-muted-foreground">
+              Keeping <span className="font-medium text-foreground">{survivor?.name}</span> — "
+              {loser?.name}" merges into it and is archived.
+            </p>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={reset}>
+                Clear
+              </Button>
+              <Button size="sm" onClick={() => setConfirmOpen(true)} disabled={mergeMutation.isPending}>
+                {mergeMutation.isPending ? (
+                  <>
+                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> Merging…
+                  </>
+                ) : (
+                  "Merge these two"
+                )}
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Merge these accounts?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm">
+                <div className="rounded-md border border-green-300 bg-green-50 p-3 dark:border-green-800 dark:bg-green-950/20">
+                  <span className="font-medium text-green-800 dark:text-green-200">Keep:</span>{" "}
+                  {survivor?.name}
+                  {survivor?.account_number && (
+                    <span className="text-muted-foreground"> #{survivor.account_number}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <span>Moving onto it:</span>
+                  <span className="inline-flex items-center gap-1">
+                    <Users className="h-3.5 w-3.5" /> {loser?.contact_count ?? 0} contacts
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <Briefcase className="h-3.5 w-3.5" /> {loser?.opportunity_count ?? 0} opportunities
+                  </span>
+                  <span>+ their activities, files &amp; partner links</span>
+                </div>
+                <div className="rounded-md border border-yellow-300 bg-yellow-50 p-3 dark:border-yellow-800 dark:bg-yellow-950/20">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-600" />
+                    <div>
+                      <div className="font-medium text-yellow-800 dark:text-yellow-200">
+                        Archiving 1 duplicate account:
+                      </div>
+                      <ul className="mt-1 space-y-0.5 text-yellow-700 dark:text-yellow-300">
+                        <li className="flex items-center gap-1">
+                          <ArrowRight className="h-3 w-3" /> {loser?.name}
+                        </li>
+                      </ul>
+                      <div className="mt-1 text-xs text-yellow-700 dark:text-yellow-400">
+                        Archived, not deleted — you can undo this from Merge history.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={runManualMerge}>Merge accounts</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
