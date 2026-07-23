@@ -475,6 +475,47 @@ export function useEmailAccounts() {
   });
 }
 
+/** One sending inbox's warmup health + how much daily volume it's already
+ *  carrying — the `inbox-health` edge action's per-inbox shape (Campaigns
+ *  overhaul Phase 5). `warmup` is null when Smartlead's warmup-stats read
+ *  failed or came back empty (unverified endpoint — see the edge function's
+ *  fetchInboxWarmup doc comment); `daily_limit` is null when no plausible
+ *  limit field was found on the account row. Both "unknown, not zero" —
+ *  the UI must say so honestly rather than implying a real 0. */
+export interface InboxHealthEntry {
+  id: number;
+  from_email: string | null;
+  from_name: string | null;
+  daily_limit: number | null;
+  warmup: {
+    sent_7d: number | null;
+    inbox_rate: number | null;
+    spam_rate: number | null;
+    status: string | null;
+  } | null;
+  campaigns: Array<{ id: string; name: string; leads_per_day: number; status: string }>;
+  total_leads_per_day: number;
+}
+
+/** Lazy — only fires while `enabled` (the Sending Inboxes dialog is open, or
+ *  the launch wizard has reached its cadence/inbox step): each call makes a
+ *  live Smartlead warmup-stats round trip per inbox (capped at 10 server-
+ *  side), so this shouldn't run on every Campaigns tab render. */
+export function useInboxHealth(enabled: boolean) {
+  return useQuery({
+    queryKey: ["playbook", "inbox-health"],
+    enabled,
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "inbox-health" },
+      });
+      if (error) throw error;
+      return (data?.inboxes ?? []) as InboxHealthEntry[];
+    },
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
 export function useLaunchCampaign() {
   const qc = useQueryClient();
   return useMutation({

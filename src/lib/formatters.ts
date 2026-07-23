@@ -30,6 +30,28 @@ export function formatDate(dateString: string | null): string {
   return format(d, "MMM d, yyyy");
 }
 
+/**
+ * Formats a "calendar day" value that's stored as UTC-midnight in a
+ * timestamptz column (e.g. campaign_enrollments.first_send_at — computed
+ * server-side as a bare "YYYY-MM-DD" and written to Postgres, which lands
+ * as YYYY-MM-DDT00:00:00Z) — reads the date via the UTC getters rather than
+ * formatDate's local-time parseISO/format, so a viewer in a timezone behind
+ * UTC (e.g. US Pacific) doesn't see the day roll back by one. A bare `date`
+ * column (no time component, e.g. accounts.anchor_date) has no such issue
+ * and can keep using formatDate.
+ */
+export function formatDateOnly(dateString: string | null): string {
+  if (!dateString) return "—";
+  const d = parseISO(dateString);
+  if (!isValid(d)) return "—";
+  // Relabel the UTC calendar date as if it were local, then format with
+  // local getters (what date-fns' format() always uses) — the standard
+  // trick for rendering a UTC-instant-that's-really-just-a-date without a
+  // timezone-dependent off-by-one.
+  const local = new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  return format(local, "MMM d, yyyy");
+}
+
 export function formatDateTime(dateString: string | null): string {
   if (!dateString) return "—";
   const d = parseISO(dateString);

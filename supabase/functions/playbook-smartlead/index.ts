@@ -276,6 +276,26 @@ function mergeTemplate(tpl: string, vars: { first_name: string; last_name: strin
     .replace(/\{\{\s*company\s*\}\}/gi, vars.company);
 }
 
+/**
+ * Rep-access foundation (Campaigns overhaul Phase 5) — who's calling, and
+ * are they an admin. Threaded into launch()/setCampaignStatus()/
+ * setEnrollmentStatus() so each can allow a non-admin to act on ONLY a
+ * campaign/enrollment they own. See the ownership checks inside each of
+ * those three functions, and 20260723040000_campaigns_rep_access_rls.sql
+ * for the read-side counterpart.
+ *
+ * Rep rollout flip point: this type and the checks that consume it are the
+ * backend half of "reps can manage their own campaigns" — there is no UI
+ * change in this slice (AdminGate on /playbook + the admin check in
+ * ContactsList.tsx still gate the only way a browser reaches this
+ * function). When that UI flip happens, these checks need no further
+ * change; just confirm the flip's own gates are what actually changed.
+ */
+interface CallerContext {
+  isAdmin: boolean;
+  userId: string | null;
+}
+
 /** Random 32-byte hex secret for a campaign's webhook registration
  *  (Campaigns overhaul Phase 2, S5) — gates campaign-webhooks' inbound
  *  ?token= query param and, when Smartlead echoes it back, its optional
@@ -813,16 +833,22 @@ const PULSE_STATUS_FOR_ACTION: Record<SetStatusInput["action"], "active" | "paus
  * `pause`/`resume` touch only the campaigns row in this slice — per-
  * enrollment pause/resume is out of scope for v1 (see the spec).
  */
-async function setCampaignStatus(p: SetStatusInput, archivedBy: string | null) {
+async function setCampaignStatus(p: SetStatusInput, archivedBy: string | null, callerCtx: CallerContext) {
   if (!p.id || !p.action || !(p.action in SMARTLEAD_STATUS_FOR_ACTION)) {
     throw new Error("id and a valid action (start|pause|resume|stop) are required");
   }
   const { data: campaign, error: campErr } = await svc
     .from("campaigns")
-    .select("id, status, smartlead_campaign_id, leads_per_day, settings, anchor_date")
+    .select("id, status, smartlead_campaign_id, leads_per_day, settings, anchor_date, owner_user_id")
     .eq("id", p.id)
     .single();
   if (campErr || !campaign) throw new Error("Campaign not found: " + (campErr?.message ?? p.id));
+
+  // Rep rollout flip point: remove/adjust this admin gate when reps get UI
+  // access to Campaigns (see the same note in launch() above).
+  if (!callerCtx.isAdmin && (!callerCtx.userId || campaign.owner_user_id !== callerCtx.userId)) {
+    throw new Error("You can only manage campaigns you own.");
+  }
 
   if (campaign.smartlead_campaign_id != null) {
     await smartleadFetch(`/campaigns/${campaign.smartlead_campaign_id}/status`, {
@@ -1020,7 +1046,7 @@ async function smartleadSetLeadPauseState(smartleadCampaignId: number, leadId: n
  *   reason without a human actually looking, and never touches a 'replied'/
  *   'bounced'/etc. enrollment (those are terminal, not "paused").
  */
-async function setEnrollmentStatus(p: SetEnrollmentStatusInput, archivedBy: string | null) {
+async function setEnrollmentStatus(p: SetEnrollmentStatusInput, archivedBy: string | null, callerCtx: CallerContext) {
   if (!p.enrollment_id || !["pause", "resume", "stop"].includes(p.action)) {
     throw new Error("enrollment_id and a valid action (pause|resume|stop) are required");
   }
@@ -1050,10 +1076,16 @@ async function setEnrollmentStatus(p: SetEnrollmentStatusInput, archivedBy: stri
 
   const { data: campaign, error: cErr } = await svc
     .from("campaigns")
-    .select("id, name, smartlead_campaign_id")
+    .select("id, name, smartlead_campaign_id, owner_user_id")
     .eq("id", enrollment.campaign_id)
     .single();
   if (cErr || !campaign) throw new Error("Campaign not found: " + (cErr?.message ?? enrollment.campaign_id));
+
+  // Rep rollout flip point: remove/adjust this admin gate when reps get UI
+  // access to Campaigns (see the same note in launch() above).
+  if (!callerCtx.isAdmin && (!callerCtx.userId || campaign.owner_user_id !== callerCtx.userId)) {
+    throw new Error("You can only manage enrollments in campaigns you own.");
+  }
 
   let warning: string | undefined;
 
@@ -1138,10 +1170,17 @@ async function setEnrollmentStatus(p: SetEnrollmentStatusInput, archivedBy: stri
  * added to Smartlead, and logs an email_sent activity on each linked contact
  * (suppressed/dropped/already-enrolled recipients excluded from all three).
  */
-async function launch(p: LaunchInput) {
+async function launch(p: LaunchInput, callerCtx: CallerContext) {
   const usingSteps = Array.isArray(p.steps) && p.steps.length > 0;
   if (!p.campaign_name || !p.recipients?.length || (!usingSteps && !p.sequence?.length)) {
     throw new Error("campaign_name, a sequence (or steps), and recipients are required");
+  }
+  // Rep rollout flip point: remove/adjust this admin gate when reps get UI
+  // access to Campaigns (see App.tsx's AdminGate + ContactsList.tsx's own
+  // admin check — those are the gates that actually decide who can reach
+  // this today; this is just the backend half staying in sync with them).
+  if (!callerCtx.isAdmin && (!callerCtx.userId || p.owner_id !== callerCtx.userId)) {
+    throw new Error("You can only launch campaigns for yourself.");
   }
   const delay = () => new Promise((r) => setTimeout(r, 300));
 
@@ -1517,6 +1556,174 @@ async function launch(p: LaunchInput) {
     tasks_created: tasksCreated,
     smartlead_url: `https://app.smartlead.ai/app/email-campaign/${campaignId}/analytics`,
   };
+}
+
+// ============================================================
+// inbox-health (Campaigns overhaul Phase 5) — "Sending inboxes" panel
+// ------------------------------------------------------------
+// Plain-English capacity/warmup view of every Smartlead sending inbox, so a
+// rep can tell "is this inbox safe to keep loading up" without opening
+// Smartlead. Two data sources per inbox: Smartlead's own warmup-stats
+// endpoint (best-effort, unverified shape — see fetchInboxWarmup) and our
+// own campaigns table (which active campaigns are already sending through
+// this inbox, and how many new people/day that adds up to).
+// ============================================================
+
+interface InboxHealthWarmup {
+  sent_7d: number | null;
+  /** Percent, 0-100 (already unwrapped from any trailing "%"). */
+  inbox_rate: number | null;
+  /** Percent, 0-100. */
+  spam_rate: number | null;
+  status: string | null;
+}
+
+interface InboxHealthCampaignSummary {
+  id: string;
+  name: string;
+  leads_per_day: number;
+  status: string;
+}
+
+interface InboxHealthEntry {
+  id: number;
+  from_email: string | null;
+  from_name: string | null;
+  daily_limit: number | null;
+  warmup: InboxHealthWarmup | null;
+  campaigns: InboxHealthCampaignSummary[];
+  total_leads_per_day: number;
+}
+
+/** First numeric-looking value among candidates, else null. Strips a
+ *  trailing "%" (some Smartlead rate fields come back as "45.2%" strings —
+ *  same pattern buildSmartleadMetrics already assumes for analytics). */
+function firstNumber(...candidates: unknown[]): number | null {
+  for (const v of candidates) {
+    if (v == null) continue;
+    const n = Number(String(v).replace(/%$/, "").trim());
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+/**
+ * Best-effort per-inbox warmup read — GET /email-accounts/{id}/warmup-stats.
+ * Endpoint shape UNVERIFIED beyond "matches the /email-accounts/{id}/<noun>
+ * pattern the rest of Smartlead's REST API uses" — same unverified-but-
+ * best-guess posture as registerCampaignWebhook and resolveSmartleadLeadId
+ * elsewhere in this file. Reads every plausible field-name variant for the
+ * 7-day sent/inbox/spam numbers and a status string; returns null (NEVER
+ * throws, and never fabricates a number) on any failure or unrecognized
+ * shape — a missing warmup read must never break the panel, it just shows
+ * "No warmup data" for that inbox.
+ */
+async function fetchInboxWarmup(emailAccountId: number): Promise<InboxHealthWarmup | null> {
+  try {
+    const raw = await smartleadFetch(`/email-accounts/${emailAccountId}/warmup-stats`);
+    if (typeof raw !== "object" || raw === null) return null;
+    const res = raw as Record<string, unknown>;
+    const sent7d = firstNumber(res.sent_count, res.total_sent_count, res.warmup_email_sent_count, res.sent);
+    const inboxRate = firstNumber(res.inbox_percentage, res.inbox_rate, res.landed_inbox_percentage, res.inbox_placement);
+    const spamRate = firstNumber(res.spam_percentage, res.spam_rate, res.landed_spam_percentage, res.spam_placement);
+    const statusRaw = res.warmup_status ?? res.status;
+    const status = typeof statusRaw === "string" && statusRaw.trim() ? statusRaw.trim() : null;
+    if (sent7d == null && inboxRate == null && spamRate == null && status == null) return null;
+    return { sent_7d: sent7d, inbox_rate: inboxRate, spam_rate: spamRate, status };
+  } catch (err) {
+    console.warn(`inbox-health: warmup-stats fetch failed for email account ${emailAccountId} (showing "no data"):`, (err as Error).message);
+    return null;
+  }
+}
+
+/** Extract a plausible numeric daily-send limit off a Smartlead email-account
+ *  list row. Field name UNVERIFIED — the client's useEmailAccounts only ever
+ *  reads id/from_email/from_name off this same endpoint, so anything beyond
+ *  those three is a best guess at the real field name. Reads every
+ *  plausible variant and returns null (never a fabricated 0) when nothing
+ *  matches, so the UI can honestly say "limit unknown" instead of implying a
+ *  real 0/day cap. */
+function extractDailyLimit(row: Record<string, unknown>): number | null {
+  const warmupDetails = (row.warmup_details && typeof row.warmup_details === "object")
+    ? row.warmup_details as Record<string, unknown>
+    : undefined;
+  const n = firstNumber(
+    row.message_per_day, row.daily_sent_limit, row.max_email_per_day, row.daily_limit,
+    warmupDetails?.total_warmup_per_day,
+  );
+  return n != null && n > 0 ? n : null;
+}
+
+/** Defensive top-level extraction for the /email-accounts response — same
+ *  "array, or data/rows nested under a key" posture as extractLeadRows/
+ *  extractStatRows above (fetchEmailAccounts' shape beyond "an array" isn't
+ *  pinned down either). */
+function extractEmailAccountRows(res: unknown): Record<string, unknown>[] {
+  if (Array.isArray(res)) return res as Record<string, unknown>[];
+  if (typeof res !== "object" || res === null) return [];
+  const obj = res as Record<string, unknown>;
+  for (const key of ["data", "email_accounts", "rows"]) {
+    if (Array.isArray(obj[key])) return obj[key] as Record<string, unknown>[];
+  }
+  return [];
+}
+
+/** Admin-only (see the Deno.serve dispatch below). Capped at the first 10
+ *  inboxes — a real Smartlead account here has a handful of sending
+ *  inboxes, and each one costs a live warmup-stats round trip through the
+ *  same rate-limited smartleadFetch queue every other Smartlead call in
+ *  this file shares, so an unbounded list could push a slow account past
+ *  the edge function's runtime budget. */
+async function inboxHealth(): Promise<{ inboxes: InboxHealthEntry[] }> {
+  const rawAccounts = await fetchEmailAccounts();
+  const accounts = extractEmailAccountRows(rawAccounts).slice(0, 10);
+  if (!accounts.length) return { inboxes: [] };
+
+  const ids = accounts
+    .map((a) => (a.id != null ? String(a.id) : null))
+    .filter((id): id is string => id != null);
+  const { data: activeCampaigns, error } = ids.length
+    ? await svc
+      .from("campaigns")
+      .select("id, name, leads_per_day, status, sending_email_account_id")
+      .eq("status", "active")
+      .in("sending_email_account_id", ids)
+    : { data: [], error: null };
+  if (error) console.error("inbox-health: campaign lookup failed (showing every inbox as feeding nothing):", error.message);
+
+  const campaignsByInbox = new Map<string, InboxHealthCampaignSummary[]>();
+  for (const c of activeCampaigns ?? []) {
+    const key = c.sending_email_account_id as string;
+    if (!campaignsByInbox.has(key)) campaignsByInbox.set(key, []);
+    campaignsByInbox.get(key)!.push({
+      id: c.id as string, name: c.name as string,
+      leads_per_day: (c.leads_per_day as number) ?? 0, status: c.status as string,
+    });
+  }
+
+  // Warmup reads are sequential in effect anyway (smartleadFetch's own
+  // module-level queue serializes every outbound Smartlead call), so
+  // Promise.all here doesn't create a request burst — it just lets each
+  // inbox's warmup fetch and the (already-in-hand) campaign lookup resolve
+  // together without hand-rolled sequencing.
+  const inboxes = await Promise.all(accounts.map(async (a) => {
+    const id = Number(a.id);
+    const key = String(a.id);
+    const campaigns = campaignsByInbox.get(key) ?? [];
+    const totalLeadsPerDay = campaigns.reduce((sum, c) => sum + (c.leads_per_day || 0), 0);
+    const warmup = Number.isFinite(id) ? await fetchInboxWarmup(id) : null;
+    return {
+      id,
+      from_email: typeof a.from_email === "string" ? a.from_email : null,
+      from_name: typeof a.from_name === "string" ? a.from_name : null,
+      daily_limit: extractDailyLimit(a),
+      warmup,
+      campaigns,
+      total_leads_per_day: totalLeadsPerDay,
+    };
+  }));
+
+  return { inboxes };
 }
 
 // ============================================================
@@ -2156,11 +2363,37 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const auth = req.headers.get("Authorization");
-    if (!isServiceRole(auth) && !(await callerIsAdmin(auth))) {
-      return json({ error: "Admin only" }, 403);
-    }
     const body = await req.json().catch(() => ({}));
     const action = body.action ?? "status";
+
+    const svcCaller = isServiceRole(auth);
+    // Service-role callers (the daily-sweep cron) get full access, same as
+    // an admin, without an extra RPC round trip — they never carry a user
+    // JWT for callerIsAdmin to check against anyway.
+    const adminCaller = svcCaller ? true : await callerIsAdmin(auth);
+
+    // Rep-access foundation (Campaigns overhaul Phase 5) — see
+    // 20260723040000_campaigns_rep_access_rls.sql's header comment for the
+    // full picture. Today NOTHING in the product UI lets a non-admin reach
+    // this function (AdminGate on /playbook + the admin check in
+    // ContactsList.tsx are the only ways a browser gets here), so this
+    // branch is backend-ready but practically unreachable by a real rep
+    // until that UI flip happens. When it does, a non-admin authenticated
+    // caller may reach ONLY these three actions, and only to act on a
+    // campaign/enrollment they own — see the ownership checks inside
+    // launch()/setCampaignStatus()/setEnrollmentStatus(). Every other
+    // action (import/sync/daily-sweep/delete-campaign/webhook diagnostics/
+    // decide-suggestion/inbox-health/etc.) stays admin-or-service-role-only.
+    const REP_ELIGIBLE_ACTIONS = new Set(["launch", "set-campaign-status", "set-enrollment-status"]);
+    let repUserId: string | null = null;
+    if (!svcCaller && !adminCaller) {
+      if (!REP_ELIGIBLE_ACTIONS.has(action)) {
+        return json({ error: "Admin only" }, 403);
+      }
+      repUserId = await callerUserId(auth);
+      if (!repUserId) return json({ error: "Admin only" }, 403);
+    }
+    const callerCtx: CallerContext = { isAdmin: adminCaller, userId: repUserId };
 
     if (action === "status") return json({ configured: smartleadConfigured() });
     if (!smartleadConfigured()) return json({ error: "SMARTLEAD_API_KEY not configured" }, 500);
@@ -2172,22 +2405,28 @@ Deno.serve(async (req) => {
     if (action === "import") return json(await importCampaigns());
     if (action === "sync") return json(await syncCampaigns());
     if (action === "daily-sweep") return json(await dailySweep());
-    if (action === "launch") return json(await launch(body as unknown as LaunchInput));
+    if (action === "inbox-health") return json(await inboxHealth());
+    if (action === "launch") return json(await launch(body as unknown as LaunchInput, callerCtx));
     if (action === "set-campaign-status") {
-      const archivedBy = await callerUserId(auth);
+      // Reuse the uid already fetched for a rep caller above; an admin/
+      // service-role caller still needs one resolved fresh (archivedBy is
+      // "who took this action", independent of the rep-eligibility check).
+      const archivedBy = repUserId ?? await callerUserId(auth);
       return json(
         await setCampaignStatus(
           { id: body.id as string, action: body.status_action as SetStatusInput["action"] },
           archivedBy,
+          callerCtx,
         ),
       );
     }
     if (action === "set-enrollment-status") {
-      const archivedBy = await callerUserId(auth);
+      const archivedBy = repUserId ?? await callerUserId(auth);
       return json(
         await setEnrollmentStatus(
           { enrollment_id: body.enrollment_id as string, action: body.status_action as SetEnrollmentStatusInput["action"] },
           archivedBy,
+          callerCtx,
         ),
       );
     }
