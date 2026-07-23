@@ -1,6 +1,11 @@
 // Sequence template gallery — the entry point into the one builder. Each preset
-// (8-Touch, Warming, …) is a starting point you open, view, and (next phase)
-// launch on a list/contact. A "Custom" card starts an empty builder.
+// (8-Touch, Warming, …) is a starting point you open, view, and launch on a
+// list/contact. A "Custom" card starts an empty builder.
+//
+// "Use this template" (preview dialog) and SequenceEditor's "Use this
+// sequence" (Campaigns overhaul S3) both open the SAME CampaignWizard
+// instance in `mode="template"` — this component owns that instance since
+// it's the one place both launch triggers converge.
 
 import { useState } from "react";
 import { Rocket, Flame, Wand2, Sparkles, Clock, Layers, ArrowRight, Pencil, Copy, Trash2 } from "lucide-react";
@@ -17,14 +22,18 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { useCampaignTemplates, useDeleteTemplate } from "./api";
+import { useCampaignTemplates, useDeleteTemplate, useTemplateScoreboard, useSmartleadStatus } from "./api";
 import { SequenceTimeline, SequenceMiniPreview } from "./SequenceTimeline";
 import { SequenceEditor } from "./SequenceEditor";
+import { CampaignWizard } from "./CampaignWizard";
 import type { CampaignTemplate, SequenceStep } from "./types";
 
 type EditorSeed = (Partial<CampaignTemplate> & { steps: SequenceStep[] }) | null;
+type LaunchSeed = { template_id: string | null; name: string; steps: SequenceStep[] };
 
-const CATEGORY: Record<string, { icon: typeof Rocket; accent: string; chip: string; label: string }> = {
+// Exported for QuickCampaignDialog.tsx's compact template picker (Campaigns
+// overhaul S7) — same category -> icon/accent/label mapping, one source.
+export const CATEGORY: Record<string, { icon: typeof Rocket; accent: string; chip: string; label: string }> = {
   flagship:      { icon: Rocket,   accent: "from-amber-500/20 to-orange-500/10", chip: "bg-amber-500/15 text-amber-600 dark:text-amber-400", label: "Flagship" },
   warming:       { icon: Flame,    accent: "from-orange-500/20 to-rose-500/10",  chip: "bg-orange-500/15 text-orange-600 dark:text-orange-400", label: "Warming" },
   post_demo:     { icon: Sparkles, accent: "from-violet-500/20 to-fuchsia-500/10", chip: "bg-violet-500/15 text-violet-600 dark:text-violet-400", label: "Post-demo" },
@@ -35,6 +44,12 @@ const CATEGORY: Record<string, { icon: typeof Rocket; accent: string; chip: stri
 
 export function TemplatesSection() {
   const { data: templates, isLoading } = useCampaignTemplates();
+  const { data: scoreboard } = useTemplateScoreboard();
+  const { data: sl } = useSmartleadStatus();
+  // Only a confirmed `false` disables — undefined (still loading) and true
+  // both leave every launch path enabled, so the gate never flashes on
+  // while the status query is in flight.
+  const smartleadDisabled = sl?.configured === false;
   const del = useDeleteTemplate();
   const [preview, setPreview] = useState<CampaignTemplate | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -44,6 +59,26 @@ export function TemplatesSection() {
   // mounted between uses, so without a changing key its internal step state
   // would carry over (e.g. "Customize a copy" showed the last sequence built).
   const [editorNonce, setEditorNonce] = useState(0);
+
+  // Same remount-fresh pattern for the launch wizard (Campaigns overhaul S3):
+  // both "Use this template" (below) and SequenceEditor's "Use this
+  // sequence" (via onLaunch) open this same instance.
+  const [launchOpen, setLaunchOpen] = useState(false);
+  const [launchSeed, setLaunchSeed] = useState<LaunchSeed | null>(null);
+  const [launchNonce, setLaunchNonce] = useState(0);
+
+  const openLaunch = (seed: LaunchSeed) => {
+    // Guards BOTH "Use this template" below and SequenceEditor's "Use this
+    // sequence" (which reaches here via its `onLaunch` prop) — the single
+    // funnel point for every template-based launch in this component.
+    if (smartleadDisabled) {
+      toast.info("Connect Smartlead to launch campaigns.");
+      return;
+    }
+    setLaunchSeed(seed);
+    setLaunchNonce((n) => n + 1);
+    setLaunchOpen(true);
+  };
 
   const openBlank = () => {
     setEditorSeed(null);
@@ -88,6 +123,7 @@ export function TemplatesSection() {
           {(templates ?? []).map((t) => {
             const cat = CATEGORY[t.category] ?? CATEGORY.custom;
             const Icon = cat.icon;
+            const score = scoreboard?.[t.id];
             return (
               <Card
                 key={t.id}
@@ -113,6 +149,14 @@ export function TemplatesSection() {
                       <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{t.duration_days ?? "—"}d</span>
                     </span>
                   </div>
+                  {/* Lifetime scoreboard (Campaigns overhaul Phase 3, S9) —
+                      hidden entirely at zero rather than showing "0
+                      campaigns" on every template that's never been used. */}
+                  {score && score.campaigns > 0 && (
+                    <p className="text-[11px] text-muted-foreground">
+                      {score.campaigns} {score.campaigns === 1 ? "campaign" : "campaigns"} · {score.replies} {score.replies === 1 ? "reply" : "replies"}
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             );
@@ -171,20 +215,32 @@ export function TemplatesSection() {
                     </Button>
                   )}
                 </div>
-                <div className="flex items-center gap-2 order-1 sm:order-2">
-                  {preview.is_preset ? (
-                    <Button variant="outline" size="sm" onClick={() => openCustomize(preview)}>
-                      <Copy className="h-4 w-4 mr-1" /> Customize a copy
+                <div className="flex flex-col items-end gap-1 order-1 sm:order-2">
+                  <div className="flex items-center gap-2">
+                    {preview.is_preset ? (
+                      <Button variant="outline" size="sm" onClick={() => openCustomize(preview)}>
+                        <Copy className="h-4 w-4 mr-1" /> Customize a copy
+                      </Button>
+                    ) : (
+                      <Button variant="outline" size="sm" onClick={() => openEdit(preview)}>
+                        <Pencil className="h-4 w-4 mr-1" /> Edit
+                      </Button>
+                    )}
+                    <Button
+                      variant="ai"
+                      disabled={smartleadDisabled}
+                      onClick={() => {
+                        openLaunch({ template_id: preview.id, name: preview.name, steps: preview.steps });
+                        setPreview(null);
+                      }}
+                    >
+                      <span className="ai-icon mr-1"><ArrowRight className="h-4 w-4" /></span>
+                      Use this template
                     </Button>
-                  ) : (
-                    <Button variant="outline" size="sm" onClick={() => openEdit(preview)}>
-                      <Pencil className="h-4 w-4 mr-1" /> Edit
-                    </Button>
+                  </div>
+                  {smartleadDisabled && (
+                    <p className="text-xs text-muted-foreground">Connect Smartlead to launch campaigns.</p>
                   )}
-                  <Button variant="ai" disabled title="Launching on a list or contact lands next">
-                    <span className="ai-icon mr-1"><ArrowRight className="h-4 w-4" /></span>
-                    Use this template
-                  </Button>
                 </div>
               </DialogFooter>
             </>
@@ -194,7 +250,25 @@ export function TemplatesSection() {
 
       {/* The one builder — edit/create a sequence. key remounts it fresh
           per open so a reopen never shows the previously-built sequence. */}
-      <SequenceEditor key={editorNonce} open={editorOpen} onOpenChange={setEditorOpen} initial={editorSeed} />
+      <SequenceEditor
+        key={editorNonce}
+        open={editorOpen}
+        onOpenChange={setEditorOpen}
+        initial={editorSeed}
+        onLaunch={(t) => openLaunch({ template_id: t.id, name: t.name, steps: t.steps })}
+      />
+
+      {/* Launch wizard, template mode (Campaigns overhaul S3) — opened from
+          "Use this template" above or SequenceEditor's "Use this sequence"
+          via onLaunch. key remounts it fresh per open, same reason as the
+          editor above. */}
+      <CampaignWizard
+        key={launchNonce}
+        open={launchOpen}
+        onOpenChange={setLaunchOpen}
+        mode="template"
+        templateSeed={launchSeed ?? { template_id: null, name: "", steps: [] }}
+      />
 
       {/* Delete a custom template */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>

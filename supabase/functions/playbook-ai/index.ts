@@ -3,6 +3,10 @@
 //   - generate-ideas  : weekly AI marketing ideas (server.js generatePlaybookIdeas)
 // Campaign-writer + analysis + adaptation actions land in later phases.
 //
+// Campaigns unification (2026-07-22): campaign context/analysis reads and
+// writes `campaigns`, not the retired `playbook_campaigns` (now
+// playbook_campaigns_archived_20260722 — see 20260722100000_campaigns_unify.sql).
+//
 // Auth: admin/super_admin only (verified from the caller's JWT). Writes
 // run via the service client (tables are admin-only RLS).
 //
@@ -18,6 +22,7 @@ import {
   campaignSuggestSystem,
   campaignRegenerateSystem,
   campaignAnalysisSystem,
+  campaignInsightsSystem,
   isTrainingNoteDuplicate,
   formatTrainingNotes,
   parseJsonResponse,
@@ -94,8 +99,8 @@ async function gatherContext(): Promise<{ ctx: PlaybookContext; trainingNotes: {
 
   // Past campaign performance (campaigns with metrics, last 90 days).
   const { data: campaigns } = await svc
-    .from("playbook_campaigns")
-    .select("title, status, notes, metrics, created_at")
+    .from("campaigns")
+    .select("name, status, notes, metrics, created_at")
     .gte("created_at", ninetyAgo)
     .order("created_at", { ascending: false })
     .limit(50);
@@ -103,11 +108,11 @@ async function gatherContext(): Promise<{ ctx: PlaybookContext; trainingNotes: {
     (c) => c.metrics && (c.metrics.sent != null || c.metrics.openRate != null || c.metrics.clickRate != null),
   );
 
-  // "Upcoming events" — planned campaigns not yet launched (Waypoint replacement).
+  // "Upcoming events" — draft campaigns not yet launched (Waypoint replacement).
   const { data: planned } = await svc
-    .from("playbook_campaigns")
-    .select("title, status, created_at")
-    .eq("status", "planned")
+    .from("campaigns")
+    .select("name, status, created_at")
+    .eq("status", "draft")
     .order("created_at", { ascending: false })
     .limit(20);
 
@@ -120,14 +125,14 @@ async function gatherContext(): Promise<{ ctx: PlaybookContext; trainingNotes: {
 
   // Recent campaign analyses (last 5).
   const { data: analyzed } = await svc
-    .from("playbook_campaigns")
-    .select("title, analysis_json")
+    .from("campaigns")
+    .select("name, analysis_json")
     .not("analysis_json", "is", null)
     .order("analyzed_at", { ascending: false })
     .limit(5);
   const recentAnalyses = (analyzed ?? []).map((e) => {
     const a = (e.analysis_json ?? {}) as Record<string, unknown>;
-    return { campaign: e.title, summary: a.summary, performance: a.performance, wins: a.wins, improvements: a.improvements };
+    return { campaign: e.name, summary: a.summary, performance: a.performance, wins: a.wins, improvements: a.improvements };
   });
 
   // Training notes.
@@ -250,13 +255,13 @@ async function generateCampaign(description: string) {
 /** Suggest improvements to a draft campaign, grounded in past performance. */
 async function suggestCampaign(campaign: unknown) {
   const { data: past } = await svc
-    .from("playbook_campaigns")
-    .select("title, metrics")
+    .from("campaigns")
+    .select("name, metrics")
     .not("metrics", "is", null)
     .order("created_at", { ascending: false })
     .limit(20);
   const history = (past ?? [])
-    .map((e) => ({ title: e.title, ...(e.metrics ?? {}) }))
+    .map((e) => ({ name: e.name, ...(e.metrics ?? {}) }))
     .filter((e) => (e as Record<string, unknown>).sent || (e as Record<string, unknown>).openRate);
   try {
     const text = await callClaude({
@@ -298,7 +303,7 @@ async function regenerateEmail(p: {
 
 /** Analyze a completed campaign vs historical averages; auto-add training. */
 async function analyzeCampaign(campaignId: string) {
-  const { data: ev } = await svc.from("playbook_campaigns").select("*").eq("id", campaignId).single();
+  const { data: ev } = await svc.from("campaigns").select("*").eq("id", campaignId).single();
   if (!ev) throw new Error("Campaign not found");
   if (ev.analyzed_at) return { already_analyzed: true, analysis: ev.analysis_json ?? {} };
   const metrics = (ev.metrics ?? {}) as Record<string, string>;
@@ -308,7 +313,7 @@ async function analyzeCampaign(campaignId: string) {
     .from("playbook_ideas").select("title").eq("executed_campaign_id", campaignId).maybeSingle();
 
   const { data: others } = await svc
-    .from("playbook_campaigns").select("metrics").eq("status", "complete").neq("id", campaignId);
+    .from("campaigns").select("metrics").eq("status", "completed").neq("id", campaignId);
   let to = 0, on = 0, tc = 0, cn = 0, tb = 0, bn = 0;
   for (const c of others ?? []) {
     const m = (c.metrics ?? {}) as Record<string, string>;
@@ -322,7 +327,7 @@ async function analyzeCampaign(campaignId: string) {
   const avgClick = cn ? (tc / cn).toFixed(1) + "%" : "N/A";
   const avgBounce = bn ? (tb / bn).toFixed(1) + "%" : "N/A";
 
-  const user = `Campaign: ${ev.title}
+  const user = `Campaign: ${ev.name}
 Sent: ${metrics.sent || "unknown"}
 Open Rate: ${metrics.openRate || "unknown"}
 Click Rate: ${metrics.clickRate || "unknown"}
@@ -359,10 +364,210 @@ Was this from a Playbook idea? ${linked ? "Yes: " + linked.title : "No"}`;
       }
     }
   }
-  await svc.from("playbook_campaigns")
+  await svc.from("campaigns")
     .update({ analysis_json: analysis, analyzed_at: new Date().toISOString() })
     .eq("id", campaignId);
   return { success: true, analysis, training_added: trainingAdded };
+}
+
+/**
+ * Campaign insights + template-suggestion generation (Campaigns overhaul
+ * Phase 4 — the AI learning loop). Broader sibling of analyzeCampaign: also
+ * proposes concrete, numbers-grounded template edits (subject/body/timing/
+ * audience) queued in campaign_suggestions, and — same as analyzeCampaign —
+ * distills at most one training note. Called both from the Insights panel's
+ * (future) manual trigger and, primarily, from playbook-smartlead's daily
+ * sweep once a campaign has enough data (see that function's doc comment).
+ *
+ * Unlike analyzeCampaign, this does NOT refuse to run on an already-analyzed
+ * campaign — the caller (daily-sweep) already filters to `analyzed_at IS
+ * NULL`, and after this runs once analyzed_at is set, so the sweep won't
+ * re-select it. A direct re-invoke just extends analysis_json again and
+ * skips any suggestion that duplicates an existing PENDING one for the same
+ * template/step/kind (see the dedupe check below).
+ */
+async function campaignInsights(campaignId: string) {
+  if (!campaignId) throw new Error("campaign_id is required");
+  const { data: campaign, error: campErr } = await svc
+    .from("campaigns")
+    .select("id, name, status, metrics, steps, settings, template_id, analyzed_at, analysis_json")
+    .eq("id", campaignId)
+    .maybeSingle();
+  if (campErr) throw new Error(campErr.message);
+  if (!campaign) throw new Error("Campaign not found");
+
+  const metrics = (campaign.metrics ?? {}) as Record<string, unknown>;
+
+  // Enrollment aggregates: counts by status + reply_category.
+  const { data: enrollRows } = await svc
+    .from("campaign_enrollments")
+    .select("status, reply_category")
+    .eq("campaign_id", campaignId);
+  const enrollmentsByStatus: Record<string, number> = {};
+  const repliesByCategory: Record<string, number> = {};
+  for (const r of (enrollRows ?? []) as { status: string; reply_category: string | null }[]) {
+    const st = r.status || "unknown";
+    enrollmentsByStatus[st] = (enrollmentsByStatus[st] ?? 0) + 1;
+    if (r.reply_category) repliesByCategory[r.reply_category] = (repliesByCategory[r.reply_category] ?? 0) + 1;
+  }
+
+  // Event tallies (raw counts off our own webhook log — see
+  // useCampaignEventStats' doc comment for why this isn't a per-step
+  // breakdown).
+  const { data: eventRows } = await svc
+    .from("campaign_events")
+    .select("event_type")
+    .eq("campaign_id", campaignId);
+  const eventCounts: Record<string, number> = {};
+  for (const r of (eventRows ?? []) as { event_type: string }[]) {
+    const t = r.event_type || "unknown";
+    eventCounts[t] = (eventCounts[t] ?? 0) + 1;
+  }
+
+  // Template + sibling campaigns run from the same template (metrics only).
+  let template: { id: string; name: string; steps: unknown } | null = null;
+  let siblings: Array<{ name: string; metrics: unknown }> = [];
+  if (campaign.template_id) {
+    const { data: tmpl } = await svc
+      .from("campaign_templates")
+      .select("id, name, steps")
+      .eq("id", campaign.template_id)
+      .maybeSingle();
+    template = tmpl ?? null;
+    const { data: sibs } = await svc
+      .from("campaigns")
+      .select("name, metrics")
+      .eq("template_id", campaign.template_id)
+      .neq("id", campaignId)
+      .order("created_at", { ascending: false })
+      .limit(10);
+    siblings = (sibs ?? []) as Array<{ name: string; metrics: unknown }>;
+  }
+
+  const notes = (await allTrainingNotes()).slice(0, 20);
+
+  const user = `Campaign: ${campaign.name} (status: ${campaign.status})
+
+METRICS:
+${JSON.stringify(metrics, null, 2)}
+
+STEPS SENT (actual copy):
+${JSON.stringify(campaign.steps, null, 2)}
+
+ENROLLMENT COUNTS BY STATUS:
+${JSON.stringify(enrollmentsByStatus, null, 2)}
+
+REPLIES BY CATEGORY:
+${Object.keys(repliesByCategory).length ? JSON.stringify(repliesByCategory, null, 2) : "No categorized replies yet."}
+
+EVENT TALLIES (raw counts from our event log):
+${Object.keys(eventCounts).length ? JSON.stringify(eventCounts, null, 2) : "No events logged yet."}
+
+TEMPLATE: ${template ? template.name : "None — this is a one-off campaign not built from a template. Do not propose template_suggestions."}
+${template ? `Template steps:\n${JSON.stringify(template.steps, null, 2)}` : ""}
+
+SIBLING CAMPAIGNS FROM THE SAME TEMPLATE (last 10, metrics only):
+${siblings.length ? JSON.stringify(siblings, null, 2) : "None — this is the only campaign run from this template so far."}
+
+${formatTrainingNotes(notes)}`;
+
+  const text = await callClaude({
+    model: PLAYBOOK_FAST_MODEL,
+    system: campaignInsightsSystem,
+    user,
+    maxTokens: 2000,
+    temperature: 0.7,
+  });
+  const parsed = parseJsonResponse(text);
+
+  const performanceSummary = typeof parsed.performance_summary === "string" ? parsed.performance_summary : "";
+  const wins = Array.isArray(parsed.wins) ? (parsed.wins as unknown[]).filter((w) => typeof w === "string") as string[] : [];
+  const improvements = Array.isArray(parsed.improvements)
+    ? (parsed.improvements as unknown[]).filter((w) => typeof w === "string") as string[]
+    : [];
+  const rawSuggestions = Array.isArray(parsed.template_suggestions)
+    ? (parsed.template_suggestions as Array<Record<string, unknown>>)
+    : [];
+  const trainingNote = typeof parsed.training_note === "string" && parsed.training_note.trim()
+    ? parsed.training_note.trim()
+    : null;
+
+  // Extend (not replace) analysis_json — keep analyze-campaign's keys
+  // (summary/performance/wins/improvements) so CampaignCard.tsx and
+  // gatherContext's recentAnalyses read (both key off `summary`/`performance`/
+  // `wins`/`improvements`) keep working unchanged; add insights-only keys
+  // alongside.
+  const priorAnalysis = (campaign.analysis_json ?? {}) as Record<string, unknown>;
+  const analysis: Record<string, unknown> = {
+    ...priorAnalysis,
+    summary: performanceSummary || priorAnalysis.summary,
+    wins: wins.length ? wins : priorAnalysis.wins,
+    improvements: improvements.length ? improvements : priorAnalysis.improvements,
+    insights_generated_at: new Date().toISOString(),
+    template_suggestions_count: rawSuggestions.length,
+  };
+  const { error: updErr } = await svc
+    .from("campaigns")
+    .update({ analysis_json: analysis, analyzed_at: campaign.analyzed_at ?? new Date().toISOString() })
+    .eq("id", campaignId);
+  if (updErr) throw new Error(updErr.message);
+
+  // Template suggestions — only when the source campaign actually has a
+  // template (see campaign_suggestions.template_id NOT NULL constraint).
+  const ALLOWED_KIND = new Set(["subject", "body", "timing", "audience", "general"]);
+  let suggestionsCreated = 0;
+  if (campaign.template_id && rawSuggestions.length) {
+    const { data: existingPending } = await svc
+      .from("campaign_suggestions")
+      .select("step_order, kind")
+      .eq("template_id", campaign.template_id)
+      .eq("status", "pending");
+    const existingKeys = new Set(
+      (existingPending ?? []).map((s) => `${s.step_order ?? "null"}:${s.kind}`),
+    );
+    for (const raw of rawSuggestions.slice(0, 4)) {
+      const kind = ALLOWED_KIND.has(raw.kind as string) ? (raw.kind as string) : null;
+      const rationale = typeof raw.rationale === "string" ? raw.rationale.trim() : "";
+      // rationale is NOT NULL on the table, and a suggestion with no
+      // recognized kind or no stated reason isn't actionable — skip both
+      // rather than inserting a row the UI can't render meaningfully.
+      if (!kind || !rationale) continue;
+      const stepOrder = typeof raw.step_order === "number" ? raw.step_order : null;
+      const key = `${stepOrder ?? "null"}:${kind}`;
+      if (existingKeys.has(key)) continue; // dedupe vs. an existing PENDING suggestion
+      const { error: insErr } = await svc.from("campaign_suggestions").insert({
+        campaign_id: campaignId,
+        template_id: campaign.template_id,
+        step_order: stepOrder,
+        kind,
+        current_value: typeof raw.current_value === "string" ? raw.current_value : null,
+        suggested_value: typeof raw.suggested_value === "string" ? raw.suggested_value : null,
+        rationale,
+      });
+      if (!insErr) {
+        existingKeys.add(key);
+        suggestionsCreated++;
+      } else {
+        console.error(`campaign-insights: suggestion insert failed for campaign ${campaignId}:`, insErr.message);
+      }
+    }
+  }
+
+  // Training note — same dedupe rule as analyzeCampaign, tagged so its
+  // provenance is visible in the Training panel (source label added there).
+  let trainingAdded = 0;
+  if (trainingNote) {
+    const { data: existing } = await svc.from("playbook_training").select("note");
+    const existingNotes = (existing ?? []).map((r) => r.note as string);
+    if (!isTrainingNoteDuplicate(trainingNote, existingNotes)) {
+      const { error: noteErr } = await svc
+        .from("playbook_training")
+        .insert({ note: trainingNote, source: "auto-insights" });
+      if (!noteErr) trainingAdded = 1;
+    }
+  }
+
+  return { success: true, analysis, suggestions_created: suggestionsCreated, training_added: trainingAdded };
 }
 
 Deno.serve(async (req) => {
@@ -390,6 +595,9 @@ Deno.serve(async (req) => {
     }
     if (action === "analyze-campaign") {
       return json(await analyzeCampaign(body.campaignId));
+    }
+    if (action === "campaign-insights") {
+      return json(await campaignInsights(body.campaign_id));
     }
     return json({ error: `Unknown action: ${action}` }, 400);
   } catch (e) {

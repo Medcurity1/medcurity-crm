@@ -4,12 +4,17 @@ import { toast } from "sonner";
 import type {
   PlaybookTrainingNote,
   PlaybookIdea,
-  PlaybookCampaign,
+  Campaign,
+  CampaignMetrics,
   Newsletter,
   NewsletterType,
   CampaignTemplate,
   SequenceStep,
+  CampaignSuggestion,
+  SuggestionStatus,
 } from "./types";
+import { normalizeEmail, type SuppressionEntry } from "./suppression";
+import { isPositiveReplyCategory } from "./reply-extract";
 
 // ---------------------------------------------------------------------------
 // Training notes (the feedback loop) — Phase A
@@ -250,15 +255,83 @@ export function useCampaigns() {
     queryKey: ["playbook", "campaigns"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("playbook_campaigns")
-        .select("*, owner:user_profiles!owner_id(id, full_name)")
-        // Newest first. created_at alone ties for the whole bulk-import batch
-        // (all imported at once), which let Smartlead's oldest-first order leak
-        // through — so tiebreak by smartlead_campaign_id desc (newer = higher id).
+        .from("campaigns")
+        .select(
+          "*, owner:user_profiles!owner_user_id(id, full_name), template:campaign_templates(name)",
+        )
+        // Newest first, id as the tiebreaker (stable ordering within the
+        // same created_at, e.g. a bulk-import batch inserted in one pass).
         .order("created_at", { ascending: false })
-        .order("smartlead_campaign_id", { ascending: false, nullsFirst: false });
+        .order("id", { ascending: false });
       if (error) throw error;
-      return data as (PlaybookCampaign & { owner?: { id: string; full_name: string | null } | null })[];
+      return data as (Campaign & {
+        owner?: { id: string; full_name: string | null } | null;
+        template?: { name: string } | null;
+      })[];
+    },
+  });
+}
+
+export type CampaignStatusAction = "start" | "pause" | "resume" | "stop";
+
+/** Start / pause / resume / stop a campaign from the tracker — mirrors the
+ *  Smartlead status on the linked campaign (when there is one) and, for
+ *  start-on-a-draft and stop, does the local bookkeeping (first_send_at
+ *  backfill + task spawn on start; enrollment/task cancellation on stop).
+ *  See the `set-campaign-status` action in playbook-smartlead/index.ts (S4). */
+export function useSetCampaignStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: { id: string; action: CampaignStatusAction }) => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "set-campaign-status", id: p.id, status_action: p.action },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as {
+        success: boolean;
+        id: string;
+        status: string;
+        tasks_created?: number;
+        tasks_cancelled?: number;
+        warning?: string;
+      };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] }),
+    onError: (e) => toast.error("Couldn't update campaign: " + (e as Error).message),
+  });
+}
+
+export interface CampaignEnrollmentStats {
+  total: number;
+  finished: number;
+  replied: number;
+}
+
+/** One grouped fetch of enrollment progress for every visible campaign card
+ *  — totals + finished (completed/stopped/bounced) + replied per
+ *  campaign_id. Single .in() query selecting just campaign_id + status,
+ *  aggregated client-side; fine at tracker-list scale (not a full-database
+ *  scan). */
+export function useCampaignEnrollmentStats(campaignIds: string[]) {
+  const key = [...campaignIds].sort().join(",");
+  return useQuery({
+    queryKey: ["playbook", "campaign-enrollment-stats", key],
+    enabled: campaignIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("campaign_enrollments")
+        .select("campaign_id, status")
+        .in("campaign_id", campaignIds);
+      if (error) throw error;
+      const out: Record<string, CampaignEnrollmentStats> = {};
+      for (const row of (data ?? []) as { campaign_id: string; status: string }[]) {
+        const s = (out[row.campaign_id] ??= { total: 0, finished: 0, replied: 0 });
+        s.total++;
+        if (row.status === "replied") s.replied++;
+        else if (row.status === "completed" || row.status === "stopped" || row.status === "bounced") s.finished++;
+      }
+      return out;
     },
   });
 }
@@ -402,13 +475,65 @@ export function useEmailAccounts() {
   });
 }
 
+/** One sending inbox's warmup health + how much daily volume it's already
+ *  carrying — the `inbox-health` edge action's per-inbox shape (Campaigns
+ *  overhaul Phase 5). `warmup` is null when Smartlead's warmup-stats read
+ *  failed or came back empty (unverified endpoint — see the edge function's
+ *  fetchInboxWarmup doc comment); `daily_limit` is null when no plausible
+ *  limit field was found on the account row. Both "unknown, not zero" —
+ *  the UI must say so honestly rather than implying a real 0. */
+export interface InboxHealthEntry {
+  id: number;
+  from_email: string | null;
+  from_name: string | null;
+  daily_limit: number | null;
+  warmup: {
+    sent_7d: number | null;
+    inbox_rate: number | null;
+    spam_rate: number | null;
+    status: string | null;
+  } | null;
+  campaigns: Array<{ id: string; name: string; leads_per_day: number; status: string }>;
+  total_leads_per_day: number;
+}
+
+/** Lazy — only fires while `enabled` (the Sending Inboxes dialog is open, or
+ *  the launch wizard has reached its cadence/inbox step): each call makes a
+ *  live Smartlead warmup-stats round trip per inbox (capped at 10 server-
+ *  side), so this shouldn't run on every Campaigns tab render. */
+export function useInboxHealth(enabled: boolean) {
+  return useQuery({
+    queryKey: ["playbook", "inbox-health"],
+    enabled,
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "inbox-health" },
+      });
+      if (error) throw error;
+      return (data?.inboxes ?? []) as InboxHealthEntry[];
+    },
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
 export function useLaunchCampaign() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (p: {
       campaign_name: string;
       target_audience?: string;
-      sequence: CampaignSequenceEmail[];
+      // AI-wizard path. Omit when `steps` is present (mixed-channel path) —
+      // the server ignores `sequence` entirely once `steps` is set.
+      sequence?: CampaignSequenceEmail[];
+      // Mixed-channel path (Campaigns overhaul S3): the template gallery /
+      // SequenceEditor "Launch this sequence" flow sends the full frozen
+      // step array here instead (email edits already folded in). The server
+      // derives the Smartlead email sequence from the EMAIL_AUTO steps and
+      // spawns CALL/LINKEDIN/EMAIL_HYBRID steps as tasks off it.
+      steps?: SequenceStep[];
+      template_id?: string;
+      // ISO "YYYY-MM-DD" — defaults to today server-side if omitted.
+      anchor_date?: string;
       recipients: Recipient[];
       email_account_id?: number;
       source_idea_id?: string;
@@ -416,13 +541,35 @@ export function useLaunchCampaign() {
       adaptiveEnabled?: boolean;
       owner_id?: string;
       schedule?: Record<string, unknown>;
+      // Normalized emails the user deliberately chose to include despite
+      // being on the Do-Not-Email list (per-person "Include anyway" — see
+      // CampaignRecipients.tsx). The server re-checks suppression itself and
+      // only honors an override that's actually listed here.
+      suppression_overrides?: string[];
+      // Normalized emails the user deliberately chose to double-enroll
+      // despite already being actively enrolled in another campaign
+      // (per-person "Enroll anyway" — see CampaignRecipients.tsx, S3). The
+      // server re-checks this itself too.
+      enrollment_overrides?: string[];
     }) => {
       const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
         body: { action: "launch", ...p },
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-      return data as { smartlead_campaign_id: number; auto_started: boolean; leads_added: number; leads_failed: number };
+      return data as {
+        smartlead_campaign_id: number;
+        auto_started: boolean;
+        leads_added: number;
+        leads_failed: number;
+        suppression_dropped?: number;
+        // S3 — always present on a successful launch, but optional here so
+        // older cached edge-function responses (mid-deploy) don't crash a
+        // strict read.
+        already_enrolled_dropped?: number;
+        enrolled?: number;
+        tasks_created?: number;
+      };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] });
@@ -695,7 +842,14 @@ export function useInsertImage() {
   });
 }
 
-/** Recipients = the (non-archived, contactable) contacts carrying a tag.
+/** Recipients = the (non-archived) contacts carrying a tag, with an email on
+ *  file. Do-Not-Contact / No-Longer-Employed / customer / partner / etc.
+ *  suppression is deliberately NOT filtered here — every recipient source
+ *  (tag, CSV, paste) is expected to run through fetchSuppressionForEmails
+ *  in CampaignRecipients.tsx so the same Do-Not-Email rule applies
+ *  everywhere, not just to contacts pulled by tag (2026-07-22: this used to
+ *  hard-filter do_not_contact/no_longer_employed here, silently, which left
+ *  CSV/paste recipients completely unchecked).
  *  Paginates so a large tag (>1 page) returns EVERY member — a campaign must
  *  never silently mail a truncated list. Hard-stops at 50k as a sanity cap. */
 export async function fetchRecipientsByTag(tagId: string): Promise<Recipient[]> {
@@ -704,7 +858,7 @@ export async function fetchRecipientsByTag(tagId: string): Promise<Recipient[]> 
   for (let page = 0; page < 50; page++) {
     const { data, error } = await supabase
       .from("contacts")
-      .select("id, first_name, last_name, email, account_id, do_not_contact, no_longer_employed, account:accounts!account_id(name), contact_tags!inner(tag_id)")
+      .select("id, first_name, last_name, email, account_id, account:accounts!account_id(name), contact_tags!inner(tag_id)")
       .eq("contact_tags.tag_id", tagId)
       .is("archived_at", null)
       // Pending pen imports are not campaign-able people yet (pen cutover,
@@ -719,7 +873,7 @@ export async function fetchRecipientsByTag(tagId: string): Promise<Recipient[]> 
     if (batch.length < PAGE) break;
   }
   return all
-    .filter((c: Record<string, unknown>) => !c.do_not_contact && !c.no_longer_employed && c.email)
+    .filter((c: Record<string, unknown>) => typeof c.email === "string" && c.email.trim())
     .map((c: Record<string, unknown>) => ({
       email: c.email as string,
       first_name: (c.first_name as string) ?? "",
@@ -728,4 +882,493 @@ export async function fetchRecipientsByTag(tagId: string): Promise<Recipient[]> 
       contact_id: c.id as string,
       account_id: (c.account_id as string) ?? undefined,
     }));
+}
+
+/** Batched Do-Not-Email check: which of these emails are on
+ *  v_marketing_suppression, and why. Matches on normalized
+ *  (lowercased/trimmed) email — every email we send is normalized before
+ *  querying. 500 emails per `.in()` batch (matches the server-side mirror in
+ *  playbook-smartlead/index.ts). Every recipient source is expected to run
+ *  through this after its list is built — see CampaignRecipients.tsx. */
+export async function fetchSuppressionForEmails(emails: string[]): Promise<SuppressionEntry[]> {
+  const normalized = Array.from(new Set(emails.map(normalizeEmail).filter(Boolean)));
+  if (!normalized.length) return [];
+  const BATCH = 500;
+  const out: SuppressionEntry[] = [];
+  for (let i = 0; i < normalized.length; i += BATCH) {
+    const batch = normalized.slice(i, i + BATCH);
+    const { data, error } = await supabase
+      .from("v_marketing_suppression")
+      .select("email, reason")
+      .in("email", batch);
+    if (error) throw error;
+    for (const row of (data ?? []) as { email: string; reason: string }[]) {
+      out.push({ email: row.email, reason: row.reason });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Reply feed (Campaigns overhaul S7)
+// ---------------------------------------------------------------------------
+
+const REPLIES_LOOKBACK_DAYS = 30;
+const REPLIES_LIMIT = 50;
+
+// Raw campaign_events.event_type values that represent a reply — the
+// webhook path stores Smartlead's RAW event name (verified live 2026-07-22
+// as EMAIL_REPLY, not the canonical EMAIL_REPLIED — see
+// supabase/functions/playbook-smartlead/index.ts's SMARTLEAD_WEBHOOK_EVENT_TYPES
+// comment), while the daily sweep's own event logging (S9,
+// _shared/campaign-enrollment-actions.ts) inserts the same raw name for
+// consistency. Older/future rows might still carry the canonical name, so
+// this checks both — kept in sync manually with
+// _shared/campaign-enrollment-actions.ts's REPLY_EVENT_TYPES (a browser
+// bundle can't import that Deno-side file).
+const REPLY_EVENT_TYPES = ["EMAIL_REPLIED", "EMAIL_REPLY"];
+
+export interface CampaignReplyRow {
+  id: string;
+  campaign_id: string | null;
+  enrollment_id: string | null;
+  email: string | null;
+  payload: Record<string, unknown>;
+  occurred_at: string | null;
+  created_at: string;
+  campaign: { id: string; name: string } | null;
+  enrollment: { first_name: string | null; last_name: string | null; contact_id: string | null; reply_category: string | null } | null;
+}
+
+/** Recent reply campaign_events, newest first, last 30 days, capped at 50 —
+ *  the Replies section in CampaignsTab.tsx. One query (campaign + enrollment
+ *  embedded) — campaign_events is admin-only RLS, same as everything else
+ *  this admin-only tab reads. Matches BOTH the raw and canonical event-type
+ *  spelling (REPLY_EVENT_TYPES above) so rows logged by either the real-time
+ *  webhook or the daily sweep (S9) show up here. */
+export function useCampaignReplies() {
+  return useQuery({
+    queryKey: ["playbook", "campaign-replies"],
+    queryFn: async () => {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - REPLIES_LOOKBACK_DAYS);
+      const { data, error } = await supabase
+        .from("campaign_events")
+        .select(
+          "id, campaign_id, enrollment_id, email, payload, occurred_at, created_at, " +
+            "campaign:campaigns(id, name), enrollment:campaign_enrollments(first_name, last_name, contact_id, reply_category)",
+        )
+        .in("event_type", REPLY_EVENT_TYPES)
+        .gte("created_at", cutoff.toISOString())
+        .order("created_at", { ascending: false })
+        .limit(REPLIES_LIMIT);
+      if (error) throw error;
+      // Same to-one-embed cast as fetchActiveEnrollmentsForEmails below —
+      // PostgREST returns a single object for both campaign_id -> campaigns
+      // and enrollment_id -> campaign_enrollments, but the query-builder's
+      // type inference (no generated Database types in this project) sees
+      // them as arrays.
+      return (data ?? []) as unknown as CampaignReplyRow[];
+    },
+  });
+}
+
+/** Mark a reply as handled (Campaigns overhaul Phase 3, S9) — stamps
+ *  payload.handled on the campaign_events row via the playbook-smartlead
+ *  edge function (campaign_events is service-role-write-only; a client can't
+ *  update it directly — see the `mark-reply-handled` action's doc comment).
+ *  The Replies feed dims/groups a handled row rather than removing it. */
+export function useMarkReplyHandled() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (eventId: string) => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "mark-reply-handled", event_id: eventId },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["playbook", "campaign-replies"] }),
+    onError: (e) => toast.error("Couldn't mark handled: " + (e as Error).message),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Campaigns tab "This month" stats strip (Campaigns overhaul Phase 3, S9)
+// ---------------------------------------------------------------------------
+
+const MONTH_STATS_WINDOW_DAYS = 30;
+
+export interface CampaignMonthStats {
+  campaignsLaunched: number;
+  peopleEnrolled: number;
+  replies: number;
+  positiveReplies: number;
+}
+
+/** "This month" strip above Ongoing campaigns in CampaignsTab.tsx — plain
+ *  counts over the last 30 days: campaigns launched (left draft in that
+ *  window), people enrolled, replies received, and replies that read as
+ *  positive (isPositiveReplyCategory — see reply-extract.ts's client twin of
+ *  _shared/reply-category.ts). Two queries (campaigns don't live on the
+ *  enrollments table), but each is a single grouped fetch, not one query per
+ *  number. */
+export function useCampaignsMonthStats() {
+  return useQuery({
+    queryKey: ["playbook", "campaign-month-stats"],
+    queryFn: async (): Promise<CampaignMonthStats> => {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - MONTH_STATS_WINDOW_DAYS);
+      const cutoffIso = cutoff.toISOString();
+
+      const [launchedRes, enrollRes] = await Promise.all([
+        supabase
+          .from("campaigns")
+          .select("id", { count: "exact", head: true })
+          .neq("status", "draft")
+          .gte("created_at", cutoffIso),
+        supabase
+          .from("campaign_enrollments")
+          .select("enrolled_at, replied_at, reply_category")
+          .or(`enrolled_at.gte.${cutoffIso},replied_at.gte.${cutoffIso}`),
+      ]);
+      if (launchedRes.error) throw launchedRes.error;
+      if (enrollRes.error) throw enrollRes.error;
+
+      let peopleEnrolled = 0;
+      let replies = 0;
+      let positiveReplies = 0;
+      for (const row of (enrollRes.data ?? []) as { enrolled_at: string | null; replied_at: string | null; reply_category: string | null }[]) {
+        if (row.enrolled_at && row.enrolled_at >= cutoffIso) peopleEnrolled++;
+        if (row.replied_at && row.replied_at >= cutoffIso) {
+          replies++;
+          if (isPositiveReplyCategory(row.reply_category)) positiveReplies++;
+        }
+      }
+
+      return {
+        campaignsLaunched: launchedRes.count ?? 0,
+        peopleEnrolled,
+        replies,
+        positiveReplies,
+      };
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Template scoreboard (Campaigns overhaul Phase 3, S9)
+// ---------------------------------------------------------------------------
+
+export interface TemplateScoreboardEntry {
+  campaigns: number;
+  replies: number;
+}
+
+/** Lifetime "N campaigns · X replies" per template, for the small stat line
+ *  on each preset card in TemplatesSection.tsx. One query grouping every
+ *  campaign by template_id client-side (cheap at this scale — same
+ *  aggregate-in-app pattern as useCampaignEnrollmentStats). Templates with
+ *  zero linked campaigns simply have no entry — callers hide the line
+ *  entirely rather than showing "0 campaigns". */
+export function useTemplateScoreboard() {
+  return useQuery({
+    queryKey: ["playbook", "template-scoreboard"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("campaigns")
+        .select("template_id, metrics")
+        .not("template_id", "is", null);
+      if (error) throw error;
+      const out: Record<string, TemplateScoreboardEntry> = {};
+      for (const row of (data ?? []) as { template_id: string; metrics: CampaignMetrics | null }[]) {
+        const entry = (out[row.template_id] ??= { campaigns: 0, replies: 0 });
+        entry.campaigns++;
+        const replies = Number(row.metrics?.replies);
+        if (Number.isFinite(replies)) entry.replies += replies;
+      }
+      return out;
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Enrollment engine (Campaigns overhaul S3)
+// ---------------------------------------------------------------------------
+
+export interface ActiveEnrollmentEntry {
+  email: string;
+  campaign_id: string;
+  /** Falls back to a generic label if the joined campaign row is somehow
+   *  missing (e.g. RLS edge case) — should not normally happen. */
+  campaign_name: string;
+}
+
+/** Batched check: which of these emails are ALREADY actively enrolled in
+ *  ANY campaign (not just the one being built)? CampaignRecipients.tsx's
+ *  "already enrolled elsewhere" soft-alert rail — same shape/batching as
+ *  fetchSuppressionForEmails, reading campaign_enrollments instead of
+ *  v_marketing_suppression. Server re-checks this independently before
+ *  enrolling anyone (playbook-smartlead/index.ts's `launch` action). */
+export async function fetchActiveEnrollmentsForEmails(emails: string[]): Promise<ActiveEnrollmentEntry[]> {
+  const normalized = Array.from(new Set(emails.map(normalizeEmail).filter(Boolean)));
+  if (!normalized.length) return [];
+  const BATCH = 500;
+  const out: ActiveEnrollmentEntry[] = [];
+  for (let i = 0; i < normalized.length; i += BATCH) {
+    const batch = normalized.slice(i, i + BATCH);
+    const { data, error } = await supabase
+      .from("campaign_enrollments")
+      .select("email, campaign_id, campaign:campaigns(name)")
+      .eq("status", "active")
+      .in("email", batch);
+    if (error) throw error;
+    // Supabase's query-builder type inference doesn't know campaign_id ->
+    // campaigns.id is many-to-one (no generated Database types in this
+    // project), so it infers `campaign` as an array; PostgREST actually
+    // returns a single embedded object for a to-one relationship at
+    // runtime — cast via `unknown` and read it as the object it really is.
+    for (const row of (data ?? []) as unknown as {
+      email: string | null;
+      campaign_id: string;
+      campaign: { name: string } | null;
+    }[]) {
+      if (!row.email) continue;
+      out.push({
+        email: row.email,
+        campaign_id: row.campaign_id,
+        campaign_name: row.campaign?.name ?? "another campaign",
+      });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Campaign detail sheet (Campaigns overhaul S8) — the full person-by-person
+// view of one campaign, with per-person Pause/Resume/Stop.
+// ---------------------------------------------------------------------------
+
+export interface CampaignEnrollmentRow {
+  id: string;
+  campaign_id: string;
+  contact_id: string | null;
+  account_id: string | null;
+  enroll_position: number;
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  company: string | null;
+  status: string;
+  paused_reason: string | null;
+  current_step: number;
+  first_send_at: string | null;
+  replied_at: string | null;
+  bounced_at: string | null;
+  unsubscribed_at: string | null;
+  last_event_at: string | null;
+  enrolled_at: string;
+  reply_category: string | null;
+}
+
+/** Every enrollment for one campaign, in enroll_position order — the detail
+ *  sheet's People table. Lazy: only enabled while a campaignId is actually
+ *  supplied (i.e. the sheet is open), so a closed sheet never fires this. */
+export function useCampaignEnrollments(campaignId: string | null) {
+  return useQuery({
+    queryKey: ["playbook", "campaign-enrollments", campaignId],
+    enabled: !!campaignId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("campaign_enrollments")
+        .select("id, campaign_id, contact_id, account_id, enroll_position, email, first_name, last_name, company, status, paused_reason, current_step, first_send_at, replied_at, bounced_at, unsubscribed_at, last_event_at, enrolled_at, reply_category")
+        .eq("campaign_id", campaignId as string)
+        .order("enroll_position", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as CampaignEnrollmentRow[];
+    },
+  });
+}
+
+export interface CampaignEventRow {
+  id: string;
+  event_type: string;
+  email: string | null;
+  occurred_at: string | null;
+  created_at: string;
+}
+
+const CAMPAIGN_DETAIL_EVENTS_LIMIT = 20;
+
+/** Last 20 campaign_events for one campaign, newest first — the detail
+ *  sheet's Recent activity section. Same lazy-enable pattern as
+ *  useCampaignEnrollments. */
+export function useCampaignEvents(campaignId: string | null) {
+  return useQuery({
+    queryKey: ["playbook", "campaign-events", campaignId],
+    enabled: !!campaignId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("campaign_events")
+        .select("id, event_type, email, occurred_at, created_at")
+        .eq("campaign_id", campaignId as string)
+        .order("created_at", { ascending: false })
+        .limit(CAMPAIGN_DETAIL_EVENTS_LIMIT);
+      if (error) throw error;
+      return (data ?? []) as CampaignEventRow[];
+    },
+  });
+}
+
+export interface CampaignEventStats {
+  sent: number;
+  opened: number;
+  clicked: number;
+  replied: number;
+}
+
+/** Which of the four funnel buckets an event_type string belongs to, or null
+ *  if it's none of them (e.g. a bounce/unsubscribe/category-update row).
+ *  event_type may be the raw Smartlead name (EMAIL_REPLY) or the canonical
+ *  one (EMAIL_REPLIED) — see REPLY_EVENT_TYPES above — so this matches on
+ *  substring the same defensive way _shared/webhook-normalize.ts's
+ *  mapEventType does, rather than an exact-string lookup table. */
+function eventTypeBucket(eventType: string): keyof CampaignEventStats | null {
+  const t = eventType.toLowerCase();
+  if (t.includes("repl")) return "replied";
+  if (t.includes("click")) return "clicked";
+  if (t.includes("open")) return "opened";
+  if (t.includes("sent") || t.includes("send")) return "sent";
+  return null;
+}
+
+/** Total sent/opened/clicked/replied counts across EVERY campaign_events row
+ *  for one campaign (not just the last-20 useCampaignEvents shows) — the
+ *  CampaignDetailSheet's compact "Events seen" funnel row. Deliberately
+ *  honest about what this is: a raw tally of our own event log, not a
+ *  per-step breakdown (Smartlead's sequence-step field isn't reliably
+ *  present — see extractStepNumber's doc comment in playbook-smartlead/
+ *  index.ts) and not the same numbers as campaigns.metrics (Smartlead's own
+ *  server-computed rates, shown separately in the header). Lazy, same
+ *  enable-while-open pattern as the other detail-sheet queries. */
+export function useCampaignEventStats(campaignId: string | null) {
+  return useQuery({
+    queryKey: ["playbook", "campaign-event-stats", campaignId],
+    enabled: !!campaignId,
+    queryFn: async (): Promise<CampaignEventStats> => {
+      const { data, error } = await supabase
+        .from("campaign_events")
+        .select("event_type")
+        .eq("campaign_id", campaignId as string);
+      if (error) throw error;
+      const out: CampaignEventStats = { sent: 0, opened: 0, clicked: 0, replied: 0 };
+      for (const row of (data ?? []) as { event_type: string }[]) {
+        const bucket = eventTypeBucket(row.event_type);
+        if (bucket) out[bucket]++;
+      }
+      return out;
+    },
+  });
+}
+
+export type EnrollmentStatusAction = "pause" | "resume" | "stop";
+
+/** Pause / resume / stop ONE person's enrollment — see the `set-enrollment-status`
+ *  action in playbook-smartlead/index.ts (S8). `warning` (best-effort Smartlead
+ *  sync failed, or their Smartlead lead couldn't be found) is returned rather
+ *  than thrown so the caller can toast.warning it instead of toast.error — the
+ *  Pulse-side change still succeeded. */
+export function useSetEnrollmentStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: { enrollment_id: string; action: EnrollmentStatusAction; campaign_id: string }) => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "set-enrollment-status", enrollment_id: p.enrollment_id, status_action: p.action },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as { success: boolean; status: string; warning?: string };
+    },
+    onSuccess: (_r, p) => {
+      qc.invalidateQueries({ queryKey: ["playbook", "campaign-enrollments", p.campaign_id] });
+      // Prefix match — invalidates every campaign's enrollment-stats entry,
+      // not just this one, since the stats key also carries a sorted-ids
+      // suffix this mutation has no cheap way to reconstruct.
+      qc.invalidateQueries({ queryKey: ["playbook", "campaign-enrollment-stats"] });
+      qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] });
+    },
+    onError: (e) => toast.error("Couldn't update this person: " + (e as Error).message),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Campaign suggestions (Campaigns overhaul Phase 4 — the AI learning loop)
+// ---------------------------------------------------------------------------
+
+/** Every suggestion (pending + decided), newest first — InsightsPanel groups
+ *  pending ones by template client-side and shows decided ones collapsed
+ *  underneath. One query covers both; the panel's badge count on the
+ *  Insights button reuses this same cached list (react-query dedupes the
+ *  fetch) rather than firing a second one. */
+export function useCampaignSuggestions() {
+  return useQuery({
+    queryKey: ["playbook", "campaign-suggestions"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("campaign_suggestions")
+        .select("*, campaign:campaigns(name)")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as unknown as CampaignSuggestion[];
+    },
+  });
+}
+
+/** Count of pending suggestions only — the same query the badge would need,
+ *  kept separate so a page that only wants the count (the Insights button
+ *  before the panel is ever opened) doesn't pull rationale/current/suggested
+ *  text for every row. Cheap head-count query. */
+export function usePendingSuggestionCount() {
+  return useQuery({
+    queryKey: ["playbook", "campaign-suggestions", "pending-count"],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from("campaign_suggestions")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "pending");
+      if (error) throw error;
+      return count ?? 0;
+    },
+  });
+}
+
+/** Apply or dismiss a suggestion — see the `decide-suggestion` action in
+ *  playbook-smartlead/index.ts. campaign_suggestions is admin-read-only via
+ *  RLS, so the status transition (and, on 'applied', the training-note log)
+ *  has to go through the edge function rather than a direct table update —
+ *  same shape as useMarkReplyHandled/useSetEnrollmentStatus above.
+ *
+ *  IMPORTANT: this does NOT edit the template. When decision is 'applied',
+ *  the caller must have already written the template edit itself (via
+ *  useSaveTemplate + applySuggestionToTemplate from suggestion-apply.ts,
+ *  see InsightsPanel.tsx's handleApply) BEFORE calling this — this hook only
+ *  stamps the suggestion decided and logs the training note. */
+export function useDecideSuggestion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: { id: string; decision: Extract<SuggestionStatus, "applied" | "dismissed"> }) => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "decide-suggestion", id: p.id, decision: p.decision },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as { success: boolean; status: string; already_decided?: boolean };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["playbook", "campaign-suggestions"] });
+      qc.invalidateQueries({ queryKey: ["playbook", "training"] });
+    },
+    onError: (e) => toast.error("Couldn't save that decision: " + (e as Error).message),
+  });
 }

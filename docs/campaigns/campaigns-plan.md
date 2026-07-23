@@ -330,3 +330,193 @@ Reaction: "better than playbook ever was." Looks loved. Concrete asks:
 - Smartlead reply/unsub detection is **daily polling, not webhooks** — v1 uses the daily job; the
   naive single-anchor date math would mis-schedule throttled leads, so we anchor **per-lead** (§5).
 - "Warming sequence" is **undefined** in any doc — §9 proposes a default; needs Nathan's real cadence.
+
+---
+
+## BUILD KICKOFF — 2026-07-22 (Nathan's green light; supersedes stale bits above)
+
+Nathan approved the full overhaul ("build and build until this is done, in the build order you said").
+Fable session planning/managing; build work delegated to subagents with tight specs + review.
+
+### Research corrections (2026-07-22 — these OVERRIDE §5/§6/§8 assumptions)
+
+- **Smartlead HAS webhooks** (account/client/campaign scope): EMAIL_SENT, EMAIL_OPENED, EMAIL_CLICKED,
+  EMAIL_REPLIED (incl. reply body), EMAIL_BOUNCED, EMAIL_UNSUBSCRIBED. HMAC-SHA256 signed; retries
+  1m/5m/15m/1h/6h then **auto-disable after 5 failures** → keep the daily reconcile sweep as the safety
+  net regardless. §6's "no webhooks, daily polling only" is obsolete for Phase 2+.
+- **Custom fields: up to 200 per lead** (not just first/last/company/email) → deep personalization =
+  pre-render Pulse fields into custom_fields at lead upload. §8's 4-field caveat is obsolete.
+- Native per-step **A/B variants** (variant_distribution_type), **per-lead pause/resume/delete**,
+  **reply categories** (Interested/Meeting Request/Not Interested/Do Not Contact/Info Request + AI
+  categorization), `auto_pause_domain_leads_on_reply` (whole-domain courtesy pause),
+  OOO detection settings (ignore-as-reply, auto-reactivate w/ delay), `stop_lead_settings` (stop on
+  reply default), global block list API, warmup-stats API, per-lead message-history + reply-in-thread,
+  spintax. Follow-up threading = omit subject ("Re:").
+- Lead add: 400/batch; `ignore_duplicate_leads_in_other_campaign` **defaults false** = Smartlead blocks
+  cross-campaign dupes by default (backstop for our no-double-enroll rail). Analytics-by-date capped at
+  30-day windows. Rate limits undocumented → keep the serial client + backoff.
+- **API/webhooks require Smartlead Pro plan — VERIFY our tier before Phase 2** (probe from the edge fn;
+  key is staging-only secret).
+- playbook-smartlead-sync.yml "failure" was NOT a bug: GH `schedule:` runs from main (prod) only, and
+  Playbook is staging-only → 403 by design; correctly disabled until promotion. Scheduled metrics
+  refresh moves into the Phase-2 daily engine job (pg_cron on staging) instead.
+
+### Nathan's decisions (2026-07-22)
+
+- **Per-person solo campaigns**: right-click → start = a solo campaign (1 person, own Smartlead campaign).
+  Smartlead-side clutter is fine — Pulse is the tracking surface, staff shouldn't need Smartlead at all.
+  8-Touch = usually solo/small; Warming + drips = bulk lists. Both models first-class.
+- **Tracker**: beautiful Ongoing campaigns tracker incl. recently-ended (≤30 days), status at a glance,
+  pause/edit/stop from inside Pulse. Admins see ALL campaigns; non-admins later see only My Campaigns.
+- **Rep touches surface in the Nexus tab** (widget) as well as Up Next.
+- **Unsubscribe link = per-campaign OPTION, not forced** (some sends are permission-based follow-ups;
+  Nathan reviewing past practice). Opt-outs that do occur must still flow back + stick.
+- **Top-priority rails: never email Do-Not-Email + never double-enroll.** (CSV/paste suppression hole
+  confirmed 2026-07-22 — close server-side in launch, all recipient sources.)
+- **Reply feed lives in the Campaigns tab** (duplication with contact email activity acceptable;
+  implementer picks the best mechanism).
+- **Admin-only until proven** ("we shouldn't put a tool in user's hands if it's not working, hard to
+  use, or not beautiful"). Staging-only until cutover promotion.
+- Senders for now: Summer's side email + the marketing side email (+ main work emails sparingly if
+  volume is low — they perform better). More inboxes purchased only after the machine proves out.
+- Content: Nathan is getting Jordan M's 8-Touch/Warming wording; AI drafts fill gaps until then.
+- Future (docketed): Ask-AI natural-language campaign setup → build clean internal APIs now so AI can
+  drive campaigns later.
+
+### Phase 1 slices (current work)
+
+- **S1 — Unify the two campaign models.** `campaigns` (20260625000001) becomes the single source of
+  truth; migrate `playbook_campaigns` rows in (same ids, origin='legacy'|'pulse'|
+  'smartlead_import', status map planned→draft, in_progress→active, complete→completed), add the
+  legacy columns campaigns lacks (metrics, analyzed_at, analysis_json, adaptive_enabled, notes, …),
+  repoint FKs (campaign_adaptations), archive-rename the old table (reversible), update api.ts hooks +
+  playbook-smartlead + playbook-ai. Newsletters confirmed untouched (playbook_newsletters only).
+- **S2 — Suppression enforcement.** Server-side v_marketing_suppression check in launch for ALL
+  sources (tag/CSV/paste); UI soft-alert counts ("50 picked → 47 eligible, 3 suppressed") + review
+  list; keep override explicit + logged.
+- **S3 — Template→launch bridge + enrollments.** "Use this template"/"Use this sequence" live:
+  template steps → launch flow (edit email copy, recipients, inbox, leads/day) → writes `campaigns`
+  (frozen steps) + `campaign_enrollments` (enroll_position by upload order; first_send_at = anchor +
+  floor((pos-1)/leads_per_day) snapped to send days; Smartlead max_new_leads_per_day MUST equal
+  leads_per_day) → pushes EMAIL_AUTO steps to Smartlead → **spawns CALL/LINKEDIN/EMAIL_HYBRID tasks at
+  launch** per enrollment at computed dates (activities recipe w/ campaign_enrollment_id,
+  campaign_step_number, is_campaign_generated; Phase 2 re-dates on drift + cancels on reply).
+- **S4 — Tracker v1.** Unified Ongoing (+ ended ≤30d) view on `campaigns`: status chips,
+  owner, per-campaign enrollment progress, metrics, pause/resume/stop actions (new edge actions →
+  Smartlead PATCH status), styled delete confirm (replaces native confirm()), TrainingPanel padding
+  polish. Admin sees all; groundwork for My Campaigns scoping.
+
+Phase 2+ (engine: webhooks endpoint + tier probe, daily sweep pg_cron, auto-stop, task re-dating,
+stop/edit mid-flight, solo-campaign right-click fast path, Nexus widget, reply feed, analytics, AI
+insights/adaptation, scale) — specs to be cut when Phase 1 lands.
+
+### PHASE 1 COMPLETE — 2026-07-22, staging, live-verified
+
+All four slices shipped + verified with real Smartlead traffic (commits 306fb72 S1-unify,
+93441b6 S2-suppression, 6626c61 S3-launch-bridge, f662f67 S4-tracker, fc57cd3 backfill fix):
+template → 3-step launch (suppression rail caught a real DNC paste + per-person override worked) →
+draft in Smartlead → Start from tracker (dates computed, 4 merged call/LinkedIn tasks spawned,
+correct Jul29/Aug2/Aug9/Aug13 offsets) → Pause/Resume → Stop (enrollment stopped, all 4 tasks
+archived "Campaign stopped") → delete (both sides). Live-test catch worth remembering: the
+first_send_at bulk-write upsert silently violated NOT NULL → replaced with grouped per-date
+UPDATEs that throw; Start/Resume are retry-safe + idempotent.
+
+Known follow-ups for Phase 2 (docketed in the code, not blockers):
+- Task due dates don't skip weekends / honor domain_rules.start_anchor (Day-12 LinkedIn from a
+  Tue launch lands on a Sunday). Snap non-email steps to weekdays.
+- Task title merge falls back to "" when a pasted recipient has no first_name — fall back to email.
+- Smartlead "did email 1 actually send" confirmation = Phase 2 webhooks/per-lead statistics.
+- Empty-copy templates: seeded 8-Touch/Warming still need Jordan M's real wording.
+
+Phase 2 (engine: webhooks + tier probe, daily sweep, auto-stop on reply, task re-dating,
+right-click solo campaigns, Nexus widget, reply feed) is next.
+
+### PHASE 2 COMPLETE — 2026-07-22, staging, live-verified with real sending
+
+Commits 5926e5c (S5 webhooks+auto-stop), e688598 (S6 daily sweep + pg_cron 13:10 UTC),
+b1a37e3 (S7 right-click fast path + Nexus widget + Replies feed + weekend snap),
+d6cf6bc + 326af98 (webhook-register diagnostic + the REAL Smartlead event enum:
+EMAIL_SENT / EMAIL_OPEN / EMAIL_LINK_CLICK / EMAIL_REPLY / EMAIL_BOUNCE / LEAD_UNSUBSCRIBED —
+their API rejected the docs-page names; payloads carry NO signature, so the per-campaign
+?token= secret gate is the auth).
+
+Live test (news@accessmedcurity.com → nathang@medcurity.com, Warming template, real send):
+email sent + opened + Nathan replied; webhook registration verified working (id stored,
+all 6 events on — auto-registers at launch now); the reply landed pre-registration, which
+live-proved the S6 sweep instead: per-lead statistics reconcile detected the reply, stopped
+the enrollment (status replied, first_send_at corrected to the real send date), and created
+the owner's "Reply from Nathan Gellatly" high-priority task. Tracker/Replies/right-click all
+deployed; suppression + double-enroll rails unchanged.
+
+Known follow-ups (docketed): sweep-detected replies should also write a campaign_events row
+so the Replies feed shows them (today only webhook-received replies appear); a future send
+will naturally regression-test the real-time webhook path end-to-end; LIVE TEST campaign left
+in the tracker for Nathan to inspect, then delete.
+
+Remaining phases: 3 (analytics depth + reply-feed actions), 4 (AI insights/adaptation),
+5 (scale: multi-inbox, warmup, rep access). Content: Jordan M's copy still pending.
+
+### PHASE 3 COMPLETE — 2026-07-22 evening, staging, verified live
+
+Commits 86bdaeb (S8 campaign detail sheet) + 6ace3d0 (S9+S10 replies/analytics):
+- Campaign detail sheet: click any campaign → header w/ shared Start/Pause/Resume/Stop,
+  sequence strip, metrics, searchable People table (per-person status/first-send/step,
+  contact links), per-person Stop/Pause/Resume (Pulse-side always completes; Smartlead
+  per-lead call best-effort with honest warning), recent-events feed. Verified live on the
+  LIVE TEST campaign (Nathan's replied enrollment renders correctly, terminal rows hide controls).
+- Replies completeness: sweep-detected replies/bounces now write campaign_events (idempotent)
+  + replies land on the contact timeline; reply_category column populated from Smartlead lead
+  categories (webhook + sweep); feed actions (Open contact, Mark handled w/ collapsed group);
+  positive-reply helper unit-tested.
+- Analytics: event-tally row in the detail sheet, "This month" stats strip on the tab,
+  per-template lifetime scoreboard (verified live: Warming card shows "1 campaign · 1 reply").
+
+Cosmetic follow-ups noted: detail-sheet First-send renders a day early (date-only value through
+a local-time formatter); Step column shows "Not sent yet" until events carry sequence numbers.
+
+Remaining: Phase 4 (AI insights/adaptation loop — milestone reviews, apply/dismiss suggestions,
+auto-training), Phase 5 (scale: multi-inbox dashboard, warmup badges, timezone windows, rep
+access + My Campaigns RLS). Content: Jordan M's 8-Touch/Warming wording still pending.
+
+### PHASES 4 & 5 COMPLETE — 2026-07-22 night, staging, live-verified
+
+Commits 798430c (Phase 4 AI loop) + d653a91 (Phase 5 scale). The full master plan is now built.
+
+**Phase 4 — AI learning loop:** campaign-insights AI action reviews a campaign's real numbers
+(metrics, enrollment statuses, reply categories, event tallies, sibling campaigns on the same
+template, Training notes) → plain-English performance read + up to 4 grounded template
+suggestions (model instructed to cite numbers, return [] not invent). Daily sweep auto-analyzes
+at completion or 20+ sends (cap 3/run). Insights panel (next to Training, pending-count badge):
+current→suggested + rationale, Apply edits the TEMPLATE (running campaigns never touched) + logs
+to Training, Dismiss archives. Timing suggestions apply only when they parse; audience/general
+are read-only guidance. campaign_suggestions table, decide-suggestion action, 17 unit tests.
+
+**Phase 5 — scale layer:** "Sending inboxes" panel — LIVE-VERIFIED against real Smartlead
+warmup data (the /email-accounts/{id}/warmup-stats endpoint WORKS — last unverified Smartlead
+endpoint, now confirmed): every inbox's warmup health in plain English, which campaigns it feeds,
+combined daily draw, honest headroom. Surfaced a real signal on first look: the launch default
+leads_per_day=25 oversubscribes news@ (15/day limit) → "Room for ~0 more" (docket: lower the
+default or clamp to the inbox limit). Wizard warns when an inbox already feeds active campaigns.
+Rep-access foundation (built, NOT flipped): additive owner-scoped SELECT RLS
+(campaigns/enrollments/events/templates; suggestions stay admin-only; zero client write policies)
++ edge-fn ownership gates on launch/status/enrollment for non-admin callers; UI stays admin-gated,
+"Rep rollout flip point" comments mark App.tsx/ContactsList.tsx/playbook-smartlead every gate.
+Cosmetic fixes shipped: first-send date UTC formatter, Step column "In progress".
+
+**Live-tested by us before any real use (per Nathan):** throttle math, suppression + no-double-
+enroll, template launch, per-person Stop (verified: only the targeted person stopped + their
+tasks archived, the co-enrollee stayed active with tasks intact; Smartlead lead id resolved
+on demand, per-lead pause endpoint succeeded), webhook registration (real enum found via probe),
+reply auto-stop (real reply from Nathan), daily sweep reconcile, inbox warmup. Everything an
+admin can do has been exercised against the real Smartlead account on staging.
+
+### Docketed follow-ups (none blocking)
+- Launch default leads_per_day (25) can exceed a small inbox's daily limit — clamp to inbox
+  limit or lower default; the Sending-inboxes panel now surfaces the oversubscription.
+- Cosmetic: (shipped) first-send date, Step column.
+- Rep rollout is a deliberate later flip (3 marked points) — needs Nathan/Brayden's go.
+- Jordan M's real 8-Touch/Warming copy still pending — presets ship with placeholder wording.
+- The LIVE TEST + a Warming preset now carry lifetime stats; delete LIVE TEST campaigns when done.
+
+### PROJECT STATUS: all 5 planned phases BUILT + live-verified on staging, admin-only, awaiting
+Nathan's prod-promotion go (whole Campaigns feature promotes together at cutover) + Jordan's copy.

@@ -83,11 +83,19 @@ export function buildSmartleadMetrics(analytics: Record<string, unknown> | null)
   return m;
 }
 
-/** Map a Smartlead status to our planned/in_progress/complete (server.js:3896). */
-export function mapSmartleadStatus(status: string | null | undefined): "planned" | "in_progress" | "complete" {
-  if (!status) return "planned";
+/** Map a Smartlead status to our draft/active/paused/completed/stopped
+ *  (campaigns.status — 20260625000001). Mirrors Smartlead directly rather
+ *  than the old planned/in_progress/complete bucketing (server.js:3896) so
+ *  a paused campaign shows as paused, not lumped in with active. */
+export function mapSmartleadStatus(
+  status: string | null | undefined,
+): "draft" | "active" | "paused" | "completed" | "stopped" {
+  if (!status) return "draft";
   const s = status.toUpperCase();
-  if (s === "ACTIVE" || s === "PAUSED") return "in_progress";
-  if (s === "STOPPED" || s === "ARCHIVED" || s === "COMPLETED") return "complete";
-  return "planned";
+  if (s === "ACTIVE") return "active";
+  if (s === "PAUSED") return "paused";
+  if (s === "COMPLETED") return "completed";
+  if (s === "STOPPED" || s === "ARCHIVED") return "stopped";
+  if (s === "DRAFTED") return "draft";
+  return "draft";
 }

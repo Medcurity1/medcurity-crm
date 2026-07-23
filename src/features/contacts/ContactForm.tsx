@@ -31,10 +31,49 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { DuplicateWarning } from "@/components/DuplicateWarning";
+import { cn } from "@/lib/utils";
+import {
+  UserRound,
+  Phone as PhoneGroupIcon,
+  SlidersHorizontal,
+  CalendarClock,
+  MapPin,
+  Flag,
+  StickyNote,
+  type LucideIcon,
+} from "lucide-react";
+
+/**
+ * One visual group of the form (Summer's 7/22 reorg + Nathan's design
+ * pass): a soft panel with an icon-chip header. Keeps the long form
+ * scannable without the single "boring box" it used to be.
+ */
+function FormSection({
+  icon: Icon,
+  title,
+  children,
+  bodyClassName,
+}: {
+  icon: LucideIcon;
+  title: string;
+  children: React.ReactNode;
+  bodyClassName?: string;
+}) {
+  return (
+    <section className="overflow-hidden rounded-xl border border-border/60 bg-card">
+      <div className="flex items-center gap-2.5 border-b border-border/40 bg-muted/30 px-4 py-2.5">
+        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10">
+          <Icon className="h-3.5 w-3.5 text-primary" />
+        </span>
+        <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
+      </div>
+      <div className={cn("p-4", bodyClassName)}>{children}</div>
+    </section>
+  );
+}
 
 /**
  * Outer wrapper — handles the data-load gate. We must NOT mount the
@@ -302,11 +341,13 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
     <div>
       <PageHeader title={isEditing ? "Edit Contact" : "New Contact"} />
 
-      <Card>
-        <CardContent className="pt-6">
-          <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2 md:col-span-2">
+      <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="max-w-4xl space-y-5">
+            <FormSection
+              icon={UserRound}
+              title="Who They Are"
+              bodyClassName="grid grid-cols-1 md:grid-cols-2 gap-4"
+            >
+              <div className="space-y-2">
                 <Label>Account</Label>
                 <AccountCombobox
                   value={
@@ -325,13 +366,33 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="first_name">First Name *<RequiredIndicator fieldKey="first_name" requiredFields={requiredKeys} /></Label>
+                <Label>Owner<RequiredIndicator fieldKey="owner_user_id" requiredFields={requiredKeys} /></Label>
+                <Select
+                  value={watch("owner_user_id") ?? "unassigned"}
+                  onValueChange={(v) => setValue("owner_user_id", v === "unassigned" ? null : v)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select owner" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unassigned">Unassigned</SelectItem>
+                    {users?.map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.full_name ?? u.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="first_name">First Name<RequiredIndicator fieldKey="first_name" requiredFields={requiredKeys} /></Label>
                 <Input id="first_name" {...register("first_name")} />
                 {errors.first_name && <p className="text-sm text-destructive">{errors.first_name.message}</p>}
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="last_name">Last Name *<RequiredIndicator fieldKey="last_name" requiredFields={requiredKeys} /></Label>
+                <Label htmlFor="last_name">Last Name<RequiredIndicator fieldKey="last_name" requiredFields={requiredKeys} /></Label>
                 <Input id="last_name" {...register("last_name")} />
                 {errors.last_name && <p className="text-sm text-destructive">{errors.last_name.message}</p>}
               </div>
@@ -377,37 +438,52 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
                   still round-trip the loaded value on save so nothing is lost. */}
 
               <div className="space-y-2">
-                <Label htmlFor="phone">
-                  Phone<RequiredIndicator fieldKey="phone" requiredFields={requiredKeys} />
-                </Label>
-                <PhoneInput
-                  id="phone"
-                  value={watch("phone") ?? ""}
-                  onChange={(v) => setValue("phone", v)}
+                <Label>Credential</Label>
+                <PicklistSelect
+                  fieldKey="contacts.credential"
+                  className="w-full"
+                  value={watch("credential") as string | null | undefined}
+                  onChange={(v) => setValue("credential", (v ?? "") as never)}
+                  allowClear
                 />
               </div>
+            </FormSection>
 
-              <div className="space-y-2">
-                <Label htmlFor="phone_ext">
-                  Phone Ext<RequiredIndicator fieldKey="phone_ext" requiredFields={requiredKeys} />
-                </Label>
-                <Input
-                  id="phone_ext"
-                  inputMode="numeric"
-                  placeholder="567"
-                  {...register("phone_ext")}
-                />
-              </div>
+            <FormSection icon={PhoneGroupIcon} title="Phone & Links" bodyClassName="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr_2fr] gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="phone">
+                    Phone<RequiredIndicator fieldKey="phone" requiredFields={requiredKeys} />
+                  </Label>
+                  <PhoneInput
+                    id="phone"
+                    value={watch("phone") ?? ""}
+                    onChange={(v) => setValue("phone", v)}
+                  />
+                </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="mobile_phone">
-                  Mobile Phone<RequiredIndicator fieldKey="mobile_phone" requiredFields={requiredKeys} />
-                </Label>
-                <PhoneInput
-                  id="mobile_phone"
-                  value={watch("mobile_phone") ?? ""}
-                  onChange={(v) => setValue("mobile_phone", v)}
-                />
+                <div className="space-y-2">
+                  <Label htmlFor="phone_ext">
+                    Ext<RequiredIndicator fieldKey="phone_ext" requiredFields={requiredKeys} />
+                  </Label>
+                  <Input
+                    id="phone_ext"
+                    inputMode="numeric"
+                    placeholder="567"
+                    {...register("phone_ext")}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="mobile_phone">
+                    Mobile Phone<RequiredIndicator fieldKey="mobile_phone" requiredFields={requiredKeys} />
+                  </Label>
+                  <PhoneInput
+                    id="mobile_phone"
+                    value={watch("mobile_phone") ?? ""}
+                    onChange={(v) => setValue("mobile_phone", v)}
+                  />
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -415,33 +491,20 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
                 <Input id="linkedin_url" type="url" placeholder="https://linkedin.com/in/..." {...register("linkedin_url")} />
                 {errors.linkedin_url && <p className="text-sm text-destructive">{errors.linkedin_url.message}</p>}
               </div>
+            </FormSection>
 
-              <div className="space-y-2">
-                <Label>Credential</Label>
-                <PicklistSelect
-                  fieldKey="contacts.credential"
-                  value={watch("credential") as string | null | undefined}
-                  onChange={(v) => setValue("credential", (v ?? "") as never)}
-                  allowClear
-                />
-              </div>
-
+            <FormSection
+              icon={SlidersHorizontal}
+              title="Details"
+              bodyClassName="grid grid-cols-1 sm:grid-cols-2 gap-4"
+            >
               <div className="space-y-2">
                 <Label>Time Zone</Label>
                 <PicklistSelect
                   fieldKey="contacts.time_zone"
+                  className="w-full"
                   value={watch("time_zone") as string | null | undefined}
                   onChange={(v) => setValue("time_zone", (v ?? "") as never)}
-                  allowClear
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Contact Type</Label>
-                <PicklistSelect
-                  fieldKey="contacts.type"
-                  value={watch("type") as string | null | undefined}
-                  onChange={(v) => setValue("type", (v ?? "") as never)}
                   allowClear
                 />
               </div>
@@ -450,6 +513,7 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
                 <Label>Relationship Tag</Label>
                 <PicklistSelect
                   fieldKey="contacts.business_relationship_tag"
+                  className="w-full"
                   value={watch("business_relationship_tag") as string | null | undefined}
                   onChange={(v) =>
                     setValue("business_relationship_tag", (v ?? "") as never)
@@ -459,35 +523,33 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
               </div>
 
               <div className="space-y-2">
-                <Label>Lead Source</Label>
+                <Label>Contact Type</Label>
                 <PicklistSelect
-                  fieldKey="contacts.lead_source"
-                  value={watch("lead_source") as string | null | undefined}
-                  onChange={(v) => setValue("lead_source", v ?? null)}
+                  fieldKey="contacts.type"
+                  className="w-full"
+                  value={watch("type") as string | null | undefined}
+                  onChange={(v) => setValue("type", (v ?? "") as never)}
                   allowClear
                 />
               </div>
 
               <div className="space-y-2">
-                <Label>Owner<RequiredIndicator fieldKey="owner_user_id" requiredFields={requiredKeys} /></Label>
-                <Select
-                  value={watch("owner_user_id") ?? "unassigned"}
-                  onValueChange={(v) => setValue("owner_user_id", v === "unassigned" ? null : v)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select owner" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="unassigned">Unassigned</SelectItem>
-                    {users?.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.full_name ?? u.id}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label>Lead Source</Label>
+                <PicklistSelect
+                  fieldKey="contacts.lead_source"
+                  className="w-full"
+                  value={watch("lead_source") as string | null | undefined}
+                  onChange={(v) => setValue("lead_source", v ?? null)}
+                  allowClear
+                />
               </div>
+            </FormSection>
 
+            <FormSection
+              icon={CalendarClock}
+              title="Marketing Dates"
+              bodyClassName="grid grid-cols-1 md:grid-cols-2 gap-4"
+            >
               <div className="space-y-2">
                 <Label htmlFor="mql_date">MQL Date<RequiredIndicator fieldKey="mql_date" requiredFields={requiredKeys} /></Label>
                 <Input id="mql_date" type="date" {...register("mql_date")} />
@@ -497,12 +559,13 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
                 <Label htmlFor="sql_date">SQL Date<RequiredIndicator fieldKey="sql_date" requiredFields={requiredKeys} /></Label>
                 <Input id="sql_date" type="date" {...register("sql_date")} />
               </div>
-            </div>
+            </FormSection>
 
-            {/* Mailing address */}
-            <div className="space-y-3 pt-2">
-              <h3 className="text-sm font-medium text-muted-foreground">Mailing Address</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormSection
+              icon={MapPin}
+              title="Mailing Address"
+              bodyClassName="grid grid-cols-1 md:grid-cols-2 gap-4"
+            >
                 <div className="space-y-2 md:col-span-2">
                   <Label htmlFor="mailing_street">Street</Label>
                   <Input id="mailing_street" {...register("mailing_street")} />
@@ -519,7 +582,7 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
                       setValue("mailing_state", v === "none" ? "" : v)
                     }
                   >
-                    <SelectTrigger id="mailing_state">
+                    <SelectTrigger id="mailing_state" className="w-full">
                       <SelectValue placeholder="Select state..." />
                     </SelectTrigger>
                     <SelectContent>
@@ -540,10 +603,13 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
                   <Label htmlFor="mailing_country">Country</Label>
                   <Input id="mailing_country" {...register("mailing_country")} />
                 </div>
-              </div>
-            </div>
+            </FormSection>
 
-            <div className="flex flex-col gap-2">
+            <FormSection
+              icon={Flag}
+              title="Flags"
+              bodyClassName="grid grid-cols-1 sm:grid-cols-2 gap-3"
+            >
               <div className="flex items-center space-x-2">
                 <Checkbox
                   id="is_primary"
@@ -578,36 +644,35 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
                   No longer employed
                 </Label>
               </div>
-            </div>
+            </FormSection>
 
-            <EventsAttendedField
-              value={watch("events_attended") ?? null}
-              onChange={(next) => setValue("events_attended", next)}
-            />
+            <FormSection icon={StickyNote} title="Notes & Events" bodyClassName="space-y-4">
+              <EventsAttendedField
+                value={watch("events_attended") ?? null}
+                onChange={(next) => setValue("events_attended", next)}
+              />
 
+              <div className="space-y-2">
+                <Label htmlFor="notes">Notes</Label>
+                <Textarea id="notes" rows={3} {...register("notes")} />
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="notes">Notes</Label>
-              <Textarea id="notes" rows={3} {...register("notes")} />
-            </div>
+              <div className="space-y-2">
+                <Label htmlFor="next_steps">Next Steps</Label>
+                <Textarea id="next_steps" rows={2} {...register("next_steps")} />
+              </div>
+            </FormSection>
 
-            <div className="space-y-2">
-              <Label htmlFor="next_steps">Next Steps</Label>
-              <Textarea id="next_steps" rows={2} {...register("next_steps")} />
-            </div>
-
-            <div className="flex items-center gap-3">
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? "Saving..." : isEditing ? "Save Changes" : "Create Contact"}
-              </Button>
+            <div className="flex items-center justify-end gap-3">
               {unsavedDialog}
               <Button type="button" variant="outline" onClick={() => confirmIfDirty(() => navigate(-1))}>
                 Cancel
               </Button>
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting ? "Saving..." : isEditing ? "Save Changes" : "Create Contact"}
+              </Button>
             </div>
-          </form>
-        </CardContent>
-      </Card>
+      </form>
     </div>
   );
 }
