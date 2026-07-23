@@ -10,6 +10,10 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Queued / requested
 
+- [QUEUED] 2026-07-22 · (prod-promotion nit) · **Campaigns "This month" stats strip counts migrated historical campaigns** ("61 campaigns launched" on prod day one — the 30-day filter catches rows whose timestamps were touched by the unify migration/sync, not real launches). Filter on origin='pulse' or created_at of genuinely-launched campaigns. Cosmetic.
+
+- [QUEUED] 2026-07-22 · Nathan · **Campaigns PUBLIC LAUNCH checklist (when Jordan's wording is in + Nathan has personally tested):** (1) put Jordan M's real copy into the 8-Touch + Warming presets (template editor or seed-update migration); (2) flip ACTIVE_ANNOUNCEMENT in src/components/AnnouncementBanner.tsx (fresh id, ctaRoute /playbook); (3) remove the admin gates at the three "Rep rollout flip point" marks (App.tsx route, Sidebar adminItems, ContactsList right-click) — rep-facing RLS + edge-fn ownership gates are already live; (4) consider clamping launch leads_per_day to the chosen inbox's daily limit (docketed separately). Launch-day order: copy → test → flips together.
+
 - [QUEUED] 2026-07-22 · (Campaigns Phase 5 finding) · **Launch default leads_per_day (25) can exceed a sending inbox's daily limit** (live example: news@accessmedcurity.com is 15/day, a launch defaulting to 25/day shows "Room for ~0 more people/day" in the new Sending-inboxes panel). Fix: clamp leads_per_day to the chosen inbox's warmup/daily limit at launch, or lower the default and let the panel guide. Not urgent — the panel surfaces it honestly today.
 
 - [QUEUED] 2026-07-22 · (Phase-3 cosmetic follow-ups) · Campaigns detail sheet: (a) First-send column renders a day early (date-only first_send_at through a local-time formatter — format date-only values in UTC); (b) Step column stays "Not sent yet" until events carry sequence numbers (could infer email-1-sent from campaign metrics). Also: delete the "LIVE TEST — Phase 2 webhooks" campaign from the tracker once Nathan has looked at it. (The sweep-replies→campaign_events gap from the Phase-2 live test SHIPPED in 6ace3d0 — see SHIPPED 7/22 Phase 3.)
