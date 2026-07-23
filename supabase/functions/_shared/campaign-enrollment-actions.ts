@@ -234,13 +234,29 @@ export async function stopEnrollmentForReply(
   fallbackEmail: string | null,
   eventMeta?: { occurredAt?: string | null; source?: string },
 ): Promise<{ updated: boolean; tasksCancelled: number }> {
-  if (ENROLLMENT_TERMINAL_STATUSES.includes(enrollment.status)) return { updated: false, tasksCancelled: 0 };
-
-  const { error } = await svc
+  // Atomic transition guard: the live webhook and the daily sweep can both
+  // observe the same reply and call this concurrently. A plain read-then-act
+  // check against the caller's (possibly stale) `enrollment.status` snapshot
+  // is a TOCTOU race — both callers could see "not terminal yet" and both
+  // run the side effects below, double-firing the bell notification and the
+  // "Reply from X" follow-up task (which isn't deduped by the partial unique
+  // index, since its campaign_step_number is NULL and NULLs are distinct).
+  // Instead, the UPDATE itself is the lock: it only matches a row that is
+  // STILL non-terminal at write time, and `.select("id")` tells us whether
+  // THIS call won that race. Only the winner (non-empty result) proceeds to
+  // the notification/task/event/archive side effects below; the loser's
+  // update matches zero rows and returns immediately, a clean no-op.
+  const { data: transitioned, error } = await svc
     .from("campaign_enrollments")
     .update({ status: "replied", replied_at: new Date().toISOString(), paused_reason: "replied" })
-    .eq("id", enrollment.id);
-  if (error) console.error("campaign-enrollment-actions: reply status update failed:", error.message);
+    .eq("id", enrollment.id)
+    .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`)
+    .select("id");
+  if (error) {
+    console.error("campaign-enrollment-actions: reply status update failed:", error.message);
+    return { updated: false, tasksCancelled: 0 };
+  }
+  if (!transitioned?.length) return { updated: false, tasksCancelled: 0 };
 
   await recordEventIfMissing(svc, {
     enrollmentId: enrollment.id,
@@ -306,12 +322,20 @@ export async function stopEnrollmentForBounce(
   campaignId?: string,
   eventMeta?: { occurredAt?: string | null; source?: string },
 ): Promise<{ updated: boolean; tasksCancelled: number }> {
-  if (ENROLLMENT_TERMINAL_STATUSES.includes(enrollment.status)) return { updated: false, tasksCancelled: 0 };
-  const { error } = await svc
+  // Same atomic-transition guard as stopEnrollmentForReply above — see its
+  // comment for why a stale-snapshot check isn't safe against a concurrent
+  // webhook + daily-sweep call for the same bounce.
+  const { data: transitioned, error } = await svc
     .from("campaign_enrollments")
     .update({ status: "bounced", bounced_at: new Date().toISOString() })
-    .eq("id", enrollment.id);
-  if (error) console.error("campaign-enrollment-actions: bounce status update failed:", error.message);
+    .eq("id", enrollment.id)
+    .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`)
+    .select("id");
+  if (error) {
+    console.error("campaign-enrollment-actions: bounce status update failed:", error.message);
+    return { updated: false, tasksCancelled: 0 };
+  }
+  if (!transitioned?.length) return { updated: false, tasksCancelled: 0 };
 
   if (campaignId) {
     await recordEventIfMissing(svc, {

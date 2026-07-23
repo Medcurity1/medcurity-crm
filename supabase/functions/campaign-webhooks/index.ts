@@ -214,6 +214,7 @@ interface Enrollment {
   status: string;
   current_step: number;
   first_send_at: string | null;
+  actual_first_send_at: string | null;
   smartlead_lead_id: number | null;
 }
 interface Campaign {
@@ -224,7 +225,7 @@ interface Campaign {
 }
 
 async function resolveEnrollment(campaignId: string, email: string | null, leadId: number | null): Promise<Enrollment | null> {
-  const cols = "id, contact_id, account_id, first_name, last_name, email, status, current_step, first_send_at, smartlead_lead_id";
+  const cols = "id, contact_id, account_id, first_name, last_name, email, status, current_step, first_send_at, actual_first_send_at, smartlead_lead_id";
   if (email) {
     const { data, error } = await svc
       .from("campaign_enrollments")
@@ -259,12 +260,21 @@ async function handleEmailSent(enrollment: Enrollment, leadId: number | null, oc
     updates.smartlead_lead_id = leadId;
   }
 
-  const sendDate = dateOnly(occurredAtIso);
-  const isFirstSend = enrollment.current_step === 0
-    || !enrollment.first_send_at
-    || dateOnly(enrollment.first_send_at) !== sendDate;
-
-  if (isFirstSend) {
+  // One-time estimate->actual correction, gated on actual_first_send_at
+  // being unset (added by 20260723060000_campaigns_audit_fixes.sql).
+  // first_send_at is pre-populated at launch with an ESTIMATE (anchor +
+  // throttle math — computeAndPersistFirstSendDates); the first time
+  // Smartlead confirms a REAL send for this enrollment, that confirmation
+  // is authoritative forever after. Every later EMAIL_SENT in the sequence
+  // (day 2, day 5, ... of an 8-Touch) must NOT re-anchor first_send_at or
+  // re-shift tasks again — comparing against the estimate on every send
+  // (the old `current_step===0 || !first_send_at || dateOnly(...)!==
+  // sendDate` check) made every subsequent send look like a fresh mismatch
+  // and re-fired the shift, drifting all pending tasks. actual_first_send_at
+  // being non-null means "already corrected once" and short-circuits this
+  // whole branch — only smartlead_lead_id/current_step still update below.
+  if (!enrollment.actual_first_send_at) {
+    const sendDate = dateOnly(occurredAtIso);
     if (enrollment.first_send_at) {
       const delta = daysBetweenDateOnly(enrollment.first_send_at, occurredAtIso);
       if (delta !== 0) {
@@ -272,6 +282,7 @@ async function handleEmailSent(enrollment: Enrollment, leadId: number | null, oc
       }
     }
     updates.first_send_at = sendDate;
+    updates.actual_first_send_at = occurredAtIso;
   }
 
   const derivedStep = extractStepNumber(rawPayload);
@@ -334,6 +345,18 @@ Deno.serve(async (req) => {
   } catch {
     rawBody = "";
   }
+
+  // Request-size cap (512KB) — Smartlead payloads are small JSON objects;
+  // anything wildly bigger is either a malformed/malicious caller or a
+  // provider bug, and JSON.parse'ing an unbounded body is needless memory
+  // pressure on this function. Keep the endpoint's always-200-except-auth
+  // contract (see the top-of-file "Resilience" note) — don't insert
+  // anything, just acknowledge and drop it.
+  if (rawBody.length > 512_000) {
+    console.warn("campaign-webhooks: oversized payload (", rawBody.length, "bytes ) ignored");
+    return json({ received: true, note: "oversized payload ignored" });
+  }
+
   let parsed: unknown = null;
   try {
     parsed = rawBody ? JSON.parse(rawBody) : null;

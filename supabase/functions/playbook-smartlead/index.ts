@@ -45,6 +45,7 @@ import {
   fetchEmailAccounts,
   buildSmartleadMetrics,
   mapSmartleadStatus,
+  type CampaignStatus,
 } from "../_shared/smartlead.ts";
 import {
   computeFirstSendDates,
@@ -405,6 +406,30 @@ interface CampaignStep {
   task_note_template?: string;
 }
 
+// Pulse-terminal campaign statuses a Smartlead import/sync pass must never
+// regress away from. mapSmartleadStatus can return null (missing/unexpected
+// Smartlead status string); previously it defaulted to "draft", which meant
+// a transient bad status from Smartlead's API — or a stopped/completed
+// campaign whose Smartlead-side status Smartlead itself reports oddly —
+// could silently flip a Pulse campaign back to "draft", re-arming sending
+// and re-showing the tracker's Delete action. See mapSmartleadStatus's doc
+// comment (_shared/smartlead.ts) for the full rationale.
+const CAMPAIGN_TERMINAL_STATUSES = new Set(["stopped", "completed"]);
+
+/** Resolve the status to write for an EXISTING campaign row being
+ *  imported/synced from Smartlead. `mapped` is mapSmartleadStatus's result.
+ *  Keeps the row's current status unchanged when: (a) mapped is null
+ *  (unrecognized/missing Smartlead status — nothing to apply), or (b) the
+ *  row is already Pulse-terminal (stopped/completed) and mapped would move
+ *  it backward to draft/active. Otherwise applies `mapped`. */
+function resolveSyncedStatus(currentStatus: string, mapped: CampaignStatus | null): string {
+  if (!mapped) return currentStatus;
+  if (CAMPAIGN_TERMINAL_STATUSES.has(currentStatus) && (mapped === "draft" || mapped === "active")) {
+    return currentStatus;
+  }
+  return mapped;
+}
+
 async function importCampaigns() {
   const campaigns = await fetchCampaigns();
   if (!Array.isArray(campaigns)) throw new Error("Unexpected Smartlead response");
@@ -425,20 +450,26 @@ async function importCampaigns() {
 
     const metrics = buildSmartleadMetrics(analytics);
     const notes = notesFromSequences(sequences);
-    const status = mapSmartleadStatus(camp.status as string);
+    const mappedStatus = mapSmartleadStatus(camp.status as string);
 
     if (existing) {
       const merged = { ...(existing.metrics ?? {}), ...metrics };
       // Mirror Smartlead's status directly (bidirectional — Smartlead is
       // the source of truth for a linked campaign's send state, including
-      // pause/resume, not just forward lifecycle progress).
+      // pause/resume, not just forward lifecycle progress) — but never
+      // regress a Pulse-terminal status on an unrecognized/backward value;
+      // see resolveSyncedStatus above.
+      const status = resolveSyncedStatus(existing.status as string, mappedStatus);
       await svc.from("campaigns").update({ metrics: merged, status }).eq("id", existing.id);
       updated++;
     } else {
+      // Brand-new row: no prior status to preserve, and the status column
+      // is NOT NULL — fall back to "draft" (the column's own default) if
+      // Smartlead's status didn't map to anything recognized.
       await svc.from("campaigns").insert({
         name: (camp.name as string) || "Smartlead Campaign " + campId,
         origin: "smartlead_import",
-        status,
+        status: mappedStatus ?? "draft",
         smartlead_campaign_id: campId,
         notes,
         metrics,
@@ -462,7 +493,12 @@ async function syncCampaigns() {
       const analytics = (await fetchCampaignAnalytics(c.smartlead_campaign_id)) as Record<string, unknown>;
       const metrics = buildSmartleadMetrics(analytics);
       const merged = { ...(c.metrics ?? {}), ...metrics };
-      const status = mapSmartleadStatus(camp.status as string);
+      const mappedStatus = mapSmartleadStatus(camp.status as string);
+      // No-regress rule: never let a sync pass move an already-terminal
+      // (stopped/completed) Pulse campaign back to draft/active, and never
+      // apply a null (unrecognized Smartlead status) mapping — see
+      // resolveSyncedStatus / mapSmartleadStatus's doc comments.
+      const status = resolveSyncedStatus(c.status as string, mappedStatus);
       await svc.from("campaigns").update({ metrics: merged, status }).eq("id", c.id);
       synced++;
     } catch { /* skip this one */ }
@@ -849,6 +885,31 @@ async function setCampaignStatus(p: SetStatusInput, archivedBy: string | null, c
   if (!callerCtx.isAdmin && (!callerCtx.userId || campaign.owner_user_id !== callerCtx.userId)) {
     throw new Error("You can only manage campaigns you own.");
   }
+
+  // State preconditions — these are correctness, not permission, so they
+  // apply to admins/service-role too. Without them a "start" or "resume"
+  // call re-mirrors an already-live status to Smartlead and re-runs the
+  // schedule-fill path regardless of the campaign's actual current state,
+  // which let a Stopped campaign be resumed (re-arming sending) or
+  // re-showed the tracker's Delete action after a bad state transition.
+  // The tracker UI only ever offers Start on a draft campaign and Resume on
+  // a paused one (CampaignStatusControls in CampaignCard.tsx gates the
+  // buttons on c.status), so these mirror what the UI already enforces —
+  // this closes the gap for any other caller (API misuse, a stale tab with
+  // a cached status, a future non-UI caller).
+  if (p.action === "resume" && campaign.status !== "paused") {
+    throw new Error("Only a paused campaign can be resumed.");
+  }
+  if (p.action === "start" && campaign.status !== "draft") {
+    throw new Error("Only a draft campaign can be started.");
+  }
+  if (p.action === "pause" && campaign.status !== "active") {
+    throw new Error("Only an active campaign can be paused.");
+  }
+  // stop is allowed from any non-terminal status (draft/active/paused) —
+  // no precondition needed; a stopped/completed campaign has no UI path to
+  // re-trigger stop (CampaignStatusControls only renders Stop for
+  // active/paused), so this can't be reached from the tracker either way.
 
   if (campaign.smartlead_campaign_id != null) {
     await smartleadFetch(`/campaigns/${campaign.smartlead_campaign_id}/status`, {
@@ -1438,7 +1499,25 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
     // campaigns row too (not just the Smartlead campaign), which cascades
     // to any enrollments already inserted (campaign_enrollments.campaign_id
     // is ON DELETE CASCADE, 20260625000001).
-    const enrollmentRows = enrollableRecipients.map((r, i) => ({
+    //
+    // De-dupe by contact_id first: uq_enrollment_campaign_contact
+    // (campaign_id, contact_id) — 20260625000001 — rejects a second row with
+    // the same non-null contact_id, and that unique-violation aborts the
+    // WHOLE insert batch it lands in (not just the offending row), which
+    // would abort the whole enrollment for every recipient already queued
+    // in Smartlead above. Drop later duplicates, keep the first occurrence
+    // (preserves upload order for the survivors' enroll_position). NULL
+    // contact_id (CSV/paste recipients with no contact match) is exempt —
+    // Postgres treats NULLs as distinct, so they never collide with each
+    // other on this index.
+    const seenContactIds = new Set<string>();
+    const dedupedRecipients = enrollableRecipients.filter((r) => {
+      if (!r.contact_id) return true;
+      if (seenContactIds.has(r.contact_id)) return false;
+      seenContactIds.add(r.contact_id);
+      return true;
+    });
+    const enrollmentRows = dedupedRecipients.map((r, i) => ({
       campaign_id: pulseCampaignId,
       contact_id: r.contact_id ?? null,
       account_id: r.account_id ?? null, // tag-source recipients carry it; CSV/paste don't (no lookup in v1)
@@ -1909,7 +1988,7 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
 
   const { data: enrollments, error } = await svc
     .from("campaign_enrollments")
-    .select("id, contact_id, account_id, first_name, last_name, email, status, first_send_at, reply_category")
+    .select("id, contact_id, account_id, first_name, last_name, email, status, first_send_at, actual_first_send_at, reply_category")
     .eq("campaign_id", campaign.id)
     .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`);
   if (error) throw new Error("Enrollment lookup for reconcile failed: " + error.message);
@@ -1924,7 +2003,8 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
   for (const e of enrollments as {
     id: string; contact_id: string | null; account_id: string | null;
     first_name: string | null; last_name: string | null; email: string | null;
-    status: string; first_send_at: string | null; reply_category: string | null;
+    status: string; first_send_at: string | null; actual_first_send_at: string | null;
+    reply_category: string | null;
   }[]) {
     const key = e.email ? normalizeEmail(e.email) : "";
     const row = key ? byEmail.get(key) : undefined;
@@ -1962,15 +2042,24 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
       continue;
     }
 
-    // (a) first-send date reconcile
-    if (row.sentAt) {
+    // (a) first-send date reconcile — SAME one-time-correction gate as
+    // campaign-webhooks' handleEmailSent (see actual_first_send_at's column
+    // comment, 20260723060000_campaigns_audit_fixes.sql): once a real send
+    // has been confirmed for this enrollment (by either this sweep or the
+    // live webhook), it must never be corrected/shifted again. Without this
+    // gate the sweep would re-"correct" first_send_at (and re-shift tasks)
+    // every single run for as long as row.sentAt (Smartlead's reported first
+    // send) differed from the stored value for any reason — the exact same
+    // re-anchor-on-every-send bug FIX 1 closes on the webhook side, just
+    // triggered by a cron tick instead of a later EMAIL_SENT event.
+    if (row.sentAt && !e.actual_first_send_at) {
       const sentDate = row.sentAt.slice(0, 10);
       const mismatched = !e.first_send_at || e.first_send_at.slice(0, 10) !== sentDate;
       if (mismatched) {
         const delta = e.first_send_at ? daysBetweenDateOnly(e.first_send_at, row.sentAt) : 0;
         const { error: updErr } = await svc
           .from("campaign_enrollments")
-          .update({ first_send_at: sentDate })
+          .update({ first_send_at: sentDate, actual_first_send_at: row.sentAt })
           .eq("id", e.id);
         if (updErr) {
           console.error(`daily-sweep: first_send_at correction failed for enrollment ${e.id}:`, updErr.message);
@@ -1978,6 +2067,16 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
         }
         if (delta !== 0) await shiftEnrollmentTasks(svc, e.id, delta);
         enrollmentsUpdated++;
+      } else {
+        // Already correct (matches what we'd have set) — still stamp
+        // actual_first_send_at so the gate closes even when there was
+        // nothing to shift, matching handleEmailSent's behavior of always
+        // setting it on the first confirmed send.
+        const { error: stampErr } = await svc
+          .from("campaign_enrollments")
+          .update({ actual_first_send_at: row.sentAt })
+          .eq("id", e.id);
+        if (stampErr) console.error(`daily-sweep: actual_first_send_at stamp failed for enrollment ${e.id}:`, stampErr.message);
       }
     }
   }

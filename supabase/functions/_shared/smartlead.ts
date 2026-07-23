@@ -83,19 +83,34 @@ export function buildSmartleadMetrics(analytics: Record<string, unknown> | null)
   return m;
 }
 
+// Mirrors src/features/playbook/types.ts's CampaignStatus (Deno can't import
+// across the "@/" alias into src/ — see CampaignStep's comment in
+// playbook-smartlead/index.ts for the same constraint — so this is a
+// structurally-compatible local copy, kept in sync manually).
+export type CampaignStatus = "draft" | "active" | "paused" | "completed" | "stopped";
+
 /** Map a Smartlead status to our draft/active/paused/completed/stopped
  *  (campaigns.status — 20260625000001). Mirrors Smartlead directly rather
  *  than the old planned/in_progress/complete bucketing (server.js:3896) so
- *  a paused campaign shows as paused, not lumped in with active. */
-export function mapSmartleadStatus(
-  status: string | null | undefined,
-): "draft" | "active" | "paused" | "completed" | "stopped" {
-  if (!status) return "draft";
+ *  a paused campaign shows as paused, not lumped in with active.
+ *
+ *  Returns `null` for a missing/unrecognized status rather than silently
+ *  defaulting to "draft". A previous version of this function defaulted
+ *  every unrecognized string to "draft" — since a linked campaign's status
+ *  is written straight from this function's result on every import/sync
+ *  pass, an unexpected Smartlead status string (a new value Smartlead adds,
+ *  a transient API hiccup, etc.) would silently REGRESS an already-stopped
+ *  or already-completed Pulse campaign back to "draft" — re-arming its
+ *  sending state and re-showing the tracker's Delete action. Callers must
+ *  treat `null` as "don't change the stored status" (see syncCampaigns'/
+ *  importCampaigns' no-regression handling in playbook-smartlead/index.ts). */
+export function mapSmartleadStatus(status: string | null | undefined): CampaignStatus | null {
+  if (!status) return null;
   const s = status.toUpperCase();
   if (s === "ACTIVE") return "active";
   if (s === "PAUSED") return "paused";
   if (s === "COMPLETED") return "completed";
   if (s === "STOPPED" || s === "ARCHIVED") return "stopped";
   if (s === "DRAFTED") return "draft";
-  return "draft";
+  return null;
 }
