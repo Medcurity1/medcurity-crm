@@ -19,7 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/EmptyState";
 import { cn } from "@/lib/utils";
 import { formatName } from "@/lib/formatters";
-import { useCampaignTemplates, type Recipient } from "./api";
+import { useCampaignTemplates, useSmartleadStatus, type Recipient } from "./api";
 import { CampaignWizard } from "./CampaignWizard";
 import { CATEGORY } from "./TemplatesSection";
 import { SequenceMiniPreview } from "./SequenceTimeline";
@@ -50,6 +50,11 @@ export function QuickCampaignDialog({
   contacts: QuickCampaignContact[];
 }) {
   const { data: templates, isLoading } = useCampaignTemplates();
+  const { data: sl } = useSmartleadStatus();
+  // Only a confirmed `false` disables — undefined (still loading) and true
+  // both leave the picker enabled, so the gate never flashes on while the
+  // status query is in flight.
+  const smartleadDisabled = sl?.configured === false;
   const [launchOpen, setLaunchOpen] = useState(false);
   const [launchNonce, setLaunchNonce] = useState(0);
   const [launchSeed, setLaunchSeed] = useState<{ template_id: string | null; name: string; steps: CampaignTemplate["steps"] } | null>(null);
@@ -100,7 +105,11 @@ export function QuickCampaignDialog({
             </p>
           )}
 
-          {withEmail.length === 0 ? (
+          {smartleadDisabled ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              Campaigns aren't connected yet — ask an admin to finish Smartlead setup.
+            </div>
+          ) : withEmail.length === 0 ? (
             <EmptyState
               icon={Wand2}
               title="No email on file"

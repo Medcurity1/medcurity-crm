@@ -14,7 +14,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
-  useAnalyzeCampaign, useDeleteCampaign, useSetCampaignStatus, smartleadUrl,
+  useAnalyzeCampaign, useDeleteCampaign, useSetCampaignStatus, useSmartleadStatus, smartleadUrl,
   type CampaignEnrollmentStats, type CampaignStatusAction,
 } from "./api";
 import type { Campaign } from "./types";
@@ -64,6 +64,12 @@ export function CampaignStatusControls({
   const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
   const busy = setStatus.isPending && setStatus.variables?.id === c.id;
   const busyAction = busy ? setStatus.variables?.action : null;
+  const { data: sl } = useSmartleadStatus();
+  // Only a confirmed `false` disables Start — undefined (still loading) and
+  // true both leave it enabled, so the gate never flashes on while the
+  // status query is in flight. Pause/Resume/Stop stay ungated (a running
+  // campaign can't exist on an unconfigured env anyway).
+  const smartleadDisabled = sl?.configured === false;
 
   function runStatus(action: CampaignStatusAction) {
     setStatus.mutate(
@@ -95,7 +101,8 @@ export function CampaignStatusControls({
       {c.status === "draft" && (
         <Button
           size="sm" className="h-7 text-xs"
-          disabled={busy}
+          disabled={busy || smartleadDisabled}
+          title={smartleadDisabled ? "Connect Smartlead to start" : undefined}
           onClick={() => runStatus("start")}
         >
           {busyAction === "start" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><Play className="h-3.5 w-3.5 mr-1" /> Start</>}

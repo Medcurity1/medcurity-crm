@@ -38,7 +38,7 @@ import { partitionSuppression, normalizeEmail, type SuppressionEntry } from "./s
 import type { SequenceStep } from "./types";
 import {
   useGenerateCampaign, useSuggestCampaign, useRegenerateEmail, useEmailAccounts, useLaunchCampaign,
-  useInboxHealth,
+  useInboxHealth, useSmartleadStatus,
   type GeneratedCampaign, type Recipient, type ActiveEnrollmentEntry,
 } from "./api";
 
@@ -158,6 +158,12 @@ export function CampaignWizard({
   const regen = useRegenerateEmail();
   const { data: tags } = useTags();
   const { data: inboxes } = useEmailAccounts();
+  const { data: sl } = useSmartleadStatus();
+  // Only a confirmed `false` disables Launch — undefined (still loading) and
+  // true both leave it enabled, so the gate never flashes on while the
+  // status query is in flight. Backstop for every path that reaches this
+  // wizard (AI mode, templates, right-click quick-start).
+  const smartleadDisabled = sl?.configured === false;
   // Lazy — only fires once the wizard has actually reached the cadence/inbox
   // step (Campaigns overhaul Phase 5's "Sending inboxes" note below).
   const { data: inboxHealth } = useInboxHealth(step === 4);
@@ -682,9 +688,12 @@ export function CampaignWizard({
                 {aiEmailsIncomplete && (
                   <p className="text-xs text-amber-600">One or more emails still need wording — go back to Step 2 to finish them.</p>
                 )}
+                {smartleadDisabled && (
+                  <p className="text-xs text-muted-foreground">Connect Smartlead to launch campaigns.</p>
+                )}
                 <div className="flex justify-between pt-2">
                   <Button variant="ghost" onClick={() => setStep(3)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
-                  <Button onClick={doLaunch} disabled={launch.isPending || aiEmailsIncomplete}>
+                  <Button onClick={doLaunch} disabled={launch.isPending || aiEmailsIncomplete || smartleadDisabled}>
                     {launch.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Launching…</> : <><Rocket className="h-4 w-4 mr-1" /> {autoStart ? "Launch & start" : "Create draft"}</>}
                   </Button>
                 </div>

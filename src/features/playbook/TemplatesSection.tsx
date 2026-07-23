@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { useCampaignTemplates, useDeleteTemplate, useTemplateScoreboard } from "./api";
+import { useCampaignTemplates, useDeleteTemplate, useTemplateScoreboard, useSmartleadStatus } from "./api";
 import { SequenceTimeline, SequenceMiniPreview } from "./SequenceTimeline";
 import { SequenceEditor } from "./SequenceEditor";
 import { CampaignWizard } from "./CampaignWizard";
@@ -45,6 +45,11 @@ export const CATEGORY: Record<string, { icon: typeof Rocket; accent: string; chi
 export function TemplatesSection() {
   const { data: templates, isLoading } = useCampaignTemplates();
   const { data: scoreboard } = useTemplateScoreboard();
+  const { data: sl } = useSmartleadStatus();
+  // Only a confirmed `false` disables — undefined (still loading) and true
+  // both leave every launch path enabled, so the gate never flashes on
+  // while the status query is in flight.
+  const smartleadDisabled = sl?.configured === false;
   const del = useDeleteTemplate();
   const [preview, setPreview] = useState<CampaignTemplate | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -63,6 +68,13 @@ export function TemplatesSection() {
   const [launchNonce, setLaunchNonce] = useState(0);
 
   const openLaunch = (seed: LaunchSeed) => {
+    // Guards BOTH "Use this template" below and SequenceEditor's "Use this
+    // sequence" (which reaches here via its `onLaunch` prop) — the single
+    // funnel point for every template-based launch in this component.
+    if (smartleadDisabled) {
+      toast.info("Connect Smartlead to launch campaigns.");
+      return;
+    }
     setLaunchSeed(seed);
     setLaunchNonce((n) => n + 1);
     setLaunchOpen(true);
@@ -203,26 +215,32 @@ export function TemplatesSection() {
                     </Button>
                   )}
                 </div>
-                <div className="flex items-center gap-2 order-1 sm:order-2">
-                  {preview.is_preset ? (
-                    <Button variant="outline" size="sm" onClick={() => openCustomize(preview)}>
-                      <Copy className="h-4 w-4 mr-1" /> Customize a copy
+                <div className="flex flex-col items-end gap-1 order-1 sm:order-2">
+                  <div className="flex items-center gap-2">
+                    {preview.is_preset ? (
+                      <Button variant="outline" size="sm" onClick={() => openCustomize(preview)}>
+                        <Copy className="h-4 w-4 mr-1" /> Customize a copy
+                      </Button>
+                    ) : (
+                      <Button variant="outline" size="sm" onClick={() => openEdit(preview)}>
+                        <Pencil className="h-4 w-4 mr-1" /> Edit
+                      </Button>
+                    )}
+                    <Button
+                      variant="ai"
+                      disabled={smartleadDisabled}
+                      onClick={() => {
+                        openLaunch({ template_id: preview.id, name: preview.name, steps: preview.steps });
+                        setPreview(null);
+                      }}
+                    >
+                      <span className="ai-icon mr-1"><ArrowRight className="h-4 w-4" /></span>
+                      Use this template
                     </Button>
-                  ) : (
-                    <Button variant="outline" size="sm" onClick={() => openEdit(preview)}>
-                      <Pencil className="h-4 w-4 mr-1" /> Edit
-                    </Button>
+                  </div>
+                  {smartleadDisabled && (
+                    <p className="text-xs text-muted-foreground">Connect Smartlead to launch campaigns.</p>
                   )}
-                  <Button
-                    variant="ai"
-                    onClick={() => {
-                      openLaunch({ template_id: preview.id, name: preview.name, steps: preview.steps });
-                      setPreview(null);
-                    }}
-                  >
-                    <span className="ai-icon mr-1"><ArrowRight className="h-4 w-4" /></span>
-                    Use this template
-                  </Button>
                 </div>
               </DialogFooter>
             </>
