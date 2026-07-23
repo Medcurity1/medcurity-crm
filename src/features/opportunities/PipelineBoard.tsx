@@ -55,7 +55,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { QueryError } from "@/components/QueryError";
 import { toast } from "sonner";
-import { Plus, MoreVertical, Pencil, Trash2, DollarSign, Hash, TrendingUp } from "lucide-react";
+import { Plus, MoreVertical, Pencil, Trash2, DollarSign, Hash, TrendingUp, ArrowUpDown } from "lucide-react";
 import { OPEN_STAGES, formatCurrency, stageLabel } from "@/lib/formatters";
 import { celebrateClosedWon } from "@/lib/confetti";
 import { supabase } from "@/lib/supabase";
@@ -66,6 +66,26 @@ import type {
   OpportunityStage,
   PipelineView,
 } from "@/types/crm";
+
+/** How cards are ordered inside each stage column (Summer, 7/22: "sort by
+ * close date in each of the categories" for Joe's business tracker). Lives
+ * in the URL (?sort=) like the other board filters so a shared/bookmarked
+ * tracker link keeps its ordering. Cards were previously amount-ordered
+ * (the query's default) with no way to change it. */
+type PipelineCardSort = "close" | "amount" | "name";
+
+function sortCards(items: ActivePipelineRow[], sortBy: PipelineCardSort): ActivePipelineRow[] {
+  return [...items].sort((a, b) => {
+    if (sortBy === "amount") return Number(b.amount) - Number(a.amount);
+    if (sortBy === "name") return a.name.localeCompare(b.name);
+    // Close date: soonest at the top; undated deals sink to the bottom
+    // (alphabetical among themselves so the order is stable).
+    if (!a.expected_close_date && !b.expected_close_date) return a.name.localeCompare(b.name);
+    if (!a.expected_close_date) return 1;
+    if (!b.expected_close_date) return -1;
+    return a.expected_close_date.localeCompare(b.expected_close_date);
+  });
+}
 
 function PipelineStats({ items }: { items: ActivePipelineRow[] }) {
   // Memoized so the total/average aren't re-reduced on every re-render of the
@@ -119,12 +139,14 @@ interface PipelineKanbanProps {
   pipeline: ActivePipelineRow[] | undefined;
   isLoading: boolean;
   stages?: OpportunityStage[];
+  sortBy: PipelineCardSort;
 }
 
 function PipelineKanban({
   pipeline,
   isLoading,
   stages,
+  sortBy,
 }: PipelineKanbanProps) {
   const navigate = useNavigate();
   const updateMutation = useUpdateOpportunity();
@@ -190,7 +212,7 @@ function PipelineKanban({
 
   const columns = displayStages.map((stage) => ({
     stage,
-    items: pipeline?.filter((p) => p.stage === stage) ?? [],
+    items: sortCards(pipeline?.filter((p) => p.stage === stage) ?? [], sortBy),
   }));
 
   // Open deals whose stage isn't one of the board's columns (legacy Lead/
@@ -198,7 +220,10 @@ function PipelineKanban({
   // vanish from the board while still counting on the Home page and the stats
   // above — the "2 deals missing" report. Surface them in a read-only catch-all
   // so the board never loses a deal; reps can drag a stray into a real stage.
-  const unmappedItems = pipeline?.filter((p) => !displayStages.includes(p.stage)) ?? [];
+  const unmappedItems = sortCards(
+    pipeline?.filter((p) => !displayStages.includes(p.stage)) ?? [],
+    sortBy
+  );
   const totalColumns = displayStages.length + (unmappedItems.length > 0 ? 1 : 0);
 
   function handleDragStart(event: DragStartEvent) {
@@ -329,6 +354,7 @@ function PipelineTabBody({
   onRetry,
   isRetrying,
   stages,
+  sortBy,
 }: {
   pipeline: ActivePipelineRow[] | undefined;
   isLoading: boolean;
@@ -336,6 +362,7 @@ function PipelineTabBody({
   onRetry: () => void;
   isRetrying: boolean;
   stages?: OpportunityStage[];
+  sortBy: PipelineCardSort;
 }) {
   if (isError) {
     return (
@@ -350,7 +377,7 @@ function PipelineTabBody({
   return (
     <>
       <PipelineStats items={pipeline ?? []} />
-      <PipelineKanban pipeline={pipeline} isLoading={isLoading} stages={stages} />
+      <PipelineKanban pipeline={pipeline} isLoading={isLoading} stages={stages} sortBy={sortBy} />
     </>
   );
 }
@@ -360,8 +387,10 @@ function PipelineTabBody({
 // load from firing a second, hidden active_pipeline fetch on every mount.
 function RenewalsPipelineTab({
   ownerUserId,
+  sortBy,
 }: {
   ownerUserId: string | undefined;
+  sortBy: PipelineCardSort;
 }) {
   const { data: pipeline, isLoading, isError, isFetching, refetch } =
     useActivePipeline({ kind: "renewal", owner_user_id: ownerUserId });
@@ -373,6 +402,7 @@ function RenewalsPipelineTab({
       isError={isError}
       onRetry={() => refetch()}
       isRetrying={isFetching}
+      sortBy={sortBy}
     />
   );
 }
@@ -380,9 +410,11 @@ function RenewalsPipelineTab({
 function CustomViewTab({
   view,
   ownerUserId,
+  sortBy,
 }: {
   view: PipelineView;
   ownerUserId: string | undefined;
+  sortBy: PipelineCardSort;
 }) {
   const { data: pipeline, isLoading, isError, isFetching, refetch } =
     useCustomPipeline({
@@ -400,6 +432,7 @@ function CustomViewTab({
       onRetry={() => refetch()}
       isRetrying={isFetching}
       stages={view.config.stages}
+      sortBy={sortBy}
     />
   );
 }
@@ -414,6 +447,11 @@ export function PipelineBoard() {
   const myDeals = myDealsParam === "1";
   const setMyDeals = (checked: boolean) => setMyDealsParam(checked ? "1" : "0");
   const [ownerFilter, setOwnerFilter] = useUrlState("owner", "");
+  // Card order within each column. Close date is the default (Summer's
+  // ask for Joe's business tracker); "amount" restores the old behavior.
+  const [sortParam, setSortParam] = useUrlState("sort", "close");
+  const sortBy: PipelineCardSort =
+    sortParam === "amount" || sortParam === "name" ? sortParam : "close";
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingView, setEditingView] = useState<PipelineView | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PipelineView | null>(null);
@@ -522,6 +560,23 @@ export function PipelineBoard() {
             </SelectContent>
           </Select>
         )}
+
+        <div className="ml-auto flex items-center gap-2">
+          <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+          <Label htmlFor="pipeline-sort" className="text-sm text-muted-foreground hidden sm:block">
+            Sort cards
+          </Label>
+          <Select value={sortBy} onValueChange={setSortParam}>
+            <SelectTrigger id="pipeline-sort" className="w-52">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="close">Close date — soonest first</SelectItem>
+              <SelectItem value="amount">Amount — largest first</SelectItem>
+              <SelectItem value="name">Deal name — A to Z</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -583,11 +638,12 @@ export function PipelineBoard() {
             isError={salesError}
             onRetry={() => refetchSales()}
             isRetrying={salesFetching}
+            sortBy={sortBy}
           />
         </TabsContent>
 
         <TabsContent value="renewals" className="mt-4">
-          <RenewalsPipelineTab ownerUserId={ownerUserId} />
+          <RenewalsPipelineTab ownerUserId={ownerUserId} sortBy={sortBy} />
         </TabsContent>
 
         {pipelineViews?.map((view) => (
@@ -596,7 +652,7 @@ export function PipelineBoard() {
             value={`custom-${view.id}`}
             className="mt-4"
           >
-            <CustomViewTab view={view} ownerUserId={ownerUserId} />
+            <CustomViewTab view={view} ownerUserId={ownerUserId} sortBy={sortBy} />
           </TabsContent>
         ))}
       </Tabs>
