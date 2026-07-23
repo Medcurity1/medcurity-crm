@@ -91,6 +91,91 @@ export function useMergeAccounts() {
   });
 }
 
+/* ─────────────────────────── Manual pair merge ─────────────────────────── */
+
+// Stats for two hand-picked accounts (Nathan 7/22: some duplicates have
+// names different enough that the finder never groups them). Same facts the
+// finder table shows, assembled client-side — no RPC covers an arbitrary
+// pair, and the merge itself reuses the exact same merge_accounts +
+// account_fill_blanks path via useMergeAccounts.
+export interface ManualMergeAccountInfo {
+  id: string;
+  name: string;
+  account_number: string | null;
+  customer_status: string | null;
+  owner_name: string | null;
+  contact_count: number;
+  opportunity_count: number;
+  has_closed_won: boolean;
+  total_won_amount: number;
+  created_at: string;
+}
+
+export function useManualMergePair(idA: string | null, idB: string | null) {
+  const ids = idA && idB && idA !== idB ? [idA, idB] : null;
+  return useQuery({
+    queryKey: ["data-cleanup", "manual-pair", ids ? [...ids].sort().join(":") : "none"],
+    enabled: !!ids,
+    queryFn: async (): Promise<ManualMergeAccountInfo[]> => {
+      const [accountsRes, oppsRes, countA, countB] = await Promise.all([
+        supabase
+          .from("accounts")
+          .select(
+            "id, name, account_number, customer_status, created_at, owner:user_profiles!owner_user_id(full_name)"
+          )
+          .in("id", ids!),
+        supabase
+          .from("opportunities")
+          .select("account_id, stage, amount")
+          .in("account_id", ids!),
+        supabase
+          .from("contacts")
+          .select("id", { count: "exact", head: true })
+          .eq("account_id", ids![0]),
+        supabase
+          .from("contacts")
+          .select("id", { count: "exact", head: true })
+          .eq("account_id", ids![1]),
+      ]);
+      if (accountsRes.error) throw accountsRes.error;
+      if (oppsRes.error) throw oppsRes.error;
+      if (countA.error) throw countA.error;
+      if (countB.error) throw countB.error;
+
+      const contactCounts: Record<string, number> = {
+        [ids![0]]: countA.count ?? 0,
+        [ids![1]]: countB.count ?? 0,
+      };
+      const opps = (oppsRes.data ?? []) as Array<{
+        account_id: string;
+        stage: string;
+        amount: number | null;
+      }>;
+
+      // Keep the caller's pick order (left picker first).
+      return ids!.map((id) => {
+        const raw = (accountsRes.data ?? []).find((a) => a.id === id) as
+          | (Record<string, unknown> & { owner?: { full_name?: string | null } | null })
+          | undefined;
+        const mine = opps.filter((o) => o.account_id === id);
+        const won = mine.filter((o) => o.stage === "closed_won");
+        return {
+          id,
+          name: (raw?.name as string) ?? "(unknown account)",
+          account_number: (raw?.account_number as string | null) ?? null,
+          customer_status: (raw?.customer_status as string | null) ?? null,
+          owner_name: raw?.owner?.full_name ?? null,
+          contact_count: contactCounts[id] ?? 0,
+          opportunity_count: mine.length,
+          has_closed_won: won.length > 0,
+          total_won_amount: won.reduce((s, o) => s + Number(o.amount ?? 0), 0),
+          created_at: (raw?.created_at as string) ?? "",
+        };
+      });
+    },
+  });
+}
+
 /* ─────────────────── Dismiss "not a duplicate" groups ─────────────────── */
 
 export function useDismissAccountDuplicate() {
