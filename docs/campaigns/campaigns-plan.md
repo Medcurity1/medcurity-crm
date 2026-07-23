@@ -477,3 +477,46 @@ a local-time formatter); Step column shows "Not sent yet" until events carry seq
 Remaining: Phase 4 (AI insights/adaptation loop — milestone reviews, apply/dismiss suggestions,
 auto-training), Phase 5 (scale: multi-inbox dashboard, warmup badges, timezone windows, rep
 access + My Campaigns RLS). Content: Jordan M's 8-Touch/Warming wording still pending.
+
+### PHASES 4 & 5 COMPLETE — 2026-07-22 night, staging, live-verified
+
+Commits 798430c (Phase 4 AI loop) + d653a91 (Phase 5 scale). The full master plan is now built.
+
+**Phase 4 — AI learning loop:** campaign-insights AI action reviews a campaign's real numbers
+(metrics, enrollment statuses, reply categories, event tallies, sibling campaigns on the same
+template, Training notes) → plain-English performance read + up to 4 grounded template
+suggestions (model instructed to cite numbers, return [] not invent). Daily sweep auto-analyzes
+at completion or 20+ sends (cap 3/run). Insights panel (next to Training, pending-count badge):
+current→suggested + rationale, Apply edits the TEMPLATE (running campaigns never touched) + logs
+to Training, Dismiss archives. Timing suggestions apply only when they parse; audience/general
+are read-only guidance. campaign_suggestions table, decide-suggestion action, 17 unit tests.
+
+**Phase 5 — scale layer:** "Sending inboxes" panel — LIVE-VERIFIED against real Smartlead
+warmup data (the /email-accounts/{id}/warmup-stats endpoint WORKS — last unverified Smartlead
+endpoint, now confirmed): every inbox's warmup health in plain English, which campaigns it feeds,
+combined daily draw, honest headroom. Surfaced a real signal on first look: the launch default
+leads_per_day=25 oversubscribes news@ (15/day limit) → "Room for ~0 more" (docket: lower the
+default or clamp to the inbox limit). Wizard warns when an inbox already feeds active campaigns.
+Rep-access foundation (built, NOT flipped): additive owner-scoped SELECT RLS
+(campaigns/enrollments/events/templates; suggestions stay admin-only; zero client write policies)
++ edge-fn ownership gates on launch/status/enrollment for non-admin callers; UI stays admin-gated,
+"Rep rollout flip point" comments mark App.tsx/ContactsList.tsx/playbook-smartlead every gate.
+Cosmetic fixes shipped: first-send date UTC formatter, Step column "In progress".
+
+**Live-tested by us before any real use (per Nathan):** throttle math, suppression + no-double-
+enroll, template launch, per-person Stop (verified: only the targeted person stopped + their
+tasks archived, the co-enrollee stayed active with tasks intact; Smartlead lead id resolved
+on demand, per-lead pause endpoint succeeded), webhook registration (real enum found via probe),
+reply auto-stop (real reply from Nathan), daily sweep reconcile, inbox warmup. Everything an
+admin can do has been exercised against the real Smartlead account on staging.
+
+### Docketed follow-ups (none blocking)
+- Launch default leads_per_day (25) can exceed a small inbox's daily limit — clamp to inbox
+  limit or lower default; the Sending-inboxes panel now surfaces the oversubscription.
+- Cosmetic: (shipped) first-send date, Step column.
+- Rep rollout is a deliberate later flip (3 marked points) — needs Nathan/Brayden's go.
+- Jordan M's real 8-Touch/Warming copy still pending — presets ship with placeholder wording.
+- The LIVE TEST + a Warming preset now carry lifetime stats; delete LIVE TEST campaigns when done.
+
+### PROJECT STATUS: all 5 planned phases BUILT + live-verified on staging, admin-only, awaiting
+Nathan's prod-promotion go (whole Campaigns feature promotes together at cutover) + Jordan's copy.
