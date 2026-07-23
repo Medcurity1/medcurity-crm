@@ -73,6 +73,7 @@ function SuggestionCard({
   onDismiss,
   applying,
   deciding,
+  templateBusy,
 }: {
   suggestion: CampaignSuggestion;
   template: CampaignTemplate | undefined;
@@ -80,6 +81,14 @@ function SuggestionCard({
   onDismiss: (s: CampaignSuggestion) => void;
   applying: boolean;
   deciding: boolean;
+  // True while ANY suggestion for this same template is mid-apply — not just
+  // this card's own `applying`. Guards against applying two suggestions on
+  // the same template in quick succession: the apply mutation full-
+  // overwrites campaign_templates.steps from the React-Query-cached
+  // template, so a second apply that starts before the first's refetch
+  // resolves reads stale steps and silently reverts the first edit. See
+  // InsightsPanel's handleApply/inFlightTemplateId.
+  templateBusy: boolean;
 }) {
   const disabledReason = suggestionApplyDisabledReason(template, suggestion);
 
@@ -114,8 +123,8 @@ function SuggestionCard({
         <Button
           size="sm"
           className="h-7 text-xs"
-          disabled={!!disabledReason || applying || deciding}
-          title={disabledReason ?? undefined}
+          disabled={!!disabledReason || applying || deciding || templateBusy}
+          title={disabledReason ?? (templateBusy ? "Another suggestion for this template is being applied…" : undefined)}
           onClick={() => onApply(suggestion)}
         >
           <Check className="h-3.5 w-3.5 mr-1" />
@@ -125,7 +134,7 @@ function SuggestionCard({
           size="sm"
           variant="outline"
           className="h-7 text-xs"
-          disabled={applying || deciding}
+          disabled={applying || deciding || templateBusy}
           onClick={() => onDismiss(suggestion)}
         >
           <X className="h-3.5 w-3.5 mr-1" />
@@ -148,6 +157,12 @@ export function InsightsPanel({
   const saveTemplate = useSaveTemplate();
   const decide = useDecideSuggestion();
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Which template currently has an apply in flight (or null). Distinct from
+  // busyId (which suggestion's card shows the spinner) — this drives the
+  // shared disable-gate across every OTHER pending suggestion for the same
+  // template, so a second Apply can't fire before the first's template
+  // refetch has landed. See SuggestionCard's `templateBusy` doc comment.
+  const [inFlightTemplateId, setInFlightTemplateId] = useState<string | null>(null);
   const [decidedOpen, setDecidedOpen] = useState(false);
 
   const templatesById = useMemo(() => {
@@ -185,7 +200,19 @@ export function InsightsPanel({
     const result = applySuggestionToTemplate(template, s);
     if (!result) return; // button is disabled in this state; guard anyway
     setBusyId(s.id);
+    // Lock every OTHER pending suggestion on this same template out of
+    // Apply/Dismiss for the duration of this call (see SuggestionCard's
+    // `templateBusy` prop) — without this, a second apply on the same
+    // template started before this one's saveTemplate.mutateAsync resolves
+    // would read the same stale `templatesById[s.template_id]` snapshot
+    // captured above and full-overwrite `steps` from it, silently reverting
+    // whatever this call is about to save.
+    setInFlightTemplateId(s.template_id);
     try {
+      // mutateAsync only resolves once useSaveTemplate's own onSuccess
+      // (qc.invalidateQueries) has run, so templatesById is already fresh
+      // by the time we clear the lock below — the next Apply on this
+      // template reads the just-applied steps, not a stale snapshot.
       await saveTemplate.mutateAsync({
         id: template.id,
         name: template.name,
@@ -197,6 +224,7 @@ export function InsightsPanel({
     } catch (e) {
       toast.error("Couldn't update the template: " + (e as Error).message);
       setBusyId(null);
+      setInFlightTemplateId(null);
       return;
     }
     try {
@@ -204,6 +232,7 @@ export function InsightsPanel({
       toast.success(`Applied to ${template.name}.`);
     } finally {
       setBusyId(null);
+      setInFlightTemplateId(null);
     }
   }
 
@@ -252,6 +281,7 @@ export function InsightsPanel({
                       onDismiss={handleDismiss}
                       applying={busyId === s.id && saveTemplate.isPending}
                       deciding={busyId === s.id && decide.isPending}
+                      templateBusy={saveTemplate.isPending && inFlightTemplateId === s.template_id}
                     />
                   ))}
                 </div>

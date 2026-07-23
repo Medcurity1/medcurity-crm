@@ -45,6 +45,7 @@ import {
   fetchEmailAccounts,
   buildSmartleadMetrics,
   mapSmartleadStatus,
+  type CampaignStatus,
 } from "../_shared/smartlead.ts";
 import {
   computeFirstSendDates,
@@ -405,6 +406,30 @@ interface CampaignStep {
   task_note_template?: string;
 }
 
+// Pulse-terminal campaign statuses a Smartlead import/sync pass must never
+// regress away from. mapSmartleadStatus can return null (missing/unexpected
+// Smartlead status string); previously it defaulted to "draft", which meant
+// a transient bad status from Smartlead's API — or a stopped/completed
+// campaign whose Smartlead-side status Smartlead itself reports oddly —
+// could silently flip a Pulse campaign back to "draft", re-arming sending
+// and re-showing the tracker's Delete action. See mapSmartleadStatus's doc
+// comment (_shared/smartlead.ts) for the full rationale.
+const CAMPAIGN_TERMINAL_STATUSES = new Set(["stopped", "completed"]);
+
+/** Resolve the status to write for an EXISTING campaign row being
+ *  imported/synced from Smartlead. `mapped` is mapSmartleadStatus's result.
+ *  Keeps the row's current status unchanged when: (a) mapped is null
+ *  (unrecognized/missing Smartlead status — nothing to apply), or (b) the
+ *  row is already Pulse-terminal (stopped/completed) and mapped would move
+ *  it backward to draft/active. Otherwise applies `mapped`. */
+function resolveSyncedStatus(currentStatus: string, mapped: CampaignStatus | null): string {
+  if (!mapped) return currentStatus;
+  if (CAMPAIGN_TERMINAL_STATUSES.has(currentStatus) && (mapped === "draft" || mapped === "active")) {
+    return currentStatus;
+  }
+  return mapped;
+}
+
 async function importCampaigns() {
   const campaigns = await fetchCampaigns();
   if (!Array.isArray(campaigns)) throw new Error("Unexpected Smartlead response");
@@ -425,20 +450,26 @@ async function importCampaigns() {
 
     const metrics = buildSmartleadMetrics(analytics);
     const notes = notesFromSequences(sequences);
-    const status = mapSmartleadStatus(camp.status as string);
+    const mappedStatus = mapSmartleadStatus(camp.status as string);
 
     if (existing) {
       const merged = { ...(existing.metrics ?? {}), ...metrics };
       // Mirror Smartlead's status directly (bidirectional — Smartlead is
       // the source of truth for a linked campaign's send state, including
-      // pause/resume, not just forward lifecycle progress).
+      // pause/resume, not just forward lifecycle progress) — but never
+      // regress a Pulse-terminal status on an unrecognized/backward value;
+      // see resolveSyncedStatus above.
+      const status = resolveSyncedStatus(existing.status as string, mappedStatus);
       await svc.from("campaigns").update({ metrics: merged, status }).eq("id", existing.id);
       updated++;
     } else {
+      // Brand-new row: no prior status to preserve, and the status column
+      // is NOT NULL — fall back to "draft" (the column's own default) if
+      // Smartlead's status didn't map to anything recognized.
       await svc.from("campaigns").insert({
         name: (camp.name as string) || "Smartlead Campaign " + campId,
         origin: "smartlead_import",
-        status,
+        status: mappedStatus ?? "draft",
         smartlead_campaign_id: campId,
         notes,
         metrics,
@@ -462,7 +493,12 @@ async function syncCampaigns() {
       const analytics = (await fetchCampaignAnalytics(c.smartlead_campaign_id)) as Record<string, unknown>;
       const metrics = buildSmartleadMetrics(analytics);
       const merged = { ...(c.metrics ?? {}), ...metrics };
-      const status = mapSmartleadStatus(camp.status as string);
+      const mappedStatus = mapSmartleadStatus(camp.status as string);
+      // No-regress rule: never let a sync pass move an already-terminal
+      // (stopped/completed) Pulse campaign back to draft/active, and never
+      // apply a null (unrecognized Smartlead status) mapping — see
+      // resolveSyncedStatus / mapSmartleadStatus's doc comments.
+      const status = resolveSyncedStatus(c.status as string, mappedStatus);
       await svc.from("campaigns").update({ metrics: merged, status }).eq("id", c.id);
       synced++;
     } catch { /* skip this one */ }
@@ -849,6 +885,31 @@ async function setCampaignStatus(p: SetStatusInput, archivedBy: string | null, c
   if (!callerCtx.isAdmin && (!callerCtx.userId || campaign.owner_user_id !== callerCtx.userId)) {
     throw new Error("You can only manage campaigns you own.");
   }
+
+  // State preconditions — these are correctness, not permission, so they
+  // apply to admins/service-role too. Without them a "start" or "resume"
+  // call re-mirrors an already-live status to Smartlead and re-runs the
+  // schedule-fill path regardless of the campaign's actual current state,
+  // which let a Stopped campaign be resumed (re-arming sending) or
+  // re-showed the tracker's Delete action after a bad state transition.
+  // The tracker UI only ever offers Start on a draft campaign and Resume on
+  // a paused one (CampaignStatusControls in CampaignCard.tsx gates the
+  // buttons on c.status), so these mirror what the UI already enforces —
+  // this closes the gap for any other caller (API misuse, a stale tab with
+  // a cached status, a future non-UI caller).
+  if (p.action === "resume" && campaign.status !== "paused") {
+    throw new Error("Only a paused campaign can be resumed.");
+  }
+  if (p.action === "start" && campaign.status !== "draft") {
+    throw new Error("Only a draft campaign can be started.");
+  }
+  if (p.action === "pause" && campaign.status !== "active") {
+    throw new Error("Only an active campaign can be paused.");
+  }
+  // stop is allowed from any non-terminal status (draft/active/paused) —
+  // no precondition needed; a stopped/completed campaign has no UI path to
+  // re-trigger stop (CampaignStatusControls only renders Stop for
+  // active/paused), so this can't be reached from the tracker either way.
 
   if (campaign.smartlead_campaign_id != null) {
     await smartleadFetch(`/campaigns/${campaign.smartlead_campaign_id}/status`, {
