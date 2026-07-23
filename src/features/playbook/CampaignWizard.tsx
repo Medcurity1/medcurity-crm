@@ -38,6 +38,7 @@ import { partitionSuppression, normalizeEmail, type SuppressionEntry } from "./s
 import type { SequenceStep } from "./types";
 import {
   useGenerateCampaign, useSuggestCampaign, useRegenerateEmail, useEmailAccounts, useLaunchCampaign,
+  useInboxHealth,
   type GeneratedCampaign, type Recipient, type ActiveEnrollmentEntry,
 } from "./api";
 
@@ -157,6 +158,9 @@ export function CampaignWizard({
   const regen = useRegenerateEmail();
   const { data: tags } = useTags();
   const { data: inboxes } = useEmailAccounts();
+  // Lazy — only fires once the wizard has actually reached the cadence/inbox
+  // step (Campaigns overhaul Phase 5's "Sending inboxes" note below).
+  const { data: inboxHealth } = useInboxHealth(step === 4);
   const launch = useLaunchCampaign();
 
   // Two independent soft-alert rails against the SAME raw recipient list —
@@ -193,6 +197,14 @@ export function CampaignWizard({
   const rampProjection = useMemo(
     () => (mode === "template" ? projectSendRamp(templateSteps, leadsPerDay, sendableRecipients.length) : null),
     [mode, templateSteps, leadsPerDay, sendableRecipients.length],
+  );
+
+  // The chosen inbox's current load (Campaigns overhaul Phase 5) — only
+  // meaningful once an inbox is actually picked, and only ever non-null once
+  // inboxHealth has loaded (step === 4).
+  const selectedInboxHealth = useMemo(
+    () => (inboxId ? (inboxHealth ?? []).find((ib) => String(ib.id) === inboxId) ?? null : null),
+    [inboxHealth, inboxId],
   );
 
   function reset() {
@@ -636,6 +648,12 @@ export function CampaignWizard({
                       {(inboxes ?? []).map((a) => <SelectItem key={a.id} value={String(a.id)}>{a.from_email ?? a.from_name ?? `Inbox ${a.id}`}</SelectItem>)}
                     </SelectContent>
                   </Select>
+                  {selectedInboxHealth && selectedInboxHealth.campaigns.length > 0 && (
+                    <p className="text-[11px] text-muted-foreground">
+                      This inbox is also sending for {selectedInboxHealth.campaigns.length} other campaign{selectedInboxHealth.campaigns.length === 1 ? "" : "s"}{" "}
+                      ({selectedInboxHealth.total_leads_per_day} people/day) — new sends share its daily capacity.
+                    </p>
+                  )}
                 </div>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="checkbox" checked={autoStart} onChange={(e) => setAutoStart(e.target.checked)} />

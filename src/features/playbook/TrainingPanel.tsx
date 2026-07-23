@@ -23,6 +23,8 @@ const SOURCE_LABELS: Record<string, string> = {
   thumbs_down: "From 👎 feedback",
   campaign_result: "From a campaign result",
   adaptation_feedback: "From an adaptation",
+  "auto-insights": "From AI insights",
+  suggestion_applied: "From an applied suggestion",
 };
 
 function sourceLabel(source: string): string {

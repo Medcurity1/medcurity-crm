@@ -6,7 +6,7 @@
 // overhaul S4) — a campaign never has to be managed by opening Smartlead.
 
 import { useMemo, useState } from "react";
-import { Megaphone, Download, RefreshCw, Loader2, Plus } from "lucide-react";
+import { Megaphone, Download, RefreshCw, Loader2, Plus, Inbox } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,6 +18,7 @@ import { CampaignReplies } from "./CampaignReplies";
 import { LoadError } from "./LoadError";
 import { CampaignCard, type CampaignRow } from "./CampaignCard";
 import { CampaignDetailSheet } from "./CampaignDetailSheet";
+import { InboxHealthDialog } from "./InboxHealthDialog";
 import {
   useCampaigns,
   useSmartleadStatus,
@@ -71,6 +72,7 @@ export function CampaignsTab() {
   // sheet vanishing instantly.
   const [detailCampaign, setDetailCampaign] = useState<CampaignRow | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [inboxHealthOpen, setInboxHealthOpen] = useState(false);
 
   const inboxLabels = useMemo(() => {
     const m = new Map<string, string>();
@@ -178,6 +180,9 @@ export function CampaignsTab() {
             )}
             {sl?.configured ? (
               <>
+                <Button size="sm" variant="outline" onClick={() => setInboxHealthOpen(true)}>
+                  <Inbox className="h-4 w-4 mr-1" /> Sending inboxes
+                </Button>
                 <Button size="sm" onClick={() => importMut.mutate()} disabled={busy}>
                   {importMut.isPending ? (
                     <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Importing…</>
@@ -247,6 +252,8 @@ export function CampaignsTab() {
       </div>
 
       <CampaignWizard open={wizardOpen} onOpenChange={setWizardOpen} />
+
+      <InboxHealthDialog open={inboxHealthOpen} onOpenChange={setInboxHealthOpen} />
 
       <CampaignDetailSheet
         campaign={liveDetailCampaign}

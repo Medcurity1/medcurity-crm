@@ -10,6 +10,8 @@ import type {
   NewsletterType,
   CampaignTemplate,
   SequenceStep,
+  CampaignSuggestion,
+  SuggestionStatus,
 } from "./types";
 import { normalizeEmail, type SuppressionEntry } from "./suppression";
 import { isPositiveReplyCategory } from "./reply-extract";
@@ -470,6 +472,47 @@ export function useEmailAccounts() {
       return (data?.accounts ?? []) as Array<{ id: number; from_email?: string; from_name?: string }>;
     },
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** One sending inbox's warmup health + how much daily volume it's already
+ *  carrying — the `inbox-health` edge action's per-inbox shape (Campaigns
+ *  overhaul Phase 5). `warmup` is null when Smartlead's warmup-stats read
+ *  failed or came back empty (unverified endpoint — see the edge function's
+ *  fetchInboxWarmup doc comment); `daily_limit` is null when no plausible
+ *  limit field was found on the account row. Both "unknown, not zero" —
+ *  the UI must say so honestly rather than implying a real 0. */
+export interface InboxHealthEntry {
+  id: number;
+  from_email: string | null;
+  from_name: string | null;
+  daily_limit: number | null;
+  warmup: {
+    sent_7d: number | null;
+    inbox_rate: number | null;
+    spam_rate: number | null;
+    status: string | null;
+  } | null;
+  campaigns: Array<{ id: string; name: string; leads_per_day: number; status: string }>;
+  total_leads_per_day: number;
+}
+
+/** Lazy — only fires while `enabled` (the Sending Inboxes dialog is open, or
+ *  the launch wizard has reached its cadence/inbox step): each call makes a
+ *  live Smartlead warmup-stats round trip per inbox (capped at 10 server-
+ *  side), so this shouldn't run on every Campaigns tab render. */
+export function useInboxHealth(enabled: boolean) {
+  return useQuery({
+    queryKey: ["playbook", "inbox-health"],
+    enabled,
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "inbox-health" },
+      });
+      if (error) throw error;
+      return (data?.inboxes ?? []) as InboxHealthEntry[];
+    },
+    staleTime: 2 * 60 * 1000,
   });
 }
 
@@ -1256,5 +1299,76 @@ export function useSetEnrollmentStatus() {
       qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] });
     },
     onError: (e) => toast.error("Couldn't update this person: " + (e as Error).message),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Campaign suggestions (Campaigns overhaul Phase 4 — the AI learning loop)
+// ---------------------------------------------------------------------------
+
+/** Every suggestion (pending + decided), newest first — InsightsPanel groups
+ *  pending ones by template client-side and shows decided ones collapsed
+ *  underneath. One query covers both; the panel's badge count on the
+ *  Insights button reuses this same cached list (react-query dedupes the
+ *  fetch) rather than firing a second one. */
+export function useCampaignSuggestions() {
+  return useQuery({
+    queryKey: ["playbook", "campaign-suggestions"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("campaign_suggestions")
+        .select("*, campaign:campaigns(name)")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as unknown as CampaignSuggestion[];
+    },
+  });
+}
+
+/** Count of pending suggestions only — the same query the badge would need,
+ *  kept separate so a page that only wants the count (the Insights button
+ *  before the panel is ever opened) doesn't pull rationale/current/suggested
+ *  text for every row. Cheap head-count query. */
+export function usePendingSuggestionCount() {
+  return useQuery({
+    queryKey: ["playbook", "campaign-suggestions", "pending-count"],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from("campaign_suggestions")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "pending");
+      if (error) throw error;
+      return count ?? 0;
+    },
+  });
+}
+
+/** Apply or dismiss a suggestion — see the `decide-suggestion` action in
+ *  playbook-smartlead/index.ts. campaign_suggestions is admin-read-only via
+ *  RLS, so the status transition (and, on 'applied', the training-note log)
+ *  has to go through the edge function rather than a direct table update —
+ *  same shape as useMarkReplyHandled/useSetEnrollmentStatus above.
+ *
+ *  IMPORTANT: this does NOT edit the template. When decision is 'applied',
+ *  the caller must have already written the template edit itself (via
+ *  useSaveTemplate + applySuggestionToTemplate from suggestion-apply.ts,
+ *  see InsightsPanel.tsx's handleApply) BEFORE calling this — this hook only
+ *  stamps the suggestion decided and logs the training note. */
+export function useDecideSuggestion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: { id: string; decision: Extract<SuggestionStatus, "applied" | "dismissed"> }) => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "decide-suggestion", id: p.id, decision: p.decision },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as { success: boolean; status: string; already_decided?: boolean };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["playbook", "campaign-suggestions"] });
+      qc.invalidateQueries({ queryKey: ["playbook", "training"] });
+    },
+    onError: (e) => toast.error("Couldn't save that decision: " + (e as Error).message),
   });
 }

@@ -26,7 +26,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { formatName, formatDate, formatDateTime, formatRelativeDate } from "@/lib/formatters";
+import { formatName, formatDate, formatDateOnly, formatDateTime, formatRelativeDate } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { SequenceTimeline } from "./SequenceTimeline";
 import { STATUS_META, originHint, CampaignStatusControls, type CampaignRow } from "./CampaignCard";
@@ -260,9 +260,25 @@ export function CampaignDetailSheet({
                       const meta = ENROLLMENT_STATUS_META[e.status] ?? { label: e.status, className: "" };
                       const displayName = formatName(e.first_name ?? "", e.last_name ?? "").trim() || e.email || "—";
                       const subtitle = enrollmentSubtitle(e);
+                      // current_step only advances once campaign_events sees
+                      // a step-attributable send (Smartlead doesn't reliably
+                      // tell us which step — see extractStepNumber's doc
+                      // comment in playbook-smartlead/index.ts), so it can
+                      // stay 0 for a person who genuinely has been sent to.
+                      // Don't claim a step number we don't have, but also
+                      // don't say "Not sent yet" when we have real evidence
+                      // otherwise: the campaign has sent SOMETHING (metrics)
+                      // AND this person's own first_send_at has passed AND
+                      // they're not just enrolled-and-waiting (active) or
+                      // stopped-by-reply (still means their first email
+                      // went out) — show "In progress" instead.
+                      const campaignHasSent = Number(c.metrics?.sent) > 0;
+                      const firstSendInPast = !!e.first_send_at && new Date(e.first_send_at).getTime() <= Date.now();
                       const stepLabel = e.current_step > 0
                         ? `Step ${e.current_step}${totalEmailSteps ? ` of ${totalEmailSteps}` : ""}`
-                        : "Not sent yet";
+                        : campaignHasSent && firstSendInPast && (e.status === "active" || e.status === "replied")
+                          ? "In progress"
+                          : "Not sent yet";
                       const terminal = ENROLLMENT_TERMINAL.includes(e.status);
                       const rowBusy = setEnrollment.isPending && setEnrollment.variables?.enrollment_id === e.id;
                       const rowBusyAction = rowBusy ? setEnrollment.variables?.action : null;
@@ -289,8 +305,8 @@ export function CampaignDetailSheet({
                               {meta.label}
                             </Badge>
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground" title={formatDateTime(e.first_send_at)}>
-                            {formatDate(e.first_send_at)}
+                          <TableCell className="text-sm text-muted-foreground" title={formatDateOnly(e.first_send_at)}>
+                            {formatDateOnly(e.first_send_at)}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{stepLabel}</TableCell>
                           <TableCell className="text-right">
