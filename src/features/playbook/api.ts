@@ -254,17 +254,31 @@ export function useCampaigns() {
   return useQuery({
     queryKey: ["playbook", "campaigns"],
     queryFn: async () => {
+      // Explicit column list — NEVER select("*") here. webhook_secret is
+      // column-level REVOKEd from `authenticated` (20260723060000; it
+      // authenticates the public campaign-webhooks endpoint, and
+      // campaigns_read_own's RLS only filters rows, not columns), so a `*`
+      // select would error for every non-service-role caller. Keep this in
+      // sync with the Campaign type (src/features/playbook/types.ts) —
+      // every campaigns column EXCEPT webhook_secret.
       const { data, error } = await supabase
         .from("campaigns")
         .select(
-          "*, owner:user_profiles!owner_user_id(id, full_name), template:campaign_templates(name)",
+          "id, name, template_id, steps, owner_user_id, sending_email_account_id, smartlead_campaign_id, smartlead_webhook_id, status, leads_per_day, anchor_date, settings, metrics, origin, notes, analyzed_at, analysis_json, adaptive_enabled, legacy_meta, created_at, updated_at, owner:user_profiles!owner_user_id(id, full_name), template:campaign_templates(name)",
         )
         // Newest first, id as the tiebreaker (stable ordering within the
         // same created_at, e.g. a bulk-import batch inserted in one pass).
         .order("created_at", { ascending: false })
         .order("id", { ascending: false });
       if (error) throw error;
-      return data as (Campaign & {
+      // as unknown as: with an explicit (non-"*") column list, supabase-js's
+      // string-parsed select type infers the embedded owner/template
+      // resources as arrays (no generated Database types in this project to
+      // tell it they're many-to-one) — incompatible enough with the
+      // hand-authored shape below that a direct `as` is rejected. Same
+      // two-step cast already used elsewhere in this file (e.g.
+      // useCampaignReplies, useCampaignSuggestions).
+      return data as unknown as (Campaign & {
         owner?: { id: string; full_name: string | null } | null;
         template?: { name: string } | null;
       })[];

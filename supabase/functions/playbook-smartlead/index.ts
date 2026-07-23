@@ -1438,7 +1438,25 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
     // campaigns row too (not just the Smartlead campaign), which cascades
     // to any enrollments already inserted (campaign_enrollments.campaign_id
     // is ON DELETE CASCADE, 20260625000001).
-    const enrollmentRows = enrollableRecipients.map((r, i) => ({
+    //
+    // De-dupe by contact_id first: uq_enrollment_campaign_contact
+    // (campaign_id, contact_id) — 20260625000001 — rejects a second row with
+    // the same non-null contact_id, and that unique-violation aborts the
+    // WHOLE insert batch it lands in (not just the offending row), which
+    // would abort the whole enrollment for every recipient already queued
+    // in Smartlead above. Drop later duplicates, keep the first occurrence
+    // (preserves upload order for the survivors' enroll_position). NULL
+    // contact_id (CSV/paste recipients with no contact match) is exempt —
+    // Postgres treats NULLs as distinct, so they never collide with each
+    // other on this index.
+    const seenContactIds = new Set<string>();
+    const dedupedRecipients = enrollableRecipients.filter((r) => {
+      if (!r.contact_id) return true;
+      if (seenContactIds.has(r.contact_id)) return false;
+      seenContactIds.add(r.contact_id);
+      return true;
+    });
+    const enrollmentRows = dedupedRecipients.map((r, i) => ({
       campaign_id: pulseCampaignId,
       contact_id: r.contact_id ?? null,
       account_id: r.account_id ?? null, // tag-source recipients carry it; CSV/paste don't (no lookup in v1)
@@ -1909,7 +1927,7 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
 
   const { data: enrollments, error } = await svc
     .from("campaign_enrollments")
-    .select("id, contact_id, account_id, first_name, last_name, email, status, first_send_at, reply_category")
+    .select("id, contact_id, account_id, first_name, last_name, email, status, first_send_at, actual_first_send_at, reply_category")
     .eq("campaign_id", campaign.id)
     .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`);
   if (error) throw new Error("Enrollment lookup for reconcile failed: " + error.message);
@@ -1924,7 +1942,8 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
   for (const e of enrollments as {
     id: string; contact_id: string | null; account_id: string | null;
     first_name: string | null; last_name: string | null; email: string | null;
-    status: string; first_send_at: string | null; reply_category: string | null;
+    status: string; first_send_at: string | null; actual_first_send_at: string | null;
+    reply_category: string | null;
   }[]) {
     const key = e.email ? normalizeEmail(e.email) : "";
     const row = key ? byEmail.get(key) : undefined;
@@ -1962,15 +1981,24 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
       continue;
     }
 
-    // (a) first-send date reconcile
-    if (row.sentAt) {
+    // (a) first-send date reconcile — SAME one-time-correction gate as
+    // campaign-webhooks' handleEmailSent (see actual_first_send_at's column
+    // comment, 20260723060000_campaigns_audit_fixes.sql): once a real send
+    // has been confirmed for this enrollment (by either this sweep or the
+    // live webhook), it must never be corrected/shifted again. Without this
+    // gate the sweep would re-"correct" first_send_at (and re-shift tasks)
+    // every single run for as long as row.sentAt (Smartlead's reported first
+    // send) differed from the stored value for any reason — the exact same
+    // re-anchor-on-every-send bug FIX 1 closes on the webhook side, just
+    // triggered by a cron tick instead of a later EMAIL_SENT event.
+    if (row.sentAt && !e.actual_first_send_at) {
       const sentDate = row.sentAt.slice(0, 10);
       const mismatched = !e.first_send_at || e.first_send_at.slice(0, 10) !== sentDate;
       if (mismatched) {
         const delta = e.first_send_at ? daysBetweenDateOnly(e.first_send_at, row.sentAt) : 0;
         const { error: updErr } = await svc
           .from("campaign_enrollments")
-          .update({ first_send_at: sentDate })
+          .update({ first_send_at: sentDate, actual_first_send_at: row.sentAt })
           .eq("id", e.id);
         if (updErr) {
           console.error(`daily-sweep: first_send_at correction failed for enrollment ${e.id}:`, updErr.message);
@@ -1978,6 +2006,16 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
         }
         if (delta !== 0) await shiftEnrollmentTasks(svc, e.id, delta);
         enrollmentsUpdated++;
+      } else {
+        // Already correct (matches what we'd have set) — still stamp
+        // actual_first_send_at so the gate closes even when there was
+        // nothing to shift, matching handleEmailSent's behavior of always
+        // setting it on the first confirmed send.
+        const { error: stampErr } = await svc
+          .from("campaign_enrollments")
+          .update({ actual_first_send_at: row.sentAt })
+          .eq("id", e.id);
+        if (stampErr) console.error(`daily-sweep: actual_first_send_at stamp failed for enrollment ${e.id}:`, stampErr.message);
       }
     }
   }
