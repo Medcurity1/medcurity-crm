@@ -17,7 +17,6 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -138,7 +137,6 @@ function RequestDetailDialog({
   // Request managers = the admin group (matches the requests UPDATE RLS).
   const canManageNotes = profile?.role === "admin" || profile?.role === "super_admin";
   const { data: attachments } = useRequestAttachments(request.id, open);
-  const [note, setNote] = useState("");
   const [notesDraft, setNotesDraft] = useState(request.working_notes ?? "");
   // Re-sync the draft each time the dialog opens (the dialog stays
   // mounted per card, so state would otherwise go stale across opens).
@@ -385,7 +383,7 @@ function RequestDetailDialog({
                     rows={3}
                     value={notesDraft}
                     onChange={(e) => setNotesDraft(e.target.value)}
-                    placeholder={'Notes for the team — e.g. "Molly is gathering info for this one"'}
+                    placeholder={'Notes for the team, e.g. "still gathering info on this one"'}
                     className="bg-background/60"
                   />
                   <div className="flex items-center justify-between gap-2">
@@ -425,21 +423,13 @@ function RequestDetailDialog({
             </div>
           )}
 
+          {/* The old per-decision "Note (optional)" box was retired in favor
+              of Working Notes above (Nathan 7/24) — one notes surface, not two. */}
           {isPending && isProduct && (
-            <div className="space-y-2">
-              <Label htmlFor={`note-${request.id}`}>Note (optional)</Label>
-              <Textarea
-                id={`note-${request.id}`}
-                rows={2}
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="Add context for your decision..."
-              />
-              <p className="text-xs text-muted-foreground">
-                Approving files this to the product team's Jira board, including any
-                attachments.
-              </p>
-            </div>
+            <p className="text-xs text-muted-foreground">
+              Approving files this to the product team's Jira board, including any
+              attachments.
+            </p>
           )}
         </div>
 
@@ -452,7 +442,7 @@ function RequestDetailDialog({
                 disabled={busy}
                 onClick={() =>
                   deny.mutate(
-                    { id: request.id, note: note.trim() || undefined },
+                    { id: request.id },
                     {
                       onSuccess: () => {
                         toast.success("Request denied.");
@@ -470,7 +460,7 @@ function RequestDetailDialog({
                 disabled={busy}
                 onClick={() =>
                   approve.mutate(
-                    { id: request.id, note: note.trim() || undefined },
+                    { id: request.id },
                     {
                       onSuccess: (res) => {
                         toast.success(

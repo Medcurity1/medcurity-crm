@@ -4,6 +4,8 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Staging — awaiting prod go-ahead
 
+- [STAGING] 2026-07-24 · Nathan · Requests dialog cleanup: retired the old per-decision "Note (optional)" box on product requests (Working Notes is the one notes surface now; approve/deny no longer send a decision_note) + Working Notes placeholder reworded (no name, no em dash).
+
 
 (The Azure SWA upload outage RESOLVED ~15:50 PT 7/21 — Nathan's empty-commit pipe test afdc08f went green and shipped the two stuck approved frontends; see SHIPPED. The 7/21 afternoon batch — ghost-stage migration, partner banner, claim tool, phone auto-fill, FTE gate fix — remains STAGING-ONLY awaiting Nathan's go.)
 
