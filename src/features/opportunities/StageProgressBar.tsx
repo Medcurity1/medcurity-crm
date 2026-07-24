@@ -32,7 +32,7 @@ export function StageProgressBar({ currentStage, onStageClick }: StageProgressBa
             bg = isWon ? "bg-emerald-500" : currentStage === "closed_lost" ? "bg-red-500" : "bg-primary";
           } else if (isPast && !isClosedStage) {
             bg = "bg-primary/40";
-          } else if (isClosed && !isClosedStage && i < 4) {
+          } else if (isClosed && !isClosedStage) {
             bg = isWon ? "bg-emerald-300" : "bg-red-300";
           }
 

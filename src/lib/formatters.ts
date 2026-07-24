@@ -271,18 +271,17 @@ export function employeesToFteRange(employees: number | null | undefined): strin
 }
 
 export const OPEN_STAGES: OpportunityStage[] = [
-  // SF-aligned stages (current). Pipeline board uses these.
   "details_analysis",
   "demo",
   "proposal_and_price_quote",
   "proposal_conversation",
-  // Legacy stages — kept so any historical pipeline configs that
-  // still reference them don't filter to nothing.
-  "lead",
-  "qualified",
-  "proposal",
   "verbal_commit",
 ];
+
+// Retired stages: still valid enum values in the DB (historical rows /
+// stage history may carry them) but never offered in pickers or shown
+// as board columns.
+export const RETIRED_STAGES: OpportunityStage[] = ["lead", "qualified", "proposal"];
 
 // Stages shown in the UI + used by pipeline-view defaults. Order
 // matches the SF probability ladder (low → high, then closed states).
@@ -291,6 +290,7 @@ export const ALL_STAGES: OpportunityStage[] = [
   "demo",
   "proposal_and_price_quote",
   "proposal_conversation",
+  "verbal_commit",
   "closed_won",
   "closed_lost",
 ];

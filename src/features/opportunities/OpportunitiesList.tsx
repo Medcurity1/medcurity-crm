@@ -123,7 +123,7 @@ function StaleBadge({
 // right from the list. Click a cell to edit; saves on blur / Enter, Esc cancels.
 const INLINE_STAGES: OpportunityStage[] = [
   "details_analysis", "demo", "proposal_and_price_quote",
-  "proposal_conversation", "closed_won", "closed_lost",
+  "proposal_conversation", "verbal_commit", "closed_won", "closed_lost",
 ];
 
 function InlineStage({
@@ -665,6 +665,7 @@ export function OpportunitiesList() {
             { value: "demo", label: "Demo" },
             { value: "proposal_and_price_quote", label: "Proposal and Price Quote" },
             { value: "proposal_conversation", label: "Proposal Conversation" },
+            { value: "verbal_commit", label: "Verbal Commit" },
             { value: "closed_won", label: "Closed Won" },
             { value: "closed_lost", label: "Closed Lost" },
           ]}

@@ -2,7 +2,7 @@ import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom"
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
-import { Pencil, Archive, ChevronDown, UserRoundCog, Plus, Trash2, History } from "lucide-react";
+import { Pencil, Archive, ChevronDown, UserRoundCog, Plus, Trash2, History, StickyNote } from "lucide-react";
 import { useOpportunity, useUpdateOpportunity, useArchiveOpportunity, useDeleteOpportunity, useStageHistory, useOpportunityProducts, useRemoveOpportunityProduct, useUpdateOpportunityProduct, useEnsureOpportunityAmountFresh } from "./api";
 import { MultiProductPicker } from "./MultiProductPicker";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
@@ -24,6 +24,7 @@ import { OpportunityContacts } from "./OpportunityContacts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CollapsibleTabs } from "@/components/CollapsibleTabs";
 import {
   Table,
@@ -37,6 +38,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { OpportunityStage } from "@/types/crm";
 import {
+  ALL_STAGES,
   stageLabel,
   businessTypeLabel,
   teamLabel,
@@ -393,6 +395,24 @@ export function OpportunityDetail() {
     };
   const parseNumber = (v: string) => (v === "" ? null : Number(v));
 
+  // Shared stage-change gate: used by the top-card Stage picker AND the
+  // clickable progress bar. Closed Won is blocked until the account passes
+  // the close-readiness check (Rachel); every change confirms via dialog.
+  const requestStageChange = async (stage: OpportunityStage) => {
+    if (stage === opp.stage) return;
+    if (stage === "closed_won") {
+      const { ready, missing } = await checkCloseReadiness(supabase, opp.account_id, opp.id);
+      if (!ready) {
+        toast.error(formatCloseReadinessMessage(missing));
+        return;
+      }
+    }
+    setPendingStage(stage);
+  };
+  // A stray retired stage (lead/qualified/proposal) still needs to render
+  // in the picker so the current value isn't blank.
+  const stageOptions = ALL_STAGES.includes(opp.stage) ? ALL_STAGES : [opp.stage, ...ALL_STAGES];
+
   function handleArchive() {
     if (!id) return;
     archiveMutation.mutate(
@@ -478,14 +498,38 @@ export function OpportunityDetail() {
             ) : <p className="text-sm text-muted-foreground">{"\u2014"}</p>}
           </CardContent>
         </Card>
+        {/* Stage (Summer 7/24): editable right from the top bar. Runs
+            through the same close-readiness gate + confirm dialog as the
+            progress bar below. */}
+        <Card>
+          <CardHeader className="pb-1 pt-3 px-4">
+            <CardTitle className="text-xs text-muted-foreground font-medium">Stage</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            <Select value={opp.stage} onValueChange={(v) => requestStageChange(v as OpportunityStage)}>
+              <SelectTrigger className="h-7 border-0 px-0 shadow-none text-sm font-semibold focus:ring-0 [&>svg]:opacity-50">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {stageOptions.map((s) => (
+                  <SelectItem key={s} value={s}>{stageLabel(s)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </CardContent>
+        </Card>
+        {/* Expected Close (Summer 7/24): editable in place. */}
         <Card>
           <CardHeader className="pb-1 pt-3 px-4">
             <CardTitle className="text-xs text-muted-foreground font-medium">Expected Close</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
-            <p className="text-sm font-semibold">
-              {opp.expected_close_date ? formatDate(opp.expected_close_date) : "\u2014"}
-            </p>
+            <InlineEdit
+              value={opp.expected_close_date}
+              type="date"
+              onSave={saveField("expected_close_date")}
+              className="text-sm font-semibold"
+            />
           </CardContent>
         </Card>
         <Card>
@@ -530,26 +574,30 @@ export function OpportunityDetail() {
             <p className="text-sm font-semibold">{formatDate(opp.contract_end_date)}</p>
           </CardContent>
         </Card>
+        {/* Next Steps (Summer 7/24): same jot-it-down treatment as the
+            account Quick Notes card. Binds to opportunities.next_step.
+            Spans the grid's leftover columns so it adds no vertical
+            space on desktop. */}
+        <Card className="col-span-2 md:col-span-3 lg:col-span-4 border-amber-400/40 bg-amber-400/[0.06] dark:bg-amber-300/[0.04]">
+          <CardHeader className="pb-1 pt-3 px-4">
+            <CardTitle className="text-xs text-muted-foreground font-medium inline-flex items-center gap-1.5">
+              <StickyNote className="h-3.5 w-3.5 text-amber-500/80" />
+              Next Steps
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            <InlineEdit
+              value={opp.next_step ?? null}
+              type="textarea"
+              placeholder={'Add the next step — e.g. "Send updated proposal after their board meeting"'}
+              onSave={saveField("next_step")}
+            />
+          </CardContent>
+        </Card>
       </div>
 
       {/* --------- Stage Progress Bar --------- */}
-      <StageProgressBar
-        currentStage={opp.stage}
-        onStageClick={async (stage) => {
-          if (stage === opp.stage) return;
-          // Close-readiness gate (Rachel): block the move INTO Closed Won
-          // until the account has complete client info, before we even open
-          // the confirm dialog. Other stage changes are unaffected.
-          if (stage === "closed_won") {
-            const { ready, missing } = await checkCloseReadiness(supabase, opp.account_id, opp.id);
-            if (!ready) {
-              toast.error(formatCloseReadinessMessage(missing));
-              return;
-            }
-          }
-          setPendingStage(stage);
-        }}
-      />
+      <StageProgressBar currentStage={opp.stage} onStageClick={requestStageChange} />
 
       {/* --------- Loss Reason --------- */}
       {opp.stage === "closed_lost" && opp.loss_reason && (
@@ -892,10 +940,7 @@ export function OpportunityDetail() {
             label="Follow Up"
             value={opp.follow_up ? "\u2713 Yes" : "\u2717 No"}
           />
-          {/* Full-row span so the textarea has horizontal room. */}
-          <div className="md:col-span-2">
-            <EditableField label="Next Step" value={opp.next_step} onSave={saveField("next_step")} type="textarea" />
-          </div>
+          {/* Next Step moved to the top-of-page card (Summer 7/24). */}
           {/* Service / Product split — auto-derived inside
               recalc_opportunity_amount from products.product_family.
               A line is "service" if its product's family ILIKE 'service%';

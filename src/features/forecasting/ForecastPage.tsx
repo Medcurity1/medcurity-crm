@@ -44,12 +44,12 @@ const STAGE_WEIGHTS: Record<OpportunityStage, number> = {
   demo: 0.6,
   proposal_and_price_quote: 0.75,
   proposal_conversation: 0.9,
+  verbal_commit: 0.95,
   closed_won: 1.0,
   closed_lost: 0,
   lead: 0.1,
   qualified: 0.3,
   proposal: 0.6,
-  verbal_commit: 0.9,
 };
 
 const FORECAST_STAGES: OpportunityStage[] = [
@@ -57,6 +57,7 @@ const FORECAST_STAGES: OpportunityStage[] = [
   "demo",
   "proposal_and_price_quote",
   "proposal_conversation",
+  "verbal_commit",
 ];
 
 const STAGE_COLORS: Record<string, string> = {
@@ -64,11 +65,11 @@ const STAGE_COLORS: Record<string, string> = {
   demo: "#3b82f6",
   proposal_and_price_quote: "#8b5cf6",
   proposal_conversation: "#a855f7",
+  verbal_commit: "#f59e0b",
   // Legacy — same palette so old bars render
   lead: "#94a3b8",
   qualified: "#3b82f6",
   proposal: "#8b5cf6",
-  verbal_commit: "#f59e0b",
 };
 
 const QUOTA_PLACEHOLDER = 500000;
@@ -102,6 +103,7 @@ function getCurrentQuarter(): number {
 const PROPOSAL_STAGES: OpportunityStage[] = [
   "proposal_conversation",
   "proposal_and_price_quote",
+  "verbal_commit",
 ];
 
 export function ForecastPage() {
