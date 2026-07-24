@@ -4,7 +4,6 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Staging — awaiting prod go-ahead
 
-- [STAGING] 2026-07-24 · Summer ×2 + Nathan/Rachel · 7/24 batch: Verbal Commit live stage + Proposal column removed; opp top cards (editable Expected Close, Stage card, amber Next Steps); request Working Notes. Includes 2 migrations (20260724000001/2). See SHIPPED for detail.
 
 (The Azure SWA upload outage RESOLVED ~15:50 PT 7/21 — Nathan's empty-commit pipe test afdc08f went green and shipped the two stuck approved frontends; see SHIPPED. The 7/21 afternoon batch — ghost-stage migration, partner banner, claim tool, phone auto-fill, FTE gate fix — remains STAGING-ONLY awaiting Nathan's go.)
 
