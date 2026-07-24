@@ -978,6 +978,9 @@ export interface CrmRequest {
   completed_at: string | null;
   completed_by: string | null;
   decision_note: string | null;
+  working_notes: string | null;
+  working_notes_updated_at: string | null;
+  working_notes_updated_by_name: string | null;
   created_at: string;
   updated_at: string;
   // joined

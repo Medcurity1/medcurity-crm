@@ -368,6 +368,45 @@ async function setOutcome(id: string, patch: Partial<CrmRequest>) {
   return data[0] as CrmRequest;
 }
 
+/**
+ * Working notes (Nathan + Rachel 7/24): a shared scratchpad the request
+ * managers keep on a request while it's in flight ("Molly is gathering
+ * info for this one"). Writes are admin-only via RLS; unlike setOutcome
+ * there's no status CAS — notes stay editable after a request resolves.
+ */
+export function useSaveRequestNotes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      notes,
+      authorName,
+    }: {
+      id: string;
+      notes: string;
+      authorName: string | null;
+    }) => {
+      const trimmed = notes.trim();
+      const { data, error } = await supabase
+        .from("requests")
+        .update({
+          working_notes: trimmed || null,
+          working_notes_updated_at: trimmed ? new Date().toISOString() : null,
+          working_notes_updated_by_name: trimmed ? authorName : null,
+        })
+        .eq("id", id)
+        .select();
+      if (error) throw error;
+      // RLS silently matches zero rows for non-admins — surface it.
+      if (!data || data.length === 0) {
+        throw new Error("You don't have permission to edit request notes.");
+      }
+      return data[0] as CrmRequest;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["requests"] }),
+  });
+}
+
 /** Collateral / CRM requests: check off as done. */
 export function useCompleteRequest() {
   const qc = useQueryClient();

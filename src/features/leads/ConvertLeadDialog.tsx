@@ -608,6 +608,7 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
                       <SelectItem value="demo">Demo</SelectItem>
                       <SelectItem value="proposal_and_price_quote">Proposal and Price Quote</SelectItem>
                       <SelectItem value="proposal_conversation">Proposal Conversation</SelectItem>
+                      <SelectItem value="verbal_commit">Verbal Commit</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

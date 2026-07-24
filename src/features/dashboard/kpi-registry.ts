@@ -79,6 +79,7 @@ const OPEN_STAGES = [
   "demo",
   "proposal_and_price_quote",
   "proposal_conversation",
+  "verbal_commit",
 ].join(",");
 
 function getQuarterStart(date: Date): Date {

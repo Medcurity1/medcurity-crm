@@ -9,9 +9,11 @@ import {
   Paperclip,
   RefreshCw,
   Sparkles,
+  StickyNote,
   ThumbsDown,
   ThumbsUp,
 } from "lucide-react";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,6 +33,7 @@ import {
   STATUS_LABELS,
   PRODUCT_CATEGORY_LABELS,
   useCompleteRequest,
+  useSaveRequestNotes,
   useApproveProductRequest,
   useDenyProductRequest,
   useSummarizeProductRequest,
@@ -130,8 +133,20 @@ function RequestDetailDialog({
   const deny = useDenyProductRequest();
   const summarize = useSummarizeProductRequest();
   const designPromptMutation = useGenerateDesignPrompt();
+  const saveNotes = useSaveRequestNotes();
+  const { profile } = useAuth();
+  // Request managers = the admin group (matches the requests UPDATE RLS).
+  const canManageNotes = profile?.role === "admin" || profile?.role === "super_admin";
   const { data: attachments } = useRequestAttachments(request.id, open);
   const [note, setNote] = useState("");
+  const [notesDraft, setNotesDraft] = useState(request.working_notes ?? "");
+  // Re-sync the draft each time the dialog opens (the dialog stays
+  // mounted per card, so state would otherwise go stale across opens).
+  useEffect(() => {
+    if (open) setNotesDraft(request.working_notes ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+  const notesDirty = notesDraft.trim() !== (request.working_notes ?? "").trim();
   const [summary, setSummary] = useState<string | null>(request.ai_summary);
   const [designPrompt, setDesignPrompt] = useState<string | null>(
     request.design_prompt,
@@ -351,6 +366,63 @@ function RequestDetailDialog({
               {STATUS_LABELS[request.status]} {fmtDate(request.completed_at)}
               {request.decision_note ? ` — ${request.decision_note}` : ""}
             </p>
+          )}
+
+          {/* Working notes (Nathan + Rachel 7/24): a request often isn't a
+              simple yes/no — it's a process. Managers jot the current state
+              here ("Molly is gathering info"), and anyone who can open the
+              request sees why it's sitting open. Editable by admins only;
+              read-only for the requester. */}
+          {(canManageNotes || request.working_notes) && (
+            <div className="space-y-1.5 rounded-md border border-amber-400/40 bg-amber-400/[0.06] p-3 dark:bg-amber-300/[0.04]">
+              <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <StickyNote className="h-3.5 w-3.5 text-amber-500/80" />
+                Working Notes
+              </p>
+              {canManageNotes ? (
+                <>
+                  <Textarea
+                    rows={3}
+                    value={notesDraft}
+                    onChange={(e) => setNotesDraft(e.target.value)}
+                    placeholder={'Notes for the team — e.g. "Molly is gathering info for this one"'}
+                    className="bg-background/60"
+                  />
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-muted-foreground">
+                      {request.working_notes_updated_at
+                        ? `Last updated${request.working_notes_updated_by_name ? ` by ${request.working_notes_updated_by_name}` : ""} · ${fmtDate(request.working_notes_updated_at)}`
+                        : "Visible to anyone who can see this request."}
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!notesDirty || saveNotes.isPending}
+                      onClick={() =>
+                        saveNotes.mutate(
+                          { id: request.id, notes: notesDraft, authorName: profile?.full_name ?? null },
+                          {
+                            onSuccess: () => toast.success("Notes saved."),
+                            onError: (e) => toast.error((e as Error).message),
+                          },
+                        )
+                      }
+                    >
+                      {saveNotes.isPending ? "Saving…" : "Save notes"}
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="whitespace-pre-wrap text-sm">{request.working_notes}</p>
+                  {request.working_notes_updated_at && (
+                    <p className="text-[11px] text-muted-foreground">
+                      {`Last updated${request.working_notes_updated_by_name ? ` by ${request.working_notes_updated_by_name}` : ""} · ${fmtDate(request.working_notes_updated_at)}`}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
           )}
 
           {isPending && isProduct && (

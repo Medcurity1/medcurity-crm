@@ -83,7 +83,7 @@ export function CreatePipelineDialog({
     resolver: zodResolver(pipelineViewSchema),
     defaultValues: {
       name: "",
-      stages: ["details_analysis", "demo", "proposal_and_price_quote", "proposal_conversation"],
+      stages: ["details_analysis", "demo", "proposal_and_price_quote", "proposal_conversation", "verbal_commit"],
       team_filter: "",
       kind_filter: "",
       is_shared: false,
@@ -103,7 +103,7 @@ export function CreatePipelineDialog({
       } else {
         reset({
           name: "",
-          stages: ["details_analysis", "demo", "proposal_and_price_quote", "proposal_conversation"],
+          stages: ["details_analysis", "demo", "proposal_and_price_quote", "proposal_conversation", "verbal_commit"],
           team_filter: "",
           kind_filter: "",
           is_shared: false,

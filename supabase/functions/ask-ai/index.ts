@@ -43,7 +43,8 @@ const json = (body: unknown, status = 200) =>
 // still references them filters to empty. THIS IS WHERE OPEN DEALS LIVE.
 const OPEN_STAGES = [
   "details_analysis", "demo", "proposal_and_price_quote", "proposal_conversation",
-  "lead", "qualified", "proposal", "verbal_commit",
+  "verbal_commit",
+  "lead", "qualified", "proposal",
 ];
 const OPP_STAGES = [...OPEN_STAGES, "closed_won", "closed_lost"];
 const MAX_ROWS = 25; // hard cap on any list a tool returns
@@ -336,7 +337,7 @@ serve(async (req) => {
     "If a question is ambiguous or outside what your tools can see, briefly say what you can and can't check, make one reasonable interpretation, and ask a single short clarifying question rather than guessing.",
     "When it would genuinely help, end your reply with one final line of up to 3 suggested follow-up questions, in exactly this format with nothing else on that line: [[SUGGESTIONS]] first question | second question | third question. Keep each short and specific to what you just showed. Omit the line entirely if no follow-up is useful.",
     "When you reference specific records, name them; the app turns them into clickable links from the records you retrieved.",
-    "Medcurity terms: the live pipeline stages are Details Analysis (details_analysis), Demo (demo), Proposal and Price Quote (proposal_and_price_quote), and Proposal Conversation (proposal_conversation), then Closed Won and Closed Lost. Always refer to a stage by its friendly name, never the raw snake_case value. customer_status (client, prospect, former_client) is the real customer state, shown in the app as Account Status with the labels Customer, Prospect, and Former Customer. sales_active plus sales_status (prospecting, identified_outreach, engaged, nurture, shown as Sales Status) mark whether and how a rep is actively working an account, and next_follow_up_date is the rep's planned follow-up. A renewal is an opportunity with kind = renewal.",
+    "Medcurity terms: the live pipeline stages are Details Analysis (details_analysis), Demo (demo), Proposal and Price Quote (proposal_and_price_quote), Proposal Conversation (proposal_conversation), and Verbal Commit (verbal_commit), then Closed Won and Closed Lost. Always refer to a stage by its friendly name, never the raw snake_case value. customer_status (client, prospect, former_client) is the real customer state, shown in the app as Account Status with the labels Customer, Prospect, and Former Customer. sales_active plus sales_status (prospecting, identified_outreach, engaged, nurture, shown as Sales Status) mark whether and how a rep is actively working an account, and next_follow_up_date is the rep's planned follow-up. A renewal is an opportunity with kind = renewal.",
   ].join("\n");
 
   // ── Bounded tool-use loop ───────────────────────────────────────────

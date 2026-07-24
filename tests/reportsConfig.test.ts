@@ -82,13 +82,14 @@ describe("resolveRange local-time boundaries", () => {
 
 // ---------------------------------------------------------------------------
 // The Report Builder's opportunity Stage filter/column must offer exactly the
-// live SF-matching stage set (formatters.ALL_STAGES). Migration
-// 20260422000001 rewrote every opportunity/history row onto these values; the
-// legacy stages (lead/qualified/proposal/verbal_commit) match zero live rows.
+// live stage set (formatters.ALL_STAGES). Migration 20260422000001 rewrote
+// every opportunity/history row onto the SF-matching values; verbal_commit was
+// un-retired 2026-07-24 (Summer). The remaining retired stages
+// (lead/qualified/proposal) match zero live rows.
 // ---------------------------------------------------------------------------
 
 describe("Report Builder opportunity stage enum", () => {
-  const LEGACY = ["lead", "qualified", "proposal", "verbal_commit"];
+  const LEGACY = ["lead", "qualified", "proposal"];
 
   it("filter enumValues equals the canonical live stage set", () => {
     const stageFilter = ENTITY_DEFS.opportunities.filterColumns.find(

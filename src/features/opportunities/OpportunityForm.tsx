@@ -1248,6 +1248,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                       <SelectItem value="demo">Demo</SelectItem>
                       <SelectItem value="proposal_and_price_quote">Proposal and Price Quote</SelectItem>
                       <SelectItem value="proposal_conversation">Proposal Conversation</SelectItem>
+                      <SelectItem value="verbal_commit">Verbal Commit</SelectItem>
                       <SelectItem value="closed_won">Closed Won</SelectItem>
                       <SelectItem value="closed_lost">Closed Lost</SelectItem>
                     </SelectContent>

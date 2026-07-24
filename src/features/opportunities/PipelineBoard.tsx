@@ -56,7 +56,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { QueryError } from "@/components/QueryError";
 import { toast } from "sonner";
 import { Plus, MoreVertical, Pencil, Trash2, DollarSign, Hash, TrendingUp, ArrowUpDown } from "lucide-react";
-import { OPEN_STAGES, formatCurrency, stageLabel } from "@/lib/formatters";
+import { OPEN_STAGES, RETIRED_STAGES, formatCurrency, stageLabel } from "@/lib/formatters";
 import { celebrateClosedWon } from "@/lib/confetti";
 import { supabase } from "@/lib/supabase";
 import { checkCloseReadiness, formatCloseReadinessMessage } from "@/lib/closeReadiness";
@@ -205,10 +205,11 @@ function PipelineKanban({
     })
   );
 
-  // Hide the unused Lead + Qualified columns from the board (Brayden:
-  // "we'll never use those"). Custom saved views still show whatever
-  // stages they configured.
-  const displayStages = stages ?? OPEN_STAGES.filter((s) => s !== "lead" && s !== "qualified");
+  // Retired stages (lead/qualified/proposal) never render as columns,
+  // even when an old custom saved view still lists them in its config.
+  const displayStages = stages
+    ? stages.filter((s) => !RETIRED_STAGES.includes(s))
+    : OPEN_STAGES;
 
   const columns = displayStages.map((stage) => ({
     stage,

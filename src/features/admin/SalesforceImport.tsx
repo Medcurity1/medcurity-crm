@@ -3559,8 +3559,8 @@ export function SalesforceImport() {
                   "perception_analysis": "details_analysis",
                   "negotiation/review": "proposal_conversation",
                   "negotiation": "proposal_conversation",
-                  "verbal_commit": "proposal_conversation",
-                  "verbal commit": "proposal_conversation",
+                  "verbal_commit": "verbal_commit",
+                  "verbal commit": "verbal_commit",
                   "prospecting": "details_analysis",
                   "lead": "details_analysis",
                 },
@@ -3625,11 +3625,11 @@ export function SalesforceImport() {
                 lead_source: new Set(["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "other"]),
                 source: new Set(["website", "referral", "cold_call", "trade_show", "partner", "social_media", "email_campaign", "webinar", "podcast", "conference", "other"]),
                 stage: new Set([
-                  // SF-matching values (current — migration 20260422000001)
+                  // Live values (verbal_commit promoted 2026-07-24)
                   "details_analysis", "demo", "proposal_and_price_quote",
-                  "proposal_conversation", "closed_won", "closed_lost",
+                  "proposal_conversation", "verbal_commit", "closed_won", "closed_lost",
                   // Legacy values still valid in the enum for FK safety
-                  "lead", "qualified", "proposal", "verbal_commit",
+                  "lead", "qualified", "proposal",
                 ]),
                 status: new Set(["new", "contacted", "qualified", "unqualified", "converted", "dead"]),
                 kind: new Set(["new_business", "renewal"]),
@@ -4614,7 +4614,7 @@ export function SalesforceImport() {
       renewal_type: ["auto_renew", "manual_renew", "no_auto_renew", "full_auto_renew", "platform_only_auto_renew"],
       // leads.status only (accounts.status retired)
       status: ["new", "contacted", "qualified", "unqualified", "converted"],
-      stage: ["lead", "qualified", "proposal", "verbal_commit", "closed_won", "closed_lost"],
+      stage: ["details_analysis", "demo", "proposal_and_price_quote", "proposal_conversation", "verbal_commit", "closed_won", "closed_lost"],
       kind: ["new_business", "renewal"],
       team: ["sales", "renewals"],
       // sql/mql removed (Joe 2026-07-14): Source is a CHANNEL, not a stage.
