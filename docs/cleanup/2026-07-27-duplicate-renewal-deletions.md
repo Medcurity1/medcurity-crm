@@ -86,6 +86,28 @@ account. A new contract signature is needed before the anniversary on <date>.
 Created by renewal automation." Margaret's completed Hearing Doctors task and all
 logged emails were kept (they detach to the account).
 
+## Batch 2 — Margaret-confirmed (deleted 2026-07-27, later same day — total $33,656.50)
+
+Margaret's answers to the ask-list converted 4 of the 6 ambiguous children into
+confirmed duplicates ("UPC has been renewed with all listed products… Gunnison
+Valley has been renewed, Services every other year… The Neurology Center has been
+renewed. P+P is included with the SRA automatically… The Custom Service $13,200
+was renewed with Keena, not the $4400"). The Keena $4,400 child was KEPT — its
+contract was NOT renewed, so that child is real work. Camp Lowell still awaits
+Rachel.
+
+| # | Account | Opp id | Name | $ | Parent id | Margaret's confirmation |
+|---|---|---|---|---|---|---|
+| 12 | Keena Healthcare Technology (Oct chain) | d3212823-fb70-4a1f-8009-04a18c7656ad | Custom Service | 13,200.00 | (Oct-2025 parent) | The $13,200 arrangement is renewed (2026-06-09>2027-06-09 won); June parent's own note "Next Renewal should be Oct 1" ties June+Oct to one arrangement |
+| 13 | Universal Primary Care (UPC Health) | 2bb6912b-3e15-457a-af35-82f8923a9501 | SRA \| BNVA | 7,300.00 | (2025-07-22 parent) | "Renewed with all listed products… Dan has already taken care of the BNVA" (services every other year) |
+| 14 | Gunnison Valley Health Hospital | 23bb63de-6bde-4028-a978-4e8e69ea1917 | Remote Services \| SRA | 6,906.50 | (2025-07-15 parent) | "Renewed, Services every other year per their contract" (the SRA-only $3,192 won IS the full renewal) |
+| 15 | The Neurology Center | 13b63d08-27f0-49f2-ac1a-de25a5f94db6 | SRA \| Remote Services \| P+P | 6,250.00 | (2025-07-08 parent) | "Renewed. P+P is included with the SRA automatically" ($6,208 won 7/13 covers it) |
+
+Open signature tasks deleted with them (all born overdue): a20a2d09 (due 5/9),
+e167ce9d (due 5/16), 3d7caec7 (due 5/23). Kickoff/renewal email threads on the
+children detach to their accounts as before. Same undo path (suppression row per
+parent).
+
 ## Not deleted
 
 - The 5 already-Closed-Won duplicates ($20,068.50: Blue Mountain, Hana, Ko-Kwel,
