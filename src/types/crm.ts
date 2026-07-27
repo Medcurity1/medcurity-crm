@@ -836,6 +836,9 @@ export interface ActivePipelineRow {
   owner_name?: string | null;
   account_id: string;
   account_name: string;
+  /** Auto-renewal flags — added to the view by 20260727120000. */
+  created_by_automation?: boolean | null;
+  renewal_from_opportunity_id?: string | null;
 }
 
 export interface RenewalQueueRow {

@@ -3,6 +3,7 @@ import { User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatCurrency, daysUntil, formatDate } from "@/lib/formatters";
 import type { ActivePipelineRow } from "@/types/crm";
+import { AutoRenewalBadge, isAutoRenewal } from "./AutoRenewalBadge";
 
 interface PipelineCardProps {
   item: ActivePipelineRow;
@@ -48,6 +49,7 @@ export function PipelineCard({ item, onClick, isDragging }: PipelineCardProps) {
     >
       <p className="text-xs text-muted-foreground truncate">{item.account_name}</p>
       <p className="font-medium text-sm truncate mt-0.5">{item.name}</p>
+      {isAutoRenewal(item) ? <AutoRenewalBadge className="mt-1" /> : null}
       <div className="flex items-center justify-between mt-2">
         <span className="text-sm font-semibold text-primary">
           {formatCurrency(item.amount)}

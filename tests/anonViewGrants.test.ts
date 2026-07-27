@@ -26,6 +26,10 @@ const PROTECTED_VIEWS = [
   "data_health_check",
   "v_lead_last_activity",
   "v_field_inventory",
+  // Revoked by the sibling migration 20260710164000, and recreated by
+  // 20260727120000 to expose the auto-renewal flags — guarded here so any
+  // future `create or replace` of it must re-revoke anon too.
+  "active_pipeline",
 ] as const;
 
 // Views converted to security_invoker so caller RLS applies (the other two
