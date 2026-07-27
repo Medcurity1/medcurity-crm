@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+import { parseUsAddress } from "@/lib/parseUsAddress";
 import { DuplicateWarning } from "@/components/DuplicateWarning";
 import { cn } from "@/lib/utils";
 import {
@@ -568,7 +569,25 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
             >
                 <div className="space-y-2 md:col-span-2">
                   <Label htmlFor="mailing_street">Street</Label>
-                  <Input id="mailing_street" {...register("mailing_street")} />
+                  <Input
+                    id="mailing_street"
+                    {...register("mailing_street")}
+                    // Paste a full address here and the city/state/zip fields
+                    // fill themselves (Summer, 2026-07-27).
+                    onPaste={(e) => {
+                      const parsed = parseUsAddress(e.clipboardData.getData("text"));
+                      if (!parsed) return;
+                      e.preventDefault();
+                      setValue("mailing_street", parsed.street, { shouldDirty: true });
+                      setValue("mailing_city", parsed.city, { shouldDirty: true });
+                      setValue("mailing_state", parsed.state, { shouldDirty: true });
+                      setValue("mailing_zip", parsed.zip, { shouldDirty: true });
+                      if (parsed.country) {
+                        setValue("mailing_country", parsed.country, { shouldDirty: true });
+                      }
+                      toast.success("Address split into street, city, state and zip");
+                    }}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="mailing_city">City</Label>
