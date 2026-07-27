@@ -28,9 +28,7 @@ Statuses: `IDEA` · `QUEUED` · `IN PROGRESS` · `BLOCKED` · `STAGING` (awaitin
 
 ## B. On staging — awaiting prod go-ahead
 
-| # | Item | Detail | Verify | Checked |
-|---|---|---|---|---|
-| B1 | Home KPI server-side amount sum | Migration 20260727210000 + kpi-registry. Three tiles stopped paging every opportunity to the browser. Commit 0d56c01. | `git log --oneline origin/main..origin/Staging` contains 0d56c01 | 2026-07-27 |
+_(none — everything staged today promoted to PROD 2026-07-27 in 81bec7d)_
 
 ---
 
