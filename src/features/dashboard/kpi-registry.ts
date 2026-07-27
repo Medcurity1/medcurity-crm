@@ -44,25 +44,36 @@ export interface KpiDefinition {
  * filter chains.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function fetchAllOppAmounts(
+/**
+ * Sum opportunity amounts SERVER-side (migration 20260727210000).
+ *
+ * This used to page every matching row's `amount` to the browser (1,000 at a
+ * time, up to 50,000) just to add them up here — the whole opportunities
+ * table crossing the wire on every Home load, for every user, growing with
+ * the pipeline (docket 2026-07-22, prod RAM/perf follow-up (d)).
+ *
+ * The RPC is SECURITY INVOKER, so caller RLS still applies and each user
+ * sums exactly the rows they could see before — same numbers, one request.
+ */
+async function sumOppAmounts(
   supabase: SupabaseClient,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  applyFilters: (q: any) => any,
-): Promise<number[]> {
-  const all: number[] = [];
-  let from = 0;
-  const pageSize = 1000;
-  while (all.length < 50_000) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const base: any = supabase.from("opportunities").select("amount");
-    const { data, error } = await applyFilters(base).range(from, from + pageSize - 1);
-    if (error) throw error;
-    const rows = (data ?? []) as { amount: number | string | null }[];
-    for (const r of rows) all.push(Number(r.amount ?? 0));
-    if (rows.length < pageSize) break;
-    from += pageSize;
-  }
-  return all;
+  args: {
+    ownerUserId?: string | null;
+    openOnly?: boolean;
+    stage?: string | null;
+    contractStartFrom?: string | null;
+    contractStartTo?: string | null;
+  },
+): Promise<number> {
+  const { data, error } = await supabase.rpc("sum_opportunity_amounts", {
+    p_owner_user_id: args.ownerUserId ?? null,
+    p_open_only: args.openOnly ?? false,
+    p_stage: args.stage ?? null,
+    p_contract_start_from: args.contractStartFrom ?? null,
+    p_contract_start_to: args.contractStartTo ?? null,
+  });
+  if (error) throw error;
+  return Number(data ?? 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -188,13 +199,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     format: "currency",
     link: () => `/opportunities?owner=mine&stage=${OPEN_STAGES}`,
     query: async (supabase, userId) => {
-      const amounts = await fetchAllOppAmounts(supabase, (q) =>
-        q
-          .eq("owner_user_id", userId)
-          .not("stage", "in", '("closed_won","closed_lost")')
-          .is("archived_at", null),
-      );
-      return amounts.reduce((s, n) => s + n, 0);
+      return sumOppAmounts(supabase, { ownerUserId: userId, openOnly: true });
     },
   },
   {
@@ -259,15 +264,12 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     query: async (supabase, userId) => {
       const quarterStart = getQuarterStart(new Date());
       const quarterEnd = getQuarterEnd(new Date());
-      const amounts = await fetchAllOppAmounts(supabase, (q) =>
-        q
-          .eq("owner_user_id", userId)
-          .eq("stage", "closed_won")
-          .is("archived_at", null)
-          .gte("contract_start_date", localISODate(quarterStart))
-          .lt("contract_start_date", localISODate(quarterEnd)),
-      );
-      return amounts.reduce((s, n) => s + n, 0);
+      return sumOppAmounts(supabase, {
+        ownerUserId: userId,
+        stage: "closed_won",
+        contractStartFrom: localISODate(quarterStart),
+        contractStartTo: localISODate(quarterEnd),
+      });
     },
   },
   {
@@ -483,12 +485,7 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     requiredRole: ["admin"],
     link: `/opportunities?stage=${OPEN_STAGES}`,
     query: async (supabase) => {
-      const amounts = await fetchAllOppAmounts(supabase, (q) =>
-        q
-          .is("archived_at", null)
-          .not("stage", "in", '("closed_won","closed_lost")'),
-      );
-      return amounts.reduce((s, n) => s + n, 0);
+      return sumOppAmounts(supabase, { openOnly: true });
     },
   },
   {

@@ -33,7 +33,19 @@ function makeBuilder(result: StubResult) {
 }
 
 function makeClient(result: StubResult): SupabaseClient {
-  return { from: () => makeBuilder(result) } as unknown as SupabaseClient;
+  return {
+    from: () => makeBuilder(result),
+    // The three amount-sum KPIs (my_open_pipeline, revenue_starting_quarter,
+    // team_pipeline) call the sum_opportunity_amounts RPC instead of paging
+    // rows (migration 20260727210000). Same contract as a builder: resolves
+    // to { data, error }, never throws — so the same error-surfacing rule
+    // applies. `data` is the scalar sum, hence the empty-result 0 below.
+    rpc: () =>
+      Promise.resolve({
+        data: Array.isArray(result.data) && result.data.length === 0 ? 0 : result.data,
+        error: result.error,
+      }),
+  } as unknown as SupabaseClient;
 }
 
 const USER_ID = "00000000-0000-0000-0000-000000000000";
