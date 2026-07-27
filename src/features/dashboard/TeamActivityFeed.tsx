@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelativeDate } from "@/lib/formatters";
 import { dedupeEmailActivityRows } from "./activityFeedDedupe";
+import { AutomationBadge, isAutomationActivity } from "@/features/activities/AutomationBadge";
 import type { ActivityType } from "@/types/crm";
 
 const FEED_LIMIT = 15;
@@ -20,6 +21,8 @@ interface TeamActivity {
   opportunity_id: string | null;
   owner_user_id: string | null;
   external_message_id: string | null;
+  created_by_automation?: boolean;
+  campaign_enrollment_id?: string | null;
   owner: { full_name: string | null } | null;
   account: { name: string } | null;
   contact: { first_name: string | null; last_name: string | null } | null;
@@ -89,7 +92,7 @@ export function TeamActivityFeed() {
       const { data: rows, error } = await supabase
         .from("activities")
         .select(
-          "id, activity_type, subject, created_at, account_id, contact_id, opportunity_id, owner_user_id, external_message_id, owner:user_profiles!owner_user_id(full_name), account:accounts(name), contact:contacts(first_name, last_name), opportunity:opportunities(name)",
+          "id, activity_type, subject, created_at, account_id, contact_id, opportunity_id, owner_user_id, external_message_id, created_by_automation, campaign_enrollment_id, owner:user_profiles!owner_user_id(full_name), account:accounts(name), contact:contacts(first_name, last_name), opportunity:opportunities(name)",
         )
         .is("archived_at", null)
         .order("created_at", { ascending: false })
@@ -146,6 +149,12 @@ export function TeamActivityFeed() {
                       <span className="text-muted-foreground">
                         {actionVerb(a.activity_type)}
                       </span>
+                      {isAutomationActivity(a) && (
+                        <>
+                          {" "}
+                          <AutomationBadge />
+                        </>
+                      )}
                       {related && (
                         <>
                           {" "}

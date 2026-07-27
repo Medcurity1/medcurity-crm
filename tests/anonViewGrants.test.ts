@@ -30,6 +30,9 @@ const PROTECTED_VIEWS = [
   // 20260727120000 to expose the auto-renewal flags — guarded here so any
   // future `create or replace` of it must re-revoke anon too.
   "active_pipeline",
+  // Definer view over cron.job (20260727150000) — schedule visibility for
+  // signed-in admins only; anon must never see the job inventory.
+  "v_cron_jobs_admin",
 ] as const;
 
 // Views converted to security_invoker so caller RLS applies (the other two

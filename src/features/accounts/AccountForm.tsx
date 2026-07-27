@@ -35,6 +35,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+import { parseUsAddress } from "@/lib/parseUsAddress";
 import { DuplicateWarning } from "@/components/DuplicateWarning";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -858,7 +859,26 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2 md:col-span-2">
                   <Label htmlFor="billing_street">Street</Label>
-                  <Input id="billing_street" {...register("billing_street")} />
+                  <Input
+                    id="billing_street"
+                    {...register("billing_street")}
+                    // Paste a full address here and the city/state/zip fields
+                    // fill themselves (Summer, 2026-07-27). Non-address pastes
+                    // pass through untouched.
+                    onPaste={(e) => {
+                      const parsed = parseUsAddress(e.clipboardData.getData("text"));
+                      if (!parsed) return;
+                      e.preventDefault();
+                      setValue("billing_street", parsed.street, { shouldDirty: true });
+                      setValue("billing_city", parsed.city, { shouldDirty: true });
+                      setValue("billing_state", parsed.state, { shouldDirty: true });
+                      setValue("billing_zip", parsed.zip, { shouldDirty: true });
+                      if (parsed.country) {
+                        setValue("billing_country", parsed.country, { shouldDirty: true });
+                      }
+                      toast.success("Address split into street, city, state and zip");
+                    }}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="billing_city">City</Label>
@@ -910,7 +930,24 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2 md:col-span-2">
                   <Label htmlFor="shipping_street">Street</Label>
-                  <Input id="shipping_street" disabled={sameAsBilling} {...register("shipping_street")} />
+                  <Input
+                    id="shipping_street"
+                    disabled={sameAsBilling}
+                    {...register("shipping_street")}
+                    onPaste={(e) => {
+                      const parsed = parseUsAddress(e.clipboardData.getData("text"));
+                      if (!parsed) return;
+                      e.preventDefault();
+                      setValue("shipping_street", parsed.street, { shouldDirty: true });
+                      setValue("shipping_city", parsed.city, { shouldDirty: true });
+                      setValue("shipping_state", parsed.state, { shouldDirty: true });
+                      setValue("shipping_zip", parsed.zip, { shouldDirty: true });
+                      if (parsed.country) {
+                        setValue("shipping_country", parsed.country, { shouldDirty: true });
+                      }
+                      toast.success("Address split into street, city, state and zip");
+                    }}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="shipping_city">City</Label>
