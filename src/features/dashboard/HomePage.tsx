@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { useRecentRecords, type RecentRecord } from "@/hooks/useRecentRecords";
 import { TeamActivityFeed } from "./TeamActivityFeed";
+import { AutoRenewalBadge, isAutoRenewal } from "@/features/opportunities/AutoRenewalBadge";
 import { dedupeEmailActivityRows } from "./activityFeedDedupe";
 import { MyAccountsWidget } from "./MyAccountsWidget";
 import { RecentWins } from "./RecentWins";
@@ -86,6 +87,8 @@ interface OpenOpportunity {
   stage: OpportunityStage;
   amount: number;
   expected_close_date: string | null;
+  created_by_automation: boolean | null;
+  renewal_from_opportunity_id: string | null;
   account: { name: string } | null;
 }
 
@@ -129,7 +132,9 @@ function useMyOpenOpportunities(userId: string) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("opportunities")
-        .select("id, name, stage, amount, expected_close_date, account:accounts(name)")
+        .select(
+          "id, name, stage, amount, expected_close_date, created_by_automation, renewal_from_opportunity_id, account:accounts(name)",
+        )
         .eq("owner_user_id", userId)
         .is("archived_at", null)
         .not("stage", "in", '("closed_won","closed_lost")')
@@ -696,12 +701,15 @@ function MyOpenOpportunitiesSection({ userId }: { userId: string }) {
                 {opps.map((opp) => (
                   <TableRow key={opp.id}>
                     <TableCell>
-                      <Link
-                        to={`/opportunities/${opp.id}`}
-                        className="font-medium text-primary hover:underline"
-                      >
-                        {opp.name}
-                      </Link>
+                      <span className="inline-flex items-center gap-1.5">
+                        <Link
+                          to={`/opportunities/${opp.id}`}
+                          className="font-medium text-primary hover:underline"
+                        >
+                          {opp.name}
+                        </Link>
+                        {isAutoRenewal(opp) ? <AutoRenewalBadge /> : null}
+                      </span>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {opp.account?.name ?? "—"}

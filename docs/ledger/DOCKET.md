@@ -4,10 +4,12 @@ Everything requested, planned, or ideated that is NOT yet shipped. One line per 
 
 ## Staging — awaiting prod go-ahead
 
+- [STAGING] 2026-07-27 · Nathan (off Margaret's report) · **"Auto-renewal" tag on generated renewal deals.** A small amber badge next to the deal name wherever a rep meets it: Opportunities list, Pipeline board card, the deal page header, and Home → My Open Opportunities. Hover explains "Pulse created this deal automatically for the upcoming contract renewal… it is a new deal, not the old one reopened." Tagged only when BOTH `created_by_automation` AND `renewal_from_opportunity_id` are set, so SF-imported renewals (automation flag, no parent link) and hand-made renewals stay untagged — over-tagging would teach the team to ignore the badge. Deliberately a TAG, NOT a rename: the deal's real name is untouched, so reports/exports/SF-era naming are unaffected and this is reversible with zero data cleanup. Migration 20260727120000 adds the two flags to the `active_pipeline` view (the Pipeline board's only source; append-only replace, anon revoke re-asserted, and `active_pipeline` added to the anonViewGrants regression guard). 5 new tests (272 total, all green). Files: AutoRenewalBadge.tsx (new), OpportunitiesList, OpportunityDetail, PipelineCard, HomePage, crm.ts.
+
 - [STAGING] 2026-07-24 · Nathan · Requests dialog cleanup: retired the old per-decision "Note (optional)" box on product requests (Working Notes is the one notes surface now; approve/deny no longer send a decision_note) + Working Notes placeholder reworded (no name, no em dash).
 
 
-(The Azure SWA upload outage RESOLVED ~15:50 PT 7/21 — Nathan's empty-commit pipe test afdc08f went green and shipped the two stuck approved frontends; see SHIPPED. The 7/21 afternoon batch — ghost-stage migration, partner banner, claim tool, phone auto-fill, FTE gate fix — remains STAGING-ONLY awaiting Nathan's go.)
+(The Azure SWA upload outage RESOLVED ~15:50 PT 7/21 — Nathan's empty-commit pipe test afdc08f went green and shipped the two stuck approved frontends; see SHIPPED. The 7/21 afternoon batch — ghost-stage migration, partner banner, claim tool, phone auto-fill, FTE gate fix — DID ship to PROD in merge aaec792; this line previously claimed otherwise and was stale. Confirmed live 2026-07-27 from prod data: the ghost-stage re-stage row (changed_by = null, 7/21 22:53 UTC) is present on prod's opportunity_stage_history.)
 
 (The 2026-07-15 batch — Joe Lead Source, Rachel Assessor, Summer email fix — shipped to prod in 5bc05df; the 7/10 Lead-Source-required + 7/11 ClickUp items were already on prod via 9d6b6a7. See SHIPPED.md.)
 

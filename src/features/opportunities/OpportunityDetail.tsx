@@ -8,6 +8,7 @@ import { MultiProductPicker } from "./MultiProductPicker";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { StageProgressBar } from "./StageProgressBar";
 import { useClosedLostGuard } from "./useClosedLostGuard";
+import { AutoRenewalBadge, isAutoRenewal } from "./AutoRenewalBadge";
 import { PageHeader } from "@/components/PageHeader";
 import { VerifiedBadge } from "@/components/VerifiedBadge";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -444,6 +445,7 @@ export function OpportunityDetail() {
               ownerId={opp.owner_user_id}
               invalidateKeys={[["opportunity", opp.id]]}
             />
+            {isAutoRenewal(opp) ? <AutoRenewalBadge /> : null}
             <StatusBadge value={opp.stage} variant="stage" label={stageLabel(opp.stage)} />
             {opp.business_type ? (
               <StatusBadge

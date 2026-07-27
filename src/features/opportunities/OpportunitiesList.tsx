@@ -6,6 +6,7 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { Target, Plus, Search, X, Pencil, Check } from "lucide-react";
 import { useOpportunities, useOpportunitiesTotals, useArchiveOpportunity, useBulkUpdateOwner, useBulkDeleteOpportunities, useUpdateOpportunity } from "./api";
 import { useClosedLostGuard } from "./useClosedLostGuard";
+import { AutoRenewalBadge, isAutoRenewal } from "./AutoRenewalBadge";
 import { DealMergerGame } from "@/features/deal-merger/DealMergerGame";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
@@ -578,13 +579,16 @@ export function OpportunitiesList() {
       />
     ),
     name: (o) => (
-      <Link
-        to={`/opportunities/${o.id}`}
-        className="font-medium text-primary hover:underline"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {o.name}
-      </Link>
+      <span className="inline-flex items-center gap-1.5">
+        <Link
+          to={`/opportunities/${o.id}`}
+          className="font-medium text-primary hover:underline"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {o.name}
+        </Link>
+        {isAutoRenewal(o) ? <AutoRenewalBadge /> : null}
+      </span>
     ),
     account: (o) =>
       o.account ? (
