@@ -200,17 +200,30 @@ export function CampaignWizard({
     );
   }, [recipients, suppressionPartition, enrollmentPartition]);
 
-  const rampProjection = useMemo(
-    () => (mode === "template" ? projectSendRamp(templateSteps, leadsPerDay, sendableRecipients.length) : null),
-    [mode, templateSteps, leadsPerDay, sendableRecipients.length],
-  );
-
   // The chosen inbox's current load (Campaigns overhaul Phase 5) — only
   // meaningful once an inbox is actually picked, and only ever non-null once
   // inboxHealth has loaded (step === 4).
   const selectedInboxHealth = useMemo(
     () => (inboxId ? (inboxHealth ?? []).find((ib) => String(ib.id) === inboxId) ?? null : null),
     [inboxHealth, inboxId],
+  );
+  // Remaining daily capacity on the chosen inbox: its Smartlead daily limit
+  // minus what its active campaigns already draw. null = limit unknown — no
+  // clamp, never treated as 0 (same "unknown, not zero" rule as
+  // InboxHealthDialog).
+  const inboxHeadroom = useMemo(() => {
+    if (!selectedInboxHealth || selectedInboxHealth.daily_limit == null) return null;
+    return Math.max(0, selectedInboxHealth.daily_limit - selectedInboxHealth.total_leads_per_day);
+  }, [selectedInboxHealth]);
+  // What the launch actually sends as leads/day: capped at the inbox's
+  // remaining room whenever the limit is known. Floor of 1 — the edge
+  // action's `Number(...) || 25` treats 0 as unset and would default it
+  // straight back to 25.
+  const effectiveLeadsPerDay = inboxHeadroom != null ? Math.min(leadsPerDay, Math.max(1, inboxHeadroom)) : leadsPerDay;
+
+  const rampProjection = useMemo(
+    () => (mode === "template" ? projectSendRamp(templateSteps, effectiveLeadsPerDay, sendableRecipients.length) : null),
+    [mode, templateSteps, effectiveLeadsPerDay, sendableRecipients.length],
   );
 
   function reset() {
@@ -302,7 +315,7 @@ export function CampaignWizard({
       autoStart,
       adaptiveEnabled: adaptive,
       owner_id: profile?.id,
-      schedule: { max_new_leads_per_day: leadsPerDay, min_time_btw_emails: minGap },
+      schedule: { max_new_leads_per_day: effectiveLeadsPerDay, min_time_btw_emails: minGap },
       suppression_overrides: suppressionOverrides,
       enrollment_overrides: enrollmentOverrides,
     };
@@ -654,12 +667,28 @@ export function CampaignWizard({
                       {(inboxes ?? []).map((a) => <SelectItem key={a.id} value={String(a.id)}>{a.from_email ?? a.from_name ?? `Inbox ${a.id}`}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                  {selectedInboxHealth && selectedInboxHealth.campaigns.length > 0 && (
+                  {selectedInboxHealth && (selectedInboxHealth.campaigns.length > 0 || inboxHeadroom != null) && (
                     <p className="text-[11px] text-muted-foreground">
-                      This inbox is also sending for {selectedInboxHealth.campaigns.length} other campaign{selectedInboxHealth.campaigns.length === 1 ? "" : "s"}{" "}
-                      ({selectedInboxHealth.total_leads_per_day} people/day) — new sends share its daily capacity.
+                      {selectedInboxHealth.campaigns.length > 0 && (
+                        <>
+                          This inbox is also sending for {selectedInboxHealth.campaigns.length} other campaign{selectedInboxHealth.campaigns.length === 1 ? "" : "s"}{" "}
+                          ({selectedInboxHealth.total_leads_per_day} people/day) — new sends share its daily capacity.{" "}
+                        </>
+                      )}
+                      {inboxHeadroom != null && (
+                        <>Room for ~{inboxHeadroom} more {inboxHeadroom === 1 ? "person" : "people"}/day (limit {selectedInboxHealth.daily_limit}/day).</>
+                      )}
                     </p>
                   )}
+                  {inboxHeadroom === 0 ? (
+                    <p className="text-xs text-amber-600">
+                      This inbox is already at its daily limit — the launch will be capped at 1 new person/day. Consider a different inbox.
+                    </p>
+                  ) : inboxHeadroom != null && leadsPerDay > inboxHeadroom ? (
+                    <p className="text-xs text-amber-600">
+                      That's more than this inbox has room for — the launch will be capped at {inboxHeadroom} new {inboxHeadroom === 1 ? "person" : "people"}/day.
+                    </p>
+                  ) : null}
                 </div>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="checkbox" checked={autoStart} onChange={(e) => setAutoStart(e.target.checked)} />
