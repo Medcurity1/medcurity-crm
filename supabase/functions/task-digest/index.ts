@@ -319,10 +319,40 @@ serve(async () => {
     }));
 
   const todayP = pacificYMD(new Date());
-  const out = { candidates: digestUsers.length, sent: 0, no_tasks: 0, no_outlook: 0, error: 0 };
+  const out = { candidates: digestUsers.length, sent: 0, no_tasks: 0, no_outlook: 0, error: 0, deduped: 0 };
   for (const u of digestUsers) {
+    // Per-day send guard (20260727170000): atomically CLAIM (user, day) so a
+    // second same-day trigger — pg_cron plus the restored GH backup schedule,
+    // or a manual re-run — can never double-email. ignoreDuplicates makes the
+    // upsert a no-op returning zero rows when the day is already claimed.
+    const { data: claim, error: claimErr } = await supabase
+      .from("task_digest_log")
+      .upsert(
+        { user_id: u.userId, digest_date: todayP },
+        { onConflict: "user_id,digest_date", ignoreDuplicates: true },
+      )
+      .select("user_id");
+    if (claimErr) {
+      console.warn(`task-digest: claim failed for ${u.userId}: ${claimErr.message}`);
+      out.error++;
+      continue;
+    }
+    if (!claim || claim.length === 0) {
+      out.deduped++;
+      continue;
+    }
     const r = await digestForUser(supabase, u.userId, todayP, u.includeFollowUps);
     out[r]++;
+    if (r !== "sent") {
+      // Nothing actually went out — release the claim so a later same-day
+      // retry (or the GH backup net) can still deliver after a transient
+      // failure instead of the guard eating the digest for the day.
+      await supabase
+        .from("task_digest_log")
+        .delete()
+        .eq("user_id", u.userId)
+        .eq("digest_date", todayP);
+    }
   }
 
   return new Response(JSON.stringify({ ok: true, ...out }), {

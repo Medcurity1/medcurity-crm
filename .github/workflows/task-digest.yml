@@ -1,23 +1,20 @@
 name: Task Digest (cron)
 
-# STATUS (2026-07-10): pg_cron + pg_net (migration 20260710178000, jobname
-# task_digest_weekday_morning, "0 15 * * 1-5" UTC) is now PRIMARY and the
-# ONLY automatic trigger for task-digest — this workflow's `schedule:`
-# trigger has been REMOVED (not just left as a redundant net like
-# sync-emails.yml / meddy-sweep.yml). Reason: supabase/functions/
-# task-digest/index.ts has no per-day send dedup (flagged in
-# docs/audit/2026-06-24-full-audit.md — "re-run double-emails"), so
-# running both an exact-time pg_cron trigger AND a GitHub cron that lands
-# late-but-same-day (observed drift ~2h, e.g. "8 AM" landing ~10 AM) would
-# email every opted-in rep two digests. Once the function gets a per-day
-# dedup guard (e.g. a task_digest_log(user_id, digest_date) table checked
-# before send — tracked on the DOCKET), this workflow's schedule trigger
-# can be safely restored as a true redundant safety net.
+# STATUS (2026-07-27): pg_cron + pg_net (migration 20260710178000, jobname
+# task_digest_weekday_morning, "0 15 * * 1-5" UTC) stays PRIMARY, and this
+# workflow's `schedule:` is RESTORED as the redundant backup net (matching
+# sync-emails.yml / meddy-sweep.yml). Safe now because the function has a
+# per-day send guard: task_digest_log(user_id, digest_date), claimed
+# atomically before each send and released when nothing went out
+# (migration 20260727170000 + the upsert-claim in index.ts). If pg_cron
+# already delivered, the backup run reports `deduped` and emails nobody;
+# GitHub's cron drift (~2h observed) is harmless for the same reason.
+# The 15:20 offset just keeps the backup from racing the primary.
 #
-# This workflow file stays as a MANUAL safety net: workflow_dispatch still
-# works for an on-demand run (e.g. if pg_cron/pg_net is down — check
-# select * from public.v_task_digest_schedule_status; first), same
-# curl -fsS failure visibility as before.
+# workflow_dispatch remains for on-demand runs (e.g. if pg_cron/pg_net is
+# down — check select * from public.v_task_digest_schedule_status; first),
+# same curl -fsS failure visibility as before. Scheduled runs target
+# PRODUCTION only; dispatch runs hit production AND staging (testing).
 #
 # Daily morning task digest: one email per rep listing the tasks they
 # have due today (+ overdue). Opt-in per user (My Settings →
@@ -35,6 +32,9 @@ name: Task Digest (cron)
 # recovery) — same self-healing alert pattern as sync-emails.yml.
 
 on:
+  schedule:
+    # Backup net: 20 min after the 15:00 UTC pg_cron primary (weekdays).
+    - cron: "20 15 * * 1-5"
   workflow_dispatch: {}
 
 # Lets the failure-alert steps open/close a GitHub issue with the built-in token.
@@ -48,7 +48,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Send production digests
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+        if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         env:
           URL: ${{ secrets.PRODUCTION_VITE_SUPABASE_URL }}
           KEY: ${{ secrets.PRODUCTION_VITE_SUPABASE_ANON_KEY }}
