@@ -54,6 +54,12 @@ Two tracked files answer "who asked for this, when, and did it happen?" Update t
 
 When work ships, move its DOCKET line to SHIPPED. Before building anything "new", check the DOCKET for prior asks and SHIPPED for whether it already happened.
 
+**DOCKET upkeep is priority #1 (Nathan, 2026-07-27).** Nathan never edits this file — it is Claude's own tracking system, and it has rotted before (a 7/27 audit found 10 items already done or moot, one blocked for six weeks on an answer the requester had already given). Therefore:
+
+- Every DOCKET row carries a **`Verify` recipe** (a grep or query that re-proves it is still open) and a **`Checked` date**. One item per row — never bundle.
+- **Never report a row to Nathan as current without re-running its Verify first.** Being in the docket is not evidence.
+- Run the **`/docket`** skill (`.claude/skills/docket/SKILL.md`) to audit, add, or close rows; re-audit anything checked more than ~14 days ago.
+
 ## Current phase
 
 (update this as work progresses)
