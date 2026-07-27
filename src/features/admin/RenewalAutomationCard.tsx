@@ -60,6 +60,7 @@ const PREVIEW_STATUS_META: Record<
   { label: string; tone: "success" | "warning" | "muted" }
 > = {
   will_create: { label: "Will create", tone: "success" },
+  covered_by_existing: { label: "Covered by existing deal", tone: "muted" },
   anniversary_outside_window: {
     label: "Outside window",
     tone: "warning",

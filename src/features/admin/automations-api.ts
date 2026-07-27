@@ -321,6 +321,7 @@ export function useRenewalAudit() {
 export interface RenewalPreviewRow {
   status:
     | "will_create"
+    | "covered_by_existing"
     | "anniversary_outside_window"
     | "before_baseline"
     | "has_live_renewal"
