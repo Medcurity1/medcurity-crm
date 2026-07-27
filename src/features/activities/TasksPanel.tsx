@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { CheckCircle2, Circle, Clock, Plus, ChevronDown, RotateCcw, Pencil, Trash2 } from "lucide-react";
 import { useTasks, useCompleteActivity, useReopenActivity, useArchiveActivity } from "./api";
 import { priorityPillClass, priorityLabel } from "./taskOrder";
+import { AutomationBadge, isAutomationActivity } from "./AutomationBadge";
 import { describeRecurrence } from "./recurrence";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { QuickTaskDialog } from "./QuickTaskDialog";
@@ -114,6 +115,7 @@ function TaskItem({
               {task.owner.full_name}
             </span>
           )}
+          {isAutomationActivity(task) && <AutomationBadge />}
           <span
             className={cn(
               "text-xs inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full font-medium",

@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDate, activityLabel, localDayRangeBounds } from "@/lib/formatters";
+import { AutomationBadge, isAutomationActivity } from "./AutomationBadge";
 
 const PAGE_SIZE = 25;
 
@@ -452,7 +453,10 @@ export function ActivitiesListPage() {
                         </Link>
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {a.owner?.full_name ?? "\u2014"}
+                        <span className="inline-flex items-center gap-1.5">
+                          {a.owner?.full_name ?? "\u2014"}
+                          {isAutomationActivity(a) && <AutomationBadge />}
+                        </span>
                       </TableCell>
                       <TableCell>
                         {link ? (

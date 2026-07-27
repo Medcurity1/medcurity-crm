@@ -694,6 +694,11 @@ export interface Activity {
   recur_monthday: number | null;
   recur_until: string | null;
   recurrence_parent_id: string | null;
+  /** Machine-written row (renewal signature tasks etc.) — 20260727160000.
+   *  Campaign-spawned rows may predate the flag; badge on this OR
+   *  campaign_enrollment_id (see isAutomationActivity). */
+  created_by_automation?: boolean;
+  campaign_enrollment_id?: string | null;
   // Outlook calendar sync (tasks)
   outlook_event_id: string | null;
   outlook_sync_error: string | null;

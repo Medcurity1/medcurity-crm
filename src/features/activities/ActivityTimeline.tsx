@@ -24,6 +24,7 @@ import {
   User,
 } from "lucide-react";
 import { useActivities } from "./api";
+import { AutomationBadge, isAutomationActivity } from "./AutomationBadge";
 import { QueryError } from "@/components/QueryError";
 import { ActivityForm } from "./ActivityForm";
 import { LogEmailDialog } from "./LogEmailDialog";
@@ -639,6 +640,7 @@ function ActivityEntry({
           {activity.owner?.full_name && (
             <span>{activity.owner.full_name}</span>
           )}
+          {isAutomationActivity(activity) && <AutomationBadge />}
           {isDue && (
             <span className="inline-flex items-center gap-1 text-amber-600">
               <Clock className="h-3 w-3" />
