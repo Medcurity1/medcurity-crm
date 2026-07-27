@@ -52,6 +52,39 @@ export function formatDateOnly(dateString: string | null): string {
   return format(local, "MMM d, yyyy");
 }
 
+/**
+ * Parse an <input type="date"> value ("YYYY-MM-DD") as LOCAL midnight.
+ * Bare `new Date("YYYY-MM-DD")` parses as UTC midnight, which in a
+ * negative-offset zone (all US zones) is 4-8pm the PREVIOUS local day —
+ * the root of every "my date range drops the last day" report.
+ * (Same math as RenewalsQueue's private parseLocalDate.)
+ */
+export function parseLocalDate(dateStr: string): Date {
+  const [y, m, d] = dateStr.slice(0, 10).split("-").map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+
+/**
+ * Inclusive local-day range bounds for filtering a timestamptz column from
+ * date-only inputs: `gte` = local midnight of startStr, `lt` = local midnight
+ * of the day AFTER endStr (exclusive upper bound — no 23:59:59.999 gap, no
+ * DST edge). Summer's Activities bug (2026-07-27): "20th to 24th" computed the
+ * end bound in UTC and silently dropped everything on the 24th.
+ */
+export function localDayRangeBounds(
+  startStr: string | null | undefined,
+  endStr: string | null | undefined,
+): { gte?: string; lt?: string } {
+  const bounds: { gte?: string; lt?: string } = {};
+  if (startStr) bounds.gte = parseLocalDate(startStr).toISOString();
+  if (endStr) {
+    const end = parseLocalDate(endStr);
+    end.setDate(end.getDate() + 1);
+    bounds.lt = end.toISOString();
+  }
+  return bounds;
+}
+
 export function formatDateTime(dateString: string | null): string {
   if (!dateString) return "—";
   const d = parseISO(dateString);

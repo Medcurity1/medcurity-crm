@@ -46,7 +46,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatDate, activityLabel } from "@/lib/formatters";
+import { formatDate, activityLabel, localDayRangeBounds } from "@/lib/formatters";
 
 const PAGE_SIZE = 25;
 
@@ -133,16 +133,19 @@ function useActivitiesList(filters: ListFilters) {
       if (filters.owner !== "all") {
         query = query.eq("owner_user_id", filters.owner);
       }
-      if (filters.startDate) {
-        // Filter by the interaction date too, so the date range matches what's
-        // shown/sorted (a back-dated call falls in its real month, not today).
-        query = query.gte("effective_at", filters.startDate);
+      // Filter by the interaction date too, so the date range matches what's
+      // shown/sorted (a back-dated call falls in its real month, not today).
+      // Bounds are LOCAL calendar days: the old code passed the bare date
+      // string (UTC midnight) as the start and computed the end via
+      // new Date("YYYY-MM-DD") + setHours(23,59,59) — UTC parse + local
+      // setHours lands on the PREVIOUS local day, so "20th to 24th" silently
+      // dropped the 24th (Summer, 2026-07-27).
+      const dateBounds = localDayRangeBounds(filters.startDate, filters.endDate);
+      if (dateBounds.gte) {
+        query = query.gte("effective_at", dateBounds.gte);
       }
-      if (filters.endDate) {
-        // include full end day
-        const end = new Date(filters.endDate);
-        end.setHours(23, 59, 59, 999);
-        query = query.lte("effective_at", end.toISOString());
+      if (dateBounds.lt) {
+        query = query.lt("effective_at", dateBounds.lt);
       }
       if (filters.scopeAccountId) {
         query = query.eq("account_id", filters.scopeAccountId);
