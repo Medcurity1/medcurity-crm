@@ -108,6 +108,27 @@ e167ce9d (due 5/16), 3d7caec7 (due 5/23). Kickoff/renewal email threads on the
 children detach to their accounts as before. Same undo path (suppression row per
 parent).
 
+## Batch 3 — the 5 Closed-Won duplicates (deleted 2026-07-27, Nathan's "go for it" — total $20,068.50 of double-counted revenue removed)
+
+Margaret confirmed "All duplicates, yes." Each was an auto-generated copy she
+closed as Won on 7/22 (Blue Mountain on 7/27) while the real renewal was already
+Closed Won weeks earlier at the same products/amount. Deleting removes the second
+booking of the same money; each account keeps its genuine won renewal, so no
+account loses customer status. Revenue dashboards drop ~$20k for July/Aug — that
+is the correction.
+
+| # | Account | Opp id | Name | $ | Closed (dup) | Real renewal |
+|---|---|---|---|---|---|---|
+| 16 | Blue Mountain Hospital (Utah) | f6dd69d7-17d4-4423-bd88-d568abef128c | Custom Service \| SRA \| Remote Services | 7,647.50 | 2026-08-15 | SRA \| Remote Services \| SAFER $7,647.50 won 6/16 (2026-06-16>2027-06-16); Molly's note: contract cancelled, billed through AUCH |
+| 17 | Hana Health | ef88cda1-… | SRA \| Remote Services \| BNVA \| CO Training | 5,745.00 | 2026-06-30 | Same products $5,745 won 6/9 (2026-06-09>2027-06-09) |
+| 18 | Ko-Kwel Wellness Center | a4b57bb1-… | Remote Services | 4,900.00 | 2026-08-06 | Remote Services $4,900 won 7/20 (2026-07-20>2027-07-20) |
+| 19 | Rheumatology & Osteoporosis Services | 7c6094a9-… | GE Training \| SRA | 1,296.00 | 2026-08-04 | SRA \| GE Training $2,160 won 7/20 (2026-07-20>2027-07-20) |
+| 20 | Beautiful You Dermatology | 8f4088e4-… | P+P | 480.00 | 2026-08-11 | P+P $480 won 7/20 (2026-07-20>2027-07-20) |
+
+No open tasks remained on these (Margaret's completed signature task on Blue
+Mountain and all logged emails detach to their accounts as history). 11 line
+items cascade. Same undo path (suppression row per parent).
+
 ## Not deleted
 
 - The 5 already-Closed-Won duplicates ($20,068.50: Blue Mountain, Hana, Ko-Kwel,
