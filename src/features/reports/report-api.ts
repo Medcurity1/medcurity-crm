@@ -237,6 +237,24 @@ function applyFilter(
   entityKey: string,
   filter: ReportFilter
 ): any {
+  // Virtual "Partner Account" filter (accounts only, Summer 2026-07-27):
+  // partner-hood isn't a column — it's account_type starting with "Partner"
+  // ("Partner", "Partner - Alliance"; legacy non-partner values like CHC or
+  // Direct don't count, matching the AccountForm checkbox rule). Yes →
+  // Partner-prefixed; No → anything else including NULL (plain .not.ilike
+  // would silently drop NULL rows).
+  if (filter.field === "_is_partner") {
+    const wantPartner =
+      (filter.operator === "eq" && filter.value === "true") ||
+      (filter.operator === "neq" && filter.value === "false");
+    const wantNonPartner =
+      (filter.operator === "eq" && filter.value === "false") ||
+      (filter.operator === "neq" && filter.value === "true");
+    if (wantPartner) return query.ilike("account_type", "Partner%");
+    if (wantNonPartner) return query.or("account_type.is.null,account_type.not.ilike.Partner*");
+    return query;
+  }
+
   const field = resolveFilterField(entityKey, filter.field);
   const value = filter.value;
 

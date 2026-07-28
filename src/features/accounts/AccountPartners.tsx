@@ -14,8 +14,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { StatusBadge } from "@/components/StatusBadge";
-import { customerStatusLabel } from "@/lib/formatters";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { AddPartnerDialog } from "./AddPartnerDialog";
 
@@ -33,11 +31,18 @@ import { AddPartnerDialog } from "./AddPartnerDialog";
  * tab with a clear "+ Add Partner" CTA — chose this over hiding
  * the tab so users always know where to add a partnership.
  *
- * Add Partner dialog asks the user whether the new account is a
- * Partner OF this account or a Member OF this account, so they
- * never have to think about which column gets which id.
+ * The Add Partner dialog infers the direction from whether THIS
+ * account is partner-typed (Summer 7/27: the old member/partner
+ * chooser kept recording resellers backwards as members).
  */
-export function AccountPartners({ accountId }: { accountId: string }) {
+export function AccountPartners({
+  accountId,
+  accountIsPartner,
+}: {
+  accountId: string;
+  /** Whether the account whose tab this is has a Partner account type. */
+  accountIsPartner: boolean;
+}) {
   const qc = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<AccountPartnership | null>(null);
@@ -177,6 +182,7 @@ export function AccountPartners({ accountId }: { accountId: string }) {
         open={addOpen}
         onOpenChange={setAddOpen}
         accountId={accountId}
+        accountIsPartner={accountIsPartner}
         onAdded={() => {
           qc.invalidateQueries({ queryKey: ["account_partners", accountId] });
           qc.invalidateQueries({ queryKey: ["partners"] });
@@ -228,15 +234,15 @@ function PartnershipSection({
           <p className="text-xs text-muted-foreground">{subtitle}</p>
         </div>
       </div>
+      {/* Columns trimmed to Account + Type (Summer 7/27: "I don't think
+          Status, Role, or Notes are important either. Just type").
+          role/notes stay in the DB, just not rendered or collected. */}
       <div className="rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Account</TableHead>
-              <TableHead>Status</TableHead>
               <TableHead>Type</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Notes</TableHead>
               <TableHead className="w-10" />
             </TableRow>
           </TableHeader>
@@ -255,28 +261,8 @@ function PartnershipSection({
                       {target.name}
                     </Link>
                   </TableCell>
-                  <TableCell>
-                    {target.customer_status ? (
-                      <StatusBadge
-                        value={target.customer_status}
-                        variant="customerStatus"
-                        label={customerStatusLabel(target.customer_status)}
-                      />
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
                     {target.account_type ?? "—"}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
-                    {p.role ?? "—"}
-                  </TableCell>
-                  <TableCell
-                    className="text-muted-foreground text-sm max-w-[16rem] truncate"
-                    title={p.notes ?? undefined}
-                  >
-                    {p.notes ?? "—"}
                   </TableCell>
                   <TableCell>
                     <Button

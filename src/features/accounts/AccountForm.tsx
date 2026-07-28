@@ -610,51 +610,26 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                 </div>
 
                 {/* ---- Partner details (Summer 7/16): shown only when the
-                     Partner box is checked, right where it's checked. Replaces
-                     the old bottom "Partner Information" section. ---- */}
+                     Partner box is checked, right where it's checked.
+                     Trimmed to Partner Type only (Summer 7/27) — Partnership
+                     Status and Relationship Notes are retired from the form;
+                     their columns and existing data are untouched. ---- */}
                 {(watch("account_type") ?? "").startsWith("Partner") && (
-                  <div className="md:col-span-2 rounded-md border border-border bg-muted/30 p-4 space-y-4">
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                      Partner details
-                    </p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="partnership_status">Partnership Status</Label>
-                        <PicklistSelect
-                          id="partnership_status"
-                          fieldKey="accounts.partnership_status"
-                          value={watch("partnership_status") ?? ""}
-                          onChange={(v) => setValue("partnership_status", v ?? "")}
-                          allowClear
-                          placeholder="Select status…"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="partner_type">
-                          {/* Always required here — this box only renders for
-                              partner accounts (Rachel's rule). */}
-                          Partner Type
-                          <span className="text-destructive ml-0.5">*</span>
-                        </Label>
-                        <PicklistSelect
-                          id="partner_type"
-                          fieldKey="accounts.partner_type"
-                          value={watch("partner_type") ?? ""}
-                          onChange={(v) => setValue("partner_type", v ?? "")}
-                          allowClear
-                          placeholder="Select type…"
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="relationship_notes">Relationship Notes</Label>
-                      <Textarea
-                        id="relationship_notes"
-                        rows={4}
-                        placeholder="Partnership plan, history, and next steps with this partner…"
-                        {...register("relationship_notes")}
-                      />
-                    </div>
+                  <div className="md:col-span-2 rounded-md border border-border bg-muted/30 p-4 space-y-2">
+                    <Label htmlFor="partner_type">
+                      {/* Always required here — this box only renders for
+                          partner accounts (Rachel's rule). */}
+                      Partner Type
+                      <span className="text-destructive ml-0.5">*</span>
+                    </Label>
+                    <PicklistSelect
+                      id="partner_type"
+                      fieldKey="accounts.partner_type"
+                      value={watch("partner_type") ?? ""}
+                      onChange={(v) => setValue("partner_type", v ?? "")}
+                      allowClear
+                      placeholder="Select type…"
+                    />
                   </div>
                 )}
 

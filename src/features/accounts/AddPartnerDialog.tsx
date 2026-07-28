@@ -1,12 +1,11 @@
 import { useState, useEffect, useMemo } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Search, ArrowUp, ArrowDown } from "lucide-react";
+import { Search } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +32,8 @@ interface AddPartnerDialogProps {
   onOpenChange: (open: boolean) => void;
   /** The account whose Partner tab opened this dialog. */
   accountId: string;
+  /** Whether that account is partner-typed — decides the direction. */
+  accountIsPartner: boolean;
   /** Called after the partnership row is successfully created. */
   onAdded: () => void;
 }
@@ -46,30 +47,27 @@ interface AccountSearchResult {
 
 /**
  * Dialog for creating a new account_partners row from an account
- * detail page. Asks the user which direction the relationship goes:
- *   - "this account is the PARTNER" → other account is member
- *   - "this account is the MEMBER"  → other account is partner
- *
- * The direction toggle removes ambiguity vs. just picking an
- * account (which could be either side). Defaults to "this is the
- * partner" since that's the more common case for the Partner tab
- * being on a partner-flagged account.
+ * detail page. The direction is INFERRED, not asked (Summer 7/27):
+ * if THIS account is partner-typed, the picked account joins as a
+ * member underneath it; otherwise the picked account is the partner
+ * this account came in through. The old member/partner chooser
+ * defaulted to "this is the partner", which kept recording
+ * resellers backwards as members of their own clients. The
+ * partner/member columns (512 live rows) are unchanged — only the
+ * question is gone, replaced by a plain-English sentence stating
+ * what will be recorded.
  */
 export function AddPartnerDialog({
   open,
   onOpenChange,
   accountId,
+  accountIsPartner,
   onAdded,
 }: AddPartnerDialogProps) {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 250);
   const [results, setResults] = useState<AccountSearchResult[]>([]);
   const [selected, setSelected] = useState<AccountSearchResult | null>(null);
-  const [direction, setDirection] = useState<"this_is_partner" | "this_is_member">(
-    "this_is_partner"
-  );
-  const [role, setRole] = useState("");
-  const [notes, setNotes] = useState("");
   const [searching, setSearching] = useState(false);
   // Accounts already linked to this one (either direction) so the search
   // results can mark them instead of dead-ending in an "already exists"
@@ -82,9 +80,6 @@ export function AddPartnerDialog({
     if (!open) {
       setSearch("");
       setSelected(null);
-      setRole("");
-      setNotes("");
-      setDirection("this_is_partner");
       setResults([]);
     }
   }, [open]);
@@ -152,16 +147,12 @@ export function AddPartnerDialog({
   const createMutation = useMutation({
     mutationFn: async () => {
       if (!selected) throw new Error("No account selected");
-      const partner_account_id =
-        direction === "this_is_partner" ? accountId : selected.id;
-      const member_account_id =
-        direction === "this_is_partner" ? selected.id : accountId;
+      const partner_account_id = accountIsPartner ? accountId : selected.id;
+      const member_account_id = accountIsPartner ? selected.id : accountId;
       const { data: userRes } = await supabase.auth.getUser();
       const { error } = await supabase.from("account_partners").insert({
         partner_account_id,
         member_account_id,
-        role: role.trim() || null,
-        notes: notes.trim() || null,
         created_by: userRes.user?.id ?? null,
       });
       if (error) {
@@ -182,10 +173,10 @@ export function AddPartnerDialog({
 
   const directionDescription = useMemo(() => {
     if (!selected) return null;
-    return direction === "this_is_partner"
-      ? `${selected.name} comes in through this account.`
-      : `This account comes in through ${selected.name}.`;
-  }, [selected, direction]);
+    return accountIsPartner
+      ? `${selected.name} will be listed as a member — an account that came in through this partner.`
+      : `${selected.name} will be listed as the partner this account came in through.`;
+  }, [selected, accountIsPartner]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -193,7 +184,9 @@ export function AddPartnerDialog({
         <DialogHeader>
           <DialogTitle>Add Partnership</DialogTitle>
           <DialogDescription>
-            Link this account to another account as a partner or member.
+            {accountIsPartner
+              ? "Pick an account that came in through this partner."
+              : "Pick the partner this account came in through."}
           </DialogDescription>
         </DialogHeader>
 
@@ -272,79 +265,9 @@ export function AddPartnerDialog({
             )}
           </div>
 
-          {/* Direction toggle */}
-          {selected && (
-            <div className="space-y-1.5">
-              <Label>Relationship</Label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setDirection("this_is_partner")}
-                  className={`rounded-md border p-3 text-left text-sm transition-colors ${
-                    direction === "this_is_partner"
-                      ? "border-primary bg-primary/5"
-                      : "border-input hover:bg-muted"
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 font-medium">
-                    <ArrowDown className="h-3.5 w-3.5" />
-                    This is the Partner
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    Other account is a member underneath us
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDirection("this_is_member")}
-                  className={`rounded-md border p-3 text-left text-sm transition-colors ${
-                    direction === "this_is_member"
-                      ? "border-primary bg-primary/5"
-                      : "border-input hover:bg-muted"
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 font-medium">
-                    <ArrowUp className="h-3.5 w-3.5" />
-                    This is a Member
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    Other account is the partner above us
-                  </div>
-                </button>
-              </div>
-              {directionDescription && (
-                <p className="text-xs text-muted-foreground italic">
-                  {directionDescription}
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Optional role */}
-          {selected && (
-            <div className="space-y-1.5">
-              <Label htmlFor="partner-role">Role (optional)</Label>
-              <Input
-                id="partner-role"
-                placeholder="e.g. Reseller, Co-marketing partner"
-                value={role}
-                onChange={(e) => setRole(e.target.value)}
-              />
-            </div>
-          )}
-
-          {/* Optional relationship notes */}
-          {selected && (
-            <div className="space-y-1.5">
-              <Label htmlFor="partner-notes">Notes (optional)</Label>
-              <Textarea
-                id="partner-notes"
-                rows={2}
-                placeholder="Context about this partnership…"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-              />
-            </div>
+          {/* What will be recorded — direction is inferred, stated plainly */}
+          {selected && directionDescription && (
+            <p className="text-sm text-muted-foreground">{directionDescription}</p>
           )}
         </div>
 

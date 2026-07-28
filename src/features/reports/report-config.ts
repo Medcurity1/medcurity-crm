@@ -139,6 +139,17 @@ const accountFilterColumns: FilterColumnDef[] = [
     type: "enum",
     enumValues: ["client", "prospect", "former_client"],
   },
+  {
+    // Virtual — resolved specially in report-api.ts applyFilter, not a real
+    // column. Partner-hood lives on account_type (values starting with
+    // "Partner"), NOT on customer_status: an account can be a partner AND a
+    // customer at once, so it's its own Yes/No line right under Account
+    // Status rather than a fourth status value (Summer's 2026-07-27 request
+    // — she suggested exactly this "separate line item" as the alternative).
+    filterKey: "_is_partner",
+    label: "Partner Account",
+    type: "boolean",
+  },
   { filterKey: "sales_active", label: "Working (Active/Inactive)", type: "boolean" },
   {
     filterKey: "sales_status",

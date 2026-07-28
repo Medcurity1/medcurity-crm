@@ -20,7 +20,6 @@ Statuses: `IDEA` · `QUEUED` · `IN PROGRESS` · `BLOCKED` · `STAGING` (awaitin
 | # | Item | Who | Detail | Verify | Checked |
 |---|---|---|---|---|---|
 | A1 | Camp Lowell duplicate renewal | Rachel | $1,012.50 auto-renewal; its successor is a 3-yr "SP SRA" $499 — likely the same product renamed. Delete or keep. Last of the 20-deal cleanup. | `opportunities?created_by_automation=eq.true&renewal_from_opportunity_id=not.is.null&amount=eq.1012.5` still open on prod | 2026-07-27 |
-| A2 | Partner tab cleanup | Summer → then Summer + Rachel | She wants the top card gone. But that layout IS her own 7/17 request, and Partner Type is Rachel's required-when-partner field. Also wants the partner/member arrows gone — can't drop (512 live relationship rows), but the wording should be plain English. | `grep -n partner_type src/features/accounts/AccountForm.tsx` (required rule) + `account_partners` row count | 2026-07-27 |
 | A3 | Campaign copy for 8-Touch + Warming presets | Jordan Mayer | The gate on Campaigns public launch (D1). | Presets still carry placeholder copy in the template editor | 2026-07-27 |
 | A4 | On-Site Fee: confirm "under 250" = 249-and-below | Molly | She answered in June ("$500 under 250, $1,000 for 250 or more"), but **383 prod accounts sit at exactly fte_count 250** — worth her saying yes with that number in view before they flip $500→$1,000. | `accounts?fte_count=eq.250&archived_at=is.null` count = 383 | 2026-07-27 |
 

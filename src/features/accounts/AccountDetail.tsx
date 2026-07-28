@@ -545,27 +545,22 @@ export function AccountDetail() {
             label: "Partner",
             content: (
               <div className="space-y-4">
-                {/* Partner details for partner-typed accounts (Summer 7/16):
-                    replaces the retired bottom "Partner Information" layout
-                    section. Edited via the account Edit form, where these
-                    fields sit under the Partner checkbox. */}
+                {/* Partner Type only (Summer 7/27 — "just type"): the old
+                    3-field card (Partnership Status / Relationship Notes) is
+                    retired; those columns keep their data but aren't shown or
+                    collected anymore. Partner Type stays because it's
+                    required for partner accounts (Rachel's rule); edited via
+                    the account Edit form. */}
                 {(account.account_type ?? "").startsWith("Partner") && (
-                  <div className="rounded-md border border-border p-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="block text-xs text-muted-foreground">Partnership Status</span>
-                      {account.partnership_status ?? "—"}
-                    </div>
-                    <div>
-                      <span className="block text-xs text-muted-foreground">Partner Type</span>
-                      {account.partner_type ?? "—"}
-                    </div>
-                    <div className="md:col-span-2">
-                      <span className="block text-xs text-muted-foreground">Relationship Notes</span>
-                      <span className="whitespace-pre-wrap">{account.relationship_notes ?? "—"}</span>
-                    </div>
+                  <div className="rounded-md border border-border px-4 py-2.5 text-sm flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Partner Type</span>
+                    <span className="font-medium">{account.partner_type ?? "—"}</span>
                   </div>
                 )}
-                <AccountPartners accountId={account.id} />
+                <AccountPartners
+                  accountId={account.id}
+                  accountIsPartner={(account.account_type ?? "").startsWith("Partner")}
+                />
               </div>
             ),
           },
