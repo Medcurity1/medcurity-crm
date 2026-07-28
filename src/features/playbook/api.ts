@@ -15,6 +15,8 @@ import type {
 } from "./types";
 import { normalizeEmail, type SuppressionEntry } from "./suppression";
 import { isPositiveReplyCategory } from "./reply-extract";
+import type { LeadList } from "@/types/crm";
+import { buildSmartQuery, parseSmartRules, smartRulesEmpty } from "@/features/lead-lists/lead-lists-api";
 
 // ---------------------------------------------------------------------------
 // Training notes (the feedback loop) — Phase A
@@ -991,6 +993,101 @@ export async function fetchRecipientsByTag(tagId: string): Promise<Recipient[]> 
       contact_id: c.id as string,
       account_id: (c.account_id as string) ?? undefined,
     }));
+}
+
+/**
+ * Members of a saved list as campaign recipients (outside-review I26 —
+ * "launch a campaign from a saved List"; Report Builder audiences arrive
+ * here too via its existing Save-as-list). Static lists read
+ * lead_list_members; smart lists (is_dynamic) resolve their rules LIVE
+ * through the same buildSmartQuery the Lists page uses. Both paths apply
+ * the same eligibility filters as fetchRecipientsByTag: not archived, not a
+ * pending pen import, has an email — and both feed the same Do-Not-Email +
+ * already-enrolled rails afterwards like every other source. Pages in 1000s
+ * with a 50-page (50k row) sanity hard-stop, same as fetchRecipientsByTag —
+ * the caller (loadList) refuses audiences past its own much lower ceiling
+ * long before that matters.
+ */
+export async function fetchRecipientsByList(list: LeadList): Promise<Recipient[]> {
+  const PAGE = 1000;
+
+  if (list.is_dynamic) {
+    const rules = parseSmartRules(list);
+    // Empty rules = "every contact in the CRM" — never what anyone meant.
+    // The Lists page refuses to create such a list, so hitting this means a
+    // corrupt/legacy filter_config: say so, don't report "matches nobody"
+    // (same posture as useFreezeSmartList).
+    if (smartRulesEmpty(rules)) throw new Error("This smart list has no usable rules — open it on the Lists page and set them up again.");
+    const all: Record<string, unknown>[] = [];
+    for (let page = 0; page < 50; page++) {
+      const { data, error } = await buildSmartQuery(
+        rules,
+        "id, first_name, last_name, email, account_id, account:accounts!account_id(name)",
+      )
+        .not("email", "is", null)
+        .order("id", { ascending: true }) // stable order so range paging can't skip/dupe
+        .range(page * PAGE, (page + 1) * PAGE - 1);
+      if (error) throw error;
+      const batch = (data ?? []) as Record<string, unknown>[];
+      all.push(...batch);
+      if (batch.length < PAGE) break;
+    }
+    // A multi-tag rule returns one row per matching tag through the inner
+    // embed — dedupe by contact id (same as useSmartListMembers).
+    const seen = new Set<string>();
+    const out: Recipient[] = [];
+    for (const c of all) {
+      const id = c.id as string;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      if (typeof c.email !== "string" || !c.email.trim()) continue;
+      out.push({
+        email: c.email,
+        first_name: (c.first_name as string) ?? "",
+        last_name: (c.last_name as string) ?? "",
+        company_name: ((c.account as { name?: string } | null)?.name) ?? "",
+        contact_id: id,
+        account_id: (c.account_id as string) ?? undefined,
+      });
+    }
+    return out;
+  }
+
+  const all: Record<string, unknown>[] = [];
+  for (let page = 0; page < 50; page++) {
+    const { data, error } = await supabase
+      .from("lead_list_members")
+      .select("id, contact:contacts!inner(id, first_name, last_name, email, account_id, account:accounts!account_id(name))")
+      .eq("list_id", list.id)
+      .is("contact.archived_at", null)
+      .is("contact.import_status", null)
+      .not("contact.email", "is", null)
+      .order("id", { ascending: true })
+      .range(page * PAGE, (page + 1) * PAGE - 1);
+    if (error) throw error;
+    const batch = (data ?? []) as Record<string, unknown>[];
+    all.push(...batch);
+    if (batch.length < PAGE) break;
+  }
+  const seen = new Set<string>();
+  const out: Recipient[] = [];
+  for (const row of all) {
+    const c = row.contact as Record<string, unknown> | null;
+    if (!c) continue;
+    const id = c.id as string;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    if (typeof c.email !== "string" || !c.email.trim()) continue;
+    out.push({
+      email: c.email,
+      first_name: (c.first_name as string) ?? "",
+      last_name: (c.last_name as string) ?? "",
+      company_name: ((c.account as { name?: string } | null)?.name) ?? "",
+      contact_id: id,
+      account_id: (c.account_id as string) ?? undefined,
+    });
+  }
+  return out;
 }
 
 /** Batched Do-Not-Email check: which of these emails are on
