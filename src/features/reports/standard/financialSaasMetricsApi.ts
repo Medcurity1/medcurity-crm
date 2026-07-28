@@ -2,7 +2,7 @@
 // Data layer for the Financial & SaaS Metrics report.
 //
 // Two reads:
-//   1. quarterly metrics  -> RPC f_financial_saas_metrics_quarterly
+//   1. quarterly metrics -> RPC f_financial_saas_metrics_quarterly
 //   2. raw opportunity rows -> v_arr_base_dataset
 //
 // Both are read directly from Supabase. The RPC does all the heavy
@@ -16,11 +16,11 @@ import type { RawDatasetRow } from "./financialSaasMetricsExport";
 
 /** Shape returned by f_financial_saas_metrics_quarterly. */
 export interface QuarterMetrics {
-  quarter_start: string;          // ISO yyyy-mm-dd
-  quarter_end: string;            // ISO yyyy-mm-dd
-  quarter_label: string;          // "Q3-2025"
+  quarter_start: string; // ISO yyyy-mm-dd
+  quarter_end: string; // ISO yyyy-mm-dd
+  quarter_label: string; // "Q3-2025"
   year: number;
-  quarter_num: number;            // 1..4
+  quarter_num: number; // 1..4
 
   // Revenue block
   new_dollars: number;
@@ -178,13 +178,21 @@ export async function fetchRawDataset(
       .from("v_arr_base_dataset")
       .select(
         "account_name, account_number, opportunity_name, opportunity_owner, " +
-        "created_date, close_date, age, amount, fiscal_period, payment_frequency, " +
-        "one_time_project, stage, type, account_type, primary_partner, " +
-        "lead_source, probability, next_step",
+          "created_date, close_date, age, amount, fiscal_period, payment_frequency, " +
+          "one_time_project, stage, type, account_type, primary_partner, " +
+          "lead_source, probability, next_step",
       )
+      // New-business losses (Type = "New Business" AND Stage = closed_lost)
+      // are prospects that never became customers — not churn, not revenue.
+      // The metrics RPCs exclude them (migration
+      // financial_saas_metrics_exclude_new_business_losses, 2026-07-28), so
+      // the Raw Data tab must exclude them too or the tabs would disagree.
+      // NOT(type = 'New Business' AND stage = 'closed_lost') expressed as
+      // an OR of the negations, PostgREST-style:
+      .or('type.neq."New Business",stage.neq.closed_lost')
       .order("close_date", { ascending: true });
     if (startDate) q = q.gte("close_date", startDate);
-    if (endDate)   q = q.lte("close_date", endDate);
+    if (endDate) q = q.lte("close_date", endDate);
     return q;
   });
 }
