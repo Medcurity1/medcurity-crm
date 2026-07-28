@@ -4,6 +4,7 @@ import {
   groupSuppressionReasons,
   normalizeEmail,
   suppressionReasonLabel,
+  isNonOverridableReason,
   type SuppressionEntry,
 } from "@/features/playbook/suppression";
 
@@ -170,5 +171,66 @@ describe("partitionSuppression", () => {
     ];
     const result = partitionSuppression(recipients, getEmail, suppression);
     expect(result.dropped).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Outside-review fix 2 (2026-07-28) — recorded opt-outs are non-overridable.
+// optout_unsubscribed / optout_manual come from the marketing_optouts table
+// (an actual unsubscribe click or a deliberate manual opt-out); "Include
+// anyway" must never defeat them, even when a stale override for that email
+// is still present. optout_bounced stays overridable (re-trying a once-
+// bounced address is a business call). The server twin
+// (partitionSuppressedEmails in playbook-smartlead/index.ts) enforces the
+// same rule regardless of what the client sends.
+// ---------------------------------------------------------------------------
+describe("non-overridable opt-outs", () => {
+  it("an unsubscribe cannot be overridden — the person stays dropped", () => {
+    const recipients: TestRecipient[] = [{ email: "gone@x.com" }];
+    const suppression: SuppressionEntry[] = [{ email: "gone@x.com", reason: "optout_unsubscribed" }];
+    const result = partitionSuppression(recipients, getEmail, suppression, ["gone@x.com"]);
+    expect(result.dropped).toHaveLength(1);
+    expect(result.overridden).toEqual([]);
+    expect(result.eligible).toEqual([]);
+  });
+
+  it("a manual opt-out cannot be overridden either", () => {
+    const recipients: TestRecipient[] = [{ email: "optedout@x.com" }];
+    const suppression: SuppressionEntry[] = [{ email: "optedout@x.com", reason: "optout_manual" }];
+    const result = partitionSuppression(recipients, getEmail, suppression, ["optedout@x.com"]);
+    expect(result.dropped).toHaveLength(1);
+    expect(result.overridden).toEqual([]);
+  });
+
+  it("a prior bounce CAN be overridden", () => {
+    const recipients: TestRecipient[] = [{ email: "bounced@x.com" }];
+    const suppression: SuppressionEntry[] = [{ email: "bounced@x.com", reason: "optout_bounced" }];
+    const result = partitionSuppression(recipients, getEmail, suppression, ["bounced@x.com"]);
+    expect(result.overridden).toHaveLength(1);
+    expect(result.dropped).toEqual([]);
+  });
+
+  it("one non-overridable reason locks the person even when other reasons are overridable", () => {
+    const recipients: TestRecipient[] = [{ email: "mixed@x.com" }];
+    const suppression: SuppressionEntry[] = [
+      { email: "mixed@x.com", reason: "customer_account" },
+      { email: "Mixed@X.com", reason: "optout_unsubscribed" }, // different casing on purpose
+    ];
+    const result = partitionSuppression(recipients, getEmail, suppression, ["mixed@x.com"]);
+    expect(result.dropped).toHaveLength(1);
+    expect(result.overridden).toEqual([]);
+  });
+
+  it("isNonOverridableReason: unsubscribed/manual lock, bounced and everything else don't", () => {
+    expect(isNonOverridableReason("optout_unsubscribed")).toBe(true);
+    expect(isNonOverridableReason("optout_manual")).toBe(true);
+    expect(isNonOverridableReason("optout_bounced")).toBe(false);
+    expect(isNonOverridableReason("customer_account")).toBe(false);
+  });
+
+  it("labels the new opt-out reasons in plain English", () => {
+    expect(suppressionReasonLabel("optout_unsubscribed")).toBe("unsubscribed");
+    expect(suppressionReasonLabel("optout_bounced")).toBe("email bounced");
+    expect(suppressionReasonLabel("optout_manual")).toBe("opted out");
   });
 });

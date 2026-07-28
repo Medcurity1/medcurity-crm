@@ -35,10 +35,27 @@ export const SUPPRESSION_REASON_LABEL: Record<string, string> = {
   lead_do_not_contact: "do not contact (import)",
   lead_avoid: "unsubscribed / bounced",
   lead_archived: "archived (import)",
+  optout_unsubscribed: "unsubscribed",
+  optout_bounced: "email bounced",
+  optout_manual: "opted out",
 };
 
 export function suppressionReasonLabel(reason: string): string {
   return SUPPRESSION_REASON_LABEL[reason] ?? reason.replace(/_/g, " ");
+}
+
+/** Suppression reasons an "Include anyway" override can never bypass
+ *  (outside-review fix 2): a recorded unsubscribe or manual opt-out is the
+ *  person's own choice, not a business preference — the UI refuses the
+ *  checkbox and partitionSuppression drops the person even if an override
+ *  is somehow present (e.g. recorded before the opt-out arrived). A prior
+ *  bounce (optout_bounced) stays overridable. Kept in sync with the same
+ *  set in playbook-smartlead/index.ts (the server twin, which enforces this
+ *  regardless of what the client sends). */
+export const NON_OVERRIDABLE_SUPPRESSION_REASONS = new Set(["optout_unsubscribed", "optout_manual"]);
+
+export function isNonOverridableReason(reason: string): boolean {
+  return NON_OVERRIDABLE_SUPPRESSION_REASONS.has(reason);
 }
 
 /** Lowercase + trim — the normalization every suppression match runs
@@ -86,11 +103,14 @@ export interface SuppressionPartition<T> {
  * differences between how an email was typed/uploaded and how it's stored
  * never cause a false negative or a false override-miss.
  *
- * Override precedence: being in `overrides` always wins over being
- * suppressed — an override is a deliberate per-person act, so it takes the
- * suppressed person out of `dropped` and into `overridden` rather than
- * removing them from consideration entirely (callers that only care about
- * "who gets emailed" should concatenate eligible + overridden).
+ * Override precedence: being in `overrides` wins over being suppressed — an
+ * override is a deliberate per-person act, so it takes the suppressed person
+ * out of `dropped` and into `overridden` rather than removing them from
+ * consideration entirely (callers that only care about "who gets emailed"
+ * should concatenate eligible + overridden). The one exception: a
+ * NON-OVERRIDABLE reason (recorded unsubscribe / manual opt-out — see
+ * NON_OVERRIDABLE_SUPPRESSION_REASONS) always drops the person, override or
+ * not, so a stale override can't defeat an opt-out that arrived after it.
  */
 export function partitionSuppression<T>(
   recipients: T[],
@@ -110,11 +130,13 @@ export function partitionSuppression<T>(
   const overridden: T[] = [];
   for (const r of recipients) {
     const key = normalizeEmail(getEmail(r));
-    if (!key || !reasonsByEmail.has(key)) {
+    const reasons = key ? reasonsByEmail.get(key) : undefined;
+    if (!key || !reasons) {
       eligible.push(r);
       continue;
     }
-    if (overrideSet.has(key)) overridden.push(r);
+    const locked = reasons.some(isNonOverridableReason);
+    if (!locked && overrideSet.has(key)) overridden.push(r);
     else dropped.push(r);
   }
   return { eligible, dropped, overridden };

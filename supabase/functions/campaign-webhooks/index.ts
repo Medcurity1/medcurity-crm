@@ -10,9 +10,14 @@
 //     CALL/LINKEDIN/EMAIL_HYBRID tasks by the same day delta.
 //   - EMAIL_REPLIED: stops the enrollment, archives its pending tasks,
 //     notifies the campaign owner (bell + a same-day follow-up task).
-//   - EMAIL_BOUNCED: stops the enrollment, archives its pending tasks.
-//   - EMAIL_UNSUBSCRIBED: stops the enrollment, archives its pending tasks,
-//     and flags the linked contact do_not_contact.
+//   - EMAIL_BOUNCED: stops the enrollment, archives its pending tasks, and
+//     records the address in marketing_optouts (reason 'bounced').
+//   - EMAIL_UNSUBSCRIBED: records the opt-out in marketing_optouts (reason
+//     'unsubscribed' — non-overridable at launch), flags the linked contact
+//     do_not_contact, archives pending tasks, and stops the enrollment if
+//     it's still live. The opt-out side effects run even when the
+//     enrollment already ended (outside-review fix 2 — see
+//     stopEnrollmentForUnsubscribe in _shared/campaign-enrollment-actions).
 //   - EMAIL_OPENED / EMAIL_CLICKED: event row only, no state change.
 //
 // PUBLIC endpoint (no user JWT — Smartlead's servers call this, not a
@@ -45,10 +50,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { normalizeWebhookPayload, type CanonicalWebhookEventType } from "../_shared/webhook-normalize.ts";
 import { dateOnly, daysBetweenDateOnly, shiftEnrollmentTasks } from "../_shared/campaign-task-shift.ts";
 import {
-  ENROLLMENT_TERMINAL_STATUSES,
-  archivePendingTasksForEnrollment,
   stopEnrollmentForBounce,
   stopEnrollmentForReply,
+  stopEnrollmentForUnsubscribe,
 } from "../_shared/campaign-enrollment-actions.ts";
 
 const corsHeaders = {
@@ -65,12 +69,6 @@ function json(body: Record<string, unknown>, status = 200) {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const svc = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
-
-// ENROLLMENT_TERMINAL_STATUSES (statuses a webhook event should NOT act on
-// again) now comes from _shared/campaign-enrollment-actions.ts — was
-// duplicated here identically before the S6 extraction; playbook-smartlead's
-// daily sweep needs the same list, so it's now the single source of truth
-// both import (see the top-of-file import).
 
 function normalizeEmail(email: string | null | undefined): string {
   return (email ?? "").trim().toLowerCase();
@@ -194,11 +192,11 @@ function extractStepNumber(raw: unknown): number | null {
   return null;
 }
 
-// archivePendingTasksForEnrollment/shiftEnrollmentTasks now come from
-// _shared/ (see the top-of-file import) — handleEmailSent below calls
-// shiftEnrollmentTasks(svc, ...) directly; handleUnsubscribed (the one
-// per-event handler still local to this file) calls
-// archivePendingTasksForEnrollment(svc, ...) directly.
+// shiftEnrollmentTasks comes from _shared/ (see the top-of-file import) —
+// handleEmailSent below calls shiftEnrollmentTasks(svc, ...) directly. The
+// reply/bounce/unsubscribe reactions all live in
+// _shared/campaign-enrollment-actions.ts (one implementation, shared with
+// the daily sweep's reconcile).
 
 // ---------------------------------------------------------------------
 // Enrollment shape read/written by the handlers below.
@@ -211,6 +209,8 @@ interface Enrollment {
   first_name: string | null;
   last_name: string | null;
   email: string | null;
+  company: string | null;
+  owner_user_id: string | null;
   status: string;
   current_step: number;
   first_send_at: string | null;
@@ -225,7 +225,7 @@ interface Campaign {
 }
 
 async function resolveEnrollment(campaignId: string, email: string | null, leadId: number | null): Promise<Enrollment | null> {
-  const cols = "id, contact_id, account_id, first_name, last_name, email, status, current_step, first_send_at, actual_first_send_at, smartlead_lead_id";
+  const cols = "id, contact_id, account_id, first_name, last_name, email, company, owner_user_id, status, current_step, first_send_at, actual_first_send_at, smartlead_lead_id";
   if (email) {
     const { data, error } = await svc
       .from("campaign_enrollments")
@@ -296,27 +296,12 @@ async function handleEmailSent(enrollment: Enrollment, leadId: number | null, oc
   }
 }
 
-// handleReplied/handleBounced are now stopEnrollmentForReply/
-// stopEnrollmentForBounce from _shared/campaign-enrollment-actions.ts (see
-// the top-of-file import and the switch statement below) — S6 extraction so
-// the daily-sweep's per-lead reconcile can react identically.
-
-async function handleUnsubscribed(enrollment: Enrollment): Promise<void> {
-  if (ENROLLMENT_TERMINAL_STATUSES.includes(enrollment.status)) return;
-  const { error } = await svc
-    .from("campaign_enrollments")
-    .update({ status: "stopped", unsubscribed_at: new Date().toISOString(), paused_reason: "unsubscribed" })
-    .eq("id", enrollment.id);
-  if (error) console.error("campaign-webhooks: EMAIL_UNSUBSCRIBED status update failed:", error.message);
-  await archivePendingTasksForEnrollment(svc, enrollment.id, "Unsubscribed");
-  if (enrollment.contact_id) {
-    const { error: contactErr } = await svc
-      .from("contacts")
-      .update({ do_not_contact: true })
-      .eq("id", enrollment.contact_id);
-    if (contactErr) console.error("campaign-webhooks: do_not_contact flag failed:", contactErr.message);
-  }
-}
+// handleReplied/handleBounced/handleUnsubscribed are now
+// stopEnrollmentForReply / stopEnrollmentForBounce /
+// stopEnrollmentForUnsubscribe from _shared/campaign-enrollment-actions.ts
+// (see the top-of-file import and the switch statement below) — S6
+// extraction (+ outside-review fix 2 for the unsubscribe) so the
+// daily-sweep's per-lead reconcile reacts identically.
 
 // ---------------------------------------------------------------------
 // Handler
@@ -457,7 +442,7 @@ Deno.serve(async (req) => {
         await stopEnrollmentForBounce(svc, enrollment, campaign.id);
         break;
       case "EMAIL_UNSUBSCRIBED":
-        await handleUnsubscribed(enrollment);
+        await stopEnrollmentForUnsubscribe(svc, enrollment, campaign.id);
         break;
       case "EMAIL_OPENED":
       case "EMAIL_CLICKED":

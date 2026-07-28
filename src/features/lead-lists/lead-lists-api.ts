@@ -226,8 +226,12 @@ export function smartRuleChips(
 
 const SMART_FETCH_CAP = 2000;
 
+// Exported since 2026-07-28: the campaign wizard's "from a saved list"
+// recipient source resolves a smart list's live members through the same
+// query the Lists page uses (see fetchRecipientsByList in
+// src/features/playbook/api.ts) — one rule engine, two readers.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildSmartQuery(rules: SmartListRules, selectCols: string): any {
+export function buildSmartQuery(rules: SmartListRules, selectCols: string): any {
   const needsTags = !!rules.tag_ids?.length;
   const needsAccount = !!rules.customer_status?.length;
   const select =

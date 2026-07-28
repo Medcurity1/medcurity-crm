@@ -6,19 +6,21 @@
 // overhaul S4) — a campaign never has to be managed by opening Smartlead.
 
 import { useMemo, useState } from "react";
-import { Megaphone, Download, RefreshCw, Loader2, Plus, Inbox } from "lucide-react";
+import { Megaphone, Download, RefreshCw, Loader2, Plus, Inbox, AlertTriangle, Search } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { CampaignWizard } from "./CampaignWizard";
 import { TemplatesSection } from "./TemplatesSection";
-import { CampaignReplies } from "./CampaignReplies";
+import { CampaignReplies, isReplyHandled } from "./CampaignReplies";
 import { LoadError } from "./LoadError";
 import { CampaignCard, type CampaignRow } from "./CampaignCard";
 import { CampaignDetailSheet } from "./CampaignDetailSheet";
 import { InboxHealthDialog } from "./InboxHealthDialog";
+import { campaignAttentionFlags, type AttentionFlag } from "./needs-attention";
 import {
   useCampaigns,
   useSmartleadStatus,
@@ -29,6 +31,7 @@ import {
   useSetCampaignStatus,
   useCampaignEnrollmentStats,
   useCampaignsMonthStats,
+  useCampaignReplies,
   useEmailAccounts,
 } from "./api";
 
@@ -65,6 +68,7 @@ export function CampaignsTab() {
   const busy = importMut.isPending || syncMut.isPending;
   const [wizardOpen, setWizardOpen] = useState(false);
   const [ownerFilter, setOwnerFilter] = useState<"everyone" | "mine">("everyone");
+  const [search, setSearch] = useState("");
   const [showAllPast, setShowAllPast] = useState(false);
   // Detail sheet (Campaigns overhaul S8) — `detailCampaign` deliberately
   // isn't cleared on close (only `detailOpen` toggles), so Radix's own
@@ -87,21 +91,89 @@ export function CampaignsTab() {
     return c.sending_email_account_id ? inboxLabels.get(c.sending_email_account_id) ?? null : null;
   }
 
-  const filtered = useMemo(() => {
+  // Owner filter and search are applied in two steps deliberately: the
+  // enrollment-stats fetch keys on the OWNER-filtered id list only, so
+  // typing in the search box never mints a new stats cache key (each
+  // keystroke used to refire the whole enrollment query and blank every
+  // card's people-line — adversarial review).
+  const ownerFiltered = useMemo(() => {
     const rows = (campaigns ?? []) as CampaignRow[];
     if (ownerFilter === "mine") return rows.filter((c) => c.owner_user_id === profile?.id);
     return rows;
   }, [campaigns, ownerFilter, profile?.id]);
 
-  // Ongoing = draft + active + paused. The list comes back newest-first
-  // (created_at desc, id as tiebreaker).
-  const ongoing = filtered.filter(
-    (c) => c.status === "draft" || c.status === "active" || c.status === "paused",
-  );
-  const allPast = filtered.filter((c) => c.status === "completed" || c.status === "stopped");
+  const searchActive = search.trim().length > 0;
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return ownerFiltered;
+    return ownerFiltered.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        (c.owner?.full_name ?? "").toLowerCase().includes(q),
+    );
+  }, [ownerFiltered, search]);
+
+  // "Needs you today" (outside-review I27): unhandled replies come from the
+  // same query the Replies feed below already runs — shared cache key, so
+  // this costs nothing extra. The section (and the pulling-out of flagged
+  // cards) waits until that query settles, so cards don't visibly jump
+  // between sections when it resolves mid-render.
+  const repliesQ = useCampaignReplies();
+  const repliesSettled = !repliesQ.isPending;
+  const unhandledByCampaign = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of repliesQ.data ?? []) {
+      if (isReplyHandled(r)) continue;
+      if (!r.campaign_id) continue;
+      m.set(r.campaign_id, (m.get(r.campaign_id) ?? 0) + 1);
+    }
+    return m;
+  }, [repliesQ.data]);
+
   const now = Date.now();
-  const recentlyEnded = allPast.filter((c) => now - new Date(c.updated_at).getTime() <= RECENTLY_ENDED_MS);
-  const olderPast = allPast.filter((c) => now - new Date(c.updated_at).getTime() > RECENTLY_ENDED_MS);
+  const attentionById = useMemo(() => {
+    const m = new Map<string, AttentionFlag[]>();
+    if (!repliesSettled) return m;
+    for (const c of filtered) {
+      const flags = campaignAttentionFlags(c, {
+        unhandledReplies: unhandledByCampaign.get(c.id) ?? 0,
+        nowMs: now,
+      });
+      if (flags.length) m.set(c.id, flags);
+    }
+    return m;
+    // `now` deliberately not a dep — it changes every render; the flags only
+    // meaningfully change when the underlying data does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, unhandledByCampaign, repliesSettled]);
+
+  // Ongoing = draft + active + paused. Campaigns that need a human are
+  // pulled OUT into their own section at the top. A terminal (completed/
+  // stopped) campaign joins it ONLY for a replies flag — but then
+  // regardless of age, since campaigns.updated_at is never maintained after
+  // insert and the 30-day bucket would otherwise hide a fresh reply on an
+  // old campaign behind "Show all past" (adversarial review).
+  const allPast = filtered.filter((c) => c.status === "completed" || c.status === "stopped");
+  const recentlyEndedAll = allPast.filter((c) => now - new Date(c.updated_at).getTime() <= RECENTLY_ENDED_MS);
+  const needsAttention = filtered.filter((c) => {
+    const flags = attentionById.get(c.id);
+    if (!flags) return false;
+    const terminal = c.status === "completed" || c.status === "stopped";
+    return terminal ? flags.some((f) => f.kind === "replies") : true;
+  });
+  const needsIds = new Set(needsAttention.map((c) => c.id));
+  const ongoing = filtered.filter(
+    (c) => (c.status === "draft" || c.status === "active" || c.status === "paused") && !needsIds.has(c.id),
+  );
+  const recentlyEnded = recentlyEndedAll.filter((c) => !needsIds.has(c.id));
+  const olderPast = allPast.filter(
+    (c) => now - new Date(c.updated_at).getTime() > RECENTLY_ENDED_MS && !needsIds.has(c.id),
+  );
+  // The "no ongoing campaigns" message should still appear when the only
+  // flagged campaigns are terminal ones (their amber box isn't "ongoing").
+  const anyOngoingAnywhere =
+    ongoing.length > 0 ||
+    needsAttention.some((c) => c.status === "draft" || c.status === "active" || c.status === "paused");
 
   // Re-resolve the sheet's campaign against the live list on every render so
   // its header (status chip, metrics) stays current after a Start/Pause/
@@ -114,10 +186,11 @@ export function CampaignsTab() {
     return rows.find((c) => c.id === detailCampaign.id) ?? detailCampaign;
   }, [campaigns, detailCampaign]);
 
-  // One grouped enrollment-stats fetch for every campaign currently visible
-  // in the filtered list (not just the rendered subset) — cheap at this
-  // scale, and means expanding "Show all past" never needs a second fetch.
-  const statsIds = useMemo(() => filtered.map((c) => c.id), [filtered]);
+  // One grouped enrollment-stats fetch for every campaign in the OWNER-
+  // filtered list (not the search-filtered one — see ownerFiltered's
+  // comment — and not just the rendered subset): cheap at this scale, and
+  // expanding "Show all past" or typing a search never needs a new fetch.
+  const statsIds = useMemo(() => ownerFiltered.map((c) => c.id), [ownerFiltered]);
   const { data: statsById } = useCampaignEnrollmentStats(statsIds);
 
   // "This month" strip (Campaigns overhaul Phase 3, S9) — a quick pulse-check
@@ -135,6 +208,7 @@ export function CampaignsTab() {
         setStatus={setStatus}
         stats={statsById?.[c.id]}
         inboxLabel={inboxLabelFor(c)}
+        attention={attentionById.get(c.id)}
         onOpenDetail={(row) => { setDetailCampaign(row); setDetailOpen(true); }}
       />
     );
@@ -171,6 +245,15 @@ export function CampaignsTab() {
               <FilterPill label="Everyone" active={ownerFilter === "everyone"} onClick={() => setOwnerFilter("everyone")} />
               <FilterPill label="Mine" active={ownerFilter === "mine"} onClick={() => setOwnerFilter("mine")} />
             </div>
+            <div className="relative">
+              <Search className="h-3.5 w-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search campaigns…"
+                className="h-7 w-44 pl-7 text-xs"
+              />
+            </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {sl?.configured && (
@@ -206,6 +289,20 @@ export function CampaignsTab() {
           </div>
         </div>
 
+        {/* Needs you today (outside-review I27) — every campaign with an
+            unhandled reply, a stall, a high bounce rate, or a forgotten
+            draft, pulled out of its normal section so trouble is the FIRST
+            thing on the tracker instead of buried in a flat list. */}
+        {!isLoading && !isError && needsAttention.length > 0 && (
+          <div className="rounded-md border border-amber-300/60 dark:border-amber-500/30 p-3 space-y-2">
+            <h3 className="text-sm font-semibold flex items-center gap-1.5">
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              Needs you today ({needsAttention.length})
+            </h3>
+            {needsAttention.map(renderCard)}
+          </div>
+        )}
+
         {isLoading ? (
           <div className="space-y-2">
             {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}
@@ -216,14 +313,20 @@ export function CampaignsTab() {
           <div className="space-y-2">
             {ongoing.map(renderCard)}
           </div>
-        ) : (
+        ) : anyOngoingAnywhere ? null : (
           <EmptyState
             icon={Megaphone}
-            title={allPast.length ? "No ongoing campaigns" : "No campaigns yet"}
+            title={
+              searchActive
+                ? "No campaigns match that search"
+                : allPast.length ? "No ongoing campaigns" : "No campaigns yet"
+            }
             description={
-              sl?.configured
-                ? "Start one from a template above, or import your existing Smartlead campaigns."
-                : "Campaigns will live here once Smartlead is connected."
+              searchActive
+                ? "Try a different name, or clear the search."
+                : sl?.configured
+                  ? "Start one from a template above, or import your existing Smartlead campaigns."
+                  : "Campaigns will live here once Smartlead is connected."
             }
           />
         )}

@@ -15,6 +15,8 @@ import type {
 } from "./types";
 import { normalizeEmail, type SuppressionEntry } from "./suppression";
 import { isPositiveReplyCategory } from "./reply-extract";
+import type { LeadList } from "@/types/crm";
+import { buildSmartQuery, parseSmartRules, smartRulesEmpty } from "@/features/lead-lists/lead-lists-api";
 
 // ---------------------------------------------------------------------------
 // Training notes (the feedback loop) — Phase A
@@ -489,6 +491,23 @@ export function useEmailAccounts() {
   });
 }
 
+/** Active users, for the wizard's Campaign owner picker — same
+ *  is_active-scoped shape as leads/api.ts's + accounts/api.ts's useUsers(). */
+export function useActiveUsers() {
+  return useQuery({
+    queryKey: ["playbook", "active-users"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("user_profiles")
+        .select("id, full_name")
+        .eq("is_active", true)
+        .order("full_name");
+      if (error) throw error;
+      return (data ?? []) as { id: string; full_name: string | null }[];
+    },
+  });
+}
+
 /** One sending inbox's warmup health + how much daily volume it's already
  *  carrying — the `inbox-health` edge action's per-inbox shape (Campaigns
  *  overhaul Phase 5). `warmup` is null when Smartlead's warmup-stats read
@@ -583,6 +602,10 @@ export function useLaunchCampaign() {
         already_enrolled_dropped?: number;
         enrolled?: number;
         tasks_created?: number;
+        // Non-fatal launch problem the user must still hear about (partial
+        // Smartlead upload, post-start bookkeeping failure) — toasted by
+        // CampaignWizard's handleLaunchSuccess (outside-review fix 3).
+        warning?: string;
       };
     },
     onSuccess: () => {
@@ -591,6 +614,80 @@ export function useLaunchCampaign() {
     },
     onError: (e) => toast.error("Launch failed: " + (e as Error).message),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Campaign wizard draft autosave — survive an accidental close (Escape /
+// outside-click on the wizard Dialog used to discard everything). One row
+// per session in campaign_drafts. NOTE the table's RLS is admin-ALL (all
+// admins see all rows — 20260624000001), so per-user scoping happens in
+// fetchLatestCampaignDraft's explicit user_id filter, not in RLS; the
+// rep-rollout flip must add a per-user policy. state_json carries the
+// wizard's own serializable state, keyed by a `v` version marker so a
+// future shape change can tell an old draft apart from a fresh one. See
+// CampaignWizard.tsx's autosave effect.
+// ---------------------------------------------------------------------------
+
+export interface CampaignDraftRow {
+  id: string;
+  title: string;
+  state_json: unknown;
+  updated_at: string;
+}
+
+/** Most recent draft for the signed-in user IN the given wizard mode.
+ *  Both filters are load-bearing (adversarial review): the table's RLS is
+ *  admin-ALL — not per-user — so without the user_id filter one admin's
+ *  wizard would offer (and could delete) another admin's half-built
+ *  campaign; and `mode` is a prop the resume can't switch, so without the
+ *  mode filter the single `limit 1` row could permanently shadow the other
+ *  mode's draft. */
+export async function fetchLatestCampaignDraft(mode: "ai" | "template"): Promise<CampaignDraftRow | null> {
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user?.id;
+  if (!userId) return null;
+  const { data, error } = await supabase
+    .from("campaign_drafts")
+    .select("id, title, state_json, updated_at")
+    .eq("user_id", userId)
+    .eq("state_json->>mode", mode)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data as CampaignDraftRow | null;
+}
+
+/** Insert (no id) or update (with id) the wizard's one draft row for this
+ *  session. Returns the row id so the caller can keep updating the same row
+ *  on every later autosave instead of creating a new one each time. */
+export async function saveCampaignDraft(p: {
+  id?: string;
+  title: string;
+  state_json: Record<string, unknown>;
+}): Promise<string> {
+  if (p.id) {
+    const { data, error } = await supabase
+      .from("campaign_drafts")
+      .update({ title: p.title, state_json: p.state_json, updated_at: new Date().toISOString() })
+      .eq("id", p.id)
+      .select("id")
+      .single();
+    if (error) throw error;
+    return data.id as string;
+  }
+  const { data, error } = await supabase
+    .from("campaign_drafts")
+    .insert({ title: p.title, state_json: p.state_json })
+    .select("id")
+    .single();
+  if (error) throw error;
+  return data.id as string;
+}
+
+export async function deleteCampaignDraft(id: string): Promise<void> {
+  const { error } = await supabase.from("campaign_drafts").delete().eq("id", id);
+  if (error) throw error;
 }
 
 /** Analyze a completed campaign (AI insights + auto-training). */
@@ -898,6 +995,101 @@ export async function fetchRecipientsByTag(tagId: string): Promise<Recipient[]> 
     }));
 }
 
+/**
+ * Members of a saved list as campaign recipients (outside-review I26 —
+ * "launch a campaign from a saved List"; Report Builder audiences arrive
+ * here too via its existing Save-as-list). Static lists read
+ * lead_list_members; smart lists (is_dynamic) resolve their rules LIVE
+ * through the same buildSmartQuery the Lists page uses. Both paths apply
+ * the same eligibility filters as fetchRecipientsByTag: not archived, not a
+ * pending pen import, has an email — and both feed the same Do-Not-Email +
+ * already-enrolled rails afterwards like every other source. Pages in 1000s
+ * with a 50-page (50k row) sanity hard-stop, same as fetchRecipientsByTag —
+ * the caller (loadList) refuses audiences past its own much lower ceiling
+ * long before that matters.
+ */
+export async function fetchRecipientsByList(list: LeadList): Promise<Recipient[]> {
+  const PAGE = 1000;
+
+  if (list.is_dynamic) {
+    const rules = parseSmartRules(list);
+    // Empty rules = "every contact in the CRM" — never what anyone meant.
+    // The Lists page refuses to create such a list, so hitting this means a
+    // corrupt/legacy filter_config: say so, don't report "matches nobody"
+    // (same posture as useFreezeSmartList).
+    if (smartRulesEmpty(rules)) throw new Error("This smart list has no usable rules — open it on the Lists page and set them up again.");
+    const all: Record<string, unknown>[] = [];
+    for (let page = 0; page < 50; page++) {
+      const { data, error } = await buildSmartQuery(
+        rules,
+        "id, first_name, last_name, email, account_id, account:accounts!account_id(name)",
+      )
+        .not("email", "is", null)
+        .order("id", { ascending: true }) // stable order so range paging can't skip/dupe
+        .range(page * PAGE, (page + 1) * PAGE - 1);
+      if (error) throw error;
+      const batch = (data ?? []) as Record<string, unknown>[];
+      all.push(...batch);
+      if (batch.length < PAGE) break;
+    }
+    // A multi-tag rule returns one row per matching tag through the inner
+    // embed — dedupe by contact id (same as useSmartListMembers).
+    const seen = new Set<string>();
+    const out: Recipient[] = [];
+    for (const c of all) {
+      const id = c.id as string;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      if (typeof c.email !== "string" || !c.email.trim()) continue;
+      out.push({
+        email: c.email,
+        first_name: (c.first_name as string) ?? "",
+        last_name: (c.last_name as string) ?? "",
+        company_name: ((c.account as { name?: string } | null)?.name) ?? "",
+        contact_id: id,
+        account_id: (c.account_id as string) ?? undefined,
+      });
+    }
+    return out;
+  }
+
+  const all: Record<string, unknown>[] = [];
+  for (let page = 0; page < 50; page++) {
+    const { data, error } = await supabase
+      .from("lead_list_members")
+      .select("id, contact:contacts!inner(id, first_name, last_name, email, account_id, account:accounts!account_id(name))")
+      .eq("list_id", list.id)
+      .is("contact.archived_at", null)
+      .is("contact.import_status", null)
+      .not("contact.email", "is", null)
+      .order("id", { ascending: true })
+      .range(page * PAGE, (page + 1) * PAGE - 1);
+    if (error) throw error;
+    const batch = (data ?? []) as Record<string, unknown>[];
+    all.push(...batch);
+    if (batch.length < PAGE) break;
+  }
+  const seen = new Set<string>();
+  const out: Recipient[] = [];
+  for (const row of all) {
+    const c = row.contact as Record<string, unknown> | null;
+    if (!c) continue;
+    const id = c.id as string;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    if (typeof c.email !== "string" || !c.email.trim()) continue;
+    out.push({
+      email: c.email,
+      first_name: (c.first_name as string) ?? "",
+      last_name: (c.last_name as string) ?? "",
+      company_name: ((c.account as { name?: string } | null)?.name) ?? "",
+      contact_id: id,
+      account_id: (c.account_id as string) ?? undefined,
+    });
+  }
+  return out;
+}
+
 /** Batched Do-Not-Email check: which of these emails are on
  *  v_marketing_suppression, and why. Matches on normalized
  *  (lowercased/trimmed) email — every email we send is normalized before
@@ -908,16 +1100,26 @@ export async function fetchSuppressionForEmails(emails: string[]): Promise<Suppr
   const normalized = Array.from(new Set(emails.map(normalizeEmail).filter(Boolean)));
   if (!normalized.length) return [];
   const BATCH = 500;
+  // PostgREST silently caps an un-paged select at 1000 rows, and one email
+  // can match several suppression reasons — page each batch to exhaustion
+  // with a stable order so no suppression row is ever dropped (matches the
+  // server-side mirror in playbook-smartlead/index.ts).
+  const PAGE = 1000;
   const out: SuppressionEntry[] = [];
   for (let i = 0; i < normalized.length; i += BATCH) {
     const batch = normalized.slice(i, i + BATCH);
-    const { data, error } = await supabase
-      .from("v_marketing_suppression")
-      .select("email, reason")
-      .in("email", batch);
-    if (error) throw error;
-    for (const row of (data ?? []) as { email: string; reason: string }[]) {
-      out.push({ email: row.email, reason: row.reason });
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from("v_marketing_suppression")
+        .select("email, reason")
+        .in("email", batch)
+        .order("email", { ascending: true })
+        .order("source_id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) throw error;
+      const rows = (data ?? []) as { email: string; reason: string }[];
+      for (const row of rows) out.push({ email: row.email, reason: row.reason });
+      if (rows.length < PAGE) break;
     }
   }
   return out;
@@ -951,7 +1153,7 @@ export interface CampaignReplyRow {
   occurred_at: string | null;
   created_at: string;
   campaign: { id: string; name: string } | null;
-  enrollment: { first_name: string | null; last_name: string | null; contact_id: string | null; reply_category: string | null } | null;
+  enrollment: { first_name: string | null; last_name: string | null; contact_id: string | null; account_id: string | null; reply_category: string | null } | null;
 }
 
 /** Recent reply campaign_events, newest first, last 30 days, capped at 50 —
@@ -970,7 +1172,7 @@ export function useCampaignReplies() {
         .from("campaign_events")
         .select(
           "id, campaign_id, enrollment_id, email, payload, occurred_at, created_at, " +
-            "campaign:campaigns(id, name), enrollment:campaign_enrollments(first_name, last_name, contact_id, reply_category)",
+            "campaign:campaigns(id, name), enrollment:campaign_enrollments(first_name, last_name, contact_id, account_id, reply_category)",
         )
         .in("event_type", REPLY_EVENT_TYPES)
         .gte("created_at", cutoff.toISOString())
@@ -1235,6 +1437,203 @@ export function useCampaignEvents(campaignId: string | null) {
   });
 }
 
+/**
+ * Log a completed call activity from a reply card (outside-review I28 —
+ * "act on a reply without leaving Pulse"). One click = one call record on
+ * the contact's timeline, same activities shape ActivityForm writes.
+ */
+export function useLogReplyCall() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: {
+      contact_id: string;
+      account_id: string | null;
+      owner_user_id: string | null;
+      campaignName: string | null;
+    }) => {
+      const { error } = await supabase.from("activities").insert({
+        activity_type: "call",
+        subject: `Call after campaign reply${p.campaignName ? ` — ${p.campaignName}` : ""}`,
+        contact_id: p.contact_id,
+        account_id: p.account_id,
+        owner_user_id: p.owner_user_id,
+        activity_date: new Date().toISOString(),
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["activities"] });
+      toast.success("Call logged on the contact's timeline.");
+    },
+    onError: (e) => toast.error("Couldn't log the call: " + (e as Error).message),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Per-touch performance + revenue influence (outside-review I29 / I30)
+// ---------------------------------------------------------------------------
+
+export interface TouchStats {
+  /** Sequence email number -> tallies. */
+  bySeq: Record<number, { sent: number; opened: number; clicked: number; replied: number; bounced: number }>;
+  /** Events whose payload never named an email number. */
+  unattributed: number;
+  totalEvents: number;
+  /** True when the 10k-event read cap was hit — tallies are a floor. */
+  capped: boolean;
+}
+
+/**
+ * Per-email-number tallies for one campaign (I29 — "is email 6 earning its
+ * send?"). Reads ONLY event_type + the handful of payload seq-number
+ * variants via PostgREST json-arrow selection, so no reply bodies or full
+ * webhook payloads ever ship to the browser. Smartlead doesn't tag every
+ * event with its email number — the unattributed bucket keeps the table
+ * honest instead of silently miscounting.
+ */
+export function useCampaignTouchStats(campaignId: string | null) {
+  return useQuery({
+    queryKey: ["playbook", "campaign-touch-stats", campaignId],
+    enabled: !!campaignId,
+    queryFn: async (): Promise<TouchStats> => {
+      const PAGE = 1000;
+      const MAX_PAGES = 10;
+      type Row = { event_type: string } & Record<string, unknown>;
+      const rows: Row[] = [];
+      let capped = false;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const { data, error } = await supabase
+          .from("campaign_events")
+          .select("id, event_type, s1:payload->seq_number, s2:payload->sequence_number, s3:payload->step_number, s4:payload->email_seq_number, d1:payload->data->seq_number, d2:payload->data->sequence_number, d3:payload->data->step_number")
+          .eq("campaign_id", campaignId as string)
+          // Index-aligned (idx_campaign_events_campaign_created) with id as
+          // the total-order tiebreaker so range paging stays stable.
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(page * PAGE, (page + 1) * PAGE - 1);
+        if (error) throw error;
+        const batch = (data ?? []) as unknown as Row[];
+        rows.push(...batch);
+        if (batch.length < PAGE) break;
+        if (page === MAX_PAGES - 1) capped = true;
+      }
+      const bySeq: TouchStats["bySeq"] = {};
+      let unattributed = 0;
+      for (const r of rows) {
+        let seq: number | null = null;
+        for (const k of ["s1", "s2", "s3", "s4", "d1", "d2", "d3"]) {
+          const v = r[k];
+          if (v == null) continue;
+          const n = Number(v);
+          if (Number.isFinite(n) && n > 0) { seq = Math.trunc(n); break; }
+        }
+        const bucket = touchEventBucket(r.event_type);
+        if (!bucket) continue;
+        if (seq == null) { unattributed++; continue; }
+        if (!bySeq[seq]) bySeq[seq] = { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 };
+        bySeq[seq][bucket]++;
+      }
+      return { bySeq, unattributed, totalEvents: rows.length, capped };
+    },
+  });
+}
+
+export interface CampaignInfluence {
+  /** Opportunities opened on an enrolled account AFTER that account's first
+   *  enrollment in this campaign — influence, not proof of causation. */
+  deals: { id: string; name: string; amount: number | null; stage: string; created_at: string }[];
+  wonTotal: number;
+  openTotal: number;
+  capped: boolean;
+}
+
+/**
+ * "Did this campaign make money?" (I30) — joins the campaign's enrolled
+ * accounts to opportunities created after enrollment. Correlation by
+ * design (the label in the sheet says "opened after enrollment"), which is
+ * the honest version of attribution this data can support.
+ */
+export function useCampaignInfluence(campaignId: string | null) {
+  return useQuery({
+    queryKey: ["playbook", "campaign-influence", campaignId],
+    enabled: !!campaignId,
+    queryFn: async (): Promise<CampaignInfluence> => {
+      const PAGE = 1000;
+      // 1. Earliest enrollment per account.
+      const minEnrolled = new Map<string, number>();
+      // Pages to exhaustion (same convention as fetchSuppressionForEmails):
+      // a dropped enrollment page would silently drop its accounts' deals
+      // from the money totals.
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from("campaign_enrollments")
+          .select("account_id, enrolled_at")
+          .eq("campaign_id", campaignId as string)
+          .not("account_id", "is", null)
+          .order("id", { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const batch = (data ?? []) as { account_id: string; enrolled_at: string }[];
+        for (const e of batch) {
+          const t = new Date(e.enrolled_at).getTime();
+          if (Number.isNaN(t)) continue;
+          const prev = minEnrolled.get(e.account_id);
+          if (prev == null || t < prev) minEnrolled.set(e.account_id, t);
+        }
+        if (batch.length < PAGE) break;
+      }
+      if (!minEnrolled.size) return { deals: [], wonTotal: 0, openTotal: 0, capped: false };
+
+      // 2. Opportunities on those accounts, created after enrollment.
+      const accountIds = [...minEnrolled.keys()];
+      const BATCH = 200;
+      const deals: CampaignInfluence["deals"] = [];
+      let capped = false;
+      for (let i = 0; i < accountIds.length; i += BATCH) {
+        const ids = accountIds.slice(i, i + BATCH);
+        for (let page = 0; page < 10; page++) {
+          const { data, error } = await supabase
+            .from("opportunities")
+            .select("id, name, amount, stage, created_at, account_id")
+            .in("account_id", ids)
+            .is("archived_at", null)
+            // The renewal generator opens full-value renewal opps nightly on
+            // customer accounts — counting those would let a campaign claim
+            // credit for the renewal book of every customer it touched
+            // (adversarial review). Human-opened deals only.
+            .eq("created_by_automation", false)
+            .order("id", { ascending: true })
+            .range(page * PAGE, (page + 1) * PAGE - 1);
+          if (error) throw error;
+          const batch = (data ?? []) as { id: string; name: string; amount: number | null; stage: string; created_at: string; account_id: string }[];
+          for (const o of batch) {
+            const enrolledAt = minEnrolled.get(o.account_id);
+            if (enrolledAt == null) continue;
+            const created = new Date(o.created_at).getTime();
+            if (Number.isNaN(created) || created <= enrolledAt) continue;
+            // numeric columns can arrive as strings through PostgREST —
+            // coerce once here so totals and the sheet agree (repo-wide
+            // Number(amount) convention).
+            const amt = Number(o.amount ?? 0);
+            deals.push({ id: o.id, name: o.name, amount: Number.isFinite(amt) ? amt : null, stage: o.stage, created_at: o.created_at });
+          }
+          if (batch.length < PAGE) break;
+          if (page === 9) capped = true;
+        }
+      }
+      deals.sort((a, b) => b.created_at.localeCompare(a.created_at));
+      let wonTotal = 0;
+      let openTotal = 0;
+      for (const d of deals) {
+        const amt = typeof d.amount === "number" && Number.isFinite(d.amount) ? d.amount : 0;
+        if (d.stage === "closed_won") wonTotal += amt;
+        else if (d.stage !== "closed_lost") openTotal += amt;
+      }
+      return { deals, wonTotal, openTotal, capped };
+    },
+  });
+}
+
 export interface CampaignEventStats {
   sent: number;
   opened: number;
@@ -1248,6 +1647,17 @@ export interface CampaignEventStats {
  *  one (EMAIL_REPLIED) — see REPLY_EVENT_TYPES above — so this matches on
  *  substring the same defensive way _shared/webhook-normalize.ts's
  *  mapEventType does, rather than an exact-string lookup table. */
+/** The per-email table's classifier: eventTypeBucket plus the bounce case
+ *  (the Engagement funnel deliberately excludes bounces; the per-email
+ *  table includes them). One shared matcher underneath so the two tables
+ *  on the detail sheet can never disagree about what counts as sent/open/
+ *  click/reply (adversarial review — an inline second regex chain dropped
+ *  EMAIL_SEND-shaped types the funnel counted). */
+function touchEventBucket(eventType: string): "sent" | "opened" | "clicked" | "replied" | "bounced" | null {
+  if (eventType.toLowerCase().includes("bounc")) return "bounced";
+  return eventTypeBucket(eventType);
+}
+
 function eventTypeBucket(eventType: string): keyof CampaignEventStats | null {
   const t = eventType.toLowerCase();
   if (t.includes("repl")) return "replied";

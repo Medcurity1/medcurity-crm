@@ -35,7 +35,7 @@ _(none — everything staged today promoted to PROD 2026-07-27 in 81bec7d)_
 
 | # | Item | Detail | Verify | Checked |
 |---|---|---|---|---|
-| C1 | Campaigns overhaul (the big project) | Phases 1–5 built; admin-only + staging-gated until Nathan tests. Plan: `docs/campaigns/campaigns-plan.md`. | Admin gates still present at the 3 "Rep rollout flip point" marks | 2026-07-27 |
+| C1 | Campaigns overhaul (the big project) | Phases 1–5 built + the full 2026-07-28 outside-review program (7 batches); admin-only + staging-gated until Nathan tests. Plan: `docs/campaigns/campaigns-plan.md`. | `grep -n "AdminGate><PlaybookPage" src/App.tsx` + Campaigns in Sidebar adminItems (the literal "Rep rollout flip point" comment phrase no longer exists — old recipe was unrunnable) | 2026-07-28 |
 
 ---
 
@@ -67,6 +67,46 @@ _(none — everything staged today promoted to PROD 2026-07-27 in 81bec7d)_
 | E6 | Sweep status view readable by authenticated (LOW) | v_campaigns_daily_sweep_schedule_status granted to `authenticated` — matches the existing cron-view precedent. | `grep -n v_campaigns_daily_sweep_schedule_status supabase/migrations/20260722200000_*.sql` | 2026-07-27 |
 | E7 | Step column stuck on "Not sent yet" | Stays until events carry sequence numbers. Could infer email-1-sent from campaign metrics. | `grep -n stepLabel src/features/playbook/CampaignDetailSheet.tsx` | 2026-07-27 |
 | E8 | Delete the LIVE TEST campaign | "LIVE TEST — Phase 2 webhooks (Nathan only)" still `active` on STAGING (not on prod). | staging `campaigns?name=like.*LIVE TEST*` returns 1 row | 2026-07-27 |
+
+---
+
+## I. Campaigns outside-review (2026-07-28 fleet audit) — Nathan approved "go for it on your list"
+
+Source: `docs/audit/2026-07-28-campaigns-outside-review.md` (61-agent read-only audit; 22 confirmed + 1 plausible bugs, 147 unverified findings, 129-idea roadmap). The 4 worst confirmed bugs shipped same-day (see SHIPPED 2026-07-28). Everything below is verified-real and still open.
+
+### I-a. Remaining confirmed bugs
+
+| # | Item | Detail | Verify | Checked |
+|---|---|---|---|---|
+| I1 | Webhook self-heal skips campaigns whose registration failed at launch | Heal filters `.not("smartlead_webhook_id","is",null)` — the broken ones are never retried; launch swallows the failure silently. | `grep -n 'not("smartlead_webhook_id"' supabase/functions/playbook-smartlead/index.ts` | 2026-07-28 |
+| I2 | isWebhookHealthy inverts its own uncertain-check rule | `if (!rows.length) return false` on an unrecognized GET shape → re-registers a duplicate webhook every sweep → events double-counted. | `grep -n 'if (!rows.length) return false' supabase/functions/playbook-smartlead/index.ts` | 2026-07-28 |
+| I3 | Two recipients sharing one email enroll twice and break webhook lookup | Launch dedupes only by contact_id; QuickCampaignDialog bypasses the byEmail merge; `.maybeSingle()` then errors on 2 rows forever. (Sibling of E4's race.) | `grep -n seenContactIds supabase/functions/playbook-smartlead/index.ts` — still contact_id-only | 2026-07-28 |
+| I7 | No compare-and-set on campaign status (Stop racing Start) | setCampaignStatus writes unconditionally after a stale read; start's task spawn can land on a just-stopped campaign. | status writes lack `.eq("status", expected)` | 2026-07-28 |
+| I8 | Sweep step 1 unbudgeted + fixed order starves steps 2-7 | syncCampaigns runs before any hasBudget() with no cap; shared 100s budget; steps 4-6 have no rotation cursor. | `grep -n 'await syncCampaigns' supabase/functions/playbook-smartlead/index.ts` before first hasBudget | 2026-07-28 |
+| I9 | Sweep selects unpaginated — silent truncation at PostgREST's 1000-row cap | Zero `.range(` in the sweep's own selects (the launch-path suppression/enrollment checks were paged 7/28); meddy-sweep pages around the same cap deliberately. | sweep step selects in playbook-smartlead/index.ts lack `.range(` | 2026-07-28 |
+| I11 | Webhook category text unvalidated → AI prompt-injection path | extractCategory accepts any string; flows verbatim into playbook-ai's prompt whose training notes become permanent "hard rules" with no review. | `grep -n extractCategory supabase/functions/campaign-webhooks/index.ts` — no allowlist/cap | 2026-07-28 |
+| I12 | Each campaign gets exactly ONE AI analysis, at ~20 sends | `.is("analyzed_at", null)` + sent>=20; never re-analyzed at completion. Fix pairs with a manual "Get insights" button. | insight-candidate select in playbook-smartlead/index.ts | 2026-07-28 |
+| I13 | Tracker stats scan every enrollment of every campaign in one unbounded .in() | Includes collapsed old campaigns; GET-URL breaks ~200 campaigns. Convert to a count RPC (supersedes-adjacent to E2). | `grep -n useCampaignEnrollmentStats src/features/playbook/api.ts` — no limit/RPC | 2026-07-28 |
+| I14 | v_marketing_suppression recomputes 11 branches per check, unindexable | CTE referenced 7× (materialized), email from lateral unnest → `.in()` can't push to an index; every launch pays full recompute per 500-batch. | view def in 20260728100000 (unchanged structure) | 2026-07-28 |
+| I15 | Prod sweep cron likely firing daily at a 500ing function | 20260722200000's GUC fallback rewrites the email-sync URL; prod has no SMARTLEAD_API_KEY → daily dead call logged as success. Confirm on prod, then silence or gate. | fallback block in 20260722200000_campaigns_daily_sweep_cron.sql:88-107 | 2026-07-28 |
+| I16 | Legacy Mailchimp/newsletter rows sit in "Ongoing campaigns" forever | 20260722100000 migrated them status active, steps [], 0 enrollments; CampaignsTab never filters origin. | `grep -n "origin" src/features/playbook/CampaignsTab.tsx` — not filtered | 2026-07-28 |
+| I18 | delete-campaign action has no status precondition | UI gates Delete to drafts; the edge action deletes ANY status, orphaning spawned tasks. | delete-campaign handler in playbook-smartlead/index.ts | 2026-07-28 |
+| I19 | Campaigns writes nothing to the audit log | Zero audit_log hits across the feature despite Pulse's mature audit system; who launched/stopped what is unrecorded. | `grep -rn audit_log supabase/functions/playbook-smartlead/ supabase/functions/campaign-webhooks/` = 0 | 2026-07-28 |
+| I20 | Orchestration engine has zero automated test coverage | All 7 campaign test files import only _shared pure modules; launch/status/sweep/webhook handlers untested — where every confirmed bug lived. | `grep -l "_shared" tests/campaign*.test.ts` = all of them | 2026-07-28 |
+| I21 | Signature-header lockout risk (PLAUSIBLE, unconfirmed) | verifyOptionalSignature 401s any present-but-unrecognized signature header; if Smartlead ever signs with an account-level key, every webhook dies → 5-failure auto-disable. | `grep -n verifyOptionalSignature supabase/functions/campaign-webhooks/index.ts` | 2026-07-28 |
+
+### I-b. Approved next builds (top experience wins)
+
+| # | Item | Detail | Verify | Checked |
+|---|---|---|---|---|
+| I36 | campaigns.settings read-modify-write clobber window | syncCampaigns (last_metrics_sync_at) and the sweep reconcile (last_sweep_at) both rewrite the whole settings JSON; a manual Sync racing the cron can drop the other's key. Sequential within one sweep run — only the concurrent-manual case. Fix = a jsonb-merge RPC. | `grep -c "last_sweep_at\|last_metrics_sync_at" supabase/functions/playbook-smartlead/index.ts` — both via spread-update | 2026-07-28 |
+| I37 | Ignored wizard resume banners can strand draft rows | Ignore the banner + build fresh + abandon without launching → the old row is only cleaned on a successful launch. Low-volume leak; add cleanup on discard-by-abandonment or an updated_at-based prune. | `grep -n "draftBanner" src/features/playbook/CampaignWizard.tsx` — cleanup only in handleLaunchSuccess | 2026-07-28 |
+| I38 | Test-coverage gaps from the 7/28 build day | Top pure-logic candidates without tests: touchEventBucket/eventTypeBucket (funnel-vs-per-email agreement), mailtoRecipient/replySubject (mailto injection guards), the influence won/open bucketing + renewal exclusion (extract to a pure helper first), and the Deno-side resolveSyncedStatus/extractDailyLimit (need the vitest-importable-extraction treatment webhook-normalize got). | `ls tests/ \| grep -c campaign` vs the list here | 2026-07-28 |
+| I35 | Needs-you reply tally: caps + error visibility | The "N replies waiting" tally reads the Replies feed query (30-day window, 50-row cap, handled rows consume slots) — at volume, older UNHANDLED replies fall out and the flag silently drops; a failed replies query also silently zeroes the signal. Convert to a dedicated unhandled-count query (pairs with promoting `handled` to a real column, roadmap) before campaign volume grows. | `grep -n REPLIES_LIMIT src/features/playbook/api.ts` = 50 | 2026-07-28 |
+| I31 | Everything else from the review | 147 unverified findings + the full 129-idea roadmap (18 themes) live in the report — mine it when each area is touched. | `docs/audit/2026-07-28-campaigns-outside-review.md` exists | 2026-07-28 |
+| I32 | Custom templates saved with no owner | useSaveTemplate's insert never sets owner_user_id, so every custom template (incl. InsightsPanel's preset copies) will be INVISIBLE to reps under campaign_templates_read_own when the rep-access RLS flips. Backfill + set-on-insert before the flip. | `grep -n owner_user_id src/features/playbook/api.ts` — absent from the template insert payload | 2026-07-28 |
+| I33 | Manual opt-out has no writer | marketing_optouts allows reason='manual' (non-overridable, labeled in the report) but nothing can create one — admins can only REVOKE today. Add an "Opt out of marketing" action (contact page or DoNotEmail report) writing via an edge action. | `grep -rn "reason: \"manual\"" supabase/functions/ src/` = 0 hits | 2026-07-28 |
+| I34 | Rep-rollout flip: three RLS prerequisites from the review builds | (1) campaign_enrollments.owner_user_id now carries the CONTACT's owner, so `campaign_enrollments_read_own` alone would hide co-workers' enrollments from a campaign's owner — the flip needs an additional "enrollments of campaigns I own" SELECT policy, and 20260723040000's comment claiming enrollments carry the campaign owner is stale. (2) campaign_drafts RLS is admin-ALL; the wizard scopes per-user in the QUERY (fetchLatestCampaignDraft) — the flip needs a real per-user policy. (3) lead_lists RLS is own-or-admin, so the wizard's "From a saved list" source only shows a rep their OWN lists — the marketing→sales list handoff needs a deliberate widening (e.g. share non-working lists) or the helper text changed to "your own lists". | `grep -n "campaign_enrollments_read_own" supabase/migrations/20260723040000_campaigns_rep_access_rls.sql` — no campaign-owner policy beside it | 2026-07-28 |
 
 ---
 

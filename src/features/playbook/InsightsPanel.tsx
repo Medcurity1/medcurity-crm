@@ -208,17 +208,41 @@ export function InsightsPanel({
     // captured above and full-overwrite `steps` from it, silently reverting
     // whatever this call is about to save.
     setInFlightTemplateId(s.template_id);
+    // A shared preset is migration-managed reading material — the database
+    // refuses client edits to it outright (20260728100500, outside-review
+    // fix 4: campaigns launched from a preset stamp the PRESET's id onto
+    // their suggestions, so a plain Apply here used to permanently
+    // overwrite the shared 8-Touch/Warming steps). Apply lands on a custom
+    // copy instead — and CUMULATIVELY: applying several suggestions in one
+    // sitting updates the SAME same-day copy (matched by name) rather than
+    // minting sibling copies that each carry only one change. The copy's
+    // steps keep the preset's step order numbers, so the order-matched
+    // apply maps cleanly onto the copy.
+    const isPreset = template.is_preset;
+    const copyName = `${template.name} — AI improved ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+    const existingCopy = isPreset
+      ? (templates ?? []).find((t) => !t.is_preset && t.name === copyName)
+      : undefined;
+    // Only reuse the existing copy when the suggestion still maps onto its
+    // steps (same order numbers) — otherwise a fresh copy, uniquely named,
+    // rather than overwriting the copy with reset-to-preset steps.
+    const applyToCopy = existingCopy
+      ? applySuggestionToTemplate({ ...existingCopy, id: s.template_id }, s)
+      : null;
+    const useExistingCopy = !!existingCopy && !!applyToCopy;
+    const steps = useExistingCopy ? applyToCopy!.steps : result.steps;
+    const insertName = existingCopy && !useExistingCopy ? `${copyName} (2)` : copyName;
     try {
       // mutateAsync only resolves once useSaveTemplate's own onSuccess
       // (qc.invalidateQueries) has run, so templatesById is already fresh
       // by the time we clear the lock below — the next Apply on this
       // template reads the just-applied steps, not a stale snapshot.
       await saveTemplate.mutateAsync({
-        id: template.id,
-        name: template.name,
+        ...(isPreset ? (useExistingCopy ? { id: existingCopy!.id } : {}) : { id: template.id }),
+        name: isPreset ? insertName : template.name,
         description: template.description,
         category: template.category,
-        steps: result.steps,
+        steps,
         domain_rules: template.domain_rules,
       });
     } catch (e) {
@@ -229,7 +253,13 @@ export function InsightsPanel({
     }
     try {
       await decide.mutateAsync({ id: s.id, decision: "applied" });
-      toast.success(`Applied to ${template.name}.`);
+      toast.success(
+        isPreset
+          ? useExistingCopy
+            ? `Added to your copy "${copyName}" — the shared preset itself is never edited.`
+            : `"${template.name}" is a shared preset, so this was saved as a new template: "${insertName}".`
+          : `Applied to ${template.name}.`,
+      );
     } finally {
       setBusyId(null);
       setInFlightTemplateId(null);

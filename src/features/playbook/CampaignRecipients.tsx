@@ -1,6 +1,8 @@
-// Campaign recipients picker — three sources that all accumulate (with
-// dedup): a contact tag (custom list), a CSV/.txt upload with column mapping,
-// or pasted emails. Shows a managed recipient table.
+// Campaign recipients picker — four sources that all accumulate (with
+// dedup): a contact tag (custom list), a saved list (static or smart —
+// Report Builder audiences arrive via its Save-as-list; outside-review
+// I26), a CSV/.txt upload with column mapping, or pasted emails. Shows a
+// managed recipient table.
 //
 // Every source feeds the SAME Do-Not-Email safety check (2026-07-22): once
 // the recipient list is built/deduped, every email is checked against
@@ -26,17 +28,22 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import {
-  fetchRecipientsByTag, fetchSuppressionForEmails, fetchActiveEnrollmentsForEmails,
+  fetchRecipientsByTag, fetchRecipientsByList, fetchSuppressionForEmails, fetchActiveEnrollmentsForEmails,
   type Recipient, type ActiveEnrollmentEntry,
 } from "./api";
+import { useLeadLists } from "@/features/lead-lists/lead-lists-api";
 import { parseCsv, guessField, rowsToRecipients, FIELD_LABEL, type RecipientField } from "./csv";
 import {
   partitionSuppression, groupSuppressionReasons, normalizeEmail, suppressionReasonLabel,
+  isNonOverridableReason,
   type SuppressionEntry,
 } from "./suppression";
 
 const FIELD_OPTIONS: RecipientField[] = ["email", "first_name", "last_name", "full_name", "company_name", "skip"];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Refuse a saved-list audience above this in one pick — matches the Lists
+// page's own SMART_FETCH_CAP display ceiling; see loadList.
+const LIST_AUDIENCE_CEILING = 2000;
 
 export function CampaignRecipients({
   recipients, setRecipients, tags,
@@ -59,6 +66,14 @@ export function CampaignRecipients({
 }) {
   const [recipientTag, setRecipientTag] = useState("");
   const [tagLoading, setTagLoading] = useState(false);
+  const [recipientList, setRecipientList] = useState("");
+  const [listLoading, setListLoading] = useState(false);
+  const { data: lists, isError: listsError } = useLeadLists();
+  // Latest recipients, readable synchronously — mergeAdd builds from this
+  // instead of the render-closure prop so concurrent sources can't clobber
+  // each other (see mergeAdd's comment).
+  const recipientsRef = useRef(recipients);
+  useEffect(() => { recipientsRef.current = recipients; }, [recipients]);
   const [pasted, setPasted] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [showSuppressed, setShowSuppressed] = useState(false);
@@ -145,7 +160,11 @@ export function CampaignRecipients({
   // launch payload, so the two can never disagree.
   const sendableCount = recipients.filter((r) => {
     const key = normalizeEmail(r.email);
-    const okSuppression = !reasonsByEmail.has(key) || overrideSet.has(key);
+    const reasons = reasonsByEmail.get(key);
+    // A non-overridable reason (recorded unsubscribe / manual opt-out) can't
+    // be included-anyway — mirrors partitionSuppression's lock, so this
+    // summary count always matches what the launch will actually send.
+    const okSuppression = !reasons || (overrideSet.has(key) && !reasons.some(isNonOverridableReason));
     const okEnrollment = !enrollmentReasonsByEmail.has(key) || enrollmentOverrideSet.has(key);
     return okSuppression && okEnrollment;
   }).length;
@@ -167,18 +186,26 @@ export function CampaignRecipients({
   }
 
   function mergeAdd(incoming: Recipient[]) {
-    const byEmail = new Map(recipients.map((r) => [r.email.toLowerCase(), r]));
-    let added = 0, skipped = 0;
+    // Built from the ref, not the closed-over prop (adversarial review):
+    // two sources resolving concurrently — a slow saved-list load racing a
+    // quick paste — would otherwise each merge into a stale snapshot and
+    // the loser's additions would vanish under a "N added" success toast.
+    const byEmail = new Map(recipientsRef.current.map((r) => [r.email.toLowerCase(), r]));
+    let added = 0, skipped = 0, capped = 0;
     for (const r of incoming) {
       const key = r.email.toLowerCase();
       if (!EMAIL_RE.test(key)) { skipped++; continue; }
       if (byEmail.has(key)) { skipped++; continue; }
-      if (byEmail.size >= 10000) { skipped++; continue; }
+      if (byEmail.size >= 10000) { capped++; continue; }
       byEmail.set(key, r);
       added++;
     }
     setRecipients([...byEmail.values()]);
-    toast.success(`${added} added${skipped ? `, ${skipped} skipped (dupes/invalid)` : ""}.`);
+    // The cap is its own count (adversarial review) — a list blowing past
+    // 10,000 is not "dupes/invalid" and must not be reported as such.
+    let msg = `${added} added${skipped ? `, ${skipped} skipped (dupes/invalid)` : ""}.`;
+    if (capped) msg += ` ${capped} not added — the 10,000-recipient limit was reached.`;
+    toast.success(msg);
   }
 
   async function loadTag(tagId: string) {
@@ -188,6 +215,34 @@ export function CampaignRecipients({
     try { mergeAdd(await fetchRecipientsByTag(tagId)); }
     catch (e) { toast.error("Couldn't load contacts: " + (e as Error).message); }
     finally { setTagLoading(false); setRecipientTag(""); }
+  }
+
+  async function loadList(listId: string) {
+    setRecipientList(listId);
+    if (!listId) return;
+    const list = (lists ?? []).find((l) => l.id === listId);
+    if (!list) { setRecipientList(""); return; }
+    setListLoading(true);
+    try {
+      const recs = await fetchRecipientsByList(list);
+      if (!recs.length) {
+        toast.info(list.is_dynamic
+          ? "That smart list matches nobody with an email right now."
+          : "That list has no members with an email.");
+      } else if (recs.length > LIST_AUDIENCE_CEILING) {
+        // A broad smart rule ("everyone with an email") can legitimately
+        // resolve to the whole CRM — refuse rather than pour an arbitrary
+        // subset into a campaign (adversarial review). At this team's
+        // sending rates an audience this size is a mistake, not a plan.
+        toast.error(
+          `That list has ${recs.length.toLocaleString()} people — too many for one campaign. ` +
+          `Narrow the list (or split it) to under ${LIST_AUDIENCE_CEILING.toLocaleString()} and try again.`,
+        );
+      } else {
+        mergeAdd(recs);
+      }
+    } catch (e) { toast.error("Couldn't load the list: " + (e as Error).message); }
+    finally { setListLoading(false); setRecipientList(""); }
   }
 
   function onFile(file: File) {
@@ -245,6 +300,36 @@ export function CampaignRecipients({
         </div>
         <p className="text-[11px] text-muted-foreground">Do-Not-Email people are checked after you add them, below.</p>
       </div>
+
+      {/* Source 1b: saved list (outside-review I26 — Report Builder
+          audiences arrive here via its Save-as-list) */}
+      {((lists ?? []).length > 0 || listsError) && (
+        <div className="space-y-1">
+          <Label className="text-xs">From a saved list</Label>
+          {listsError ? (
+            <p className="text-xs text-amber-600">Couldn't load your saved lists — reopen this step to retry.</p>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <Select value={recipientList} onValueChange={loadList} disabled={listLoading}>
+                  <SelectTrigger className="flex-1"><SelectValue placeholder="Pick a list…" /></SelectTrigger>
+                  <SelectContent>
+                    {(lists ?? []).map((l) => (
+                      <SelectItem key={l.id} value={l.id}>
+                        {l.name}{l.is_dynamic ? " (smart — resolved when you pick it)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {listLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Built an audience in the Report Builder? Save it as a list there, then pick it here.
+              </p>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Source 2: CSV upload */}
       <div className="space-y-1">
@@ -388,13 +473,19 @@ export function CampaignRecipients({
               <div className="divide-y max-h-52 overflow-y-auto border-t">
                 {suppressedAll.map((r) => {
                   const key = normalizeEmail(r.email);
-                  const reasons = (reasonsByEmail.get(key) ?? []).map(suppressionReasonLabel).join(" · ");
-                  const checked = overrideSet.has(key);
+                  const reasonCodes = reasonsByEmail.get(key) ?? [];
+                  const reasons = reasonCodes.map(suppressionReasonLabel).join(" · ");
+                  // Unsubscribed / manually opted-out people can't be
+                  // included anyway — their choice, not ours. The server
+                  // enforces the same rule regardless of what's sent.
+                  const locked = reasonCodes.some(isNonOverridableReason);
+                  const checked = overrideSet.has(key) && !locked;
                   return (
-                    <label key={r.email} className="flex items-center gap-2 px-2 py-1.5 text-xs cursor-pointer">
+                    <label key={r.email} className={locked ? "flex items-center gap-2 px-2 py-1.5 text-xs" : "flex items-center gap-2 px-2 py-1.5 text-xs cursor-pointer"}>
                       <input
                         type="checkbox"
                         checked={checked}
+                        disabled={locked}
                         onChange={(e) => toggleOverride(r.email, e.target.checked)}
                       />
                       <span className="flex-1 min-w-0 truncate">
@@ -402,7 +493,9 @@ export function CampaignRecipients({
                         <span className="text-muted-foreground"> · {reasons || "suppressed"}</span>
                       </span>
                       <span className={checked ? "shrink-0 text-[10px] font-medium text-emerald-600" : "shrink-0 text-[10px] font-medium text-muted-foreground"}>
-                        {checked ? "Included anyway" : "Excluded"}
+                        {locked
+                          ? (reasonCodes.includes("optout_unsubscribed") ? "Unsubscribed — can't include" : "Opted out — can't include")
+                          : checked ? "Included anyway" : "Excluded"}
                       </span>
                     </label>
                   );
@@ -411,6 +504,7 @@ export function CampaignRecipients({
             )}
             <p className="px-2 py-1.5 text-[11px] text-muted-foreground border-t">
               Checked people are added to the campaign anyway. Everyone else here is left out of the send.
+              People who unsubscribed or opted out can't be included — that choice is theirs.
             </p>
           </div>
         )}

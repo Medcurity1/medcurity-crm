@@ -17,6 +17,7 @@ import {
   useAnalyzeCampaign, useDeleteCampaign, useSetCampaignStatus, useSmartleadStatus, smartleadUrl,
   type CampaignEnrollmentStats, type CampaignStatusAction,
 } from "./api";
+import type { AttentionFlag } from "./needs-attention";
 import type { Campaign } from "./types";
 
 export type CampaignRow = Campaign & {
@@ -175,6 +176,7 @@ export function CampaignCard({
   setStatus,
   stats,
   inboxLabel,
+  attention,
   onOpenDetail,
 }: {
   c: CampaignRow;
@@ -183,6 +185,9 @@ export function CampaignCard({
   setStatus: ReturnType<typeof useSetCampaignStatus>;
   stats?: CampaignEnrollmentStats;
   inboxLabel?: string | null;
+  /** "Needs you" chips (outside-review I27) — computed by CampaignsTab via
+   *  campaignAttentionFlags; undefined/empty = nothing to flag. */
+  attention?: AttentionFlag[];
   /** Opens the full campaign detail sheet — wired to a click anywhere on the
    *  card body (Campaigns overhaul S8). Optional so CampaignCard still works
    *  standalone without it. */
@@ -208,6 +213,21 @@ export function CampaignCard({
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="font-semibold text-sm truncate">{c.name}</h3>
               <Badge variant="secondary" className={statusMeta.className}>{statusMeta.label}</Badge>
+              {(attention ?? []).map((f) => (
+                <Badge
+                  key={f.kind}
+                  variant="secondary"
+                  className={
+                    (f.severity === "red"
+                      ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
+                      : "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300")
+                    + " max-w-full truncate"
+                  }
+                  title={f.label}
+                >
+                  {f.label}
+                </Badge>
+              ))}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
               {c.owner?.full_name ? `${c.owner.full_name}` : ""}
@@ -220,7 +240,13 @@ export function CampaignCard({
                 {c.metrics?.sent != null ? `${c.metrics.sent} sent` : ""}
                 {c.metrics?.openRate != null ? ` · ${c.metrics.openRate} open` : ""}
                 {c.metrics?.clickRate != null ? ` · ${c.metrics.clickRate} click` : ""}
-                {c.metrics?.replies != null ? ` · ${c.metrics.replies} replies` : ""}
+                {c.metrics?.replies != null ? (
+                  // Replies are the number that matters on this card — the
+                  // one metric a rep acts on today (outside-review I27).
+                  <span className={Number(c.metrics.replies) > 0 ? "font-medium text-foreground" : undefined}>
+                    {` · ${c.metrics.replies} replies`}
+                  </span>
+                ) : ""}
               </p>
             )}
             {stats && stats.total > 0 && (
