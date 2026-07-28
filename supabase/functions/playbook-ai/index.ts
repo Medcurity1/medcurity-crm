@@ -301,11 +301,15 @@ async function regenerateEmail(p: {
   return { success: true, email: parseJsonResponse(text) };
 }
 
-/** Analyze a completed campaign vs historical averages; auto-add training. */
-async function analyzeCampaign(campaignId: string) {
+/** Analyze a completed campaign vs historical averages; auto-add training.
+ *  `force` (docket I12) re-runs the analysis even when one already exists —
+ *  the one-shot analyzed_at gate meant a campaign analyzed at ~20 sends was
+ *  never revisited after finishing with real results; the detail sheet's
+ *  "Get fresh insights" button passes force to fix exactly that. */
+async function analyzeCampaign(campaignId: string, force = false) {
   const { data: ev } = await svc.from("campaigns").select("*").eq("id", campaignId).single();
   if (!ev) throw new Error("Campaign not found");
-  if (ev.analyzed_at) return { already_analyzed: true, analysis: ev.analysis_json ?? {} };
+  if (ev.analyzed_at && !force) return { already_analyzed: true, analysis: ev.analysis_json ?? {} };
   const metrics = (ev.metrics ?? {}) as Record<string, string>;
   if (!metrics.sent || parseInt(metrics.sent) === 0) throw new Error("No send data yet");
 
@@ -594,7 +598,7 @@ Deno.serve(async (req) => {
       return json(await regenerateEmail(body));
     }
     if (action === "analyze-campaign") {
-      return json(await analyzeCampaign(body.campaignId));
+      return json(await analyzeCampaign(body.campaignId, body.force === true));
     }
     if (action === "campaign-insights") {
       return json(await campaignInsights(body.campaign_id));

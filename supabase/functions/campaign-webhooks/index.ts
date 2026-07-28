@@ -48,6 +48,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { normalizeWebhookPayload, type CanonicalWebhookEventType } from "../_shared/webhook-normalize.ts";
+import { sanitizeReplyCategory } from "../_shared/reply-category.ts";
 import { dateOnly, daysBetweenDateOnly, shiftEnrollmentTasks } from "../_shared/campaign-task-shift.ts";
 import {
   stopEnrollmentForBounce,
@@ -226,15 +227,21 @@ interface Campaign {
 
 async function resolveEnrollment(campaignId: string, email: string | null, leadId: number | null): Promise<Enrollment | null> {
   const cols = "id, contact_id, account_id, first_name, last_name, email, company, owner_user_id, status, current_step, first_send_at, actual_first_send_at, smartlead_lead_id";
+  // .limit(1) with a stable order instead of .maybeSingle() (docket I3):
+  // pre-dedupe data can hold two enrollments for one email, and
+  // .maybeSingle() ERRORS on two rows — which made every event for that
+  // address unprocessable forever. Earliest enrollment wins, matching the
+  // launch-side first-occurrence dedupe.
   if (email) {
     const { data, error } = await svc
       .from("campaign_enrollments")
       .select(cols)
       .eq("campaign_id", campaignId)
       .eq("email", normalizeEmail(email))
-      .maybeSingle();
+      .order("enrolled_at", { ascending: true })
+      .limit(1);
     if (error) console.error("campaign-webhooks: enrollment lookup by email failed:", error.message);
-    if (data) return data as unknown as Enrollment;
+    if (data?.length) return data[0] as unknown as Enrollment;
   }
   if (leadId != null) {
     const { data, error } = await svc
@@ -242,9 +249,10 @@ async function resolveEnrollment(campaignId: string, email: string | null, leadI
       .select(cols)
       .eq("campaign_id", campaignId)
       .eq("smartlead_lead_id", leadId)
-      .maybeSingle();
+      .order("enrolled_at", { ascending: true })
+      .limit(1);
     if (error) console.error("campaign-webhooks: enrollment lookup by lead id failed:", error.message);
-    if (data) return data as unknown as Enrollment;
+    if (data?.length) return data[0] as unknown as Enrollment;
   }
   return null;
 }
@@ -407,7 +415,10 @@ Deno.serve(async (req) => {
     // classification onto the enrollment so the Replies feed / month stats
     // can read it without re-parsing every payload.
     if (isLeadCategoryUpdateEvent(normalized.rawType) && enrollment) {
-      const category = extractCategory(parsed);
+      // Canonicalized before storage (docket I11): this is a PUBLIC
+      // endpoint, and a verbatim category string flowed into the AI prompt
+      // and the UI. Unknown values are dropped, not stored.
+      const category = sanitizeReplyCategory(extractCategory(parsed));
       if (category) {
         const { error: catErr } = await svc
           .from("campaign_enrollments")
