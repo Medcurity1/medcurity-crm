@@ -583,6 +583,10 @@ export function useLaunchCampaign() {
         already_enrolled_dropped?: number;
         enrolled?: number;
         tasks_created?: number;
+        // Non-fatal launch problem the user must still hear about (partial
+        // Smartlead upload, post-start bookkeeping failure) — toasted by
+        // CampaignWizard's handleLaunchSuccess (outside-review fix 3).
+        warning?: string;
       };
     },
     onSuccess: () => {
@@ -908,16 +912,26 @@ export async function fetchSuppressionForEmails(emails: string[]): Promise<Suppr
   const normalized = Array.from(new Set(emails.map(normalizeEmail).filter(Boolean)));
   if (!normalized.length) return [];
   const BATCH = 500;
+  // PostgREST silently caps an un-paged select at 1000 rows, and one email
+  // can match several suppression reasons — page each batch to exhaustion
+  // with a stable order so no suppression row is ever dropped (matches the
+  // server-side mirror in playbook-smartlead/index.ts).
+  const PAGE = 1000;
   const out: SuppressionEntry[] = [];
   for (let i = 0; i < normalized.length; i += BATCH) {
     const batch = normalized.slice(i, i + BATCH);
-    const { data, error } = await supabase
-      .from("v_marketing_suppression")
-      .select("email, reason")
-      .in("email", batch);
-    if (error) throw error;
-    for (const row of (data ?? []) as { email: string; reason: string }[]) {
-      out.push({ email: row.email, reason: row.reason });
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from("v_marketing_suppression")
+        .select("email, reason")
+        .in("email", batch)
+        .order("email", { ascending: true })
+        .order("source_id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) throw error;
+      const rows = (data ?? []) as { email: string; reason: string }[];
+      for (const row of rows) out.push({ email: row.email, reason: row.reason });
+      if (rows.length < PAGE) break;
     }
   }
   return out;

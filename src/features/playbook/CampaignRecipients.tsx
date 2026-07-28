@@ -32,6 +32,7 @@ import {
 import { parseCsv, guessField, rowsToRecipients, FIELD_LABEL, type RecipientField } from "./csv";
 import {
   partitionSuppression, groupSuppressionReasons, normalizeEmail, suppressionReasonLabel,
+  isNonOverridableReason,
   type SuppressionEntry,
 } from "./suppression";
 
@@ -145,7 +146,11 @@ export function CampaignRecipients({
   // launch payload, so the two can never disagree.
   const sendableCount = recipients.filter((r) => {
     const key = normalizeEmail(r.email);
-    const okSuppression = !reasonsByEmail.has(key) || overrideSet.has(key);
+    const reasons = reasonsByEmail.get(key);
+    // A non-overridable reason (recorded unsubscribe / manual opt-out) can't
+    // be included-anyway — mirrors partitionSuppression's lock, so this
+    // summary count always matches what the launch will actually send.
+    const okSuppression = !reasons || (overrideSet.has(key) && !reasons.some(isNonOverridableReason));
     const okEnrollment = !enrollmentReasonsByEmail.has(key) || enrollmentOverrideSet.has(key);
     return okSuppression && okEnrollment;
   }).length;
@@ -388,13 +393,19 @@ export function CampaignRecipients({
               <div className="divide-y max-h-52 overflow-y-auto border-t">
                 {suppressedAll.map((r) => {
                   const key = normalizeEmail(r.email);
-                  const reasons = (reasonsByEmail.get(key) ?? []).map(suppressionReasonLabel).join(" · ");
-                  const checked = overrideSet.has(key);
+                  const reasonCodes = reasonsByEmail.get(key) ?? [];
+                  const reasons = reasonCodes.map(suppressionReasonLabel).join(" · ");
+                  // Unsubscribed / manually opted-out people can't be
+                  // included anyway — their choice, not ours. The server
+                  // enforces the same rule regardless of what's sent.
+                  const locked = reasonCodes.some(isNonOverridableReason);
+                  const checked = overrideSet.has(key) && !locked;
                   return (
-                    <label key={r.email} className="flex items-center gap-2 px-2 py-1.5 text-xs cursor-pointer">
+                    <label key={r.email} className={locked ? "flex items-center gap-2 px-2 py-1.5 text-xs" : "flex items-center gap-2 px-2 py-1.5 text-xs cursor-pointer"}>
                       <input
                         type="checkbox"
                         checked={checked}
+                        disabled={locked}
                         onChange={(e) => toggleOverride(r.email, e.target.checked)}
                       />
                       <span className="flex-1 min-w-0 truncate">
@@ -402,7 +413,9 @@ export function CampaignRecipients({
                         <span className="text-muted-foreground"> · {reasons || "suppressed"}</span>
                       </span>
                       <span className={checked ? "shrink-0 text-[10px] font-medium text-emerald-600" : "shrink-0 text-[10px] font-medium text-muted-foreground"}>
-                        {checked ? "Included anyway" : "Excluded"}
+                        {locked
+                          ? (reasonCodes.includes("optout_unsubscribed") ? "Unsubscribed — can't include" : "Opted out — can't include")
+                          : checked ? "Included anyway" : "Excluded"}
                       </span>
                     </label>
                   );
@@ -411,6 +424,7 @@ export function CampaignRecipients({
             )}
             <p className="px-2 py-1.5 text-[11px] text-muted-foreground border-t">
               Checked people are added to the campaign anyway. Everyone else here is left out of the send.
+              People who unsubscribed or opted out can't be included — that choice is theirs.
             </p>
           </div>
         )}

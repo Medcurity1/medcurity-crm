@@ -59,6 +59,7 @@ import {
   archivePendingTasksForEnrollment,
   stopEnrollmentForBounce,
   stopEnrollmentForReply,
+  stopEnrollmentForUnsubscribe,
 } from "../_shared/campaign-enrollment-actions.ts";
 
 const corsHeaders = {
@@ -190,20 +191,39 @@ function sequenceToSteps(sequence: Array<Record<string, unknown>>): Array<Record
 function normalizeEmail(email: string): string {
   return (email ?? "").trim().toLowerCase();
 }
+/** Suppression reasons a launch-time "Include anyway" override can never
+ *  bypass (outside-review fix 2): a recorded unsubscribe or a manual opt-out
+ *  is a legal signal, not a business preference. 'optout_bounced' stays
+ *  overridable — re-trying a once-bounced address is a business call. Kept
+ *  in sync with NON_OVERRIDABLE_SUPPRESSION_REASONS in
+ *  src/features/playbook/suppression.ts (the client twin). */
+const NON_OVERRIDABLE_SUPPRESSION_REASONS = new Set(["optout_unsubscribed", "optout_manual"]);
+
 function partitionSuppressedEmails(
   emails: string[],
   suppression: { email: string; reason: string }[],
   overrides: string[],
 ): { eligible: Set<string>; dropped: string[]; overriddenCount: number } {
-  const suppressedSet = new Set(suppression.map((r) => normalizeEmail(r.email)));
+  const reasonsByEmail = new Map<string, string[]>();
+  for (const r of suppression) {
+    const key = normalizeEmail(r.email);
+    if (!key) continue;
+    const list = reasonsByEmail.get(key);
+    if (list) { if (!list.includes(r.reason)) list.push(r.reason); }
+    else reasonsByEmail.set(key, [r.reason]);
+  }
   const overrideSet = new Set(overrides.map(normalizeEmail));
   const eligible = new Set<string>();
   const dropped: string[] = [];
   let overriddenCount = 0;
   for (const raw of emails) {
     const key = normalizeEmail(raw);
-    if (!key || !suppressedSet.has(key)) { eligible.add(key); continue; }
-    if (overrideSet.has(key)) { eligible.add(key); overriddenCount++; }
+    const reasons = key ? reasonsByEmail.get(key) : undefined;
+    if (!key || !reasons) { eligible.add(key); continue; }
+    // An override never beats a non-overridable reason — a stale override
+    // list (person opted out AFTER the override was checked) fails safe.
+    const locked = reasons.some((x) => NON_OVERRIDABLE_SUPPRESSION_REASONS.has(x));
+    if (!locked && overrideSet.has(key)) { eligible.add(key); overriddenCount++; }
     else dropped.push(raw);
   }
   return { eligible, dropped, overriddenCount };
@@ -218,16 +238,27 @@ async function fetchSuppressionForEmails(emails: string[]): Promise<{ email: str
   const normalized = Array.from(new Set(emails.map(normalizeEmail).filter(Boolean)));
   if (!normalized.length) return [];
   const BATCH = 500;
+  // PostgREST caps an un-paged select at 1000 rows SILENTLY, and one email
+  // can match several suppression reasons — 500 emails × 2+ reasons would
+  // truncate, dropping suppression rows (i.e. emailing Do-Not-Email people).
+  // Page each batch to exhaustion, with a stable ORDER BY so LIMIT/OFFSET
+  // pages can't skip or duplicate rows (outside-review amendment).
+  const PAGE = 1000;
   const out: { email: string; reason: string }[] = [];
   for (let i = 0; i < normalized.length; i += BATCH) {
     const batch = normalized.slice(i, i + BATCH);
-    const { data, error } = await svc
-      .from("v_marketing_suppression")
-      .select("email, reason")
-      .in("email", batch);
-    if (error) throw new Error("Suppression check failed: " + error.message);
-    for (const row of (data ?? []) as { email: string; reason: string }[]) {
-      out.push({ email: row.email, reason: row.reason });
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await svc
+        .from("v_marketing_suppression")
+        .select("email, reason")
+        .in("email", batch)
+        .order("email", { ascending: true })
+        .order("source_id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) throw new Error("Suppression check failed: " + error.message);
+      const rows = (data ?? []) as { email: string; reason: string }[];
+      for (const row of rows) out.push({ email: row.email, reason: row.reason });
+      if (rows.length < PAGE) break;
     }
   }
   return out;
@@ -243,17 +274,27 @@ async function fetchActiveEnrollmentEmails(emails: string[]): Promise<Set<string
   const normalized = Array.from(new Set(emails.map(normalizeEmail).filter(Boolean)));
   if (!normalized.length) return new Set();
   const BATCH = 500;
+  // Same silent-1000-row-cap hazard as fetchSuppressionForEmails above (an
+  // email can hold several active enrollments across campaigns) — page each
+  // batch to exhaustion with a stable order.
+  const PAGE = 1000;
   const out = new Set<string>();
   for (let i = 0; i < normalized.length; i += BATCH) {
     const batch = normalized.slice(i, i + BATCH);
-    const { data, error } = await svc
-      .from("campaign_enrollments")
-      .select("email")
-      .eq("status", "active")
-      .in("email", batch);
-    if (error) throw new Error("Enrollment check failed: " + error.message);
-    for (const row of (data ?? []) as { email: string | null }[]) {
-      if (row.email) out.add(normalizeEmail(row.email));
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await svc
+        .from("campaign_enrollments")
+        .select("email, id")
+        .eq("status", "active")
+        .in("email", batch)
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) throw new Error("Enrollment check failed: " + error.message);
+      const rows = (data ?? []) as { email: string | null }[];
+      for (const row of rows) {
+        if (row.email) out.add(normalizeEmail(row.email));
+      }
+      if (rows.length < PAGE) break;
     }
   }
   return out;
@@ -774,19 +815,27 @@ async function backfillFirstSendDates(
 async function cancelPendingCampaignTasks(
   campaignId: string,
   archivedBy: string | null,
-): Promise<{ tasksCancelled: number }> {
+): Promise<{ tasksCancelled: number; complete: boolean }> {
+  // `complete` = every lookup and archive write succeeded (outside-review
+  // fix 3 amendment): errors here used to be console-only, so a Stop could
+  // report success while pending call/LinkedIn tasks survived on a dead
+  // campaign — and, once the campaigns row said 'stopped', the tracker no
+  // longer offered Stop, stranding the user without the retry the error
+  // message promises. setCampaignStatus's stop path now throws BEFORE the
+  // campaigns-row write when complete is false, keeping Stop retryable.
   const { data: enrollments, error: enrErr } = await svc
     .from("campaign_enrollments")
     .select("id")
     .eq("campaign_id", campaignId);
   if (enrErr) {
     console.error("cancelPendingCampaignTasks: couldn't load enrollments:", enrErr.message);
-    return { tasksCancelled: 0 };
+    return { tasksCancelled: 0, complete: false };
   }
   const enrollmentIds = (enrollments ?? []).map((e) => e.id as string);
-  if (!enrollmentIds.length) return { tasksCancelled: 0 };
+  if (!enrollmentIds.length) return { tasksCancelled: 0, complete: true };
 
   let cancelled = 0;
+  let complete = true;
   const BATCH = 500;
   const now = new Date().toISOString();
   for (let i = 0; i < enrollmentIds.length; i += BATCH) {
@@ -800,6 +849,7 @@ async function cancelPendingCampaignTasks(
       .is("archived_at", null);
     if (findErr) {
       console.error("cancelPendingCampaignTasks: task lookup failed:", findErr.message);
+      complete = false;
       continue;
     }
     const taskIds = (pending ?? []).map((t) => t.id as string);
@@ -814,11 +864,12 @@ async function cancelPendingCampaignTasks(
       .in("id", taskIds);
     if (updErr) {
       console.error("cancelPendingCampaignTasks: archive update failed:", updErr.message);
+      complete = false;
       continue;
     }
     cancelled += taskIds.length;
   }
-  return { tasksCancelled: cancelled };
+  return { tasksCancelled: cancelled, complete };
 }
 
 interface SetStatusInput {
@@ -949,10 +1000,18 @@ async function setCampaignStatus(p: SetStatusInput, archivedBy: string | null, c
       ? (scheduleSettings.days_of_week as number[])
       : [1, 2, 3, 4, 5];
 
-    await svc
+    // Checked, not fire-and-forget (outside-review fix 3): a silently
+    // failed write here left Smartlead actively sending while the Pulse row
+    // still said 'draft' — and the handler returned success. Throwing is
+    // retry-safe: the row is unchanged, so the same action's precondition
+    // still passes and the Smartlead mirror above is idempotent.
+    const { error: statusErr } = await svc
       .from("campaigns")
       .update(isDraft ? { anchor_date: anchorDate, status: newStatus } : { status: newStatus })
       .eq("id", p.id);
+    if (statusErr) {
+      throw new Error(`Couldn't record the campaign as ${newStatus}: ${statusErr.message} — try the action again.`);
+    }
 
     // The campaign IS started in Smartlead by this point — a bookkeeping
     // failure below must not present as "start failed". One internal retry,
@@ -982,17 +1041,37 @@ async function setCampaignStatus(p: SetStatusInput, archivedBy: string | null, c
         "The campaign started, but scheduling its call/LinkedIn tasks hit a snag — pause and resume it to finish scheduling.";
     }
   } else if (p.action === "stop") {
-    await svc.from("campaigns").update({ status: newStatus }).eq("id", p.id);
-    await svc
+    // All writes checked (outside-review fix 3): Smartlead is already
+    // stopped by the mirror above, so what a silently failed write left
+    // behind was live-looking Pulse state — active enrollments, pending
+    // call/LinkedIn tasks, an 'active' card — on a campaign that was
+    // actually dead, with the handler still reporting success. Ordered
+    // enrollments -> tasks -> campaigns row so any failure leaves the row
+    // non-stopped => the tracker still shows Stop and a retry re-runs
+    // everything idempotently.
+    const { error: enrollStopErr } = await svc
       .from("campaign_enrollments")
       .update({ status: "stopped" })
       .eq("campaign_id", p.id)
       .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`);
+    if (enrollStopErr) {
+      throw new Error(`Sending is stopped, but the campaign's people couldn't be marked stopped: ${enrollStopErr.message} — press Stop again to finish.`);
+    }
     const result = await cancelPendingCampaignTasks(p.id, archivedBy);
     tasksCancelled = result.tasksCancelled;
+    if (!result.complete) {
+      throw new Error("Sending is stopped, but some of the campaign's pending tasks couldn't be archived — press Stop again to finish.");
+    }
+    const { error: stopErr } = await svc.from("campaigns").update({ status: newStatus }).eq("id", p.id);
+    if (stopErr) {
+      throw new Error(`Sending is stopped, but the campaign's status couldn't be updated: ${stopErr.message} — press Stop again to finish.`);
+    }
   } else {
     // pause, resume, or start-on-a-non-draft (defensive no-op path above).
-    await svc.from("campaigns").update({ status: newStatus }).eq("id", p.id);
+    const { error: pauseErr } = await svc.from("campaigns").update({ status: newStatus }).eq("id", p.id);
+    if (pauseErr) {
+      throw new Error(`Couldn't record the campaign as ${newStatus}: ${pauseErr.message} — try the action again.`);
+    }
   }
 
   return {
@@ -1299,6 +1378,10 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
   let alreadyEnrolledDropped = 0;
   let enrolledCount = 0;
   let tasksCreated = 0;
+  // Non-fatal launch problems the user must still hear about (partial lead
+  // upload, a failed post-start bookkeeping write) — returned as `warning`
+  // and toasted by the wizard (outside-review fix 3).
+  let launchWarning: string | undefined;
   try {
     // 2. Sequence. Skipped entirely for an all-task sequence (no EMAIL_AUTO
     // steps at all) — Smartlead doesn't need an empty sequences payload, and
@@ -1410,8 +1493,14 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
 
     // 6. Add leads in batches of 400, retrying a failed batch once before
     // counting it failed (a single transient blip shouldn't drop ~400 leads).
+    // Tracks WHICH recipients actually landed (outside-review fix 3): every
+    // downstream step — enrollments, contact-timeline activities, task
+    // spawning — must only cover people the sending platform really has,
+    // not the full pre-upload list.
     const batchSize = 400;
     const totalBatches = Math.ceil(enrollableRecipients.length / batchSize);
+    const uploadedRecipients: typeof enrollableRecipients = [];
+    const failedUploadEmails: string[] = [];
     for (let i = 0; i < totalBatches; i++) {
       const batch = enrollableRecipients.slice(i * batchSize, (i + 1) * batchSize);
       const leadList = batch.map((r) => ({
@@ -1432,12 +1521,23 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
           ok = true;
         } catch { /* retry once */ }
       }
-      if (ok) leadsAdded += batch.length;
-      else leadsFailed += batch.length;
+      if (ok) {
+        leadsAdded += batch.length;
+        uploadedRecipients.push(...batch);
+      } else {
+        leadsFailed += batch.length;
+        failedUploadEmails.push(...batch.map((r) => r.email));
+      }
       if (i < totalBatches - 1) await delay();
     }
     if (leadsAdded === 0 && leadsFailed > 0) {
       throw new Error("All lead batches failed; campaign created but has no leads.");
+    }
+    if (leadsFailed > 0) {
+      launchWarning =
+        `${leadsFailed} ${leadsFailed === 1 ? "person" : "people"} couldn't be added to the sending platform ` +
+        `and were left out of this campaign — they got no enrollment and no tasks. ` +
+        `Re-add them in a follow-up launch when you're ready.`;
     }
 
     // 7. Record in Pulse (BEFORE any START, so a rollback never deletes a
@@ -1479,6 +1579,13 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
             already_active_dropped: alreadyEnrolledDropped,
             overridden: alreadyActiveOverridden,
           },
+          // Durable record of what the Smartlead upload actually did — the
+          // toast disappears; this doesn't (outside-review fix 3).
+          upload: {
+            added: leadsAdded,
+            failed: leadsFailed,
+            failed_emails: failedUploadEmails.slice(0, 200),
+          },
         },
       })
       .select("id")
@@ -1489,7 +1596,10 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
     pulseCampaignId = inserted.id;
 
     // 7.5. Enrollments (S3) — one row per person actually added to Smartlead
-    // above, in upload order (enroll_position drives the throttle math).
+    // above (uploadedRecipients — recipients from FAILED upload batches get
+    // no enrollment, no timeline entry, and no tasks; outside-review fix 3
+    // made this comment true), in upload order (enroll_position drives the
+    // throttle math).
     // Always inserted with first_send_at = NULL; it's only computed once we
     // know sending has actually started (step 10 below) — a draft
     // campaign's enrollments stay NULL until a later "Start" action
@@ -1511,7 +1621,7 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
     // Postgres treats NULLs as distinct, so they never collide with each
     // other on this index.
     const seenContactIds = new Set<string>();
-    const dedupedRecipients = enrollableRecipients.filter((r) => {
+    const dedupedRecipients = uploadedRecipients.filter((r) => {
       if (!r.contact_id) return true;
       if (seenContactIds.has(r.contact_id)) return false;
       seenContactIds.add(r.contact_id);
@@ -1555,9 +1665,12 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
     }
 
     // 9. Log an email activity on each linked contact (timeline visibility).
-    // Non-fatal: a bad FK in one row shouldn't fail the whole launch.
+    // Non-fatal: a bad FK in one row shouldn't fail the whole launch. Only
+    // people actually uploaded to Smartlead — a timeline entry saying
+    // "added to campaign" for someone whose upload failed would be a lie
+    // (outside-review fix 3).
     const subject = String(emailSequence[0]?.subject ?? p.campaign_name);
-    const acts = enrollableRecipients
+    const acts = uploadedRecipients
       .filter((r) => r.contact_id)
       .map((r) => ({
         activity_type: "email",
@@ -1593,16 +1706,36 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
           body: JSON.stringify({ status: "START" }),
         });
         autoStarted = true;
-        await svc.from("campaigns").update({ status: "active" }).eq("id", pulseCampaignId);
-        try {
-          await backfillFirstSendDates(insertedEnrollments, anchorDate, maxNewLeadsPerDay, sendDays);
-          const spawned = await spawnCampaignTasks(pulseCampaignId);
-          tasksCreated = spawned.tasksCreated;
-        } catch (postErr) {
-          console.error(
-            "playbook launch: post-start task spawn failed (campaign is live; not rolling back):",
-            (postErr as Error).message,
-          );
+        // Checked, not fire-and-forget (outside-review fix 3): Smartlead is
+        // LIVE by this point, so a failed write here used to leave the Pulse
+        // row saying 'draft' while real email went out — and reported
+        // success. Can't throw (the outer catch would roll back a live
+        // campaign); instead skip the schedule bookkeeping (it belongs to an
+        // active campaign) and hand the user the exact recovery step — the
+        // tracker's Start on the still-draft row re-runs all of it
+        // idempotently.
+        const { error: activateErr } = await svc
+          .from("campaigns")
+          .update({ status: "active" })
+          .eq("id", pulseCampaignId);
+        if (activateErr) {
+          console.error("playbook launch: campaign is LIVE in Smartlead but the Pulse status write failed:", activateErr.message);
+          // Append, never overwrite — a partial-upload warning set earlier
+          // must survive alongside this one (adversarial review).
+          const startWarning =
+            "The campaign IS sending, but Pulse couldn't record it as started — open it in the tracker and press Start to finish the bookkeeping.";
+          launchWarning = launchWarning ? `${launchWarning} ALSO: ${startWarning}` : startWarning;
+        } else {
+          try {
+            await backfillFirstSendDates(insertedEnrollments, anchorDate, maxNewLeadsPerDay, sendDays);
+            const spawned = await spawnCampaignTasks(pulseCampaignId);
+            tasksCreated = spawned.tasksCreated;
+          } catch (postErr) {
+            console.error(
+              "playbook launch: post-start task spawn failed (campaign is live; not rolling back):",
+              (postErr as Error).message,
+            );
+          }
         }
       } catch { /* leave as draft */ }
     }
@@ -1634,6 +1767,7 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
     enrolled: enrolledCount,
     tasks_created: tasksCreated,
     smartlead_url: `https://app.smartlead.ai/app/email-campaign/${campaignId}/analytics`,
+    ...(launchWarning ? { warning: launchWarning } : {}),
   };
 }
 
@@ -1871,6 +2005,11 @@ interface LeadStatRow {
   sentAt: string | null;
   repliedAt: string | null;
   bouncedAt: string | null;
+  /** Unsubscribe signal, when the statistics endpoint happens to expose one
+   *  (outside-review fix 2) — unverified field names, same defensive-read
+   *  posture as reply/bounce: if Smartlead never sends it here, the branch
+   *  simply never fires and the webhook remains the unsubscribe source. */
+  unsubscribedAt: string | null;
   /** Smartlead's lead-category classification (Interested / Meeting Request
    *  / Not Interested / etc.), when the statistics endpoint happens to
    *  include it — unverified field name, same defensive-read posture as
@@ -1897,10 +2036,13 @@ function normalizeLeadStatRow(raw: Record<string, unknown>, nowIso: string): Lea
   let bouncedAt = toIsoOrNullLocal(raw.bounce_time ?? raw.bounced_at ?? raw.email_bounce_time ?? raw.bounce_date);
   if (!bouncedAt && (raw.is_bounced === true || raw.bounced === true)) bouncedAt = nowIso;
 
+  let unsubscribedAt = toIsoOrNullLocal(raw.unsubscribed_time ?? raw.unsubscribed_at ?? raw.unsubscribe_time ?? raw.unsubscribe_date);
+  if (!unsubscribedAt && (raw.is_unsubscribed === true || raw.unsubscribed === true)) unsubscribedAt = nowIso;
+
   const categoryRaw = raw.category ?? raw.lead_category ?? raw.category_name ?? raw.reply_category;
   const category = typeof categoryRaw === "string" && categoryRaw.trim() ? categoryRaw.trim() : null;
 
-  return { email: email || null, sentAt, repliedAt, bouncedAt, category };
+  return { email: email || null, sentAt, repliedAt, bouncedAt, unsubscribedAt, category };
 }
 
 function extractStatRows(res: unknown): Record<string, unknown>[] {
@@ -1962,8 +2104,15 @@ interface ReconcileResult {
  *       EMAIL_REPLIED webhook handler uses)
  *   (c) lead shows a bounce -> stopEnrollmentForBounce (same routine the
  *       EMAIL_BOUNCED webhook handler uses)
- * Bounce is checked before reply (mutually exclusive in practice; bounce is
- * the more terminal signal if a payload somehow carried both).
+ *   (d) lead shows an unsubscribe -> stopEnrollmentForUnsubscribe (same
+ *       routine the EMAIL_UNSUBSCRIBED webhook handler uses; outside-review
+ *       fix 2 — this reconcile previously had no unsubscribe branch at all)
+ * Order: bounce, else reply, THEN unsubscribe on top of either — the
+ * bounce/reply branch owns the status + notification, the unsubscribe
+ * branch always records the opt-out (its transition no-ops when a prior
+ * branch already ended the enrollment). A post-loop backstop also records
+ * unsubscribes for ALREADY-terminal enrollments, which the main query
+ * filters out.
  */
 async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<ReconcileResult> {
   const nowIso = new Date().toISOString();
@@ -1988,7 +2137,7 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
 
   const { data: enrollments, error } = await svc
     .from("campaign_enrollments")
-    .select("id, contact_id, account_id, first_name, last_name, email, status, first_send_at, actual_first_send_at, reply_category")
+    .select("id, contact_id, account_id, first_name, last_name, email, company, status, first_send_at, actual_first_send_at, reply_category")
     .eq("campaign_id", campaign.id)
     .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`);
   if (error) throw new Error("Enrollment lookup for reconcile failed: " + error.message);
@@ -2003,6 +2152,7 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
   for (const e of enrollments as {
     id: string; contact_id: string | null; account_id: string | null;
     first_name: string | null; last_name: string | null; email: string | null;
+    company: string | null;
     status: string; first_send_at: string | null; actual_first_send_at: string | null;
     reply_category: string | null;
   }[]) {
@@ -2021,26 +2171,44 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
       if (catErr) console.error(`daily-sweep: reply_category update failed for enrollment ${e.id}:`, catErr.message);
     }
 
-    // (c) bounce — checked first; a bounced lead never sends a real reply.
+    // (c)/(b) — bounce beats reply (a bounced lead never sends a real
+    // reply); reply beats unsubscribe for the STATUS + owner notification,
+    // because an unsubscribe routinely rides along with a real reply ("take
+    // me off your list") and the rep must still be told about the reply
+    // (adversarial-review fix — the unsub branch running FIRST silently
+    // killed the bell + follow-up task + Replies-feed row for that case).
+    let signalHandled = false;
     if (row.bouncedAt) {
       const result = await stopEnrollmentForBounce(svc, e, campaign.id, { occurredAt: row.bouncedAt, source: "daily-sweep" });
       if (result.updated) {
         enrollmentsUpdated++;
         tasksCancelled += result.tasksCancelled;
       }
-      continue;
-    }
-
-    // (b) reply
-    if (row.repliedAt) {
+      signalHandled = true;
+    } else if (row.repliedAt) {
       const result = await stopEnrollmentForReply(svc, e, campaignForActions, null, e.email, { occurredAt: row.repliedAt, source: "daily-sweep" });
       if (result.updated) {
         enrollmentsUpdated++;
         repliesDetected++;
         tasksCancelled += result.tasksCancelled;
       }
-      continue;
+      signalHandled = true;
     }
+
+    // (d) unsubscribe — the one signal this reconcile previously ignored
+    // (outside-review fix 2). Runs AFTER (not instead of) the branches
+    // above: its opt-out side effects are unconditional, and its status
+    // transition simply no-ops when a bounce/reply already ended the
+    // enrollment — the opt-out is recorded either way.
+    if (row.unsubscribedAt) {
+      const result = await stopEnrollmentForUnsubscribe(svc, e, campaign.id, { occurredAt: row.unsubscribedAt, source: "daily-sweep" });
+      if (result.updated) {
+        enrollmentsUpdated++;
+        tasksCancelled += result.tasksCancelled;
+      }
+      signalHandled = true;
+    }
+    if (signalHandled) continue;
 
     // (a) first-send date reconcile — SAME one-time-correction gate as
     // campaign-webhooks' handleEmailSent (see actual_first_send_at's column
@@ -2077,6 +2245,45 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
           .update({ actual_first_send_at: row.sentAt })
           .eq("id", e.id);
         if (stampErr) console.error(`daily-sweep: actual_first_send_at stamp failed for enrollment ${e.id}:`, stampErr.message);
+      }
+    }
+  }
+
+  // Post-terminal unsubscribe backstop (adversarial review): the loop above
+  // only iterates NON-terminal enrollments, but an unsubscribe Smartlead
+  // reports after a reply/bounce/completion belongs in marketing_optouts
+  // regardless — that's the entire point of fix 2, and on a webhook-less
+  // campaign this reconcile is the only path that will ever see it. One
+  // extra targeted query for just the unsubscribed emails that didn't match
+  // a live enrollment; stopEnrollmentForUnsubscribe's transition no-ops on
+  // these rows, so only the opt-out side effects fire. Capped — a backstop,
+  // not a bulk path.
+  const liveEmails = new Set(
+    ((enrollments ?? []) as { email: string | null }[])
+      .map((x) => (x.email ? normalizeEmail(x.email) : ""))
+      .filter(Boolean),
+  );
+  const unmatchedUnsubEmails = [...byEmail.entries()]
+    .filter(([em, r]) => r.unsubscribedAt && !liveEmails.has(em))
+    .map(([em]) => em)
+    .slice(0, 200);
+  if (unmatchedUnsubEmails.length) {
+    const { data: terminalRows, error: termErr } = await svc
+      .from("campaign_enrollments")
+      .select("id, contact_id, account_id, first_name, last_name, email, company, status")
+      .eq("campaign_id", campaign.id)
+      .in("email", unmatchedUnsubEmails);
+    if (termErr) {
+      console.error("daily-sweep: post-terminal unsubscribe lookup failed:", termErr.message);
+    } else {
+      for (const t of (terminalRows ?? []) as {
+        id: string; contact_id: string | null; account_id: string | null;
+        first_name: string | null; last_name: string | null; email: string | null;
+        company: string | null; status: string;
+      }[]) {
+        const row = t.email ? byEmail.get(normalizeEmail(t.email)) : undefined;
+        if (!row?.unsubscribedAt) continue;
+        await stopEnrollmentForUnsubscribe(svc, t, campaign.id, { occurredAt: row.unsubscribedAt, source: "daily-sweep" });
       }
     }
   }

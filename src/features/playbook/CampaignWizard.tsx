@@ -289,6 +289,7 @@ export function CampaignWizard({
     already_enrolled_dropped?: number;
     enrolled?: number;
     tasks_created?: number;
+    warning?: string;
   }) {
     const enrolled = r.enrolled ?? 0;
     const tasksCreated = r.tasks_created ?? 0;
@@ -305,6 +306,10 @@ export function CampaignWizard({
     if (alreadyEnrolledDropped > 0) notes.push(`${alreadyEnrolledDropped} already enrolled elsewhere skipped`);
     if (notes.length) msg += ` (${notes.join("; ")})`;
     toast.success(msg);
+    // A launch can succeed with a problem attached (some people failed to
+    // upload; a bookkeeping write failed after sending started) — surface
+    // it, don't swallow it (outside-review fix 3).
+    if (r.warning) toast.warning(r.warning, { duration: 12000 });
   }
 
   function doLaunch() {

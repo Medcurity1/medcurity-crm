@@ -70,6 +70,55 @@ _(none — everything staged today promoted to PROD 2026-07-27 in 81bec7d)_
 
 ---
 
+## I. Campaigns outside-review (2026-07-28 fleet audit) — Nathan approved "go for it on your list"
+
+Source: `docs/audit/2026-07-28-campaigns-outside-review.md` (61-agent read-only audit; 22 confirmed + 1 plausible bugs, 147 unverified findings, 129-idea roadmap). The 4 worst confirmed bugs shipped same-day (see SHIPPED 2026-07-28). Everything below is verified-real and still open.
+
+### I-a. Remaining confirmed bugs
+
+| # | Item | Detail | Verify | Checked |
+|---|---|---|---|---|
+| I1 | Webhook self-heal skips campaigns whose registration failed at launch | Heal filters `.not("smartlead_webhook_id","is",null)` — the broken ones are never retried; launch swallows the failure silently. | `grep -n 'not("smartlead_webhook_id"' supabase/functions/playbook-smartlead/index.ts` | 2026-07-28 |
+| I2 | isWebhookHealthy inverts its own uncertain-check rule | `if (!rows.length) return false` on an unrecognized GET shape → re-registers a duplicate webhook every sweep → events double-counted. | `grep -n 'if (!rows.length) return false' supabase/functions/playbook-smartlead/index.ts` | 2026-07-28 |
+| I3 | Two recipients sharing one email enroll twice and break webhook lookup | Launch dedupes only by contact_id; QuickCampaignDialog bypasses the byEmail merge; `.maybeSingle()` then errors on 2 rows forever. (Sibling of E4's race.) | `grep -n seenContactIds supabase/functions/playbook-smartlead/index.ts` — still contact_id-only | 2026-07-28 |
+| I4 | Resume after meeting-booked pause never restores archived tasks | Pause archives pending call/LinkedIn tasks; resume only flips status; spawn is one-time (tasks_spawned_at). | resume branch of setEnrollmentStatus writes only status/paused_reason | 2026-07-28 |
+| I5 | Sweep re-pauses human-resumed enrollments every day | Step-3 filter only excludes rows still paused+meeting_booked; a resumed row requalifies while the opp stays open. | sweep step 3 eligibility filter in playbook-smartlead/index.ts | 2026-07-28 |
+| I6 | Smartlead COMPLETED silently archives still-future manual tasks | Status sync marks campaign completed at last EMAIL; sweep step 6 then force-completes enrollments + archives Day-10+ CALL/LINKEDIN tasks. | sweep step 6 (`archivePendingTasksForEnrollment(... "Campaign completed")`) | 2026-07-28 |
+| I7 | No compare-and-set on campaign status (Stop racing Start) | setCampaignStatus writes unconditionally after a stale read; start's task spawn can land on a just-stopped campaign. | status writes lack `.eq("status", expected)` | 2026-07-28 |
+| I8 | Sweep step 1 unbudgeted + fixed order starves steps 2-7 | syncCampaigns runs before any hasBudget() with no cap; shared 100s budget; steps 4-6 have no rotation cursor. | `grep -n 'await syncCampaigns' supabase/functions/playbook-smartlead/index.ts` before first hasBudget | 2026-07-28 |
+| I9 | Sweep selects unpaginated — silent truncation at PostgREST's 1000-row cap | Zero `.range(` in the whole engine; meddy-sweep pages around the same cap deliberately. | `grep -c '.range(' supabase/functions/playbook-smartlead/index.ts` = 0 | 2026-07-28 |
+| I10 | Sweep failures invisible + not watchdog-covered | Report returned in a discarded HTTP body; pg_cron logs queue-success; watchdog expected-jobs list lacks campaigns_daily_sweep. | watchdog VALUES list in 20260715120000_sales_status_and_follow_up.sql | 2026-07-28 |
+| I11 | Webhook category text unvalidated → AI prompt-injection path | extractCategory accepts any string; flows verbatim into playbook-ai's prompt whose training notes become permanent "hard rules" with no review. | `grep -n extractCategory supabase/functions/campaign-webhooks/index.ts` — no allowlist/cap | 2026-07-28 |
+| I12 | Each campaign gets exactly ONE AI analysis, at ~20 sends | `.is("analyzed_at", null)` + sent>=20; never re-analyzed at completion. Fix pairs with a manual "Get insights" button. | insight-candidate select in playbook-smartlead/index.ts | 2026-07-28 |
+| I13 | Tracker stats scan every enrollment of every campaign in one unbounded .in() | Includes collapsed old campaigns; GET-URL breaks ~200 campaigns. Convert to a count RPC (supersedes-adjacent to E2). | `grep -n useCampaignEnrollmentStats src/features/playbook/api.ts` — no limit/RPC | 2026-07-28 |
+| I14 | v_marketing_suppression recomputes 11 branches per check, unindexable | CTE referenced 7× (materialized), email from lateral unnest → `.in()` can't push to an index; every launch pays full recompute per 500-batch. | view def in 20260728100000 (unchanged structure) | 2026-07-28 |
+| I15 | Prod sweep cron likely firing daily at a 500ing function | 20260722200000's GUC fallback rewrites the email-sync URL; prod has no SMARTLEAD_API_KEY → daily dead call logged as success. Confirm on prod, then silence or gate. | fallback block in 20260722200000_campaigns_daily_sweep_cron.sql:88-107 | 2026-07-28 |
+| I16 | Legacy Mailchimp/newsletter rows sit in "Ongoing campaigns" forever | 20260722100000 migrated them status active, steps [], 0 enrollments; CampaignsTab never filters origin. | `grep -n "origin" src/features/playbook/CampaignsTab.tsx` — not filtered | 2026-07-28 |
+| I17 | Wizard discards all work on Escape/outside-click | No confirm, no autosave; `campaign_drafts` table (built for exactly this) has zero references. | `grep -rn campaign_drafts src/ supabase/functions/` = 0 hits | 2026-07-28 |
+| I18 | delete-campaign action has no status precondition | UI gates Delete to drafts; the edge action deletes ANY status, orphaning spawned tasks. | delete-campaign handler in playbook-smartlead/index.ts | 2026-07-28 |
+| I19 | Campaigns writes nothing to the audit log | Zero audit_log hits across the feature despite Pulse's mature audit system; who launched/stopped what is unrecorded. | `grep -rn audit_log supabase/functions/playbook-smartlead/ supabase/functions/campaign-webhooks/` = 0 | 2026-07-28 |
+| I20 | Orchestration engine has zero automated test coverage | All 7 campaign test files import only _shared pure modules; launch/status/sweep/webhook handlers untested — where every confirmed bug lived. | `grep -l "_shared" tests/campaign*.test.ts` = all of them | 2026-07-28 |
+| I21 | Signature-header lockout risk (PLAUSIBLE, unconfirmed) | verifyOptionalSignature 401s any present-but-unrecognized signature header; if Smartlead ever signs with an account-level key, every webhook dies → 5-failure auto-disable. | `grep -n verifyOptionalSignature supabase/functions/campaign-webhooks/index.ts` | 2026-07-28 |
+
+### I-b. Approved next builds (the "before flipping the gates" group + top experience wins)
+
+| # | Item | Detail | Verify | Checked |
+|---|---|---|---|---|
+| I22 | Owner routing for campaign tasks + replies | Owner picker at launch; call/LinkedIn tasks + reply bell/follow-up go to the CONTACT's owner, not the launcher. The plan doc always called for this. | `grep -n "owner_id: profile?.id" src/features/playbook/CampaignWizard.tsx` still hardcoded | 2026-07-28 |
+| I23 | Wizard autosave (use the existing campaign_drafts table) | Survive an accidental Escape / phone call. Closes I17. | same Verify as I17 | 2026-07-28 |
+| I24 | Size-aware launch confirmation + pre-flight checklist | "Launch to 412 people?"; inbox has room, every email has copy, optional test-send to self. | launch step in CampaignWizard has no confirm dialog | 2026-07-28 |
+| I25 | Enforce inbox daily cap server-side | The 7/27 clamp is client-only; the edge action accepts any leads_per_day. | `grep -n "max_new_leads_per_day" supabase/functions/playbook-smartlead/index.ts` — no room check | 2026-07-28 |
+| I26 | Launch a campaign from a saved List / Report result | Today: one contact tag, right-click selection, or CSV re-upload. Biggest recipient-flow gap. | no list/report source in CampaignRecipients.tsx | 2026-07-28 |
+| I27 | "Needs you today" tracker ordering + trouble flags | Unhandled replies / stalled sends / idle drafts surface first instead of a flat newest-first grid. | CampaignsTab.tsx sorts by created_at only | 2026-07-28 |
+| I28 | Reply actions: pre-filled reply, log call, create opportunity | Replies feed currently only offers mark-handled + open-contact. | CampaignReplies.tsx action buttons | 2026-07-28 |
+| I29 | Per-touch (per-email-#) performance breakdown | Which email in the sequence earns its send; campaign_events + step numbers once I-series event work lands. | no per-step stats anywhere in playbook UI | 2026-07-28 |
+| I30 | Campaign → opportunity → revenue attribution | Join enrollments (contact/account) to opportunities; answer "did this campaign make money?". | no such join/report exists | 2026-07-28 |
+| I31 | Everything else from the review | 147 unverified findings + the full 129-idea roadmap (18 themes) live in the report — mine it when each area is touched. | `docs/audit/2026-07-28-campaigns-outside-review.md` exists | 2026-07-28 |
+| I32 | Custom templates saved with no owner | useSaveTemplate's insert never sets owner_user_id, so every custom template (incl. InsightsPanel's preset copies) will be INVISIBLE to reps under campaign_templates_read_own when the rep-access RLS flips. Backfill + set-on-insert before the flip. | `grep -n owner_user_id src/features/playbook/api.ts` — absent from the template insert payload | 2026-07-28 |
+| I33 | Manual opt-out has no writer | marketing_optouts allows reason='manual' (non-overridable, labeled in the report) but nothing can create one — admins can only REVOKE today. Add an "Opt out of marketing" action (contact page or DoNotEmail report) writing via an edge action. | `grep -rn "reason: \"manual\"" supabase/functions/ src/` = 0 hits | 2026-07-28 |
+
+---
+
 ## F. Queued — low-priority bug pile (deferred with eyes open)
 
 | # | Item | Detail | Verify | Checked |

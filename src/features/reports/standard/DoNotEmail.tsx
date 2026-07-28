@@ -5,9 +5,11 @@
 
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Download, ShieldX } from "lucide-react";
+import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -35,6 +37,9 @@ const REASON_LABEL: Record<string, string> = {
   lead_do_not_contact: "Import: do not contact",
   lead_avoid: "Import: avoid (bounced/unsub)",
   lead_archived: "Import: archived",
+  optout_unsubscribed: "Unsubscribed (campaign)",
+  optout_bounced: "Bounced (campaign)",
+  optout_manual: "Opted out (manual)",
 };
 
 // Category filter → which reasons it includes.
@@ -44,11 +49,12 @@ const CATEGORIES: { value: string; label: string; reasons: string[] | null }[] =
   { value: "partner", label: "Partner-account contacts", reasons: ["partner_account"] },
   { value: "former", label: "Past customers", reasons: ["former_customer_account"] },
   { value: "do_not_market", label: "Do-not-market / do-not-contact", reasons: ["contact_do_not_contact", "account_do_not_contact", "lead_do_not_market", "lead_do_not_contact"] },
-  { value: "nle_bounced", label: "No longer employed / bounced / archived", reasons: ["contact_no_longer_employed", "contact_archived", "lead_avoid", "lead_archived"] },
+  { value: "nle_bounced", label: "No longer employed / bounced / archived", reasons: ["contact_no_longer_employed", "contact_archived", "lead_avoid", "lead_archived", "optout_bounced"] },
+  { value: "optout", label: "Unsubscribed / opted out (campaigns)", reasons: ["optout_unsubscribed", "optout_manual"] },
 ];
 
 interface SuppRow {
-  source_kind: "contact" | "lead";
+  source_kind: "contact" | "lead" | "optout";
   source_id: string;
   reason: string;
   first_name: string | null;
@@ -62,6 +68,30 @@ interface SuppRow {
 export function DoNotEmail() {
   const [category, setCategory] = useState("all");
   const reasons = CATEGORIES.find((c) => c.value === category)?.reasons ?? null;
+  const qc = useQueryClient();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
+
+  // Escape hatch for campaign opt-out rows (2026-07-28): unsubscribes are
+  // non-overridable at launch, so without this an accidental or forged
+  // unsubscribe would block an address forever. Admin-only (RLS enforces it
+  // too; the column-scoped grant allows flipping revoked_at and nothing
+  // else). The row stays in marketing_optouts as history — it just leaves
+  // the suppression view.
+  const reallow = useMutation({
+    mutationFn: async (optoutId: string) => {
+      const { error: revokeErr } = await supabase
+        .from("marketing_optouts")
+        .update({ revoked_at: new Date().toISOString() })
+        .eq("id", optoutId);
+      if (revokeErr) throw revokeErr;
+    },
+    onSuccess: () => {
+      toast.success("Re-allowed — this address can be emailed again.");
+      qc.invalidateQueries({ queryKey: ["report", "do-not-email"] });
+    },
+    onError: (e) => toast.error("Couldn't re-allow: " + (e as Error).message),
+  });
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["report", "do-not-email", category],
@@ -100,7 +130,7 @@ export function DoNotEmail() {
       r.email,
       r.company ?? "",
       REASON_LABEL[r.reason] ?? r.reason,
-      r.source_kind === "lead" ? "Import" : "Contact",
+      r.source_kind === "lead" ? "Import" : r.source_kind === "optout" ? "Campaign opt-out" : "Contact",
       r.owner_name,
     ]);
     downloadCsv(`do-not-email-${category}-${todayStamp()}.csv`, [header, ...out]);
@@ -175,10 +205,13 @@ export function DoNotEmail() {
                   <TableRow><TableCell colSpan={7} className="p-6 text-sm text-muted-foreground text-center">Nothing to suppress in this category.</TableCell></TableRow>
                 ) : (
                   rows.slice(0, PREVIEW_LIMIT).map((r) => {
-                    const href = r.source_kind === "lead" ? `/imports/${r.source_id}` : `/contacts/${r.source_id}`;
+                    // Campaign opt-out rows (source_kind 'optout') point at a
+                    // marketing_optouts row, not a contact/import — no record
+                    // page to link to.
+                    const href = r.source_kind === "lead" ? `/imports/${r.source_id}` : r.source_kind === "optout" ? null : `/contacts/${r.source_id}`;
                     return (
                       <TableRow key={`${r.source_kind}-${r.source_id}-${r.reason}`}>
-                        <TableCell><Link target="_blank" rel="noopener noreferrer" to={href} className="text-primary hover:underline">{r.first_name}</Link></TableCell>
+                        <TableCell>{href ? <Link target="_blank" rel="noopener noreferrer" to={href} className="text-primary hover:underline">{r.first_name}</Link> : (r.first_name ?? "—")}</TableCell>
                         <TableCell>{r.last_name}</TableCell>
                         <TableCell>{r.email}</TableCell>
                         <TableCell>
@@ -187,7 +220,25 @@ export function DoNotEmail() {
                           ) : r.company}
                         </TableCell>
                         <TableCell>{REASON_LABEL[r.reason] ?? r.reason}</TableCell>
-                        <TableCell className="capitalize">{r.source_kind === "lead" ? "Import" : "Contact"}</TableCell>
+                        <TableCell>
+                          {r.source_kind === "lead" ? "Import" : r.source_kind === "optout" ? (
+                            <span className="inline-flex items-center gap-2">
+                              Campaign opt-out
+                              {isAdmin && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-6 px-2 text-[11px]"
+                                  disabled={reallow.isPending}
+                                  onClick={() => reallow.mutate(r.source_id)}
+                                  title="Remove this opt-out so the address can be emailed again"
+                                >
+                                  Re-allow
+                                </Button>
+                              )}
+                            </span>
+                          ) : "Contact"}
+                        </TableCell>
                         <TableCell>{r.owner_name}</TableCell>
                       </TableRow>
                     );

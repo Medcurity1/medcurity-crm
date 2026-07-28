@@ -43,6 +43,56 @@ export const ENROLLMENT_TERMINAL_STATUSES = ["completed", "stopped", "replied", 
 // bundle can't import this Deno-side file.
 export const REPLY_EVENT_TYPES = ["EMAIL_REPLIED", "EMAIL_REPLY"];
 export const BOUNCE_EVENT_TYPES = ["EMAIL_BOUNCED", "EMAIL_BOUNCE"];
+export const UNSUBSCRIBE_EVENT_TYPES = ["LEAD_UNSUBSCRIBED", "EMAIL_UNSUBSCRIBED"];
+
+export type MarketingOptoutReason = "unsubscribed" | "bounced" | "manual";
+
+/**
+ * Durable, email-keyed opt-out/bounce record (outside-review fix 2,
+ * 2026-07-28) — the write half of the marketing_optouts table
+ * (20260728100000), whose optout_* branch of v_marketing_suppression every
+ * send path already reads. Called UNCONDITIONALLY by the unsubscribe/bounce
+ * routines below, before and regardless of any status-transition guard, so
+ * the opt-out survives even when the enrollment already ended (replied,
+ * completed, stopped) — and it works for CSV/paste recipients with no
+ * contact row, because the key is the email itself.
+ *
+ * Idempotent: upsert on (email, reason) with ignoreDuplicates — the FIRST
+ * record wins and replays are no-ops. The full row is always supplied (this
+ * is an insert-or-skip, never a partial-row update), so the
+ * upsert-partial-row NOT-NULL trap from the Phase 1 build doesn't apply.
+ * A missing/blank email is a silent no-op — there is nothing to key on.
+ */
+export async function recordMarketingOptout(
+  svc: DbClient,
+  opts: {
+    email: string | null;
+    reason: MarketingOptoutReason;
+    source: string;
+    campaignId?: string | null;
+    enrollmentId?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    company?: string | null;
+  },
+): Promise<void> {
+  const email = (opts.email ?? "").trim().toLowerCase();
+  if (!email) return;
+  const { error } = await svc.from("marketing_optouts").upsert(
+    {
+      email,
+      reason: opts.reason,
+      source: opts.source,
+      campaign_id: opts.campaignId ?? null,
+      enrollment_id: opts.enrollmentId ?? null,
+      first_name: opts.firstName ?? null,
+      last_name: opts.lastName ?? null,
+      company: opts.company ?? null,
+    },
+    { onConflict: "email,reason", ignoreDuplicates: true },
+  );
+  if (error) console.error("campaign-enrollment-actions: marketing_optouts write failed:", error.message);
+}
 
 /** Does a campaign_events row already exist for this enrollment with one of
  *  `types`? On a lookup failure, returns false (log and proceed to insert
@@ -157,6 +207,10 @@ export interface EnrollmentForActions {
   last_name: string | null;
   email: string | null;
   status: string;
+  /** Optional — populated by callers whose select includes it, so the
+   *  marketing_optouts record (and the Do-Not-Email report's Company
+   *  column) isn't blank for opt-out rows. */
+  company?: string | null;
 }
 export interface CampaignForActions {
   id: string;
@@ -322,6 +376,23 @@ export async function stopEnrollmentForBounce(
   campaignId?: string,
   eventMeta?: { occurredAt?: string | null; source?: string },
 ): Promise<{ updated: boolean; tasksCancelled: number }> {
+  // Durable suppression record FIRST, unconditionally — a bounced address is
+  // a bad address for every future campaign, not just this enrollment, and
+  // recording it must not depend on winning the status transition below
+  // (a bounce observed after a reply/stop still marks the address). Reason
+  // 'bounced' stays overridable at launch, unlike 'unsubscribed' — see
+  // NON_OVERRIDABLE_SUPPRESSION_REASONS in playbook-smartlead/index.ts.
+  await recordMarketingOptout(svc, {
+    email: enrollment.email,
+    reason: "bounced",
+    source: eventMeta?.source ?? "webhook",
+    campaignId: campaignId ?? null,
+    enrollmentId: enrollment.id,
+    firstName: enrollment.first_name,
+    lastName: enrollment.last_name,
+    company: enrollment.company ?? null,
+  });
+
   // Same atomic-transition guard as stopEnrollmentForReply above — see its
   // comment for why a stale-snapshot check isn't safe against a concurrent
   // webhook + daily-sweep call for the same bounce.
@@ -351,4 +422,106 @@ export async function stopEnrollmentForBounce(
 
   const tasksCancelled = await archivePendingTasksForEnrollment(svc, enrollment.id, "Email bounced");
   return { updated: true, tasksCancelled };
+}
+
+/**
+ * React to an unsubscribe (outside-review fix 2, 2026-07-28): record the
+ * opt-out durably, flag the linked contact, log the event trail, and — only
+ * if the enrollment is still live — stop it and archive its pending tasks.
+ * One implementation, two callers: campaign-webhooks' LEAD_UNSUBSCRIBED
+ * handler and the daily sweep's per-lead reconcile, same split as
+ * reply/bounce.
+ *
+ * ORDER MATTERS, and it is the opposite of the old webhook-local handler:
+ * every opt-out side effect runs UNCONDITIONALLY, before the status guard.
+ * The old code early-returned when the enrollment was already terminal —
+ * which silently discarded the most common real-world ordering ("take me
+ * off your list" arrives as a REPLY first, flipping status to 'replied';
+ * the LEAD_UNSUBSCRIBED webhook lands seconds later into a closed door), as
+ * well as any unsubscribe after a stop/completion. Every side effect here
+ * is idempotent, so webhook replays and webhook+sweep double-delivery stay
+ * safe without the early return.
+ *
+ * The status transition itself stays guarded and atomic (same compare-and-
+ * set as reply/bounce): an unsubscribe after a reply keeps the more
+ * informative 'replied' status — the opt-out is already recorded above
+ * either way — and can never regress a terminal status.
+ */
+export async function stopEnrollmentForUnsubscribe(
+  svc: DbClient,
+  enrollment: EnrollmentForActions,
+  campaignId: string,
+  eventMeta?: { occurredAt?: string | null; source?: string },
+): Promise<{ updated: boolean; tasksCancelled: number }> {
+  // 1. Durable, email-keyed opt-out — the fix for CSV/paste recipients
+  //    (contact_id NULL) and for post-terminal unsubscribes alike. Reason
+  //    'unsubscribed' is non-overridable at launch (a legal signal, not a
+  //    business preference).
+  await recordMarketingOptout(svc, {
+    email: enrollment.email,
+    reason: "unsubscribed",
+    source: eventMeta?.source ?? "webhook",
+    campaignId,
+    enrollmentId: enrollment.id,
+    firstName: enrollment.first_name,
+    lastName: enrollment.last_name,
+    company: enrollment.company ?? null,
+  });
+
+  // 2. First unsubscribed_at wins (idempotent — replays can't move it).
+  const { error: tsErr } = await svc
+    .from("campaign_enrollments")
+    .update({ unsubscribed_at: eventMeta?.occurredAt ?? new Date().toISOString() })
+    .eq("id", enrollment.id)
+    .is("unsubscribed_at", null);
+  if (tsErr) console.error("campaign-enrollment-actions: unsubscribed_at stamp failed:", tsErr.message);
+
+  // 3. Contact-level flag, when the enrollment is linked to a contact.
+  if (enrollment.contact_id) {
+    const { error: contactErr } = await svc
+      .from("contacts")
+      .update({ do_not_contact: true })
+      .eq("id", enrollment.contact_id);
+    if (contactErr) console.error("campaign-enrollment-actions: do_not_contact flag failed:", contactErr.message);
+  }
+
+  // 4. Event trail — a no-op on the webhook path (its own generic event
+  //    insert, logged before dispatch, dedupes this), the ONLY record on
+  //    the sweep path (same pattern as reply/bounce).
+  await recordEventIfMissing(svc, {
+    enrollmentId: enrollment.id,
+    campaignId,
+    email: enrollment.email,
+    eventType: "LEAD_UNSUBSCRIBED",
+    dedupeTypes: UNSUBSCRIBE_EVENT_TYPES,
+    occurredAt: eventMeta?.occurredAt,
+    payload: eventMeta?.source ? { source: eventMeta.source } : {},
+  });
+
+  // 5. Status transition — atomic, only from a still-live status.
+  const { data: transitioned, error } = await svc
+    .from("campaign_enrollments")
+    .update({ status: "stopped", paused_reason: "unsubscribed" })
+    .eq("id", enrollment.id)
+    .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`)
+    .select("id");
+  if (error) {
+    console.error("campaign-enrollment-actions: unsubscribe status update failed:", error.message);
+    return { updated: false, tasksCancelled: 0 };
+  }
+  const updated = !!transitioned?.length;
+
+  // 6. Archive pending SEQUENCE tasks — only when THIS call actually ended
+  //    the enrollment. Deliberately NOT unconditional (adversarial review):
+  //    when a reply already ended it, stopEnrollmentForReply archived the
+  //    sequence tasks and then created the high-priority "Reply from X"
+  //    follow-up — which is itself is_campaign_generated and pending, so an
+  //    unconditional archive here would silently delete the rep's follow-up
+  //    on exactly the "reply says unsubscribe me" ordering. Every other
+  //    terminal transition (bounce/stop/complete) already archived its own
+  //    pending tasks, so gating on the transition loses nothing.
+  const tasksCancelled = updated
+    ? await archivePendingTasksForEnrollment(svc, enrollment.id, "Unsubscribed")
+    : 0;
+  return { updated, tasksCancelled };
 }
