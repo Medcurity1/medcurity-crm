@@ -2752,7 +2752,12 @@ async function dailySweep(): Promise<DailySweepReport> {
             user_id: pauseNotifyUserId,
             type: "engagement",
             title: "Opportunity opened — sequence paused",
-            message: `${who} has a new opportunity — paused their ${info.name} sequence`,
+            // info can be undefined (campaign lookup batch failed / row
+            // gone) now that the notify gate keys on the ENROLLMENT's owner
+            // — an unguarded info.name here crashed the rest of step 3's
+            // loop (final-sweep catch). The name is cosmetic; never throw
+            // over it.
+            message: `${who} has a new opportunity — paused their ${info?.name ?? "campaign"} sequence`,
             link: `/playbook?campaign=${e.campaign_id}`,
           });
           if (notifErr) console.error("daily-sweep: meeting-pause notification insert failed:", notifErr.message);

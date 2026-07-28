@@ -193,11 +193,15 @@ export function CampaignReplies() {
   const count = replies?.length ?? 0;
   // Rows whose call has already been logged this session — the button
   // becomes a static "Call logged" so a second click can't write a second
-  // call row (adversarial review).
+  // call row (adversarial review). loggingRowId keys the in-flight spinner
+  // to the exact ROW clicked — matching on contact_id lit every row for
+  // that contact at once (final-sweep catch).
   const [calledRowIds, setCalledRowIds] = useState<Set<string>>(new Set());
+  const [loggingRowId, setLoggingRowId] = useState<string | null>(null);
 
   function logCallFor(row: CampaignReplyRow) {
-    if (!row.enrollment?.contact_id || calledRowIds.has(row.id)) return;
+    if (!row.enrollment?.contact_id || calledRowIds.has(row.id) || loggingRowId) return;
+    setLoggingRowId(row.id);
     logCall.mutate(
       {
         contact_id: row.enrollment.contact_id,
@@ -205,7 +209,10 @@ export function CampaignReplies() {
         owner_user_id: profile?.id ?? null,
         campaignName: row.campaign?.name ?? null,
       },
-      { onSuccess: () => setCalledRowIds((prev) => new Set(prev).add(row.id)) },
+      {
+        onSuccess: () => setCalledRowIds((prev) => new Set(prev).add(row.id)),
+        onSettled: () => setLoggingRowId(null),
+      },
     );
   }
 
@@ -256,7 +263,7 @@ export function CampaignReplies() {
                     marking={markHandled.isPending && markHandled.variables === row.id}
                     onMarkHandled={() => markHandled.mutate(row.id)}
                     onLogCall={() => logCallFor(row)}
-                    loggingCall={logCall.isPending && logCall.variables?.contact_id === row.enrollment?.contact_id}
+                    loggingCall={loggingRowId === row.id}
                     callLogged={calledRowIds.has(row.id)}
                   />
                 ))}
@@ -284,7 +291,7 @@ export function CampaignReplies() {
                         marking={false}
                         onMarkHandled={() => {}}
                         onLogCall={() => logCallFor(row)}
-                        loggingCall={logCall.isPending && logCall.variables?.contact_id === row.enrollment?.contact_id}
+                        loggingCall={loggingRowId === row.id}
                         callLogged={calledRowIds.has(row.id)}
                       />
                     ))}

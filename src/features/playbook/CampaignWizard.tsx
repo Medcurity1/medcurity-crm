@@ -382,7 +382,14 @@ export function CampaignWizard({
   function resumeDraft() {
     if (!draftBanner) return;
     const s = draftBanner.state;
-    setStep(s.step); setDescription(s.description); setCampaign(s.campaign);
+    // Never resume PAST the Recipients step: the suppression + already-
+    // enrolled data is fetched only while CampaignRecipients is mounted
+    // (step 3), so landing straight on step 4 would show an unwarned
+    // recipient count and skip the per-person review screen every launch
+    // is supposed to pass through (final-sweep catch). The server would
+    // still re-check before sending — this keeps the UI honest too.
+    setStep(Math.min(s.step, 3) as Step);
+    setDescription(s.description); setCampaign(s.campaign);
     setTemplateName(s.templateName); setTemplateSteps(s.templateSteps);
     setRecipients(s.recipients);
     setSuppressionOverrides(s.suppressionOverrides); setEnrollmentOverrides(s.enrollmentOverrides);

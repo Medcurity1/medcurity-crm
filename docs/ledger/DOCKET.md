@@ -35,7 +35,7 @@ _(none — everything staged today promoted to PROD 2026-07-27 in 81bec7d)_
 
 | # | Item | Detail | Verify | Checked |
 |---|---|---|---|---|
-| C1 | Campaigns overhaul (the big project) | Phases 1–5 built; admin-only + staging-gated until Nathan tests. Plan: `docs/campaigns/campaigns-plan.md`. | Admin gates still present at the 3 "Rep rollout flip point" marks | 2026-07-27 |
+| C1 | Campaigns overhaul (the big project) | Phases 1–5 built + the full 2026-07-28 outside-review program (7 batches); admin-only + staging-gated until Nathan tests. Plan: `docs/campaigns/campaigns-plan.md`. | `grep -n "AdminGate><PlaybookPage" src/App.tsx` + Campaigns in Sidebar adminItems (the literal "Rep rollout flip point" comment phrase no longer exists — old recipe was unrunnable) | 2026-07-28 |
 
 ---
 
@@ -99,6 +99,9 @@ Source: `docs/audit/2026-07-28-campaigns-outside-review.md` (61-agent read-only 
 
 | # | Item | Detail | Verify | Checked |
 |---|---|---|---|---|
+| I36 | campaigns.settings read-modify-write clobber window | syncCampaigns (last_metrics_sync_at) and the sweep reconcile (last_sweep_at) both rewrite the whole settings JSON; a manual Sync racing the cron can drop the other's key. Sequential within one sweep run — only the concurrent-manual case. Fix = a jsonb-merge RPC. | `grep -c "last_sweep_at\|last_metrics_sync_at" supabase/functions/playbook-smartlead/index.ts` — both via spread-update | 2026-07-28 |
+| I37 | Ignored wizard resume banners can strand draft rows | Ignore the banner + build fresh + abandon without launching → the old row is only cleaned on a successful launch. Low-volume leak; add cleanup on discard-by-abandonment or an updated_at-based prune. | `grep -n "draftBanner" src/features/playbook/CampaignWizard.tsx` — cleanup only in handleLaunchSuccess | 2026-07-28 |
+| I38 | Test-coverage gaps from the 7/28 build day | Top pure-logic candidates without tests: touchEventBucket/eventTypeBucket (funnel-vs-per-email agreement), mailtoRecipient/replySubject (mailto injection guards), the influence won/open bucketing + renewal exclusion (extract to a pure helper first), and the Deno-side resolveSyncedStatus/extractDailyLimit (need the vitest-importable-extraction treatment webhook-normalize got). | `ls tests/ \| grep -c campaign` vs the list here | 2026-07-28 |
 | I35 | Needs-you reply tally: caps + error visibility | The "N replies waiting" tally reads the Replies feed query (30-day window, 50-row cap, handled rows consume slots) — at volume, older UNHANDLED replies fall out and the flag silently drops; a failed replies query also silently zeroes the signal. Convert to a dedicated unhandled-count query (pairs with promoting `handled` to a real column, roadmap) before campaign volume grows. | `grep -n REPLIES_LIMIT src/features/playbook/api.ts` = 50 | 2026-07-28 |
 | I31 | Everything else from the review | 147 unverified findings + the full 129-idea roadmap (18 themes) live in the report — mine it when each area is touched. | `docs/audit/2026-07-28-campaigns-outside-review.md` exists | 2026-07-28 |
 | I32 | Custom templates saved with no owner | useSaveTemplate's insert never sets owner_user_id, so every custom template (incl. InsightsPanel's preset copies) will be INVISIBLE to reps under campaign_templates_read_own when the rep-access RLS flips. Backfill + set-on-insert before the flip. | `grep -n owner_user_id src/features/playbook/api.ts` — absent from the template insert payload | 2026-07-28 |
