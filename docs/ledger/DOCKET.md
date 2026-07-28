@@ -99,8 +99,8 @@ Source: `docs/audit/2026-07-28-campaigns-outside-review.md` (61-agent read-only 
 
 | # | Item | Detail | Verify | Checked |
 |---|---|---|---|---|
-| I27 | "Needs you today" tracker ordering + trouble flags | Unhandled replies / stalled sends / idle drafts surface first instead of a flat newest-first grid. | CampaignsTab.tsx sorts by created_at only | 2026-07-28 |
 | I28 | Reply actions: pre-filled reply, log call, create opportunity | Replies feed currently only offers mark-handled + open-contact. | CampaignReplies.tsx action buttons | 2026-07-28 |
+| I35 | Needs-you reply tally: caps + error visibility | The "N replies waiting" tally reads the Replies feed query (30-day window, 50-row cap, handled rows consume slots) — at volume, older UNHANDLED replies fall out and the flag silently drops; a failed replies query also silently zeroes the signal. Convert to a dedicated unhandled-count query (pairs with promoting `handled` to a real column, roadmap) before campaign volume grows. | `grep -n REPLIES_LIMIT src/features/playbook/api.ts` = 50 | 2026-07-28 |
 | I29 | Per-touch (per-email-#) performance breakdown | Which email in the sequence earns its send; campaign_events + step numbers once I-series event work lands. | no per-step stats anywhere in playbook UI | 2026-07-28 |
 | I30 | Campaign → opportunity → revenue attribution | Join enrollments (contact/account) to opportunities; answer "did this campaign make money?". | no such join/report exists | 2026-07-28 |
 | I31 | Everything else from the review | 147 unverified findings + the full 129-idea roadmap (18 themes) live in the report — mine it when each area is touched. | `docs/audit/2026-07-28-campaigns-outside-review.md` exists | 2026-07-28 |

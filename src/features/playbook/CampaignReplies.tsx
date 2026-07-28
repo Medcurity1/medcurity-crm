@@ -34,6 +34,15 @@ function handledInfo(row: CampaignReplyRow): HandledInfo | null {
   return h?.at ? h : null;
 }
 
+/** The ONE definition of "this reply is handled" — a real mark-handled
+ *  stamp with a timestamp, not any truthy `handled` key (the payload is the
+ *  raw webhook body, so a vendor field could collide). Exported so the
+ *  tracker's "N replies waiting" tally (CampaignsTab) can never disagree
+ *  with what this feed shows as handled (outside-review I27). */
+export function isReplyHandled(row: CampaignReplyRow): boolean {
+  return handledInfo(row) !== null;
+}
+
 function ReplyRow({
   row,
   handled,

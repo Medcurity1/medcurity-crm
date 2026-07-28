@@ -526,7 +526,7 @@ async function importCampaigns() {
 async function syncCampaigns() {
   const { data: existing } = await svc
     .from("campaigns")
-    .select("id, smartlead_campaign_id, status, metrics")
+    .select("id, smartlead_campaign_id, status, metrics, settings")
     .not("smartlead_campaign_id", "is", null);
   let synced = 0;
   for (const c of existing ?? []) {
@@ -541,7 +541,13 @@ async function syncCampaigns() {
       // apply a null (unrecognized Smartlead status) mapping — see
       // resolveSyncedStatus / mapSmartleadStatus's doc comments.
       const status = resolveSyncedStatus(c.status as string, mappedStatus);
-      await svc.from("campaigns").update({ metrics: merged, status }).eq("id", c.id);
+      // last_metrics_sync_at = "the numbers on the card are this fresh" —
+      // stamped for EVERY linked campaign on every sync/sweep, unlike
+      // last_sweep_at (the per-lead reconcile's rotation cursor, capped at
+      // 25 campaigns/run). The tracker's stale-numbers chip reads this
+      // (needs-attention.ts, outside-review I27).
+      const settings = { ...((c.settings as Record<string, unknown>) ?? {}), last_metrics_sync_at: new Date().toISOString() };
+      await svc.from("campaigns").update({ metrics: merged, status, settings }).eq("id", c.id);
       synced++;
     } catch { /* skip this one */ }
   }
