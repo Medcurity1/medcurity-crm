@@ -210,6 +210,7 @@ interface Enrollment {
   last_name: string | null;
   email: string | null;
   company: string | null;
+  owner_user_id: string | null;
   status: string;
   current_step: number;
   first_send_at: string | null;
@@ -224,7 +225,7 @@ interface Campaign {
 }
 
 async function resolveEnrollment(campaignId: string, email: string | null, leadId: number | null): Promise<Enrollment | null> {
-  const cols = "id, contact_id, account_id, first_name, last_name, email, company, status, current_step, first_send_at, actual_first_send_at, smartlead_lead_id";
+  const cols = "id, contact_id, account_id, first_name, last_name, email, company, owner_user_id, status, current_step, first_send_at, actual_first_send_at, smartlead_lead_id";
   if (email) {
     const { data, error } = await svc
       .from("campaign_enrollments")

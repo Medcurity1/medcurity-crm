@@ -489,6 +489,23 @@ export function useEmailAccounts() {
   });
 }
 
+/** Active users, for the wizard's Campaign owner picker — same
+ *  is_active-scoped shape as leads/api.ts's + accounts/api.ts's useUsers(). */
+export function useActiveUsers() {
+  return useQuery({
+    queryKey: ["playbook", "active-users"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("user_profiles")
+        .select("id, full_name")
+        .eq("is_active", true)
+        .order("full_name");
+      if (error) throw error;
+      return (data ?? []) as { id: string; full_name: string | null }[];
+    },
+  });
+}
+
 /** One sending inbox's warmup health + how much daily volume it's already
  *  carrying — the `inbox-health` edge action's per-inbox shape (Campaigns
  *  overhaul Phase 5). `warmup` is null when Smartlead's warmup-stats read
@@ -595,6 +612,80 @@ export function useLaunchCampaign() {
     },
     onError: (e) => toast.error("Launch failed: " + (e as Error).message),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Campaign wizard draft autosave — survive an accidental close (Escape /
+// outside-click on the wizard Dialog used to discard everything). One row
+// per session in campaign_drafts. NOTE the table's RLS is admin-ALL (all
+// admins see all rows — 20260624000001), so per-user scoping happens in
+// fetchLatestCampaignDraft's explicit user_id filter, not in RLS; the
+// rep-rollout flip must add a per-user policy. state_json carries the
+// wizard's own serializable state, keyed by a `v` version marker so a
+// future shape change can tell an old draft apart from a fresh one. See
+// CampaignWizard.tsx's autosave effect.
+// ---------------------------------------------------------------------------
+
+export interface CampaignDraftRow {
+  id: string;
+  title: string;
+  state_json: unknown;
+  updated_at: string;
+}
+
+/** Most recent draft for the signed-in user IN the given wizard mode.
+ *  Both filters are load-bearing (adversarial review): the table's RLS is
+ *  admin-ALL — not per-user — so without the user_id filter one admin's
+ *  wizard would offer (and could delete) another admin's half-built
+ *  campaign; and `mode` is a prop the resume can't switch, so without the
+ *  mode filter the single `limit 1` row could permanently shadow the other
+ *  mode's draft. */
+export async function fetchLatestCampaignDraft(mode: "ai" | "template"): Promise<CampaignDraftRow | null> {
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user?.id;
+  if (!userId) return null;
+  const { data, error } = await supabase
+    .from("campaign_drafts")
+    .select("id, title, state_json, updated_at")
+    .eq("user_id", userId)
+    .eq("state_json->>mode", mode)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data as CampaignDraftRow | null;
+}
+
+/** Insert (no id) or update (with id) the wizard's one draft row for this
+ *  session. Returns the row id so the caller can keep updating the same row
+ *  on every later autosave instead of creating a new one each time. */
+export async function saveCampaignDraft(p: {
+  id?: string;
+  title: string;
+  state_json: Record<string, unknown>;
+}): Promise<string> {
+  if (p.id) {
+    const { data, error } = await supabase
+      .from("campaign_drafts")
+      .update({ title: p.title, state_json: p.state_json, updated_at: new Date().toISOString() })
+      .eq("id", p.id)
+      .select("id")
+      .single();
+    if (error) throw error;
+    return data.id as string;
+  }
+  const { data, error } = await supabase
+    .from("campaign_drafts")
+    .insert({ title: p.title, state_json: p.state_json })
+    .select("id")
+    .single();
+  if (error) throw error;
+  return data.id as string;
+}
+
+export async function deleteCampaignDraft(id: string): Promise<void> {
+  const { error } = await supabase.from("campaign_drafts").delete().eq("id", id);
+  if (error) throw error;
 }
 
 /** Analyze a completed campaign (AI insights + auto-training). */

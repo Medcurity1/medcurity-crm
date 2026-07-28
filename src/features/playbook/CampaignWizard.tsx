@@ -13,7 +13,7 @@
 // action. autoStart defaults OFF in AI mode (review the Smartlead draft
 // first) and ON in template mode (a template is already proven copy).
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Loader2, Sparkles, Wand2, ArrowLeft, ArrowRight, Rocket, CheckCircle2, AlertTriangle,
   Plus, Trash2, Eye, Code2, RotateCw,
@@ -21,6 +21,10 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,13 +36,15 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useTags } from "@/features/tags/api";
+import { formatRelativeDate } from "@/lib/formatters";
 import { CampaignRecipients } from "./CampaignRecipients";
 import { SequenceTimeline } from "./SequenceTimeline";
 import { partitionSuppression, normalizeEmail, type SuppressionEntry } from "./suppression";
 import type { SequenceStep } from "./types";
 import {
   useGenerateCampaign, useSuggestCampaign, useRegenerateEmail, useEmailAccounts, useLaunchCampaign,
-  useInboxHealth, useSmartleadStatus,
+  useInboxHealth, useSmartleadStatus, useActiveUsers,
+  fetchLatestCampaignDraft, saveCampaignDraft, deleteCampaignDraft,
   type GeneratedCampaign, type Recipient, type ActiveEnrollmentEntry,
 } from "./api";
 
@@ -93,6 +99,55 @@ function projectSendRamp(steps: SequenceStep[], leadsPerDay: number, recipientCo
   return msg + ".";
 }
 
+/** Autosave payload for campaign_drafts.state_json (see api.ts's
+ *  saveCampaignDraft/fetchLatestCampaignDraft). `v` is a version marker so a
+ *  future shape change can tell an old saved draft apart from a fresh one
+ *  instead of guessing. */
+interface CampaignDraftState {
+  v: 1;
+  mode: "ai" | "template";
+  step: Step;
+  description: string;
+  campaign: GeneratedCampaign | null;
+  templateName: string;
+  templateSteps: SequenceStep[];
+  recipients: Recipient[];
+  suppressionOverrides: string[];
+  enrollmentOverrides: string[];
+  inboxId: string;
+  ownerId: string;
+  autoStart: boolean;
+  adaptive: boolean;
+  leadsPerDay: number;
+  minGap: number;
+}
+
+/** Type-guards a campaign_drafts.state_json blob before trusting it — an old
+ *  or malformed row (schema drift, hand-edited row, a future version this
+ *  build doesn't know about) is treated as no draft at all rather than
+ *  crashing the resume. */
+function parseCampaignDraftState(json: unknown): CampaignDraftState | null {
+  if (!json || typeof json !== "object") return null;
+  const s = json as Record<string, unknown>;
+  if (s.v !== 1) return null;
+  if (s.mode !== "ai" && s.mode !== "template") return null;
+  if (typeof s.step !== "number") return null;
+  if (typeof s.description !== "string") return null;
+  if (s.campaign !== null && typeof s.campaign !== "object") return null;
+  if (typeof s.templateName !== "string") return null;
+  if (!Array.isArray(s.templateSteps)) return null;
+  if (!Array.isArray(s.recipients)) return null;
+  if (!Array.isArray(s.suppressionOverrides)) return null;
+  if (!Array.isArray(s.enrollmentOverrides)) return null;
+  if (typeof s.inboxId !== "string") return null;
+  if (typeof s.ownerId !== "string") return null;
+  if (typeof s.autoStart !== "boolean") return null;
+  if (typeof s.adaptive !== "boolean") return null;
+  if (typeof s.leadsPerDay !== "number") return null;
+  if (typeof s.minGap !== "number") return null;
+  return s as unknown as CampaignDraftState;
+}
+
 export function CampaignWizard({
   open, onOpenChange, initialDescription = "", sourceIdeaId,
   mode = "ai",
@@ -134,6 +189,10 @@ export function CampaignWizard({
   const [activeEnrollments, setActiveEnrollments] = useState<ActiveEnrollmentEntry[]>([]);
   const [enrollmentOverrides, setEnrollmentOverrides] = useState<string[]>([]);
   const [inboxId, setInboxId] = useState("");
+  // Campaign owner (defaults to whoever opened the wizard) — call/LinkedIn
+  // tasks and reply alerts still go to each person's own account owner; this
+  // only covers people without one. See the Select in Step 4.
+  const [ownerId, setOwnerId] = useState(profile?.id ?? "");
   // Template mode defaults ON (a template is already-proven copy someone
   // just wants running); AI mode defaults OFF (review the Smartlead draft
   // before it sends anything the AI just wrote).
@@ -144,6 +203,22 @@ export function CampaignWizard({
   const [launchResult, setLaunchResult] = useState<{
     id: number; started: boolean; leads: number; failed: number;
     suppressionDropped: number; alreadyEnrolledDropped: number; enrolled: number; tasksCreated: number;
+  } | null>(null);
+  // Launch confirmation step (a small summary AlertDialog between the outer
+  // Launch button and the actual doLaunch() call).
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  // Autosave / resume — see the two effects below. draftIdRef remembers the
+  // one campaign_drafts row this session owns (undefined id => next save
+  // inserts; once set, every later save updates the same row). draftBanner
+  // holds an unresolved "resume this?" offer found on open; resuming or
+  // discarding clears it.
+  const draftIdRef = useRef<string | null>(null);
+  const draftCheckedRef = useRef(false);
+  // Serialized snapshot of the first "has content" state of this open —
+  // the autosave effect's dirty gate (only divergence from it gets saved).
+  const autosaveBaselineRef = useRef<string | null>(null);
+  const [draftBanner, setDraftBanner] = useState<{
+    id: string; title: string; updatedAt: string; state: CampaignDraftState;
   } | null>(null);
   // Template mode's own content state — a deep-copied, freely-editable copy
   // of templateSeed.steps. Edits here apply to THIS launch only; the saved
@@ -158,6 +233,7 @@ export function CampaignWizard({
   const regen = useRegenerateEmail();
   const { data: tags } = useTags();
   const { data: inboxes } = useEmailAccounts();
+  const { data: activeUsers } = useActiveUsers();
   const { data: sl } = useSmartleadStatus();
   // Only a confirmed `false` disables Launch — undefined (still loading) and
   // true both leave it enabled, so the gate never flashes on while the
@@ -226,18 +302,127 @@ export function CampaignWizard({
     [mode, templateSteps, effectiveLeadsPerDay, sendableRecipients.length],
   );
 
+  // The picked sending inbox's display label, for the launch-confirmation
+  // summary (Step 4's own inbox picker already renders this inline).
+  const selectedInbox = useMemo(
+    () => (inboxId ? (inboxes ?? []).find((a) => String(a.id) === inboxId) ?? null : null),
+    [inboxes, inboxId],
+  );
+
+  // Is there anything worth not losing? Drives both the autosave effect and
+  // the "draft saved" toast on close — an empty wizard has nothing to save.
+  const hasMeaningfulContent = useMemo(() => {
+    if (recipients.length > 0) return true;
+    if (templateName.trim()) return true;
+    if (mode === "ai" && campaign?.sequence.some((e) => e.subject.trim() || plain(e.body_html).trim())) return true;
+    if (mode === "template" && templateSteps.some((s) => (s.subject_template ?? "").trim() || plain(s.body_template ?? "").trim())) return true;
+    return false;
+  }, [recipients, templateName, mode, campaign, templateSteps]);
+
+  // Resume-a-draft check, once per open. Skipped entirely when
+  // initialRecipients was passed — that's a deliberate fresh start (right-
+  // click "Start a campaign…"), never a "did you mean to resume?" moment.
+  useEffect(() => {
+    if (!open) { draftCheckedRef.current = false; return; }
+    if (initialRecipients) return;
+    if (draftCheckedRef.current) return;
+    draftCheckedRef.current = true;
+    // Fetch filters by user AND mode (see fetchLatestCampaignDraft) — the
+    // mode re-check here is belt-and-braces, since a resume can't switch
+    // the `mode` prop. A mismatched draft is left alone, never deleted.
+    fetchLatestCampaignDraft(mode)
+      .then((row) => {
+        if (!row) return;
+        const parsed = parseCampaignDraftState(row.state_json);
+        if (!parsed) { deleteCampaignDraft(row.id).catch(() => {}); return; }
+        if (parsed.mode !== mode) return;
+        setDraftBanner({ id: row.id, title: row.title, updatedAt: row.updated_at, state: parsed });
+      })
+      .catch(() => {}); // resume is a convenience — a failed check shouldn't block the wizard
+  }, [open, initialRecipients, mode]);
+
+  // Debounced autosave — while the dialog is open, the user has actually
+  // CHANGED something, and it isn't mid-launch or already launched. The
+  // baseline snapshot is the dirty gate (adversarial review): template mode
+  // seeds templateName/steps and quick-campaign passes initialRecipients,
+  // so "has content" alone would write a draft row (and toast "Draft
+  // saved") on every open-then-close with zero user interaction. Same row
+  // every time (draftIdRef), so this never piles up more than one row per
+  // session.
+  useEffect(() => {
+    if (!open) { autosaveBaselineRef.current = null; return; }
+    if (launch.isPending || launchResult || !hasMeaningfulContent) return;
+    const state: CampaignDraftState = {
+      v: 1, mode, step, description, campaign, templateName, templateSteps,
+      recipients, suppressionOverrides, enrollmentOverrides, inboxId, ownerId,
+      autoStart, adaptive, leadsPerDay, minGap,
+    };
+    const serialized = JSON.stringify(state);
+    if (autosaveBaselineRef.current === null) {
+      // First qualifying render of this open — record what "untouched"
+      // looks like; only divergence from it is worth saving.
+      autosaveBaselineRef.current = serialized;
+      return;
+    }
+    if (serialized === autosaveBaselineRef.current) return;
+    const title = templateName.trim() || "Untitled campaign";
+    const t = setTimeout(() => {
+      saveCampaignDraft({ id: draftIdRef.current ?? undefined, title, state_json: state as unknown as Record<string, unknown> })
+        .then((id) => { draftIdRef.current = id; })
+        .catch(() => {}); // best-effort — an autosave failure shouldn't interrupt the wizard
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [
+    open, launch.isPending, launchResult, hasMeaningfulContent,
+    mode, step, description, campaign, templateName, templateSteps,
+    recipients, suppressionOverrides, enrollmentOverrides, inboxId, ownerId,
+    autoStart, adaptive, leadsPerDay, minGap,
+  ]);
+
+  function resumeDraft() {
+    if (!draftBanner) return;
+    const s = draftBanner.state;
+    setStep(s.step); setDescription(s.description); setCampaign(s.campaign);
+    setTemplateName(s.templateName); setTemplateSteps(s.templateSteps);
+    setRecipients(s.recipients);
+    setSuppressionOverrides(s.suppressionOverrides); setEnrollmentOverrides(s.enrollmentOverrides);
+    setInboxId(s.inboxId); setOwnerId(s.ownerId);
+    setAutoStart(s.autoStart); setAdaptive(s.adaptive);
+    setLeadsPerDay(s.leadsPerDay); setMinGap(s.minGap);
+    draftIdRef.current = draftBanner.id;
+    setDraftBanner(null);
+  }
+  function discardDraft() {
+    if (!draftBanner) return;
+    const id = draftBanner.id;
+    setDraftBanner(null);
+    deleteCampaignDraft(id).catch(() => {});
+  }
+
   function reset() {
     setStep(mode === "template" ? 2 : 1);
     setDescription(initialDescription); setCampaign(null); setSuggestions(null); setAppliedSug(new Set());
     setShowRegen(false); setRegenFeedback(""); setCodeView(new Set());
-    setRecipients(initialRecipients ?? []); setInboxId("");
+    setRecipients(initialRecipients ?? []); setInboxId(""); setOwnerId(profile?.id ?? "");
     setSuppression([]); setSuppressionOverrides([]);
     setActiveEnrollments([]); setEnrollmentOverrides([]);
     setAutoStart(mode === "template"); setAdaptive(false); setLeadsPerDay(25); setMinGap(15); setLaunchResult(null);
     setTemplateName(templateSeed?.name ?? "");
     setTemplateSteps(templateSeed?.steps ? templateSeed.steps.map((s) => ({ ...s })) : []);
+    setConfirmOpen(false); setDraftBanner(null); draftIdRef.current = null;
+    autosaveBaselineRef.current = null;
   }
-  function close(o: boolean) { if (!o) reset(); onOpenChange(o); }
+  function close(o: boolean) {
+    if (!o) {
+      // The autosave already ran, so an accidental Escape / outside-click no
+      // longer loses anything — just say so, quietly, once.
+      if (hasMeaningfulContent && draftIdRef.current) {
+        toast.info("Draft saved — pick up where you left off next time.");
+      }
+      reset();
+    }
+    onOpenChange(o);
+  }
 
   function handleGenerate(desc?: string) {
     gen.mutate(desc ?? description, { onSuccess: (r) => { setCampaign(r.campaign); setSuggestions(null); setAppliedSug(new Set()); setStep(2); } });
@@ -300,6 +485,23 @@ export function CampaignWizard({
       leads: r.leads_added, failed: r.leads_failed ?? 0,
       suppressionDropped, alreadyEnrolledDropped, enrolled, tasksCreated,
     });
+    // The draft's job is done — a launched campaign is the real record now.
+    // BOTH rows can exist (adversarial review): the session's own autosave
+    // row (draftIdRef) AND a still-unresolved resume offer from a previous
+    // session (draftBanner, when the user ignored the banner and built
+    // fresh) — leaving the banner row behind meant "you have an unfinished
+    // campaign" forever after every launch.
+    if (draftIdRef.current) {
+      const id = draftIdRef.current;
+      draftIdRef.current = null;
+      deleteCampaignDraft(id).catch(() => {});
+    }
+    // A still-set banner means the offer was ignored (resume/discard both
+    // clear it) — its row is stale now too.
+    if (draftBanner) {
+      deleteCampaignDraft(draftBanner.id).catch(() => {});
+      setDraftBanner(null);
+    }
     let msg = `Campaign launched — ${enrolled} ${enrolled === 1 ? "person" : "people"} enrolled, ${tasksCreated} task${tasksCreated === 1 ? "" : "s"} scheduled.`;
     const notes: string[] = [];
     if (suppressionDropped > 0) notes.push(`${suppressionDropped} on the Do-Not-Email list skipped`);
@@ -319,7 +521,7 @@ export function CampaignWizard({
       source_idea_id: sourceIdeaId,
       autoStart,
       adaptiveEnabled: adaptive,
-      owner_id: profile?.id,
+      owner_id: ownerId || profile?.id,
       schedule: { max_new_leads_per_day: effectiveLeadsPerDay, min_time_btw_emails: minGap },
       suppression_overrides: suppressionOverrides,
       enrollment_overrides: enrollmentOverrides,
@@ -367,375 +569,449 @@ export function CampaignWizard({
   const aiEmailsIncomplete = mode === "ai" && !!campaign &&
     campaign.sequence.some((e) => isEmailStepEmpty(e.subject, e.body_html));
 
+  // Launch-confirmation summary (Step 4's Launch button opens this instead
+  // of calling doLaunch() directly). Mirrors the same counts the Step 4
+  // summary strip below already shows.
+  const confirmEmailCount = mode === "ai" ? (campaign?.sequence.length ?? 0) : templateEmailSteps.length;
+  const confirmTouchCount = mode === "template" ? templateTaskSteps.length : 0;
+  const confirmInboxLabel = selectedInbox
+    ? (selectedInbox.from_email ?? selectedInbox.from_name ?? `Inbox ${selectedInbox.id}`)
+    : "No sending inbox picked — Smartlead's default will be used";
+  // Same gate the template-mode Step 2 Continue button already enforces —
+  // repeated here as a belt-and-suspenders check right before the launch
+  // actually fires, not a replacement for it.
+  const confirmEmailsIncomplete = mode === "template" && incompleteTemplateEmails.length > 0;
+
   return (
-    <Dialog open={open} onOpenChange={close}>
-      <DialogContent className="sm:max-w-3xl max-h-[88vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{mode === "template" ? "Launch sequence" : "New Campaign"} — Step {displayStep} of {displayTotal}</DialogTitle>
-          <DialogDescription>
-            {mode === "ai" && step === 1 && "Describe the campaign you want. The AI writes the email sequence."}
-            {mode === "ai" && step === 2 && "Review and edit the sequence. Rewrite any email, regenerate, or ask for suggestions."}
-            {mode === "template" && step === 2 && "Review the automated emails — edit them for this launch only. Calls, LinkedIn, and review-and-send steps become your tasks automatically."}
-            {step === 3 && "Choose who gets it — a contact tag, a CSV upload, or pasted emails."}
-            {step === 4 && "Set the cadence, pick the inbox, and launch. Leave 'start now' off to review the draft in Smartlead first."}
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={close}>
+        <DialogContent className="sm:max-w-3xl max-h-[88vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{mode === "template" ? "Launch sequence" : "New Campaign"} — Step {displayStep} of {displayTotal}</DialogTitle>
+            <DialogDescription>
+              {mode === "ai" && step === 1 && "Describe the campaign you want. The AI writes the email sequence."}
+              {mode === "ai" && step === 2 && "Review and edit the sequence. Rewrite any email, regenerate, or ask for suggestions."}
+              {mode === "template" && step === 2 && "Review the automated emails — edit them for this launch only. Calls, LinkedIn, and review-and-send steps become your tasks automatically."}
+              {step === 3 && "Choose who gets it — a contact tag, a CSV upload, or pasted emails."}
+              {step === 4 && "Set the cadence, pick the inbox, and launch. Leave 'start now' off to review the draft in Smartlead first."}
+            </DialogDescription>
+          </DialogHeader>
 
-        {/* Step 1 — Describe (AI mode only) */}
-        {mode === "ai" && step === 1 && (
-          <div className="space-y-3">
-            <Label>What's the campaign?</Label>
-            <Textarea
-              rows={5}
-              placeholder="e.g. A 3-email cold sequence to small dental practices (1-20 staff) introducing the SRA and offering a quick demo."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-            <Button variant="ai" onClick={() => handleGenerate()} disabled={!canGenerate || gen.isPending}>
-              {gen.isPending
-                ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Writing…</>
-                : <><span className="ai-icon mr-1"><Sparkles className="h-4 w-4" /></span> Generate sequence</>}
-            </Button>
-            {!canGenerate && description.length > 0 && <p className="text-xs text-muted-foreground">A little more detail helps (20+ characters).</p>}
-          </div>
-        )}
-
-        {/* Step 2 — Preview / Edit (AI mode) */}
-        {mode === "ai" && step === 2 && campaign && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <Label className="text-xs">Campaign name</Label>
-                <Input value={campaign.campaign_name} onChange={(e) => setCampaign({ ...campaign, campaign_name: e.target.value })} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Target audience</Label>
-                <Input value={campaign.target_audience} onChange={(e) => setCampaign({ ...campaign, target_audience: e.target.value })} />
+          {/* Resume-a-draft banner — only on the wizard's first screen
+              (displayStep 1: AI mode's Describe, or template mode's Review
+              emails), same screen the "Step 1 of N" title already implies. */}
+          {draftBanner && displayStep === 1 && (
+            <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs">
+              <span>You have an unfinished campaign from {formatRelativeDate(draftBanner.updatedAt)} — Resume it?</span>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button size="xs" variant="outline" className="h-6" onClick={resumeDraft}>Resume</Button>
+                <Button size="xs" variant="ghost" className="h-6 text-muted-foreground" onClick={discardDraft}>Discard</Button>
               </div>
             </div>
+          )}
 
-            {gen.isPending && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Rewriting the sequence…</div>
-            )}
+          {/* Step 1 — Describe (AI mode only) */}
+          {mode === "ai" && step === 1 && (
+            <div className="space-y-3">
+              <Label>What's the campaign?</Label>
+              <Textarea
+                rows={5}
+                placeholder="e.g. A 3-email cold sequence to small dental practices (1-20 staff) introducing the SRA and offering a quick demo."
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
+              <Button variant="ai" onClick={() => handleGenerate()} disabled={!canGenerate || gen.isPending}>
+                {gen.isPending
+                  ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Writing…</>
+                  : <><span className="ai-icon mr-1"><Sparkles className="h-4 w-4" /></span> Generate sequence</>}
+              </Button>
+              {!canGenerate && description.length > 0 && <p className="text-xs text-muted-foreground">A little more detail helps (20+ characters).</p>}
+            </div>
+          )}
 
-            {campaign.sequence.map((email) => {
-              const isCode = codeView.has(email.seq_number);
-              return (
-                <div key={email.seq_number} className="rounded-md border p-3 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold">Email {email.seq_number}</span>
-                      {email.seq_number === 1 ? (
-                        <span className="text-[11px] text-muted-foreground">Send immediately</span>
-                      ) : (
-                        <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1">
-                          Send
-                          <Input
-                            type="number" min={1} max={60} value={email.delay_days}
-                            onChange={(e) => editEmail(email.seq_number, { delay_days: Math.max(1, Math.min(60, Number(e.target.value) || 1)) })}
-                            className="h-6 w-14 text-xs px-1"
-                          />
-                          days after previous
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="xs" className="h-6" onClick={() => toggleCode(email.seq_number)} title="Toggle preview / HTML">
-                        {isCode ? <><Eye className="h-3 w-3 mr-1" /> Preview</> : <><Code2 className="h-3 w-3 mr-1" /> HTML</>}
-                      </Button>
-                      <Button
-                        variant="ai" size="xs" className="h-6"
-                        disabled={regen.isPending}
-                        onClick={() => regen.mutate({ description, campaign, seq_number: email.seq_number }, { onSuccess: (r) => editEmail(email.seq_number, r.email) })}
-                      >
-                        {regen.isPending && regen.variables?.seq_number === email.seq_number
-                          ? <Loader2 className="h-3 w-3 animate-spin" />
-                          : <><span className="ai-icon"><Wand2 className="h-3 w-3" /></span></>}
-                      </Button>
-                      <Button variant="ghost" size="xs" className="h-6 text-muted-foreground hover:text-destructive"
-                        disabled={campaign.sequence.length <= 1} onClick={() => deleteEmail(email.seq_number)}>
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                  <Input value={email.subject} onChange={(e) => editEmail(email.seq_number, { subject: e.target.value })}
-                    placeholder={email.seq_number === 1 ? "Subject" : "Subject (blank = threaded reply)"} />
-                  {isCode ? (
-                    <Textarea rows={6} className="font-mono text-[11px]" value={email.body_html}
-                      onChange={(e) => editEmail(email.seq_number, { body_html: e.target.value })} />
-                  ) : (
-                    <div className="rounded border bg-white overflow-hidden">
-                      <iframe title={`Email ${email.seq_number}`} srcDoc={emailSrcDoc(email.body_html)} sandbox="" className="w-full min-h-[160px]" />
-                    </div>
-                  )}
-                  <p className="text-[11px] text-muted-foreground truncate">Preview: {plain(email.body_html).slice(0, 100) || "—"}</p>
+          {/* Step 2 — Preview / Edit (AI mode) */}
+          {mode === "ai" && step === 2 && campaign && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="text-xs">Campaign name</Label>
+                  <Input value={campaign.campaign_name} onChange={(e) => setCampaign({ ...campaign, campaign_name: e.target.value })} />
                 </div>
-              );
-            })}
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Button size="sm" variant="outline" onClick={addEmail} disabled={campaign.sequence.length >= MAX_EMAILS}>
-                <Plus className="h-4 w-4 mr-1" /> Add follow-up
-              </Button>
-              <Button size="sm" variant="ai" onClick={() => setShowRegen((v) => !v)} disabled={gen.isPending}>
-                <span className="ai-icon mr-1"><RotateCw className="h-4 w-4" /></span> Regenerate
-              </Button>
-              <Button size="sm" variant="ai" disabled={suggest.isPending}
-                onClick={() => suggest.mutate(campaign, { onSuccess: (r) => { setSuggestions(parseSuggestions(r.suggestions)); setAppliedSug(new Set()); } })}>
-                {suggest.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Thinking…</> : <><span className="ai-icon mr-1"><Sparkles className="h-4 w-4" /></span> Suggest improvements</>}
-              </Button>
-            </div>
-
-            {showRegen && (
-              <div className="rounded-md border p-2 space-y-2">
-                <div className="flex flex-wrap gap-1">
-                  {REGEN_CHIPS.map((c) => (
-                    <button key={c} type="button" className="text-[11px] rounded-full border px-2 py-0.5 hover:bg-accent"
-                      onClick={() => setRegenFeedback((f) => f ? `${f}; ${c}` : c)}>{c}</button>
-                  ))}
+                <div className="space-y-1">
+                  <Label className="text-xs">Target audience</Label>
+                  <Input value={campaign.target_audience} onChange={(e) => setCampaign({ ...campaign, target_audience: e.target.value })} />
                 </div>
-                <Textarea rows={2} placeholder="What should change across the whole sequence?" value={regenFeedback} onChange={(e) => setRegenFeedback(e.target.value)} />
-                <Button size="sm" variant="ai" onClick={regenerateWithFeedback} disabled={!regenFeedback.trim() || gen.isPending}>
-                  {gen.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <span className="ai-icon mr-1"><RotateCw className="h-4 w-4" /></span>} Regenerate with this feedback
-                </Button>
               </div>
-            )}
 
-            {suggestions && (
-              <div className="rounded-md border p-2 space-y-2">
-                <p className="text-xs font-medium">Suggested improvements</p>
-                {suggestions.map((s, i) => (
-                  <div key={i} className="flex items-start justify-between gap-2 text-xs">
-                    <span className="text-muted-foreground">{s}</span>
-                    {appliedSug.has(i) ? (
-                      <span className="text-emerald-600 shrink-0 inline-flex items-center gap-0.5"><CheckCircle2 className="h-3 w-3" /> Applied</span>
-                    ) : (
-                      <Button size="xs" variant="ai" className="h-6 shrink-0" disabled={gen.isPending} onClick={() => applySuggestion(s, i)}>
-                        <span className="ai-icon mr-0.5"><Sparkles className="h-3 w-3" /></span> Apply
-                      </Button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
+              {gen.isPending && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Rewriting the sequence…</div>
+              )}
 
-            <div className="flex justify-between pt-2">
-              <Button variant="ghost" onClick={() => setStep(1)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
-              <Button onClick={() => setStep(3)} disabled={!campaign.sequence.some((e) => e.subject && e.body_html)}>
-                Recipients <ArrowRight className="h-4 w-4 ml-1" />
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 2 — Review emails (template mode) */}
-        {mode === "template" && step === 2 && (
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <Label className="text-xs">Campaign name</Label>
-              <Input value={templateName} onChange={(e) => setTemplateName(e.target.value)} placeholder="What should this launch be called?" />
-            </div>
-
-            {templateEmailSteps.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-xs font-medium text-muted-foreground">Automated emails — edit for this launch only, the saved template is untouched</p>
-                {templateEmailSteps.map((s) => {
-                  const isCode = codeView.has(s.order);
-                  const incomplete = isEmailStepEmpty(s.subject_template, s.body_template);
-                  return (
-                    <div key={s.order} className={cn("rounded-md border p-3 space-y-2", incomplete && "border-amber-400/60")}>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-semibold">Day {s.day_offset} email</span>
-                        <Button variant="ghost" size="xs" className="h-6" onClick={() => toggleCode(s.order)} title="Toggle preview / HTML">
+              {campaign.sequence.map((email) => {
+                const isCode = codeView.has(email.seq_number);
+                return (
+                  <div key={email.seq_number} className="rounded-md border p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold">Email {email.seq_number}</span>
+                        {email.seq_number === 1 ? (
+                          <span className="text-[11px] text-muted-foreground">Send immediately</span>
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1">
+                            Send
+                            <Input
+                              type="number" min={1} max={60} value={email.delay_days}
+                              onChange={(e) => editEmail(email.seq_number, { delay_days: Math.max(1, Math.min(60, Number(e.target.value) || 1)) })}
+                              className="h-6 w-14 text-xs px-1"
+                            />
+                            days after previous
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button variant="ghost" size="xs" className="h-6" onClick={() => toggleCode(email.seq_number)} title="Toggle preview / HTML">
                           {isCode ? <><Eye className="h-3 w-3 mr-1" /> Preview</> : <><Code2 className="h-3 w-3 mr-1" /> HTML</>}
                         </Button>
+                        <Button
+                          variant="ai" size="xs" className="h-6"
+                          disabled={regen.isPending}
+                          onClick={() => regen.mutate({ description, campaign, seq_number: email.seq_number }, { onSuccess: (r) => editEmail(email.seq_number, r.email) })}
+                        >
+                          {regen.isPending && regen.variables?.seq_number === email.seq_number
+                            ? <Loader2 className="h-3 w-3 animate-spin" />
+                            : <><span className="ai-icon"><Wand2 className="h-3 w-3" /></span></>}
+                        </Button>
+                        <Button variant="ghost" size="xs" className="h-6 text-muted-foreground hover:text-destructive"
+                          disabled={campaign.sequence.length <= 1} onClick={() => deleteEmail(email.seq_number)}>
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
                       </div>
-                      <Input
-                        value={s.subject_template ?? ""}
-                        placeholder="Subject"
-                        onChange={(e) => patchTemplateStep(s.order, { subject_template: e.target.value })}
-                      />
-                      {isCode ? (
-                        <Textarea rows={6} className="font-mono text-[11px]" value={s.body_template ?? ""}
-                          onChange={(e) => patchTemplateStep(s.order, { body_template: e.target.value })} />
-                      ) : (
-                        <div className="rounded border bg-white overflow-hidden">
-                          <iframe title={`Day ${s.day_offset} email`} srcDoc={emailSrcDoc(s.body_template ?? "")} sandbox="" className="w-full min-h-[160px]" />
-                        </div>
-                      )}
-                      {incomplete && (
-                        <p className="text-[11px] text-amber-600">This email still needs wording.</p>
-                      )}
                     </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {templateTaskSteps.length > 0 && (
-              <div className="space-y-1">
-                <p className="text-xs font-medium text-muted-foreground">Calls, LinkedIn & review-and-send steps — become your tasks, right on schedule</p>
-                <SequenceTimeline steps={templateTaskSteps} />
-              </div>
-            )}
-
-            {incompleteTemplateEmails.length > 0 && (
-              <p className="text-xs text-amber-600">
-                {incompleteTemplateEmails.length === 1
-                  ? "One email above still needs wording before you can continue."
-                  : `${incompleteTemplateEmails.length} emails above still need wording before you can continue.`}
-              </p>
-            )}
-            <div className="flex justify-between pt-2">
-              <Button variant="ghost" onClick={() => close(false)}>Cancel</Button>
-              <Button onClick={() => setStep(3)} disabled={!templateName.trim() || incompleteTemplateEmails.length > 0}>
-                Recipients <ArrowRight className="h-4 w-4 ml-1" />
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 3 — Recipients (shared) */}
-        {step === 3 && (
-          <div className="space-y-3">
-            <CampaignRecipients
-              recipients={recipients} setRecipients={setRecipients} tags={tags ?? []}
-              suppression={suppression} setSuppression={setSuppression}
-              suppressionOverrides={suppressionOverrides} setSuppressionOverrides={setSuppressionOverrides}
-              activeEnrollments={activeEnrollments} setActiveEnrollments={setActiveEnrollments}
-              enrollmentOverrides={enrollmentOverrides} setEnrollmentOverrides={setEnrollmentOverrides}
-            />
-            {recipients.length > 0 && sendableRecipients.length === 0 && (
-              <p className="text-xs text-amber-600">
-                {suppressionPartition.dropped.length > 0 && enrollmentPartition.dropped.length > 0
-                  ? "Everyone here is either on the Do-Not-Email list or already enrolled in another campaign. Check \"Include anyway\" / \"Enroll anyway\" above, or add different recipients, to continue."
-                  : suppressionPartition.dropped.length > 0
-                    ? "Everyone here is on the Do-Not-Email list. Check \"Include anyway\" on at least one person above, or add different recipients, to continue."
-                    : "Everyone here is already enrolled in another campaign. Check \"Enroll anyway\" on at least one person above, or add different recipients, to continue."}
-              </p>
-            )}
-            <div className="flex justify-between pt-2">
-              <Button variant="ghost" onClick={() => setStep(2)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
-              <Button onClick={() => setStep(4)} disabled={sendableRecipients.length === 0}>Launch step <ArrowRight className="h-4 w-4 ml-1" /></Button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 4 — Launch (shared) */}
-        {step === 4 && (
-          <div className="space-y-3">
-            {launchResult ? (
-              <div className="rounded-md border p-4 text-center space-y-2">
-                {launchResult.failed > 0 ? <AlertTriangle className="h-8 w-8 mx-auto text-amber-500" /> : <CheckCircle2 className="h-8 w-8 mx-auto text-green-600" />}
-                <p className="text-sm font-medium">{launchResult.started ? "Campaign launched and started." : "Campaign created as a draft in Smartlead."}</p>
-                <p className="text-xs text-muted-foreground">
-                  {launchResult.leads} added{launchResult.failed > 0 ? ` · ${launchResult.failed} failed` : ""} · Smartlead #{launchResult.id}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {launchResult.enrolled} enrolled{launchResult.started ? ` · ${launchResult.tasksCreated} task${launchResult.tasksCreated === 1 ? "" : "s"} scheduled` : ""}
-                </p>
-                {launchResult.failed > 0 && <p className="text-xs text-amber-600">Some recipients couldn't be added. Check the audience in Smartlead before you start.</p>}
-                {launchResult.suppressionDropped > 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    {launchResult.suppressionDropped} suppressed contact{launchResult.suppressionDropped === 1 ? "" : "s"}{" "}
-                    {launchResult.suppressionDropped === 1 ? "was" : "were"} not added (Do-Not-Email list).
-                  </p>
-                )}
-                {launchResult.alreadyEnrolledDropped > 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    {launchResult.alreadyEnrolledDropped} contact{launchResult.alreadyEnrolledDropped === 1 ? "" : "s"}{" "}
-                    {launchResult.alreadyEnrolledDropped === 1 ? "was" : "were"} already enrolled elsewhere and skipped.
-                  </p>
-                )}
-                {!launchResult.started && <p className="text-xs text-muted-foreground">Review and start it in Smartlead when you're ready.</p>}
-                <Button size="sm" onClick={() => close(false)}>Done</Button>
-              </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <Label className="text-xs">New leads per day</Label>
-                    <Input type="number" min={1} max={500} value={leadsPerDay} onChange={(e) => setLeadsPerDay(Math.max(1, Math.min(500, Number(e.target.value) || 25)))} />
+                    <Input value={email.subject} onChange={(e) => editEmail(email.seq_number, { subject: e.target.value })}
+                      placeholder={email.seq_number === 1 ? "Subject" : "Subject (blank = threaded reply)"} />
+                    {isCode ? (
+                      <Textarea rows={6} className="font-mono text-[11px]" value={email.body_html}
+                        onChange={(e) => editEmail(email.seq_number, { body_html: e.target.value })} />
+                    ) : (
+                      <div className="rounded border bg-white overflow-hidden">
+                        <iframe title={`Email ${email.seq_number}`} srcDoc={emailSrcDoc(email.body_html)} sandbox="" className="w-full min-h-[160px]" />
+                      </div>
+                    )}
+                    <p className="text-[11px] text-muted-foreground truncate">Preview: {plain(email.body_html).slice(0, 100) || "—"}</p>
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Minutes between emails</Label>
-                    <Input type="number" min={1} max={120} value={minGap} onChange={(e) => setMinGap(Math.max(1, Math.min(120, Number(e.target.value) || 15)))} />
-                  </div>
-                </div>
-                <p className="text-[11px] text-muted-foreground">Sends weekdays 9am–5pm Pacific. Lower daily volume + a longer gap protect deliverability.</p>
+                );
+              })}
 
-                <div className="space-y-1">
-                  <Label className="text-xs">Sending inbox</Label>
-                  <Select value={inboxId} onValueChange={setInboxId}>
-                    <SelectTrigger><SelectValue placeholder="Pick an inbox…" /></SelectTrigger>
-                    <SelectContent>
-                      {(inboxes ?? []).map((a) => <SelectItem key={a.id} value={String(a.id)}>{a.from_email ?? a.from_name ?? `Inbox ${a.id}`}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  {selectedInboxHealth && (selectedInboxHealth.campaigns.length > 0 || inboxHeadroom != null) && (
-                    <p className="text-[11px] text-muted-foreground">
-                      {selectedInboxHealth.campaigns.length > 0 && (
-                        <>
-                          This inbox is also sending for {selectedInboxHealth.campaigns.length} other campaign{selectedInboxHealth.campaigns.length === 1 ? "" : "s"}{" "}
-                          ({selectedInboxHealth.total_leads_per_day} people/day) — new sends share its daily capacity.{" "}
-                        </>
-                      )}
-                      {inboxHeadroom != null && (
-                        <>Room for ~{inboxHeadroom} more {inboxHeadroom === 1 ? "person" : "people"}/day (limit {selectedInboxHealth.daily_limit}/day).</>
-                      )}
-                    </p>
-                  )}
-                  {inboxHeadroom === 0 ? (
-                    <p className="text-xs text-amber-600">
-                      This inbox is already at its daily limit — the launch will be capped at 1 new person/day. Consider a different inbox.
-                    </p>
-                  ) : inboxHeadroom != null && leadsPerDay > inboxHeadroom ? (
-                    <p className="text-xs text-amber-600">
-                      That's more than this inbox has room for — the launch will be capped at {inboxHeadroom} new {inboxHeadroom === 1 ? "person" : "people"}/day.
-                    </p>
-                  ) : null}
-                </div>
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" checked={autoStart} onChange={(e) => setAutoStart(e.target.checked)} />
-                  {mode === "template" ? "Start sending when I hit Launch" : "Start sending immediately (leave off to review the draft in Smartlead first)"}
-                </label>
-                {mode === "template" && (
-                  <p className="text-[11px] text-muted-foreground -mt-2 ml-6">
-                    Off = saved as a draft you review and start in Smartlead later.
-                  </p>
-                )}
-                <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-not-allowed">
-                  <input type="checkbox" checked={adaptive} disabled onChange={(e) => setAdaptive(e.target.checked)} />
-                  Adaptive monitoring — AI tweaks unsent emails based on performance <span className="text-[11px] italic">(coming soon)</span>
-                </label>
-                {rampProjection && (
-                  <p className="text-[11px] text-muted-foreground">{rampProjection}</p>
-                )}
-                <div className={cn("rounded-md p-2 text-xs", autoStart ? "bg-amber-50 text-amber-700" : "bg-muted/40 text-muted-foreground")}>
-                  {mode === "ai" ? (campaign?.sequence.length ?? 0) : templateEmailSteps.length} emails
-                  {mode === "template" && templateTaskSteps.length > 0 ? ` · ${templateTaskSteps.length} task step${templateTaskSteps.length === 1 ? "" : "s"}` : ""}
-                  {" "}· {sendableRecipients.length} recipients
-                  {suppressionPartition.dropped.length > 0 ? ` (${suppressionPartition.dropped.length} on the Do-Not-Email list excluded)` : ""}
-                  {enrollmentPartition.dropped.length > 0 ? ` (${enrollmentPartition.dropped.length} already enrolled elsewhere excluded)` : ""}
-                  {autoStart ? " · will START sending" : " · will be saved as a DRAFT"}
-                </div>
-                {aiEmailsIncomplete && (
-                  <p className="text-xs text-amber-600">One or more emails still need wording — go back to Step 2 to finish them.</p>
-                )}
-                {smartleadDisabled && (
-                  <p className="text-xs text-muted-foreground">Connect Smartlead to launch campaigns.</p>
-                )}
-                <div className="flex justify-between pt-2">
-                  <Button variant="ghost" onClick={() => setStep(3)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
-                  <Button onClick={doLaunch} disabled={launch.isPending || aiEmailsIncomplete || smartleadDisabled}>
-                    {launch.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Launching…</> : <><Rocket className="h-4 w-4 mr-1" /> {autoStart ? "Launch & start" : "Create draft"}</>}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="outline" onClick={addEmail} disabled={campaign.sequence.length >= MAX_EMAILS}>
+                  <Plus className="h-4 w-4 mr-1" /> Add follow-up
+                </Button>
+                <Button size="sm" variant="ai" onClick={() => setShowRegen((v) => !v)} disabled={gen.isPending}>
+                  <span className="ai-icon mr-1"><RotateCw className="h-4 w-4" /></span> Regenerate
+                </Button>
+                <Button size="sm" variant="ai" disabled={suggest.isPending}
+                  onClick={() => suggest.mutate(campaign, { onSuccess: (r) => { setSuggestions(parseSuggestions(r.suggestions)); setAppliedSug(new Set()); } })}>
+                  {suggest.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Thinking…</> : <><span className="ai-icon mr-1"><Sparkles className="h-4 w-4" /></span> Suggest improvements</>}
+                </Button>
+              </div>
+
+              {showRegen && (
+                <div className="rounded-md border p-2 space-y-2">
+                  <div className="flex flex-wrap gap-1">
+                    {REGEN_CHIPS.map((c) => (
+                      <button key={c} type="button" className="text-[11px] rounded-full border px-2 py-0.5 hover:bg-accent"
+                        onClick={() => setRegenFeedback((f) => f ? `${f}; ${c}` : c)}>{c}</button>
+                    ))}
+                  </div>
+                  <Textarea rows={2} placeholder="What should change across the whole sequence?" value={regenFeedback} onChange={(e) => setRegenFeedback(e.target.value)} />
+                  <Button size="sm" variant="ai" onClick={regenerateWithFeedback} disabled={!regenFeedback.trim() || gen.isPending}>
+                    {gen.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <span className="ai-icon mr-1"><RotateCw className="h-4 w-4" /></span>} Regenerate with this feedback
                   </Button>
                 </div>
-              </>
-            )}
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
+              )}
+
+              {suggestions && (
+                <div className="rounded-md border p-2 space-y-2">
+                  <p className="text-xs font-medium">Suggested improvements</p>
+                  {suggestions.map((s, i) => (
+                    <div key={i} className="flex items-start justify-between gap-2 text-xs">
+                      <span className="text-muted-foreground">{s}</span>
+                      {appliedSug.has(i) ? (
+                        <span className="text-emerald-600 shrink-0 inline-flex items-center gap-0.5"><CheckCircle2 className="h-3 w-3" /> Applied</span>
+                      ) : (
+                        <Button size="xs" variant="ai" className="h-6 shrink-0" disabled={gen.isPending} onClick={() => applySuggestion(s, i)}>
+                          <span className="ai-icon mr-0.5"><Sparkles className="h-3 w-3" /></span> Apply
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex justify-between pt-2">
+                <Button variant="ghost" onClick={() => setStep(1)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
+                <Button onClick={() => setStep(3)} disabled={!campaign.sequence.some((e) => e.subject && e.body_html)}>
+                  Recipients <ArrowRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 2 — Review emails (template mode) */}
+          {mode === "template" && step === 2 && (
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Campaign name</Label>
+                <Input value={templateName} onChange={(e) => setTemplateName(e.target.value)} placeholder="What should this launch be called?" />
+              </div>
+
+              {templateEmailSteps.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">Automated emails — edit for this launch only, the saved template is untouched</p>
+                  {templateEmailSteps.map((s) => {
+                    const isCode = codeView.has(s.order);
+                    const incomplete = isEmailStepEmpty(s.subject_template, s.body_template);
+                    return (
+                      <div key={s.order} className={cn("rounded-md border p-3 space-y-2", incomplete && "border-amber-400/60")}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold">Day {s.day_offset} email</span>
+                          <Button variant="ghost" size="xs" className="h-6" onClick={() => toggleCode(s.order)} title="Toggle preview / HTML">
+                            {isCode ? <><Eye className="h-3 w-3 mr-1" /> Preview</> : <><Code2 className="h-3 w-3 mr-1" /> HTML</>}
+                          </Button>
+                        </div>
+                        <Input
+                          value={s.subject_template ?? ""}
+                          placeholder="Subject"
+                          onChange={(e) => patchTemplateStep(s.order, { subject_template: e.target.value })}
+                        />
+                        {isCode ? (
+                          <Textarea rows={6} className="font-mono text-[11px]" value={s.body_template ?? ""}
+                            onChange={(e) => patchTemplateStep(s.order, { body_template: e.target.value })} />
+                        ) : (
+                          <div className="rounded border bg-white overflow-hidden">
+                            <iframe title={`Day ${s.day_offset} email`} srcDoc={emailSrcDoc(s.body_template ?? "")} sandbox="" className="w-full min-h-[160px]" />
+                          </div>
+                        )}
+                        {incomplete && (
+                          <p className="text-[11px] text-amber-600">This email still needs wording.</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {templateTaskSteps.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-muted-foreground">Calls, LinkedIn & review-and-send steps — become your tasks, right on schedule</p>
+                  <SequenceTimeline steps={templateTaskSteps} />
+                </div>
+              )}
+
+              {incompleteTemplateEmails.length > 0 && (
+                <p className="text-xs text-amber-600">
+                  {incompleteTemplateEmails.length === 1
+                    ? "One email above still needs wording before you can continue."
+                    : `${incompleteTemplateEmails.length} emails above still need wording before you can continue.`}
+                </p>
+              )}
+              <div className="flex justify-between pt-2">
+                <Button variant="ghost" onClick={() => close(false)}>Cancel</Button>
+                <Button onClick={() => setStep(3)} disabled={!templateName.trim() || incompleteTemplateEmails.length > 0}>
+                  Recipients <ArrowRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3 — Recipients (shared) */}
+          {step === 3 && (
+            <div className="space-y-3">
+              <CampaignRecipients
+                recipients={recipients} setRecipients={setRecipients} tags={tags ?? []}
+                suppression={suppression} setSuppression={setSuppression}
+                suppressionOverrides={suppressionOverrides} setSuppressionOverrides={setSuppressionOverrides}
+                activeEnrollments={activeEnrollments} setActiveEnrollments={setActiveEnrollments}
+                enrollmentOverrides={enrollmentOverrides} setEnrollmentOverrides={setEnrollmentOverrides}
+              />
+              {recipients.length > 0 && sendableRecipients.length === 0 && (
+                <p className="text-xs text-amber-600">
+                  {suppressionPartition.dropped.length > 0 && enrollmentPartition.dropped.length > 0
+                    ? "Everyone here is either on the Do-Not-Email list or already enrolled in another campaign. Check \"Include anyway\" / \"Enroll anyway\" above, or add different recipients, to continue."
+                    : suppressionPartition.dropped.length > 0
+                      ? "Everyone here is on the Do-Not-Email list. Check \"Include anyway\" on at least one person above, or add different recipients, to continue."
+                      : "Everyone here is already enrolled in another campaign. Check \"Enroll anyway\" on at least one person above, or add different recipients, to continue."}
+                </p>
+              )}
+              <div className="flex justify-between pt-2">
+                <Button variant="ghost" onClick={() => setStep(2)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
+                <Button onClick={() => setStep(4)} disabled={sendableRecipients.length === 0}>Launch step <ArrowRight className="h-4 w-4 ml-1" /></Button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 4 — Launch (shared) */}
+          {step === 4 && (
+            <div className="space-y-3">
+              {launchResult ? (
+                <div className="rounded-md border p-4 text-center space-y-2">
+                  {launchResult.failed > 0 ? <AlertTriangle className="h-8 w-8 mx-auto text-amber-500" /> : <CheckCircle2 className="h-8 w-8 mx-auto text-green-600" />}
+                  <p className="text-sm font-medium">{launchResult.started ? "Campaign launched and started." : "Campaign created as a draft in Smartlead."}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {launchResult.leads} added{launchResult.failed > 0 ? ` · ${launchResult.failed} failed` : ""} · Smartlead #{launchResult.id}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {launchResult.enrolled} enrolled{launchResult.started ? ` · ${launchResult.tasksCreated} task${launchResult.tasksCreated === 1 ? "" : "s"} scheduled` : ""}
+                  </p>
+                  {launchResult.failed > 0 && <p className="text-xs text-amber-600">Some recipients couldn't be added. Check the audience in Smartlead before you start.</p>}
+                  {launchResult.suppressionDropped > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      {launchResult.suppressionDropped} suppressed contact{launchResult.suppressionDropped === 1 ? "" : "s"}{" "}
+                      {launchResult.suppressionDropped === 1 ? "was" : "were"} not added (Do-Not-Email list).
+                    </p>
+                  )}
+                  {launchResult.alreadyEnrolledDropped > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      {launchResult.alreadyEnrolledDropped} contact{launchResult.alreadyEnrolledDropped === 1 ? "" : "s"}{" "}
+                      {launchResult.alreadyEnrolledDropped === 1 ? "was" : "were"} already enrolled elsewhere and skipped.
+                    </p>
+                  )}
+                  {!launchResult.started && <p className="text-xs text-muted-foreground">Review and start it in Smartlead when you're ready.</p>}
+                  <Button size="sm" onClick={() => close(false)}>Done</Button>
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">New leads per day</Label>
+                      <Input type="number" min={1} max={500} value={leadsPerDay} onChange={(e) => setLeadsPerDay(Math.max(1, Math.min(500, Number(e.target.value) || 25)))} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Minutes between emails</Label>
+                      <Input type="number" min={1} max={120} value={minGap} onChange={(e) => setMinGap(Math.max(1, Math.min(120, Number(e.target.value) || 15)))} />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">Sends weekdays 9am–5pm Pacific. Lower daily volume + a longer gap protect deliverability.</p>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">Campaign owner</Label>
+                    <Select value={ownerId} onValueChange={setOwnerId}>
+                      <SelectTrigger><SelectValue placeholder="Pick an owner…" /></SelectTrigger>
+                      <SelectContent>
+                        {(activeUsers ?? []).map((u) => <SelectItem key={u.id} value={u.id}>{u.full_name ?? u.id}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-muted-foreground">
+                      Call and LinkedIn tasks, and reply alerts, go to each person's own account owner — the campaign owner covers people without one.
+                    </p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">Sending inbox</Label>
+                    <Select value={inboxId} onValueChange={setInboxId}>
+                      <SelectTrigger><SelectValue placeholder="Pick an inbox…" /></SelectTrigger>
+                      <SelectContent>
+                        {(inboxes ?? []).map((a) => <SelectItem key={a.id} value={String(a.id)}>{a.from_email ?? a.from_name ?? `Inbox ${a.id}`}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    {selectedInboxHealth && (selectedInboxHealth.campaigns.length > 0 || inboxHeadroom != null) && (
+                      <p className="text-[11px] text-muted-foreground">
+                        {selectedInboxHealth.campaigns.length > 0 && (
+                          <>
+                            This inbox is also sending for {selectedInboxHealth.campaigns.length} other campaign{selectedInboxHealth.campaigns.length === 1 ? "" : "s"}{" "}
+                            ({selectedInboxHealth.total_leads_per_day} people/day) — new sends share its daily capacity.{" "}
+                          </>
+                        )}
+                        {inboxHeadroom != null && (
+                          <>Room for ~{inboxHeadroom} more {inboxHeadroom === 1 ? "person" : "people"}/day (limit {selectedInboxHealth.daily_limit}/day).</>
+                        )}
+                      </p>
+                    )}
+                    {inboxHeadroom === 0 ? (
+                      <p className="text-xs text-amber-600">
+                        This inbox is already at its daily limit — pick a different inbox to launch. (The server refuses a launch on a full inbox.)
+                      </p>
+                    ) : inboxHeadroom != null && leadsPerDay > inboxHeadroom ? (
+                      <p className="text-xs text-amber-600">
+                        That's more than this inbox has room for — the launch will be capped at {inboxHeadroom} new {inboxHeadroom === 1 ? "person" : "people"}/day.
+                      </p>
+                    ) : null}
+                  </div>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" checked={autoStart} onChange={(e) => setAutoStart(e.target.checked)} />
+                    {mode === "template" ? "Start sending when I hit Launch" : "Start sending immediately (leave off to review the draft in Smartlead first)"}
+                  </label>
+                  {mode === "template" && (
+                    <p className="text-[11px] text-muted-foreground -mt-2 ml-6">
+                      Off = saved as a draft you review and start in Smartlead later.
+                    </p>
+                  )}
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-not-allowed">
+                    <input type="checkbox" checked={adaptive} disabled onChange={(e) => setAdaptive(e.target.checked)} />
+                    Adaptive monitoring — AI tweaks unsent emails based on performance <span className="text-[11px] italic">(coming soon)</span>
+                  </label>
+                  {rampProjection && (
+                    <p className="text-[11px] text-muted-foreground">{rampProjection}</p>
+                  )}
+                  <div className={cn("rounded-md p-2 text-xs", autoStart ? "bg-amber-50 text-amber-700" : "bg-muted/40 text-muted-foreground")}>
+                    {mode === "ai" ? (campaign?.sequence.length ?? 0) : templateEmailSteps.length} emails
+                    {mode === "template" && templateTaskSteps.length > 0 ? ` · ${templateTaskSteps.length} task step${templateTaskSteps.length === 1 ? "" : "s"}` : ""}
+                    {" "}· {sendableRecipients.length} recipients
+                    {suppressionPartition.dropped.length > 0 ? ` (${suppressionPartition.dropped.length} on the Do-Not-Email list excluded)` : ""}
+                    {enrollmentPartition.dropped.length > 0 ? ` (${enrollmentPartition.dropped.length} already enrolled elsewhere excluded)` : ""}
+                    {autoStart ? " · will START sending" : " · will be saved as a DRAFT"}
+                  </div>
+                  {aiEmailsIncomplete && (
+                    <p className="text-xs text-amber-600">One or more emails still need wording — go back to Step 2 to finish them.</p>
+                  )}
+                  {smartleadDisabled && (
+                    <p className="text-xs text-muted-foreground">Connect Smartlead to launch campaigns.</p>
+                  )}
+                  <div className="flex justify-between pt-2">
+                    <Button variant="ghost" onClick={() => setStep(3)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
+                    <Button onClick={() => setConfirmOpen(true)} disabled={launch.isPending || aiEmailsIncomplete || smartleadDisabled || inboxHeadroom === 0}>
+                      {launch.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Launching…</> : <><Rocket className="h-4 w-4 mr-1" /> {autoStart ? "Launch & start" : "Create draft"}</>}
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Launch confirmation — a small plain-English summary between the
+          Launch button above and the actual doLaunch() call. All of the
+          outer button's own gating (aiEmailsIncomplete, smartleadDisabled,
+          launch.isPending) still applies before this can even open. */}
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Ready to launch?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-1.5 text-left text-sm">
+                <p>{sendableRecipients.length} {sendableRecipients.length === 1 ? "person" : "people"} will be added</p>
+                <p>{confirmInboxLabel}</p>
+                <p>
+                  {confirmEmailCount} automatic email{confirmEmailCount === 1 ? "" : "s"}
+                  {confirmTouchCount > 0 ? ` + ${confirmTouchCount} call/LinkedIn touch${confirmTouchCount === 1 ? "" : "es"}` : ""} per person
+                </p>
+                <p>{autoStart ? "Sending starts immediately after launch." : "Launches as a DRAFT — nothing sends until you press Start."}</p>
+                <p>{effectiveLeadsPerDay} new {effectiveLeadsPerDay === 1 ? "person" : "people"}/day</p>
+                {confirmEmailsIncomplete && (
+                  <p className="text-amber-600">Some emails are missing wording — fix them before launching</p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction disabled={confirmEmailsIncomplete || launch.isPending} onClick={doLaunch}>
+              Launch to {sendableRecipients.length} {sendableRecipients.length === 1 ? "person" : "people"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

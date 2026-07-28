@@ -57,6 +57,7 @@ import { daysBetweenDateOnly, shiftEnrollmentTasks } from "../_shared/campaign-t
 import {
   ENROLLMENT_TERMINAL_STATUSES,
   archivePendingTasksForEnrollment,
+  restoreArchivedTasksForEnrollment,
   stopEnrollmentForBounce,
   stopEnrollmentForReply,
   stopEnrollmentForUnsubscribe,
@@ -632,7 +633,7 @@ async function spawnCampaignTasks(campaignId: string): Promise<{ tasksCreated: n
 
   const { data: enrollments, error: enrErr } = await svc
     .from("campaign_enrollments")
-    .select("id, first_name, last_name, company, email, first_send_at")
+    .select("id, first_name, last_name, company, email, first_send_at, owner_user_id")
     .eq("campaign_id", campaignId)
     .eq("status", "active")
     .is("tasks_spawned_at", null)
@@ -684,7 +685,10 @@ async function spawnCampaignTasks(campaignId: string): Promise<{ tasksCreated: n
       const note = mergeTemplate(step.task_note_template || "", vars);
       rows.push({
         activity_type: "task",
-        owner_user_id: campaign.owner_user_id,
+        // Owner routing (outside-review group 2): the person's own owner
+        // does their calls/LinkedIn touches; the campaign owner only covers
+        // enrollments without one (CSV/paste people, unowned contacts).
+        owner_user_id: (e.owner_user_id as string | null) ?? campaign.owner_user_id,
         subject: mergeTemplate(step.manual_task_title_template || defaultTaskTitle(step.channel), vars),
         body: note || null,
         due_at: dueAt,
@@ -926,7 +930,7 @@ async function setCampaignStatus(p: SetStatusInput, archivedBy: string | null, c
   }
   const { data: campaign, error: campErr } = await svc
     .from("campaigns")
-    .select("id, status, smartlead_campaign_id, leads_per_day, settings, anchor_date, owner_user_id")
+    .select("id, status, smartlead_campaign_id, leads_per_day, settings, anchor_date, owner_user_id, sending_email_account_id")
     .eq("id", p.id)
     .single();
   if (campErr || !campaign) throw new Error("Campaign not found: " + (campErr?.message ?? p.id));
@@ -962,6 +966,39 @@ async function setCampaignStatus(p: SetStatusInput, archivedBy: string | null, c
   // re-trigger stop (CampaignStatusControls only renders Stop for
   // active/paused), so this can't be reached from the tracker either way.
 
+  // Inbox-cap recheck at START (adversarial review): computeInboxRoom only
+  // counts ACTIVE campaigns, and every launch lands as a draft first — so
+  // three drafts on one inbox each saw full room at launch time. Starting
+  // is the moment a draft actually claims room, so it's rechecked here,
+  // BEFORE the Smartlead mirror. Zero room refuses (the campaign stays a
+  // draft, retry-safe); partial room clamps leads_per_day with an honest
+  // warning. Smartlead's own schedule keeps the rate it got at launch (we
+  // don't re-POST it) — the clamp governs Pulse's throttle math and the
+  // Sending Inboxes panel, which is what the cap protects.
+  let startClampWarning: string | undefined;
+  if (p.action === "start" && campaign.sending_email_account_id != null) {
+    const roomAtStart = await computeInboxRoom(Number(campaign.sending_email_account_id));
+    if (roomAtStart != null) {
+      if (roomAtStart <= 0) {
+        throw new Error(
+          "That sending inbox is already at its daily limit across its active campaigns — stop or slow another campaign, or relaunch this one on a different inbox.",
+        );
+      }
+      if ((campaign.leads_per_day ?? 0) > roomAtStart) {
+        const { error: clampErr } = await svc
+          .from("campaigns")
+          .update({ leads_per_day: roomAtStart })
+          .eq("id", p.id);
+        if (clampErr) {
+          console.error("set-campaign-status: start-time leads_per_day clamp failed:", clampErr.message);
+        } else {
+          campaign.leads_per_day = roomAtStart;
+          startClampWarning = `New-people-per-day was lowered to ${roomAtStart} to stay inside the sending inbox's daily limit.`;
+        }
+      }
+    }
+  }
+
   if (campaign.smartlead_campaign_id != null) {
     await smartleadFetch(`/campaigns/${campaign.smartlead_campaign_id}/status`, {
       method: "POST",
@@ -973,7 +1010,7 @@ async function setCampaignStatus(p: SetStatusInput, archivedBy: string | null, c
   const newStatus = PULSE_STATUS_FOR_ACTION[p.action];
   let tasksCreated = 0;
   let tasksCancelled = 0;
-  let warning: string | undefined;
+  let warning: string | undefined = startClampWarning;
 
   if (p.action === "start" || p.action === "resume") {
     // Retry-safe: runs on every start AND resume, not just draft→start. A
@@ -1037,8 +1074,9 @@ async function setCampaignStatus(p: SetStatusInput, archivedBy: string | null, c
       }
     } catch (postErr) {
       console.error("set-campaign-status: scheduling failed after retry:", (postErr as Error).message);
-      warning =
+      const schedNote =
         "The campaign started, but scheduling its call/LinkedIn tasks hit a snag — pause and resume it to finish scheduling.";
+      warning = warning ? `${warning} ${schedNote}` : schedNote;
     }
   } else if (p.action === "stop") {
     // All writes checked (outside-review fix 3): Smartlead is already
@@ -1285,11 +1323,32 @@ async function setEnrollmentStatus(p: SetEnrollmentStatusInput, archivedBy: stri
     if (error) throw new Error("Couldn't pause this person: " + error.message);
   } else {
     newStatus = "active";
+    const wasMeetingPause = enrollment.paused_reason === "meeting_booked";
     const { error } = await svc
       .from("campaign_enrollments")
-      .update({ status: "active", paused_reason: null })
+      .update({
+        status: "active",
+        paused_reason: null,
+        // A human clearing a meeting-booked pause is final for the
+        // opportunities that existed at the time: the daily sweep only
+        // re-pauses when a NEW qualifying opp is created after this stamp
+        // (outside-review group 2, docket I5 — it used to revert the
+        // human's resume every single day).
+        ...(wasMeetingPause ? { meeting_pause_dismissed_at: new Date().toISOString() } : {}),
+      })
       .eq("id", enrollment.id);
     if (error) throw new Error("Couldn't resume this person: " + error.message);
+
+    // Resume is now actually the reverse of the meeting-booked pause: the
+    // call/LinkedIn tasks that pause archived come back (overdue ones
+    // re-dated to tomorrow) — docket I4.
+    if (wasMeetingPause) {
+      const restored = await restoreArchivedTasksForEnrollment(svc, enrollment.id, ["Opportunity opened"]);
+      if (restored > 0) {
+        const note = `Their ${restored} paused task${restored === 1 ? "" : "s"} came back too (overdue ones moved to tomorrow).`;
+        warning = warning ? `${warning} ${note}` : note;
+      }
+    }
   }
 
   return { success: true, status: newStatus, ...(warning ? { warning } : {}) };
@@ -1411,7 +1470,30 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
     const sendDays = Array.isArray(p.schedule?.days_of_week)
       ? (p.schedule!.days_of_week as number[])
       : [1, 2, 3, 4, 5];
-    const maxNewLeadsPerDay = Number(p.schedule?.max_new_leads_per_day) || 25;
+    let maxNewLeadsPerDay = Number(p.schedule?.max_new_leads_per_day) || 25;
+
+    // Server-side inbox cap (outside-review group 2, docket I25): the 7/27
+    // wizard clamp is client-only — a stale tab, an API caller, or a future
+    // UI path could still oversubscribe a mailbox. Same math as the Sending
+    // Inboxes panel: Smartlead's daily limit minus what active campaigns
+    // already draw. Unknown limit = no cap (never treated as 0); zero room
+    // = refuse (the rollback in the outer catch cleans up the just-created
+    // Smartlead campaign).
+    if (p.email_account_id != null) {
+      const room = await computeInboxRoom(p.email_account_id);
+      if (room != null) {
+        if (room <= 0) {
+          throw new Error(
+            "That sending inbox is already at its daily limit across its active campaigns — pick a different inbox, or lower another campaign's daily volume first.",
+          );
+        }
+        if (maxNewLeadsPerDay > room) {
+          const capNote = `New-people-per-day was capped at ${room} to stay inside the sending inbox's daily limit.`;
+          launchWarning = launchWarning ? `${launchWarning} ALSO: ${capNote}` : capNote;
+          maxNewLeadsPerDay = room;
+        }
+      }
+    }
     try {
       await smartleadFetch(`/campaigns/${campaignId}/schedule`, {
         method: "POST",
@@ -1627,11 +1709,65 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
       seenContactIds.add(r.contact_id);
       return true;
     });
+
+    // Owner routing (outside-review group 2): each enrollment carries the
+    // CONTACT's owner so tasks, reply bells, and follow-ups land on the rep
+    // who owns the relationship — the campaign owner (the launcher / the
+    // wizard's owner picker) is only the fallback for CSV/paste people and
+    // unowned contacts. Looked up server-side so every launch path (wizard,
+    // right-click quick campaign) gets it without trusting the client.
+    const ownerLookupIds = Array.from(new Set(
+      dedupedRecipients.map((r) => r.contact_id).filter(Boolean) as string[],
+    ));
+    const contactOwner = new Map<string, string>();
+    const OWNER_BATCH = 500;
+    for (let i = 0; i < ownerLookupIds.length; i += OWNER_BATCH) {
+      const batch = ownerLookupIds.slice(i, i + OWNER_BATCH);
+      const { data: ownerRows, error: ownerErr } = await svc
+        .from("contacts")
+        .select("id, owner_user_id")
+        .in("id", batch);
+      if (ownerErr) {
+        // Non-fatal: fall back to the campaign owner for this batch rather
+        // than failing a launch over routing metadata.
+        console.error("playbook launch: contact owner lookup failed (falling back to campaign owner):", ownerErr.message);
+        continue;
+      }
+      for (const c of (ownerRows ?? []) as { id: string; owner_user_id: string | null }[]) {
+        if (c.owner_user_id) contactOwner.set(c.id, c.owner_user_id);
+      }
+    }
+    // Deactivated owners don't get tasks (adversarial review): a contact
+    // still owned by a departed rep must fall through to the campaign
+    // owner — a live human — not an account nobody signs into.
+    const candidateOwnerIds = Array.from(new Set(contactOwner.values()));
+    if (candidateOwnerIds.length) {
+      const activeOwners = new Set<string>();
+      for (let i = 0; i < candidateOwnerIds.length; i += OWNER_BATCH) {
+        const batch = candidateOwnerIds.slice(i, i + OWNER_BATCH);
+        const { data: profRows, error: profErr } = await svc
+          .from("user_profiles")
+          .select("id, is_active")
+          .in("id", batch);
+        if (profErr) {
+          console.error("playbook launch: owner is_active check failed (keeping contact owners as-is):", profErr.message);
+          batch.forEach((id) => activeOwners.add(id));
+          continue;
+        }
+        for (const u of (profRows ?? []) as { id: string; is_active: boolean | null }[]) {
+          if (u.is_active !== false) activeOwners.add(u.id);
+        }
+      }
+      for (const [contactId, ownerId] of contactOwner) {
+        if (!activeOwners.has(ownerId)) contactOwner.delete(contactId);
+      }
+    }
+
     const enrollmentRows = dedupedRecipients.map((r, i) => ({
       campaign_id: pulseCampaignId,
       contact_id: r.contact_id ?? null,
       account_id: r.account_id ?? null, // tag-source recipients carry it; CSV/paste don't (no lookup in v1)
-      owner_user_id: p.owner_id ?? null,
+      owner_user_id: (r.contact_id ? contactOwner.get(r.contact_id) : undefined) ?? p.owner_id ?? null,
       enroll_position: i + 1,
       email: normalizeEmail(r.email),
       first_name: r.first_name ?? "",
@@ -1881,6 +2017,39 @@ function extractEmailAccountRows(res: unknown): Record<string, unknown>[] {
   return [];
 }
 
+/**
+ * Remaining new-leads/day room on one sending inbox (outside-review group
+ * 2): Smartlead's daily limit minus what ACTIVE campaigns already draw
+ * through it — the same math the Sending Inboxes panel and the wizard's
+ * client-side clamp use, now enforced at launch time on the server. Returns
+ * null for "unknown" (inbox not found, limit field unrecognized, lookup
+ * failed) — the caller must treat null as NO CAP, never as 0.
+ */
+async function computeInboxRoom(emailAccountId: number): Promise<number | null> {
+  try {
+    const rawAccounts = await fetchEmailAccounts();
+    const account = extractEmailAccountRows(rawAccounts).find((a) => String(a.id) === String(emailAccountId));
+    if (!account) return null;
+    const limit = extractDailyLimit(account);
+    if (limit == null) return null;
+    const { data: active, error } = await svc
+      .from("campaigns")
+      .select("leads_per_day")
+      .eq("status", "active")
+      .eq("sending_email_account_id", String(emailAccountId));
+    if (error) {
+      console.warn("computeInboxRoom: active-campaign lookup failed (treating room as unknown):", error.message);
+      return null;
+    }
+    const draw = ((active ?? []) as { leads_per_day: number | null }[])
+      .reduce((sum, c) => sum + (c.leads_per_day || 0), 0);
+    return Math.max(0, limit - draw);
+  } catch (err) {
+    console.warn("computeInboxRoom: failed (treating room as unknown):", (err as Error).message);
+    return null;
+  }
+}
+
 /** Admin-only (see the Deno.serve dispatch below). Capped at the first 10
  *  inboxes — a real Smartlead account here has a handful of sending
  *  inboxes, and each one costs a live warmup-stats round trip through the
@@ -1966,6 +2135,9 @@ interface DailySweepReport {
   webhooks_healed: number;
   skipped_for_budget: number;
   insights_generated: number;
+  /** Plain-English step-failure notes (group 2, docket I10) — persisted to
+   *  campaign_sweep_runs; empty = the run was clean (ok = true). */
+  errors: string[];
 }
 
 const SWEEP_BUDGET_MS = 100_000; // stop starting new campaign work after ~100s (150s edge limit)
@@ -2137,7 +2309,7 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
 
   const { data: enrollments, error } = await svc
     .from("campaign_enrollments")
-    .select("id, contact_id, account_id, first_name, last_name, email, company, status, first_send_at, actual_first_send_at, reply_category")
+    .select("id, contact_id, account_id, first_name, last_name, email, company, owner_user_id, status, first_send_at, actual_first_send_at, reply_category")
     .eq("campaign_id", campaign.id)
     .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`);
   if (error) throw new Error("Enrollment lookup for reconcile failed: " + error.message);
@@ -2152,7 +2324,7 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
   for (const e of enrollments as {
     id: string; contact_id: string | null; account_id: string | null;
     first_name: string | null; last_name: string | null; email: string | null;
-    company: string | null;
+    company: string | null; owner_user_id: string | null;
     status: string; first_send_at: string | null; actual_first_send_at: string | null;
     reply_category: string | null;
   }[]) {
@@ -2330,6 +2502,56 @@ async function isWebhookHealthy(smartleadCampaignId: number, webhookId: number):
   }
 }
 
+/**
+ * Run-log wrapper around dailySweep (outside-review group 2, docket I10):
+ * the report used to live only in this HTTP response body — which pg_cron's
+ * net.http_post DISCARDS, and pg_cron records "succeeded" the moment the
+ * request is queued — so the sweep could fail every night with nobody the
+ * wiser. campaign_sweep_runs (20260728150000) is the durable record; the
+ * scheduled-job watchdog reads its freshness + ok flag and pages admins.
+ */
+async function runDailySweepWithLog(): Promise<DailySweepReport> {
+  let runId: string | null = null;
+  const { data: runRow, error: insErr } = await svc
+    .from("campaign_sweep_runs")
+    .insert({ started_at: new Date().toISOString() })
+    .select("id")
+    .single();
+  if (insErr) console.error("daily-sweep: run-log insert failed (continuing unlogged):", insErr.message);
+  else runId = (runRow?.id as string | undefined) ?? null;
+
+  let report: DailySweepReport;
+  try {
+    report = await dailySweep();
+  } catch (err) {
+    // Every step inside dailySweep is individually caught, so reaching here
+    // means a structural failure (bad deploy, DB down). Record it before
+    // rethrowing — a half-row with finished_at set and ok=false is exactly
+    // what the watchdog surfaces.
+    if (runId) {
+      const { error: crashErr } = await svc.from("campaign_sweep_runs").update({
+        finished_at: new Date().toISOString(),
+        ok: false,
+        error: ("sweep crashed: " + (err as Error).message).slice(0, 2000),
+      }).eq("id", runId);
+      if (crashErr) console.error("daily-sweep: run-log crash finalize failed:", crashErr.message);
+    }
+    throw err;
+  }
+
+  if (runId) {
+    const ok = report.errors.length === 0;
+    const { error: updErr } = await svc.from("campaign_sweep_runs").update({
+      finished_at: new Date().toISOString(),
+      ok,
+      report: report as unknown as Record<string, unknown>,
+      error: ok ? null : report.errors.join("; ").slice(0, 2000),
+    }).eq("id", runId);
+    if (updErr) console.error("daily-sweep: run-log finalize failed:", updErr.message);
+  }
+  return report;
+}
+
 async function dailySweep(): Promise<DailySweepReport> {
   const startedAt = Date.now();
   const hasBudget = () => Date.now() - startedAt < SWEEP_BUDGET_MS;
@@ -2345,6 +2567,7 @@ async function dailySweep(): Promise<DailySweepReport> {
     webhooks_healed: 0,
     skipped_for_budget: 0,
     insights_generated: 0,
+    errors: [],
   };
 
   // ---- 1. Metrics + status refresh ---------------------------------
@@ -2353,6 +2576,7 @@ async function dailySweep(): Promise<DailySweepReport> {
     report.campaigns_synced = synced;
   } catch (err) {
     console.error("daily-sweep: metrics/status sync failed:", (err as Error).message);
+    report.errors.push("step 1 (metrics/status sync): " + (err as Error).message);
   }
 
   // ---- 2. Per-lead reconcile (cap 25/run, oldest-swept-first) ------
@@ -2397,6 +2621,7 @@ async function dailySweep(): Promise<DailySweepReport> {
         report.tasks_cancelled += result.tasksCancelled;
       } catch (err) {
         console.error(`daily-sweep: reconcile failed for campaign ${camp.id} "${camp.name}" (continuing):`, (err as Error).message);
+        report.errors.push(`step 2 (reconcile "${camp.name}"): ` + (err as Error).message);
       }
       reconciledThisRun++;
 
@@ -2406,13 +2631,14 @@ async function dailySweep(): Promise<DailySweepReport> {
     }
   } catch (err) {
     console.error("daily-sweep: per-lead reconcile step failed:", (err as Error).message);
+    report.errors.push("step 2 (per-lead reconcile): " + (err as Error).message);
   }
 
   // ---- 3. Meeting-booked pause --------------------------------------
   try {
     const { data: candidates, error: candErr } = await svc
       .from("campaign_enrollments")
-      .select("id, campaign_id, contact_id, account_id, first_name, last_name, email, status, paused_reason, enrolled_at")
+      .select("id, campaign_id, contact_id, account_id, first_name, last_name, email, owner_user_id, status, paused_reason, enrolled_at, meeting_pause_dismissed_at")
       .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`)
       .or("contact_id.not.is.null,account_id.not.is.null");
     if (candErr) throw new Error(candErr.message);
@@ -2422,7 +2648,9 @@ async function dailySweep(): Promise<DailySweepReport> {
     ) as {
       id: string; campaign_id: string; contact_id: string | null; account_id: string | null;
       first_name: string | null; last_name: string | null; email: string | null;
+      owner_user_id: string | null;
       status: string; paused_reason: string | null; enrolled_at: string;
+      meeting_pause_dismissed_at: string | null;
     }[];
 
     if (eligible.length) {
@@ -2485,7 +2713,16 @@ async function dailySweep(): Promise<DailySweepReport> {
         const accId = enrollmentAccountId.get(e.id);
         if (!accId) continue;
         const opps = oppsByAccount.get(accId) ?? [];
-        const hasQualifyingOpp = opps.some((o) => new Date(o.created_at) > new Date(e.enrolled_at));
+        // A qualifying opp must be newer than the enrollment AND newer than
+        // any human dismissal of a previous meeting-booked pause — the
+        // sweep used to re-pause a human-resumed enrollment every single
+        // day for as long as the same opp stayed open (outside-review
+        // group 2, docket I5). A genuinely NEW opportunity still pauses.
+        const dismissedAt = e.meeting_pause_dismissed_at ? new Date(e.meeting_pause_dismissed_at) : null;
+        const hasQualifyingOpp = opps.some((o) => {
+          const created = new Date(o.created_at);
+          return created > new Date(e.enrolled_at) && (!dismissedAt || created > dismissedAt);
+        });
         if (!hasQualifyingOpp) continue;
 
         const { error: updErr } = await svc
@@ -2500,10 +2737,13 @@ async function dailySweep(): Promise<DailySweepReport> {
         report.meetings_paused++;
 
         const info = campaignInfo.get(e.campaign_id);
-        if (info?.owner_user_id) {
+        // Owner routing (group 2): notify the person's own owner; the
+        // campaign owner is the fallback.
+        const pauseNotifyUserId = e.owner_user_id ?? info?.owner_user_id ?? null;
+        if (pauseNotifyUserId) {
           const who = `${e.first_name ?? ""} ${e.last_name ?? ""}`.trim() || e.email || "A contact";
           const { error: notifErr } = await svc.from("notifications").insert({
-            user_id: info.owner_user_id,
+            user_id: pauseNotifyUserId,
             type: "engagement",
             title: "Opportunity opened — sequence paused",
             message: `${who} has a new opportunity — paused their ${info.name} sequence`,
@@ -2515,6 +2755,7 @@ async function dailySweep(): Promise<DailySweepReport> {
     }
   } catch (err) {
     console.error("daily-sweep: meeting-booked pause step failed:", (err as Error).message);
+    report.errors.push("step 3 (meeting-booked pause): " + (err as Error).message);
   }
 
   // ---- 4. Task spawn catch-up ----------------------------------------
@@ -2533,6 +2774,7 @@ async function dailySweep(): Promise<DailySweepReport> {
     }
   } catch (err) {
     console.error("daily-sweep: task spawn catch-up step failed:", (err as Error).message);
+    report.errors.push("step 4 (task spawn catch-up): " + (err as Error).message);
   }
 
   // ---- 5. Webhook health ----------------------------------------------
@@ -2562,16 +2804,24 @@ async function dailySweep(): Promise<DailySweepReport> {
     }
   } catch (err) {
     console.error("daily-sweep: webhook health step failed:", (err as Error).message);
+    report.errors.push("step 5 (webhook health): " + (err as Error).message);
   }
 
   // ---- 6. Auto-complete straggler enrollments -------------------------
+  // Split by WHY the campaign ended (outside-review group 2, docket I6):
+  // 'stopped' means a human killed it — archiving the pending call/LinkedIn
+  // tasks is right. 'completed' means Smartlead merely finished SENDING the
+  // emails — typically days before a Day-10+ CALL/LINKEDIN touch is due —
+  // so those manual touches stay alive for the rep to finish; the
+  // enrollment still flips to 'completed' so tracking is honest, and the
+  // tasks complete naturally from Up Next.
   try {
     const { data: doneCampaigns, error: doneErr } = await svc
       .from("campaigns")
-      .select("id")
+      .select("id, status")
       .in("status", ["completed", "stopped"]);
     if (doneErr) throw new Error(doneErr.message);
-    for (const c of doneCampaigns ?? []) {
+    for (const c of (doneCampaigns ?? []) as { id: string; status: string }[]) {
       if (!hasBudget()) { report.skipped_for_budget++; break; }
       const { data: stragglers, error: findErr } = await svc
         .from("campaign_enrollments")
@@ -2584,18 +2834,59 @@ async function dailySweep(): Promise<DailySweepReport> {
       }
       const ids = (stragglers ?? []).map((e) => e.id as string);
       if (!ids.length) continue;
-      const { error: updErr } = await svc.from("campaign_enrollments").update({ status: "completed" }).in("id", ids);
+
+      // 'completed' campaigns: only flip enrollments whose manual touches
+      // are DONE. Flipping while tasks were still pending created a zombie
+      // state (adversarial review): 'completed' is terminal, so a later
+      // reply/unsubscribe's transition guard no-op'd and the surviving
+      // tasks became permanently un-archivable — the rep would call
+      // someone who had already replied or opted out. An enrollment with
+      // pending tasks stays 'active' (webhooks still react fully to it)
+      // and flips here on a later sweep once its tasks finish or archive.
+      let flippable = ids;
+      if (c.status === "completed") {
+        const withPending = new Set<string>();
+        const PENDING_BATCH = 500;
+        for (let i = 0; i < ids.length; i += PENDING_BATCH) {
+          const idBatch = ids.slice(i, i + PENDING_BATCH);
+          const { data: pendingRows, error: pendErr } = await svc
+            .from("activities")
+            .select("campaign_enrollment_id")
+            .in("campaign_enrollment_id", idBatch)
+            .eq("is_campaign_generated", true)
+            .is("completed_at", null)
+            .is("archived_at", null);
+          if (pendErr) {
+            // Can't tell who still has tasks — skip the whole campaign this
+            // run rather than risk completing someone mid-touch.
+            console.error(`daily-sweep: auto-complete pending-task check failed for campaign ${c.id}:`, pendErr.message);
+            withPending.clear();
+            idBatch.forEach((id) => withPending.add(id));
+          } else {
+            for (const row of (pendingRows ?? []) as { campaign_enrollment_id: string }[]) {
+              withPending.add(row.campaign_enrollment_id);
+            }
+          }
+        }
+        flippable = ids.filter((id) => !withPending.has(id));
+      }
+      if (!flippable.length) continue;
+
+      const { error: updErr } = await svc.from("campaign_enrollments").update({ status: "completed" }).in("id", flippable);
       if (updErr) {
         console.error(`daily-sweep: auto-complete update failed for campaign ${c.id}:`, updErr.message);
         continue;
       }
-      report.enrollments_updated += ids.length;
-      for (const id of ids) {
-        report.tasks_cancelled += await archivePendingTasksForEnrollment(svc, id, "Campaign completed");
+      report.enrollments_updated += flippable.length;
+      if (c.status === "stopped") {
+        for (const id of flippable) {
+          report.tasks_cancelled += await archivePendingTasksForEnrollment(svc, id, "Campaign stopped");
+        }
       }
     }
   } catch (err) {
     console.error("daily-sweep: auto-complete step failed:", (err as Error).message);
+    report.errors.push("step 6 (auto-complete): " + (err as Error).message);
   }
 
   // ---- 7. AI insights (Campaigns overhaul Phase 4) ---------------------
@@ -2660,6 +2951,7 @@ async function dailySweep(): Promise<DailySweepReport> {
     }
   } catch (err) {
     console.error("daily-sweep: insights step failed:", (err as Error).message);
+    report.errors.push("step 7 (AI insights): " + (err as Error).message);
   }
 
   return report;
@@ -2710,7 +3002,7 @@ Deno.serve(async (req) => {
     }
     if (action === "import") return json(await importCampaigns());
     if (action === "sync") return json(await syncCampaigns());
-    if (action === "daily-sweep") return json(await dailySweep());
+    if (action === "daily-sweep") return json(await runDailySweepWithLog());
     if (action === "inbox-health") return json(await inboxHealth());
     if (action === "launch") return json(await launch(body as unknown as LaunchInput, callerCtx));
     if (action === "set-campaign-status") {

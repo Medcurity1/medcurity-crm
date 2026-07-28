@@ -211,6 +211,11 @@ export interface EnrollmentForActions {
    *  marketing_optouts record (and the Do-Not-Email report's Company
    *  column) isn't blank for opt-out rows. */
   company?: string | null;
+  /** Optional — the enrollment's own owner (the contact's owner, stamped at
+   *  launch since outside-review group 2). When present, reply
+   *  notifications + follow-up tasks route HERE; the campaign owner is only
+   *  the fallback. */
+  owner_user_id?: string | null;
 }
 export interface CampaignForActions {
   id: string;
@@ -262,6 +267,70 @@ export async function archivePendingTasksForEnrollment(
     return 0;
   }
   return ids.length;
+}
+
+/**
+ * Un-archive an enrollment's campaign tasks that a PAUSE archived — the
+ * missing reverse of archivePendingTasksForEnrollment (outside-review group
+ * 2, docket I4: resuming a meeting-booked pause used to permanently lose
+ * the person's remaining call/LinkedIn tasks, because nothing ever cleared
+ * archived_at and the spawner only runs once per enrollment).
+ *
+ * Restores ONLY tasks whose archive_reason is in `reasons` — the caller
+ * names the pause reason it is reversing (e.g. "Opportunity opened"), so
+ * tasks archived by replies/bounces/unsubscribes/stops are never
+ * resurrected. A restored task whose due date already passed while paused
+ * is re-dated to tomorrow (same time of day) so it reappears in Up Next
+ * instead of being born overdue.
+ * Returns the number of tasks restored.
+ */
+export async function restoreArchivedTasksForEnrollment(
+  svc: DbClient,
+  enrollmentId: string,
+  reasons: string[],
+): Promise<number> {
+  const { data: archived, error: findErr } = await svc
+    .from("activities")
+    .select("id, due_at")
+    .eq("campaign_enrollment_id", enrollmentId)
+    .eq("is_campaign_generated", true)
+    .is("completed_at", null)
+    .not("archived_at", "is", null)
+    .in("archive_reason", reasons);
+  if (findErr) {
+    console.error("campaign-enrollment-actions: archived-task lookup failed:", findErr.message);
+    return 0;
+  }
+  const rows = (archived ?? []) as { id: string; due_at: string | null }[];
+  if (!rows.length) return 0;
+
+  const { error: updErr } = await svc
+    .from("activities")
+    .update({ archived_at: null, archived_by: null, archive_reason: null })
+    .in("id", rows.map((t) => t.id));
+  if (updErr) {
+    console.error("campaign-enrollment-actions: task restore failed:", updErr.message);
+    return 0;
+  }
+
+  // Re-date any task that went overdue while paused: tomorrow, keeping the
+  // original time of day (the send-window slot the step chose).
+  const now = new Date();
+  for (const t of rows) {
+    if (!t.due_at) continue;
+    const due = new Date(t.due_at);
+    if (Number.isNaN(due.getTime()) || due > now) continue;
+    const next = new Date(due);
+    next.setUTCFullYear(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    next.setUTCDate(next.getUTCDate() + 1);
+    const nextIso = next.toISOString();
+    const { error: dateErr } = await svc
+      .from("activities")
+      .update({ due_at: nextIso, reminder_at: nextIso })
+      .eq("id", t.id);
+    if (dateErr) console.error("campaign-enrollment-actions: restored-task re-date failed:", dateErr.message);
+  }
+  return rows.length;
 }
 
 /**
@@ -326,12 +395,17 @@ export async function stopEnrollmentForReply(
 
   const tasksCancelled = await archivePendingTasksForEnrollment(svc, enrollment.id, "Contact replied");
 
-  if (campaign.owner_user_id) {
+  // Owner routing (outside-review group 2): the reply belongs to the
+  // person's own owner when the enrollment carries one; the campaign owner
+  // (the launcher) is only the fallback — a marketer running a campaign on
+  // a rep's book must not swallow the rep's replies.
+  const notifyUserId = enrollment.owner_user_id ?? campaign.owner_user_id;
+  if (notifyUserId) {
     const who = displayName(enrollment, fallbackEmail);
     const link = `/playbook?campaign=${campaign.id}`;
 
     const { error: notifErr } = await svc.from("notifications").insert({
-      user_id: campaign.owner_user_id,
+      user_id: notifyUserId,
       type: "engagement",
       title: "Reply received",
       message: `${who} replied in ${campaign.name} — their sequence stopped`,
@@ -342,7 +416,7 @@ export async function stopEnrollmentForReply(
     const nowIso = new Date().toISOString();
     const { error: taskErr } = await svc.from("activities").insert({
       activity_type: "task",
-      owner_user_id: campaign.owner_user_id,
+      owner_user_id: notifyUserId,
       subject: `Reply from ${who} — ${campaign.name}`,
       body: replyBody ? replyBody.slice(0, 2000) : null,
       due_at: nowIso,
