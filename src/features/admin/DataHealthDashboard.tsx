@@ -29,7 +29,8 @@ import {
   ChevronLeft,
   ChevronsRight,
 } from "lucide-react";
-import { formatDate } from "@/lib/formatters";
+import { formatDate, formatCurrency, stageLabel, RETIRED_STAGES } from "@/lib/formatters";
+import type { OpportunityStage } from "@/types/crm";
 import { Link } from "react-router-dom";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
 import { toast } from "sonner";
@@ -104,6 +105,35 @@ function useDataHealthCheck() {
       // The lead type is retired (2026-07-20): the frozen leads table's
       // health rows are noise, and its write paths are gone.
       return (data as DataHealthRow[]).filter((r) => r.entity !== "leads");
+    },
+  });
+}
+
+// Ghost-stage check (docket D4): deals in retired stages (lead/qualified/
+// proposal) render nowhere — the pipeline board filters those columns out
+// and stage pickers don't offer them, so a deal parked there is invisible
+// pipeline. The 7/21 incident hid ~90 renewal children exactly this way;
+// the DB was fixed but nothing WATCHES for a recurrence. This count does.
+interface RetiredStageDeal {
+  id: string;
+  name: string | null;
+  stage: OpportunityStage; // honest: the query filters to RETIRED_STAGES
+  amount: number | null;
+}
+
+function useRetiredStageDeals() {
+  return useQuery({
+    queryKey: ["data_health_retired_stage_deals"],
+    queryFn: async () => {
+      const { data, count, error } = await supabase
+        .from("opportunities")
+        .select("id, name, stage, amount", { count: "exact" })
+        .in("stage", RETIRED_STAGES)
+        .is("archived_at", null)
+        .order("amount", { ascending: false, nullsFirst: false })
+        .limit(50);
+      if (error) throw error;
+      return { deals: (data ?? []) as RetiredStageDeal[], totalCount: count ?? 0 };
     },
   });
 }
@@ -453,6 +483,94 @@ function DrilldownPanel({ entity, issue, onClose }: {
   );
 }
 
+/* ---------- Ghost-stage card ---------- */
+
+function RetiredStageCard() {
+  const { data, isLoading } = useRetiredStageDeals();
+  const totalCount = data?.totalCount ?? 0;
+  const deals = data?.deals ?? [];
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4" />
+          Hidden Pipeline Check
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          Deals in retired stages (Lead, Qualified, Proposal) don't appear on
+          the pipeline board or in stage filters — a deal parked there is
+          invisible to the team. This check exists because it happened once:
+          ~90 renewal deals sat unseen in a retired stage until July 2026.
+        </p>
+        {isLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" /> Checking...
+          </div>
+        ) : totalCount === 0 ? (
+          <div className="flex items-center gap-2 text-sm">
+            <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+            <span>No deals are hiding in retired stages.</span>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 text-sm font-medium text-red-600">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <span>
+                {totalCount} deal{totalCount === 1 ? "" : "s"} {totalCount === 1 ? "is" : "are"} in a retired stage
+                and invisible on the pipeline. Open each one and move it to a
+                current stage.
+              </span>
+            </div>
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Deal</TableHead>
+                    <TableHead>Retired stage</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead className="w-16"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {deals.map((d) => (
+                    <TableRow key={d.id}>
+                      <TableCell className="text-sm font-medium">
+                        {d.name || `ID: ${d.id.slice(0, 8)}`}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className="text-xs">{stageLabel(d.stage)}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right text-sm">
+                        {d.amount != null ? formatCurrency(d.amount) : "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Link
+                          to={`/opportunities/${d.id}`}
+                          className="text-blue-600 hover:underline text-xs inline-flex items-center gap-1"
+                        >
+                          View <ExternalLink className="h-3 w-3" />
+                        </Link>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            {totalCount > deals.length && (
+              <p className="text-xs text-muted-foreground">
+                Showing the {deals.length} largest by amount of {totalCount} total.
+              </p>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 /* ---------- Component ---------- */
 
 export function DataHealthDashboard() {
@@ -720,6 +838,9 @@ export function DataHealthDashboard() {
           )}
         </CardContent>
       </Card>
+
+      {/* ---- Ghost-stage check (docket D4) ---- */}
+      <RetiredStageCard />
 
       {/* ---- Audit Log Stats ---- */}
       <Card>
