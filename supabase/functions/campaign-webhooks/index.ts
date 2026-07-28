@@ -30,9 +30,11 @@
 // matches the `campaigns.webhook_secret` row resolved from the payload's
 // campaign id; anything else is rejected 401 BEFORE any payload content is
 // trusted. If Smartlead also sends an HMAC-SHA256 signature header (keyed by
-// the same secret), it's verified too when present; the header's absence is
-// logged but does not reject on its own (the token gate is the primary
-// defense — see verifyOptionalSignature below).
+// the same secret), it's checked when present and the outcome is logged
+// either way — but it never gates the request. The token check above is the
+// SOLE authentication; see verifyOptionalSignature's doc comment for why a
+// present-but-unverifiable signature fails open instead of 401ing (docket
+// I21).
 //
 // Resilience: once past the auth gate, this handler NEVER throws past the
 // top-level try/catch — any processing error is logged and still answered
@@ -101,37 +103,61 @@ function hexToBytes(hex: string): Uint8Array | null {
 
 /**
  * If Smartlead sent a signature header, verify HMAC-SHA256(rawBody, secret)
- * against it (constant-time). Returns true when there's nothing to check
- * (no header present — logged by the caller, not treated as a failure since
- * the ?token= gate already authenticated the request) or when the signature
- * matches; false only on a PRESENT-but-WRONG signature.
+ * against it (constant-time) and log the outcome. This check is advisory
+ * ONLY and never rejects the request — the ?token= gate (checked by the
+ * caller before this function runs) is the entire authentication story
+ * here.
+ *
+ * Why fail open (docket I21): an ABSENT signature header is already
+ * accepted (nothing to check, token gate already passed), so rejecting a
+ * PRESENT-but-unverifiable one adds zero real security — an attacker who
+ * wanted past this check would simply omit the header rather than send a
+ * bad one. But treating "present and wrong" as a hard failure creates a
+ * genuine lockout risk: if Smartlead ever starts signing with a different
+ * key or scheme (e.g. an account-level key instead of per-campaign, or a
+ * new signature format), every single webhook call would suddenly fail
+ * verification, this endpoint would 401 all of them, and Smartlead's own
+ * retry/backoff would hit its 5-consecutive-failure auto-disable — killing
+ * live updates for every campaign at once, for a mismatch that carries no
+ * actual security signal. So: verified match keeps working as an extra
+ * signal when Smartlead does sign correctly; anything else is logged
+ * (never the secret or the full signature/token — just which header
+ * showed up) and let through.
  */
-async function verifyOptionalSignature(rawBody: string, req: Request, secret: string): Promise<boolean> {
-  const header = req.headers.get("X-Smartlead-Signature")
-    ?? req.headers.get("x-smartlead-signature")
-    ?? req.headers.get("X-Signature")
-    ?? req.headers.get("X-Webhook-Signature");
-  if (!header) {
-    console.warn("campaign-webhooks: no signature header present; continuing (token gate already passed)");
-    return true;
+async function verifyOptionalSignature(rawBody: string, req: Request, secret: string): Promise<void> {
+  const headerCandidates: [name: string, value: string | null][] = [
+    ["X-Smartlead-Signature", req.headers.get("X-Smartlead-Signature")],
+    ["x-smartlead-signature", req.headers.get("x-smartlead-signature")],
+    ["X-Signature", req.headers.get("X-Signature")],
+    ["X-Webhook-Signature", req.headers.get("X-Webhook-Signature")],
+  ];
+  const found = headerCandidates.find(([, v]) => !!v);
+  if (!found) {
+    // Nothing to check — the token gate already authenticated the request.
+    return;
   }
+  const [headerName, header] = found as [string, string];
   const presented = hexToBytes(header);
   if (!presented) {
-    console.warn("campaign-webhooks: signature header is not valid hex; rejecting");
-    return false;
+    console.warn(`campaign-webhooks: signature header "${headerName}" present but not valid hex; accepting (token gate is authoritative — see verifyOptionalSignature doc comment)`);
+    return;
   }
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const macBuf = await crypto.subtle.sign("HMAC", key, enc.encode(rawBody));
   const expected = new Uint8Array(macBuf);
-  if (presented.length !== expected.length) return false;
+  if (presented.length !== expected.length) {
+    console.warn(`campaign-webhooks: signature header "${headerName}" present but did not verify (length mismatch); accepting (token gate is authoritative)`);
+    return;
+  }
   let diff = 0;
   for (let i = 0; i < expected.length; i++) diff |= presented[i] ^ expected[i];
   if (diff !== 0) {
-    console.warn("campaign-webhooks: signature mismatch; rejecting");
-    return false;
+    console.warn(`campaign-webhooks: signature header "${headerName}" present but did not verify; accepting (token gate is authoritative)`);
+    return;
   }
-  return true;
+  // Verified — nothing to log; this is the expected steady state once
+  // Smartlead signs with the same secret we generated.
 }
 
 // dateOnly/daysBetweenDateOnly (whole-day shifts, EMAIL_SENT handling below)
@@ -383,9 +409,10 @@ Deno.serve(async (req) => {
     console.warn("campaign-webhooks: token mismatch; rejecting");
     return json({ error: "unauthorized" }, 401);
   }
-  if (!(await verifyOptionalSignature(rawBody, req, campaignRow.webhook_secret))) {
-    return json({ error: "unauthorized" }, 401);
-  }
+  // Advisory-only from here — see verifyOptionalSignature's doc comment.
+  // It never rejects; the token check above is what already authenticated
+  // this request.
+  await verifyOptionalSignature(rawBody, req, campaignRow.webhook_secret);
 
   const campaign = campaignRow as Campaign;
 

@@ -224,6 +224,15 @@ export function useSaveTemplate() {
         if (error) throw error;
         return data as CampaignTemplate;
       }
+      // New custom template — stamp the creating user as owner (same
+      // supabase.auth.getUser() mechanism this file already uses elsewhere,
+      // e.g. fetchLatestCampaignDraft / useFreezeSmartList's sibling in
+      // lead-lists-api.ts) so it isn't ownerless once
+      // campaign_templates_read_own RLS ships for the rep rollout (docket
+      // I32) — an ownerless custom template would be invisible to the rep
+      // who made it.
+      const { data: auth } = await supabase.auth.getUser();
+      payload.owner_user_id = auth.user?.id ?? null;
       const { data, error } = await supabase
         .from("campaign_templates")
         .insert(payload)
@@ -1182,6 +1191,37 @@ export async function fetchSuppressionForEmails(emails: string[]): Promise<Suppr
     }
   }
   return out;
+}
+
+/**
+ * Admin manual opt-out (docket I33) — adds one email straight to
+ * marketing_optouts with reason 'manual', via playbook-smartlead's
+ * `optout-add` action (admin-gated + email-normalizing server-side, same
+ * invoke/error-shape contract as every other action in this file). Backs
+ * the Do-Not-Email report's "Opt out an email…" button — for addresses that
+ * need to be suppressed without having actually bounced or unsubscribed
+ * from a real send. Invalidates the same ["report", "do-not-email"] query
+ * the report reads (prefix match covers every category variant, same as
+ * DoNotEmail.tsx's own `reallow` mutation) so the new row shows up without
+ * a manual refresh.
+ */
+export function useAddManualOptout() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: { email: string; note?: string }) => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "optout-add", email: p.email, note: p.note },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as { success: boolean };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["report", "do-not-email"] });
+      toast.success("Opted out — this address will no longer be marketed to.");
+    },
+    onError: (e) => toast.error("Couldn't opt out that address: " + (e as Error).message),
+  });
 }
 
 // ---------------------------------------------------------------------------

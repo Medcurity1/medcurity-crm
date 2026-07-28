@@ -226,6 +226,31 @@ export function useNotificationToasts() {
     // Agent ding: visitor message in a conversation this agent joined →
     // short chime + 3s toast unless they're viewing that conversation
     // (Nexus index.html:12250-12266; gated on meddy_new_chat prefs).
+    //
+    // Relevance gate (docket F1): meddy_messages INSERTs have no per-row
+    // filter for "conversations this agent joined" — Postgres realtime can't
+    // filter on a join — so every visitor message company-wide fires this
+    // callback on EVERY open staff tab, and a single live chat can carry many
+    // messages. Without a cache, each one repeats the same
+    // meddy_conversation_agents round-trip (plus toast/sound evaluation) on
+    // every tab that already knows it isn't a member. relevantConvIds
+    // remembers positive answers for the life of the subscription (bounded
+    // via the same rememberSeen cap as seenIds above); negative answers
+    // EXPIRE after a short TTL, because "not mine" is the one answer that
+    // changes mid-conversation — an agent takes over a live chat that was
+    // already negative-cached from its pre-takeover messages, and a
+    // permanent negative cache would silence that conversation until a full
+    // reload (adversarial review). Within the TTL a busy stranger chat still
+    // costs one lookup per minute per tab instead of one per message.
+    const relevantConvIds = new Set<string>();
+    const irrelevantConvUntil = new Map<string, number>();
+    const IRRELEVANT_TTL_MS = 60_000;
+    const rememberIrrelevant = (id: string) => {
+      irrelevantConvUntil.set(id, Date.now() + IRRELEVANT_TTL_MS);
+      while (irrelevantConvUntil.size > MAX_SEEN_IDS) {
+        irrelevantConvUntil.delete(irrelevantConvUntil.keys().next().value as string);
+      }
+    };
     const dingChannel = supabase
       .channel(`pulse-meddy-ding:${user.id}`)
       .on(
@@ -239,6 +264,11 @@ export function useNotificationToasts() {
             content: string;
           };
           if (m.role !== "visitor") return;
+          // Known not-mine (and the answer is still fresh) — bail before
+          // the viewing/prefs checks and well before any DB round-trip or
+          // toast work.
+          const notMineUntil = irrelevantConvUntil.get(m.conversation_id);
+          if (notMineUntil != null && notMineUntil > Date.now()) return;
           const loc = locationRef.current;
           const viewing =
             loc.pathname.startsWith("/meddy") &&
@@ -247,13 +277,22 @@ export function useNotificationToasts() {
           if (viewing) return;
           const prefs = prefsRef.current;
           if (!prefs || prefs["meddy_new_chat"] === false) return;
-          const { data: member } = await supabase
-            .from("meddy_conversation_agents")
-            .select("user_id")
-            .eq("conversation_id", m.conversation_id)
-            .eq("user_id", user!.id)
-            .maybeSingle();
-          if (!member || cancelled) return;
+          let isMember = relevantConvIds.has(m.conversation_id);
+          if (!isMember) {
+            // Not in the positive cache and not freshly negative-cached —
+            // ask the real membership question and remember the answer
+            // (positives forever, negatives for the TTL).
+            const { data: member } = await supabase
+              .from("meddy_conversation_agents")
+              .select("user_id")
+              .eq("conversation_id", m.conversation_id)
+              .eq("user_id", user!.id)
+              .maybeSingle();
+            isMember = !!member;
+            if (isMember) rememberSeen(relevantConvIds, m.conversation_id);
+            else rememberIrrelevant(m.conversation_id);
+          }
+          if (!isMember || cancelled) return;
           if (document.hidden) {
             showOsNotification(
               "New message from visitor",

@@ -338,6 +338,42 @@ function mergeTemplate(tpl: string, vars: { first_name: string; last_name: strin
 interface CallerContext {
   isAdmin: boolean;
   userId: string | null;
+  /** Who to record in audit_logs.changed_by — resolved for HUMAN callers
+   *  regardless of role (unlike userId, which stays null for admins because
+   *  a non-null value triggers the rep ownership checks). Null for the
+   *  service-role cron. */
+  auditUserId?: string | null;
+}
+
+/** Best-effort audit trail for campaign actions (docket I19) — Campaigns
+ *  previously wrote nothing to Pulse's audit system, so who launched or
+ *  stopped what was unrecorded. Column names match audit_logs' REAL schema
+ *  (20260331000000: table_name/record_id/action/changed_by/new_data — NOT
+ *  the entity/performed_by names inbound-lead uses, whose inserts have been
+ *  silently failing). Never throws and never blocks the action it records. */
+async function auditCampaignAction(
+  action: string,
+  recordId: string,
+  changedBy: string | null | undefined,
+  newData: Record<string, unknown>,
+  tableName = "campaigns",
+): Promise<void> {
+  try {
+    const { error } = await svc.from("audit_logs").insert({
+      table_name: tableName,
+      record_id: recordId,
+      action,
+      changed_by: changedBy ?? null,
+      // old_data: {} not null — AuditLogViewer's computeChanges bails on a
+      // null side and would render every one of these rows as "No field
+      // changes"; an empty object makes it list new_data as (empty) → value.
+      old_data: {},
+      new_data: newData,
+    });
+    if (error) console.error(`audit_logs insert failed for ${action} (continuing):`, error.message);
+  } catch (err) {
+    console.error(`audit_logs insert failed for ${action} (continuing):`, (err as Error).message);
+  }
 }
 
 /** Random 32-byte hex secret for a campaign's webhook registration
@@ -607,9 +643,17 @@ async function syncCampaigns(deadline?: number) {
       // stamped for EVERY linked campaign on every sync/sweep, unlike
       // last_sweep_at (the per-lead reconcile's rotation cursor, capped at
       // 25 campaigns/run). The tracker's stale-numbers chip reads this
-      // (needs-attention.ts, outside-review I27).
-      const settings = { ...((c.settings as Record<string, unknown>) ?? {}), last_metrics_sync_at: new Date().toISOString() };
-      await svc.from("campaigns").update({ metrics: merged, status, settings }).eq("id", c.id);
+      // (needs-attention.ts, outside-review I27). Settings goes through the
+      // server-side merge RPC (docket I36) — a read → spread → full-column
+      // write here could drop a key another writer (the sweep's
+      // last_sweep_at, a launch's suppression snapshot) landed in between.
+      const { error: applyErr } = await svc.rpc("campaign_sync_apply", {
+        p_campaign_id: c.id,
+        p_metrics: merged,
+        p_status: status,
+        p_settings_patch: { last_metrics_sync_at: new Date().toISOString() },
+      });
+      if (applyErr) throw new Error(applyErr.message);
       synced++;
     } catch { /* skip this one */ }
   }
@@ -1228,6 +1272,13 @@ async function setCampaignStatus(p: SetStatusInput, archivedBy: string | null, c
     }
   }
 
+  await auditCampaignAction(`campaign_${p.action}`, p.id, callerCtx.auditUserId, {
+    from_status: campaign.status,
+    to_status: newStatus,
+    tasks_created: tasksCreated,
+    tasks_cancelled: tasksCancelled,
+  });
+
   return {
     success: true,
     id: p.id,
@@ -1552,6 +1603,9 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
   let suppressionDropped = 0;
   let alreadyEnrolledDropped = 0;
   let enrolledCount = 0;
+  // In-flight launch claims held by THIS launch (docket E4) — released on
+  // success and on rollback; the table's TTL reaps anything a crash leaves.
+  let claimedEmails: string[] = [];
   let tasksCreated = 0;
   // Non-fatal launch problems the user must still hear about (partial lead
   // upload, a failed post-start bookkeeping write) — returned as `warning`
@@ -1671,19 +1725,57 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
       );
     }
 
+    // 5.4. Concurrent-launch claims (docket E4) — MUST run BEFORE the
+    // active-enrollment check below. The check-then-insert rail can't see
+    // another launch that's mid-flight (its enrollments aren't committed
+    // yet), so two simultaneous launches could both pass it and both enroll
+    // — and SEND to — the same person. Claiming first closes the window
+    // from both sides: an overlapping launch hits our claims, and a launch
+    // that starts after we finish sees our committed enrollments in the
+    // check. Conflicted recipients are dropped with an honest warning
+    // unless the caller explicitly overrode them (enrollment_overrides
+    // means "double-enroll deliberately", which covers this rail too).
+    const enrollmentOverrideSet = new Set(
+      (Array.isArray(p.enrollment_overrides) ? p.enrollment_overrides : []).map(normalizeEmail),
+    );
+    const claimCandidates = Array.from(new Set(recipients.map((r) => normalizeEmail(r.email)).filter(Boolean)));
+    let claimConflicts = new Set<string>();
+    const { data: conflictArr, error: claimErr } = await svc.rpc("campaign_launch_claim_emails", {
+      p_emails: claimCandidates,
+    });
+    if (claimErr) throw new Error("Couldn't reserve this launch's recipients: " + claimErr.message);
+    claimConflicts = new Set((conflictArr ?? []) as string[]);
+    claimedEmails = claimCandidates.filter((e) => !claimConflicts.has(e));
+    let concurrentLaunchDropped = 0;
+    const claimClearedRecipients = recipients.filter((r) => {
+      const key = normalizeEmail(r.email);
+      if (!claimConflicts.has(key)) return true;
+      if (enrollmentOverrideSet.has(key)) return true;
+      concurrentLaunchDropped++;
+      return false;
+    });
+    if (concurrentLaunchDropped > 0) {
+      const claimNote =
+        `${concurrentLaunchDropped} ${concurrentLaunchDropped === 1 ? "person is" : "people are"} being launched by someone else right now ` +
+        `and ${concurrentLaunchDropped === 1 ? "was" : "were"} left out of this one — if they really belong here too, launch them again in a few minutes.`;
+      launchWarning = launchWarning ? `${launchWarning} ALSO: ${claimNote}` : claimNote;
+    }
+    if (claimClearedRecipients.length === 0) {
+      throw new Error(
+        "Every recipient in this launch is already being launched by someone else right now — try again in a few minutes.",
+      );
+    }
+
     // 5.5. No-double-enroll rail (S3): is this email ALREADY actively
     // enrolled in ANY campaign (not just this one)? Mirrors the suppression
     // rail immediately above — same batch/override/all-dropped pattern,
     // different source table. Someone already receiving one cadence
     // shouldn't silently be dropped into a second at the same time unless a
     // human deliberately says so (enrollment_overrides).
-    const enrollmentChecked = recipients.length;
-    const activeEnrollmentEmails = await fetchActiveEnrollmentEmails(recipients.map((r) => r.email));
-    const enrollmentOverrideSet = new Set(
-      (Array.isArray(p.enrollment_overrides) ? p.enrollment_overrides : []).map(normalizeEmail),
-    );
+    const enrollmentChecked = claimClearedRecipients.length;
+    const activeEnrollmentEmails = await fetchActiveEnrollmentEmails(claimClearedRecipients.map((r) => r.email));
     let alreadyActiveOverridden = 0;
-    const enrollableRecipients = recipients.filter((r) => {
+    const enrollableRecipients = claimClearedRecipients.filter((r) => {
       const key = normalizeEmail(r.email);
       if (!activeEnrollmentEmails.has(key)) return true;
       if (enrollmentOverrideSet.has(key)) { alreadyActiveOverridden++; return true; }
@@ -2036,7 +2128,29 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
     if (pulseCampaignId) {
       try { await svc.from("campaigns").delete().eq("id", pulseCampaignId); } catch { /* best-effort */ }
     }
+    // Release this launch's claims so a corrected retry isn't blocked for
+    // the TTL (docket E4). Best-effort — the TTL is the real backstop.
+    if (claimedEmails.length) {
+      try { await svc.rpc("campaign_launch_release_emails", { p_emails: claimedEmails }); } catch { /* TTL reaps */ }
+    }
     throw err;
+  }
+
+  if (claimedEmails.length) {
+    try { await svc.rpc("campaign_launch_release_emails", { p_emails: claimedEmails }); } catch { /* TTL reaps */ }
+  }
+
+  if (pulseCampaignId) {
+    await auditCampaignAction("campaign_launch", pulseCampaignId, callerCtx.auditUserId, {
+      name: p.campaign_name,
+      smartlead_campaign_id: campaignId,
+      enrolled: enrolledCount,
+      leads_added: leadsAdded,
+      leads_failed: leadsFailed,
+      suppression_dropped: suppressionDropped,
+      already_enrolled_dropped: alreadyEnrolledDropped,
+      auto_started: autoStarted,
+    });
   }
 
   return {
@@ -2283,6 +2397,8 @@ interface DailySweepReport {
   webhooks_healed: number;
   skipped_for_budget: number;
   insights_generated: number;
+  /** Abandoned wizard drafts removed by step 0 (docket I37). */
+  drafts_pruned: number;
   /** Plain-English step-failure notes (group 2, docket I10) — persisted to
    *  campaign_sweep_runs; empty = the run was clean (ok = true). */
   errors: string[];
@@ -2479,6 +2595,14 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
   let repliesDetected = 0;
   let tasksCancelled = 0;
 
+  // Category updates batch by VALUE (docket E3): categories are the hot
+  // write in this loop — Smartlead re-categorizes routinely, while the
+  // bounce/reply/unsubscribe transitions below are one-shot per enrollment
+  // and side-effectful (notifications, task cancels, opt-outs), so THOSE
+  // stay per-row by design. There are at most 7 canonical categories, so
+  // grouping turns N single-row updates into ≤7 `.in()` statements.
+  const categoryUpdates = new Map<string, string[]>();
+
   for (const e of enrollments as {
     id: string; contact_id: string | null; account_id: string | null;
     first_name: string | null; last_name: string | null; email: string | null;
@@ -2494,11 +2618,9 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
     // a category can arrive on the same statistics row as a reply, or on its
     // own before/after one.
     if (row.category && row.category !== e.reply_category) {
-      const { error: catErr } = await svc
-        .from("campaign_enrollments")
-        .update({ reply_category: row.category })
-        .eq("id", e.id);
-      if (catErr) console.error(`daily-sweep: reply_category update failed for enrollment ${e.id}:`, catErr.message);
+      const ids = categoryUpdates.get(row.category) ?? [];
+      ids.push(e.id);
+      categoryUpdates.set(row.category, ids);
     }
 
     // (c)/(b) — bounce beats reply (a bounced lead never sends a real
@@ -2576,6 +2698,20 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
           .eq("id", e.id);
         if (stampErr) console.error(`daily-sweep: actual_first_send_at stamp failed for enrollment ${e.id}:`, stampErr.message);
       }
+    }
+  }
+
+  // Flush the batched category updates (docket E3) — one `.in()` per
+  // distinct category value, chunked to stay inside sane statement sizes.
+  const CAT_CHUNK = 500;
+  for (const [category, ids] of categoryUpdates) {
+    for (let i = 0; i < ids.length; i += CAT_CHUNK) {
+      const chunk = ids.slice(i, i + CAT_CHUNK);
+      const { error: catErr } = await svc
+        .from("campaign_enrollments")
+        .update({ reply_category: category })
+        .in("id", chunk);
+      if (catErr) console.error(`daily-sweep: batched reply_category update failed (${category}, ${chunk.length} rows):`, catErr.message);
     }
   }
 
@@ -2732,8 +2868,29 @@ async function dailySweep(): Promise<DailySweepReport> {
     webhooks_healed: 0,
     skipped_for_budget: 0,
     insights_generated: 0,
+    drafts_pruned: 0,
     errors: [],
   };
+
+  // ---- 0. Abandoned wizard-draft prune (docket I37) ----------------
+  // Ignore-the-resume-banner + build fresh + walk away leaves the old
+  // campaign_drafts row forever (cleanup only ran on a successful launch).
+  // One cheap DELETE, before the budgeted steps: any draft untouched for
+  // 30 days is abandoned — the wizard autosaves on every edit, so a draft
+  // someone still cares about always has a recent updated_at.
+  try {
+    const cutoff = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    const { data: pruned, error: pruneErr } = await svc
+      .from("campaign_drafts")
+      .delete()
+      .lt("updated_at", cutoff)
+      .select("id");
+    if (pruneErr) throw new Error(pruneErr.message);
+    report.drafts_pruned = (pruned ?? []).length;
+  } catch (err) {
+    console.error("daily-sweep: draft prune failed:", (err as Error).message);
+    report.errors.push("step 0 (draft prune): " + (err as Error).message);
+  }
 
   // ---- 1. Metrics + status refresh ---------------------------------
   // Budgeted (docket I8): step 1 used to run uncapped BEFORE any
@@ -2799,8 +2956,12 @@ async function dailySweep(): Promise<DailySweepReport> {
       }
       reconciledThisRun++;
 
-      const nextSettings = { ...(camp.settings ?? {}), last_sweep_at: new Date().toISOString() };
-      const { error: settingsErr } = await svc.from("campaigns").update({ settings: nextSettings }).eq("id", camp.id);
+      // Merge RPC, not spread-update (docket I36) — see campaign_sync_apply's
+      // comment in syncCampaigns for the clobber window this closes.
+      const { error: settingsErr } = await svc.rpc("campaign_settings_merge", {
+        p_campaign_id: camp.id,
+        p_patch: { last_sweep_at: new Date().toISOString() },
+      });
       if (settingsErr) console.error(`daily-sweep: last_sweep_at update failed for campaign ${camp.id}:`, settingsErr.message);
     }
   } catch (err) {
@@ -3006,7 +3167,16 @@ async function dailySweep(): Promise<DailySweepReport> {
               })
               .eq("id", c.id);
             if (adoptErr) console.error(`daily-sweep: webhook adopt write failed for campaign ${c.id}:`, adoptErr.message);
-            else report.webhooks_healed++;
+            else {
+              report.webhooks_healed++;
+              // Audit the heal (docket I19): live updates silently coming
+              // (back) online is worth a trail — it explains gaps in a
+              // campaign's event history after the fact.
+              await auditCampaignAction("campaign_webhook_healed", c.id, null, {
+                mode: "adopted",
+                webhook_id: existing.id,
+              });
+            }
             continue;
           }
         }
@@ -3023,7 +3193,14 @@ async function dailySweep(): Promise<DailySweepReport> {
           }
           const { error: healErr } = await svc.from("campaigns").update({ smartlead_webhook_id: newId, webhook_secret: secret }).eq("id", c.id);
           if (healErr) console.error(`daily-sweep: webhook heal write failed for campaign ${c.id}:`, healErr.message);
-          else report.webhooks_healed++;
+          else {
+            report.webhooks_healed++;
+            await auditCampaignAction("campaign_webhook_healed", c.id, null, {
+              mode: staleId != null ? "replaced" : "registered",
+              webhook_id: newId,
+              ...(staleId != null ? { stale_webhook_id: staleId } : {}),
+            });
+          }
         }
       } catch (err) {
         console.warn(`daily-sweep: webhook heal failed for campaign ${c.id} (best-effort, continuing):`, (err as Error).message);
@@ -3231,10 +3408,15 @@ async function dailySweep(): Promise<DailySweepReport> {
           }
           report.insights_generated++;
           // A finished campaign's analysis is the FINAL one — mark it so
-          // the (b) set above never re-queues it (docket I12).
+          // the (b) set above never re-queues it (docket I12). Merge RPC,
+          // not spread-update (adversarial review): c.settings here was
+          // read BEFORE a loop of per-campaign AI round trips — the widest
+          // read→write gap in this file, exactly the clobber I36 closes.
           if (c.status !== "active") {
-            const finalSettings = { ...(c.settings ?? {}), analysis_final: true };
-            const { error: finalErr } = await svc.from("campaigns").update({ settings: finalSettings }).eq("id", c.id);
+            const { error: finalErr } = await svc.rpc("campaign_settings_merge", {
+              p_campaign_id: c.id,
+              p_patch: { analysis_final: true },
+            });
             if (finalErr) console.error(`daily-sweep: analysis_final stamp failed for campaign ${c.id}:`, finalErr.message);
           }
         } catch (err) {
@@ -3284,9 +3466,88 @@ Deno.serve(async (req) => {
       repUserId = await callerUserId(auth);
       if (!repUserId) return json({ error: "Admin only" }, 403);
     }
-    const callerCtx: CallerContext = { isAdmin: adminCaller, userId: repUserId };
+    // Audit identity (docket I19): resolved only for the actions that write
+    // audit rows, and only for human callers — the sweep's service-role
+    // calls record changed_by = null. Kept separate from userId, which must
+    // stay null for admins (a non-null userId flips on rep ownership checks).
+    const AUDITED_ACTIONS = new Set(["launch", "set-campaign-status", "delete-campaign", "optout-add"]);
+    const auditUserId = !svcCaller && AUDITED_ACTIONS.has(action) ? await callerUserId(auth) : null;
+    const callerCtx: CallerContext = { isAdmin: adminCaller, userId: repUserId, auditUserId };
 
     if (action === "status") return json({ configured: smartleadConfigured() });
+    // optout-add lives ABOVE the Smartlead-configured gate below
+    // (adversarial review): it is a pure Postgres write with zero
+    // Smartlead involvement, and prod today has no SMARTLEAD_API_KEY —
+    // parking it under that gate made the admin button a guaranteed 500
+    // in exactly the environment that needs manual opt-outs most.
+    if (action === "optout-add") {
+      // Manual marketing opt-out (docket I33) — the marketing_optouts table
+      // supported reason='manual' from day one but nothing could WRITE one;
+      // admins could only revoke. Admin/service-role only (not in
+      // REP_ELIGIBLE_ACTIONS, so the dispatch gate above already enforces
+      // it). Normalizes server-side; the table's CHECK would reject a
+      // non-normalized email anyway.
+      const email = normalizeEmail(String(body.email ?? ""));
+      if (!email || !email.includes("@")) throw new Error("A valid email address is required.");
+      const note = typeof body.note === "string" && body.note.trim() ? body.note.trim().slice(0, 500) : null;
+      // unique(email, reason): an active manual row means already opted out;
+      // a revoked one is re-activated (the admin is deliberately re-opting
+      // the address out after an earlier Re-allow).
+      const { data: existing, error: exErr } = await svc
+        .from("marketing_optouts")
+        .select("id, revoked_at")
+        .eq("email", email)
+        .eq("reason", "manual")
+        .maybeSingle();
+      if (exErr) throw new Error("Couldn't check the opt-out list: " + exErr.message);
+      let optoutId: string;
+      let reactivated = false;
+      if (existing && !existing.revoked_at) {
+        return json({ success: true, already_opted_out: true });
+      } else if (existing) {
+        const { error: updErr } = await svc
+          .from("marketing_optouts")
+          .update({ revoked_at: null, note, source: "manual" })
+          .eq("id", existing.id);
+        if (updErr) throw new Error("Couldn't re-activate the opt-out: " + updErr.message);
+        optoutId = existing.id as string;
+        reactivated = true;
+      } else {
+        const { data: ins, error: insOptErr } = await svc
+          .from("marketing_optouts")
+          .insert({ email, reason: "manual", source: "manual", note })
+          .select("id")
+          .single();
+        if (insOptErr) {
+          // Two admins opting out the same address at once: the loser of the
+          // unique(email, reason) race gets 23505 for an operation that in
+          // fact succeeded — report it as the success it is (adversarial
+          // review), not a raw Postgres string in a toast.
+          if ((insOptErr as { code?: string }).code === "23505") {
+            return json({ success: true, already_opted_out: true });
+          }
+          throw new Error("Couldn't record the opt-out: " + insOptErr.message);
+        }
+        if (!ins) throw new Error("Couldn't record the opt-out: no row returned");
+        optoutId = ins.id as string;
+      }
+      await auditCampaignAction("marketing_optout_add", optoutId, callerCtx.auditUserId, {
+        email,
+        reason: "manual",
+        reactivated,
+        ...(note ? { note } : {}),
+      }, "marketing_optouts");
+      return json({ success: true, reactivated });
+    }
+    // The daily-sweep cron gets a graceful 200 no-op instead of the 500
+    // below (docket I15): a scheduled caller can't act on the error, and a
+    // daily 500 in net._http_response reads like an outage when the truth
+    // is just "this environment hasn't activated Smartlead yet" (prod
+    // today). Interactive actions keep the loud 500 — a human can fix it.
+    if (action === "daily-sweep" && !smartleadConfigured()) {
+      console.warn("daily-sweep: SMARTLEAD_API_KEY not configured — nothing to sweep (skipping quietly)");
+      return json({ skipped: "SMARTLEAD_API_KEY not configured — nothing to sweep" });
+    }
     if (!smartleadConfigured()) return json({ error: "SMARTLEAD_API_KEY not configured" }, 500);
 
     if (action === "email-accounts") {
@@ -3327,6 +3588,34 @@ Deno.serve(async (req) => {
       // already be gone); the Pulse row is always removed.
       const pulseId = body.id as string;
       const slId = body.smartlead_campaign_id as number | undefined;
+      // Draft-only precondition (docket I18): the tracker only offers Delete
+      // on drafts, but this handler used to delete ANY status when called
+      // directly — killing a live send and orphaning its spawned tasks (the
+      // activities keep their rows via ON DELETE SET NULL, but nothing
+      // cancels them). Mirror the UI's rule server-side, same pattern as
+      // setCampaignStatus's state preconditions. A missing row is success
+      // (idempotent retry), not an error.
+      let deleteStatus: string | null = null;
+      if (pulseId) {
+        const { data: statusRow, error: statusErr } = await svc
+          .from("campaigns")
+          .select("id, status")
+          .eq("id", pulseId)
+          .maybeSingle();
+        if (statusErr) throw new Error("Couldn't check the campaign before deleting: " + statusErr.message);
+        if (!statusRow) return json({ success: true, already_gone: true });
+        deleteStatus = statusRow.status as string;
+        if (deleteStatus !== "draft") {
+          // Status 200 with an {error} body, NOT a 409 — supabase-js
+          // collapses any non-2xx into a generic FunctionsHttpError, so the
+          // client would toast "non-2xx status code" instead of this message
+          // (adversarial review; same convention as every other user-facing
+          // error this dispatcher returns).
+          return json({
+            error: "Only a draft campaign can be deleted. Stop it first if you want to end it — stopped campaigns stay in the record.",
+          });
+        }
+      }
       // Best-effort webhook deregistration (Phase 2, S5) — look up
       // smartlead_webhook_id before the row is gone. Never fails the
       // overall delete; a leftover webhook just posts to a URL that will
@@ -3346,7 +3635,13 @@ Deno.serve(async (req) => {
         } catch { /* best-effort */ }
       }
       if (slId) { try { await smartleadFetch(`/campaigns/${slId}`, { method: "DELETE" }); } catch { /* best-effort */ } }
-      if (pulseId) await svc.from("campaigns").delete().eq("id", pulseId);
+      if (pulseId) {
+        await svc.from("campaigns").delete().eq("id", pulseId);
+        await auditCampaignAction("campaign_delete", pulseId, callerCtx.auditUserId, {
+          status_at_delete: deleteStatus,
+          smartlead_campaign_id: slId ?? null,
+        });
+      }
       return json({ success: true });
     }
     if (action === "mark-reply-handled") {

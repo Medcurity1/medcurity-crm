@@ -6,23 +6,34 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Download, ShieldX } from "lucide-react";
+import { ArrowLeft, Download, ShieldX, UserX } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { useAddManualOptout } from "@/features/playbook/api";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
 import { downloadCsv, todayStamp } from "./report-helpers";
 import { fetchUsersById, fetchAllRows } from "./report-fetchers";
 import { PreviewNote, PREVIEW_LIMIT } from "./PreviewNote";
+
+// Same basic shape-check as CampaignRecipients.tsx's EMAIL_RE — good enough
+// to catch a typo before a round trip; the edge function normalizes and
+// validates for real server-side.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Friendly label per reason (the view's raw reason codes).
 const REASON_LABEL: Record<string, string> = {
@@ -93,6 +104,22 @@ export function DoNotEmail() {
     onError: (e) => toast.error("Couldn't re-allow: " + (e as Error).message),
   });
 
+  // Admin manual opt-out (docket I33) — suppress an address that hasn't
+  // bounced/unsubscribed from a real send but still needs to be kept out of
+  // marketing (e.g. a request that came in by phone or email). The mutation
+  // itself toasts success/error and invalidates this report's query.
+  const addOptout = useAddManualOptout();
+  const [optoutOpen, setOptoutOpen] = useState(false);
+  const [optoutEmail, setOptoutEmail] = useState("");
+  const [optoutNote, setOptoutNote] = useState("");
+  const optoutEmailValid = EMAIL_RE.test(optoutEmail.trim());
+
+  function closeOptoutDialog() {
+    setOptoutOpen(false);
+    setOptoutEmail("");
+    setOptoutNote("");
+  }
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["report", "do-not-email", category],
     queryFn: async () => {
@@ -160,6 +187,11 @@ export function DoNotEmail() {
             <Button variant="outline" size="sm" onClick={exportCsv} disabled={isLoading || !rows.length}>
               <Download className="h-4 w-4 mr-1" /> Export CSV
             </Button>
+            {isAdmin && (
+              <Button variant="outline" size="sm" onClick={() => setOptoutOpen(true)}>
+                <UserX className="h-4 w-4 mr-1" /> Opt out an email…
+              </Button>
+            )}
           </div>
         }
       />
@@ -249,6 +281,56 @@ export function DoNotEmail() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={optoutOpen} onOpenChange={(o) => { if (!o) closeOptoutDialog(); else setOptoutOpen(true); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Opt out an email</DialogTitle>
+            <DialogDescription>
+              This permanently opts the address out of marketing sends — it won't be included in any future campaign.
+              An admin can undo it later with Re-allow, same as a real unsubscribe.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="optout-email">Email</Label>
+              <Input
+                id="optout-email"
+                type="email"
+                placeholder="name@company.com"
+                value={optoutEmail}
+                onChange={(e) => setOptoutEmail(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="optout-note">Note (optional)</Label>
+              <Input
+                id="optout-note"
+                placeholder="Why this address is being opted out"
+                value={optoutNote}
+                onChange={(e) => setOptoutNote(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={closeOptoutDialog}>Cancel</Button>
+            <Button
+              disabled={!optoutEmailValid || addOptout.isPending}
+              onClick={() =>
+                addOptout.mutate(
+                  { email: optoutEmail.trim(), note: optoutNote.trim() || undefined },
+                  { onSuccess: closeOptoutDialog },
+                )
+              }
+            >
+              {addOptout.isPending ? "Opting out…" : "Opt out"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

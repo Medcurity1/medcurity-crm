@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Inbox, Plus, Upload, Ban, UserCheck, Archive, AlertTriangle } from "lucide-react";
@@ -46,6 +46,21 @@ import { useArchiveAllPendingImports } from "./api";
  * file-based tools reachable until that pile is emptied, so nothing is
  * ever stranded invisible.
  */
+
+// Tiny debounce hook — third local copy of this exact pattern (see
+// TaskRecordPicker.tsx, AddPartnerDialog.tsx; worth promoting to a shared
+// src/hooks version if a fourth consumer shows up). Lets the search Input
+// stay instantly responsive (bound to the raw keystroke-by-keystroke state)
+// while the expensive part — the query, which used to fire on every
+// keystroke (docket F12) — only re-runs ~300ms after typing settles.
+function useDebouncedValue<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
 
 interface PenRow {
   id: string;
@@ -215,6 +230,7 @@ export function ImportsPen() {
   const { data: users } = useUsers();
 
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 300);
   const [ownerFilter, setOwnerFilter] = useState<string[]>([]);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
@@ -233,7 +249,7 @@ export function ImportsPen() {
   }>(null);
 
   const { data, isLoading, isError, refetch, isFetching } = usePendingImports({
-    search, ownerFilter, page, pageSize,
+    search: debouncedSearch, ownerFilter, page, pageSize,
   });
   const { data: stats } = usePenStats();
   const promoteMutation = usePromotePending();

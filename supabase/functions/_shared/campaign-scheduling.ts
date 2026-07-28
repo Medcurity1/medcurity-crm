@@ -179,22 +179,47 @@ export function emailStepsToSmartleadSequence(steps: SchedulingStep[]): Smartlea
   });
 }
 
-// Very small, dependency-free Pacific-time offset approximation: US DST
-// (PDT, UTC-7) runs roughly early March -> early November; PST (UTC-8)
-// covers the rest. This is only used to place a TASK's due time (not a
-// legal deadline or an actual send time — Smartlead handles real email send
-// timing itself), so a month-based approximation is adequate: worst case a
-// task's due time is off by an hour during the ~1-2 week window around a
-// DST transition, and it is NEVER off by a whole calendar day.
-function ptUtcOffsetHours(monthIndex0: number): number {
-  return monthIndex0 >= 2 && monthIndex0 <= 10 ? 7 : 8; // Mar(2)..Nov(10) => PDT, else PST
+// Exact America/Los_Angeles UTC offset (docket E5 — replaces a month-bucket
+// approximation that used to live here). US DST flips at 2am local on the
+// SECOND SUNDAY of March (spring forward, PST -> PDT) and the FIRST SUNDAY
+// of November (fall back, PDT -> PST) — not on a calendar-month boundary.
+// The old `monthIndex0 >= 2 && monthIndex0 <= 10 ? 7 : 8` rule treated all
+// of March as PDT and all of November as PDT-until-the-30th, so a task's
+// due TIME (never the due DATE — this never shifted a task by a whole
+// calendar day) was off by an hour for the ~1-week gap between the true
+// transition and the nearest month boundary, twice a year.
+//
+// Returns the conventional signed UTC offset in hours (-7 for PDT, -8 for
+// PST — how people actually say "Pacific is UTC-7/-8") as of the given
+// instant. Technique: format the instant's wall-clock reading in the
+// target zone, reinterpret those same numbers as if they were UTC, and diff
+// against the real instant — the gap IS the offset. This only touches
+// Intl.DateTimeFormat, an ICU-backed JS engine built-in (not a Deno-only
+// API), so it behaves identically under Deno (the edge function) and Node
+// (vitest) — same reasoning as the rest of this file's "no environment-
+// specific APIs" rule.
+export function ptUtcOffsetHours(instant: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(instant);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? "0");
+  const wallClockReadAsUtcMs = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+  return Math.round((wallClockReadAsUtcMs - instant.getTime()) / 3_600_000);
 }
 
 /**
  * The ISO timestamp for a task due on `relativeOffsetDays` days after
  * `firstSendISO`'s calendar date, at `sendWindowStart` (default "09:00")
- * America/Los_Angeles clock time (see the DST-approximation note above).
- * The resulting calendar date is then snapped FORWARD to the next allowed
+ * America/Los_Angeles clock time (exact DST-aware conversion — see
+ * ptUtcOffsetHours above). The resulting calendar date is then snapped
+ * FORWARD to the next allowed
  * `sendDays` weekday (default Mon-Fri) — a non-email step (CALL/LINKEDIN/
  * EMAIL_HYBRID) must never get a task due on a day nobody's expected to be
  * working the campaign (e.g. a Day-12 LinkedIn task from a Tuesday launch
@@ -221,18 +246,37 @@ export function taskDueAt(
   const hours = Number.isFinite(hh) ? hh : 9;
   const minutes = Number.isFinite(mm) ? mm : 0;
 
-  const offset = ptUtcOffsetHours(target.getUTCMonth());
-  // Date.UTC correctly rolls over into the next UTC calendar day when
-  // hours+offset >= 24 (e.g. a 9pm PT window in winter is 05:00 UTC the
-  // next day) — that rollover is exactly right, not a bug to guard against.
-  const utcMs = Date.UTC(
+  // Resolve "target's calendar date at hours:minutes America/Los_Angeles
+  // clock time" to a UTC instant. The exact offset to use depends on the
+  // instant itself (chicken-and-egg right around a DST transition), so this
+  // is the standard guess-then-refine: treat the wall-clock numbers as if
+  // they were already UTC to get a same-day proxy instant, look up the
+  // exact PT offset AS OF that proxy, apply it, then re-check the offset at
+  // the corrected instant in case the proxy landed on the wrong side of a
+  // transition (only possible on the literal transition day itself — e.g.
+  // a 9am request on spring-forward day naively proxies to a PRE-transition
+  // instant, which would resolve PST, when 9am local that day is actually
+  // already PDT). A third pass is never needed: this zone only has two
+  // possible offsets, so the second check either confirms the first guess
+  // or flips it once, and re-deriving with that confirmed offset is final.
+  const naiveMs = Date.UTC(
     target.getUTCFullYear(),
     target.getUTCMonth(),
     target.getUTCDate(),
-    hours + offset,
+    hours,
     minutes,
     0,
     0,
   );
+  const offsetGuess = ptUtcOffsetHours(new Date(naiveMs));
+  let utcMs = naiveMs - offsetGuess * 3_600_000;
+  const offsetConfirmed = ptUtcOffsetHours(new Date(utcMs));
+  if (offsetConfirmed !== offsetGuess) {
+    utcMs = naiveMs - offsetConfirmed * 3_600_000;
+  }
+  // Date.UTC (inside the two computations above) correctly rolls over into
+  // the next UTC calendar day when hours-offset lands outside 0-23 (e.g. a
+  // 9pm PT window in winter is 05:00 UTC the next day) — that rollover is
+  // exactly right, not a bug to guard against.
   return new Date(utcMs).toISOString();
 }

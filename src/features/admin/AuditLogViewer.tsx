@@ -42,6 +42,8 @@ const ENTITY_OPTIONS = [
   { value: "price_book_entries", label: "Price Book Entries" },
   { value: "automation_rules", label: "Automation Rules" },
   { value: "user_profiles", label: "Users" },
+  { value: "campaigns", label: "Campaigns" },
+  { value: "marketing_optouts", label: "Marketing Opt-outs" },
 ] as const;
 
 const ACTION_OPTIONS = [
@@ -72,6 +74,8 @@ const ENTITY_LABELS: Record<string, string> = {
   user_profiles: "User",
   automation_rules: "Automation Rule",
   email_templates: "Email Template",
+  campaigns: "Campaign",
+  marketing_optouts: "Marketing Opt-out",
 };
 
 const ENTITY_ROUTES: Record<string, string> = {
