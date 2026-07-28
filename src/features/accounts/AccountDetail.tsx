@@ -369,13 +369,16 @@ export function AccountDetail() {
           </CardHeader>
           <CardContent className="px-4 pb-3">
             {account.website ? (
+              // truncate must sit on a text span INSIDE a width-capped flex
+              // anchor — on the inline-flex anchor itself the element sizes
+              // to its content and long URLs spill out of the card.
               <a
                 href={normalizeUrl(account.website)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-sm text-primary hover:underline inline-flex items-center gap-1 truncate"
+                className="text-sm text-primary hover:underline flex items-center gap-1 max-w-full"
               >
-                {account.website.replace(/^https?:\/\//, "")}
+                <span className="truncate">{account.website.replace(/^https?:\/\//, "")}</span>
                 <ExternalLink className="h-3 w-3 shrink-0" />
               </a>
             ) : (

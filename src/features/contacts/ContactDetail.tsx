@@ -342,13 +342,17 @@ export function ContactDetail() {
                 {[contact.email, contact.email2, contact.email3]
                   .filter((e): e is string => !!e)
                   .map((e) => (
-                    <span key={e} className="inline-flex items-center gap-1.5 min-w-0">
+                    <span key={e} className="flex items-center gap-1.5 min-w-0">
+                      {/* truncate lives on a text span inside the min-w-0 flex
+                          anchor — on the anchor itself, long addresses size the
+                          element to content and spill out of the card (same
+                          fix as the account Website card). */}
                       <a
                         href={`mailto:${e}`}
-                        className="text-sm text-primary hover:underline inline-flex items-center gap-1 truncate"
+                        className="text-sm text-primary hover:underline flex items-center gap-1 min-w-0"
                       >
                         <Mail className="h-3 w-3 shrink-0" />
-                        {e}
+                        <span className="truncate">{e}</span>
                       </a>
                       <CopyButton value={e} />
                     </span>
