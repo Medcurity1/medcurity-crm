@@ -185,20 +185,27 @@ export function CampaignDetailSheet({
               Smartlead-linked campaigns — legacy/migrated rows have neither. */}
           {c.smartlead_campaign_id != null && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+              {/* The stored webhook id can't prove the webhook still exists on
+                  Smartlead's side, so the reconnect action is always offered —
+                  it adopts the live webhook if one exists (no duplicate). */}
               {c.smartlead_webhook_id != null ? (
                 <span className="text-muted-foreground">Live updates: on</span>
               ) : (
-                <>
-                  <span className="text-amber-600">Live updates: not connected</span>
-                  <Button
-                    size="sm" variant="outline" className="h-6 px-2 text-xs"
-                    disabled={repairWebhook.isPending}
-                    onClick={() => repairWebhook.mutate(c.id)}
-                  >
-                    {repairWebhook.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Repair live updates"}
-                  </Button>
-                </>
+                <span className="text-amber-600">Live updates: not connected</span>
               )}
+              <Button
+                size="sm" variant="outline" className="h-6 px-2 text-xs"
+                disabled={repairWebhook.isPending}
+                onClick={() => repairWebhook.mutate(c.id)}
+              >
+                {repairWebhook.isPending ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : c.smartlead_webhook_id != null ? (
+                  "Reconnect live updates"
+                ) : (
+                  "Repair live updates"
+                )}
+              </Button>
               {Number(c.metrics?.sent) > 0 && (
                 <Button
                   size="sm" variant="ai" className="h-6 px-2 text-xs"
