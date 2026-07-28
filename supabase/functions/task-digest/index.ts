@@ -94,16 +94,17 @@ function dueLabel(iso: string | null): string {
 }
 
 function taskLink(t: TaskRow): string {
+  // Leads are retired (2026-07-20): /leads/{id} only works for admins via
+  // the forwarder — sales users bounce. A lead-only task links to the
+  // owner's task list (works for every role) instead of the dead record.
   const base = t.opportunity_id
     ? `/opportunities/${t.opportunity_id}`
     : t.contact_id
       ? `/contacts/${t.contact_id}`
       : t.account_id
         ? `/accounts/${t.account_id}`
-        : t.lead_id
-          ? `/leads/${t.lead_id}`
-          : `/activities?type=task&owner=me`;
-  const hasRecord = t.opportunity_id || t.contact_id || t.account_id || t.lead_id;
+        : `/activities?type=task&owner=me`;
+  const hasRecord = t.opportunity_id || t.contact_id || t.account_id;
   const link = hasRecord ? `${base}?open_task=${t.id}` : `${base}&open_task=${t.id}`;
   return `${APP_BASE}${link}`;
 }

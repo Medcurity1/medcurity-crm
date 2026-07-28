@@ -101,12 +101,12 @@ function buildContextLines(task: TaskRow): string {
     );
   }
   if (task.lead) {
+    // Plain text, no link: leads are retired (2026-07-20) and /leads/{id}
+    // bounces every non-admin who clicks it from their calendar.
     const name =
       [task.lead.first_name, task.lead.last_name].filter(Boolean).join(" ") || "(unnamed)";
     const co = task.lead.company ? ` — ${escapeHtml(task.lead.company)}` : "";
-    lines.push(
-      `<strong>Lead:</strong> <a href="${APP_BASE}/leads/${task.lead.id}">${escapeHtml(name)}${co}</a>`
-    );
+    lines.push(`<strong>Lead:</strong> ${escapeHtml(name)}${co}`);
   }
   return lines.length ? `<p>${lines.join("<br>")}</p>` : "";
 }

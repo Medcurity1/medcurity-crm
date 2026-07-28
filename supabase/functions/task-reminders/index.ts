@@ -137,9 +137,12 @@ function formatDuePacific(iso: string | null): string | null {
   });
 }
 
-/** The records this task is about, with display names + CRM links. */
-function relatedRecords(task: ActivityRow): Array<{ label: string; name: string; url: string }> {
-  const out: Array<{ label: string; name: string; url: string }> = [];
+/** The records this task is about, with display names + CRM links. A
+ *  missing url renders as plain text — leads are retired (2026-07-20), so
+ *  their name is still useful context but /leads/{id} would bounce every
+ *  non-admin who clicked it. */
+function relatedRecords(task: ActivityRow): Array<{ label: string; name: string; url?: string }> {
+  const out: Array<{ label: string; name: string; url?: string }> = [];
   if (task.account?.name) {
     out.push({ label: "Account", name: task.account.name, url: `${APP_BASE}/accounts/${task.account.id}` });
   }
@@ -153,7 +156,7 @@ function relatedRecords(task: ActivityRow): Array<{ label: string; name: string;
   if (task.lead) {
     const person = [task.lead.first_name, task.lead.last_name].filter(Boolean).join(" ");
     const name = person && task.lead.company ? `${person} (${task.lead.company})` : person || task.lead.company || "";
-    if (name) out.push({ label: "Lead", name, url: `${APP_BASE}/leads/${task.lead.id}` });
+    if (name) out.push({ label: "Lead", name });
   }
   return out;
 }
@@ -172,7 +175,11 @@ async function sendEmailReminder(
     .map(
       (r) =>
         `<tr><td style="padding:3px 14px 3px 0;color:#777;font-size:13px;vertical-align:top">${r.label}</td>` +
-        `<td style="padding:3px 0;font-size:13px"><a href="${r.url}" style="color:#127ebf;text-decoration:none;font-weight:bold">${escapeHtml(r.name)}</a></td></tr>`,
+        `<td style="padding:3px 0;font-size:13px">${
+          r.url
+            ? `<a href="${r.url}" style="color:#127ebf;text-decoration:none;font-weight:bold">${escapeHtml(r.name)}</a>`
+            : `<span style="font-weight:bold">${escapeHtml(r.name)}</span>`
+        }</td></tr>`,
     )
     .join("");
 
@@ -282,7 +289,9 @@ async function processReminder(
 
   // Link points at the record the task is attached to, with an open_task
   // query param so the frontend can pop the EditTaskDialog on arrival.
-  // Falls back to the "my tasks" list view when the task has no record.
+  // Falls back to the "my tasks" list view when the task has no record —
+  // including lead-only tasks: leads are retired (2026-07-20) and
+  // /leads/{id} bounces every non-admin.
   const base =
     task.opportunity_id
       ? `/opportunities/${task.opportunity_id}`
@@ -290,11 +299,9 @@ async function processReminder(
         ? `/contacts/${task.contact_id}`
         : task.account_id
           ? `/accounts/${task.account_id}`
-          : task.lead_id
-            ? `/leads/${task.lead_id}`
-            : `/activities?type=task&owner=me`;
+          : `/activities?type=task&owner=me`;
   const hasRecord =
-    task.opportunity_id || task.contact_id || task.account_id || task.lead_id;
+    task.opportunity_id || task.contact_id || task.account_id;
   const link = hasRecord
     ? `${base}?open_task=${task.id}`
     : `${base}&open_task=${task.id}`;
