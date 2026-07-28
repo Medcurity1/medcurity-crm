@@ -15,8 +15,9 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/EmptyState";
 import { cn } from "@/lib/utils";
 import { formatName, formatRelativeDate, formatDateTime } from "@/lib/formatters";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { LoadError } from "./LoadError";
-import { useCampaignReplies, useMarkReplyHandled, type CampaignReplyRow } from "./api";
+import { useCampaignReplies, useMarkReplyHandled, useLogReplyCall, type CampaignReplyRow } from "./api";
 import { extractReplyBody, isPositiveReplyCategory } from "./reply-extract";
 
 function replyWho(row: CampaignReplyRow): string {
@@ -43,16 +44,54 @@ export function isReplyHandled(row: CampaignReplyRow): boolean {
   return handledInfo(row) !== null;
 }
 
+/** Best-effort subject for the mailto Reply button — the raw webhook body
+ *  sometimes carries the thread's subject; the campaign name is the honest
+ *  fallback. */
+function replySubject(row: CampaignReplyRow): string {
+  const p = (row.payload ?? {}) as Record<string, unknown>;
+  const data = (typeof p.data === "object" && p.data !== null) ? p.data as Record<string, unknown> : {};
+  for (const c of [p.subject, p.email_subject, data.subject, data.email_subject]) {
+    if (typeof c === "string" && c.trim()) {
+      // CR/LF stripped BEFORE encoding (a percent-encoded CRLF inside a
+      // mailto header value is exactly what RFC 6068 warns about) and
+      // capped — an unbounded mailto URL gets silently dropped by OS URL
+      // handlers, making the button do nothing.
+      const s = c.replace(/[\r\n]+/g, " ").trim().slice(0, 200);
+      if (!s) continue;
+      return /^re:/i.test(s) ? s : `Re: ${s}`;
+    }
+  }
+  return `Re: ${row.campaign?.name ?? "your email"}`;
+}
+
+/** The mailto recipient must be a plausible bare address — campaign_events
+ *  .email is the raw webhook value with no format validation, and an
+ *  unencoded "a@b.com?bcc=attacker@evil.com&" would inject recipients into
+ *  the rep's draft (adversarial review; same encode-the-recipient rule as
+ *  ActivityDetail's mailto builders). */
+function mailtoRecipient(email: string | null): string | null {
+  if (!email) return null;
+  const e = email.trim();
+  if (!/^[^\s<>,;:"()[\]\\?&=]+@[^\s<>,;:"()[\]\\?&=]+\.[^\s<>,;:"()[\]\\?&=]+$/.test(e)) return null;
+  return encodeURIComponent(e);
+}
+
 function ReplyRow({
   row,
   handled,
   onMarkHandled,
   marking,
+  onLogCall,
+  loggingCall,
+  callLogged,
 }: {
   row: CampaignReplyRow;
   handled: HandledInfo | null;
   onMarkHandled: () => void;
   marking: boolean;
+  onLogCall: () => void;
+  loggingCall: boolean;
+  callLogged: boolean;
 }) {
   const replyText = extractReplyBody(row.payload);
   const when = row.occurred_at ?? row.created_at;
@@ -85,7 +124,43 @@ function ReplyRow({
       <p className="text-xs text-muted-foreground italic">
         {replyText || "(reply text unavailable)"}
       </p>
-      <div className="flex items-center gap-3 pt-0.5">
+      {/* Actions (outside-review I28): answer, log the call, or open a deal
+          right here — the point of a reply is the next step, not a detour
+          through Outlook and three other tabs. */}
+      <div className="flex items-center gap-3 pt-0.5 flex-wrap">
+        {mailtoRecipient(row.email) && (
+          <a
+            href={`mailto:${mailtoRecipient(row.email)}?subject=${encodeURIComponent(replySubject(row))}`}
+            className="text-xs text-primary hover:underline"
+            title="Opens a reply in your email app"
+          >
+            Reply by email
+          </a>
+        )}
+        {row.enrollment?.contact_id && (
+          callLogged ? (
+            <span className="text-xs text-muted-foreground">Call logged</span>
+          ) : (
+            <button
+              type="button"
+              className="text-xs text-primary hover:underline disabled:opacity-50"
+              disabled={loggingCall}
+              onClick={onLogCall}
+              title="Records a call on the contact's timeline"
+            >
+              {loggingCall ? "Logging…" : "Log a call"}
+            </button>
+          )
+        )}
+        {row.enrollment?.account_id && (
+          <Link
+            to={`/opportunities/new?account_id=${row.enrollment.account_id}`}
+            className="text-xs text-primary hover:underline"
+            title="Start a new deal on this account"
+          >
+            New deal
+          </Link>
+        )}
         {row.enrollment?.contact_id && (
           <Link to={`/contacts/${row.enrollment.contact_id}`} className="text-xs text-primary hover:underline">
             Open contact
@@ -113,7 +188,26 @@ export function CampaignReplies() {
   const [handledOpen, setHandledOpen] = useState(false);
   const { data: replies, isLoading, isError, refetch } = useCampaignReplies();
   const markHandled = useMarkReplyHandled();
+  const logCall = useLogReplyCall();
+  const { profile } = useAuth();
   const count = replies?.length ?? 0;
+  // Rows whose call has already been logged this session — the button
+  // becomes a static "Call logged" so a second click can't write a second
+  // call row (adversarial review).
+  const [calledRowIds, setCalledRowIds] = useState<Set<string>>(new Set());
+
+  function logCallFor(row: CampaignReplyRow) {
+    if (!row.enrollment?.contact_id || calledRowIds.has(row.id)) return;
+    logCall.mutate(
+      {
+        contact_id: row.enrollment.contact_id,
+        account_id: row.enrollment.account_id ?? null,
+        owner_user_id: profile?.id ?? null,
+        campaignName: row.campaign?.name ?? null,
+      },
+      { onSuccess: () => setCalledRowIds((prev) => new Set(prev).add(row.id)) },
+    );
+  }
 
   const { active, handled } = useMemo(() => {
     const active: CampaignReplyRow[] = [];
@@ -161,6 +255,9 @@ export function CampaignReplies() {
                     handled={null}
                     marking={markHandled.isPending && markHandled.variables === row.id}
                     onMarkHandled={() => markHandled.mutate(row.id)}
+                    onLogCall={() => logCallFor(row)}
+                    loggingCall={logCall.isPending && logCall.variables?.contact_id === row.enrollment?.contact_id}
+                    callLogged={calledRowIds.has(row.id)}
                   />
                 ))}
               </div>
@@ -186,6 +283,9 @@ export function CampaignReplies() {
                         handled={handledInfo(row)}
                         marking={false}
                         onMarkHandled={() => {}}
+                        onLogCall={() => logCallFor(row)}
+                        loggingCall={logCall.isPending && logCall.variables?.contact_id === row.enrollment?.contact_id}
+                        callLogged={calledRowIds.has(row.id)}
                       />
                     ))}
                   </div>

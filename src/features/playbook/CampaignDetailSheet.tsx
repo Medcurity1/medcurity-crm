@@ -26,13 +26,14 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { formatName, formatDate, formatDateOnly, formatDateTime, formatRelativeDate } from "@/lib/formatters";
+import { formatName, formatDate, formatDateOnly, formatDateTime, formatRelativeDate, formatCurrency } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
+import { LoadError } from "./LoadError";
 import { SequenceTimeline } from "./SequenceTimeline";
 import { STATUS_META, originHint, CampaignStatusControls, type CampaignRow } from "./CampaignCard";
 import {
   smartleadUrl, useCampaignEnrollments, useCampaignEvents, useCampaignEventStats, useSetEnrollmentStatus,
-  useSetCampaignStatus,
+  useSetCampaignStatus, useCampaignTouchStats, useCampaignInfluence,
   type CampaignEnrollmentRow, type CampaignEventRow, type EnrollmentStatusAction,
 } from "./api";
 
@@ -97,6 +98,10 @@ export function CampaignDetailSheet({
   const { data: enrollments, isLoading: enrollmentsLoading } = useCampaignEnrollments(campaignId);
   const { data: events, isLoading: eventsLoading } = useCampaignEvents(campaignId);
   const { data: eventStats } = useCampaignEventStats(campaignId);
+  const touchStatsQ = useCampaignTouchStats(campaignId);
+  const touchStats = touchStatsQ.data;
+  const influenceQ = useCampaignInfluence(campaignId);
+  const influence = influenceQ.data;
   const setEnrollment = useSetEnrollmentStatus();
   const [search, setSearch] = useState("");
   const [stopTarget, setStopTarget] = useState<CampaignEnrollmentRow | null>(null);
@@ -202,18 +207,107 @@ export function CampaignDetailSheet({
           )}
 
           {/* Engagement funnel — a compact, honest tally of our own event
-              log (campaign_events), NOT a per-step breakdown (Smartlead
-              doesn't reliably tell us which sequence step an event belongs
-              to — see extractStepNumber's doc comment). Separate from the
-              c.metrics numbers in the header above, which are Smartlead's
-              own server-computed rates — the two are different sources and
-              can legitimately disagree slightly. */}
+              log (campaign_events). The per-email breakdown below covers
+              the subset of events that NAME their email number; this line
+              is the everything-included total. Separate from the c.metrics
+              numbers in the header above, which are Smartlead's own
+              server-computed rates — different sources, can legitimately
+              disagree slightly. */}
           {eventStats && (eventStats.sent + eventStats.opened + eventStats.clicked + eventStats.replied > 0) && (
             <div className="space-y-1">
               <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Engagement</h4>
               <p className="text-xs text-muted-foreground">
                 Events seen: {eventStats.sent} sent · {eventStats.opened} opens · {eventStats.clicked} clicks · {eventStats.replied} replies
               </p>
+            </div>
+          )}
+
+          {/* Per-email performance (outside-review I29) — which email in the
+              sequence earns its send. Only events that name their email #
+              can be attributed; the footnote keeps the table honest about
+              the rest instead of silently miscounting. */}
+          {touchStatsQ.isError && (
+            <LoadError what="per-email performance" onRetry={() => touchStatsQ.refetch()} />
+          )}
+          {touchStats && Object.keys(touchStats.bySeq).length > 0 && (
+            <div className="space-y-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Per-email performance</h4>
+              <div className="rounded-md border overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Email</TableHead>
+                      <TableHead className="text-right">Sent</TableHead>
+                      <TableHead className="text-right">Opens</TableHead>
+                      <TableHead className="text-right">Clicks</TableHead>
+                      <TableHead className="text-right">Replies</TableHead>
+                      <TableHead className="text-right">Bounces</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {Object.entries(touchStats.bySeq)
+                      .sort(([a], [b]) => Number(a) - Number(b))
+                      .map(([seq, t]) => (
+                        <TableRow key={seq}>
+                          <TableCell className="text-xs font-medium">Email {seq}</TableCell>
+                          <TableCell className="text-xs text-right">{t.sent}</TableCell>
+                          <TableCell className="text-xs text-right">{t.opened}</TableCell>
+                          <TableCell className="text-xs text-right">{t.clicked}</TableCell>
+                          <TableCell className={"text-xs text-right" + (t.replied > 0 ? " font-medium" : "")}>{t.replied}</TableCell>
+                          <TableCell className="text-xs text-right">{t.bounced}</TableCell>
+                        </TableRow>
+                      ))}
+                  </TableBody>
+                </Table>
+              </div>
+              {(touchStats.unattributed > 0 || touchStats.capped) && (
+                <p className="text-[11px] text-muted-foreground">
+                  {[
+                    touchStats.unattributed > 0
+                      ? `${touchStats.unattributed} event${touchStats.unattributed === 1 ? "" : "s"} didn't say which email they belonged to and aren't counted above.`
+                      : null,
+                    touchStats.capped ? "Counts stopped at the first 10,000 events — treat them as a floor." : null,
+                  ].filter(Boolean).join(" ")}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Influence (outside-review I30) — deals opened on enrolled
+              accounts AFTER enrollment. Deliberately labeled as "opened
+              after", not "generated by": correlation is what this data can
+              honestly support. */}
+          {influenceQ.isError && (
+            <LoadError what="campaign influence" onRetry={() => influenceQ.refetch()} />
+          )}
+          {influence && influence.deals.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Influence</h4>
+              <p className="text-xs text-muted-foreground">
+                {influence.deals.length} {influence.deals.length === 1 ? "deal" : "deals"} opened by the team after people were enrolled (auto-created renewals excluded)
+                {influence.wonTotal > 0 ? ` · ${formatCurrency(influence.wonTotal)} won` : ""}
+                {influence.openTotal > 0 ? ` · ${formatCurrency(influence.openTotal)} in open pipeline` : ""}
+              </p>
+              {influence.capped && (
+                <p className="text-[11px] text-muted-foreground">
+                  Deal totals stopped at a read cap — treat the dollars as a floor, not the full picture.
+                </p>
+              )}
+              <div className="space-y-1">
+                {influence.deals.slice(0, 5).map((d) => (
+                  <p key={d.id} className="text-xs">
+                    <Link to={`/opportunities/${d.id}`} className="text-primary hover:underline">{d.name}</Link>
+                    <span className="text-muted-foreground">
+                      {" "}· {d.stage === "closed_won" ? "won" : d.stage === "closed_lost" ? "lost" : "open"}
+                      {typeof d.amount === "number" ? ` · ${formatCurrency(d.amount)}` : ""}
+                      {" "}· {formatRelativeDate(d.created_at)}
+                    </span>
+                  </p>
+                ))}
+                {influence.deals.length > 5 && (
+                  <p className="text-[11px] text-muted-foreground">…and {influence.deals.length - 5} more on these accounts.</p>
+                )}
+              </div>
             </div>
           )}
 

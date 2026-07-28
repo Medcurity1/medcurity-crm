@@ -1153,7 +1153,7 @@ export interface CampaignReplyRow {
   occurred_at: string | null;
   created_at: string;
   campaign: { id: string; name: string } | null;
-  enrollment: { first_name: string | null; last_name: string | null; contact_id: string | null; reply_category: string | null } | null;
+  enrollment: { first_name: string | null; last_name: string | null; contact_id: string | null; account_id: string | null; reply_category: string | null } | null;
 }
 
 /** Recent reply campaign_events, newest first, last 30 days, capped at 50 —
@@ -1172,7 +1172,7 @@ export function useCampaignReplies() {
         .from("campaign_events")
         .select(
           "id, campaign_id, enrollment_id, email, payload, occurred_at, created_at, " +
-            "campaign:campaigns(id, name), enrollment:campaign_enrollments(first_name, last_name, contact_id, reply_category)",
+            "campaign:campaigns(id, name), enrollment:campaign_enrollments(first_name, last_name, contact_id, account_id, reply_category)",
         )
         .in("event_type", REPLY_EVENT_TYPES)
         .gte("created_at", cutoff.toISOString())
@@ -1437,6 +1437,203 @@ export function useCampaignEvents(campaignId: string | null) {
   });
 }
 
+/**
+ * Log a completed call activity from a reply card (outside-review I28 —
+ * "act on a reply without leaving Pulse"). One click = one call record on
+ * the contact's timeline, same activities shape ActivityForm writes.
+ */
+export function useLogReplyCall() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: {
+      contact_id: string;
+      account_id: string | null;
+      owner_user_id: string | null;
+      campaignName: string | null;
+    }) => {
+      const { error } = await supabase.from("activities").insert({
+        activity_type: "call",
+        subject: `Call after campaign reply${p.campaignName ? ` — ${p.campaignName}` : ""}`,
+        contact_id: p.contact_id,
+        account_id: p.account_id,
+        owner_user_id: p.owner_user_id,
+        activity_date: new Date().toISOString(),
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["activities"] });
+      toast.success("Call logged on the contact's timeline.");
+    },
+    onError: (e) => toast.error("Couldn't log the call: " + (e as Error).message),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Per-touch performance + revenue influence (outside-review I29 / I30)
+// ---------------------------------------------------------------------------
+
+export interface TouchStats {
+  /** Sequence email number -> tallies. */
+  bySeq: Record<number, { sent: number; opened: number; clicked: number; replied: number; bounced: number }>;
+  /** Events whose payload never named an email number. */
+  unattributed: number;
+  totalEvents: number;
+  /** True when the 10k-event read cap was hit — tallies are a floor. */
+  capped: boolean;
+}
+
+/**
+ * Per-email-number tallies for one campaign (I29 — "is email 6 earning its
+ * send?"). Reads ONLY event_type + the handful of payload seq-number
+ * variants via PostgREST json-arrow selection, so no reply bodies or full
+ * webhook payloads ever ship to the browser. Smartlead doesn't tag every
+ * event with its email number — the unattributed bucket keeps the table
+ * honest instead of silently miscounting.
+ */
+export function useCampaignTouchStats(campaignId: string | null) {
+  return useQuery({
+    queryKey: ["playbook", "campaign-touch-stats", campaignId],
+    enabled: !!campaignId,
+    queryFn: async (): Promise<TouchStats> => {
+      const PAGE = 1000;
+      const MAX_PAGES = 10;
+      type Row = { event_type: string } & Record<string, unknown>;
+      const rows: Row[] = [];
+      let capped = false;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const { data, error } = await supabase
+          .from("campaign_events")
+          .select("id, event_type, s1:payload->seq_number, s2:payload->sequence_number, s3:payload->step_number, s4:payload->email_seq_number, d1:payload->data->seq_number, d2:payload->data->sequence_number, d3:payload->data->step_number")
+          .eq("campaign_id", campaignId as string)
+          // Index-aligned (idx_campaign_events_campaign_created) with id as
+          // the total-order tiebreaker so range paging stays stable.
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(page * PAGE, (page + 1) * PAGE - 1);
+        if (error) throw error;
+        const batch = (data ?? []) as unknown as Row[];
+        rows.push(...batch);
+        if (batch.length < PAGE) break;
+        if (page === MAX_PAGES - 1) capped = true;
+      }
+      const bySeq: TouchStats["bySeq"] = {};
+      let unattributed = 0;
+      for (const r of rows) {
+        let seq: number | null = null;
+        for (const k of ["s1", "s2", "s3", "s4", "d1", "d2", "d3"]) {
+          const v = r[k];
+          if (v == null) continue;
+          const n = Number(v);
+          if (Number.isFinite(n) && n > 0) { seq = Math.trunc(n); break; }
+        }
+        const bucket = touchEventBucket(r.event_type);
+        if (!bucket) continue;
+        if (seq == null) { unattributed++; continue; }
+        if (!bySeq[seq]) bySeq[seq] = { sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 };
+        bySeq[seq][bucket]++;
+      }
+      return { bySeq, unattributed, totalEvents: rows.length, capped };
+    },
+  });
+}
+
+export interface CampaignInfluence {
+  /** Opportunities opened on an enrolled account AFTER that account's first
+   *  enrollment in this campaign — influence, not proof of causation. */
+  deals: { id: string; name: string; amount: number | null; stage: string; created_at: string }[];
+  wonTotal: number;
+  openTotal: number;
+  capped: boolean;
+}
+
+/**
+ * "Did this campaign make money?" (I30) — joins the campaign's enrolled
+ * accounts to opportunities created after enrollment. Correlation by
+ * design (the label in the sheet says "opened after enrollment"), which is
+ * the honest version of attribution this data can support.
+ */
+export function useCampaignInfluence(campaignId: string | null) {
+  return useQuery({
+    queryKey: ["playbook", "campaign-influence", campaignId],
+    enabled: !!campaignId,
+    queryFn: async (): Promise<CampaignInfluence> => {
+      const PAGE = 1000;
+      // 1. Earliest enrollment per account.
+      const minEnrolled = new Map<string, number>();
+      // Pages to exhaustion (same convention as fetchSuppressionForEmails):
+      // a dropped enrollment page would silently drop its accounts' deals
+      // from the money totals.
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from("campaign_enrollments")
+          .select("account_id, enrolled_at")
+          .eq("campaign_id", campaignId as string)
+          .not("account_id", "is", null)
+          .order("id", { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const batch = (data ?? []) as { account_id: string; enrolled_at: string }[];
+        for (const e of batch) {
+          const t = new Date(e.enrolled_at).getTime();
+          if (Number.isNaN(t)) continue;
+          const prev = minEnrolled.get(e.account_id);
+          if (prev == null || t < prev) minEnrolled.set(e.account_id, t);
+        }
+        if (batch.length < PAGE) break;
+      }
+      if (!minEnrolled.size) return { deals: [], wonTotal: 0, openTotal: 0, capped: false };
+
+      // 2. Opportunities on those accounts, created after enrollment.
+      const accountIds = [...minEnrolled.keys()];
+      const BATCH = 200;
+      const deals: CampaignInfluence["deals"] = [];
+      let capped = false;
+      for (let i = 0; i < accountIds.length; i += BATCH) {
+        const ids = accountIds.slice(i, i + BATCH);
+        for (let page = 0; page < 10; page++) {
+          const { data, error } = await supabase
+            .from("opportunities")
+            .select("id, name, amount, stage, created_at, account_id")
+            .in("account_id", ids)
+            .is("archived_at", null)
+            // The renewal generator opens full-value renewal opps nightly on
+            // customer accounts — counting those would let a campaign claim
+            // credit for the renewal book of every customer it touched
+            // (adversarial review). Human-opened deals only.
+            .eq("created_by_automation", false)
+            .order("id", { ascending: true })
+            .range(page * PAGE, (page + 1) * PAGE - 1);
+          if (error) throw error;
+          const batch = (data ?? []) as { id: string; name: string; amount: number | null; stage: string; created_at: string; account_id: string }[];
+          for (const o of batch) {
+            const enrolledAt = minEnrolled.get(o.account_id);
+            if (enrolledAt == null) continue;
+            const created = new Date(o.created_at).getTime();
+            if (Number.isNaN(created) || created <= enrolledAt) continue;
+            // numeric columns can arrive as strings through PostgREST —
+            // coerce once here so totals and the sheet agree (repo-wide
+            // Number(amount) convention).
+            const amt = Number(o.amount ?? 0);
+            deals.push({ id: o.id, name: o.name, amount: Number.isFinite(amt) ? amt : null, stage: o.stage, created_at: o.created_at });
+          }
+          if (batch.length < PAGE) break;
+          if (page === 9) capped = true;
+        }
+      }
+      deals.sort((a, b) => b.created_at.localeCompare(a.created_at));
+      let wonTotal = 0;
+      let openTotal = 0;
+      for (const d of deals) {
+        const amt = typeof d.amount === "number" && Number.isFinite(d.amount) ? d.amount : 0;
+        if (d.stage === "closed_won") wonTotal += amt;
+        else if (d.stage !== "closed_lost") openTotal += amt;
+      }
+      return { deals, wonTotal, openTotal, capped };
+    },
+  });
+}
+
 export interface CampaignEventStats {
   sent: number;
   opened: number;
@@ -1450,6 +1647,17 @@ export interface CampaignEventStats {
  *  one (EMAIL_REPLIED) — see REPLY_EVENT_TYPES above — so this matches on
  *  substring the same defensive way _shared/webhook-normalize.ts's
  *  mapEventType does, rather than an exact-string lookup table. */
+/** The per-email table's classifier: eventTypeBucket plus the bounce case
+ *  (the Engagement funnel deliberately excludes bounces; the per-email
+ *  table includes them). One shared matcher underneath so the two tables
+ *  on the detail sheet can never disagree about what counts as sent/open/
+ *  click/reply (adversarial review — an inline second regex chain dropped
+ *  EMAIL_SEND-shaped types the funnel counted). */
+function touchEventBucket(eventType: string): "sent" | "opened" | "clicked" | "replied" | "bounced" | null {
+  if (eventType.toLowerCase().includes("bounc")) return "bounced";
+  return eventTypeBucket(eventType);
+}
+
 function eventTypeBucket(eventType: string): keyof CampaignEventStats | null {
   const t = eventType.toLowerCase();
   if (t.includes("repl")) return "replied";
