@@ -62,7 +62,6 @@ _(none — everything staged today promoted to PROD 2026-07-27 in 81bec7d)_
 
 | # | Item | Detail | Verify | Checked |
 |---|---|---|---|---|
-| E1 | CSV single "Name" column → first_name only | HEADER_MAP maps `name` → `first_name`, so "Jane Smith" lands entirely as the first name. Add a space-split or a mapping warning. | `grep -n 'name: "first_name"' src/features/playbook/csv.ts` | 2026-07-27 |
 | E2 | Campaign event stats ship every row | useCampaignEventStats pulls all campaign_events to tally 4 buckets. Lazy + index-supported so cheap today; convert to a count/group-by RPC before high volume. | `grep -n useCampaignEventStats src/features/playbook/api.ts` | 2026-07-27 |
 | E3 | reconcileCampaignLeads sequential writes | Single-row writes, capped at 25 campaigns/run. Batch via chunked upsert before volume grows. | `grep -n reconcileCampaignLeads supabase/functions/playbook-smartlead/index.ts` | 2026-07-27 |
 | E4 | Double-enroll race | Two concurrent launches can enroll the same email. Needs an advisory lock — a unique index is ruled out because enrollment_overrides deliberately allows double-enroll. | `grep -n enrollment_overrides supabase/functions/playbook-smartlead/index.ts` | 2026-07-27 |

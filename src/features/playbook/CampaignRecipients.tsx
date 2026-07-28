@@ -35,7 +35,7 @@ import {
   type SuppressionEntry,
 } from "./suppression";
 
-const FIELD_OPTIONS: RecipientField[] = ["email", "first_name", "last_name", "company_name", "skip"];
+const FIELD_OPTIONS: RecipientField[] = ["email", "first_name", "last_name", "full_name", "company_name", "skip"];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function CampaignRecipients({
