@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nexus — Look Options</title>
+<style>
+  :root{
+    --bg:#0b1220; --panel:#111a2c; --card:#16213a; --card2:#1a2742;
+    --line:#243354; --ink:#e8edf7; --ink2:#9fb0cc; --ink3:#6b7c9c;
+    --accent:#34d399; --accent2:#10b981; --amber:#fbbf24; --blue:#60a5fa;
+    --rose:#fb7185; --violet:#a78bfa;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  body{background:#070d18; color:var(--ink); font:14px/1.5 -apple-system,"Segoe UI",Inter,Roboto,sans-serif; padding:32px 16px 80px}
+  .intro{max-width:1080px; margin:0 auto 40px}
+  .intro h1{font-size:26px; margin-bottom:8px}
+  .intro p{color:var(--ink2); max-width:70ch}
+  .opt{max-width:1200px; margin:0 auto 64px}
+  .opt-head{display:flex; align-items:baseline; gap:14px; margin-bottom:6px}
+  .opt-head .tag{background:var(--accent2); color:#04281c; font-weight:700; border-radius:8px; padding:2px 10px; font-size:13px}
+  .opt-head h2{font-size:20px}
+  .opt-sub{color:var(--ink2); margin-bottom:14px; max-width:90ch}
+  .pickme{color:var(--accent); font-weight:600}
+  /* ── app frame ── */
+  .frame{display:flex; border:1px solid var(--line); border-radius:14px; overflow:hidden; background:var(--bg); box-shadow:0 20px 60px rgba(0,0,0,.45)}
+  .side{width:180px; background:var(--panel); border-right:1px solid var(--line); padding:14px 10px; flex-shrink:0}
+  .logo{font-weight:800; font-size:17px; letter-spacing:.5px; padding:4px 8px 14px}
+  .nav a{display:block; color:var(--ink3); padding:6px 10px; border-radius:8px; font-size:13px; text-decoration:none}
+  .nav a.on{background:var(--card2); color:var(--ink); font-weight:600}
+  .main{flex:1; padding:20px 22px; min-width:0}
+  /* ── shared bits ── */
+  .hero{border-radius:14px; padding:18px 20px; background:linear-gradient(120deg,#12233d 0%, #0f2c33 60%, #103528 100%); border:1px solid var(--line); margin-bottom:16px}
+  .hero h3{font-size:19px; margin-bottom:2px}
+  .hero p{color:var(--ink2); font-size:13px}
+  .hero b{color:var(--accent)}
+  .chips{display:flex; gap:8px; margin-top:10px; flex-wrap:wrap}
+  .chip{background:rgba(52,211,153,.12); border:1px solid rgba(52,211,153,.35); color:var(--accent); border-radius:999px; padding:3px 10px; font-size:12px; font-weight:600}
+  .chip.b{background:rgba(96,165,250,.12); border-color:rgba(96,165,250,.35); color:var(--blue)}
+  .chip.a{background:rgba(251,191,36,.12); border-color:rgba(251,191,36,.35); color:var(--amber)}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px}
+  .card h4{font-size:13px; color:var(--ink2); text-transform:uppercase; letter-spacing:.06em; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center}
+  .card h4 .more{color:var(--ink3); font-weight:400; text-transform:none; letter-spacing:0; font-size:12px}
+  /* queue rows */
+  .q{display:flex; flex-direction:column; gap:8px}
+  .qr{display:flex; align-items:center; gap:12px; background:var(--card2); border:1px solid var(--line); border-radius:10px; padding:10px 12px}
+  .qr .dot{width:8px; height:8px; border-radius:50%; flex-shrink:0}
+  .qr .who{font-weight:650; font-size:13.5px}
+  .qr .why{color:var(--ink2); font-size:12.5px}
+  .qr .grow{flex:1; min-width:0}
+  .btn{background:var(--accent2); color:#04281c; border:none; border-radius:8px; padding:6px 12px; font-weight:700; font-size:12.5px; white-space:nowrap}
+  .btn.ghost{background:transparent; color:var(--ink3); border:1px solid var(--line); font-weight:500}
+  .d-hot{background:var(--rose)} .d-due{background:var(--amber)} .d-ren{background:var(--blue)} .d-camp{background:var(--violet)} .d-stale{background:var(--ink3)}
+  /* metric tiles */
+  .tiles{display:grid; grid-template-columns:repeat(4,1fr); gap:10px}
+  .tile{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px}
+  .tile .v{font-size:22px; font-weight:750}
+  .tile .l{color:var(--ink3); font-size:12px}
+  .tile .delta{font-size:12px; color:var(--accent); font-weight:600}
+  /* wins */
+  .win{display:flex; gap:10px; align-items:center; padding:7px 0; border-bottom:1px dashed var(--line); font-size:13px}
+  .win:last-child{border-bottom:none}
+  .win .amt{margin-left:auto; font-weight:700; color:var(--accent)}
+  .avatar{width:26px; height:26px; border-radius:50%; background:linear-gradient(135deg,var(--blue),var(--violet)); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:800; color:#0b1220; flex-shrink:0}
+  .avatar.g{background:linear-gradient(135deg,var(--accent),#5eead4)}
+  .avatar.o{background:linear-gradient(135deg,var(--amber),var(--rose))}
+  /* small task list */
+  .t{display:flex; align-items:center; gap:9px; padding:6px 0; font-size:13px; border-bottom:1px dashed var(--line)}
+  .t:last-child{border-bottom:none}
+  .box{width:14px; height:14px; border:1.5px solid var(--ink3); border-radius:4px; flex-shrink:0}
+  .t .due{margin-left:auto; font-size:12px; color:var(--amber)}
+  .muted{color:var(--ink3)}
+  .qa{display:flex; gap:8px}
+  .qa .btn.ghost{color:var(--ink2)}
+  .cols{display:grid; gap:14px}
+  .note{color:var(--ink3); font-size:12px; margin-top:8px}
+</style>
+</head>
+<body>
+
+<div class="intro">
+  <h1>Nexus — three looks to pick from</h1>
+  <p>Same ingredients in all three (Your Day queue, greeting, wins, tasks, metrics, quick actions) — what changes is what dominates the screen. All mockups use fake data and match Pulse's current dark styling. Pick one, or tell me what to steal from each.</p>
+</div>
+
+<!-- ══════════════ OPTION A ══════════════ -->
+<div class="opt">
+  <div class="opt-head"><span class="tag">Option A</span><h2>“The Briefing” — closest to the Medcurity platform</h2></div>
+  <p class="opt-sub">A warm hero greeting with your headline numbers, then a horizontal <b>top-3 strip</b> (just like “What to address today”), then the widget grid. Calm, spacious, feels like a morning briefing. <span class="pickme">Pick this if:</span> you want the platform-family look and a screen that never feels like a to-do list.</p>
+  <div class="frame">
+    <div class="side">
+      <div class="logo">Pulse</div>
+      <div class="nav">
+        <a class="on">Nexus</a><a>Meddy</a><a>Accounts</a><a>Contacts</a><a>Opportunities</a><a>Pipeline</a><a>Activities</a><a>Renewals</a><a>Reports</a><a>Campaigns</a>
+      </div>
+    </div>
+    <div class="main">
+      <div class="hero">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px">
+          <div>
+            <h3>Good morning, Summer — strong start.</h3>
+            <p>You have <b>3 replies waiting</b>, <b>2 renewals</b> entering their window, and <b>5 tasks</b> due today. Yesterday you cleared 9 of 9.</p>
+            <div class="chips"><span class="chip">Reply: Dr. Chen — Interested</span><span class="chip a">Sunrise Health renewal · $14k</span><span class="chip b">5 tasks today</span></div>
+          </div>
+          <div class="qa"><button class="btn">＋ Task</button><button class="btn ghost">＋ Contact</button><button class="btn ghost">Log call</button></div>
+        </div>
+      </div>
+      <div class="cols" style="grid-template-columns:1fr 1fr 1fr; margin-bottom:14px">
+        <div class="card"><h4>1 · Answer first</h4>
+          <div class="qr" style="background:transparent;border:none;padding:4px 0"><span class="dot d-hot"></span><div class="grow"><div class="who">Dr. Alicia Chen · Lakeview Medical</div><div class="why">Replied “Interested” yesterday — nobody has answered</div></div></div>
+          <button class="btn" style="width:100%">Open reply →</button>
+        </div>
+        <div class="card"><h4>2 · Don’t lose this</h4>
+          <div class="qr" style="background:transparent;border:none;padding:4px 0"><span class="dot d-ren"></span><div class="grow"><div class="who">Sunrise Health · $14,000</div><div class="why">Renewal 45 days out — no deal open yet</div></div></div>
+          <button class="btn" style="width:100%">Open account →</button>
+        </div>
+        <div class="card"><h4>3 · Today’s calls</h4>
+          <div class="qr" style="background:transparent;border:none;padding:4px 0"><span class="dot d-camp"></span><div class="grow"><div class="who">Sarah Bloom · Riverside Clinic</div><div class="why">Day 8 call in your Warming campaign</div></div></div>
+          <button class="btn" style="width:100%">Log the call →</button>
+        </div>
+      </div>
+      <div class="cols" style="grid-template-columns:2fr 1fr">
+        <div class="card"><h4>Recent wins <span class="more">team-wide</span></h4>
+          <div class="win"><span class="avatar g">JM</span> Jordan closed <b>&nbsp;Cascade Family Care&nbsp;</b> <span class="amt">$21,500</span></div>
+          <div class="win"><span class="avatar">SH</span> Summer closed <b>&nbsp;Bright Path Pediatrics&nbsp;</b> <span class="amt">$8,900</span></div>
+          <div class="win"><span class="avatar o">MM</span> Molly closed <b>&nbsp;Harbor View Dental&nbsp;</b> <span class="amt">$12,300</span></div>
+        </div>
+        <div class="card"><h4>My numbers <span class="more">this month</span></h4>
+          <div class="tiles" style="grid-template-columns:1fr 1fr">
+            <div class="tile" style="border:none;padding:6px 4px"><div class="v">$46k</div><div class="l">Closed won</div><div class="delta">▲ 12%</div></div>
+            <div class="tile" style="border:none;padding:6px 4px"><div class="v">18</div><div class="l">Open deals</div><div class="delta">▲ 3</div></div>
+            <div class="tile" style="border:none;padding:6px 4px"><div class="v">64</div><div class="l">Calls logged</div><div class="delta">▲ 9</div></div>
+            <div class="tile" style="border:none;padding:6px 4px"><div class="v">7</div><div class="l">Meetings set</div><div class="delta">▲ 2</div></div>
+          </div>
+        </div>
+      </div>
+      <p class="note">Below the fold: My Tasks, Pipeline, Recents, and any custom widgets — the grid you have today.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ OPTION B ══════════════ -->
+<div class="opt">
+  <div class="opt-head"><span class="tag">Option B</span><h2>“The Queue” — the working list runs the screen</h2></div>
+  <p class="opt-sub">A slim greeting, then <b>Your Day as one tall ranked list</b> on the left — work it top to bottom and your day is done. Widgets stack on the right. Densest and most action-per-pixel. <span class="pickme">Pick this if:</span> you want reps to treat Nexus like a work queue, not a dashboard.</p>
+  <div class="frame">
+    <div class="side">
+      <div class="logo">Pulse</div>
+      <div class="nav">
+        <a class="on">Nexus</a><a>Meddy</a><a>Accounts</a><a>Contacts</a><a>Opportunities</a><a>Pipeline</a><a>Activities</a><a>Renewals</a><a>Reports</a><a>Campaigns</a>
+      </div>
+    </div>
+    <div class="main">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px">
+        <div><h3 style="font-size:18px">Good morning, Summer</h3><p class="muted" style="font-size:13px">10 things need you · 3 are hot · yesterday: 9 of 9 cleared 🔥</p></div>
+        <div class="qa"><button class="btn">＋ Task</button><button class="btn ghost">＋ Contact</button><button class="btn ghost">＋ Deal</button><button class="btn ghost">Log call</button></div>
+      </div>
+      <div class="cols" style="grid-template-columns:3fr 2fr">
+        <div class="card">
+          <h4>Your Day <span class="more">ranked · 10 items</span></h4>
+          <div class="q">
+            <div class="qr"><span class="dot d-hot"></span><div class="grow"><div class="who">Dr. Alicia Chen · Lakeview Medical</div><div class="why">Replied “Interested” yesterday — unanswered</div></div><button class="btn">Open reply</button><button class="btn ghost">Not today</button></div>
+            <div class="qr"><span class="dot d-hot"></span><div class="grow"><div class="who">Tom Alvarez · Northlake Ortho</div><div class="why">Asked for a meeting — campaign paused, needs scheduling</div></div><button class="btn">Schedule</button><button class="btn ghost">Not today</button></div>
+            <div class="qr"><span class="dot d-ren"></span><div class="grow"><div class="who">Sunrise Health · $14,000 renewal</div><div class="why">45 days out — no deal open yet</div></div><button class="btn">Open account</button><button class="btn ghost">Not today</button></div>
+            <div class="qr"><span class="dot d-due"></span><div class="grow"><div class="who">Follow up: Riverside proposal</div><div class="why">Task due today · deal at $9,000</div></div><button class="btn">Open deal</button><button class="btn ghost">Not today</button></div>
+            <div class="qr"><span class="dot d-camp"></span><div class="grow"><div class="who">Sarah Bloom · Riverside Clinic</div><div class="why">Day 8 call — Warming campaign</div></div><button class="btn">Log call</button><button class="btn ghost">Not today</button></div>
+            <div class="qr"><span class="dot d-stale"></span><div class="grow"><div class="who">Harbor Springs · $7,500 proposal</div><div class="why">No touch in 21 days</div></div><button class="btn">Open deal</button><button class="btn ghost">Not today</button></div>
+            <div class="qr" style="opacity:.55"><span class="dot d-camp"></span><div class="grow"><div class="who">4 more…</div><div class="why">2 campaign calls · 2 cold-call dials from your working list</div></div><button class="btn ghost">Show all</button></div>
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:14px">
+          <div class="card"><h4>Recent wins</h4>
+            <div class="win"><span class="avatar g">JM</span> Jordan · Cascade Family Care <span class="amt">$21,500</span></div>
+            <div class="win"><span class="avatar">SH</span> Summer · Bright Path Pediatrics <span class="amt">$8,900</span></div>
+            <div class="win"><span class="avatar o">MM</span> Molly · Harbor View Dental <span class="amt">$12,300</span></div>
+          </div>
+          <div class="card"><h4>My numbers</h4>
+            <div class="tiles" style="grid-template-columns:1fr 1fr">
+              <div class="tile" style="border:none;padding:6px 4px"><div class="v">$46k</div><div class="l">Closed won</div></div>
+              <div class="tile" style="border:none;padding:6px 4px"><div class="v">18</div><div class="l">Open deals</div></div>
+              <div class="tile" style="border:none;padding:6px 4px"><div class="v">64</div><div class="l">Calls</div></div>
+              <div class="tile" style="border:none;padding:6px 4px"><div class="v">7</div><div class="l">Meetings</div></div>
+            </div>
+          </div>
+          <div class="card"><h4>Later this week</h4>
+            <div class="t"><span class="box"></span> Send SRA pricing to Mercy West <span class="due">Thu</span></div>
+            <div class="t"><span class="box"></span> Check in — Pinewood trial <span class="due">Fri</span></div>
+          </div>
+        </div>
+      </div>
+      <p class="note">Below the fold: Pipeline, Recents, custom widgets.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ OPTION C ══════════════ -->
+<div class="opt">
+  <div class="opt-head"><span class="tag">Option C</span><h2>“The Cockpit” — numbers up top, queue in the middle</h2></div>
+  <p class="opt-sub">Metric tiles run across the top (the classic dashboard feel), Your Day sits center-stage beneath them, wins and recents ride the right rail. Most “CRM-looking” of the three. <span class="pickme">Pick this if:</span> the team checks numbers first and works the list second.</p>
+  <div class="frame">
+    <div class="side">
+      <div class="logo">Pulse</div>
+      <div class="nav">
+        <a class="on">Nexus</a><a>Meddy</a><a>Accounts</a><a>Contacts</a><a>Opportunities</a><a>Pipeline</a><a>Activities</a><a>Renewals</a><a>Reports</a><a>Campaigns</a>
+      </div>
+    </div>
+    <div class="main">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
+        <h3 style="font-size:18px">Good morning, Summer <span class="muted" style="font-weight:400; font-size:13px">— Tuesday, July 29</span></h3>
+        <div class="qa"><button class="btn">＋ Task</button><button class="btn ghost">＋ Contact</button><button class="btn ghost">Log call</button></div>
+      </div>
+      <div class="tiles" style="margin-bottom:14px">
+        <div class="tile"><div class="v">$46,400</div><div class="l">Closed won · July</div><div class="delta">▲ 12% vs June</div></div>
+        <div class="tile"><div class="v">18</div><div class="l">Open deals</div><div class="delta">▲ 3 this week</div></div>
+        <div class="tile"><div class="v">3</div><div class="l">Replies waiting</div><div class="delta" style="color:var(--rose)">needs you</div></div>
+        <div class="tile"><div class="v">2</div><div class="l">Renewals in window</div><div class="delta" style="color:var(--amber)">$21k combined</div></div>
+      </div>
+      <div class="cols" style="grid-template-columns:5fr 2fr">
+        <div class="card">
+          <h4>Your Day <span class="more">work it top to bottom</span></h4>
+          <div class="q">
+            <div class="qr"><span class="dot d-hot"></span><div class="grow"><div class="who">Dr. Alicia Chen · Lakeview Medical</div><div class="why">Replied “Interested” yesterday — unanswered</div></div><button class="btn">Open reply</button></div>
+            <div class="qr"><span class="dot d-ren"></span><div class="grow"><div class="who">Sunrise Health · $14,000 renewal</div><div class="why">45 days out — no deal open yet</div></div><button class="btn">Open account</button></div>
+            <div class="qr"><span class="dot d-due"></span><div class="grow"><div class="who">Follow up: Riverside proposal</div><div class="why">Task due today · $9,000</div></div><button class="btn">Open deal</button></div>
+            <div class="qr"><span class="dot d-camp"></span><div class="grow"><div class="who">Sarah Bloom · Riverside Clinic</div><div class="why">Day 8 call — Warming campaign</div></div><button class="btn">Log call</button></div>
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:14px">
+          <div class="card"><h4>Recent wins</h4>
+            <div class="win"><span class="avatar g">JM</span> Cascade Family <span class="amt">$21.5k</span></div>
+            <div class="win"><span class="avatar">SH</span> Bright Path <span class="amt">$8.9k</span></div>
+          </div>
+          <div class="card"><h4>Recents</h4>
+            <div class="t" style="border:none"><span class="muted">🕐</span> Lakeview Medical</div>
+            <div class="t" style="border:none"><span class="muted">🕐</span> Riverside proposal</div>
+            <div class="t" style="border:none"><span class="muted">🕐</span> Mercy West</div>
+          </div>
+        </div>
+      </div>
+      <p class="note">Below the fold: My Tasks, Pipeline, custom widgets.</p>
+    </div>
+  </div>
+</div>
+
+<div class="intro" style="margin-top:-20px">
+  <p><b style="color:var(--ink)">Mix and match is fine</b> — e.g. Option A's hero with Option B's tall queue is a natural combo. All three keep Jordan's widgets and the customize/reorder ability below the fold.</p>
+</div>
+
+</body>
+</html>

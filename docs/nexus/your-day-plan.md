@@ -88,13 +88,23 @@ filler. Deterministic and explainable; tuning is a config table, not code.
   window, then retired. This flip is the existing H2 watch item — Nathan's explicit call.
 - Each phase: staging → Nathan/Jordan/Summer feedback → his prod word. Standard rails.
 
-## 5. Open decisions (Nathan + Jordan)
+## 5. Decisions & open questions
 
-1. Tab naming at the flip: single tab called "Home" (recommended) vs keeping "Nexus" visible.
-2. Ranking defaults: confirm the top-of-list philosophy (money-first vs time-first blend).
-3. Does the cold-call source feed Your Day for everyone or stay Summer-specific?
-4. Day-progress ring / streaks: wanted at all, or skip gamification?
-5. What of the greeting tone/copy (Medcurity's "You're moving in the right direction" voice)?
+DECIDED (Nathan, 2026-07-29):
+- **The tab is NEXUS. Home is retired at the flip.** Nexus becomes the top tab and the landing page.
+- **Transition notifications are REQUIRED at the flip** — "Looking for this? It's now here" pointers
+  plus an announcement ("Nexus — a new landing zone for managing your busy days"). Use the existing
+  AnnouncementBanner + contextual redirect hints from the old Home route.
+- **Build without disruption:** the Your Day feature lands on Nexus FIRST (nobody's workflow
+  changes); Home and tab order untouched until the team has reviewed. Look options + a
+  non-technical one-pager produced 2026-07-29 (`nexus-look-options.html`,
+  `nexus-transition-onepager.html`) — Nathan is socializing the plan while the engine gets built.
+
+STILL OPEN (Nathan + Jordan):
+1. Which look (A Briefing / B Queue / C Cockpit / a mix).
+2. Ranking defaults: money-first vs time-first blend.
+3. Cold-call source: everyone or Summer-specific.
+4. Day-progress / streak element: v2 at most.
 
 ## 6. Explicit non-goals (for now)
 

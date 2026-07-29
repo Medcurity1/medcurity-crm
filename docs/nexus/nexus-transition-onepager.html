@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nexus is becoming your new home base</title>
+<style>
+  :root{ --ink:#1d2b45; --ink2:#54617c; --ink3:#8a96ad; --line:#e4e9f2; --accent:#0f9d6b; --accentbg:#e9f8f1; --bluebg:#eef4fd; --blue:#3b6fc9; --amberbg:#fdf6e7; --amber:#b07a13; --card:#ffffff; --bg:#f6f8fc; }
+  *{box-sizing:border-box; margin:0; padding:0}
+  body{background:var(--bg); color:var(--ink); font:15px/1.6 -apple-system,"Segoe UI",Inter,Roboto,sans-serif; padding:48px 20px}
+  .page{max-width:820px; margin:0 auto}
+  .hero{background:linear-gradient(115deg,#eef7ff 0%, #eafaf1 100%); border:1px solid var(--line); border-radius:18px; padding:34px 36px; margin-bottom:26px}
+  .kicker{color:var(--accent); font-weight:800; text-transform:uppercase; letter-spacing:.1em; font-size:12px; margin-bottom:8px}
+  h1{font-size:30px; line-height:1.2; margin-bottom:10px}
+  .hero p{color:var(--ink2); font-size:16px; max-width:62ch}
+  h2{font-size:19px; margin:30px 0 12px}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:22px 24px; margin-bottom:16px}
+  .row{display:flex; gap:14px; align-items:flex-start; padding:11px 0; border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:none}
+  .row .from{width:250px; flex-shrink:0; font-weight:650}
+  .row .from small{display:block; color:var(--ink3); font-weight:400}
+  .row .to{color:var(--ink2)}
+  .row .to b{color:var(--accent)}
+  .arrow{color:var(--ink3); flex-shrink:0; padding-top:1px}
+  .pill{display:inline-block; background:var(--accentbg); color:var(--accent); font-weight:700; border-radius:999px; padding:3px 12px; font-size:13px; margin-right:6px}
+  .pill.b{background:var(--bluebg); color:var(--blue)}
+  .pill.a{background:var(--amberbg); color:var(--amber)}
+  .qbox{background:#f9fbfe; border:1px dashed #c9d6ea; border-radius:12px; padding:14px 16px; margin-top:14px}
+  .qbox .q{display:flex; gap:10px; align-items:center; padding:6px 0; font-size:14px}
+  .qbox .dot{width:9px; height:9px; border-radius:50%; flex-shrink:0}
+  ul{padding-left:20px; color:var(--ink2)}
+  li{margin-bottom:6px}
+  .steps{display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px}
+  .step{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px}
+  .step .n{width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;margin-bottom:8px;font-size:14px}
+  .step b{display:block; margin-bottom:4px}
+  .step span{color:var(--ink2); font-size:13.5px}
+  .foot{color:var(--ink3); font-size:13px; text-align:center; margin-top:26px}
+  @media (max-width:640px){ .steps{grid-template-columns:1fr} .row{flex-wrap:wrap} .row .from{width:100%} }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="hero">
+    <div class="kicker">Coming to Pulse</div>
+    <h1>Nexus is becoming your home base.</h1>
+    <p>One screen that starts your day for you: who to reach, what's about to renew, which replies are waiting — ranked and ready, with one-click actions. Everything you use on the Home tab today is coming along. <b>Nothing is being deleted, and nothing changes about your data.</b></p>
+  </div>
+
+  <h2>What's new: “Your Day”</h2>
+  <div class="card">
+    <p style="color:var(--ink2)">The top of Nexus becomes a short, ranked list that answers <i>“what should I do next?”</i> — assembled automatically from everything Pulse already knows. Each item says <b>who</b>, <b>why</b>, and gives you <b>one button</b> to act. Work it top to bottom and your day is handled.</p>
+    <div class="qbox">
+      <div class="q"><span class="dot" style="background:#e5484d"></span> <b>Dr. Chen replied “Interested”</b>&nbsp;— yesterday, still unanswered → <i>Open reply</i></div>
+      <div class="q"><span class="dot" style="background:#3b6fc9"></span> <b>Sunrise Health renewal, $14k</b>&nbsp;— 45 days out, no deal open → <i>Open account</i></div>
+      <div class="q"><span class="dot" style="background:#8e6bd6"></span> <b>Call Sarah at Riverside</b>&nbsp;— Day 8 of your campaign → <i>Log the call</i></div>
+    </div>
+    <p style="color:var(--ink2); margin-top:12px; font-size:13.5px">Not ready for something? Hit <b>“Not today”</b> and it politely returns tomorrow. Finish the real work (answer the reply, log the call) and the item clears itself — the list never nags about things you've already done.</p>
+  </div>
+
+  <h2>Where everything you use today will live</h2>
+  <div class="card">
+    <div class="row"><div class="from">My Tasks<small>Home tab</small></div><span class="arrow">→</span><div class="to">The <b>Tasks widget</b> on Nexus (already there today) — plus due-today tasks appear in Your Day</div></div>
+    <div class="row"><div class="from">My KPIs / metrics<small>Home tab</small></div><span class="arrow">→</span><div class="to">The <b>My Numbers widget</b> on Nexus</div></div>
+    <div class="row"><div class="from">My Open Opportunities<small>Home tab</small></div><span class="arrow">→</span><div class="to">The <b>Pipeline widget</b> on Nexus</div></div>
+    <div class="row"><div class="from">Recent wins 🎉<small>everyone's favorite</small></div><span class="arrow">→</span><div class="to">A dedicated <b>Wins widget</b>, front and center — celebrations aren't going anywhere</div></div>
+    <div class="row"><div class="from">Recent activities & records<small>Home tab</small></div><span class="arrow">→</span><div class="to">A compact <b>Recents widget</b> — jump back into whatever you touched last</div></div>
+    <div class="row"><div class="from">Quick actions<small>new task / contact / deal</small></div><span class="arrow">→</span><div class="to">Buttons in the <b>top bar of Nexus</b> — one click, always visible</div></div>
+    <div class="row"><div class="from">Your custom widgets<small>built with Jordan</small></div><span class="arrow">→</span><div class="to"><b>Untouched.</b> Everything stays, and you can still add, remove, and rearrange</div></div>
+  </div>
+
+  <h2>How the change will happen</h2>
+  <div class="steps">
+    <div class="step"><div class="n">1</div><b>Nexus gets its upgrade</b><span>Your Day and the new widgets appear on the Nexus tab. Home doesn't change at all. Try it, tell us what's wrong with it.</span></div>
+    <div class="step"><div class="n">2</div><b>We polish with your feedback</b><span>Ranking, wording, layout — tuned based on what the team actually says. Nothing flips yet.</span></div>
+    <div class="step"><div class="n">3</div><b>Nexus becomes the landing page</b><span>Only when it's clearly better. Friendly pointers appear for a while — “Looking for Recent Wins? It's right here now.”</span></div>
+  </div>
+
+  <h2 style="margin-top:26px">What you need to do</h2>
+  <div class="card">
+    <ul>
+      <li><b style="color:var(--ink)">Nothing.</b> No setup, no migration, no lost data, no new logins.</li>
+      <li>When the upgrade lands on Nexus, poke around and use the <span class="pill b">Requests</span> button for anything confusing, missing, or annoying — that feedback literally decides step 3.</li>
+      <li>If you love your current Home setup, say so! Nothing flips until the new screen has earned it.</li>
+    </ul>
+  </div>
+
+  <div class="foot">Questions or ideas → Nathan, or drop them in Requests. · Pulse / Nexus, 2026</div>
+</div>
+</body>
+</html>
