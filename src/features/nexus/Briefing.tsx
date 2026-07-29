@@ -22,6 +22,7 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { QuickTaskDialog } from "@/features/activities/QuickTaskDialog";
 import { useDayQueue, useSnoozeDayItem, type DayQueueRow } from "./day-queue-api";
 import { NEXUS_IS_LANDING, NEXUS_FEEDBACK_LINK } from "./landing-flip";
+import { getHeroTheme, useHeroTheme } from "./hero-themes";
 
 // ── Copy helpers ─────────────────────────────────────────────────────
 
@@ -186,14 +187,30 @@ export function primaryAction(row: DayQueueRow): { label: string; to: string } {
 export interface BriefingProps {
   /**
    * Rendered on the right of the "Your widgets" divider row. Nexus passes
-   * its existing Add-a-Widget button here so the briefing owns the whole
-   * header without any new widget-management UI being invented.
+   * its Customize button here so the briefing owns the whole header
+   * without any new widget-management UI being invented.
    */
   dividerActions?: ReactNode;
+  /**
+   * Pinned widgets, rendered between the top three and the divider. Nexus
+   * passes the FeaturedWidgets strip; the briefing just gives it a home.
+   */
+  featuredSlot?: ReactNode;
+  /**
+   * The Customize bar (hero swatches and the mode hint). Sits directly
+   * above the divider so the controls are next to what they change.
+   */
+  customizeSlot?: ReactNode;
 }
 
-export function Briefing({ dividerActions }: BriefingProps) {
-  const { profile } = useAuth();
+export function Briefing({
+  dividerActions,
+  featuredSlot,
+  customizeSlot,
+}: BriefingProps) {
+  const { profile, user } = useAuth();
+  const [heroThemeId] = useHeroTheme(user?.id);
+  const heroTheme = getHeroTheme(heroThemeId);
   const navigate = useNavigate();
   const { data, isLoading, isError, error } = useDayQueue();
   const snooze = useSnoozeDayItem();
@@ -221,6 +238,8 @@ export function Briefing({ dividerActions }: BriefingProps) {
             <Skeleton key={i} className="h-28 w-full rounded-xl" />
           ))}
         </div>
+        {customizeSlot}
+        {featuredSlot}
         <DividerRow actions={dividerActions} />
       </div>
     );
@@ -237,9 +256,22 @@ export function Briefing({ dividerActions }: BriefingProps) {
           it has no effect until swap day. */}
       <div
         data-tour="hero"
-        className="relative overflow-hidden rounded-xl border border-border/60 bg-gradient-to-br from-emerald-50 via-card to-sky-50 px-5 py-4 dark:from-emerald-950/50 dark:via-card dark:to-sky-950/40"
+        className="relative overflow-hidden rounded-xl border border-border/60 px-5 py-4"
       >
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        {/* Two gradient layers, one per theme, swapped in CSS so a
+            light/dark switch never waits on a re-render. The chosen preset
+            lives in localStorage (hero-themes.ts); Evergreen is default. */}
+        <span
+          aria-hidden
+          className="absolute inset-0 dark:hidden"
+          style={{ backgroundImage: heroTheme.light }}
+        />
+        <span
+          aria-hidden
+          className="absolute inset-0 hidden dark:block"
+          style={{ backgroundImage: heroTheme.dark }}
+        />
+        <div className="relative flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <h1 className="text-xl font-semibold tracking-tight">
               {name ? `${greeting}, ${name}.` : `${greeting}.`}
@@ -270,6 +302,9 @@ export function Briefing({ dividerActions }: BriefingProps) {
           </div>
         </div>
       </div>
+
+      {/* Customize mode banner, directly under the hero it restyles. */}
+      {customizeSlot}
 
       {/* Top 3 */}
       {top.length > 0 && (
@@ -317,6 +352,9 @@ export function Briefing({ dividerActions }: BriefingProps) {
           )}
         </div>
       )}
+
+      {/* Pinned widgets, above the divider by definition. */}
+      {featuredSlot}
 
       <DividerRow actions={dividerActions} />
 

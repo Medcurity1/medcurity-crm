@@ -9,8 +9,10 @@
 // every closed-won date query in Reports (not updated_at).
 
 import { useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency } from "@/lib/formatters";
 import { WidgetError } from "./WidgetError";
@@ -22,6 +24,55 @@ interface WinRow {
   close_date: string | null;
   account: { name: string } | null;
   owner: { full_name: string | null } | null;
+}
+
+/** Live celebration rows (deal_wins, 7-day window) keyed by opportunity so
+ *  recent list rows can carry the high-five (docket C2 round 4, not-worse
+ *  rule: Home's high five is USED and must survive the move). */
+interface CelebrationRow {
+  id: string;
+  opportunity_id: string;
+  fives: { user_id: string }[];
+}
+
+function useCelebrations() {
+  return useQuery({
+    queryKey: ["nexus-widget-data", "wins-celebrations"],
+    // Same light poll as Home's card so a teammate's five shows up.
+    refetchInterval: 60_000,
+    queryFn: async () => {
+      const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
+      const { data, error } = await supabase
+        .from("deal_wins")
+        .select("id, opportunity_id, fives:deal_win_high_fives(user_id)")
+        .is("retracted_at", null)
+        .gte("won_at", since);
+      if (error) throw error;
+      const byOpp = new Map<string, CelebrationRow>();
+      for (const row of (data ?? []) as unknown as CelebrationRow[]) {
+        byOpp.set(row.opportunity_id, row);
+      }
+      return byOpp;
+    },
+  });
+}
+
+function useSendHighFive() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (winId: string) => {
+      const { data, error } = await supabase.rpc("send_high_five", { p_win_id: winId });
+      if (error) throw error;
+      return data as { ok: boolean; fived: boolean; count: number };
+    },
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["nexus-widget-data", "wins-celebrations"] });
+      // Home's card shares the same underlying feed; keep it in step.
+      qc.invalidateQueries({ queryKey: ["recent-wins"] });
+      if (res?.fived) toast.success("High five sent! 🖐");
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
 }
 
 function useTeamWins(limit: number) {
@@ -58,6 +109,9 @@ function getInitials(fullName: string | null | undefined): string {
 }
 
 export function WinsWidget({ widget, searchQuery, onDataUpdated }: NexusWidgetBodyProps) {
+  const { user } = useAuth();
+  const { data: celebrations } = useCelebrations();
+  const sendFive = useSendHighFive();
   const {
     data: wins,
     isLoading,
@@ -141,6 +195,30 @@ export function WinsWidget({ widget, searchQuery, onDataUpdated }: NexusWidgetBo
                 {formatCurrency(Number(win.amount))}
               </span>
             )}
+            {(() => {
+              // High five only while the celebration window is open (the
+              // server enforces the window and the no-self rule; this just
+              // avoids offering a button that would always error).
+              const celebration = celebrations?.get(win.id);
+              if (!celebration) return null;
+              const count = celebration.fives.length;
+              const mine = celebration.fives.some((f) => f.user_id === user?.id);
+              return (
+                <button
+                  type="button"
+                  className={`shrink-0 rounded-full border px-2 py-0.5 text-xs transition-colors ${
+                    mine
+                      ? "border-emerald-400/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                      : "border-border text-muted-foreground hover:border-emerald-400/50 hover:text-emerald-600"
+                  }`}
+                  title={mine ? "You high fived this" : "Send a high five"}
+                  disabled={sendFive.isPending}
+                  onClick={() => { if (!mine) sendFive.mutate(celebration.id); }}
+                >
+                  🖐{count > 0 ? ` ${count}` : ""}
+                </button>
+              );
+            })()}
           </div>
         );
       })}

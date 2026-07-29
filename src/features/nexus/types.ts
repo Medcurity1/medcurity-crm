@@ -202,6 +202,12 @@ interface NexusWidgetBase {
   color: NexusWidgetColor | null;
   icon: string | null;
   preview_count: PreviewCount;
+  /**
+   * Pinned above the "Your widgets" divider, into the briefing area
+   * (migration 20260729200000). Set from Customize mode. The two-pin cap
+   * is a client rule, not a constraint — see featured.ts.
+   */
+  featured: boolean;
   created_at: string;
   updated_at: string;
 }

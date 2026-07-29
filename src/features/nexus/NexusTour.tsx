@@ -87,8 +87,8 @@ const STEPS: TourStep[] = [
     title: "Make it yours",
     body:
       NEXUS_IS_LANDING && NEXUS_FEEDBACK_LINK
-        ? "Add, remove, and rearrange widgets whenever you like. If something you need is missing, use the Something missing link."
-        : "Add, remove, and rearrange widgets whenever you like. If something you need is missing, send it from the Requests tab.",
+        ? "Customize is where you add, remove, rearrange, and pin widgets. If something you need is missing, use the Something missing link."
+        : "Customize is where you add, remove, rearrange, and pin widgets. If something you need is missing, send it from the Requests tab.",
     button: "Got it",
   },
 ];

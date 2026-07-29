@@ -119,7 +119,7 @@ export function PipelineWidget({
                   {opp.name}
                 </Link>
                 <p className="text-xs text-muted-foreground truncate">
-                  {opp.account?.name ?? "—"}
+                  {opp.account?.name ?? ""}
                   {opp.expected_close_date
                     ? ` · Closes ${formatDate(opp.expected_close_date)}`
                     : ""}
