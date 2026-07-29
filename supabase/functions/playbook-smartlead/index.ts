@@ -54,6 +54,7 @@ import {
   taskDueAt,
 } from "../_shared/campaign-scheduling.ts";
 import { daysBetweenDateOnly, shiftEnrollmentTasks } from "../_shared/campaign-task-shift.ts";
+import { sanitizeReplyCategory } from "../_shared/reply-category.ts";
 import {
   ENROLLMENT_TERMINAL_STATUSES,
   archivePendingTasksForEnrollment,
@@ -337,6 +338,42 @@ function mergeTemplate(tpl: string, vars: { first_name: string; last_name: strin
 interface CallerContext {
   isAdmin: boolean;
   userId: string | null;
+  /** Who to record in audit_logs.changed_by — resolved for HUMAN callers
+   *  regardless of role (unlike userId, which stays null for admins because
+   *  a non-null value triggers the rep ownership checks). Null for the
+   *  service-role cron. */
+  auditUserId?: string | null;
+}
+
+/** Best-effort audit trail for campaign actions (docket I19) — Campaigns
+ *  previously wrote nothing to Pulse's audit system, so who launched or
+ *  stopped what was unrecorded. Column names match audit_logs' REAL schema
+ *  (20260331000000: table_name/record_id/action/changed_by/new_data — NOT
+ *  the entity/performed_by names inbound-lead uses, whose inserts have been
+ *  silently failing). Never throws and never blocks the action it records. */
+async function auditCampaignAction(
+  action: string,
+  recordId: string,
+  changedBy: string | null | undefined,
+  newData: Record<string, unknown>,
+  tableName = "campaigns",
+): Promise<void> {
+  try {
+    const { error } = await svc.from("audit_logs").insert({
+      table_name: tableName,
+      record_id: recordId,
+      action,
+      changed_by: changedBy ?? null,
+      // old_data: {} not null — AuditLogViewer's computeChanges bails on a
+      // null side and would render every one of these rows as "No field
+      // changes"; an empty object makes it list new_data as (empty) → value.
+      old_data: {},
+      new_data: newData,
+    });
+    if (error) console.error(`audit_logs insert failed for ${action} (continuing):`, error.message);
+  } catch (err) {
+    console.error(`audit_logs insert failed for ${action} (continuing):`, (err as Error).message);
+  }
 }
 
 /** Random 32-byte hex secret for a campaign's webhook registration
@@ -396,27 +433,70 @@ const SMARTLEAD_WEBHOOK_EVENT_TYPES = [
   "LEAD_UNSUBSCRIBED",
 ];
 
+/** The ONE registration routine (adversarial review — the old single-
+ *  variant POST here is the exact shape documented as having failed the
+ *  first live test; webhook-register's 3-variant loop is what actually
+ *  worked). Tries each payload variant until one yields a usable id.
+ *  Returns the id plus per-attempt outcomes (webhook-register's diagnostic
+ *  response); launch and the sweep read just the id. */
+async function registerCampaignWebhookVariants(
+  smartleadCampaignId: number,
+  secret: string,
+): Promise<{ id: number | null; attempts: Array<Record<string, unknown>> }> {
+  const webhookUrl = `${SUPABASE_URL}/functions/v1/campaign-webhooks?token=${secret}`;
+  const base = { name: "Pulse campaign events", webhook_url: webhookUrl, event_types: SMARTLEAD_WEBHOOK_EVENT_TYPES };
+  const variants: Array<Record<string, unknown>> = [
+    { id: null, ...base },
+    { id: null, ...base, categories: [] },
+    { ...base },
+  ];
+  const attempts: Array<Record<string, unknown>> = [];
+  for (const payload of variants) {
+    try {
+      const res = (await smartleadFetch(`/campaigns/${smartleadCampaignId}/webhooks`, {
+        method: "POST",
+        headers: JSON_HEADERS,
+        body: JSON.stringify(payload),
+      })) as Record<string, unknown>;
+      attempts.push({ payload_keys: Object.keys(payload), ok: true, response: res });
+      const rawId = res?.id ?? res?.webhook_id ?? (res?.data as Record<string, unknown> | undefined)?.id;
+      if (typeof rawId === "number") return { id: rawId, attempts };
+      if (typeof rawId === "string" && /^\d+$/.test(rawId)) return { id: Number(rawId), attempts };
+    } catch (err) {
+      attempts.push({ ok: false, error: (err as Error).message });
+    }
+  }
+  console.warn(`webhook registration: no variant yielded a usable id for smartlead campaign ${smartleadCampaignId}`);
+  return { id: null, attempts };
+}
+
 async function registerCampaignWebhook(smartleadCampaignId: number, secret: string): Promise<number | null> {
+  const { id } = await registerCampaignWebhookVariants(smartleadCampaignId, secret);
+  return id;
+}
+
+/** Find an ALREADY-registered Pulse webhook on this Smartlead campaign (by
+ *  our function URL) — the sweep adopts it instead of blindly POSTing a
+ *  duplicate every night when our row lost/never had the id (adversarial
+ *  review). Returns the id + the token parsed from its URL, or null. */
+async function findExistingPulseWebhook(
+  smartleadCampaignId: number,
+): Promise<{ id: number; token: string | null } | null> {
   try {
-    const webhookUrl = `${SUPABASE_URL}/functions/v1/campaign-webhooks?token=${secret}`;
-    const res = (await smartleadFetch(`/campaigns/${smartleadCampaignId}/webhooks`, {
-      method: "POST",
-      headers: JSON_HEADERS,
-      body: JSON.stringify({
-        id: null,
-        name: "Pulse campaign events",
-        webhook_url: webhookUrl,
-        event_types: SMARTLEAD_WEBHOOK_EVENT_TYPES,
-      }),
-    })) as Record<string, unknown>;
-    const rawId = res?.id ?? res?.webhook_id
-      ?? (res?.data as Record<string, unknown> | undefined)?.id;
-    if (typeof rawId === "number") return rawId;
-    if (typeof rawId === "string" && /^\d+$/.test(rawId)) return Number(rawId);
-    console.warn("playbook launch: webhook registration returned no usable id; continuing webhook-less");
+    const res = await smartleadFetch(`/campaigns/${smartleadCampaignId}/webhooks`);
+    const rows = extractWebhookRows(res);
+    if (!rows || !rows.length) return null;
+    for (const w of rows) {
+      const url = typeof w.webhook_url === "string" ? w.webhook_url : null;
+      if (!url || !url.startsWith(`${SUPABASE_URL}/functions/v1/campaign-webhooks`)) continue;
+      const rawId = w.id ?? w.webhook_id;
+      const id = typeof rawId === "number" ? rawId : (typeof rawId === "string" && /^\d+$/.test(rawId) ? Number(rawId) : null);
+      if (id == null) continue;
+      const token = /[?&]token=([^&]+)/.exec(url)?.[1] ?? null;
+      return { id, token };
+    }
     return null;
-  } catch (err) {
-    console.warn("playbook launch: webhook registration failed (continuing webhook-less):", (err as Error).message);
+  } catch {
     return null;
   }
 }
@@ -523,13 +603,31 @@ async function importCampaigns() {
   return { created, updated, total: campaigns.length };
 }
 
-async function syncCampaigns() {
-  const { data: existing } = await svc
-    .from("campaigns")
-    .select("id, smartlead_campaign_id, status, metrics, settings")
-    .not("smartlead_campaign_id", "is", null);
+/** `deadline` (epoch ms, optional) caps how long the loop may run — the
+ *  daily sweep passes a per-step budget so a slow Smartlead day can't eat
+ *  the whole run and starve steps 2-7 (docket I8); the interactive Sync
+ *  button passes none. Campaigns not reached before the deadline are
+ *  reported in `capped` and simply wait for the next sync/sweep. Paged
+ *  reads (docket I9) so the campaign list can outgrow the 1000-row cap. */
+async function syncCampaigns(deadline?: number) {
+  const existing = await fetchAllRows<Record<string, unknown>>((from, to) =>
+    svc
+      .from("campaigns")
+      .select("id, smartlead_campaign_id, status, metrics, settings")
+      .not("smartlead_campaign_id", "is", null)
+      .order("id", { ascending: true })
+      .range(from, to));
   let synced = 0;
-  for (const c of existing ?? []) {
+  let capped = 0;
+  const rows = existing ?? [];
+  for (let idx = 0; idx < rows.length; idx++) {
+    const c = rows[idx];
+    if (deadline != null && Date.now() > deadline) {
+      // Unprocessed = rows not yet REACHED — errored ones were attempted
+      // and must not inflate the starvation signal (adversarial review).
+      capped = rows.length - idx;
+      break;
+    }
     try {
       const camp = (await fetchCampaignById(c.smartlead_campaign_id)) as Record<string, unknown>;
       const analytics = (await fetchCampaignAnalytics(c.smartlead_campaign_id)) as Record<string, unknown>;
@@ -545,13 +643,40 @@ async function syncCampaigns() {
       // stamped for EVERY linked campaign on every sync/sweep, unlike
       // last_sweep_at (the per-lead reconcile's rotation cursor, capped at
       // 25 campaigns/run). The tracker's stale-numbers chip reads this
-      // (needs-attention.ts, outside-review I27).
-      const settings = { ...((c.settings as Record<string, unknown>) ?? {}), last_metrics_sync_at: new Date().toISOString() };
-      await svc.from("campaigns").update({ metrics: merged, status, settings }).eq("id", c.id);
+      // (needs-attention.ts, outside-review I27). Settings goes through the
+      // server-side merge RPC (docket I36) — a read → spread → full-column
+      // write here could drop a key another writer (the sweep's
+      // last_sweep_at, a launch's suppression snapshot) landed in between.
+      const { error: applyErr } = await svc.rpc("campaign_sync_apply", {
+        p_campaign_id: c.id,
+        p_metrics: merged,
+        p_status: status,
+        p_settings_patch: { last_metrics_sync_at: new Date().toISOString() },
+      });
+      if (applyErr) throw new Error(applyErr.message);
       synced++;
     } catch { /* skip this one */ }
   }
-  return { synced };
+  return { synced, capped };
+}
+
+/** Page a PostgREST select to exhaustion — a plain select silently caps at
+ *  1000 rows (docket I9; meddy-sweep pages around the same cap). The
+ *  factory must include a stable .order() so range windows can't skip or
+ *  duplicate rows; every caller here orders by id. */
+async function fetchAllRows<T>(
+  make: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
+  pageSize = 1000,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await make(from, from + pageSize - 1);
+    if (error) throw new Error(error.message);
+    const batch = (data ?? []) as T[];
+    out.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+  return out;
 }
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
@@ -1043,17 +1168,28 @@ async function setCampaignStatus(p: SetStatusInput, archivedBy: string | null, c
       ? (scheduleSettings.days_of_week as number[])
       : [1, 2, 3, 4, 5];
 
-    // Checked, not fire-and-forget (outside-review fix 3): a silently
-    // failed write here left Smartlead actively sending while the Pulse row
-    // still said 'draft' — and the handler returned success. Throwing is
-    // retry-safe: the row is unchanged, so the same action's precondition
-    // still passes and the Smartlead mirror above is idempotent.
-    const { error: statusErr } = await svc
+    // Checked AND compare-and-set (outside-review fix 3 + docket I7): the
+    // write only lands if the status is still what this call read, so a
+    // Stop racing an in-flight Start can't be silently overwritten (and
+    // tasks can't be spawned onto a campaign someone just killed). Losing
+    // the race throws a plain retry message; the row is unchanged on every
+    // failure path, so preconditions still pass on retry and the Smartlead
+    // mirror above is idempotent.
+    const { data: casStart, error: statusErr } = await svc
       .from("campaigns")
       .update(isDraft ? { anchor_date: anchorDate, status: newStatus } : { status: newStatus })
-      .eq("id", p.id);
+      .eq("id", p.id)
+      .eq("status", campaign.status)
+      .select("id");
     if (statusErr) {
       throw new Error(`Couldn't record the campaign as ${newStatus}: ${statusErr.message} — try the action again.`);
+    }
+    if (!casStart?.length) {
+      // Smartlead was already told START above — the honest recovery is
+      // pause+resume (which re-runs the idempotent scheduling), not a
+      // retry of Start, whose draft-only precondition would now fail
+      // (adversarial review).
+      throw new Error("The campaign's status changed under this call. If it's sending, pause and resume it to finish scheduling; otherwise refresh and try again.");
     }
 
     // The campaign IS started in Smartlead by this point — a bookkeeping
@@ -1106,17 +1242,42 @@ async function setCampaignStatus(p: SetStatusInput, archivedBy: string | null, c
     if (!result.complete) {
       throw new Error("Sending is stopped, but some of the campaign's pending tasks couldn't be archived — press Stop again to finish.");
     }
-    const { error: stopErr } = await svc.from("campaigns").update({ status: newStatus }).eq("id", p.id);
+    // CAS here too (docket I7) — stop wins only from the status it read;
+    // a retry re-reads fresh, so "press Stop again" still works.
+    const { data: casStop, error: stopErr } = await svc
+      .from("campaigns")
+      .update({ status: newStatus })
+      .eq("id", p.id)
+      .eq("status", campaign.status)
+      .select("id");
     if (stopErr) {
       throw new Error(`Sending is stopped, but the campaign's status couldn't be updated: ${stopErr.message} — press Stop again to finish.`);
     }
+    if (!casStop?.length) {
+      throw new Error("Sending is stopped, but the campaign's status changed under you — refresh and press Stop again to finish.");
+    }
   } else {
     // pause, resume, or start-on-a-non-draft (defensive no-op path above).
-    const { error: pauseErr } = await svc.from("campaigns").update({ status: newStatus }).eq("id", p.id);
+    const { data: casPause, error: pauseErr } = await svc
+      .from("campaigns")
+      .update({ status: newStatus })
+      .eq("id", p.id)
+      .eq("status", campaign.status)
+      .select("id");
     if (pauseErr) {
       throw new Error(`Couldn't record the campaign as ${newStatus}: ${pauseErr.message} — try the action again.`);
     }
+    if (!casPause?.length) {
+      throw new Error("Someone else just changed this campaign's status — refresh and try again.");
+    }
   }
+
+  await auditCampaignAction(`campaign_${p.action}`, p.id, callerCtx.auditUserId, {
+    from_status: campaign.status,
+    to_status: newStatus,
+    tasks_created: tasksCreated,
+    tasks_cancelled: tasksCancelled,
+  });
 
   return {
     success: true,
@@ -1442,11 +1603,22 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
   let suppressionDropped = 0;
   let alreadyEnrolledDropped = 0;
   let enrolledCount = 0;
+  // In-flight launch claims held by THIS launch (docket E4) — released on
+  // success and on rollback; the table's TTL reaps anything a crash leaves.
+  let claimedEmails: string[] = [];
   let tasksCreated = 0;
   // Non-fatal launch problems the user must still hear about (partial lead
   // upload, a failed post-start bookkeeping write) — returned as `warning`
   // and toasted by the wizard (outside-review fix 3).
   let launchWarning: string | undefined;
+  // A failed webhook registration used to be swallowed entirely — and the
+  // nightly self-repair then skipped webhook-less campaigns, so the
+  // campaign stayed without real-time replies forever (docket I1). Now the
+  // user hears about it AND the heal step covers it tonight.
+  if (webhookId == null) {
+    launchWarning =
+      "Live reply alerts couldn't be connected for this campaign — tonight's automatic self-repair will retry, or press \"Repair live updates\" on the campaign's detail view.";
+  }
   try {
     // 2. Sequence. Skipped entirely for an all-task sequence (no EMAIL_AUTO
     // steps at all) — Smartlead doesn't need an empty sequences payload, and
@@ -1553,19 +1725,57 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
       );
     }
 
+    // 5.4. Concurrent-launch claims (docket E4) — MUST run BEFORE the
+    // active-enrollment check below. The check-then-insert rail can't see
+    // another launch that's mid-flight (its enrollments aren't committed
+    // yet), so two simultaneous launches could both pass it and both enroll
+    // — and SEND to — the same person. Claiming first closes the window
+    // from both sides: an overlapping launch hits our claims, and a launch
+    // that starts after we finish sees our committed enrollments in the
+    // check. Conflicted recipients are dropped with an honest warning
+    // unless the caller explicitly overrode them (enrollment_overrides
+    // means "double-enroll deliberately", which covers this rail too).
+    const enrollmentOverrideSet = new Set(
+      (Array.isArray(p.enrollment_overrides) ? p.enrollment_overrides : []).map(normalizeEmail),
+    );
+    const claimCandidates = Array.from(new Set(recipients.map((r) => normalizeEmail(r.email)).filter(Boolean)));
+    let claimConflicts = new Set<string>();
+    const { data: conflictArr, error: claimErr } = await svc.rpc("campaign_launch_claim_emails", {
+      p_emails: claimCandidates,
+    });
+    if (claimErr) throw new Error("Couldn't reserve this launch's recipients: " + claimErr.message);
+    claimConflicts = new Set((conflictArr ?? []) as string[]);
+    claimedEmails = claimCandidates.filter((e) => !claimConflicts.has(e));
+    let concurrentLaunchDropped = 0;
+    const claimClearedRecipients = recipients.filter((r) => {
+      const key = normalizeEmail(r.email);
+      if (!claimConflicts.has(key)) return true;
+      if (enrollmentOverrideSet.has(key)) return true;
+      concurrentLaunchDropped++;
+      return false;
+    });
+    if (concurrentLaunchDropped > 0) {
+      const claimNote =
+        `${concurrentLaunchDropped} ${concurrentLaunchDropped === 1 ? "person is" : "people are"} being launched by someone else right now ` +
+        `and ${concurrentLaunchDropped === 1 ? "was" : "were"} left out of this one — if they really belong here too, launch them again in a few minutes.`;
+      launchWarning = launchWarning ? `${launchWarning} ALSO: ${claimNote}` : claimNote;
+    }
+    if (claimClearedRecipients.length === 0) {
+      throw new Error(
+        "Every recipient in this launch is already being launched by someone else right now — try again in a few minutes.",
+      );
+    }
+
     // 5.5. No-double-enroll rail (S3): is this email ALREADY actively
     // enrolled in ANY campaign (not just this one)? Mirrors the suppression
     // rail immediately above — same batch/override/all-dropped pattern,
     // different source table. Someone already receiving one cadence
     // shouldn't silently be dropped into a second at the same time unless a
     // human deliberately says so (enrollment_overrides).
-    const enrollmentChecked = recipients.length;
-    const activeEnrollmentEmails = await fetchActiveEnrollmentEmails(recipients.map((r) => r.email));
-    const enrollmentOverrideSet = new Set(
-      (Array.isArray(p.enrollment_overrides) ? p.enrollment_overrides : []).map(normalizeEmail),
-    );
+    const enrollmentChecked = claimClearedRecipients.length;
+    const activeEnrollmentEmails = await fetchActiveEnrollmentEmails(claimClearedRecipients.map((r) => r.email));
     let alreadyActiveOverridden = 0;
-    const enrollableRecipients = recipients.filter((r) => {
+    const enrollableRecipients = claimClearedRecipients.filter((r) => {
       const key = normalizeEmail(r.email);
       if (!activeEnrollmentEmails.has(key)) return true;
       if (enrollmentOverrideSet.has(key)) { alreadyActiveOverridden++; return true; }
@@ -1622,10 +1832,13 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
       throw new Error("All lead batches failed; campaign created but has no leads.");
     }
     if (leadsFailed > 0) {
-      launchWarning =
+      const leadNote =
         `${leadsFailed} ${leadsFailed === 1 ? "person" : "people"} couldn't be added to the sending platform ` +
         `and were left out of this campaign — they got no enrollment and no tasks. ` +
         `Re-add them in a follow-up launch when you're ready.`;
+      // Append, never overwrite — the webhook-registration warning set
+      // above must survive alongside this one (adversarial review).
+      launchWarning = launchWarning ? `${launchWarning} ALSO: ${leadNote}` : leadNote;
     }
 
     // 7. Record in Pulse (BEFORE any START, so a rollback never deletes a
@@ -1708,8 +1921,21 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
     // contact_id (CSV/paste recipients with no contact match) is exempt —
     // Postgres treats NULLs as distinct, so they never collide with each
     // other on this index.
+    const preDedupeCount = uploadedRecipients.length;
     const seenContactIds = new Set<string>();
+    const seenEmails = new Set<string>();
     const dedupedRecipients = uploadedRecipients.filter((r) => {
+      // Email dedupe FIRST (docket I3): two contact records sharing one
+      // address used to create two enrollments, and the webhook's
+      // by-email lookup then failed for that address forever. One email =
+      // one enrollment, first occurrence wins (keeps upload order). Also
+      // covers the right-click quick path, which bypasses the client's
+      // own byEmail merge.
+      const emailKey = normalizeEmail(r.email);
+      if (emailKey) {
+        if (seenEmails.has(emailKey)) return false;
+        seenEmails.add(emailKey);
+      }
       if (!r.contact_id) return true;
       if (seenContactIds.has(r.contact_id)) return false;
       seenContactIds.add(r.contact_id);
@@ -1769,6 +1995,11 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
       }
     }
 
+    if (preDedupeCount > dedupedRecipients.length) {
+      const merged = preDedupeCount - dedupedRecipients.length;
+      const mergeNote = `${merged} duplicate ${merged === 1 ? "person was" : "people were"} merged (same email or contact) — each address is enrolled once.`;
+      launchWarning = launchWarning ? `${launchWarning} ALSO: ${mergeNote}` : mergeNote;
+    }
     const enrollmentRows = dedupedRecipients.map((r, i) => ({
       campaign_id: pulseCampaignId,
       contact_id: r.contact_id ?? null,
@@ -1812,7 +2043,10 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
     // "added to campaign" for someone whose upload failed would be a lie
     // (outside-review fix 3).
     const subject = String(emailSequence[0]?.subject ?? p.campaign_name);
-    const acts = uploadedRecipients
+    // dedupedRecipients, not uploadedRecipients (adversarial review): a
+    // contact dropped by the shared-email/contact dedupe has NO enrollment
+    // — a timeline entry claiming they were added would be a lie.
+    const acts = dedupedRecipients
       .filter((r) => r.contact_id)
       .map((r) => ({
         activity_type: "email",
@@ -1894,7 +2128,29 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
     if (pulseCampaignId) {
       try { await svc.from("campaigns").delete().eq("id", pulseCampaignId); } catch { /* best-effort */ }
     }
+    // Release this launch's claims so a corrected retry isn't blocked for
+    // the TTL (docket E4). Best-effort — the TTL is the real backstop.
+    if (claimedEmails.length) {
+      try { await svc.rpc("campaign_launch_release_emails", { p_emails: claimedEmails }); } catch { /* TTL reaps */ }
+    }
     throw err;
+  }
+
+  if (claimedEmails.length) {
+    try { await svc.rpc("campaign_launch_release_emails", { p_emails: claimedEmails }); } catch { /* TTL reaps */ }
+  }
+
+  if (pulseCampaignId) {
+    await auditCampaignAction("campaign_launch", pulseCampaignId, callerCtx.auditUserId, {
+      name: p.campaign_name,
+      smartlead_campaign_id: campaignId,
+      enrolled: enrolledCount,
+      leads_added: leadsAdded,
+      leads_failed: leadsFailed,
+      suppression_dropped: suppressionDropped,
+      already_enrolled_dropped: alreadyEnrolledDropped,
+      auto_started: autoStarted,
+    });
   }
 
   return {
@@ -2141,12 +2397,15 @@ interface DailySweepReport {
   webhooks_healed: number;
   skipped_for_budget: number;
   insights_generated: number;
+  /** Abandoned wizard drafts removed by step 0 (docket I37). */
+  drafts_pruned: number;
   /** Plain-English step-failure notes (group 2, docket I10) — persisted to
    *  campaign_sweep_runs; empty = the run was clean (ok = true). */
   errors: string[];
 }
 
 const SWEEP_BUDGET_MS = 100_000; // stop starting new campaign work after ~100s (150s edge limit)
+const STEP1_BUDGET_MS = 35_000; // metrics sync's own slice of the budget (docket I8)
 const SWEEP_RECONCILE_CAP = 25; // campaigns/run for the per-lead reconcile step
 const SWEEP_INSIGHTS_CAP = 3; // campaigns/run for the AI insights step (each is a Claude call — keep small)
 
@@ -2218,7 +2477,9 @@ function normalizeLeadStatRow(raw: Record<string, unknown>, nowIso: string): Lea
   if (!unsubscribedAt && (raw.is_unsubscribed === true || raw.unsubscribed === true)) unsubscribedAt = nowIso;
 
   const categoryRaw = raw.category ?? raw.lead_category ?? raw.category_name ?? raw.reply_category;
-  const category = typeof categoryRaw === "string" && categoryRaw.trim() ? categoryRaw.trim() : null;
+  // Canonicalized (docket I11) — same rule as the webhook path, so no
+  // free-text ever reaches campaign_enrollments.reply_category.
+  const category = typeof categoryRaw === "string" ? sanitizeReplyCategory(categoryRaw) : null;
 
   return { email: email || null, sentAt, repliedAt, bouncedAt, unsubscribedAt, category };
 }
@@ -2313,12 +2574,19 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
   }
   if (!byEmail.size) return { enrollmentsUpdated: 0, repliesDetected: 0, tasksCancelled: 0 };
 
-  const { data: enrollments, error } = await svc
-    .from("campaign_enrollments")
-    .select("id, contact_id, account_id, first_name, last_name, email, company, owner_user_id, status, first_send_at, actual_first_send_at, reply_category")
-    .eq("campaign_id", campaign.id)
-    .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`);
-  if (error) throw new Error("Enrollment lookup for reconcile failed: " + error.message);
+  let enrollments: Record<string, unknown>[];
+  try {
+    enrollments = await fetchAllRows<Record<string, unknown>>((from, to) =>
+      svc
+        .from("campaign_enrollments")
+        .select("id, contact_id, account_id, first_name, last_name, email, company, owner_user_id, status, first_send_at, actual_first_send_at, reply_category")
+        .eq("campaign_id", campaign.id)
+        .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`)
+        .order("id", { ascending: true })
+        .range(from, to));
+  } catch (err) {
+    throw new Error("Enrollment lookup for reconcile failed: " + (err as Error).message);
+  }
   if (!enrollments?.length) return { enrollmentsUpdated: 0, repliesDetected: 0, tasksCancelled: 0 };
 
   const campaignForActions = { id: campaign.id, name: campaign.name, owner_user_id: campaign.owner_user_id };
@@ -2326,6 +2594,14 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
   let enrollmentsUpdated = 0;
   let repliesDetected = 0;
   let tasksCancelled = 0;
+
+  // Category updates batch by VALUE (docket E3): categories are the hot
+  // write in this loop — Smartlead re-categorizes routinely, while the
+  // bounce/reply/unsubscribe transitions below are one-shot per enrollment
+  // and side-effectful (notifications, task cancels, opt-outs), so THOSE
+  // stay per-row by design. There are at most 7 canonical categories, so
+  // grouping turns N single-row updates into ≤7 `.in()` statements.
+  const categoryUpdates = new Map<string, string[]>();
 
   for (const e of enrollments as {
     id: string; contact_id: string | null; account_id: string | null;
@@ -2342,11 +2618,9 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
     // a category can arrive on the same statistics row as a reply, or on its
     // own before/after one.
     if (row.category && row.category !== e.reply_category) {
-      const { error: catErr } = await svc
-        .from("campaign_enrollments")
-        .update({ reply_category: row.category })
-        .eq("id", e.id);
-      if (catErr) console.error(`daily-sweep: reply_category update failed for enrollment ${e.id}:`, catErr.message);
+      const ids = categoryUpdates.get(row.category) ?? [];
+      ids.push(e.id);
+      categoryUpdates.set(row.category, ids);
     }
 
     // (c)/(b) — bounce beats reply (a bounced lead never sends a real
@@ -2427,6 +2701,20 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
     }
   }
 
+  // Flush the batched category updates (docket E3) — one `.in()` per
+  // distinct category value, chunked to stay inside sane statement sizes.
+  const CAT_CHUNK = 500;
+  for (const [category, ids] of categoryUpdates) {
+    for (let i = 0; i < ids.length; i += CAT_CHUNK) {
+      const chunk = ids.slice(i, i + CAT_CHUNK);
+      const { error: catErr } = await svc
+        .from("campaign_enrollments")
+        .update({ reply_category: category })
+        .in("id", chunk);
+      if (catErr) console.error(`daily-sweep: batched reply_category update failed (${category}, ${chunk.length} rows):`, catErr.message);
+    }
+  }
+
   // Post-terminal unsubscribe backstop (adversarial review): the loop above
   // only iterates NON-terminal enrollments, but an unsubscribe Smartlead
   // reports after a reply/bounce/completion belongs in marketing_optouts
@@ -2473,25 +2761,32 @@ async function reconcileCampaignLeads(campaign: SweepCampaignRow): Promise<Recon
  *  GET /campaigns/{id}/webhooks response (same "check data/webhooks/rows,
  *  fall back to top-level array" defensiveness as extractStatRows /
  *  webhook-status's raw passthrough). */
-function extractWebhookRows(res: unknown): Record<string, unknown>[] {
+/** null = UNRECOGNIZED response shape ("we can't tell"), distinct from []
+ *  = a well-formed response whose list is genuinely empty ("our webhook is
+ *  really gone"). Collapsing the two was docket I2: an unparsed 200 read as
+ *  "unhealthy" and re-registered a duplicate webhook every night, double-
+ *  counting every event from then on. */
+function extractWebhookRows(res: unknown): Record<string, unknown>[] | null {
   if (Array.isArray(res)) return res as Record<string, unknown>[];
-  if (typeof res !== "object" || res === null) return [];
+  if (typeof res !== "object" || res === null) return null;
   const obj = res as Record<string, unknown>;
   for (const key of ["data", "webhooks", "rows"]) {
     if (Array.isArray(obj[key])) return obj[key] as Record<string, unknown>[];
   }
-  return [];
+  return null;
 }
 
 /** Is our webhook still registered AND not explicitly disabled on this
  *  Smartlead campaign? On an uncertain check (fetch failure, unrecognized
  *  response shape) this returns true — a false negative here would attempt
  *  to register a SECOND webhook alongside a perfectly healthy first one,
- *  which is worse than skipping a heal for one day. */
+ *  which is worse than skipping a heal for one day. A well-formed EMPTY
+ *  list, however, is a real "it's gone" and correctly reads unhealthy. */
 async function isWebhookHealthy(smartleadCampaignId: number, webhookId: number): Promise<boolean> {
   try {
     const res = await smartleadFetch(`/campaigns/${smartleadCampaignId}/webhooks`);
     const rows = extractWebhookRows(res);
+    if (rows === null) return true; // can't tell — honor the doc contract above
     if (!rows.length) return false;
     return rows.some((w) => {
       const wid = w.id ?? w.webhook_id;
@@ -2573,13 +2868,41 @@ async function dailySweep(): Promise<DailySweepReport> {
     webhooks_healed: 0,
     skipped_for_budget: 0,
     insights_generated: 0,
+    drafts_pruned: 0,
     errors: [],
   };
 
-  // ---- 1. Metrics + status refresh ---------------------------------
+  // ---- 0. Abandoned wizard-draft prune (docket I37) ----------------
+  // Ignore-the-resume-banner + build fresh + walk away leaves the old
+  // campaign_drafts row forever (cleanup only ran on a successful launch).
+  // One cheap DELETE, before the budgeted steps: any draft untouched for
+  // 30 days is abandoned — the wizard autosaves on every edit, so a draft
+  // someone still cares about always has a recent updated_at.
   try {
-    const { synced } = await syncCampaigns();
+    const cutoff = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    const { data: pruned, error: pruneErr } = await svc
+      .from("campaign_drafts")
+      .delete()
+      .lt("updated_at", cutoff)
+      .select("id");
+    if (pruneErr) throw new Error(pruneErr.message);
+    report.drafts_pruned = (pruned ?? []).length;
+  } catch (err) {
+    console.error("daily-sweep: draft prune failed:", (err as Error).message);
+    report.errors.push("step 0 (draft prune): " + (err as Error).message);
+  }
+
+  // ---- 1. Metrics + status refresh ---------------------------------
+  // Budgeted (docket I8): step 1 used to run uncapped BEFORE any
+  // hasBudget() check — a Smartlead 429 window could spend the entire
+  // 100s here and starve every later step, every night.
+  try {
+    const { synced, capped } = await syncCampaigns(Date.now() + STEP1_BUDGET_MS);
     report.campaigns_synced = synced;
+    if (capped > 0) {
+      report.skipped_for_budget += capped;
+      console.warn(`daily-sweep: metrics sync hit its ${STEP1_BUDGET_MS / 1000}s budget with ${capped} campaigns left (they'll sync next run)`);
+    }
   } catch (err) {
     console.error("daily-sweep: metrics/status sync failed:", (err as Error).message);
     report.errors.push("step 1 (metrics/status sync): " + (err as Error).message);
@@ -2587,12 +2910,14 @@ async function dailySweep(): Promise<DailySweepReport> {
 
   // ---- 2. Per-lead reconcile (cap 25/run, oldest-swept-first) ------
   try {
-    const { data: activeCampaigns, error: activeErr } = await svc
-      .from("campaigns")
-      .select("id, name, owner_user_id, smartlead_campaign_id, settings")
-      .eq("status", "active")
-      .not("smartlead_campaign_id", "is", null);
-    if (activeErr) throw new Error(activeErr.message);
+    const activeCampaigns = await fetchAllRows<Record<string, unknown>>((from, to) =>
+      svc
+        .from("campaigns")
+        .select("id, name, owner_user_id, smartlead_campaign_id, settings")
+        .eq("status", "active")
+        .not("smartlead_campaign_id", "is", null)
+        .order("id", { ascending: true })
+        .range(from, to));
 
     const sorted = ((activeCampaigns ?? []) as SweepCampaignRow[]).slice().sort((a, b) => {
       const at = (a.settings?.last_sweep_at as string) || "";
@@ -2631,8 +2956,12 @@ async function dailySweep(): Promise<DailySweepReport> {
       }
       reconciledThisRun++;
 
-      const nextSettings = { ...(camp.settings ?? {}), last_sweep_at: new Date().toISOString() };
-      const { error: settingsErr } = await svc.from("campaigns").update({ settings: nextSettings }).eq("id", camp.id);
+      // Merge RPC, not spread-update (docket I36) — see campaign_sync_apply's
+      // comment in syncCampaigns for the clobber window this closes.
+      const { error: settingsErr } = await svc.rpc("campaign_settings_merge", {
+        p_campaign_id: camp.id,
+        p_patch: { last_sweep_at: new Date().toISOString() },
+      });
       if (settingsErr) console.error(`daily-sweep: last_sweep_at update failed for campaign ${camp.id}:`, settingsErr.message);
     }
   } catch (err) {
@@ -2642,12 +2971,14 @@ async function dailySweep(): Promise<DailySweepReport> {
 
   // ---- 3. Meeting-booked pause --------------------------------------
   try {
-    const { data: candidates, error: candErr } = await svc
-      .from("campaign_enrollments")
-      .select("id, campaign_id, contact_id, account_id, first_name, last_name, email, owner_user_id, status, paused_reason, enrolled_at, meeting_pause_dismissed_at")
-      .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`)
-      .or("contact_id.not.is.null,account_id.not.is.null");
-    if (candErr) throw new Error(candErr.message);
+    const candidates = await fetchAllRows<Record<string, unknown>>((from, to) =>
+      svc
+        .from("campaign_enrollments")
+        .select("id, campaign_id, contact_id, account_id, first_name, last_name, email, owner_user_id, status, paused_reason, enrolled_at, meeting_pause_dismissed_at")
+        .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`)
+        .or("contact_id.not.is.null,account_id.not.is.null")
+        .order("id", { ascending: true })
+        .range(from, to));
 
     const eligible = (candidates ?? []).filter(
       (e) => !(e.status === "paused" && e.paused_reason === "meeting_booked"),
@@ -2769,10 +3100,15 @@ async function dailySweep(): Promise<DailySweepReport> {
     report.errors.push("step 3 (meeting-booked pause): " + (err as Error).message);
   }
 
+  // Steps 4-6 run in a daily-rotated order (docket I8): they share the
+  // tail of the budget with no cursors of their own, so a fixed order made
+  // the same steps the permanent losers whenever earlier steps ran long.
+  // Rotation keys off the day number — deterministic, no stored state.
+  const stepTaskSpawnCatchUp = async () => {
   // ---- 4. Task spawn catch-up ----------------------------------------
   try {
-    const { data: active, error: activeErr } = await svc.from("campaigns").select("id").eq("status", "active");
-    if (activeErr) throw new Error(activeErr.message);
+    const active = await fetchAllRows<{ id: string }>((from, to) =>
+      svc.from("campaigns").select("id").eq("status", "active").order("id", { ascending: true }).range(from, to));
     for (let i = 0; i < (active?.length ?? 0); i++) {
       if (!hasBudget()) { report.skipped_for_budget += (active!.length - i); break; }
       const c = active![i];
@@ -2788,26 +3124,83 @@ async function dailySweep(): Promise<DailySweepReport> {
     report.errors.push("step 4 (task spawn catch-up): " + (err as Error).message);
   }
 
+  };
+
+  const stepWebhookHealth = async () => {
   // ---- 5. Webhook health ----------------------------------------------
+  // Covers ALL active Smartlead-linked campaigns, including those whose
+  // registration failed at launch and were saved webhook-less — the old
+  // `.not("smartlead_webhook_id","is",null)` filter excluded exactly the
+  // campaigns that most needed healing, leaving them permanently without
+  // real-time replies (docket I1). Webhook-less rows register fresh;
+  // unhealthy ones get their stale registration deleted (best-effort)
+  // before the replacement, so a heal can never accumulate duplicates.
   try {
-    const { data: withWebhook, error: whErr } = await svc
-      .from("campaigns")
-      .select("id, smartlead_campaign_id, smartlead_webhook_id, webhook_secret")
-      .eq("status", "active")
-      .not("smartlead_campaign_id", "is", null)
-      .not("smartlead_webhook_id", "is", null);
-    if (whErr) throw new Error(whErr.message);
+    const withWebhook = await fetchAllRows<Record<string, unknown>>((from, to) =>
+      svc
+        .from("campaigns")
+        .select("id, smartlead_campaign_id, smartlead_webhook_id, webhook_secret")
+        .eq("status", "active")
+        .not("smartlead_campaign_id", "is", null)
+        .order("id", { ascending: true })
+        .range(from, to));
     for (let i = 0; i < (withWebhook?.length ?? 0); i++) {
       if (!hasBudget()) { report.skipped_for_budget += (withWebhook!.length - i); break; }
-      const c = withWebhook![i] as { id: string; smartlead_campaign_id: number; smartlead_webhook_id: number; webhook_secret: string | null };
+      const c = withWebhook![i] as { id: string; smartlead_campaign_id: number; smartlead_webhook_id: number | null; webhook_secret: string | null };
       try {
-        const healthy = await isWebhookHealthy(c.smartlead_campaign_id, c.smartlead_webhook_id);
-        if (healthy) continue;
+        const staleId = c.smartlead_webhook_id;
+        if (staleId != null) {
+          const healthy = await isWebhookHealthy(c.smartlead_campaign_id, staleId);
+          if (healthy) continue;
+        } else {
+          // Webhook-less row: ADOPT any Pulse webhook already live on the
+          // Smartlead side before registering — a blind nightly POST would
+          // mint one duplicate per night whenever a past registration
+          // succeeded but its id wasn't recognized (adversarial review).
+          const existing = await findExistingPulseWebhook(c.smartlead_campaign_id);
+          if (existing) {
+            const { error: adoptErr } = await svc
+              .from("campaigns")
+              .update({
+                smartlead_webhook_id: existing.id,
+                ...(existing.token ? { webhook_secret: existing.token } : {}),
+              })
+              .eq("id", c.id);
+            if (adoptErr) console.error(`daily-sweep: webhook adopt write failed for campaign ${c.id}:`, adoptErr.message);
+            else {
+              report.webhooks_healed++;
+              // Audit the heal (docket I19): live updates silently coming
+              // (back) online is worth a trail — it explains gaps in a
+              // campaign's event history after the fact.
+              await auditCampaignAction("campaign_webhook_healed", c.id, null, {
+                mode: "adopted",
+                webhook_id: existing.id,
+              });
+            }
+            continue;
+          }
+        }
         const secret = c.webhook_secret ?? generateWebhookSecret();
+        // Register FIRST, delete the stale one only after the replacement
+        // lands (adversarial review): delete-first turned a health-check
+        // false negative into destroying a working webhook.
         const newId = await registerCampaignWebhook(c.smartlead_campaign_id, secret);
         if (newId != null) {
-          await svc.from("campaigns").update({ smartlead_webhook_id: newId, webhook_secret: secret }).eq("id", c.id);
-          report.webhooks_healed++;
+          if (staleId != null && staleId !== newId) {
+            try {
+              await smartleadFetch(`/campaigns/${c.smartlead_campaign_id}/webhooks/${staleId}`, { method: "DELETE" });
+            } catch { /* best-effort — a duplicate beats a destroyed working webhook */ }
+          }
+          const { error: healErr } = await svc.from("campaigns").update({ smartlead_webhook_id: newId, webhook_secret: secret }).eq("id", c.id);
+          if (healErr) console.error(`daily-sweep: webhook heal write failed for campaign ${c.id}:`, healErr.message);
+          else {
+            report.webhooks_healed++;
+            await auditCampaignAction("campaign_webhook_healed", c.id, null, {
+              mode: staleId != null ? "replaced" : "registered",
+              webhook_id: newId,
+              ...(staleId != null ? { stale_webhook_id: staleId } : {}),
+            });
+          }
         }
       } catch (err) {
         console.warn(`daily-sweep: webhook heal failed for campaign ${c.id} (best-effort, continuing):`, (err as Error).message);
@@ -2818,6 +3211,9 @@ async function dailySweep(): Promise<DailySweepReport> {
     report.errors.push("step 5 (webhook health): " + (err as Error).message);
   }
 
+  };
+
+  const stepAutoComplete = async () => {
   // ---- 6. Auto-complete straggler enrollments -------------------------
   // Split by WHY the campaign ended (outside-review group 2, docket I6):
   // 'stopped' means a human killed it — archiving the pending call/LinkedIn
@@ -2827,23 +3223,34 @@ async function dailySweep(): Promise<DailySweepReport> {
   // enrollment still flips to 'completed' so tracking is honest, and the
   // tasks complete naturally from Up Next.
   try {
-    const { data: doneCampaigns, error: doneErr } = await svc
-      .from("campaigns")
-      .select("id, status")
-      .in("status", ["completed", "stopped"]);
-    if (doneErr) throw new Error(doneErr.message);
+    const doneCampaigns = await fetchAllRows<{ id: string; status: string }>((from, to) =>
+      svc
+        .from("campaigns")
+        .select("id, status")
+        .in("status", ["completed", "stopped"])
+        // Legacy snapshot rows can't have enrollments — skip the per-
+        // campaign lookup entirely (adversarial review, after the I16
+        // migration completed them all).
+        .neq("origin", "legacy")
+        .order("id", { ascending: true })
+        .range(from, to));
     for (const c of (doneCampaigns ?? []) as { id: string; status: string }[]) {
       if (!hasBudget()) { report.skipped_for_budget++; break; }
-      const { data: stragglers, error: findErr } = await svc
-        .from("campaign_enrollments")
-        .select("id")
-        .eq("campaign_id", c.id)
-        .eq("status", "active");
-      if (findErr) {
-        console.error(`daily-sweep: auto-complete straggler lookup failed for campaign ${c.id}:`, findErr.message);
+      let stragglers: { id: string }[];
+      try {
+        stragglers = await fetchAllRows<{ id: string }>((from, to) =>
+          svc
+            .from("campaign_enrollments")
+            .select("id")
+            .eq("campaign_id", c.id)
+            .eq("status", "active")
+            .order("id", { ascending: true })
+            .range(from, to));
+      } catch (findErr) {
+        console.error(`daily-sweep: auto-complete straggler lookup failed for campaign ${c.id}:`, (findErr as Error).message);
         continue;
       }
-      const ids = (stragglers ?? []).map((e) => e.id as string);
+      const ids = stragglers.map((e) => e.id);
       if (!ids.length) continue;
 
       // 'completed' campaigns: only flip enrollments whose manual touches
@@ -2900,6 +3307,19 @@ async function dailySweep(): Promise<DailySweepReport> {
     report.errors.push("step 6 (auto-complete): " + (err as Error).message);
   }
 
+  };
+
+  // Step 4 is PINNED first (adversarial review): it's the only one of the
+  // three that's time-sensitive — it creates TODAY's call/LinkedIn tasks
+  // for running campaigns, while webhook health and auto-complete are
+  // idempotent catch-up. Only 5 and 6 rotate.
+  await stepTaskSpawnCatchUp();
+  const lateSteps = [stepWebhookHealth, stepAutoComplete];
+  const rot = Math.floor(Date.now() / 86_400_000) % lateSteps.length;
+  for (let k = 0; k < lateSteps.length; k++) {
+    await lateSteps[(rot + k) % lateSteps.length]();
+  }
+
   // ---- 7. AI insights (Campaigns overhaul Phase 4) ---------------------
   // Auto-generate campaign-insights (playbook-ai) for campaigns that have
   // enough data to be worth analyzing and haven't been yet: finished
@@ -2917,20 +3337,52 @@ async function dailySweep(): Promise<DailySweepReport> {
   // holds for its own `svc` client, so no new secret/GUC is needed here.
   try {
     if (hasBudget()) {
-      const { data: candidates, error: candErr } = await svc
-        .from("campaigns")
-        .select("id, status, metrics")
-        .is("analyzed_at", null)
-        .in("status", ["completed", "stopped", "active"]);
-      if (candErr) throw new Error(candErr.message);
+      // Two candidate sets (docket I12 — a campaign used to get exactly ONE
+      // analysis ever, usually at ~20 sends, the thinnest possible data):
+      //   (a) never analyzed — as before;
+      //   (b) analyzed while still ACTIVE, now finished — re-analyzed once
+      //       at completion, when the real results exist. settings
+      //       .analysis_final marks "the finished-campaign analysis has
+      //       run", stamped below after a successful (a)-or-(b) call on a
+      //       finished campaign.
+      type InsightCand = { id: string; status: string; metrics: Record<string, unknown> | null; settings: Record<string, unknown> | null };
+      // Legacy snapshot rows are excluded outright (adversarial review):
+      // after the I16 migration they're all 'completed', and analyzing an
+      // empty steps/metrics husk burns a Claude call AND distils a
+      // permanent training note from nothing.
+      const neverAnalyzed = await fetchAllRows<InsightCand>((from, to) =>
+        svc
+          .from("campaigns")
+          .select("id, status, metrics, settings")
+          .is("analyzed_at", null)
+          .in("status", ["completed", "stopped", "active"])
+          .neq("origin", "legacy")
+          .order("id", { ascending: true })
+          .range(from, to));
+      const finishedNeedingFinal = await fetchAllRows<InsightCand>((from, to) =>
+        svc
+          .from("campaigns")
+          .select("id, status, metrics, settings")
+          .not("analyzed_at", "is", null)
+          .in("status", ["completed", "stopped"])
+          .is("settings->>analysis_final", null)
+          .neq("origin", "legacy")
+          .order("id", { ascending: true })
+          .range(from, to));
+      const seenIds = new Set<string>();
+      const candidates = [...neverAnalyzed, ...finishedNeedingFinal].filter((c) => {
+        if (seenIds.has(c.id)) return false;
+        seenIds.add(c.id);
+        return true;
+      });
 
-      const eligible = ((candidates ?? []) as { id: string; status: string; metrics: Record<string, unknown> | null }[])
+      const eligible = candidates
         .filter((c) => {
-          if (c.status === "completed" || c.status === "stopped") return true;
-          if (c.status === "active") {
-            const sent = parseInt(String(c.metrics?.sent ?? ""), 10);
-            return !isNaN(sent) && sent >= 20;
-          }
+          // A finished campaign with zero sends has nothing to learn from
+          // (adversarial review) — don't burn a Claude call on it.
+          const sent = parseInt(String(c.metrics?.sent ?? ""), 10);
+          if (c.status === "completed" || c.status === "stopped") return !isNaN(sent) && sent > 0;
+          if (c.status === "active") return !isNaN(sent) && sent >= 20;
           return false;
         });
 
@@ -2955,6 +3407,18 @@ async function dailySweep(): Promise<DailySweepReport> {
             continue;
           }
           report.insights_generated++;
+          // A finished campaign's analysis is the FINAL one — mark it so
+          // the (b) set above never re-queues it (docket I12). Merge RPC,
+          // not spread-update (adversarial review): c.settings here was
+          // read BEFORE a loop of per-campaign AI round trips — the widest
+          // read→write gap in this file, exactly the clobber I36 closes.
+          if (c.status !== "active") {
+            const { error: finalErr } = await svc.rpc("campaign_settings_merge", {
+              p_campaign_id: c.id,
+              p_patch: { analysis_final: true },
+            });
+            if (finalErr) console.error(`daily-sweep: analysis_final stamp failed for campaign ${c.id}:`, finalErr.message);
+          }
         } catch (err) {
           console.error(`daily-sweep: campaign-insights invoke failed for campaign ${c.id} (continuing):`, (err as Error).message);
         }
@@ -3002,9 +3466,88 @@ Deno.serve(async (req) => {
       repUserId = await callerUserId(auth);
       if (!repUserId) return json({ error: "Admin only" }, 403);
     }
-    const callerCtx: CallerContext = { isAdmin: adminCaller, userId: repUserId };
+    // Audit identity (docket I19): resolved only for the actions that write
+    // audit rows, and only for human callers — the sweep's service-role
+    // calls record changed_by = null. Kept separate from userId, which must
+    // stay null for admins (a non-null userId flips on rep ownership checks).
+    const AUDITED_ACTIONS = new Set(["launch", "set-campaign-status", "delete-campaign", "optout-add"]);
+    const auditUserId = !svcCaller && AUDITED_ACTIONS.has(action) ? await callerUserId(auth) : null;
+    const callerCtx: CallerContext = { isAdmin: adminCaller, userId: repUserId, auditUserId };
 
     if (action === "status") return json({ configured: smartleadConfigured() });
+    // optout-add lives ABOVE the Smartlead-configured gate below
+    // (adversarial review): it is a pure Postgres write with zero
+    // Smartlead involvement, and prod today has no SMARTLEAD_API_KEY —
+    // parking it under that gate made the admin button a guaranteed 500
+    // in exactly the environment that needs manual opt-outs most.
+    if (action === "optout-add") {
+      // Manual marketing opt-out (docket I33) — the marketing_optouts table
+      // supported reason='manual' from day one but nothing could WRITE one;
+      // admins could only revoke. Admin/service-role only (not in
+      // REP_ELIGIBLE_ACTIONS, so the dispatch gate above already enforces
+      // it). Normalizes server-side; the table's CHECK would reject a
+      // non-normalized email anyway.
+      const email = normalizeEmail(String(body.email ?? ""));
+      if (!email || !email.includes("@")) throw new Error("A valid email address is required.");
+      const note = typeof body.note === "string" && body.note.trim() ? body.note.trim().slice(0, 500) : null;
+      // unique(email, reason): an active manual row means already opted out;
+      // a revoked one is re-activated (the admin is deliberately re-opting
+      // the address out after an earlier Re-allow).
+      const { data: existing, error: exErr } = await svc
+        .from("marketing_optouts")
+        .select("id, revoked_at")
+        .eq("email", email)
+        .eq("reason", "manual")
+        .maybeSingle();
+      if (exErr) throw new Error("Couldn't check the opt-out list: " + exErr.message);
+      let optoutId: string;
+      let reactivated = false;
+      if (existing && !existing.revoked_at) {
+        return json({ success: true, already_opted_out: true });
+      } else if (existing) {
+        const { error: updErr } = await svc
+          .from("marketing_optouts")
+          .update({ revoked_at: null, note, source: "manual" })
+          .eq("id", existing.id);
+        if (updErr) throw new Error("Couldn't re-activate the opt-out: " + updErr.message);
+        optoutId = existing.id as string;
+        reactivated = true;
+      } else {
+        const { data: ins, error: insOptErr } = await svc
+          .from("marketing_optouts")
+          .insert({ email, reason: "manual", source: "manual", note })
+          .select("id")
+          .single();
+        if (insOptErr) {
+          // Two admins opting out the same address at once: the loser of the
+          // unique(email, reason) race gets 23505 for an operation that in
+          // fact succeeded — report it as the success it is (adversarial
+          // review), not a raw Postgres string in a toast.
+          if ((insOptErr as { code?: string }).code === "23505") {
+            return json({ success: true, already_opted_out: true });
+          }
+          throw new Error("Couldn't record the opt-out: " + insOptErr.message);
+        }
+        if (!ins) throw new Error("Couldn't record the opt-out: no row returned");
+        optoutId = ins.id as string;
+      }
+      await auditCampaignAction("marketing_optout_add", optoutId, callerCtx.auditUserId, {
+        email,
+        reason: "manual",
+        reactivated,
+        ...(note ? { note } : {}),
+      }, "marketing_optouts");
+      return json({ success: true, reactivated });
+    }
+    // The daily-sweep cron gets a graceful 200 no-op instead of the 500
+    // below (docket I15): a scheduled caller can't act on the error, and a
+    // daily 500 in net._http_response reads like an outage when the truth
+    // is just "this environment hasn't activated Smartlead yet" (prod
+    // today). Interactive actions keep the loud 500 — a human can fix it.
+    if (action === "daily-sweep" && !smartleadConfigured()) {
+      console.warn("daily-sweep: SMARTLEAD_API_KEY not configured — nothing to sweep (skipping quietly)");
+      return json({ skipped: "SMARTLEAD_API_KEY not configured — nothing to sweep" });
+    }
     if (!smartleadConfigured()) return json({ error: "SMARTLEAD_API_KEY not configured" }, 500);
 
     if (action === "email-accounts") {
@@ -3045,6 +3588,34 @@ Deno.serve(async (req) => {
       // already be gone); the Pulse row is always removed.
       const pulseId = body.id as string;
       const slId = body.smartlead_campaign_id as number | undefined;
+      // Draft-only precondition (docket I18): the tracker only offers Delete
+      // on drafts, but this handler used to delete ANY status when called
+      // directly — killing a live send and orphaning its spawned tasks (the
+      // activities keep their rows via ON DELETE SET NULL, but nothing
+      // cancels them). Mirror the UI's rule server-side, same pattern as
+      // setCampaignStatus's state preconditions. A missing row is success
+      // (idempotent retry), not an error.
+      let deleteStatus: string | null = null;
+      if (pulseId) {
+        const { data: statusRow, error: statusErr } = await svc
+          .from("campaigns")
+          .select("id, status")
+          .eq("id", pulseId)
+          .maybeSingle();
+        if (statusErr) throw new Error("Couldn't check the campaign before deleting: " + statusErr.message);
+        if (!statusRow) return json({ success: true, already_gone: true });
+        deleteStatus = statusRow.status as string;
+        if (deleteStatus !== "draft") {
+          // Status 200 with an {error} body, NOT a 409 — supabase-js
+          // collapses any non-2xx into a generic FunctionsHttpError, so the
+          // client would toast "non-2xx status code" instead of this message
+          // (adversarial review; same convention as every other user-facing
+          // error this dispatcher returns).
+          return json({
+            error: "Only a draft campaign can be deleted. Stop it first if you want to end it — stopped campaigns stay in the record.",
+          });
+        }
+      }
       // Best-effort webhook deregistration (Phase 2, S5) — look up
       // smartlead_webhook_id before the row is gone. Never fails the
       // overall delete; a leftover webhook just posts to a URL that will
@@ -3064,7 +3635,13 @@ Deno.serve(async (req) => {
         } catch { /* best-effort */ }
       }
       if (slId) { try { await smartleadFetch(`/campaigns/${slId}`, { method: "DELETE" }); } catch { /* best-effort */ } }
-      if (pulseId) await svc.from("campaigns").delete().eq("id", pulseId);
+      if (pulseId) {
+        await svc.from("campaigns").delete().eq("id", pulseId);
+        await auditCampaignAction("campaign_delete", pulseId, callerCtx.auditUserId, {
+          status_at_delete: deleteStatus,
+          smartlead_campaign_id: slId ?? null,
+        });
+      }
       return json({ success: true });
     }
     if (action === "mark-reply-handled") {
@@ -3185,36 +3762,28 @@ Deno.serve(async (req) => {
         throw new Error("Campaign not found or not linked to Smartlead: " + (campErr?.message ?? pulseId));
       }
       const secret = (campRow.webhook_secret as string | null) ?? generateWebhookSecret();
-      const webhookUrl = `${SUPABASE_URL}/functions/v1/campaign-webhooks?token=${secret}`;
-      const base = { name: "Pulse campaign events", webhook_url: webhookUrl, event_types: SMARTLEAD_WEBHOOK_EVENT_TYPES };
-      const variants: Array<Record<string, unknown>> = [
-        { id: null, ...base },
-        { id: null, ...base, categories: [] },
-        { ...base },
-      ];
-      const attempts: Array<Record<string, unknown>> = [];
-      for (const payload of variants) {
-        try {
-          const res = (await smartleadFetch(`/campaigns/${campRow.smartlead_campaign_id}/webhooks`, {
-            method: "POST",
-            headers: JSON_HEADERS,
-            body: JSON.stringify(payload),
-          })) as Record<string, unknown>;
-          attempts.push({ payload_keys: Object.keys(payload), ok: true, response: res });
-          const rawId = res?.id ?? res?.webhook_id ?? (res?.data as Record<string, unknown> | undefined)?.id;
-          const webhookId = typeof rawId === "number"
-            ? rawId
-            : (typeof rawId === "string" && /^\d+$/.test(rawId) ? Number(rawId) : null);
-          if (webhookId != null) {
-            await svc
-              .from("campaigns")
-              .update({ smartlead_webhook_id: webhookId, webhook_secret: secret })
-              .eq("id", pulseId);
-            return json({ success: true, webhook_id: webhookId, attempts });
-          }
-        } catch (err) {
-          attempts.push({ payload_keys: Object.keys(payload), ok: false, error: (err as Error).message });
-        }
+      // Adopt-then-register through the same shared routine the launch and
+      // the nightly heal use (adversarial review — three diverging copies
+      // of the registration logic is how the weak single-variant one
+      // lingered in two of them).
+      const existing = await findExistingPulseWebhook(campRow.smartlead_campaign_id as number);
+      if (existing) {
+        await svc
+          .from("campaigns")
+          .update({
+            smartlead_webhook_id: existing.id,
+            ...(existing.token ? { webhook_secret: existing.token } : {}),
+          })
+          .eq("id", pulseId);
+        return json({ success: true, webhook_id: existing.id, adopted: true, attempts: [] });
+      }
+      const { id: webhookId, attempts } = await registerCampaignWebhookVariants(campRow.smartlead_campaign_id as number, secret);
+      if (webhookId != null) {
+        await svc
+          .from("campaigns")
+          .update({ smartlead_webhook_id: webhookId, webhook_secret: secret })
+          .eq("id", pulseId);
+        return json({ success: true, webhook_id: webhookId, attempts });
       }
       return json({ success: false, attempts });
     }

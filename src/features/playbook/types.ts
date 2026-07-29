@@ -83,6 +83,9 @@ export interface Campaign {
   owner_user_id: string | null;
   sending_email_account_id: string | null;
   smartlead_campaign_id: number | null;
+  /** Selected by useCampaigns since Phase 2; surfaced in the detail sheet's
+   *  "Live updates" indicator (docket I1). */
+  smartlead_webhook_id: number | null;
   status: CampaignStatus;
   leads_per_day: number;
   anchor_date: string | null;

@@ -224,6 +224,15 @@ export function useSaveTemplate() {
         if (error) throw error;
         return data as CampaignTemplate;
       }
+      // New custom template — stamp the creating user as owner (same
+      // supabase.auth.getUser() mechanism this file already uses elsewhere,
+      // e.g. fetchLatestCampaignDraft / useFreezeSmartList's sibling in
+      // lead-lists-api.ts) so it isn't ownerless once
+      // campaign_templates_read_own RLS ships for the rep rollout (docket
+      // I32) — an ownerless custom template would be invisible to the rep
+      // who made it.
+      const { data: auth } = await supabase.auth.getUser();
+      payload.owner_user_id = auth.user?.id ?? null;
       const { data, error } = await supabase
         .from("campaign_templates")
         .insert(payload)
@@ -326,26 +335,24 @@ export interface CampaignEnrollmentStats {
 
 /** One grouped fetch of enrollment progress for every visible campaign card
  *  — totals + finished (completed/stopped/bounced) + replied per
- *  campaign_id. Single .in() query selecting just campaign_id + status,
- *  aggregated client-side; fine at tracker-list scale (not a full-database
- *  scan). */
+ *  campaign_id. Database-side count via campaign_enrollment_status_counts
+ *  (closed docket I13, 2026-07-28) — this used to be an unbounded
+ *  `.in("campaign_id", ids)` pulling every enrollment row to the browser,
+ *  which only grows and broke on GET-URL length around ~200 campaigns. */
 export function useCampaignEnrollmentStats(campaignIds: string[]) {
   const key = [...campaignIds].sort().join(",");
   return useQuery({
     queryKey: ["playbook", "campaign-enrollment-stats", key],
     enabled: campaignIds.length > 0,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("campaign_enrollments")
-        .select("campaign_id, status")
-        .in("campaign_id", campaignIds);
+      if (campaignIds.length === 0) return {};
+      const { data, error } = await supabase.rpc("campaign_enrollment_status_counts", {
+        p_campaign_ids: campaignIds,
+      });
       if (error) throw error;
       const out: Record<string, CampaignEnrollmentStats> = {};
-      for (const row of (data ?? []) as { campaign_id: string; status: string }[]) {
-        const s = (out[row.campaign_id] ??= { total: 0, finished: 0, replied: 0 });
-        s.total++;
-        if (row.status === "replied") s.replied++;
-        else if (row.status === "completed" || row.status === "stopped" || row.status === "bounced") s.finished++;
+      for (const row of (data ?? []) as { campaign_id: string; total: number; finished: number; replied: number }[]) {
+        out[row.campaign_id] = { total: Number(row.total), finished: Number(row.finished), replied: Number(row.replied) };
       }
       return out;
     },
@@ -690,15 +697,76 @@ export async function deleteCampaignDraft(id: string): Promise<void> {
   if (error) throw error;
 }
 
-/** Analyze a completed campaign (AI insights + auto-training). */
+/**
+ * Re-register a campaign's Smartlead webhook on demand (docket I1) — the
+ * detail sheet's "Repair live updates" button. Wraps playbook-smartlead's
+ * webhook-register action, which persists the new id + secret on success;
+ * the nightly sweep self-heals too, this is the don't-wait-for-tonight path.
+ */
+export function useRepairCampaignWebhook() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (campaignId: string) => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "webhook-register", id: campaignId },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as { webhook_id?: number | null };
+    },
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] });
+      if (r?.webhook_id != null) toast.success("Live updates reconnected.");
+      else toast.warning("Smartlead didn't accept the reconnection — tonight's self-repair will retry.");
+    },
+    onError: (e) => toast.error("Couldn't reconnect live updates: " + (e as Error).message),
+  });
+}
+
+/**
+ * Run the FULL insights pass for one campaign on demand (docket I12 — the
+ * detail sheet's "Get fresh insights" button). Deliberately the
+ * campaign-insights action, NOT analyze-campaign: insights EXTENDS
+ * analysis_json and feeds the Insights panel's template suggestions, while
+ * analyze-campaign wholesale-replaces analysis_json and would wipe the
+ * suggestion keys (adversarial review).
+ */
+export function useGenerateCampaignInsights() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (campaignId: string) => {
+      const { data, error } = await supabase.functions.invoke("playbook-ai", {
+        body: { action: "campaign-insights", campaign_id: campaignId },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as { suggestions?: unknown[] };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] });
+      qc.invalidateQueries({ queryKey: ["playbook", "campaign-suggestions"] });
+      toast.success("Fresh insights ready — open the Insights panel to review them.");
+    },
+    onError: (e) => toast.error("Couldn't generate insights: " + (e as Error).message),
+  });
+}
+
+/** Analyze a completed campaign (AI insights + auto-training). Accepts a
+ *  bare campaignId (existing callers) or `{ campaignId, force }` — `force`
+ *  passes through to playbook-ai's analyze-campaign action for a future
+ *  "re-analyze" control; a bare string always omits it. Closed docket I13 +
+ *  E2 (2026-07-28). */
 export function useAnalyzeCampaign() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (campaignId: string) =>
-      invokeAI<{ analysis: Record<string, unknown>; training_added?: number; already_analyzed?: boolean }>({
+    mutationFn: (p: string | { campaignId: string; force?: boolean }) => {
+      const { campaignId, force } = typeof p === "string" ? { campaignId: p, force: undefined } : p;
+      return invokeAI<{ analysis: Record<string, unknown>; training_added?: number; already_analyzed?: boolean }>({
         action: "analyze-campaign",
         campaignId,
-      }),
+        force,
+      });
+    },
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] });
       qc.invalidateQueries({ queryKey: ["playbook", "training"] });
@@ -1123,6 +1191,37 @@ export async function fetchSuppressionForEmails(emails: string[]): Promise<Suppr
     }
   }
   return out;
+}
+
+/**
+ * Admin manual opt-out (docket I33) — adds one email straight to
+ * marketing_optouts with reason 'manual', via playbook-smartlead's
+ * `optout-add` action (admin-gated + email-normalizing server-side, same
+ * invoke/error-shape contract as every other action in this file). Backs
+ * the Do-Not-Email report's "Opt out an email…" button — for addresses that
+ * need to be suppressed without having actually bounced or unsubscribed
+ * from a real send. Invalidates the same ["report", "do-not-email"] query
+ * the report reads (prefix match covers every category variant, same as
+ * DoNotEmail.tsx's own `reallow` mutation) so the new row shows up without
+ * a manual refresh.
+ */
+export function useAddManualOptout() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: { email: string; note?: string }) => {
+      const { data, error } = await supabase.functions.invoke("playbook-smartlead", {
+        body: { action: "optout-add", email: p.email, note: p.note },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as { success: boolean };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["report", "do-not-email"] });
+      toast.success("Opted out — this address will no longer be marketed to.");
+    },
+    onError: (e) => toast.error("Couldn't opt out that address: " + (e as Error).message),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1675,23 +1774,31 @@ function eventTypeBucket(eventType: string): keyof CampaignEventStats | null {
  *  present — see extractStepNumber's doc comment in playbook-smartlead/
  *  index.ts) and not the same numbers as campaigns.metrics (Smartlead's own
  *  server-computed rates, shown separately in the header). Lazy, same
- *  enable-while-open pattern as the other detail-sheet queries. */
+ *  enable-while-open pattern as the other detail-sheet queries.
+ *
+ *  Database-side count via campaign_event_counts (closed docket E2,
+ *  2026-07-28) — this used to pull every campaign_events row for the
+ *  campaign to the browser just to bucket event_type client-side. The SQL
+ *  function's CASE mirrors eventTypeBucket's precedence exactly (repl >
+ *  click > open > sent/send); keep them in lockstep if either changes. */
 export function useCampaignEventStats(campaignId: string | null) {
   return useQuery({
     queryKey: ["playbook", "campaign-event-stats", campaignId],
     enabled: !!campaignId,
     queryFn: async (): Promise<CampaignEventStats> => {
-      const { data, error } = await supabase
-        .from("campaign_events")
-        .select("event_type")
-        .eq("campaign_id", campaignId as string);
+      const { data, error } = await supabase.rpc("campaign_event_counts", {
+        p_campaign_id: campaignId as string,
+      });
       if (error) throw error;
-      const out: CampaignEventStats = { sent: 0, opened: 0, clicked: 0, replied: 0 };
-      for (const row of (data ?? []) as { event_type: string }[]) {
-        const bucket = eventTypeBucket(row.event_type);
-        if (bucket) out[bucket]++;
-      }
-      return out;
+      const row = (Array.isArray(data) ? data[0] : data) as
+        | { sent: number; opened: number; clicked: number; replied: number }
+        | undefined;
+      return {
+        sent: Number(row?.sent ?? 0),
+        opened: Number(row?.opened ?? 0),
+        clicked: Number(row?.clicked ?? 0),
+        replied: Number(row?.replied ?? 0),
+      };
     },
   });
 }

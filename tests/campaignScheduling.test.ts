@@ -5,6 +5,7 @@ import {
   emailStepsToSmartleadSequence,
   taskDueAt,
   snapToWeekday,
+  ptUtcOffsetHours,
   type SchedulingStep,
 } from "../supabase/functions/_shared/campaign-scheduling.ts";
 
@@ -223,8 +224,12 @@ describe("taskDueAt", () => {
 
   it("adds relativeOffsetDays across a month boundary", () => {
     // 2026-02-27 (Friday) + 3 days = 2026-03-02 (Monday, Feb 2026 has 28
-    // days) — already a weekday, so the snap is a no-op here.
-    expect(taskDueAt("2026-02-27", 3, "09:00")).toBe("2026-03-02T16:00:00.000Z");
+    // days) — already a weekday, so the snap is a no-op here. 2026-03-02 is
+    // still PST (UTC-8): the spring-forward transition doesn't land until
+    // the second Sunday of March (2026-03-08) — see the "DST-exact PT
+    // offset" describe block below for the transition-day tests. (A
+    // month-bucket approximation would have wrongly called this PDT.)
+    expect(taskDueAt("2026-02-27", 3, "09:00")).toBe("2026-03-02T17:00:00.000Z");
   });
 
   describe("weekend snap (a non-email step must never land outside sendDays)", () => {
@@ -250,18 +255,58 @@ describe("taskDueAt", () => {
     });
   });
 
-  describe("DST boundary months (documented month-based PT approximation)", () => {
+  describe("DST-exact PT offset via taskDueAt (docket E5 — no more month-bucket approximation)", () => {
     it("February -> PST, UTC-8 (2026-02-15 is a Sunday, snaps to Mon 2026-02-16)", () => {
       expect(taskDueAt("2026-02-15", 0, "09:00")).toBe("2026-02-16T17:00:00.000Z");
     });
-    it("March -> PDT, UTC-7 (2026-03-01 is a Sunday, snaps to Mon 2026-03-02)", () => {
-      expect(taskDueAt("2026-03-01", 0, "09:00")).toBe("2026-03-02T16:00:00.000Z");
+    it("early March, BEFORE the transition -> still PST, UTC-8 (2026-03-01 is a Sunday, snaps to Mon 2026-03-02; the 2026 transition is 2026-03-08, not the 1st of the month)", () => {
+      // A month-bucket rule would have called this PDT (16:00Z) — this is
+      // exactly the ~1-week window the old approximation got wrong.
+      expect(taskDueAt("2026-03-01", 0, "09:00")).toBe("2026-03-02T17:00:00.000Z");
     });
-    it("November -> still PDT under the approximation, UTC-7 (2026-11-01 is a Sunday, snaps to Mon 2026-11-02)", () => {
-      expect(taskDueAt("2026-11-01", 0, "09:00")).toBe("2026-11-02T16:00:00.000Z");
+    it("mid/late March, AFTER the transition -> PDT, UTC-7 (2026-03-09, the Monday right after the 2026-03-08 transition)", () => {
+      expect(taskDueAt("2026-03-09", 0, "09:00")).toBe("2026-03-09T16:00:00.000Z");
+    });
+    it("early November, BEFORE the transition would still be PDT, but 2026-11-01 IS the transition Sunday, and 09:00 local is well after the 2am changeover -> PST, UTC-8, snaps to Mon 2026-11-02", () => {
+      // A month-bucket rule would have called this PDT (16:00Z) through
+      // the end of November — this is the other half of the bug.
+      expect(taskDueAt("2026-11-01", 0, "09:00")).toBe("2026-11-02T17:00:00.000Z");
     });
     it("December -> PST, UTC-8 (2026-12-01 is already a Tuesday, no snap)", () => {
       expect(taskDueAt("2026-12-01", 0, "09:00")).toBe("2026-12-01T17:00:00.000Z");
     });
+  });
+});
+
+describe("ptUtcOffsetHours (docket E5 — exact per-instant PT offset, replaces the old month-bucket table)", () => {
+  // US DST 2026: spring forward 2026-03-08 at 2:00am PST -> 3:00am PDT
+  // (the PST->PDT jump instant is 2026-03-08T10:00:00Z: 2:00 + 8h);
+  // fall back 2026-11-01 at 2:00am PDT -> 1:00am PST (the PDT->PST jump
+  // instant is 2026-11-01T09:00:00Z: 2:00 + 7h). Expectations are written
+  // as UTC instants (via Date.UTC) specifically so this test is immune to
+  // the host machine/CI runner's own local timezone.
+
+  it("March 2026 transition: just before 2am local (still PST) is -8, just after (now PDT) is -7", () => {
+    // 2026-03-08T09:59:00Z = 01:59 PST (one minute before the changeover).
+    expect(ptUtcOffsetHours(new Date(Date.UTC(2026, 2, 8, 9, 59, 0)))).toBe(-8);
+    // 2026-03-08T10:01:00Z = 03:01 PDT (one minute after — clocks jumped
+    // straight from 2:00 to 3:00, so 03:01 is the first minute past it).
+    expect(ptUtcOffsetHours(new Date(Date.UTC(2026, 2, 8, 10, 1, 0)))).toBe(-7);
+  });
+
+  it("November 2026 transition: just before 2am local (still PDT) is -7, just after (now PST) is -8", () => {
+    // 2026-11-01T08:59:00Z = 01:59 PDT (one minute before the changeover).
+    expect(ptUtcOffsetHours(new Date(Date.UTC(2026, 10, 1, 8, 59, 0)))).toBe(-7);
+    // 2026-11-01T09:01:00Z = 01:01 PST (one minute after — clocks fell
+    // back from 2:00 to 1:00, so 01:01 is the first minute past it).
+    expect(ptUtcOffsetHours(new Date(Date.UTC(2026, 10, 1, 9, 1, 0)))).toBe(-8);
+  });
+
+  it("mid-summer date is PDT, -7 (2026-07-15, well inside the DST window)", () => {
+    expect(ptUtcOffsetHours(new Date(Date.UTC(2026, 6, 15, 12, 0, 0)))).toBe(-7);
+  });
+
+  it("mid-winter date is PST, -8 (2026-01-15, well outside the DST window)", () => {
+    expect(ptUtcOffsetHours(new Date(Date.UTC(2026, 0, 15, 12, 0, 0)))).toBe(-8);
   });
 });

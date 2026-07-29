@@ -153,9 +153,23 @@ export function CampaignsTab() {
   // regardless of age, since campaigns.updated_at is never maintained after
   // insert and the 30-day bucket would otherwise hide a fresh reply on an
   // old campaign behind "Show all past" (adversarial review).
-  const allPast = filtered.filter((c) => c.status === "completed" || c.status === "stopped");
+  //
+  // origin === 'legacy' rows (the one-time Mailchimp-era snapshot from
+  // 20260722100000_campaigns_unify.sql) never get new smartlead data — no
+  // sync ever touches them — so they can never earn their way out of
+  // "ongoing" or "needs attention" on the merits; they'd sit there forever
+  // (docket I16, "Draft for 34 days" on prod). The backfill migration
+  // (20260728210500) closes out the ones that existed at deploy time, but
+  // this exclusion is the belt-and-braces: ANY future legacy-origin row,
+  // regardless of its status column, is treated as already past and never
+  // eligible for needsAttention — it always falls through to
+  // recentlyEnded/olderPast below. Every existing non-legacy behavior is
+  // unchanged.
+  const isLegacy = (c: CampaignRow) => c.origin === "legacy";
+  const allPast = filtered.filter((c) => c.status === "completed" || c.status === "stopped" || isLegacy(c));
   const recentlyEndedAll = allPast.filter((c) => now - new Date(c.updated_at).getTime() <= RECENTLY_ENDED_MS);
   const needsAttention = filtered.filter((c) => {
+    if (isLegacy(c)) return false;
     const flags = attentionById.get(c.id);
     if (!flags) return false;
     const terminal = c.status === "completed" || c.status === "stopped";
@@ -163,7 +177,10 @@ export function CampaignsTab() {
   });
   const needsIds = new Set(needsAttention.map((c) => c.id));
   const ongoing = filtered.filter(
-    (c) => (c.status === "draft" || c.status === "active" || c.status === "paused") && !needsIds.has(c.id),
+    (c) =>
+      (c.status === "draft" || c.status === "active" || c.status === "paused") &&
+      !isLegacy(c) &&
+      !needsIds.has(c.id),
   );
   const recentlyEnded = recentlyEndedAll.filter((c) => !needsIds.has(c.id));
   const olderPast = allPast.filter(
