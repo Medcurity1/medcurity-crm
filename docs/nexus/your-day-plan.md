@@ -163,6 +163,18 @@ DECIDED (Nathan, 2026-07-29, round 4 — the layout + polish program):
 - **High-five parity**: Home's Recent Wins high-five interaction is USED; the Nexus Wins widget
   must carry it (investigate deal_wins mechanics during the build). Not-worse rule applies.
 
+METRICS AUDIT (2026-07-29, the "16" resolved): Home's KPI registry has exactly 20 options; the
+Nexus metric registry has 12, and they are DIFFERENT vocabularies (Nexus = activity flavored:
+calls, emails, tasks; Home adds the business ones). Covered by Nexus scope/period combos already:
+open pipeline, deals in progress, closed won, team closed won, avg deal size, calls. MISSING from
+Nexus and must be ported into the metric registry before the swap (not-worse rule): My Win Rate,
+Renewals Due in 30 Days, Renewals Due in 60 Days, Total ARR at Risk, My Renewals in Progress,
+Active Customers, Total Contacts, Revenue Starting This Quarter, MQL Count, SQL Count. FLAG FOR
+NATHAN (probably drop, imports era): Pending Imports, New Imports This Month. Upcoming Close Dates
+is a list, not a stat: covered by the Pipeline widget. Reports' Dashboard Metrics page covers the
+company-level set (ARR, NRR, churn) but not the personal ones; after the registry port, the Nexus
+widget IS the personal metrics home and Reports stays the company-numbers home.
+
 BUILD ORDER (round 4): 1 two-stack layout → 2 briefing instant cycling → 3 metrics tiles +
 16-for-16 Reports audit → 4 Customize mode (gallery + pins + hero presets) → 5 wins high-five
 parity. All staging, all beneath the dormant flip.
