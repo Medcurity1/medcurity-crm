@@ -18,6 +18,8 @@ import { useNexusInitialize, useNexusWidgets } from "./api";
 import { MAX_WIDGETS, type NexusWidget } from "./types";
 import { NexusGrid } from "./NexusGrid";
 import { WidgetBuilder } from "./WidgetBuilder";
+import { Briefing } from "./Briefing";
+import { useDayQueue } from "./day-queue-api";
 
 function getGreeting(): string {
   const hour = new Date().getHours();
@@ -37,6 +39,12 @@ export function NexusPage() {
   const [builderOpen, setBuilderOpen] = useState(false);
   const [editing, setEditing] = useState<NexusWidget | null>(null);
 
+  // The briefing owns the greeting when it can load (same react-query
+  // cache, so this costs no extra round trip). If the queue read fails
+  // the briefing renders nothing and this page falls back to the header
+  // it has always had.
+  const { isError: briefingFailed } = useDayQueue();
+
   const count = widgets?.length ?? 0;
   const atCap = count >= MAX_WIDGETS;
   const nextPosition = widgets?.length
@@ -55,32 +63,39 @@ export function NexusPage() {
     </Button>
   );
 
+  const addControl = atCap ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {/* span wrapper so the tooltip still fires on the disabled button */}
+        <span tabIndex={0}>{addButton}</span>
+      </TooltipTrigger>
+      <TooltipContent>
+        You've hit the {MAX_WIDGETS}-widget limit. Remove one to add another.
+      </TooltipContent>
+    </Tooltip>
+  ) : (
+    addButton
+  );
+
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            {getGreeting()}, {profile?.full_name ?? "there"}
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Your day at a glance — arrange it however you work.
-          </p>
+      {briefingFailed && (
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">
+              {getGreeting()}, {profile?.full_name ?? "there"}
+            </h1>
+            <p className="text-muted-foreground mt-1">
+              Your day at a glance. Arrange it however you work.
+            </p>
+          </div>
+          {addControl}
         </div>
-        {atCap ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              {/* span wrapper so the tooltip still fires on the disabled button */}
-              <span tabIndex={0}>{addButton}</span>
-            </TooltipTrigger>
-            <TooltipContent>
-              You've hit the {MAX_WIDGETS}-widget limit. Remove one to add
-              another.
-            </TooltipContent>
-          </Tooltip>
-        ) : (
-          addButton
-        )}
-      </div>
+      )}
+
+      {/* The anchor above the grid. Renders nothing if the queue read
+          fails, in which case the header above takes over. */}
+      <Briefing dividerActions={briefingFailed ? undefined : addControl} />
 
       <NexusGrid onEditWidget={(w) => openBuilder(w)} />
 

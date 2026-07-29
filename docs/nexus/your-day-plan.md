@@ -116,6 +116,10 @@ DECIDED (Nathan, 2026-07-29, round 2):
   Nexus (user picks favorites); the FULL metrics catalog lands under Reports, where deep numbers
   already live. Home's removal does not open a Metrics tab seat.
 
+FLIP PREREQUISITE noted 2026-07-29 (goes with docket I34): the briefing's reply rows route to
+/playbook, which is admin-gated. Fine today (campaigns are admin-only), but the rep rollout must
+either ungate a replies view or reroute rep clicks to the contact record.
+
 STILL OPEN (Nathan + Jordan):
 1. Ranking defaults: money-first vs time-first blend.
 2. Cold-call source: everyone or Summer-specific.
