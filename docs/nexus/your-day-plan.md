@@ -7,7 +7,7 @@ meant to be this for sales ("the dream of Nexus — it just has the foundation")
 it has never earned the top spot. Goal: ONE landing surface that tells each salesperson what to do
 next, absorbs Home's value, and keeps Jordan M's widget work first-class.
 
-**Status: PLANNING ONLY — nothing built. Jordan M is a stakeholder; review this with her before building.**
+**Status: Phase 1 engine build authorized (Nathan 2026-07-29, "you can build on nexus in the meantime"); widget UI waits on the look pick. Jordan M reviews defaults + wording before the flip.**
 
 ---
 
@@ -82,10 +82,10 @@ filler. Deterministic and explainable; tuning is a config table, not code.
   Nexus. Home untouched. Team plays with it. (~1–2 days)
 - **Phase 2 (absorb, staging):** Wins widget, Recents widget, quick-action row, per-role defaults,
   KPI default pins. (~1 day)
-- **Phase 3 (flip):** the landing route points at Nexus; the tab takes the name **Home** (one
-  landing tab, powered by the Nexus grid — avoids two-homes confusion; "Nexus" survives as the
-  internal/engine name unless the team wants it kept visible). Old Home reachable during a grace
-  window, then retired. This flip is the existing H2 watch item — Nathan's explicit call.
+- **Phase 3 (flip):** the landing route points at Nexus and **the tab keeps the name Nexus — Home
+  is retired** (decided; see §5). Old /home routes redirect to Nexus with "looking for X? it's now
+  here" pointers + an AnnouncementBanner cycle for a few weeks. This flip is the existing H2 watch
+  item — Nathan's explicit call.
 - Each phase: staging → Nathan/Jordan/Summer feedback → his prod word. Standard rails.
 
 ## 5. Decisions & open questions
