@@ -8,12 +8,14 @@ import { toast } from "sonner";
 import {
   Ban,
   BarChart3,
+  History,
   Inbox,
   Kanban,
   ListTodo,
   Megaphone,
   Pin,
   Table2,
+  Trophy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -173,6 +175,18 @@ const TYPE_META: Record<
     description: "Your upcoming campaign-generated calls, LinkedIn, and review-and-send tasks.",
     icon: Megaphone,
     defaultName: "Campaign Touches",
+  },
+  wins: {
+    label: "Recent Wins",
+    description: "The team's most recently closed-won deals.",
+    icon: Trophy,
+    defaultName: "Recent Wins",
+  },
+  recents: {
+    label: "Recents",
+    description: "Records you've recently visited.",
+    icon: History,
+    defaultName: "Recents",
   },
 };
 
@@ -534,6 +548,20 @@ function TypeConfigPanel({ type, config, onConfigChange }: TypeConfigPanelProps)
       return (
         <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 p-3">
           Always shows the page owner's upcoming campaign tasks — nothing to
+          configure.
+        </p>
+      );
+    case "wins":
+      return (
+        <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 p-3">
+          Always shows the whole team's recent closed-won deals — nothing to
+          configure.
+        </p>
+      );
+    case "recents":
+      return (
+        <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 p-3">
+          Always shows the page owner's recently visited records — nothing to
           configure.
         </p>
       );

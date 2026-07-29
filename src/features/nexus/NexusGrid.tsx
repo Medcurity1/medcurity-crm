@@ -44,11 +44,13 @@ import { MetricsWidget } from "./widgets/MetricsWidget";
 import { PinnedRecordsWidget } from "./widgets/PinnedRecordsWidget";
 import { RequestsWidget } from "./widgets/RequestsWidget";
 import { CampaignTouchesWidget } from "./widgets/CampaignTouchesWidget";
+import { WinsWidget } from "./widgets/WinsWidget";
+import { RecentsWidget } from "./widgets/RecentsWidget";
 import type { NexusWidget, NexusWidgetType } from "./types";
 
 /**
- * Body component per widget type. All seven are live as of the Campaigns
- * overhaul S7 (Campaign Touches added to the original Stage C six); each
+ * Body component per widget type. Nine are live as of Nexus Phase 2
+ * (Wins + Recents added to the Campaigns-overhaul seven); each
  * implements NexusWidgetBodyProps.
  */
 export const WIDGET_BODIES: Record<
@@ -62,6 +64,8 @@ export const WIDGET_BODIES: Record<
   pinned_records: PinnedRecordsWidget,
   requests: RequestsWidget,
   campaign_touches: CampaignTouchesWidget,
+  wins: WinsWidget,
+  recents: RecentsWidget,
 };
 
 export interface NexusGridProps {

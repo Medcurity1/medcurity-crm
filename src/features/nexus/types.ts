@@ -30,6 +30,8 @@ export const NEXUS_WIDGET_TYPES = [
   "pinned_records",
   "requests",
   "campaign_touches",
+  "wins",
+  "recents",
 ] as const;
 export type NexusWidgetType = (typeof NEXUS_WIDGET_TYPES)[number];
 
@@ -41,6 +43,11 @@ export type PipelineWidgetConfig = Record<string, never>;
 /** Campaign Touches (S7) — MY upcoming campaign-generated tasks, scoped to
  *  the widget owner just like Tasks/Pipeline. No config. */
 export type CampaignTouchesWidgetConfig = Record<string, never>;
+/** Recent Wins (Nexus Phase 2) — team-wide closed-won feed. No config. */
+export type WinsWidgetConfig = Record<string, never>;
+/** Recents (Nexus Phase 2) — the signed-in user's recently visited
+ *  records, read from localStorage. No config. */
+export type RecentsWidgetConfig = Record<string, never>;
 
 /** Entities the custom report builder can target. Imports is admin-only. */
 export type NexusReportEntity = "contacts" | "accounts" | "opportunities" | "imports";
@@ -140,6 +147,8 @@ export interface NexusWidgetConfigMap {
   pinned_records: PinnedRecordsWidgetConfig;
   requests: RequestsWidgetConfig;
   campaign_touches: CampaignTouchesWidgetConfig;
+  wins: WinsWidgetConfig;
+  recents: RecentsWidgetConfig;
 }
 
 /** Any widget config (use the discriminated row types to narrow). */
