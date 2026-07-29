@@ -330,13 +330,13 @@ export function useCreateRequest() {
       // recipients). Best-effort: the in-app bell is the reliable channel,
       // so an email failure must never fail the submission. The function
       // is idempotent server-side (email_notified_at CAS), so repeats are
-      // harmless. Skipped when a bug already went straight to Jira — the
-      // reviewers have nothing to approve.
-      if (!bugFiled) {
-        void supabase.functions
-          .invoke("request-email-notify", { body: { requestId: data.id } })
-          .catch(() => {});
-      }
+      // harmless. It picks the template itself: a review email for
+      // enhancements/collateral/crm, or an informational "filed to Jira"
+      // email for an auto-filed bug (the routed team still gets notified,
+      // even though there's nothing to approve).
+      void supabase.functions
+        .invoke("request-email-notify", { body: { requestId: data.id } })
+        .catch(() => {});
 
       return { request: data as CrmRequest, failedUploads, bugFiled };
     },

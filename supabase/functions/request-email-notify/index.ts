@@ -100,17 +100,16 @@ serve(async (req) => {
     if (claimErr) return json({ error: claimErr.message }, 500);
     if (!reqRow) return json({ skipped: "already notified or not found" });
 
-    // Product BUG reports skip the approval email — they file straight to
-    // Jira on submit. Only the fallback path (filing failed/unconfigured,
-    // request still pending with no ticket) emails the reviewers like a
-    // normal product request. Keep the claim stamp either way: a filed
-    // bug must never email later.
+    // Product BUG reports get their OWN email (built below), not the review
+    // email: a bug files straight to Jira on submit, so there's nothing to
+    // approve — but the routed product team still needs to know a ticket
+    // landed and that the work is waiting in the dev tools. A bug whose
+    // filing FAILED stays pending with no ticket and falls through to the
+    // normal review email, so nothing is ever silently dropped.
     const isBug =
       reqRow.type === "product" &&
       ((reqRow.details ?? {}) as Record<string, unknown>).category === "bug";
-    if (isBug && (reqRow.status !== "pending" || reqRow.jira_issue_key)) {
-      return json({ skipped: "bug auto-filed to Jira" });
-    }
+    const isFiledBug = isBug && (reqRow.status !== "pending" || !!reqRow.jira_issue_key);
 
     async function unclaim() {
       await svc
@@ -159,10 +158,8 @@ serve(async (req) => {
       return json({ error: `token refresh failed: ${(e as Error).message}` }, 502);
     }
 
-    const label = isBug ? "product bug report" : (TYPE_LABEL[reqRow.type] ?? "request");
-    const subject = `New ${label}: ${reqRow.title}`;
-    const html = [
-      `<p>A new <strong>${escapeHtml(label)}</strong> is waiting for review.</p>`,
+    // Shared detail rows (From / Title / Priority) used by both templates.
+    const detailRows = [
       `<table style="font-size:14px;border-collapse:collapse">`,
       `<tr><td style="padding:2px 12px 2px 0;color:#666">From</td><td>${escapeHtml(reqRow.requester_name ?? "Unknown")}</td></tr>`,
       `<tr><td style="padding:2px 12px 2px 0;color:#666">Title</td><td>${escapeHtml(reqRow.title)}</td></tr>`,
@@ -171,9 +168,37 @@ serve(async (req) => {
       reqRow.description
         ? `<p style="color:#444;white-space:pre-wrap">${escapeHtml(reqRow.description)}</p>`
         : "",
-      `<p><a href="${APP_BASE}/nexus" style="display:inline-block;background:#1d4ed8;color:#fff;padding:9px 22px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:600">Open in Pulse</a></p>`,
-      `<p style="color:#999;font-size:12px">Sent by Pulse. Review and act on requests inside the CRM.</p>`,
     ].join("");
+
+    let subject: string;
+    let html: string;
+
+    if (isFiledBug) {
+      // Informational bug notice. No links and no route back to Pulse: the
+      // ticket lives in the dev tools now, so we point people to Helm/Jira
+      // rather than the CRM. Deliberately does NOT say "no action needed" —
+      // the dev team still has to work it; there's just nothing to approve
+      // here. Reference the Jira key as plain text so it's easy to find.
+      const ticket = reqRow.jira_issue_key
+        ? ` as <strong>${escapeHtml(reqRow.jira_issue_key)}</strong>`
+        : "";
+      subject = `New bug report: ${reqRow.title}`;
+      html = [
+        `<p>A new <strong>bug report</strong> came in and has been filed to Jira${ticket}.</p>`,
+        detailRows,
+        `<p>It's now with the dev team. Check <strong>Helm</strong> or <strong>Jira</strong> for the ticket and full details.</p>`,
+        `<p style="color:#999;font-size:12px">Sent by Pulse. Bug reports skip approval and go straight to the dev team — this is your heads-up that one landed.</p>`,
+      ].join("");
+    } else {
+      const label = TYPE_LABEL[reqRow.type] ?? "request";
+      subject = `New ${label}: ${reqRow.title}`;
+      html = [
+        `<p>A new <strong>${escapeHtml(label)}</strong> is waiting for review.</p>`,
+        detailRows,
+        `<p><a href="${APP_BASE}/nexus" style="display:inline-block;background:#1d4ed8;color:#fff;padding:9px 22px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:600">Open in Pulse</a></p>`,
+        `<p style="color:#999;font-size:12px">Sent by Pulse. Review and act on requests inside the CRM.</p>`,
+      ].join("");
+    }
 
     const res = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
       method: "POST",
