@@ -17,8 +17,10 @@ import {
 import { useNexusInitialize, useNexusWidgets } from "./api";
 import { MAX_WIDGETS, type NexusWidget } from "./types";
 import { NexusGrid } from "./NexusGrid";
+import { useHomeLayoutImport } from "./home-import";
 import { WidgetBuilder } from "./WidgetBuilder";
 import { Briefing } from "./Briefing";
+import { NexusTour } from "./NexusTour";
 import { useDayQueue } from "./day-queue-api";
 
 function getGreeting(): string {
@@ -36,6 +38,8 @@ export function NexusPage() {
   useNexusInitialize();
 
   const { data: widgets } = useNexusWidgets();
+  // Home layout carry-over (dormant until the landing flip; see home-import.ts).
+  useHomeLayoutImport(widgets);
   const [builderOpen, setBuilderOpen] = useState(false);
   const [editing, setEditing] = useState<NexusWidget | null>(null);
 
@@ -57,7 +61,9 @@ export function NexusPage() {
   }
 
   const addButton = (
-    <Button onClick={() => openBuilder(null)} disabled={atCap}>
+    // data-tour anchors the third tour step (NexusTour.tsx). Inert until
+    // swap day.
+    <Button data-tour="add-widget" onClick={() => openBuilder(null)} disabled={atCap}>
       <Plus className="h-4 w-4 mr-2" />
       Add a Widget
     </Button>
@@ -108,6 +114,10 @@ export function NexusPage() {
         widget={editing}
         nextPosition={nextPosition}
       />
+
+      {/* First-visit tour. Renders null (before any hook runs) until
+          NEXUS_IS_LANDING flips on swap day. See landing-flip.ts. */}
+      <NexusTour />
     </div>
   );
 }

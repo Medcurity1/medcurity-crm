@@ -31,6 +31,7 @@ export const NEXUS_WIDGET_TYPES = [
   "requests",
   "campaign_touches",
   "wins",
+  "cold_call",
   "recents",
 ] as const;
 export type NexusWidgetType = (typeof NEXUS_WIDGET_TYPES)[number];
@@ -44,6 +45,7 @@ export type PipelineWidgetConfig = Record<string, never>;
  *  the widget owner just like Tasks/Pipeline. No config. */
 export type CampaignTouchesWidgetConfig = Record<string, never>;
 /** Recent Wins (Nexus Phase 2) — team-wide closed-won feed. No config. */
+export type ColdCallWidgetConfig = Record<string, never>;
 export type WinsWidgetConfig = Record<string, never>;
 /** Recents (Nexus Phase 2) — the signed-in user's recently visited
  *  records, read from localStorage. No config. */
@@ -148,6 +150,7 @@ export interface NexusWidgetConfigMap {
   requests: RequestsWidgetConfig;
   campaign_touches: CampaignTouchesWidgetConfig;
   wins: WinsWidgetConfig;
+  cold_call: ColdCallWidgetConfig;
   recents: RecentsWidgetConfig;
 }
 

@@ -14,7 +14,7 @@
 // ICP filtering (org type / state / FTE) stays config-driven and permissive
 // by default (superseded in practice by her lists, kept for the auto pool).
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { PhoneCall } from "lucide-react";
@@ -82,7 +82,12 @@ function loadIcp(): IcpConfig {
 const LIMIT = 15;
 const LIST_CHOICE_KEY = "cold_call_list_id"; // '' = auto pool
 
-export function ColdCallWidget() {
+/**
+ * Chrome-free body (source picker + table) shared by Home's card and the
+ * Nexus 'cold_call' widget (docket C2 Step 1: every Home piece gets a
+ * Nexus twin). onDataUpdated feeds Nexus's WidgetShell "Updated X ago".
+ */
+export function ColdCallBody({ onDataUpdated }: { onDataUpdated?: (at: number) => void } = {}) {
   const [listId, setListId] = useState<string>(
     () => localStorage.getItem(LIST_CHOICE_KEY) ?? "",
   );
@@ -104,7 +109,7 @@ export function ColdCallWidget() {
     },
   });
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, dataUpdatedAt } = useQuery({
     queryKey: ["dashboard", "cold-call-contacts", listId],
     queryFn: async () => {
       // List mode: the pool is exactly the contacts Summer curated onto the
@@ -145,13 +150,13 @@ export function ColdCallWidget() {
     },
   });
 
+  useEffect(() => {
+    if (dataUpdatedAt && onDataUpdated) onDataUpdated(dataUpdatedAt);
+  }, [dataUpdatedAt, onDataUpdated]);
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-base flex items-center gap-2">
-          <PhoneCall className="h-4 w-4 text-primary" />
-          Cold Call List
-        </CardTitle>
+    <div>
+      <div className="flex justify-end mb-2">
         <Select
           value={listId || "__auto__"}
           onValueChange={(v) => {
@@ -172,8 +177,8 @@ export function ColdCallWidget() {
             ))}
           </SelectContent>
         </Select>
-      </CardHeader>
-      <CardContent>
+      </div>
+      <div>
         {isLoading ? (
           <div className="space-y-2">
             {Array.from({ length: 5 }).map((_, i) => (
@@ -216,7 +221,7 @@ export function ColdCallWidget() {
                       )}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {row.title ?? "—"}
+                      {row.title ?? ""}
                     </TableCell>
                     <TableCell>
                       {row.account_id && row.account_name ? (
@@ -227,7 +232,7 @@ export function ColdCallWidget() {
                           {row.account_name}
                         </Link>
                       ) : (
-                        <span className="text-muted-foreground">—</span>
+                        <span className="text-muted-foreground"></span>
                       )}
                       {(row.industry ?? row.account_type) && (
                         <span className="block text-xs text-muted-foreground">
@@ -236,7 +241,7 @@ export function ColdCallWidget() {
                       )}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {row.state ?? "—"}
+                      {row.state ?? ""}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {row.last_activity_at
@@ -249,6 +254,23 @@ export function ColdCallWidget() {
             </Table>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** Home's card wrapper around the shared body (unchanged appearance). */
+export function ColdCallWidget() {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <CardTitle className="text-base flex items-center gap-2">
+          <PhoneCall className="h-4 w-4 text-primary" />
+          Cold Call List
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ColdCallBody />
       </CardContent>
     </Card>
   );

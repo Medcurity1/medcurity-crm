@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import {
   Ban,
   BarChart3,
-  History,
+  History, PhoneCall,
   Inbox,
   Kanban,
   ListTodo,
@@ -187,6 +187,12 @@ const TYPE_META: Record<
     description: "Records you've recently visited.",
     icon: History,
     defaultName: "Recents",
+  },
+  cold_call: {
+    label: "Cold Call List",
+    description: "Warm-first dials from your chosen call list.",
+    icon: PhoneCall,
+    defaultName: "Cold Call List",
   },
 };
 
@@ -556,6 +562,12 @@ function TypeConfigPanel({ type, config, onConfigChange }: TypeConfigPanelProps)
         <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 p-3">
           Always shows the whole team's recent closed-won deals — nothing to
           configure.
+        </p>
+      );
+    case "cold_call":
+      return (
+        <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 p-3">
+          Pick the call list inside the widget. Nothing to configure here.
         </p>
       );
     case "recents":

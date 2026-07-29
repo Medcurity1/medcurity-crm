@@ -13,7 +13,7 @@
 // it is today rather than showing a broken banner.
 
 import { useMemo, useState, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Plus, Phone, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { QuickTaskDialog } from "@/features/activities/QuickTaskDialog";
 import { useDayQueue, useSnoozeDayItem, type DayQueueRow } from "./day-queue-api";
+import { NEXUS_IS_LANDING, NEXUS_FEEDBACK_LINK } from "./landing-flip";
 
 // ── Copy helpers ─────────────────────────────────────────────────────
 
@@ -232,8 +233,12 @@ export function Briefing({ dividerActions }: BriefingProps) {
 
   return (
     <div className="space-y-4">
-      {/* Hero */}
-      <div className="relative overflow-hidden rounded-xl border border-border/60 bg-gradient-to-br from-emerald-50 via-card to-sky-50 px-5 py-4 dark:from-emerald-950/50 dark:via-card dark:to-sky-950/40">
+      {/* Hero. data-tour is the first-visit tour's anchor (NexusTour.tsx);
+          it has no effect until swap day. */}
+      <div
+        data-tour="hero"
+        className="relative overflow-hidden rounded-xl border border-border/60 bg-gradient-to-br from-emerald-50 via-card to-sky-50 px-5 py-4 dark:from-emerald-950/50 dark:via-card dark:to-sky-950/40"
+      >
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <h1 className="text-xl font-semibold tracking-tight">
@@ -324,11 +329,22 @@ export function Briefing({ dividerActions }: BriefingProps) {
 
 function DividerRow({ actions }: { actions?: ReactNode }) {
   return (
-    <div className="flex items-center gap-3 pt-1">
+    <div data-tour="widgets" className="flex items-center gap-3 pt-1">
       <span className="text-xs uppercase tracking-wide text-muted-foreground">
         Your widgets
       </span>
       <span className="flex-1 border-t border-dashed border-border" />
+      {/* Transition-only escape hatch: live while Nexus is the landing
+          page and Home is still fresh in everyone's memory. Both flags
+          live in landing-flip.ts. */}
+      {NEXUS_IS_LANDING && NEXUS_FEEDBACK_LINK && (
+        <Link
+          to="/requests"
+          className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+        >
+          Something missing?
+        </Link>
+      )}
       {actions}
     </div>
   );

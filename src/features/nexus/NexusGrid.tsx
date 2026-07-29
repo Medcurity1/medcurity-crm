@@ -45,6 +45,7 @@ import { PinnedRecordsWidget } from "./widgets/PinnedRecordsWidget";
 import { RequestsWidget } from "./widgets/RequestsWidget";
 import { CampaignTouchesWidget } from "./widgets/CampaignTouchesWidget";
 import { WinsWidget } from "./widgets/WinsWidget";
+import { ColdCallListWidget } from "./widgets/ColdCallListWidget";
 import { RecentsWidget } from "./widgets/RecentsWidget";
 import type { NexusWidget, NexusWidgetType } from "./types";
 
@@ -65,6 +66,7 @@ export const WIDGET_BODIES: Record<
   requests: RequestsWidget,
   campaign_touches: CampaignTouchesWidget,
   wins: WinsWidget,
+  cold_call: ColdCallListWidget,
   recents: RecentsWidget,
 };
 
