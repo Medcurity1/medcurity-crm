@@ -100,11 +100,26 @@ DECIDED (Nathan, 2026-07-29):
   non-technical one-pager produced 2026-07-29 (`nexus-look-options.html`,
   `nexus-transition-onepager.html`) — Nathan is socializing the plan while the engine gets built.
 
+DECIDED (Nathan, 2026-07-29, round 2):
+- **Look = the Briefing (Option A)**, refined. Hero greeting + counts, top-3 strip, then the
+  existing customizable widget grid. Users' CURRENT widget setups carry over beneath the briefing
+  (Phase 2 includes a config import so below-the-briefing barely changes for anyone).
+- **Copy rules for the Nexus tab: NO em dashes, no filler, no AI-flavored fluff.** Counts and plain
+  phrases only ("Good morning, Summer." + "3 replies waiting · 2 renewals in window"), never
+  "strong start" style padding. The queue's reason strings are UI copy and follow the same rule
+  (20260729150000 re-emitted them dash-free).
+- **The briefing must serve non-sales users as well as Home did or better.** It shows whatever work
+  the user actually has: product folks lead with waiting Requests + due tasks (Rachel), assessment
+  folks with tasks/deadlines; no deals = no deal rows. Queue engine gains a requests branch for
+  this (build item). Role-based default layouts under the briefing (Rachel's leads with metrics).
+- **Metrics: no new top-level tab.** The 16 key metrics boil into the compact My Numbers widget on
+  Nexus (user picks favorites); the FULL metrics catalog lands under Reports, where deep numbers
+  already live. Home's removal does not open a Metrics tab seat.
+
 STILL OPEN (Nathan + Jordan):
-1. Which look (A Briefing / B Queue / C Cockpit / a mix).
-2. Ranking defaults: money-first vs time-first blend.
-3. Cold-call source: everyone or Summer-specific.
-4. Day-progress / streak element: v2 at most.
+1. Ranking defaults: money-first vs time-first blend.
+2. Cold-call source: everyone or Summer-specific.
+3. Day-progress / streak element: v2 at most.
 
 ## 6. Explicit non-goals (for now)
 
