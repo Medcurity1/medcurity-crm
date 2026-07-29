@@ -80,8 +80,11 @@ filler. Deterministic and explainable; tuning is a config table, not code.
 
 - **Phase 1 (build, staging):** queue view/RPC + snooze table + YourDayWidget + greeting header on
   Nexus. Home untouched. Team plays with it. (~1–2 days)
-- **Phase 2 (absorb, staging):** Wins widget, Recents widget, quick-action row, per-role defaults,
-  KPI default pins. (~1 day)
+- **Phase 2 (absorb, staging):** duplicate EVERYTHING Home has onto Nexus while Home still exists
+  (Nathan 2026-07-29: "turning off Home at the end does essentially nothing cause everything else
+  would already be set up"). Wins widget, Recents widget, quick-action row, per-role defaults, KPI
+  default pins, and the Home widget-config carry-over. Both tabs fully work in parallel;
+  Phase 3 becomes a no-op removal. (~1 day)
 - **Phase 3 (flip):** the landing route points at Nexus and **the tab keeps the name Nexus — Home
   is retired** (decided; see §5). Old /home routes redirect to Nexus with "looking for X? it's now
   here" pointers + an AnnouncementBanner cycle for a few weeks. This flip is the existing H2 watch
@@ -98,7 +101,7 @@ DECIDED (Nathan, 2026-07-29):
 - **Build without disruption:** the Your Day feature lands on Nexus FIRST (nobody's workflow
   changes); Home and tab order untouched until the team has reviewed. Look options + a
   non-technical one-pager produced 2026-07-29 (`nexus-look-options.html`,
-  `nexus-transition-onepager.html`) — Nathan is socializing the plan while the engine gets built.
+  `nexus-transition-guide.html`) — Nathan is socializing the plan while the engine gets built.
 
 DECIDED (Nathan, 2026-07-29, round 2):
 - **Look = the Briefing (Option A)**, refined. Hero greeting + counts, top-3 strip, then the
