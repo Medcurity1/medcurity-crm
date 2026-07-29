@@ -143,11 +143,26 @@ export function useSnoozeDayItem() {
       );
       if (error) throw error;
     },
+    // Optimistic (docket C2 round 4, "briefing cycles instantly"): the row
+    // disappears and the next-ranked item slides into the strip the moment
+    // Not today is clicked, not a round-trip later. Rolled back on error.
+    onMutate: async (itemKey: string) => {
+      await qc.cancelQueries({ queryKey: DAY_QUEUE_KEY });
+      const previous = qc.getQueryData<DayQueueRow[]>(DAY_QUEUE_KEY);
+      qc.setQueryData<DayQueueRow[]>(DAY_QUEUE_KEY, (rows) =>
+        (rows ?? []).filter((r) => r.item_key !== itemKey),
+      );
+      return { previous };
+    },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: DAY_QUEUE_KEY });
       toast.success("Back tomorrow.");
     },
-    onError: (e) =>
-      toast.error("Couldn't snooze that: " + (e as Error).message),
+    onError: (e, _itemKey, ctx) => {
+      if (ctx?.previous) qc.setQueryData(DAY_QUEUE_KEY, ctx.previous);
+      toast.error("Couldn't snooze that: " + (e as Error).message);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: DAY_QUEUE_KEY });
+    },
   });
 }

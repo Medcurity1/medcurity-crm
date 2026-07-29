@@ -1,11 +1,16 @@
-// NexusGrid — the 2-column widget grid (spec §3). Widgets order by
-// position, pairs left-to-right then down; single column below lg keeps
-// the same order. Drag-to-reorder by the header handle (rectSortingStrategy)
-// persists via useReorderWidgets. Takes an optional userId so the admin
-// "configure for user" editor can render any rep's grid, and a mode prop
-// ("default") that points the SAME grid at nexus_default_widgets for the
-// admin system-default editor — bodies preview with the signed-in
-// admin's own data since default rows have no owner.
+// NexusGrid — the two-stack widget layout (spec §3, revised docket C2).
+// Widgets order by a single global `position`; that order is dealt into two
+// INDEPENDENT vertical stacks by alternating index (0 left, 1 right, 2 left,
+// ...). Each widget is exactly as tall as its content and the next widget in
+// the same stack starts right below it, so a short widget beside a tall one
+// leaves no dead space (the old CSS grid row-aligned pairs and did). Below lg
+// there is one stack in plain position order. Drag-to-reorder by the header
+// handle still moves the widget within the single position order — see
+// handleDragEnd. Takes an optional userId so the admin "configure for user"
+// editor can render any rep's grid, and a mode prop ("default") that points
+// the SAME layout at nexus_default_widgets for the admin system-default
+// editor — bodies preview with the signed-in admin's own data since default
+// rows have no owner.
 
 import { useEffect, useMemo, useState, type ComponentType } from "react";
 import {
@@ -70,6 +75,61 @@ export const WIDGET_BODIES: Record<
   recents: RecentsWidget,
 };
 
+/**
+ * Deal a position-ordered list into the two stacks: even indexes left, odd
+ * indexes right. Exported so the mapping is testable and so anything that
+ * needs to reason about "which stack is this widget in" uses one rule.
+ *
+ * The global index is the source of truth in both directions:
+ *   stack       = index % 2 === 0 ? "left" : "right"
+ *   row in stack = Math.floor(index / 2)
+ * so a drop anywhere in the layout converts straight back to a single
+ * position number (see handleDragEnd).
+ */
+export function splitIntoStacks<T>(items: T[]): [T[], T[]] {
+  const left: T[] = [];
+  const right: T[] = [];
+  items.forEach((item, i) => {
+    if (i % 2 === 0) left.push(item);
+    else right.push(item);
+  });
+  return [left, right];
+}
+
+/** Tailwind's `lg` breakpoint — the point the layout goes from 1 to 2 stacks. */
+const TWO_STACK_QUERY = "(min-width: 1024px)";
+
+/**
+ * True when there is room for two stacks. This is a JS breakpoint rather
+ * than a CSS one because the DOM order differs between the two layouts:
+ * two stacks render left-column-then-right-column, one stack renders in
+ * plain position order. Doing it in CSS would need `order` overrides that
+ * lie to keyboard and screen-reader users about the reading order.
+ */
+function useTwoStackLayout(): boolean {
+  const [wide, setWide] = useState(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return true;
+    return window.matchMedia(TWO_STACK_QUERY).matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mql = window.matchMedia(TWO_STACK_QUERY);
+    const onChange = () => setWide(mql.matches);
+    onChange();
+    // addEventListener on MediaQueryList is missing in Safari below 14,
+    // which this app still has to boot in — fall back to addListener.
+    if (typeof mql.addEventListener === "function") {
+      mql.addEventListener("change", onChange);
+      return () => mql.removeEventListener("change", onChange);
+    }
+    mql.addListener(onChange);
+    return () => mql.removeListener(onChange);
+  }, []);
+
+  return wide;
+}
+
 export interface NexusGridProps {
   /** Defaults to the signed-in user; admins pass a target user (Stage D). */
   userId?: string;
@@ -86,6 +146,7 @@ export interface NexusGridProps {
 export function NexusGrid({ userId, onEditWidget, mode = "user" }: NexusGridProps) {
   const isDefault = mode === "default";
   const { user } = useAuth();
+  const twoStacks = useTwoStackLayout();
 
   // Both hook pairs are called unconditionally (rules of hooks); the
   // inactive side is disabled / unused.
@@ -139,6 +200,17 @@ export function NexusGrid({ userId, onEditWidget, mode = "user" }: NexusGridProp
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
+  /**
+   * A drop maps back to a position index through the widget it landed on.
+   * Every visual slot in the two-stack layout IS a global index (stack =
+   * index % 2, row = index / 2), so the widget the pointer is over carries
+   * its own index: take the drop target's index in `ordered`, arrayMove the
+   * dragged widget there, and renumber 0..n-1. The dragged widget therefore
+   * ends up in exactly the slot it was dropped on — same stack or the other
+   * one, no special case — and the widgets after the insertion point shift
+   * by one, which flips their stack. That flip is inherent to alternating
+   * distribution and is what keeps a single `position` order enough.
+   */
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -185,31 +257,50 @@ export function NexusGrid({ userId, onEditWidget, mode = "user" }: NexusGridProp
     );
   }
 
+  const renderWidget = (widget: NexusWidget) => (
+    <SortableWidget
+      key={widget.id}
+      widget={widget}
+      onEdit={() => onEditWidget(widget)}
+      onRemove={() => removeWidget.mutate(widget.id)}
+      removeDescription={
+        isDefault
+          ? `"${widget.name}" will be removed from the system default layout. Pages that already exist are not affected.`
+          : undefined
+      }
+    />
+  );
+
+  const [leftStack, rightStack] = splitIntoStacks(ordered);
+
   return (
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
       onDragEnd={handleDragEnd}
     >
+      {/*
+        `items` stays in global position order, which is also the reading
+        order of the two-stack layout (slot i sits at row i/2 of stack i%2).
+        That keeps rectSortingStrategy's measured rects in the same order the
+        user reads them, so the drag preview shifts the way the drop will.
+      */}
       <SortableContext
         items={ordered.map((w) => w.id)}
         strategy={rectSortingStrategy}
       >
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-          {ordered.map((widget) => (
-            <SortableWidget
-              key={widget.id}
-              widget={widget}
-              onEdit={() => onEditWidget(widget)}
-              onRemove={() => removeWidget.mutate(widget.id)}
-              removeDescription={
-                isDefault
-                  ? `"${widget.name}" will be removed from the system default layout. Pages that already exist are not affected.`
-                  : undefined
-              }
-            />
-          ))}
-        </div>
+        {twoStacks ? (
+          // Two independent stacks. `items-start` stops a column from being
+          // stretched by its neighbour; each stack's own gap-6 spaces the
+          // widgets, so a short widget is followed immediately by the next
+          // one instead of waiting for a shared row to end.
+          <div className="grid grid-cols-2 gap-6 items-start">
+            <div className="flex flex-col gap-6">{leftStack.map(renderWidget)}</div>
+            <div className="flex flex-col gap-6">{rightStack.map(renderWidget)}</div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-6">{ordered.map(renderWidget)}</div>
+        )}
       </SortableContext>
     </DndContext>
   );

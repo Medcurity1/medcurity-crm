@@ -93,14 +93,21 @@ export function RequestsWidget({
     );
   }
 
+  // Preview = top N rows, then the in-widget search filters ONLY those
+  // loaded rows (same contract as the other widget bodies). This used to
+  // render every pending request inside a fixed-height scroll box; in the
+  // two-stack layout widgets are as tall as their content, so the "rows
+  // shown" setting is the size knob and the list simply grows to it. The
+  // total is still reported in the footer below.
+  const preview = all.slice(0, widget.preview_count);
   const q = searchQuery.trim().toLowerCase();
   const visible = q
-    ? all.filter((r) =>
+    ? preview.filter((r) =>
         [r.title, r.status, r.priority, r.type].some((s) =>
           s?.toLowerCase().includes(q),
         ),
       )
-    : all;
+    : preview;
 
   return (
     <div>
@@ -109,9 +116,7 @@ export function RequestsWidget({
           No rows match your filter.
         </p>
       ) : (
-        // Show every pending request, but cap the height so the widget never
-        // grows unbounded — it becomes a scroll box once a few stack up.
-        <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+        <div className="space-y-2">
           {visible.map((r) => (
             <RequestCard key={r.id} request={r} showType={category === "all"} />
           ))}
