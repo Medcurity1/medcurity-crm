@@ -34,6 +34,7 @@ _(none — everything staged today promoted to PROD 2026-07-27 in 81bec7d)_
 
 | # | Item | Detail | Verify | Checked |
 |---|---|---|---|---|
+| C2 | Nexus "Your Day" overhaul (QUEUED — planning approved-in-principle) | Nathan 2026-07-29, inspired by the Medcurity platform dashboard: Nexus becomes the landing surface with a ranked next-best-action queue on top (replies, due tasks, renewal windows, stale deals, meeting prep) + Home's value absorbed (KPIs, wins feed, recents, quick actions). Jordan M is a stakeholder — review plan with her before building. Full plan: `docs/nexus/your-day-plan.md`. Supersedes-but-keeps H2 (Home stays default until Nathan's flip call = Phase 3). | `ls docs/nexus/your-day-plan.md` + `grep -rn YourDayWidget src/features/nexus/` still 0 hits (not built) | 2026-07-29 |
 | C1 | Campaigns overhaul (the big project) | Phases 1–5 built + the full 2026-07-28 outside-review program (7 batches); admin-only + staging-gated until Nathan tests. Plan: `docs/campaigns/campaigns-plan.md`. | `grep -n "AdminGate><PlaybookPage" src/App.tsx` + `grep -n '"/playbook"' src/components/layout/Sidebar.tsx` shows the Admin badge | 2026-07-29 |
 
 ---
