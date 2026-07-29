@@ -123,10 +123,28 @@ FLIP PREREQUISITE noted 2026-07-29 (goes with docket I34): the briefing's reply 
 /playbook, which is admin-gated. Fine today (campaigns are admin-only), but the rep rollout must
 either ungate a replies view or reroute rep clicks to the contact record.
 
+DECIDED (Nathan, 2026-07-29, round 3):
+- **Step 1 completeness is a CHECKLIST** of all 11 Home pieces + quick actions; every one must have
+  a Nexus (or other-tab) home before any swap. **Existing user layouts carry over automatically.**
+  **Role defaults decided BEFORE the swap** (Jordan owns the sales default; product/analyst defaults
+  differ). Usage-tracking for the Home retirement call: unnecessary, skip it.
+- **The tour**: exactly ~3 popup squares, rounded corners, gradient, beautiful, precisely anchored
+  to the element they describe, genuinely fun. **No skip button** (small team, it's short); shows
+  once per user, never again after click-through.
+- **The feedback line**: "Something missing?" one-click link (prefilled CRM request) lives in the
+  announcement/transition period only; REMOVE it once the Home tab is retired.
+
+RESOLVED by code investigation (2026-07-29): the cold-call question dissolves. Summer's own Q8
+answer (2026-07-15) already made the widget LIST-DRIVEN: it pulls dials from a call list the user
+curates, and her lists superseded the never-defined ICP config. So: the Cold Call widget ports to
+Nexus as a normal add-it-if-you-want widget (default for nobody; Summer's setup carries over via
+the layout import), and the briefing's future cold-call filler branch only produces rows for users
+who have a call list with members. No list, no cold-call content. Role never enters into it, and
+nobody has to define an ICP.
+
 STILL OPEN (Nathan + Jordan):
 1. Ranking defaults: money-first vs time-first blend.
-2. Cold-call source: everyone or Summer-specific.
-3. Day-progress / streak element: v2 at most.
+2. Day-progress / streak element: v2 at most.
 
 ## 6. Explicit non-goals (for now)
 
