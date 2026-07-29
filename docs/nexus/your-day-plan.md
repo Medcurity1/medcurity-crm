@@ -142,6 +142,31 @@ the layout import), and the briefing's future cold-call filler branch only produ
 who have a call list with members. No list, no cold-call content. Role never enters into it, and
 nobody has to define an ICP.
 
+DECIDED (Nathan, 2026-07-29, round 4 — the layout + polish program):
+- **Two-stack layout replaces the row-aligned grid.** Left and right independent stacks, natural
+  widget heights, small vertical gaps, never more than 2 columns (1 on narrow/mobile). Kills the
+  dead-space-under-short-widgets problem. No resize handles ever; "rows shown" stays the only size
+  knob.
+- **Briefing cycles instantly.** Acting on a card swaps the next-ranked item in optimistically;
+  "Not today" re-ranks tomorrow; old items keep outranking new small stuff until handled; empty
+  state only when the pool is truly empty.
+- **Metrics program (team loves Home's KPIs — must be BETTER, never worse):** (a) unlimited stat
+  tiles in one Metrics widget (big number, delta arrow, mini trend where history exists);
+  (b) FEATURED PINS (Nathan's idea): via Customize, pin 1-2 widgets ABOVE the "Your widgets" line
+  into the top area — pin Metrics and you get Home's KPI band, but with your chosen numbers;
+  (c) Reports' Dashboard Metrics page audited 16-for-16 and gaps filled.
+- **One Customize button replaces Add a Widget**: phone-home-screen edit mode (drag between stacks,
+  X to remove, visual add gallery with live mini-previews), plus pinning and the hero look, all in
+  one place.
+- **Hero gradient presets**: the demo's richer teal-navy becomes the default; 4-5 curated looks
+  pickable in Customize. No free color pickers.
+- **High-five parity**: Home's Recent Wins high-five interaction is USED; the Nexus Wins widget
+  must carry it (investigate deal_wins mechanics during the build). Not-worse rule applies.
+
+BUILD ORDER (round 4): 1 two-stack layout → 2 briefing instant cycling → 3 metrics tiles +
+16-for-16 Reports audit → 4 Customize mode (gallery + pins + hero presets) → 5 wins high-five
+parity. All staging, all beneath the dormant flip.
+
 STILL OPEN (Nathan + Jordan):
 1. Ranking defaults: money-first vs time-first blend.
 2. Day-progress / streak element: v2 at most.
