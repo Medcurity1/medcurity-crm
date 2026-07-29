@@ -59,10 +59,10 @@ import {
 import { NEXUS_WIDGET_ICONS, WIDGET_ACCENT_CLASSES } from "./WidgetShell";
 import { defaultReportConfig, normalizeReportConfig } from "./report-engine";
 import { CustomReportPanel } from "./panels/CustomReportPanel";
-import { MetricsPanel, normalizeMetricsConfig } from "./panels/MetricsPanel";
+import { MetricsPanel } from "./panels/MetricsPanel";
 import { PinnedRecordsPanel, normalizePinnedConfig } from "./panels/PinnedRecordsPanel";
 import { RequestsPanel, normalizeRequestsConfig } from "./panels/RequestsPanel";
-import { getMetricDef } from "./metrics";
+import { getMetricDef, normalizeMetricsConfig } from "./metrics";
 
 
 /** Starting config per type for a freshly-picked widget type. */
@@ -124,8 +124,13 @@ export function validateWidgetConfig(
     if (!cfg.sort?.field) return "Pick a sort column.";
   }
   if (type === "metrics") {
-    const metric = (config as { metric?: string }).metric;
-    if (!getMetricDef(metric)) return "Pick a metric.";
+    // Read through the same normalizer the widget uses, so a legacy
+    // single-stat config validates as the one-stat list it renders as.
+    const { stats } = normalizeMetricsConfig(config);
+    if (stats.length === 0) return "Add at least one stat.";
+    if (stats.some((s) => !getMetricDef(s.metric))) {
+      return "One stat's metric is no longer available. Pick another.";
+    }
   }
   return null;
 }
@@ -154,7 +159,7 @@ const TYPE_META: Record<
   },
   metrics: {
     label: "Metrics",
-    description: "A key stat as a big number or mini chart.",
+    description: "Key stats as big numbers, two per row, with mini trend lines.",
     icon: BarChart3,
     defaultName: "Metrics",
   },
@@ -483,7 +488,7 @@ export function WidgetBuilder({
           {/* 4-7. Per-type configuration */}
           <TypeConfigPanel type={type} config={config} onConfigChange={setConfig} />
 
-          {/* 8. Preview count (not applicable to single-stat Metrics) */}
+          {/* 8. Preview count (Metrics has no rows, so it has no count) */}
           {type !== "metrics" && (
             <div className="space-y-2">
               <Label>Preview rows</Label>

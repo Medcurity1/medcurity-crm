@@ -125,8 +125,8 @@ export function WidgetShell({
   const [searchOpen, setSearchOpen] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
 
-  // Metrics widgets are a single stat / mini chart — no rows to filter,
-  // so the in-widget search control is hidden (spec §10).
+  // Metrics widgets are stat tiles, not rows, so there is nothing for the
+  // in-widget search to filter and the control is hidden (spec §10).
   const searchable = widget.widget_type !== "metrics";
 
   // "Updates in real time" (spec §10): re-render every minute so the
