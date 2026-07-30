@@ -202,7 +202,19 @@ async function fileRequestToJira(svc: any, reqRow: any, requestId: string) {
     .eq("id", requestId);
   await transitionJiraIssue(jiraKey);
   await moveToBoard(jiraKey);
+  await pushAttachmentsToJira(svc, requestId, jiraKey);
+  return { jiraKey, jiraUrl };
+}
 
+/**
+ * Copy a request's attachments from the private request-attachments bucket
+ * onto a Jira issue. Split out of fileRequestToJira (MSD-957) because Helm now
+ * creates the issue for bug reports but has no access to this bucket — the
+ * upload has to happen from inside Supabase either way. Best-effort: a missing
+ * blob is logged, never fatal.
+ */
+// deno-lint-ignore no-explicit-any
+async function pushAttachmentsToJira(svc: any, requestId: string, jiraKey: string) {
   const { data: atts } = await svc
     .from("request_attachments")
     .select("original_filename, storage_path")
@@ -212,12 +224,63 @@ async function fileRequestToJira(svc: any, reqRow: any, requestId: string) {
       .from("request-attachments")
       .download(a.storage_path);
     if (blob) {
-      await uploadJiraAttachment(jiraKey, blob, a.original_filename);
+      try {
+        await uploadJiraAttachment(jiraKey, blob, a.original_filename);
+      } catch (e) {
+        console.log(`[jira] attachment upload failed for ${a.original_filename}: ${(e as Error).message}`);
+      }
     } else {
       console.log(`[jira] attachment missing in storage: ${a.storage_path}`);
     }
   }
-  return { jiraKey, jiraUrl };
+}
+
+// deno-lint-ignore no-explicit-any
+async function countAttachments(svc: any, requestId: string): Promise<number> {
+  const { count } = await svc
+    .from("request_attachments")
+    .select("id", { count: "exact", head: true })
+    .eq("request_id", requestId);
+  return count ?? 0;
+}
+
+/**
+ * Pre-MSD-957 behavior, kept as the fallback for when Helm is unconfigured or
+ * unreachable: file straight to Jira and auto-complete the request, with no
+ * client-impact determination. Degraded — the reviewer loses the gate — but a
+ * bug that reaches Jira unclassified beats a bug that goes nowhere.
+ */
+// deno-lint-ignore no-explicit-any
+async function fileBugDirect(svc: any, reqRow: any, requestId: string, callerId: string) {
+  if (!jiraAuth() || !jiraBaseUrl()) {
+    return json({ filed: false, jiraConfigured: false, jiraKey: null, jiraUrl: null });
+  }
+  const { data: claimed, error: claimErr } = await svc
+    .from("requests")
+    .update({
+      status: "completed",
+      decision_note: "Bug report — filed straight to Jira (no approval step)",
+      completed_at: new Date().toISOString(),
+      completed_by: callerId,
+    })
+    .eq("id", requestId)
+    .eq("status", "pending")
+    .select()
+    .maybeSingle();
+  if (claimErr) return json({ error: claimErr.message }, 500);
+  if (!claimed) return json({ error: "Request is no longer pending" }, 409);
+
+  try {
+    const { jiraKey, jiraUrl } = await fileRequestToJira(svc, reqRow, requestId);
+    return json({ filed: true, jiraConfigured: true, jiraKey, jiraUrl, clientFacing: null });
+  } catch (e) {
+    // Roll back to pending so the reviewers' manual approve stays available.
+    await svc
+      .from("requests")
+      .update({ status: "pending", completed_at: null, completed_by: null, decision_note: null })
+      .eq("id", requestId);
+    return json({ error: `Jira filing failed: ${(e as Error).message}` }, 502);
+  }
 }
 
 // ── Anthropic summary ────────────────────────────────────────────────
@@ -483,12 +546,87 @@ serve(async (req) => {
     const isAdmin = !!profile && ["admin", "super_admin"].includes(profile.role);
 
     const body = await req.json();
-    const { action, requestId, note, regenerate } = body as {
+    const {
+      action,
+      requestId,
+      note,
+      regenerate,
+      clientFacing,
+      draftTitle,
+      draftDescription,
+      draftPriority,
+    } = body as {
       action?: string;
       requestId?: string;
       note?: string;
       regenerate?: boolean;
+      /** file_bug only. The submitter's own client-impact call, overriding
+       * Helm's automatic classification. Omitted = trust the classifier. */
+      clientFacing?: boolean;
+      /** classify_bug only. The draft form fields — this action runs before
+       * the request row exists, so there is no requestId to load them from. */
+      draftTitle?: string;
+      draftDescription?: string;
+      draftPriority?: string;
     };
+
+    // ── classify_bug: pre-submit client-impact preview (MSD-957) ──
+    // Runs BEFORE the request row exists, so it takes the draft fields rather
+    // than a requestId. Any signed-in user may ask — they're about to file the
+    // bug anyway, and the verdict is shown to them on the form so they can
+    // correct it. Proxied through here (not called from the browser) so
+    // HELM_API_KEY never reaches the client. Read-only in Helm: creates and
+    // files nothing.
+    if (action === "classify_bug") {
+      const helmClassifyUrl = (Deno.env.get("HELM_CLASSIFY_URL") ?? "").trim();
+      const helmKey = (Deno.env.get("HELM_API_KEY") ?? "").trim();
+      if (!helmClassifyUrl || !helmKey) {
+        // Fail safe, same direction as Helm's own classifier: no automatic
+        // answer means assume clients are affected and let a human decide.
+        return json({
+          classification: {
+            clientFacing: true,
+            confidence: 0,
+            reasoning:
+              "Automatic classification unavailable — assuming clients are affected so this gets a human look.",
+            affectedAreas: [],
+            degraded: true,
+          },
+        });
+      }
+      try {
+        const res = await fetch(helmClassifyUrl, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${helmKey}`,
+          },
+          body: JSON.stringify({
+            title: draftTitle ?? "",
+            description: draftDescription ?? "",
+            priority: draftPriority ?? "low",
+            requesterName: null,
+          }),
+        });
+        const out = await res.json();
+        if (!res.ok || !out?.ok) throw new Error(out?.error ?? `Helm returned ${res.status}`);
+        return json({ classification: out.classification });
+      } catch (e) {
+        console.error("[classify_bug] Helm classify failed", e);
+        return json({
+          classification: {
+            clientFacing: true,
+            confidence: 0,
+            reasoning:
+              "Automatic classification unavailable — assuming clients are affected so this gets a human look.",
+            affectedAreas: [],
+            degraded: true,
+          },
+        });
+      }
+    }
+
+    // Every remaining action operates on an existing request row.
     if (!requestId) return json({ error: "Missing requestId" }, 400);
 
     const { data: reqRow, error: loadErr } = await svc
@@ -527,55 +665,139 @@ serve(async (req) => {
     }
 
     // ── file_bug: bug reports skip approval, straight to Jira ──
-    // Called by the submitter's client immediately after submit. When Jira
-    // isn't configured (e.g. staging) it leaves the request pending and
-    // reports filed:false — the client then falls back to the normal
-    // reviewer-email flow, so nothing is ever silently dropped.
+    // Called by the submitter's client immediately after submit.
+    //
+    // MSD-957 (Rachel, 2026-07-29): bugs used to be filed here directly and
+    // marked 'completed' within a second, which made them invisible to the
+    // reviewer widget (it renders pending only) and gave nobody any signal
+    // about whether a client was affected. Filing now goes through Helm's
+    // /api/nexus/bug-intake, which classifies the bug against the live
+    // Medcurity codebase and returns a client-facing verdict. The ticket is
+    // filed either way — a client-facing bug is the LAST thing you want to
+    // delay — but the Pulse request only auto-completes when the bug is not
+    // client-facing. A client-facing bug stays pending so it surfaces in
+    // Rachel's Requests widget for review.
+    //
+    // Every failure path leaves the request pending with no ticket, so the
+    // client falls back to the normal reviewer-email flow and nothing is
+    // silently dropped. That property predates this change; keep it.
     if (action === "file_bug") {
       const category = ((reqRow.details ?? {}) as Record<string, unknown>).category;
       if (category !== "bug") return json({ error: "Not a bug request" }, 400);
       if (reqRow.status !== "pending") {
         return json({ error: `Request is already ${reqRow.status}` }, 409);
       }
+
+      const helmUrl = (Deno.env.get("HELM_BUG_INTAKE_URL") ?? "").trim();
+      const helmKey = (Deno.env.get("HELM_API_KEY") ?? "").trim();
+
+      // Helm unreachable/unconfigured → fall back to the pre-MSD-957 path
+      // (direct Jira, auto-complete). Losing the client-impact gate is bad;
+      // losing the bug entirely is worse.
+      if (!helmUrl || !helmKey) {
+        console.log("[file_bug] Helm not configured — falling back to direct Jira filing");
+        return await fileBugDirect(svc, reqRow, requestId, caller.id);
+      }
       if (!jiraAuth() || !jiraBaseUrl()) {
+        // Attachments still need Jira creds even though Helm creates the
+        // issue. Without them we can't complete the handoff cleanly.
         return json({ filed: false, jiraConfigured: false, jiraKey: null, jiraUrl: null });
       }
 
-      // Same CAS claim as approve so concurrent invocations can't
-      // double-file. Bugs land as 'completed' — handed off to Jira, where
-      // the product team approves or denies.
-      const { data: claimed, error: claimErr } = await svc
-        .from("requests")
-        .update({
-          status: "completed",
-          decision_note: "Bug report — filed straight to Jira (no approval step)",
-          completed_at: new Date().toISOString(),
-          completed_by: caller.id,
-        })
-        .eq("id", requestId)
-        .eq("status", "pending")
-        .select()
-        .maybeSingle();
-      if (claimErr) return json({ error: claimErr.message }, 500);
-      if (!claimed) return json({ error: "Request is no longer pending" }, 409);
-
+      // Ask Helm. Idempotent on requestId (partial-unique index on
+      // tickets.pulse_request_id), so a retry can't double-file.
+      let helm: {
+        ok: boolean;
+        jiraKey?: string;
+        jiraUrl?: string;
+        clientFacing?: boolean;
+        classification?: Record<string, unknown>;
+        error?: string;
+      };
       try {
-        const { jiraKey, jiraUrl } = await fileRequestToJira(svc, reqRow, requestId);
-        return json({ filed: true, jiraConfigured: true, jiraKey, jiraUrl });
+        const res = await fetch(helmUrl, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${helmKey}`,
+          },
+          body: JSON.stringify({
+            requestId,
+            title: reqRow.title,
+            description: reqRow.description ?? "",
+            priority: reqRow.priority,
+            requesterName: reqRow.requester_name ?? null,
+            // Undefined (not null) when the submitter didn't set one, so
+            // Helm's optional-boolean schema treats it as "trust the AI".
+            submitterClientFacing:
+              typeof clientFacing === "boolean" ? clientFacing : undefined,
+            attachmentCount: await countAttachments(svc, requestId),
+          }),
+        });
+        helm = await res.json();
+        if (!res.ok || !helm?.ok || !helm.jiraKey) {
+          throw new Error(helm?.error ?? `Helm returned ${res.status}`);
+        }
       } catch (e) {
-        // Filing failed — roll back to pending so the reviewers' manual
-        // approve (which files as Bug type) remains available.
-        await svc
-          .from("requests")
-          .update({
-            status: "pending",
-            completed_at: null,
-            completed_by: null,
-            decision_note: null,
-          })
-          .eq("id", requestId);
-        return json({ error: `Jira filing failed: ${(e as Error).message}` }, 502);
+        // Request stays pending, no ticket, reviewer email fires as normal.
+        console.error("[file_bug] Helm intake failed", e);
+        return json({ error: `Helm intake failed: ${(e as Error).message}` }, 502);
       }
+
+      const isClientFacing = helm.clientFacing !== false;
+      const nextDetails = {
+        ...((reqRow.details ?? {}) as Record<string, unknown>),
+        client_facing: isClientFacing,
+        client_facing_source:
+          typeof clientFacing === "boolean" &&
+          clientFacing !== (helm.classification?.aiVerdict as boolean | undefined)
+            ? "submitter"
+            : "ai",
+        client_facing_reasoning: helm.classification?.reasoning ?? null,
+        client_facing_confidence: helm.classification?.confidence ?? null,
+      };
+
+      // CAS on pending: a concurrent invocation can't flip the outcome twice.
+      // Helm already guaranteed a single ticket, so the loser here simply
+      // reports the same key.
+      const { error: writeErr } = await svc
+        .from("requests")
+        .update(
+          isClientFacing
+            ? {
+                // Stays PENDING on purpose — this is the gate. It shows up in
+                // the routed reviewer's Requests widget until someone closes it.
+                jira_issue_key: helm.jiraKey,
+                jira_issue_url: helm.jiraUrl ?? null,
+                details: nextDetails,
+              }
+            : {
+                status: "completed",
+                decision_note:
+                  "Bug report — not client-facing; filed straight to Jira (no approval step)",
+                completed_at: new Date().toISOString(),
+                completed_by: caller.id,
+                jira_issue_key: helm.jiraKey,
+                jira_issue_url: helm.jiraUrl ?? null,
+                details: nextDetails,
+              },
+        )
+        .eq("id", requestId)
+        .eq("status", "pending");
+      if (writeErr) console.error("[file_bug] status write failed", writeErr);
+
+      // Attachments: Helm has no access to the private request-attachments
+      // bucket, so they're pushed from here after the ticket exists.
+      await pushAttachmentsToJira(svc, requestId, helm.jiraKey);
+
+      return json({
+        filed: true,
+        jiraConfigured: true,
+        jiraKey: helm.jiraKey,
+        jiraUrl: helm.jiraUrl ?? null,
+        clientFacing: isClientFacing,
+        classification: helm.classification ?? null,
+      });
     }
 
     // ── summarize ──
