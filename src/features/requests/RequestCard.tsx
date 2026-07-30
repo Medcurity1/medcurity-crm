@@ -104,6 +104,24 @@ const CATEGORY_BADGE: Record<string, string> = {
   enhancement: "bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-300",
 };
 
+/**
+ * Client-impact determination for a product bug (MSD-957). Set at submission
+ * by Helm's classifier or by the submitter overriding it. Null on requests
+ * that predate the gate, and on non-bugs — "we never asked" is a different
+ * thing from "no", so it renders nothing rather than a reassuring "No".
+ */
+function clientFacing(r: CrmRequest): boolean | null {
+  const v = ((r.details ?? {}) as Record<string, unknown>).client_facing;
+  return typeof v === "boolean" ? v : null;
+}
+
+function clientFacingNote(r: CrmRequest): { reasoning: string; bySubmitter: boolean } | null {
+  const d = (r.details ?? {}) as Record<string, unknown>;
+  const reasoning = typeof d.client_facing_reasoning === "string" ? d.client_facing_reasoning : "";
+  if (!reasoning) return null;
+  return { reasoning, bySubmitter: d.client_facing_source === "submitter" };
+}
+
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="grid grid-cols-[130px_1fr] gap-2 text-sm">
@@ -215,6 +233,11 @@ function RequestDetailDialog({
                 )}
               >
                 {PRODUCT_CATEGORY_LABELS[productCategory(request)!]}
+              </Badge>
+            )}
+            {clientFacing(request) === true && (
+              <Badge className="text-[10px] border-transparent bg-amber-100 text-amber-900 dark:bg-amber-500/20 dark:text-amber-300">
+                Affects clients
               </Badge>
             )}
             <Badge className={cn("text-[10px] border-transparent", PRIORITY_BADGE[request.priority])}>
@@ -425,7 +448,30 @@ function RequestDetailDialog({
 
           {/* The old per-decision "Note (optional)" box was retired in favor
               of Working Notes above (Nathan 7/24) — one notes surface, not two. */}
-          {isPending && isProduct && (
+          {/* Why this bug is sitting in the review queue at all (MSD-957). */}
+          {clientFacingNote(request) && (
+            <div className="rounded-md border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900/50 dark:bg-amber-950/20">
+              <p className="text-xs font-medium">
+                {clientFacing(request) ? "Affects clients" : "Does not affect clients"}
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {clientFacingNote(request)!.reasoning}
+              </p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {clientFacingNote(request)!.bySubmitter
+                  ? "Set by the person who reported it."
+                  : "Determined automatically from the codebase."}
+              </p>
+            </div>
+          )}
+          {isPending && isProduct && request.jira_issue_key && (
+            <p className="text-xs text-muted-foreground">
+              This is already filed with the dev team as{" "}
+              <strong>{request.jira_issue_key}</strong> — closing it here just clears it
+              from the review queue.
+            </p>
+          )}
+          {isPending && isProduct && !request.jira_issue_key && (
             <p className="text-xs text-muted-foreground">
               Approving files this to the product team's Jira board, including any
               attachments.
@@ -434,7 +480,29 @@ function RequestDetailDialog({
         </div>
 
         <DialogFooter className="gap-2 sm:gap-2">
-          {isPending && isProduct && (
+          {/* A client-facing bug (MSD-957) is pending AND already has a Jira
+              ticket — it was filed on submit and is only sitting here for
+              review. Approving it would be meaningless (fileRequestToJira
+              early-returns on an existing key), so the action is "I've looked
+              at this", not "file it". */}
+          {isPending && isProduct && request.jira_issue_key && (
+            <Button
+              className="gap-2"
+              disabled={busy}
+              onClick={() =>
+                complete.mutate(request.id, {
+                  onSuccess: () => {
+                    toast.success("Marked reviewed.");
+                    onOpenChange(false);
+                  },
+                  onError: (e) => toast.error((e as Error).message),
+                })
+              }
+            >
+              <Check className="h-4 w-4" /> Reviewed — close
+            </Button>
+          )}
+          {isPending && isProduct && !request.jira_issue_key && (
             <>
               <Button
                 variant="outline"
@@ -546,6 +614,11 @@ export function RequestCard({
               )}
             >
               {PRODUCT_CATEGORY_LABELS[productCategory(request)!]}
+            </Badge>
+          )}
+          {clientFacing(request) === true && (
+            <Badge className="shrink-0 text-[10px] border-transparent bg-amber-100 text-amber-900 dark:bg-amber-500/20 dark:text-amber-300">
+              Affects clients
             </Badge>
           )}
           <Badge
