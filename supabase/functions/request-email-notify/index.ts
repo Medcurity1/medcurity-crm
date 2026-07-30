@@ -194,37 +194,31 @@ serve(async (req) => {
     let subject: string;
     let html: string;
 
-    if (isFiledBug && clientFacing) {
-      // A bug that reaches a client. The ticket is already filed — we never
-      // delay THAT — but this one wants a person to look at it, so unlike the
-      // internal-bug notice it links back into Pulse, where the request is
-      // still sitting open in the Requests widget.
+    if (isFiledBug) {
+      // A bug affecting a client. It went straight to the dev team on purpose
+      // — nothing about it is waiting on a person — so this is a heads-up, not
+      // a request for action, and it points at Helm/Jira rather than back into
+      // Pulse. Deliberately does NOT say "no action needed": the dev team still
+      // has to work it; there is just nothing to approve.
       const ticket = reqRow.jira_issue_key
         ? ` as <strong>${escapeHtml(reqRow.jira_issue_key)}</strong>`
         : "";
       subject = `Client-impacting bug: ${reqRow.title}`;
       html = [
-        `<p>A new bug report came in that <strong>affects clients</strong>. It has been filed to Jira${ticket} and assigned for review, so the dev team can start on it right away.</p>`,
+        `<p>A bug came in that <strong>is affecting a client</strong>, so it went straight to the dev team${ticket} without waiting for review.</p>`,
         detailRows,
-        `<p>It is also still open in Pulse for your review — close it there once you have looked at it.</p>`,
-        `<p><a href="${APP_BASE}/nexus" style="display:inline-block;background:#b91c1c;color:#fff;padding:9px 22px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:600">Review in Pulse</a></p>`,
-        `<p style="color:#999;font-size:12px">Sent by Pulse. Bugs judged to affect clients stay open here until someone reviews them; the Jira ticket is already with the dev team.</p>`,
+        `<p>Check <strong>Helm</strong> or <strong>Jira</strong> for the ticket and full details.</p>`,
+        `<p style="color:#999;font-size:12px">Sent by Pulse. Bugs affecting clients skip the review queue so nothing holds them up — this is your heads-up that one landed.</p>`,
       ].join("");
-    } else if (isFiledBug) {
-      // Informational bug notice. No links and no route back to Pulse: the
-      // ticket lives in the dev tools now, so we point people to Helm/Jira
-      // rather than the CRM. Deliberately does NOT say "no action needed" —
-      // the dev team still has to work it; there's just nothing to approve
-      // here. Reference the Jira key as plain text so it's easy to find.
-      const ticket = reqRow.jira_issue_key
-        ? ` as <strong>${escapeHtml(reqRow.jira_issue_key)}</strong>`
-        : "";
-      subject = `New bug report: ${reqRow.title}`;
+    } else if (isBug) {
+      // A bug NOT affecting clients. Nothing has been filed. It is sitting in
+      // the review queue waiting on a decision, so this one does link back.
+      subject = `Bug report to review: ${reqRow.title}`;
       html = [
-        `<p>A new <strong>bug report</strong> came in and has been filed to Jira${ticket}. It was judged not to affect clients, so it skipped review.</p>`,
+        `<p>A new <strong>bug report</strong> came in. It doesn't look like it's affecting clients, so nothing has been sent to the dev team yet — it's waiting on your call.</p>`,
         detailRows,
-        `<p>It's now with the dev team. Check <strong>Helm</strong> or <strong>Jira</strong> for the ticket and full details.</p>`,
-        `<p style="color:#999;font-size:12px">Sent by Pulse. Bug reports that don't affect clients go straight to the dev team — this is your heads-up that one landed.</p>`,
+        `<p><a href="${APP_BASE}/nexus" style="display:inline-block;background:#1d4ed8;color:#fff;padding:9px 22px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:600">Review in Pulse</a></p>`,
+        `<p style="color:#999;font-size:12px">Sent by Pulse. Approving it files the Jira ticket; denying it closes the request.</p>`,
       ].join("");
     } else {
       const label = TYPE_LABEL[reqRow.type] ?? "request";

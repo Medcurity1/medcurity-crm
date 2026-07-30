@@ -269,6 +269,8 @@ interface CreateRequestInput {
    * through to Helm on filing, where it overrides the automatic verdict.
    */
   clientFacing?: boolean;
+  /** The classifier output behind that call, so it can be stored on the row. */
+  classification?: BugClassification;
 }
 
 /**
@@ -339,6 +341,11 @@ export interface CreateRequestResult {
      */
     clientFacing: boolean | null;
   } | null;
+  /**
+   * True when a bug was judged NOT client-facing and is therefore waiting for
+   * the product manager to triage it. No Jira ticket exists yet.
+   */
+  held: boolean;
 }
 
 export function useCreateRequest() {
@@ -374,28 +381,38 @@ export function useCreateRequest() {
         ? await uploadRequestAttachments(data.id, input.files)
         : [];
 
-      // Product BUGS are filed to Jira immediately (server-side — needs
-      // secrets), routed through Helm so the client-impact call is made and
-      // recorded. Attachments are already up, so they ride along onto the
-      // ticket. Filing happens whatever the verdict — a bug that reaches a
-      // client is the last thing you'd want to sit on — but a client-facing
-      // bug leaves the Pulse request PENDING so it stays visible in the
-      // reviewer's widget. If filing fails or Helm/Jira isn't configured, the
-      // request stays pending with no ticket and falls through to the normal
-      // reviewer email below, so a human still picks it up.
+      // The client-impact gate (MSD-957). A bug judged CLIENT-FACING goes
+      // straight to the dev team — server-side via Helm, which stamps the
+      // determination onto the Jira ticket — and the request completes. Those
+      // are the urgent ones; nothing about them waits on a person.
+      //
+      // A bug judged NOT client-facing files nothing. It stays pending so the
+      // product manager triages it first, exactly like an enhancement, and her
+      // Approve is what files it. Either way she gets an email.
       let bugFiled: CreateRequestResult["bugFiled"] = null;
+      let held = false;
       if (input.type === "product" && input.details?.category === "bug") {
         try {
           const res = (await invokeRequestAction({
             action: "file_bug",
             requestId: data.id,
             clientFacing: input.clientFacing,
+            clientFacingReasoning: input.classification?.reasoning,
+            clientFacingConfidence: input.classification?.confidence,
+            clientFacingSource:
+              typeof input.clientFacing === "boolean" &&
+              input.classification &&
+              input.clientFacing !== input.classification.clientFacing
+                ? "submitter"
+                : "ai",
           })) as {
             filed: boolean;
+            held?: boolean;
             jiraKey: string | null;
             jiraUrl: string | null;
             clientFacing?: boolean | null;
           };
+          held = !!res.held;
           if (res.filed) {
             bugFiled = {
               jiraKey: res.jiraKey,
@@ -420,7 +437,7 @@ export function useCreateRequest() {
         .invoke("request-email-notify", { body: { requestId: data.id } })
         .catch(() => {});
 
-      return { request: data as CrmRequest, failedUploads, bugFiled };
+      return { request: data as CrmRequest, failedUploads, bugFiled, held };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["requests"] });
@@ -511,6 +528,11 @@ async function invokeRequestAction(payload: {
   regenerate?: boolean;
   /** file_bug: the submitter's client-impact call, overriding the classifier. */
   clientFacing?: boolean;
+  /** file_bug: the classifier's output, echoed back so the edge function can
+   * persist it under the service role (the insert trigger strips it). */
+  clientFacingReasoning?: string;
+  clientFacingConfidence?: number;
+  clientFacingSource?: string;
   /** classify_bug: draft form fields, since there is no row to read them from. */
   draftTitle?: string;
   draftDescription?: string;

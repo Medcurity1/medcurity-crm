@@ -245,10 +245,11 @@ async function countAttachments(svc: any, requestId: string): Promise<number> {
 }
 
 /**
- * Pre-MSD-957 behavior, kept as the fallback for when Helm is unconfigured or
- * unreachable: file straight to Jira and auto-complete the request, with no
- * client-impact determination. Degraded — the reviewer loses the gate — but a
- * bug that reaches Jira unclassified beats a bug that goes nowhere.
+ * Fallback for when Helm is unconfigured or unreachable. Only ever called for
+ * a bug already judged CLIENT-FACING, so filing it straight to Jira and
+ * completing the request is the correct outcome — we just lose the provenance
+ * Helm would have stamped on the ticket. A client-facing bug that reaches the
+ * dev team without a paper trail beats one that goes nowhere.
  */
 // deno-lint-ignore no-explicit-any
 async function fileBugDirect(svc: any, reqRow: any, requestId: string, callerId: string) {
@@ -555,6 +556,9 @@ serve(async (req) => {
       draftTitle,
       draftDescription,
       draftPriority,
+      clientFacingReasoning,
+      clientFacingConfidence,
+      clientFacingSource,
     } = body as {
       action?: string;
       requestId?: string;
@@ -568,6 +572,14 @@ serve(async (req) => {
       draftTitle?: string;
       draftDescription?: string;
       draftPriority?: string;
+      /** file_bug. The classifier's own output, echoed back from the form so
+       * it can be persisted under the service role. The insert-sanitize
+       * trigger deliberately strips these on insert (a submitter must not be
+       * able to forge a verdict's provenance), so this is the only path by
+       * which they legitimately reach the row. */
+      clientFacingReasoning?: string;
+      clientFacingConfidence?: number;
+      clientFacingSource?: string;
     };
 
     // ── classify_bug: pre-submit client-impact preview (MSD-957) ──
@@ -688,12 +700,62 @@ serve(async (req) => {
         return json({ error: `Request is already ${reqRow.status}` }, 409);
       }
 
+      // ── The gate ──────────────────────────────────────────────────────
+      // The client-impact verdict was settled on the form (classify_bug +
+      // the submitter's confirmation) and stored on the row at insert. It
+      // decides the whole route:
+      //
+      //   client-facing  -> straight to the dev team, no human gate. These
+      //                     are the ones that must not wait behind a triage
+      //                     queue. Request auto-completes; Rachel is emailed
+      //                     that it happened.
+      //   not client-facing -> NO Jira ticket yet. Stays pending so Rachel
+      //                     triages it first; her Approve files it through
+      //                     the existing product-request approve path.
+      //
+      // Both cases email her either way — that was the original ask.
+      const detailsIn = (reqRow.details ?? {}) as Record<string, unknown>;
+      const verdict =
+        typeof clientFacing === "boolean"
+          ? clientFacing
+          : detailsIn.client_facing === true;
+
+      if (!verdict) {
+        // Held for triage. Record the determination so the card and the email
+        // can explain themselves, but create nothing downstream.
+        await svc
+          .from("requests")
+          .update({
+            details: {
+              ...detailsIn,
+              client_facing: false,
+              ...(clientFacingReasoning
+                ? {
+                    client_facing_reasoning: clientFacingReasoning,
+                    client_facing_confidence: clientFacingConfidence ?? null,
+                    client_facing_source: clientFacingSource ?? "ai",
+                  }
+                : {}),
+            },
+          })
+          .eq("id", requestId)
+          .eq("status", "pending");
+        return json({
+          filed: false,
+          held: true,
+          jiraConfigured: true,
+          jiraKey: null,
+          jiraUrl: null,
+          clientFacing: false,
+        });
+      }
+
       const helmUrl = (Deno.env.get("HELM_BUG_INTAKE_URL") ?? "").trim();
       const helmKey = (Deno.env.get("HELM_API_KEY") ?? "").trim();
 
-      // Helm unreachable/unconfigured → fall back to the pre-MSD-957 path
-      // (direct Jira, auto-complete). Losing the client-impact gate is bad;
-      // losing the bug entirely is worse.
+      // Helm unreachable/unconfigured → fall back to filing directly. A
+      // client-facing bug must reach the dev team even if the control plane
+      // is down; losing the provenance is bad, losing the bug is worse.
       if (!helmUrl || !helmKey) {
         console.log("[file_bug] Helm not configured — falling back to direct Jira filing");
         return await fileBugDirect(svc, reqRow, requestId, caller.id);
@@ -744,44 +806,41 @@ serve(async (req) => {
         return json({ error: `Helm intake failed: ${(e as Error).message}` }, 502);
       }
 
-      const isClientFacing = helm.clientFacing !== false;
       const nextDetails = {
-        ...((reqRow.details ?? {}) as Record<string, unknown>),
-        client_facing: isClientFacing,
+        ...detailsIn,
+        client_facing: true,
         client_facing_source:
-          typeof clientFacing === "boolean" &&
+          clientFacingSource ??
+          (typeof clientFacing === "boolean" &&
           clientFacing !== (helm.classification?.aiVerdict as boolean | undefined)
             ? "submitter"
-            : "ai",
-        client_facing_reasoning: helm.classification?.reasoning ?? null,
-        client_facing_confidence: helm.classification?.confidence ?? null,
+            : "ai"),
+        client_facing_reasoning:
+          (helm.classification?.reasoning as string | undefined) ??
+          clientFacingReasoning ??
+          null,
+        client_facing_confidence:
+          (helm.classification?.confidence as number | undefined) ??
+          clientFacingConfidence ??
+          null,
       };
 
-      // CAS on pending: a concurrent invocation can't flip the outcome twice.
-      // Helm already guaranteed a single ticket, so the loser here simply
-      // reports the same key.
+      // Client-facing: it is with the dev team now, so the Pulse request is
+      // done. Nothing here is waiting on a person. CAS on pending so a
+      // concurrent invocation can't write the outcome twice; Helm already
+      // guaranteed a single ticket, so the loser just reports the same key.
       const { error: writeErr } = await svc
         .from("requests")
-        .update(
-          isClientFacing
-            ? {
-                // Stays PENDING on purpose — this is the gate. It shows up in
-                // the routed reviewer's Requests widget until someone closes it.
-                jira_issue_key: helm.jiraKey,
-                jira_issue_url: helm.jiraUrl ?? null,
-                details: nextDetails,
-              }
-            : {
-                status: "completed",
-                decision_note:
-                  "Bug report — not client-facing; filed straight to Jira (no approval step)",
-                completed_at: new Date().toISOString(),
-                completed_by: caller.id,
-                jira_issue_key: helm.jiraKey,
-                jira_issue_url: helm.jiraUrl ?? null,
-                details: nextDetails,
-              },
-        )
+        .update({
+          status: "completed",
+          decision_note:
+            "Client-facing bug — filed straight to the dev team (no approval step)",
+          completed_at: new Date().toISOString(),
+          completed_by: caller.id,
+          jira_issue_key: helm.jiraKey,
+          jira_issue_url: helm.jiraUrl ?? null,
+          details: nextDetails,
+        })
         .eq("id", requestId)
         .eq("status", "pending");
       if (writeErr) console.error("[file_bug] status write failed", writeErr);
@@ -792,10 +851,11 @@ serve(async (req) => {
 
       return json({
         filed: true,
+        held: false,
         jiraConfigured: true,
         jiraKey: helm.jiraKey,
         jiraUrl: helm.jiraUrl ?? null,
-        clientFacing: isClientFacing,
+        clientFacing: true,
         classification: helm.classification ?? null,
       });
     }

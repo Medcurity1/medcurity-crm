@@ -330,7 +330,7 @@ function ProductCategoryPicker({
       value: "bug",
       label: "Bug",
       blurb:
-        "Something is broken. Filed to the product team's Jira right away; if it affects clients it also goes to the product manager for review.",
+        "Something is broken. If it's affecting a client it goes straight to the dev team; otherwise it's reviewed first.",
       icon: Bug,
     },
     {
@@ -395,7 +395,7 @@ function ClientImpactConfirm({
       <div className="flex items-start gap-2">
         <Users className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-500" />
         <div className="space-y-1">
-          <p className="text-sm font-medium">Does this affect clients?</p>
+          <p className="text-sm font-medium">Is a client affected right now?</p>
           <p className="text-xs text-muted-foreground">
             {verdict.degraded
               ? verdict.reasoning
@@ -407,8 +407,16 @@ function ClientImpactConfirm({
       </div>
       <div className="grid grid-cols-2 gap-2">
         {[
-          { v: true, label: "Yes — clients are affected", hint: "Goes to the product manager for review" },
-          { v: false, label: "No — internal only", hint: "Straight to the dev team" },
+          {
+            v: true,
+            label: "Yes — a client is affected",
+            hint: "Goes straight to the dev team, no waiting",
+          },
+          {
+            v: false,
+            label: "No — not urgent for clients",
+            hint: "Reviewed first, then queued with the dev team",
+          },
         ].map((o) => (
           <button
             key={String(o.v)}
@@ -480,6 +488,7 @@ function ProductForm() {
         details: { category },
         files,
         clientFacing: category === "bug" ? clientFacing : undefined,
+        classification: category === "bug" ? (verdict ?? undefined) : undefined,
       },
       {
         onSuccess: (res) => {
@@ -489,15 +498,13 @@ function ProductForm() {
             );
           } else if (res.bugFiled) {
             const key = res.bugFiled.jiraKey;
-            if (res.bugFiled.clientFacing) {
-              toast.success(
-                key
-                  ? `Bug filed as ${key} and flagged for review — it affects clients.`
-                  : "Bug filed and flagged for review — it affects clients.",
-              );
-            } else {
-              toast.success(key ? `Bug filed to Jira (${key}).` : "Bug filed to Jira.");
-            }
+            toast.success(
+              key
+                ? `Client-impacting bug — sent straight to the dev team as ${key}.`
+                : "Client-impacting bug — sent straight to the dev team.",
+            );
+          } else if (res.held) {
+            toast.success("Bug submitted — it'll be reviewed before it goes to the dev team.");
           } else if (category === "bug") {
             toast.success("Bug submitted — the product team will file it to Jira.");
           } else {
@@ -623,7 +630,7 @@ function ProductForm() {
       )}
       <p className="text-xs text-muted-foreground">
         {category === "bug"
-          ? "Bug reports are filed to the product team's Jira board right away, attachments included. Bugs that affect clients also go to the product manager for review."
+          ? "Bugs affecting a client go straight to the dev team so nothing holds them up. Everything else is reviewed first, then queued. Attachments come along either way."
           : category === "enhancement"
             ? "Enhancements are reviewed inside the CRM. If approved, the request is filed to the product team's Jira board, attachments included."
             : "Bugs go to the product team's Jira board; enhancements are reviewed and approved first."}
