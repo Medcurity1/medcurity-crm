@@ -169,8 +169,7 @@ calls, emails, tasks; Home adds the business ones). Covered by Nexus scope/perio
 open pipeline, deals in progress, closed won, team closed won, avg deal size, calls. MISSING from
 Nexus and must be ported into the metric registry before the swap (not-worse rule): My Win Rate,
 Renewals Due in 30 Days, Renewals Due in 60 Days, Total ARR at Risk, My Renewals in Progress,
-Active Customers, Total Contacts, Revenue Starting This Quarter, MQL Count, SQL Count. FLAG FOR
-NATHAN (probably drop, imports era): Pending Imports, New Imports This Month. Upcoming Close Dates
+Active Customers, Total Contacts, Revenue Starting This Quarter, MQL Count, SQL Count. DECIDED (Nathan 2026-07-29): Pending Imports and New Imports This Month are NOT ported; they retire with Home. Upcoming Close Dates
 is a list, not a stat: covered by the Pipeline widget. Reports' Dashboard Metrics page covers the
 company-level set (ARR, NRR, churn) but not the personal ones; after the registry port, the Nexus
 widget IS the personal metrics home and Reports stays the company-numbers home.

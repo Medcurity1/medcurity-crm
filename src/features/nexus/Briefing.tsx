@@ -391,8 +391,8 @@ function DividerRow({ actions }: { actions?: ReactNode }) {
           live in landing-flip.ts. */}
       {NEXUS_FEEDBACK_LINK && (
         <Link
-          to="/requests"
-          className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+          to="/requests?tab=crm"
+          className="text-xs text-primary underline underline-offset-4 hover:text-primary/80"
         >
           Something missing?
         </Link>
