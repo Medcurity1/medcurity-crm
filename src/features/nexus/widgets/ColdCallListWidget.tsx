@@ -8,10 +8,10 @@ import { useCallback } from "react";
 import { ColdCallBody } from "@/features/dashboard/ColdCallWidget";
 import type { NexusWidgetBodyProps } from "../WidgetShell";
 
-export function ColdCallListWidget({ onDataUpdated }: NexusWidgetBodyProps) {
+export function ColdCallListWidget({ widget, onDataUpdated }: NexusWidgetBodyProps) {
   const report = useCallback(
     (at: number) => onDataUpdated?.(at),
     [onDataUpdated],
   );
-  return <ColdCallBody onDataUpdated={report} />;
+  return <ColdCallBody onDataUpdated={report} limit={widget.preview_count} />;
 }

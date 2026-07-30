@@ -87,7 +87,13 @@ const LIST_CHOICE_KEY = "cold_call_list_id"; // '' = auto pool
  * Nexus 'cold_call' widget (docket C2 Step 1: every Home piece gets a
  * Nexus twin). onDataUpdated feeds Nexus's WidgetShell "Updated X ago".
  */
-export function ColdCallBody({ onDataUpdated }: { onDataUpdated?: (at: number) => void } = {}) {
+export function ColdCallBody({
+  onDataUpdated,
+  // Home's card keeps the historical 15; the Nexus widget passes its
+  // configured preview rows so the "Preview rows" setting actually applies
+  // (Nathan 2026-07-29: the list must not always run full length).
+  limit = LIMIT,
+}: { onDataUpdated?: (at: number) => void; limit?: number } = {}) {
   const [listId, setListId] = useState<string>(
     () => localStorage.getItem(LIST_CHOICE_KEY) ?? "",
   );
@@ -110,7 +116,7 @@ export function ColdCallBody({ onDataUpdated }: { onDataUpdated?: (at: number) =
   });
 
   const { data, isLoading, isError, refetch, dataUpdatedAt } = useQuery({
-    queryKey: ["dashboard", "cold-call-contacts", listId],
+    queryKey: ["dashboard", "cold-call-contacts", listId, limit],
     queryFn: async () => {
       // List mode: the pool is exactly the contacts Summer curated onto the
       // chosen list (still through the view, so DNC/NLE flags apply).
@@ -134,7 +140,7 @@ export function ColdCallBody({ onDataUpdated }: { onDataUpdated?: (at: number) =
         )
         // Warm-first: most recently touched at the top; never-touched last.
         .order("last_activity_at", { ascending: false, nullsFirst: false })
-        .limit(LIMIT);
+        .limit(limit);
       if (memberIds) {
         q = q.in("id", memberIds);
       } else {
