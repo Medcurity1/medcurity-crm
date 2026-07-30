@@ -21,7 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { QuickTaskDialog } from "@/features/activities/QuickTaskDialog";
 import { useDayQueue, useSnoozeDayItem, type DayQueueRow } from "./day-queue-api";
-import { NEXUS_IS_LANDING, NEXUS_FEEDBACK_LINK } from "./landing-flip";
+import { NEXUS_FEEDBACK_LINK } from "./landing-flip";
 import { getHeroTheme, useHeroTheme } from "./hero-themes";
 
 // ── Copy helpers ─────────────────────────────────────────────────────
@@ -142,9 +142,18 @@ export function cardLabel(row: DayQueueRow): string {
  * back to whatever record the row points at, so a branch added
  * server-side is useful the day it ships.
  */
-export function primaryAction(row: DayQueueRow): { label: string; to: string } {
+export function primaryAction(row: DayQueueRow, isAdmin = true): { label: string; to: string } {
   switch (row.kind) {
     case "reply":
+      // /playbook is admin-gated; a rep clicking it would silently bounce
+      // to /accounts (pre-promote sweep #3). Reps land on the contact
+      // instead, where the reply thread lives from their side.
+      if (!isAdmin) {
+        return {
+          label: "Open contact",
+          to: row.contact_id ? `/contacts/${row.contact_id}` : "/contacts",
+        };
+      }
       return { label: "Open reply", to: "/playbook" };
     case "task":
     case "campaign_task":
@@ -209,6 +218,9 @@ export function Briefing({
   customizeSlot,
 }: BriefingProps) {
   const { profile, user } = useAuth();
+  const isAdmin = ["admin", "super_admin"].includes(
+    ((profile as { role?: string } | null)?.role ?? ""),
+  );
   const [heroThemeId] = useHeroTheme(user?.id);
   const heroTheme = getHeroTheme(heroThemeId);
   const navigate = useNavigate();
@@ -313,6 +325,7 @@ export function Briefing({
             <BriefingCard
               key={row.item_key}
               row={row}
+              isAdmin={isAdmin}
               rank={i + 1}
               onOpen={(to) => navigate(to)}
               onSnooze={() => snooze.mutate(row.item_key)}
@@ -343,6 +356,7 @@ export function Briefing({
                 <BriefingListRow
                   key={row.item_key}
                   row={row}
+              isAdmin={isAdmin}
                   onOpen={(to) => navigate(to)}
                   onSnooze={() => snooze.mutate(row.item_key)}
                   snoozing={snooze.isPending}
@@ -375,7 +389,7 @@ function DividerRow({ actions }: { actions?: ReactNode }) {
       {/* Transition-only escape hatch: live while Nexus is the landing
           page and Home is still fresh in everyone's memory. Both flags
           live in landing-flip.ts. */}
-      {NEXUS_IS_LANDING && NEXUS_FEEDBACK_LINK && (
+      {NEXUS_FEEDBACK_LINK && (
         <Link
           to="/requests"
           className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
@@ -394,14 +408,16 @@ function BriefingCard({
   onOpen,
   onSnooze,
   snoozing,
+  isAdmin,
 }: {
   row: DayQueueRow;
   rank: number;
   onOpen: (to: string) => void;
   onSnooze: () => void;
   snoozing: boolean;
+  isAdmin: boolean;
 }) {
-  const action = primaryAction(row);
+  const action = primaryAction(row, isAdmin);
   return (
     <div className="flex flex-col gap-3 rounded-xl border bg-card p-4">
       <p className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -444,13 +460,15 @@ function BriefingListRow({
   onOpen,
   onSnooze,
   snoozing,
+  isAdmin,
 }: {
   row: DayQueueRow;
   onOpen: (to: string) => void;
   onSnooze: () => void;
   snoozing: boolean;
+  isAdmin: boolean;
 }) {
-  const action = primaryAction(row);
+  const action = primaryAction(row, isAdmin);
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card px-3 py-2">
       <span

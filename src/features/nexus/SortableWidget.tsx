@@ -30,6 +30,14 @@ export interface SortableWidgetProps {
   pinPending?: boolean;
 }
 
+function UnknownWidgetBody() {
+  return (
+    <p className="text-sm text-muted-foreground py-2">
+      This widget needs a newer version of Pulse. Refresh to update.
+    </p>
+  );
+}
+
 export function SortableWidget({
   widget,
   onEdit,
@@ -52,7 +60,11 @@ export function SortableWidget({
 
   const [searchQuery, setSearchQuery] = useState("");
   const [dataUpdatedAt, setDataUpdatedAt] = useState<number | undefined>();
-  const Body = WIDGET_BODIES[widget.widget_type];
+  // Unknown type = a newer schema row rendered by an older build (e.g. a
+  // frontend rollback after someone saved a wins/recents widget). Render a
+  // quiet placeholder instead of throwing the whole page into the error
+  // boundary (pre-promote sweep #4).
+  const Body = WIDGET_BODIES[widget.widget_type] ?? UnknownWidgetBody;
 
   return (
     <div

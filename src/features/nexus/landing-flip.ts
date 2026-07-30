@@ -21,7 +21,7 @@ export const NEXUS_IS_LANDING: boolean = false;
  * away, people are still finding their footing). Set this to `false` when
  * Home is removed for good and the feedback link should retire.
  *
- * This only matters while NEXUS_IS_LANDING is true. On its own it does
+ * This ARMED EARLY per Nathan 2026-07-29 (feedback wanted before the swap); no longer waits on the landing flip. Set false when Home retires. Previously: only mattered while NEXUS_IS_LANDING is true. On its own it does
  * nothing.
  */
 export const NEXUS_FEEDBACK_LINK: boolean = true;

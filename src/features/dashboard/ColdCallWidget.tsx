@@ -109,7 +109,7 @@ export function ColdCallBody({ onDataUpdated }: { onDataUpdated?: (at: number) =
     },
   });
 
-  const { data, isLoading, dataUpdatedAt } = useQuery({
+  const { data, isLoading, isError, refetch, dataUpdatedAt } = useQuery({
     queryKey: ["dashboard", "cold-call-contacts", listId],
     queryFn: async () => {
       // List mode: the pool is exactly the contacts Summer curated onto the
@@ -185,6 +185,17 @@ export function ColdCallBody({ onDataUpdated }: { onDataUpdated?: (at: number) =
               <Skeleton key={i} className="h-9 w-full" />
             ))}
           </div>
+        ) : isError ? (
+          <p className="text-sm text-muted-foreground">
+            Couldn't load the call list.{" "}
+            <button
+              type="button"
+              className="underline underline-offset-4"
+              onClick={() => refetch()}
+            >
+              Retry
+            </button>
+          </p>
         ) : !data?.length ? (
           <p className="text-sm text-muted-foreground">
             No contacts to call right now.

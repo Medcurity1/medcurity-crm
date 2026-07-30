@@ -124,6 +124,32 @@ function EditableField({
 
 /* ---------- Main component ---------- */
 
+/** Zone label plus a ticking local clock for the account's timezone
+ *  (values are US/Eastern-style identifiers, valid for Intl). Re-renders
+ *  every 30s; renders nothing if the stored zone is unknown to Intl. */
+function LocalTimeLine({ timezone }: { timezone: string }) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  let local: string;
+  try {
+    local = now.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: timezone,
+    });
+  } catch {
+    return null;
+  }
+  return (
+    <p className="mt-1 text-xs text-muted-foreground">
+      {timezone.replace("US/", "")} time · {local} local
+    </p>
+  );
+}
+
 export function AccountDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -397,6 +423,10 @@ export function AccountDetail() {
                 ? formatPhone(`${account.phone}${account.phone_extension ? ` x${account.phone_extension}` : ""}`)
                 : "\u2014"}
             </p>
+            {/* Summer's request (2026-07-29): the timezone lives far down the
+                page; callers need it at a glance next to the number. Shows
+                the zone plus the account's current local time. */}
+            {account.timezone && <LocalTimeLine timezone={account.timezone} />}
           </CardContent>
         </Card>
         <Card>

@@ -63,7 +63,7 @@ export function useDayQueue() {
     refetchOnWindowFocus: true,
     queryFn: async () => {
       const { data, error } = await supabase.rpc("rep_day_queue", {
-        p_limit: 25,
+        p_limit: 100,
       });
       if (error) throw error;
       return (data ?? []) as DayQueueRow[];

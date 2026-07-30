@@ -191,7 +191,7 @@ export function MetricsPanel({
       </Button>
       <p className="text-xs text-muted-foreground">
         {stats.length >= MAX_METRIC_STATS
-          ? "That is every stat available."
+          ? "Stat limit reached."
           : "Stats show two per row, in this order."}
       </p>
     </div>

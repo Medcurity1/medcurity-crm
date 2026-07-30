@@ -721,7 +721,7 @@ function applyFilters(entity: NexusReportEntity, query: any, filters: NexusRepor
 
 function text(value: unknown): ReportCell {
   const s =
-    value === null || value === undefined || value === "" ? "·" : String(value);
+    value === null || value === undefined || value === "" ? "" : String(value);
   return { kind: "text", text: s };
 }
 

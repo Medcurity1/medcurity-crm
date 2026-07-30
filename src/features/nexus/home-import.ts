@@ -129,7 +129,13 @@ export function useHomeLayoutImport(widgets: NexusWidget[] | undefined) {
 
       let position = widgets.reduce((m, w) => Math.max(m, w.position), -1) + 1;
       let allOk = true;
+      // The grid caps at 8 widgets (DB trigger enforces it) — import only
+      // what fits, oldest Home preference first, and never loop forever on
+      // a full grid (pre-promote sweep #7).
+      let room = Math.max(0, 8 - widgets.length);
       for (const [type, name] of wanted) {
+        if (room <= 0) break;
+        room--;
         // The Metrics twin carries the user's real Home KPI band over
         // (their picks or role default) so day one looks like Home did.
         const config =
@@ -147,7 +153,11 @@ export function useHomeLayoutImport(widgets: NexusWidget[] | undefined) {
           allOk = false;
         }
       }
-      if (allOk) localStorage.setItem(markerKey(user.id), new Date().toISOString());
+      // Marker is written even after a partial failure: a permanently
+      // failing insert must not retry on every visit forever. The user can
+      // still add anything missing through Customize.
+      if (!allOk) console.error("home-import: some widgets could not be added; not retrying");
+      localStorage.setItem(markerKey(user.id), new Date().toISOString());
       qc.invalidateQueries({ queryKey: ["nexus-widgets"] });
     })();
   }, [user?.id, widgets, qc]);
