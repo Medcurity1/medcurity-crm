@@ -109,7 +109,7 @@ export function usePinnedRecordInfos(records: PinnedRecordRef[]) {
             id: a.id,
             name: a.name,
             href: `/accounts/${a.id}`,
-            keyText: parts.length ? parts.join(" · ") : "—",
+            keyText: parts.length ? parts.join(" · ") : "",
             // Spec §9 flags stale CONTACTS and OPPORTUNITIES only.
             stale: false,
           });

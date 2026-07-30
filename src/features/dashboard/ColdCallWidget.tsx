@@ -14,7 +14,7 @@
 // ICP filtering (org type / state / FTE) stays config-driven and permissive
 // by default (superseded in practice by her lists, kept for the auto pool).
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { PhoneCall } from "lucide-react";
@@ -82,7 +82,18 @@ function loadIcp(): IcpConfig {
 const LIMIT = 15;
 const LIST_CHOICE_KEY = "cold_call_list_id"; // '' = auto pool
 
-export function ColdCallWidget() {
+/**
+ * Chrome-free body (source picker + table) shared by Home's card and the
+ * Nexus 'cold_call' widget (docket C2 Step 1: every Home piece gets a
+ * Nexus twin). onDataUpdated feeds Nexus's WidgetShell "Updated X ago".
+ */
+export function ColdCallBody({
+  onDataUpdated,
+  // Home's card keeps the historical 15; the Nexus widget passes its
+  // configured preview rows so the "Preview rows" setting actually applies
+  // (Nathan 2026-07-29: the list must not always run full length).
+  limit = LIMIT,
+}: { onDataUpdated?: (at: number) => void; limit?: number } = {}) {
   const [listId, setListId] = useState<string>(
     () => localStorage.getItem(LIST_CHOICE_KEY) ?? "",
   );
@@ -104,8 +115,8 @@ export function ColdCallWidget() {
     },
   });
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["dashboard", "cold-call-contacts", listId],
+  const { data, isLoading, isError, refetch, dataUpdatedAt } = useQuery({
+    queryKey: ["dashboard", "cold-call-contacts", listId, limit],
     queryFn: async () => {
       // List mode: the pool is exactly the contacts Summer curated onto the
       // chosen list (still through the view, so DNC/NLE flags apply).
@@ -129,7 +140,7 @@ export function ColdCallWidget() {
         )
         // Warm-first: most recently touched at the top; never-touched last.
         .order("last_activity_at", { ascending: false, nullsFirst: false })
-        .limit(LIMIT);
+        .limit(limit);
       if (memberIds) {
         q = q.in("id", memberIds);
       } else {
@@ -145,13 +156,13 @@ export function ColdCallWidget() {
     },
   });
 
+  useEffect(() => {
+    if (dataUpdatedAt && onDataUpdated) onDataUpdated(dataUpdatedAt);
+  }, [dataUpdatedAt, onDataUpdated]);
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-base flex items-center gap-2">
-          <PhoneCall className="h-4 w-4 text-primary" />
-          Cold Call List
-        </CardTitle>
+    <div>
+      <div className="flex justify-end mb-2">
         <Select
           value={listId || "__auto__"}
           onValueChange={(v) => {
@@ -172,14 +183,25 @@ export function ColdCallWidget() {
             ))}
           </SelectContent>
         </Select>
-      </CardHeader>
-      <CardContent>
+      </div>
+      <div>
         {isLoading ? (
           <div className="space-y-2">
             {Array.from({ length: 5 }).map((_, i) => (
               <Skeleton key={i} className="h-9 w-full" />
             ))}
           </div>
+        ) : isError ? (
+          <p className="text-sm text-muted-foreground">
+            Couldn't load the call list.{" "}
+            <button
+              type="button"
+              className="underline underline-offset-4"
+              onClick={() => refetch()}
+            >
+              Retry
+            </button>
+          </p>
         ) : !data?.length ? (
           <p className="text-sm text-muted-foreground">
             No contacts to call right now.
@@ -216,7 +238,7 @@ export function ColdCallWidget() {
                       )}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {row.title ?? "—"}
+                      {row.title ?? ""}
                     </TableCell>
                     <TableCell>
                       {row.account_id && row.account_name ? (
@@ -227,7 +249,7 @@ export function ColdCallWidget() {
                           {row.account_name}
                         </Link>
                       ) : (
-                        <span className="text-muted-foreground">—</span>
+                        <span className="text-muted-foreground"></span>
                       )}
                       {(row.industry ?? row.account_type) && (
                         <span className="block text-xs text-muted-foreground">
@@ -236,7 +258,7 @@ export function ColdCallWidget() {
                       )}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {row.state ?? "—"}
+                      {row.state ?? ""}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {row.last_activity_at
@@ -249,6 +271,23 @@ export function ColdCallWidget() {
             </Table>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** Home's card wrapper around the shared body (unchanged appearance). */
+export function ColdCallWidget() {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <CardTitle className="text-base flex items-center gap-2">
+          <PhoneCall className="h-4 w-4 text-primary" />
+          Cold Call List
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ColdCallBody />
       </CardContent>
     </Card>
   );

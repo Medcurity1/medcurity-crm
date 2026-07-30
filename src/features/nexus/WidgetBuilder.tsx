@@ -8,12 +8,14 @@ import { toast } from "sonner";
 import {
   Ban,
   BarChart3,
+  History, PhoneCall,
   Inbox,
   Kanban,
   ListTodo,
   Megaphone,
   Pin,
   Table2,
+  Trophy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -57,10 +59,10 @@ import {
 import { NEXUS_WIDGET_ICONS, WIDGET_ACCENT_CLASSES } from "./WidgetShell";
 import { defaultReportConfig, normalizeReportConfig } from "./report-engine";
 import { CustomReportPanel } from "./panels/CustomReportPanel";
-import { MetricsPanel, normalizeMetricsConfig } from "./panels/MetricsPanel";
+import { MetricsPanel } from "./panels/MetricsPanel";
 import { PinnedRecordsPanel, normalizePinnedConfig } from "./panels/PinnedRecordsPanel";
 import { RequestsPanel, normalizeRequestsConfig } from "./panels/RequestsPanel";
-import { getMetricDef } from "./metrics";
+import { getMetricDef, normalizeMetricsConfig } from "./metrics";
 
 
 /** Starting config per type for a freshly-picked widget type. */
@@ -122,57 +124,104 @@ export function validateWidgetConfig(
     if (!cfg.sort?.field) return "Pick a sort column.";
   }
   if (type === "metrics") {
-    const metric = (config as { metric?: string }).metric;
-    if (!getMetricDef(metric)) return "Pick a metric.";
+    // Read through the same normalizer the widget uses, so a legacy
+    // single-stat config validates as the one-stat list it renders as.
+    const { stats } = normalizeMetricsConfig(config);
+    if (stats.length === 0) return "Add at least one stat.";
+    if (stats.some((s) => !getMetricDef(s.metric))) {
+      return "One stat's metric is no longer available. Pick another.";
+    }
   }
   return null;
 }
 
-const TYPE_META: Record<
+/**
+ * Per-type copy. `description` is the line in the builder's type list;
+ * `galleryBlurb` is the shorter one under the gallery's preview card,
+ * where the picture is already doing most of the explaining.
+ *
+ * Exported for the gallery (WidgetGallery.tsx) so both flows name and
+ * describe a widget type identically.
+ */
+export const TYPE_META: Record<
   NexusWidgetType,
-  { label: string; description: string; icon: typeof ListTodo; defaultName: string }
+  {
+    label: string;
+    description: string;
+    galleryBlurb: string;
+    icon: typeof ListTodo;
+    defaultName: string;
+  }
 > = {
   tasks: {
     label: "Today's Tasks",
     description: "Your open tasks, sorted by due date then priority.",
+    galleryBlurb: "What is due today, in order.",
     icon: ListTodo,
     defaultName: "Today's Tasks",
   },
   pipeline: {
     label: "Current Pipeline",
     description: "Your open opportunities, closest close date first.",
+    galleryBlurb: "Your open deals, soonest close first.",
     icon: Kanban,
     defaultName: "Current Pipeline",
   },
   custom_report: {
     label: "Custom Report",
     description: "Build a report: entity, filters, sort, and columns.",
+    galleryBlurb: "Any list you want, filtered and sorted.",
     icon: Table2,
     defaultName: "Custom Report",
   },
   metrics: {
     label: "Metrics",
-    description: "A key stat as a big number or mini chart.",
+    description: "Key stats as big numbers, two per row, with mini trend lines.",
+    galleryBlurb: "Big numbers with a trend line.",
     icon: BarChart3,
     defaultName: "Metrics",
   },
   pinned_records: {
     label: "Pinned Records",
     description: "Hand-picked contacts, accounts, or opportunities.",
+    galleryBlurb: "Records you keep coming back to.",
     icon: Pin,
     defaultName: "Pinned Records",
   },
   requests: {
     label: "Requests",
     description: "Requests routed to you to review, with approve/deny.",
+    galleryBlurb: "Requests waiting on your answer.",
     icon: Inbox,
     defaultName: "Requests",
   },
   campaign_touches: {
     label: "Campaign Touches",
     description: "Your upcoming campaign-generated calls, LinkedIn, and review-and-send tasks.",
+    galleryBlurb: "Campaign steps that need you next.",
     icon: Megaphone,
     defaultName: "Campaign Touches",
+  },
+  wins: {
+    label: "Recent Wins",
+    description: "The team's most recently closed-won deals.",
+    galleryBlurb: "Deals the team just closed.",
+    icon: Trophy,
+    defaultName: "Recent Wins",
+  },
+  recents: {
+    label: "Recents",
+    description: "Records you've recently visited.",
+    galleryBlurb: "Where you have been lately.",
+    icon: History,
+    defaultName: "Recents",
+  },
+  cold_call: {
+    label: "Cold Call List",
+    description: "Warm-first dials from your chosen call list.",
+    galleryBlurb: "Who to dial next, warmest first.",
+    icon: PhoneCall,
+    defaultName: "Cold Call List",
   },
 };
 
@@ -191,6 +240,19 @@ export interface WidgetBuilderProps {
    * UI either way.
    */
   mode?: "user" | "default";
+  /**
+   * Open a NEW widget already set to this type. The gallery picks the type
+   * visually and hands it over, so this sheet is purely the settings step.
+   * Ignored when editing an existing widget.
+   */
+  initialType?: NexusWidgetType | null;
+  /**
+   * Show the type list at the top. False when the gallery already chose
+   * (changing type there means going back to the pictures).
+   */
+  showTypePicker?: boolean;
+  /** Back to the gallery. Only used when the type picker is hidden. */
+  onChangeType?: () => void;
 }
 
 export function WidgetBuilder({
@@ -200,6 +262,9 @@ export function WidgetBuilder({
   nextPosition,
   targetUserId,
   mode = "user",
+  initialType = null,
+  showTypePicker = true,
+  onChangeType,
 }: WidgetBuilderProps) {
   const isDefaultMode = mode === "default";
   const addWidget = useAddWidget();
@@ -231,14 +296,17 @@ export function WidgetBuilder({
       setPreviewCount(widget.preview_count);
       setConfig(normalizeConfigFor(widget.widget_type, widget.config));
     } else {
-      setType("tasks");
-      setName(TYPE_META.tasks.defaultName);
+      const start = initialType ?? "tasks";
+      setType(start);
+      setName(TYPE_META[start].defaultName);
       setColor(null);
       setIcon(null);
       setPreviewCount(DEFAULT_PREVIEW_COUNT);
-      setConfig({});
+      // That type's own starting config, so a gallery pick lands on a
+      // panel that is already valid where the type has defaults.
+      setConfig(defaultConfigFor(start));
     }
-  }, [open, widget]);
+  }, [open, widget, initialType]);
 
   function handleTypeChange(next: NexusWidgetType) {
     // Keep a user-typed name; swap defaults only if the name is still the
@@ -333,51 +401,85 @@ export function WidgetBuilder({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full sm:max-w-md overflow-y-auto">
         <SheetHeader>
-          <SheetTitle>{isEdit ? "Edit Widget" : "Add a Widget"}</SheetTitle>
+          <SheetTitle>
+            {isEdit
+              ? "Edit Widget"
+              : showTypePicker
+                ? "Add a Widget"
+                : `Add ${TYPE_META[type].label}`}
+          </SheetTitle>
           <SheetDescription>
             {isEdit
-              ? "Change anything — the widget updates in place."
+              ? "Change anything. The widget updates in place."
               : isDefaultMode
                 ? "Pick a type, give it a name, and it appears at the bottom of the default layout. New users only."
-                : "Pick a type, give it a name, and it appears at the bottom of your grid."}
+                : showTypePicker
+                  ? "Pick a type, give it a name, and it appears at the bottom of your grid."
+                  : "Name it and set it up. It appears at the bottom of your page."}
           </SheetDescription>
         </SheetHeader>
 
         <div className="space-y-5 px-4 pb-4">
           {/* 1. Type */}
-          <div className="space-y-2">
-            <Label>Widget type</Label>
-            <div className="grid grid-cols-1 gap-2">
-              {NEXUS_WIDGET_TYPES.map((t) => {
-                const meta = TYPE_META[t];
-                const Icon = meta.icon;
-                const selected = type === t;
-                return (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => handleTypeChange(t)}
-                    className={cn(
-                      "flex items-start gap-3 rounded-lg border p-3 text-left transition-colors",
-                      selected
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:bg-muted/50",
-                    )}
-                  >
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
-                      <Icon className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium">{meta.label}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {meta.description}
-                      </p>
-                    </div>
-                  </button>
-                );
-              })}
+          {showTypePicker ? (
+            <div className="space-y-2">
+              <Label>Widget type</Label>
+              <div className="grid grid-cols-1 gap-2">
+                {NEXUS_WIDGET_TYPES.map((t) => {
+                  const meta = TYPE_META[t];
+                  const Icon = meta.icon;
+                  const selected = type === t;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => handleTypeChange(t)}
+                      className={cn(
+                        "flex items-start gap-3 rounded-lg border p-3 text-left transition-colors",
+                        selected
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:bg-muted/50",
+                      )}
+                    >
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
+                        <Icon className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">{meta.label}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {meta.description}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex items-start gap-3 rounded-lg border bg-muted/30 p-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
+                {(() => {
+                  const Icon = TYPE_META[type].icon;
+                  return <Icon className="h-4 w-4 text-muted-foreground" />;
+                })()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">{TYPE_META[type].label}</p>
+                <p className="text-xs text-muted-foreground">
+                  {TYPE_META[type].description}
+                </p>
+              </div>
+              {onChangeType && (
+                <button
+                  type="button"
+                  onClick={onChangeType}
+                  className="shrink-0 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                >
+                  Change
+                </button>
+              )}
+            </div>
+          )}
 
           {/* 2. Name */}
           <div className="space-y-2">
@@ -463,7 +565,7 @@ export function WidgetBuilder({
           {/* 4-7. Per-type configuration */}
           <TypeConfigPanel type={type} config={config} onConfigChange={setConfig} />
 
-          {/* 8. Preview count (not applicable to single-stat Metrics) */}
+          {/* 8. Preview count (Metrics has no rows, so it has no count) */}
           {type !== "metrics" && (
             <div className="space-y-2">
               <Label>Preview rows</Label>
@@ -520,20 +622,40 @@ function TypeConfigPanel({ type, config, onConfigChange }: TypeConfigPanelProps)
     case "tasks":
       return (
         <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 p-3">
-          Always shows the page owner's open tasks — nothing to configure.
+          Always shows the page owner's open tasks. Nothing to configure.
         </p>
       );
     case "pipeline":
       return (
         <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 p-3">
-          Always shows the page owner's open opportunities — nothing to
+          Always shows the page owner's open opportunities. Nothing to
           configure.
         </p>
       );
     case "campaign_touches":
       return (
         <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 p-3">
-          Always shows the page owner's upcoming campaign tasks — nothing to
+          Always shows the page owner's upcoming campaign tasks. Nothing to
+          configure.
+        </p>
+      );
+    case "wins":
+      return (
+        <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 p-3">
+          Always shows the whole team's recent closed-won deals. Nothing to
+          configure.
+        </p>
+      );
+    case "cold_call":
+      return (
+        <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 p-3">
+          Pick the call list inside the widget. Nothing to configure here.
+        </p>
+      );
+    case "recents":
+      return (
+        <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 p-3">
+          Always shows the page owner's recently visited records. Nothing to
           configure.
         </p>
       );

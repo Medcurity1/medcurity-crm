@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Palette, Package, Wrench, Send, Check, Plus, Paperclip, X, Bug, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/PageHeader";
@@ -574,13 +575,18 @@ function CrmForm() {
 }
 
 export function RequestsPage() {
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab") ?? "";
+  const initialTab = ["collateral", "product", "crm"].includes(tabParam) ? tabParam : "collateral";
   return (
     <div className="mx-auto max-w-2xl">
       <PageHeader
         title="Requests"
         description="Submit a request and the right person gets notified. Track progress as it's worked."
       />
-      <Tabs defaultValue="collateral">
+      {/* ?tab=crm|product|collateral picks the starting tab (the Nexus
+          "Something missing?" link sends people straight to CRM). */}
+      <Tabs defaultValue={initialTab}>
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="collateral" className="gap-2">
             <Palette className="h-4 w-4" /> Collateral

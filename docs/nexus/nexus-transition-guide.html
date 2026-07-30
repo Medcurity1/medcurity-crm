@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nexus: what's changing</title>
+<style>
+  :root{ --ink:#1d2b45; --ink2:#54617c; --ink3:#8a96ad; --line:#e4e9f2; --accent:#0f9d6b; --accentbg:#e9f8f1; --bluebg:#eef4fd; --blue:#3b6fc9; --card:#ffffff; --bg:#f6f8fc; }
+  *{box-sizing:border-box; margin:0; padding:0}
+  body{background:var(--bg); color:var(--ink); font:15px/1.6 -apple-system,"Segoe UI",Inter,Roboto,sans-serif; padding:48px 20px}
+  .page{max-width:860px; margin:0 auto}
+  .hero{background:linear-gradient(115deg,#eef7ff 0%, #eafaf1 100%); border:1px solid var(--line); border-radius:18px; padding:34px 36px; margin-bottom:26px}
+  .kicker{color:var(--accent); font-weight:800; text-transform:uppercase; letter-spacing:.1em; font-size:12px; margin-bottom:8px}
+  h1{font-size:30px; line-height:1.2; margin-bottom:10px}
+  .hero p{color:var(--ink2); font-size:16px; max-width:62ch}
+  h2{font-size:19px; margin:30px 0 12px}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:22px 24px; margin-bottom:16px}
+  .row{display:flex; gap:14px; align-items:flex-start; padding:11px 0; border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:none}
+  .row .from{width:250px; flex-shrink:0; font-weight:650}
+  .row .from small{display:block; color:var(--ink3); font-weight:400}
+  .row .to{color:var(--ink2)}
+  .row .to b{color:var(--accent)}
+  .arrow{color:var(--ink3); flex-shrink:0; padding-top:1px}
+  .pill{display:inline-block; background:var(--bluebg); color:var(--blue); font-weight:700; border-radius:999px; padding:3px 12px; font-size:13px}
+  ul{padding-left:20px; color:var(--ink2)}
+  li{margin-bottom:6px}
+  .steps{display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px}
+  .step{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px}
+  .step .n{width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;margin-bottom:8px;font-size:14px}
+  .step b{display:block; margin-bottom:4px}
+  .step span{color:var(--ink2); font-size:13.5px}
+  .foot{color:var(--ink3); font-size:13px; text-align:center; margin-top:26px}
+
+  /* ── the approved product preview, same markup and styles as the chosen mockup ── */
+  .m{--mbg:#0b1220; --mpanel:#111a2c; --mcard:#16213a; --mcard2:#1a2742; --mline:#243354; --mink:#e8edf7; --mink2:#9fb0cc; --mink3:#6b7c9c; --maccent:#34d399; --maccent2:#10b981; --mamber:#fbbf24; --mblue:#60a5fa; --mrose:#fb7185; --mviolet:#a78bfa;
+     display:flex; border:1px solid var(--mline); border-radius:14px; overflow:hidden; background:var(--mbg); box-shadow:0 20px 60px rgba(15,30,60,.35); color:var(--mink); font-size:14px; line-height:1.5}
+  .m .side{width:170px; background:var(--mpanel); border-right:1px solid var(--mline); padding:14px 10px; flex-shrink:0}
+  .m .logo{font-weight:800; font-size:17px; padding:4px 8px 14px}
+  .m .nav a{display:block; color:var(--mink3); padding:6px 10px; border-radius:8px; font-size:13px; text-decoration:none}
+  .m .nav a.on{background:var(--mcard2); color:var(--mink); font-weight:600}
+  .m .main{flex:1; padding:20px 22px; min-width:0}
+  .m .ghero{border-radius:14px; padding:18px 20px; background:linear-gradient(120deg,#12233d 0%, #0f2c33 60%, #103528 100%); border:1px solid var(--mline); margin-bottom:16px}
+  .m .ghero h3{font-size:19px; margin-bottom:2px}
+  .m .ghero p{color:var(--mink2); font-size:13px}
+  .m .ghero b{color:var(--maccent)}
+  .m .chips{display:flex; gap:8px; margin-top:10px; flex-wrap:wrap}
+  .m .chip{background:rgba(52,211,153,.12); border:1px solid rgba(52,211,153,.35); color:var(--maccent); border-radius:999px; padding:3px 10px; font-size:12px; font-weight:600}
+  .m .chip.b{background:rgba(96,165,250,.12); border-color:rgba(96,165,250,.35); color:var(--mblue)}
+  .m .chip.a{background:rgba(251,191,36,.12); border-color:rgba(251,191,36,.35); color:var(--mamber)}
+  .m .mc{background:var(--mcard); border:1px solid var(--mline); border-radius:12px; padding:14px 16px}
+  .m .mc h4{font-size:13px; color:var(--mink2); text-transform:uppercase; letter-spacing:.06em; margin-bottom:10px; display:flex; justify-content:space-between}
+  .m .mc h4 .more{color:var(--mink3); font-weight:400; text-transform:none; letter-spacing:0; font-size:12px}
+  .m .qr{display:flex; align-items:center; gap:12px; padding:4px 0}
+  .m .dot{width:8px; height:8px; border-radius:50%; flex-shrink:0}
+  .m .who{font-weight:650; font-size:13.5px}
+  .m .why{color:var(--mink2); font-size:12.5px}
+  .m .grow{flex:1; min-width:0}
+  .m .btn{background:var(--maccent2); color:#04281c; border:none; border-radius:8px; padding:6px 12px; font-weight:700; font-size:12.5px; white-space:nowrap}
+  .m .btn.ghost{background:transparent; color:var(--mink2); border:1px solid var(--mline); font-weight:500}
+  .m .d-hot{background:var(--mrose)} .m .d-ren{background:var(--mblue)} .m .d-camp{background:var(--mviolet)}
+  .m .divider{display:flex; align-items:center; gap:10px; margin:2px 0 10px; color:var(--mink3); font-size:12px; text-transform:uppercase; letter-spacing:.06em}
+  .m .divider span{flex:1; border-top:1px dashed var(--mline)}
+  .m .cols{display:grid; gap:14px}
+  .m .win{display:flex; gap:10px; align-items:center; padding:7px 0; border-bottom:1px dashed var(--mline); font-size:13px}
+  .m .win:last-child{border-bottom:none}
+  .m .amt{margin-left:auto; font-weight:700; color:var(--maccent)}
+  .m .avatar{width:26px; height:26px; border-radius:50%; background:linear-gradient(135deg,var(--mblue),var(--mviolet)); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:800; color:#0b1220; flex-shrink:0}
+  .m .avatar.g{background:linear-gradient(135deg,var(--maccent),#5eead4)}
+  .m .avatar.o{background:linear-gradient(135deg,var(--mamber),var(--mrose))}
+  .m .tiles{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+  .m .tile .v{font-size:22px; font-weight:750}
+  .m .tile .l{color:var(--mink3); font-size:12px}
+  .m .tile .delta{font-size:12px; color:var(--maccent); font-weight:600}
+  .m .qa{display:flex; gap:8px}
+  @media (max-width:760px){ .m .side{display:none} .m .three3{grid-template-columns:1fr !important} .m .cols2{grid-template-columns:1fr !important} .steps{grid-template-columns:1fr} .row{flex-wrap:wrap} .row .from{width:100%} }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="hero">
+    <div class="kicker">Coming to Pulse</div>
+    <h1>Nexus is becoming your home base.</h1>
+    <p>One screen that starts your day for you. It shows who needs you, what is about to renew, which replies are waiting, ranked and ready with one-click actions. Everything you use on the Home tab today is coming along. <b>Nothing is being deleted, and nothing changes about your data.</b></p>
+  </div>
+
+  <h2>The look</h2>
+  <div class="m">
+    <div class="side">
+      <div class="logo">Pulse</div>
+      <div class="nav">
+        <a class="on">Nexus</a><a>Meddy</a><a>Accounts</a><a>Contacts</a><a>Opportunities</a><a>Pipeline</a><a>Activities</a><a>Renewals</a><a>Reports</a><a>Campaigns</a>
+      </div>
+    </div>
+    <div class="main">
+      <div class="ghero">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px">
+          <div>
+            <h3>Good morning, Summer.</h3>
+            <p><b>3 replies waiting</b> · <b>2 renewals in window</b> · <b>5 tasks due today</b></p>
+            <div class="chips"><span class="chip">Reply: Dr. Chen, Interested</span><span class="chip a">Sunrise Health renewal · $14k</span><span class="chip b">5 tasks today</span></div>
+          </div>
+          <div class="qa"><button class="btn">＋ Task</button><button class="btn ghost">＋ Contact</button><button class="btn ghost">Log call</button></div>
+        </div>
+      </div>
+      <div class="cols three3" style="grid-template-columns:1fr 1fr 1fr; margin-bottom:14px">
+        <div class="mc"><h4>1 · Answer first</h4>
+          <div class="qr"><span class="dot d-hot"></span><div class="grow"><div class="who">Dr. Alicia Chen · Lakeview Medical</div><div class="why">Replied "Interested" yesterday, unanswered</div></div></div>
+          <button class="btn" style="width:100%">Open reply</button>
+        </div>
+        <div class="mc"><h4>2 · Renewal window</h4>
+          <div class="qr"><span class="dot d-ren"></span><div class="grow"><div class="who">Sunrise Health · $14,000</div><div class="why">45 days out, no deal open</div></div></div>
+          <button class="btn" style="width:100%">Open account</button>
+        </div>
+        <div class="mc"><h4>3 · Today's calls</h4>
+          <div class="qr"><span class="dot d-camp"></span><div class="grow"><div class="who">Sarah Bloom · Riverside Clinic</div><div class="why">Day 8 call, Warming campaign</div></div></div>
+          <button class="btn" style="width:100%">Log the call</button>
+        </div>
+      </div>
+      <div class="divider">Your widgets · same as today · customizable <span></span> <button class="btn ghost" style="font-size:12px; text-transform:none; letter-spacing:0">＋ Add widget</button></div>
+      <div class="cols cols2" style="grid-template-columns:2fr 1fr">
+        <div class="mc"><h4>Recent wins</h4>
+          <div class="win"><span class="avatar g">JM</span> Jordan closed <b>&nbsp;Cascade Family Care&nbsp;</b> <span class="amt">$21,500</span></div>
+          <div class="win"><span class="avatar">SH</span> Summer closed <b>&nbsp;Bright Path Pediatrics&nbsp;</b> <span class="amt">$8,900</span></div>
+          <div class="win"><span class="avatar o">MM</span> Molly closed <b>&nbsp;Harbor View Dental&nbsp;</b> <span class="amt">$12,300</span></div>
+        </div>
+        <div class="mc"><h4>My numbers <span class="more">pick any of the 16</span></h4>
+          <div class="tiles">
+            <div class="tile"><div class="v">$46k</div><div class="l">Closed won</div><div class="delta">▲ 12%</div></div>
+            <div class="tile"><div class="v">18</div><div class="l">Open deals</div><div class="delta">▲ 3</div></div>
+            <div class="tile"><div class="v">64</div><div class="l">Calls logged</div><div class="delta">▲ 9</div></div>
+            <div class="tile"><div class="v">7</div><div class="l">Meetings set</div><div class="delta">▲ 2</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p style="color:var(--ink2); font-size:13.5px; margin-top:10px">Under the briefing sits the widget area you already know. <b style="color:var(--ink)">Your current setup carries over as is</b>, and you can still add, remove, and rearrange.</p>
+
+  <h2>What the briefing does</h2>
+  <div class="card">
+    <p style="color:var(--ink2)">The top of Nexus answers one question: <i>what should I do next?</i> It is assembled automatically from what Pulse already knows about your work. Each item says who, why, and gives you one button. Not ready for something? Hit <b>Not today</b> and it politely returns tomorrow. Finish the real work and the item clears itself. The list never nags about things you already did.</p>
+  </div>
+
+  <h2>Not in sales? It is still built for you</h2>
+  <div class="card">
+    <p style="color:var(--ink2)">The briefing shows whatever kinds of work <i>you</i> actually have. If you manage products, it leads with waiting requests and your due tasks. If you do assessment work, it leads with your tasks and deadlines. No deals means no deal rows. And if metrics are your first stop each morning, put the <b style="color:var(--ink)">My Numbers widget</b> right at the top of your widget area: pick your favorites from all 16 key metrics. The full metrics catalog lives in <b style="color:var(--ink)">Reports</b>, where the deep numbers already are.</p>
+  </div>
+
+  <h2>Where everything you use today will live</h2>
+  <div class="card">
+    <div class="row"><div class="from">My Tasks<small>Home tab</small></div><span class="arrow">→</span><div class="to">The <b>Tasks widget</b> on Nexus (already there today). Due-today tasks also appear in the briefing</div></div>
+    <div class="row"><div class="from">My KPIs / metrics<small>Home tab</small></div><span class="arrow">→</span><div class="to">The <b>My Numbers widget</b> on Nexus, your pick of the 16. The full set stays in <b>Reports</b></div></div>
+    <div class="row"><div class="from">My Open Opportunities<small>Home tab</small></div><span class="arrow">→</span><div class="to">The <b>Pipeline widget</b> on Nexus</div></div>
+    <div class="row"><div class="from">Recent wins 🎉<small>everyone's favorite</small></div><span class="arrow">→</span><div class="to">A dedicated <b>Wins widget</b>, front and center. Celebrations are not going anywhere</div></div>
+    <div class="row"><div class="from">Recent activities & records<small>Home tab</small></div><span class="arrow">→</span><div class="to">A compact <b>Recents widget</b>. Jump back into whatever you touched last</div></div>
+    <div class="row"><div class="from">Quick actions<small>new task / contact / deal</small></div><span class="arrow">→</span><div class="to">Buttons in the <b>top bar of Nexus</b>, one click, always visible</div></div>
+    <div class="row"><div class="from">Your widget setup<small>Nexus or Home</small></div><span class="arrow">→</span><div class="to"><b>Carries over unchanged.</b> The new briefing simply appears above it</div></div>
+  </div>
+
+  <h2>How the change will happen</h2>
+  <div class="steps">
+    <div class="step"><div class="n">1</div><b>Nexus gets its upgrade</b><span>The briefing appears on the Nexus tab. Home does not change at all. Try it, tell us what is wrong with it.</span></div>
+    <div class="step"><div class="n">2</div><b>Everything Home has, Nexus gets</b><span>Wins, recents, metrics, your widget setup, all duplicated onto Nexus while Home still exists. Both tabs work; nothing to relearn.</span></div>
+    <div class="step"><div class="n">3</div><b>Home retires quietly</b><span>By then Nexus already has everything, so turning Home off changes nothing. Friendly pointers appear for a while: "Looking for Recent Wins? It is right here now."</span></div>
+  </div>
+
+  <h2 style="margin-top:26px">What you need to do</h2>
+  <div class="card">
+    <ul>
+      <li><b style="color:var(--ink)">Nothing.</b> No setup, no migration, no lost data, no new logins.</li>
+      <li>When the upgrade lands on Nexus, poke around and use the <span class="pill">Requests</span> button for anything confusing, missing, or annoying. That feedback decides step 3.</li>
+      <li>If you love your current Home setup, say so. Nothing flips until Nexus has everything Home has.</li>
+    </ul>
+  </div>
+
+  <div class="foot">Questions or ideas → Nathan, or drop them in Requests. · Pulse / Nexus, 2026</div>
+</div>
+</body>
+</html>

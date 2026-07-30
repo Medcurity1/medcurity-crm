@@ -11,10 +11,13 @@
 
 import { supabase } from "@/lib/supabase";
 import { loadGoals } from "@/features/reports/dashboardGoals";
-import type {
-  NexusMetricKey,
-  NexusMetricPeriod,
-  NexusMetricScope,
+import {
+  MAX_METRIC_STATS,
+  type MetricsStatConfig,
+  type MetricsWidgetConfig,
+  type NexusMetricKey,
+  type NexusMetricPeriod,
+  type NexusMetricScope,
 } from "./types";
 
 // ── Result / definition shapes ───────────────────────────────────────
@@ -40,8 +43,22 @@ export interface NexusMetricDef {
   key: NexusMetricKey;
   label: string;
   /** Builder groups the metric picker by this. */
-  group: "Activity" | "Tasks" | "Pipeline" | "Revenue" | "Growth";
-  format: "count" | "currency";
+  group:
+    | "Activity"
+    | "Tasks"
+    | "Pipeline"
+    | "Revenue"
+    | "Renewals"
+    | "Customers"
+    | "Funnel"
+    | "Growth";
+  /**
+   * "percent" is a whole-number percentage (win rate). MetricsWidget's
+   * formatValue only special-cases "currency", so a percent renders as a
+   * plain number today; the label carries the unit until formatValue gains
+   * a percent branch (one line, in a file this port does not own).
+   */
+  format: "count" | "currency" | "percent";
   /** number = big callout; trend = mini bar chart; goal = progress bar. */
   display: "number" | "trend" | "goal";
   supportsScope: boolean;
@@ -327,6 +344,91 @@ async function closedWonSum(
   });
 }
 
+// ── Renewal queue (shared fetch + pure window math) ──────────────────
+//
+// Ported verbatim from kpi-registry.ts, including the 45s memo: the three
+// renewal metrics (renewals_due_30 / renewals_due_60 / arr_at_risk) all
+// read the SAME computed `renewal_queue` view, and a Metrics widget can
+// hold all three at once. One fetch of both columns is shared by every
+// concurrent caller, exactly as Home does it.
+//
+// Deliberately NOT paginated, because Home is not: the numbers on the two
+// pages have to be the same number. The view is already bounded to
+// closed-won opportunities whose contract_end_date falls inside the next
+// 120 days, so it sits well under PostgREST's row cap.
+
+export interface RenewalQueueRow {
+  days_until_renewal: number | null;
+  current_arr: number | null;
+}
+
+let renewalQueueCache: { at: number; p: Promise<RenewalQueueRow[]> } | null = null;
+
+function fetchRenewalQueue(): Promise<RenewalQueueRow[]> {
+  const now = Date.now();
+  if (renewalQueueCache && now - renewalQueueCache.at < 45_000) {
+    return renewalQueueCache.p;
+  }
+  const p = (async () => {
+    const { data, error } = await supabase
+      .from("renewal_queue")
+      .select("days_until_renewal, current_arr");
+    if (error) throw error;
+    return (data ?? []) as RenewalQueueRow[];
+  })();
+  renewalQueueCache = { at: now, p };
+  // A failed fetch must not poison the TTL window (kpi-registry note).
+  p.catch(() => {
+    if (renewalQueueCache?.p === p) renewalQueueCache = null;
+  });
+  return p;
+}
+
+/**
+ * Forward-looking renewals inside `days`: 0 (due today) through `days`
+ * inclusive. Past-due rows (negative days_until_renewal) are excluded, so
+ * the count matches the /renewals page preset the Home card links to.
+ * Pure, exported for unit tests.
+ */
+export function countRenewalsDueWithin(
+  rows: RenewalQueueRow[],
+  days: number,
+): number {
+  return rows.filter(
+    (r) =>
+      r.days_until_renewal !== null &&
+      r.days_until_renewal >= 0 &&
+      r.days_until_renewal <= days,
+  ).length;
+}
+
+/**
+ * Total ARR sitting in the renewal queue: every row of the view (its own
+ * 120-day window), NOT just the 30/60 day subsets. Pure, exported for
+ * unit tests.
+ */
+export function sumRenewalQueueArr(rows: RenewalQueueRow[]): number {
+  return rows.reduce((sum, r) => sum + Number(r.current_arr ?? 0), 0);
+}
+
+// ── Simple count helper ──────────────────────────────────────────────
+
+/** head:true exact count with an optional owner filter. */
+async function countRows(
+  table: string,
+  ownerId: string | null,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  applyFilters: (q: any) => any,
+): Promise<number> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let q: any = supabase.from(table).select("*", { count: "exact", head: true });
+  q = applyFilters(q);
+  if (ownerId) q = q.eq("owner_user_id", ownerId);
+  const { count, error } = await q;
+  if (error) throw error;
+  return count ?? 0;
+}
+
 function ownerFor(opts: NexusMetricQueryOpts, supportsScope: boolean): string | null {
   return supportsScope && opts.scope === "personal" ? opts.userId : null;
 }
@@ -550,6 +652,40 @@ export const NEXUS_METRICS: NexusMetricDef[] = [
     },
   },
 
+  {
+    // Home KPI `my_win_rate`, ported whole: closed-won count over
+    // (closed-won + closed-lost) count on non-archived opportunities, all
+    // time, rounded to a whole percent, 0 when the rep has closed nothing.
+    // Home's version is always the signed-in rep's own; personal scope (the
+    // default for a new stat) reproduces it exactly, and team scope drops
+    // the owner filter for the company-wide equivalent.
+    key: "win_rate",
+    // The "%" lives in the label because MetricsWidget prints percent
+    // metrics as a bare number (see the format comment above).
+    label: "My Win Rate",
+    group: "Pipeline",
+    format: "percent",
+    display: "number",
+    supportsScope: true,
+    supportsPeriod: false,
+    supportsCompare: false,
+    positiveIsGood: true,
+    periodNote: "Closed won share of all closed deals, all time",
+    query: async (opts) => {
+      const owner = ownerFor(opts, true);
+      const [won, lost] = await Promise.all([
+        countRows("opportunities", owner, (q) =>
+          q.eq("stage", "closed_won").is("archived_at", null),
+        ),
+        countRows("opportunities", owner, (q) =>
+          q.eq("stage", "closed_lost").is("archived_at", null),
+        ),
+      ]);
+      const total = won + lost;
+      return num(total === 0 ? 0 : Math.round((won / total) * 100));
+    },
+  },
+
   // ── Revenue ──────────────────────────────────────────────────────
   {
     key: "deals_closed",
@@ -624,6 +760,209 @@ export const NEXUS_METRICS: NexusMetricDef[] = [
     },
   },
 
+  {
+    // Home KPI `revenue_starting_quarter` (Summer's ask): won dollars whose
+    // CONTRACT START DATE lands in the current quarter, which is not the
+    // same as closing this quarter. Calls the very same server-side RPC
+    // Home calls, with the same local quarter bounds ([start, next start)),
+    // so the two tiles cannot drift apart.
+    key: "revenue_starting_quarter",
+    label: "Revenue Starting This Quarter",
+    group: "Revenue",
+    format: "currency",
+    display: "number",
+    supportsScope: true,
+    supportsPeriod: false,
+    supportsCompare: false,
+    positiveIsGood: true,
+    periodNote: "Contract start date in this quarter",
+    query: async (opts) => {
+      const owner = ownerFor(opts, true);
+      // periodRange("quarter") is the same local quarter Home computes with
+      // getQuarterStart/getQuarterEnd, and p_contract_start_to is exclusive
+      // in the RPC, so the first day of next quarter is the right bound.
+      const { start, end } = periodRange("quarter");
+      const { data, error } = await supabase.rpc("sum_opportunity_amounts", {
+        p_owner_user_id: owner,
+        p_open_only: false,
+        p_stage: "closed_won",
+        p_contract_start_from: localISODate(start),
+        p_contract_start_to: localISODate(end),
+      });
+      if (error) throw error;
+      return num(Number(data ?? 0));
+    },
+  },
+
+  // ── Renewals ─────────────────────────────────────────────────────
+  //
+  // All three queue metrics are company-wide on Home (the view is read
+  // unfiltered there), so they are fixed-scope here. Offering a scope
+  // toggle would default a new stat to "personal" and quietly show a
+  // smaller number than the same metric shows on Home.
+  {
+    // Home KPI `renewals_30`.
+    key: "renewals_due_30",
+    label: "Renewals Due in 30 Days",
+    group: "Renewals",
+    format: "count",
+    display: "number",
+    supportsScope: false,
+    supportsPeriod: false,
+    supportsCompare: false,
+    positiveIsGood: true,
+    periodNote: "Next 30 days, company wide",
+    query: async () => num(countRenewalsDueWithin(await fetchRenewalQueue(), 30)),
+  },
+  {
+    // Home KPI `renewals_60`.
+    key: "renewals_due_60",
+    label: "Renewals Due in 60 Days",
+    group: "Renewals",
+    format: "count",
+    display: "number",
+    supportsScope: false,
+    supportsPeriod: false,
+    supportsCompare: false,
+    positiveIsGood: true,
+    periodNote: "Next 60 days, company wide",
+    query: async () => num(countRenewalsDueWithin(await fetchRenewalQueue(), 60)),
+  },
+  {
+    // Home KPI `arr_at_risk`: the SUM of current_arr over the whole
+    // renewal queue (the view's own 120-day window), not the 30/60 subsets.
+    key: "arr_at_risk",
+    label: "Total ARR at Risk",
+    group: "Renewals",
+    format: "currency",
+    display: "number",
+    supportsScope: false,
+    supportsPeriod: false,
+    supportsCompare: false,
+    // Unused while comparison is off, but an increase here is not a win.
+    positiveIsGood: false,
+    periodNote: "Contracts ending in the next 120 days, company wide",
+    query: async () => num(sumRenewalQueueArr(await fetchRenewalQueue())),
+  },
+  {
+    // Home KPI `my_renewals`: open opportunities of kind 'renewal'.
+    // Personal scope (the default) is Home's number; team scope drops the
+    // owner filter.
+    key: "renewals_in_progress",
+    label: "My Renewals in Progress",
+    group: "Renewals",
+    format: "count",
+    display: "number",
+    supportsScope: true,
+    supportsPeriod: false,
+    supportsCompare: false,
+    positiveIsGood: true,
+    periodNote: "Open renewal opportunities right now",
+    query: async (opts) =>
+      num(
+        await countRows("opportunities", ownerFor(opts, true), (q) =>
+          q
+            .eq("kind", "renewal")
+            .is("archived_at", null)
+            .not("stage", "in", '("closed_won","closed_lost")'),
+        ),
+      ),
+  },
+
+  // ── Customers ────────────────────────────────────────────────────
+  {
+    // Home KPI `active_accounts`, labeled "Active Customers": accounts with
+    // customer_status = 'client'. This is the house customer signal (NOT
+    // lifecycle_status), so it is ported exactly as Home computes it, and
+    // it is company-wide, hence fixed-scope.
+    key: "active_customers",
+    label: "Active Customers",
+    group: "Customers",
+    format: "count",
+    display: "number",
+    supportsScope: false,
+    supportsPeriod: false,
+    supportsCompare: false,
+    positiveIsGood: true,
+    periodNote: "Accounts marked client, company wide",
+    query: async () =>
+      num(
+        await countRows("accounts", null, (q) =>
+          q.is("archived_at", null).eq("customer_status", "client"),
+        ),
+      ),
+  },
+  {
+    // Home KPI `total_contacts`: non-archived contacts, excluding rows
+    // still sitting in the import pen (import_status not null).
+    key: "total_contacts",
+    label: "Total Contacts",
+    group: "Customers",
+    format: "count",
+    display: "number",
+    supportsScope: false,
+    supportsPeriod: false,
+    supportsCompare: false,
+    positiveIsGood: true,
+    periodNote: "All contacts, company wide",
+    query: async () =>
+      num(
+        await countRows("contacts", null, (q) =>
+          q.is("archived_at", null).is("import_status", null),
+        ),
+      ),
+  },
+
+  // ── Funnel ───────────────────────────────────────────────────────
+  //
+  // MQL / SQL live on contacts since the lead-type retirement
+  // (2026-07-20). Home counts every qualified contact, all time, company
+  // wide, so both are fixed-window and fixed-scope here.
+  {
+    // Home KPI `mql_count`.
+    key: "mql_count",
+    label: "MQL Count",
+    group: "Funnel",
+    format: "count",
+    display: "number",
+    supportsScope: false,
+    supportsPeriod: false,
+    supportsCompare: false,
+    positiveIsGood: true,
+    periodNote: "Contacts with an MQL date, all time",
+    query: async () =>
+      num(
+        await countRows("contacts", null, (q) =>
+          q
+            .not("mql_date", "is", null)
+            .is("archived_at", null)
+            .is("import_status", null),
+        ),
+      ),
+  },
+  {
+    // Home KPI `sql_count`.
+    key: "sql_count",
+    label: "SQL Count",
+    group: "Funnel",
+    format: "count",
+    display: "number",
+    supportsScope: false,
+    supportsPeriod: false,
+    supportsCompare: false,
+    positiveIsGood: true,
+    periodNote: "Contacts with an SQL date, all time",
+    query: async () =>
+      num(
+        await countRows("contacts", null, (q) =>
+          q
+            .not("sql_date", "is", null)
+            .is("archived_at", null)
+            .is("import_status", null),
+        ),
+      ),
+  },
+
   // ── Growth ───────────────────────────────────────────────────────
   {
     key: "new_contacts",
@@ -671,5 +1010,102 @@ export const METRIC_GROUPS: NexusMetricDef["group"][] = [
   "Tasks",
   "Pipeline",
   "Revenue",
+  "Renewals",
+  "Customers",
+  "Funnel",
   "Growth",
 ];
+
+// ── Widget config (the stat list) ────────────────────────────────────
+//
+// One Metrics widget holds an ordered LIST of stats. The first version of
+// the widget stored a single stat at the top level of the config
+// ({ metric, scope, period, compare }) and those rows still exist in
+// nexus_widgets.config / nexus_default_widgets.config (jsonb, so no
+// migration is possible or needed). normalizeMetricsConfig is the ONLY
+// reader of that config — both the widget body and the builder panel go
+// through it — so a legacy row keeps rendering exactly one stat forever,
+// and the builder only ever writes the list shape back.
+
+/** Metric a brand-new Metrics widget starts on. */
+export const DEFAULT_METRIC_KEY: NexusMetricKey = "open_opportunities";
+
+const PERIOD_VALUES: NexusMetricPeriod[] = ["today", "week", "month", "quarter"];
+
+/**
+ * One stored stat to a clean stat. Unknown metric KEYS are kept as-is
+ * rather than swapped for a default: the widget says plainly that the
+ * metric is gone and the builder asks for a replacement, which beats
+ * silently showing a different number than the one that was saved.
+ */
+function normalizeStat(raw: unknown): MetricsStatConfig | null {
+  if (!raw || typeof raw !== "object") return null;
+  const s = raw as Partial<MetricsStatConfig>;
+  if (typeof s.metric !== "string" || !s.metric) return null;
+  return {
+    metric: s.metric as NexusMetricKey,
+    scope: s.scope === "team" ? "team" : "personal",
+    period:
+      typeof s.period === "string" && (PERIOD_VALUES as string[]).includes(s.period)
+        ? (s.period as NexusMetricPeriod)
+        : "week",
+    compare: !!s.compare,
+  };
+}
+
+/**
+ * Read any stored Metrics config into the list shape.
+ *
+ * - `{ stats: [...] }` (current)  -> cleaned list, capped at MAX_METRIC_STATS.
+ *   An explicitly empty list stays empty (the widget shows its empty state).
+ * - `{ metric, scope, ... }` (legacy single stat) -> a one-stat list.
+ * - anything else, including `{}` and null -> one default stat, so a widget
+ *   seeded with an empty config still shows a real number.
+ */
+export function normalizeMetricsConfig(raw: unknown): MetricsWidgetConfig {
+  const cfg = (raw ?? {}) as { stats?: unknown };
+  if (Array.isArray(cfg.stats)) {
+    const stats = cfg.stats
+      .map(normalizeStat)
+      .filter((s): s is MetricsStatConfig => s !== null)
+      .slice(0, MAX_METRIC_STATS);
+    return { stats };
+  }
+  const legacy = normalizeStat(cfg);
+  if (legacy) return { stats: [legacy] };
+  return {
+    stats: [
+      { metric: DEFAULT_METRIC_KEY, scope: "personal", period: "week", compare: false },
+    ],
+  };
+}
+
+/**
+ * Defaults for an "Add a stat" click: the first metric not already on the
+ * widget, read the same way as the stat above it (scope, period, compare)
+ * so a second stat lines up with the first without extra clicks.
+ */
+export function nextMetricStat(existing: MetricsStatConfig[]): MetricsStatConfig {
+  const used = new Set(existing.map((s) => s.metric));
+  const pick = NEXUS_METRICS.find((m) => !used.has(m.key)) ?? NEXUS_METRICS[0];
+  const last = existing[existing.length - 1];
+  return {
+    metric: pick.key,
+    scope: last?.scope ?? "personal",
+    period: last?.period ?? "week",
+    compare: last?.compare ?? false,
+  };
+}
+
+/** Short "This week · Personal · vs previous" line for a stat. */
+export function describeStat(stat: MetricsStatConfig): string {
+  const def = getMetricDef(stat.metric);
+  if (!def) return "Pick a replacement metric";
+  return [
+    def.supportsPeriod ? PERIOD_LABELS[stat.period] : def.periodNote,
+    def.supportsScope ? (stat.scope === "team" ? "Team-wide" : "Personal") : null,
+    def.supportsCompare && stat.compare ? "vs previous" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}

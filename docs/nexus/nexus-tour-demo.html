@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nexus tour, clickable demo</title>
+<style>
+  :root{
+    --bg:#0b1220; --panel:#111a2c; --card:#16213a; --card2:#1a2742;
+    --line:#243354; --ink:#e8edf7; --ink2:#9fb0cc; --ink3:#6b7c9c;
+    --accent:#34d399; --accent2:#10b981; --amber:#fbbf24; --blue:#60a5fa; --rose:#fb7185;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  body{background:#070d18; color:var(--ink); font:14px/1.5 -apple-system,"Segoe UI",Inter,Roboto,sans-serif; padding:20px 10px 60px}
+  .note{max-width:1100px; margin:0 auto 14px; color:var(--ink2)}
+  .note b{color:var(--accent)}
+  .frame{position:relative; max-width:1100px; margin:0 auto; display:flex; border:1px solid var(--line); border-radius:14px; overflow:hidden; background:var(--bg)}
+  .side{width:170px; background:var(--panel); border-right:1px solid var(--line); padding:14px 10px; flex-shrink:0}
+  .logo{font-weight:800; font-size:17px; padding:4px 8px 14px}
+  .nav a{display:block; color:var(--ink3); padding:6px 10px; border-radius:8px; font-size:13px}
+  .nav a.on{background:var(--card2); color:var(--ink); font-weight:600}
+  .main{flex:1; padding:20px 22px; min-width:0}
+  .hero{border-radius:14px; padding:18px 20px; background:linear-gradient(120deg,#12233d 0%, #0f2c33 60%, #103528 100%); border:1px solid var(--line); margin-bottom:16px}
+  .hero h3{font-size:19px; margin-bottom:2px}
+  .hero p{color:var(--ink2); font-size:13px}
+  .hero b{color:var(--accent)}
+  .qa{display:flex; gap:8px; float:right}
+  .btn{background:var(--accent2); color:#04281c; border:none; border-radius:8px; padding:6px 12px; font-weight:700; font-size:12.5px; cursor:pointer}
+  .btn.ghost{background:transparent; color:var(--ink2); border:1px solid var(--line); font-weight:500}
+  .cards{display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:14px}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px}
+  .card h4{font-size:12px; color:var(--ink2); text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px}
+  .who{font-weight:650; font-size:13.5px}
+  .why{color:var(--ink2); font-size:12.5px; margin-bottom:10px}
+  .dot{display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px}
+  .divider{display:flex; align-items:center; gap:10px; margin:4px 0 12px}
+  .divider span.lbl{color:var(--ink3); font-size:12px; text-transform:uppercase; letter-spacing:.06em}
+  .divider span.rule{flex:1; border-top:1px dashed var(--line)}
+  .widgets{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+  .w{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; min-height:100px}
+  .w h5{font-size:13px; margin-bottom:8px}
+  .w p{color:var(--ink3); font-size:12.5px}
+  /* tour */
+  #overlay{position:absolute; inset:0; z-index:40; display:none}
+  #ring{position:absolute; border-radius:18px; box-shadow:0 0 0 2px var(--accent), 0 0 0 9999px rgba(2,6,23,.6); transition:all .5s ease; z-index:41}
+  #tcard{position:absolute; z-index:42; width:330px; border-radius:18px; padding:18px 20px 14px; background:linear-gradient(135deg,#0e2a24 0%, #0f2438 100%); border:1px solid rgba(52,211,153,.4); box-shadow:0 24px 60px rgba(0,0,0,.55); transition:all .5s ease}
+  #tcard .step{color:var(--accent); font-size:11px; font-weight:800; letter-spacing:.1em; margin-bottom:6px}
+  #tcard h6{font-size:16px; margin-bottom:6px}
+  #tcard p{color:#c4d2e8; font-size:13px; margin-bottom:12px}
+  #tcard .row{display:flex; align-items:center; justify-content:space-between}
+  .dots{display:flex; gap:5px}
+  .dots i{width:7px; height:7px; border-radius:99px; background:#31456b; transition:all .3s}
+  .dots i.on{width:20px; background:var(--accent)}
+  #arrow{position:absolute; width:14px; height:14px; background:#0e2a24; border-left:1px solid rgba(52,211,153,.4); border-top:1px solid rgba(52,211,153,.4); transform:rotate(45deg); top:-8px}
+  #replay{display:none; margin:16px auto 0; display:block}
+</style>
+</head>
+<body>
+
+<p class="note">This is a working copy of the Nexus first-visit tour. Click <b>Next</b> to walk through it, exactly as the team will see it once, right after the tab swap. Use the button at the bottom to run it again.</p>
+
+<div class="frame" id="frame">
+  <div class="side">
+    <div class="logo">Pulse</div>
+    <div class="nav"><a class="on">Nexus</a><a>Meddy</a><a>Accounts</a><a>Contacts</a><a>Opportunities</a><a>Pipeline</a><a>Activities</a><a>Renewals</a><a>Reports</a><a>Requests</a></div>
+  </div>
+  <div class="main">
+    <div class="hero" id="a-hero">
+      <div class="qa"><button class="btn">＋ Task</button><button class="btn ghost">＋ Contact</button><button class="btn ghost">Log call</button></div>
+      <h3>Good morning, Nathan.</h3>
+      <p><b>2 requests waiting</b> · <b>1 task due today</b></p>
+    </div>
+    <div class="cards">
+      <div class="card"><h4>1 · Waiting on you</h4><div class="who"><span class="dot" style="background:var(--rose)"></span>One-pager on the SRA service</div><div class="why">Asked by Nathan 48 days ago</div><button class="btn" style="width:100%">Open request</button></div>
+      <div class="card"><h4>2 · Waiting on you</h4><div class="who"><span class="dot" style="background:var(--blue)"></span>Last Contacted column</div><div class="why">Asked by Nathan 48 days ago</div><button class="btn" style="width:100%">Open request</button></div>
+      <div class="card"><h4>3 · Due today</h4><div class="who"><span class="dot" style="background:var(--amber)"></span>Call Nathan @ Medcurity</div><div class="why">Due today</div><button class="btn" style="width:100%">Open task</button></div>
+    </div>
+    <div class="divider" id="a-widgets"><span class="lbl">Your widgets</span><span class="rule"></span><button class="btn" id="a-add">＋ Add a Widget</button></div>
+    <div class="widgets">
+      <div class="w"><h5>Today's Tasks</h5><p>Call Nathan @ Medcurity · Due today</p><p>LinkedIn connect: Nathan · Due in 5d</p></div>
+      <div class="w"><h5>Recent Wins</h5><p>Joe closed Cascade Valley Medical Group · $12,000</p><p>Margaret closed Knox Audiology · $1,800</p></div>
+      <div class="w"><h5>Current Pipeline</h5><p>SRA · Robeson Health Care · $6,600</p></div>
+      <div class="w"><h5>Recents</h5><p>Designer Security LLC · 2 days ago</p><p>1ST SOURCE BANK · 2 days ago</p></div>
+    </div>
+  </div>
+  <div id="overlay">
+    <div id="ring"></div>
+    <div id="tcard">
+      <div id="arrow"></div>
+      <div class="step" id="t-step">1 OF 3</div>
+      <h6 id="t-title"></h6>
+      <p id="t-body"></p>
+      <div class="row">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <button class="btn" id="t-next">Next</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<button class="btn" id="replay" style="margin:18px auto; display:block">Run the tour again</button>
+
+<script>
+const steps = [
+  { anchor: "a-hero", title: "Your briefing", body: "This is what needs you today, ranked so the top one matters most. Open it with one click, or push it to tomorrow with Not today.", btn: "Next" },
+  { anchor: "a-widgets", title: "Your widgets", body: "Everything from Home lives here now. Same widgets, still yours to arrange.", btn: "Next" },
+  { anchor: "a-add", title: "Make it yours", body: "Add, remove, and rearrange widgets whenever you like. If something you need is missing, send it from the Requests tab.", btn: "Got it" },
+];
+let i = 0;
+const overlay = document.getElementById("overlay"), ring = document.getElementById("ring"),
+      tcard = document.getElementById("tcard"), frame = document.getElementById("frame");
+function show(n) {
+  i = n;
+  const s = steps[n], el = document.getElementById(s.anchor);
+  const fr = frame.getBoundingClientRect(), r = el.getBoundingClientRect();
+  const pad = 8;
+  overlay.style.display = "block";
+  ring.style.left = (r.left - fr.left - pad) + "px";
+  ring.style.top = (r.top - fr.top - pad) + "px";
+  ring.style.width = (r.width + pad * 2) + "px";
+  ring.style.height = (r.height + pad * 2) + "px";
+  const cardW = 330;
+  let cx = r.left - fr.left + r.width / 2 - cardW / 2;
+  cx = Math.max(12, Math.min(cx, fr.width - cardW - 12));
+  tcard.style.left = cx + "px";
+  tcard.style.top = (r.bottom - fr.top + pad + 14) + "px";
+  const arrowX = (r.left - fr.left + r.width / 2) - cx - 7;
+  document.getElementById("arrow").style.left = Math.max(16, Math.min(arrowX, cardW - 30)) + "px";
+  document.getElementById("t-step").textContent = (n + 1) + " OF 3";
+  document.getElementById("t-title").textContent = s.title;
+  document.getElementById("t-body").textContent = s.body;
+  document.getElementById("t-next").textContent = s.btn;
+  document.querySelectorAll(".dots i").forEach((d, k) => d.classList.toggle("on", k === n));
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+document.getElementById("t-next").addEventListener("click", () => {
+  if (i < 2) show(i + 1);
+  else overlay.style.display = "none";
+});
+document.getElementById("replay").addEventListener("click", () => show(0));
+window.addEventListener("load", () => setTimeout(() => show(0), 500));
+</script>
+</body>
+</html>

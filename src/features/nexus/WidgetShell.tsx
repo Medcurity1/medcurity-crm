@@ -42,7 +42,7 @@ import type { NexusWidget, NexusWidgetColor } from "./types";
 
 /**
  * Every widget body component receives exactly this. Register new bodies
- * in WIDGET_BODIES (NexusGrid.tsx).
+ * in WIDGET_BODIES (widget-bodies.ts).
  */
 export interface NexusWidgetBodyProps {
   widget: NexusWidget;
@@ -108,6 +108,19 @@ export interface WidgetShellProps {
   dragHandleProps?: Record<string, unknown>;
   /** Override the remove-confirm body copy (admin default-layout mode). */
   removeDescription?: string;
+  /**
+   * Show the layout controls (drag, pin, edit, remove). False outside
+   * Customize mode, where the page is for reading and the only control is
+   * the row filter. Defaults to true so the admin editors, which are
+   * always in an editing context, keep the behavior they have today.
+   */
+  editable?: boolean;
+  /** Currently pinned above the divider. */
+  featured?: boolean;
+  /** Pin / unpin. Omit to hide the pin control entirely. */
+  onToggleFeatured?: () => void;
+  /** Pin write in flight. */
+  pinPending?: boolean;
   children: ReactNode;
 }
 
@@ -120,13 +133,17 @@ export function WidgetShell({
   onRemove,
   dragHandleProps,
   removeDescription,
+  editable = true,
+  featured = false,
+  onToggleFeatured,
+  pinPending = false,
   children,
 }: WidgetShellProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
 
-  // Metrics widgets are a single stat / mini chart — no rows to filter,
-  // so the in-widget search control is hidden (spec §10).
+  // Metrics widgets are stat tiles, not rows, so there is nothing for the
+  // in-widget search to filter and the control is hidden (spec §10).
   const searchable = widget.widget_type !== "metrics";
 
   // "Updates in real time" (spec §10): re-render every minute so the
@@ -158,19 +175,21 @@ export function WidgetShell({
       )}
 
       <CardHeader className="flex flex-row items-center gap-2 space-y-0 px-4">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground shrink-0 touch-none"
-              aria-label="Drag to reorder widget"
-              {...dragHandleProps}
-            >
-              <GripVertical className="h-4 w-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Drag to reorder</TooltipContent>
-        </Tooltip>
+        {editable && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground shrink-0 touch-none"
+                aria-label="Drag to reorder widget"
+                {...dragHandleProps}
+              >
+                <GripVertical className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Drag to reorder</TooltipContent>
+          </Tooltip>
+        )}
 
         <div className="min-w-0 flex-1">
           <CardTitle className="text-base flex items-center gap-2 min-w-0">
@@ -203,34 +222,63 @@ export function WidgetShell({
               <TooltipContent>Filter the visible rows</TooltipContent>
             </Tooltip>
           )}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-7 w-7"
-                onClick={onEdit}
-                aria-label="Edit widget"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Edit widget</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-7 w-7 hover:text-destructive"
-                onClick={() => setConfirmRemove(true)}
-                aria-label="Remove widget"
-              >
-                <X className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Remove widget</TooltipContent>
-          </Tooltip>
+          {editable && onToggleFeatured && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className={cn(
+                    "h-7 w-7",
+                    featured && "text-primary hover:text-primary",
+                  )}
+                  onClick={onToggleFeatured}
+                  disabled={pinPending}
+                  aria-label={featured ? "Unpin widget" : "Pin widget to the top"}
+                  aria-pressed={featured}
+                >
+                  <Pin
+                    className={cn("h-3.5 w-3.5", featured && "fill-current")}
+                  />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {featured ? "Unpin from the top" : "Pin to the top"}
+              </TooltipContent>
+            </Tooltip>
+          )}
+          {editable && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7"
+                  onClick={onEdit}
+                  aria-label="Edit widget"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Edit widget</TooltipContent>
+            </Tooltip>
+          )}
+          {editable && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7 hover:text-destructive"
+                  onClick={() => setConfirmRemove(true)}
+                  aria-label="Remove widget"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Remove widget</TooltipContent>
+            </Tooltip>
+          )}
         </div>
       </CardHeader>
 

@@ -1,31 +1,35 @@
-// Metrics widget body (jordan-v4-spec §7). Single big-number callout,
-// mini axis-free trend chart, or goal progress bar depending on the
-// metric's declared display. Optional ↑/↓ comparison vs the previous
-// equivalent period (green/red, dark-safe; flipped for metrics where an
-// increase is bad, e.g. overdue tasks).
+// Metrics widget body (jordan-v4-spec §7, docket C2 round 4). ONE widget
+// holds an ordered list of stats, rendered as a tile grid: 2 tiles per row
+// when the widget is wide enough, 1 when it is narrow. Each tile is a big
+// number, a short label, an optional ↑/↓ comparison vs the previous
+// equivalent period, and (for metrics that return per-day buckets) a mini
+// trend line. Goal-style metrics keep their progress bar.
+//
+// Every tile owns its own query, skeleton and error state, so one broken
+// stat can never blank the rest of the widget.
 
-import { useEffect } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ResponsiveContainer, BarChart, Bar } from "recharts";
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency } from "@/lib/formatters";
 import {
   getMetricDef,
+  normalizeMetricsConfig,
   PERIOD_LABELS,
   PREVIOUS_PERIOD_LABELS,
   type NexusMetricData,
   type NexusMetricDef,
 } from "../metrics";
-import type { MetricsWidgetConfig, NexusMetricPeriod } from "../types";
+import type { MetricsStatConfig, NexusMetricPeriod } from "../types";
 import { WidgetError } from "./WidgetError";
 import type { NexusWidgetBodyProps } from "../WidgetShell";
 
 function formatValue(def: NexusMetricDef, value: number): string {
-  return def.format === "currency"
-    ? formatCurrency(value)
-    : Math.round(value).toLocaleString();
+  if (def.format === "currency") return formatCurrency(value);
+  if (def.format === "percent") return Math.round(value).toLocaleString() + "%";
+  return Math.round(value).toLocaleString();
 }
 
 function CompareBadge({
@@ -85,67 +89,124 @@ function CompareBadge({
   );
 }
 
-export function MetricsWidget({ widget, onDataUpdated }: NexusWidgetBodyProps) {
-  const config = (widget.config ?? {}) as Partial<MetricsWidgetConfig>;
-  const def = getMetricDef(config.metric);
-  const scope = config.scope === "team" ? "team" : "personal";
-  const period: NexusMetricPeriod = config.period ?? "week";
-  const compare = !!config.compare;
+/**
+ * Axis-free trend line: a plain inline SVG polyline, no chart library, no
+ * axes, no tooltip. It is decoration for the number above it, so it is
+ * aria-hidden. preserveAspectRatio="none" lets it stretch to any tile
+ * width; non-scaling-stroke keeps the line from stretching with it.
+ */
+function Sparkline({ values }: { values: number[] }) {
+  if (values.length < 2) return null;
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const span = max - min || 1;
+  const stepX = 100 / (values.length - 1);
+  const points = values
+    .map((v, i) => {
+      const x = i * stepX;
+      // 1px of headroom top and bottom so the line never clips.
+      const y = 23 - ((v - min) / span) * 22;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    })
+    .join(" ");
+  return (
+    <svg
+      viewBox="0 0 100 24"
+      preserveAspectRatio="none"
+      className="mt-2 h-6 w-full text-muted-foreground"
+      aria-hidden
+      focusable="false"
+    >
+      <polyline
+        points={points}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
+  );
+}
+
+function StatTile({
+  stat,
+  index,
+  userId,
+  big,
+  onUpdated,
+}: {
+  stat: MetricsStatConfig;
+  /** Position in the stat list; identifies this tile to the parent. */
+  index: number;
+  /** Widget OWNER (not the viewer) so admin previews read the right data. */
+  userId: string;
+  /** Single-stat widgets get the larger number the widget had before. */
+  big: boolean;
+  /** Stable across renders, so the report-up effect fires only on new data. */
+  onUpdated: (index: number, timestamp: number) => void;
+}) {
+  const def = getMetricDef(stat.metric);
+  const { scope, period, compare } = stat;
 
   const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } =
     useQuery({
       queryKey: [
         "nexus-widget-data",
         "metrics",
-        widget.user_id,
-        def?.key,
+        userId,
+        stat.metric,
         scope,
         period,
       ],
-      queryFn: () => def!.query({ scope, period, userId: widget.user_id }),
+      queryFn: () => def!.query({ scope, period, userId }),
       enabled: !!def,
     });
 
   useEffect(() => {
-    if (dataUpdatedAt) onDataUpdated?.(dataUpdatedAt);
-  }, [dataUpdatedAt, onDataUpdated]);
+    if (dataUpdatedAt) onUpdated(index, dataUpdatedAt);
+  }, [dataUpdatedAt, index, onUpdated]);
 
   // Unknown metric key (e.g. a config saved before the metric was renamed
-  // or removed from the registry). getMetricDef returned null, so there's
-  // nothing to query — say so plainly instead of rendering a blank card.
+  // or removed from the registry). getMetricDef returned nothing, so
+  // there is nothing to query — say so plainly instead of a blank tile.
   if (!def) {
     return (
-      <WidgetError message="This metric is no longer available. Edit the widget to pick another." />
+      <div className="min-w-0">
+        <WidgetError message="This metric is no longer available. Edit the widget to pick another." />
+      </div>
     );
   }
 
   if (isError) {
     return (
-      <WidgetError
-        message="Couldn't load this metric."
-        onRetry={() => refetch()}
-        isRetrying={isFetching}
-      />
+      <div className="min-w-0">
+        <WidgetError
+          message={`Couldn't load ${def.label}.`}
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
+      </div>
     );
   }
 
   if (isLoading || !data) {
     return (
-      <div className="space-y-2 py-2">
-        <Skeleton className="h-9 w-28" />
-        <Skeleton className="h-4 w-40" />
+      <div className="min-w-0 space-y-2 py-1">
+        <Skeleton className={big ? "h-9 w-28" : "h-8 w-24"} />
+        <Skeleton className="h-4 w-32" />
       </div>
     );
   }
 
-  const scopeLabel = def.supportsScope
-    ? scope === "personal"
-      ? "Personal"
-      : "Team-wide"
-    : null;
+  const numberClass = cn(
+    "font-bold tracking-tight tabular-nums",
+    big ? "text-3xl" : "text-2xl",
+  );
   const contextLabel = [
     def.supportsPeriod ? PERIOD_LABELS[period] : def.periodNote,
-    scopeLabel,
+    def.supportsScope ? (scope === "team" ? "Team-wide" : "Personal") : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -154,20 +215,21 @@ export function MetricsWidget({ widget, onDataUpdated }: NexusWidgetBodyProps) {
   if (def.display === "goal") {
     if (data.goal === null) {
       return (
-        <p className="text-sm text-muted-foreground py-2">
-          No goal configured. Set the QTD billing goal in Admin → Dashboard
-          Goals.
-        </p>
+        <div className="min-w-0">
+          <p className="text-sm font-medium">{def.label}</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            No goal configured. Set the QTD billing goal in Admin → Dashboard
+            Goals.
+          </p>
+        </div>
       );
     }
     const pct = Math.min(100, Math.round((data.current / data.goal) * 100));
     return (
-      <div className="py-1 space-y-2">
+      <div className="min-w-0 space-y-2">
         <div className="flex items-baseline justify-between gap-2">
-          <span className="text-3xl font-bold tracking-tight tabular-nums">
-            {formatValue(def, data.current)}
-          </span>
-          <span className="text-sm text-muted-foreground tabular-nums">
+          <span className={numberClass}>{formatValue(def, data.current)}</span>
+          <span className="text-sm text-muted-foreground tabular-nums shrink-0">
             of {formatValue(def, data.goal)}
           </span>
         </div>
@@ -177,6 +239,7 @@ export function MetricsWidget({ widget, onDataUpdated }: NexusWidgetBodyProps) {
           aria-valuenow={pct}
           aria-valuemin={0}
           aria-valuemax={100}
+          aria-label={`${def.label} against goal`}
         >
           <div
             className={cn(
@@ -189,43 +252,88 @@ export function MetricsWidget({ widget, onDataUpdated }: NexusWidgetBodyProps) {
             style={{ width: `${pct}%` }}
           />
         </div>
-        <p className="text-xs text-muted-foreground">
-          {pct}% of goal · {contextLabel}
-        </p>
+        <div className="min-w-0">
+          <p className="text-xs font-medium truncate">{def.label}</p>
+          <p className="text-xs text-muted-foreground truncate">
+            {pct}% of goal · {contextLabel}
+          </p>
+        </div>
       </div>
     );
   }
 
   // ── Number / trend display ─────────────────────────────────────────
-  const showChart = def.display === "trend" && (data.trend?.length ?? 0) > 1;
+  const trendValues =
+    def.display === "trend" ? (data.trend ?? []).map((b) => b.value) : [];
 
   return (
-    <div className="py-1">
-      <div className="flex items-baseline gap-3 flex-wrap">
-        <span className="text-3xl font-bold tracking-tight tabular-nums">
-          {formatValue(def, data.current)}
-        </span>
+    <div className="min-w-0">
+      <div className="flex items-baseline gap-2 flex-wrap">
+        <span className={numberClass}>{formatValue(def, data.current)}</span>
         {compare && def.supportsCompare && (
           <CompareBadge def={def} data={data} period={period} />
         )}
       </div>
-      <p className="text-xs text-muted-foreground mt-1">{contextLabel}</p>
+      <p className="text-xs font-medium mt-1 truncate">{def.label}</p>
+      <p className="text-xs text-muted-foreground truncate">{contextLabel}</p>
+      <Sparkline values={trendValues} />
+    </div>
+  );
+}
 
-      {showChart && (
-        <div className="mt-3 h-14" aria-hidden>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data.trend ?? []} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
-              {/* Axis-free by design — just the shape of the trend. */}
-              <Bar
-                dataKey="value"
-                fill="#3b82f6"
-                radius={[2, 2, 0, 0]}
-                isAnimationActive={false}
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
+export function MetricsWidget({ widget, onDataUpdated }: NexusWidgetBodyProps) {
+  const { stats } = useMemo(
+    () => normalizeMetricsConfig(widget.config),
+    [widget.config],
+  );
+
+  // "Updated X ago" in the shell should describe the STALEST tile, so the
+  // header never claims data is fresher than the oldest number on screen.
+  const count = stats.length;
+  const stamps = useRef<Map<number, number>>(new Map());
+  const handleUpdated = useCallback(
+    (index: number, timestamp: number) => {
+      stamps.current.set(index, timestamp);
+      // Drop stamps for tiles that no longer exist (a stat was removed).
+      for (const key of stamps.current.keys()) {
+        if (key >= count) stamps.current.delete(key);
+      }
+      const values = Array.from(stamps.current.values());
+      if (values.length) onDataUpdated?.(Math.min(...values));
+    },
+    [onDataUpdated, count],
+  );
+
+  if (stats.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground py-2">
+        No stats yet. Use the pencil to add one.
+      </p>
+    );
+  }
+
+  return (
+    <div className="@container py-1">
+      <div
+        className={cn(
+          "grid gap-x-4 gap-y-5",
+          // Container query, not a viewport one: the widget sits in a
+          // half-width stack on desktop and full width on mobile, so what
+          // matters is how wide THIS widget is.
+          stats.length > 1 && "@min-[20rem]:grid-cols-2",
+        )}
+      >
+        {stats.map((stat, i) => (
+          <StatTile
+            key={`${i}:${stat.metric}`}
+            stat={stat}
+            index={i}
+            userId={widget.user_id}
+            big={stats.length === 1}
+            onUpdated={handleUpdated}
+          />
+        ))}
+      </div>
     </div>
   );
 }

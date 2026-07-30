@@ -13,6 +13,13 @@ import type {
   NexusWidgetConfig,
   PreviewCount,
 } from "./types";
+import {
+  MAX_FEATURED,
+  notePinned,
+  noteUnpinned,
+  pickOldestFeatured,
+  readFeaturedOrder,
+} from "./featured";
 
 // ── Input shapes ─────────────────────────────────────────────────────
 export interface NexusWidgetInput {
@@ -23,6 +30,8 @@ export interface NexusWidgetInput {
   icon?: string | null;
   preview_count?: PreviewCount;
   config?: NexusWidgetConfig;
+  /** Pinned above the divider. Defaults to false server-side. */
+  featured?: boolean;
 }
 
 export interface ReorderItem {
@@ -98,7 +107,14 @@ export function useNexusWidgets(userId?: string, opts?: { enabled?: boolean }) {
         .eq("user_id", uid!)
         .order("position", { ascending: true });
       if (error) throw error;
-      return data as NexusWidget[];
+      // `featured` (migration 20260729200000) comes back with the rest of
+      // the row. Coerced here so a row written before the column existed,
+      // or a response from a stale PostgREST schema cache, still reads as
+      // a plain false rather than undefined.
+      return (data ?? []).map((w) => ({
+        ...w,
+        featured: w.featured === true,
+      })) as NexusWidget[];
     },
     enabled: !!uid && (opts?.enabled ?? true),
   });
@@ -169,6 +185,81 @@ export function useRemoveWidget() {
 }
 
 /**
+ * Pin a widget above the "Your widgets" divider, or unpin it.
+ *
+ * The two-pin cap lives here rather than in the database (see the
+ * migration's note): pinning a third widget is allowed and quietly unpins
+ * whichever pin has been up the longest, so the control never rejects a
+ * click. Which one that is comes from featured.ts.
+ *
+ * Returns the name of the widget that lost its slot, if any, so the caller
+ * can say so out loud.
+ */
+export function usePinWidget() {
+  const qc = useQueryClient();
+  const { user } = useAuth();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      featured,
+      userId,
+    }: {
+      id: string;
+      featured: boolean;
+      /** Page owner; defaults to the signed-in user (admin editor passes it). */
+      userId?: string;
+    }) => {
+      const uid = userId ?? user?.id;
+      if (!uid) throw new Error("Not signed in");
+
+      const list = qc.getQueryData<NexusWidget[]>(["nexus-widgets", uid]) ?? [];
+      let unpinnedName: string | null = null;
+
+      if (featured) {
+        // Make room first, so the page never shows three pins mid-flight.
+        const others = list.filter((w) => w.featured && w.id !== id);
+        const order = readFeaturedOrder(uid);
+        const evicted: NexusWidget[] = [];
+        const pool = [...others];
+        while (pool.length >= MAX_FEATURED) {
+          const oldest = pickOldestFeatured(pool, order);
+          if (!oldest) break;
+          evicted.push(oldest);
+          pool.splice(pool.indexOf(oldest), 1);
+        }
+        if (evicted.length) {
+          const { error } = await supabase
+            .from("nexus_widgets")
+            .update({ featured: false })
+            .in(
+              "id",
+              evicted.map((w) => w.id),
+            );
+          if (error) throw error;
+          for (const w of evicted) noteUnpinned(uid, w.id);
+          unpinnedName = evicted[0].name;
+        }
+      }
+
+      const { error } = await supabase
+        .from("nexus_widgets")
+        .update({ featured })
+        .eq("id", id);
+      if (error) throw error;
+
+      if (featured) notePinned(uid, id);
+      else noteUnpinned(uid, id);
+
+      return { userId: uid, featured, unpinnedName };
+    },
+    onSuccess: (result) =>
+      qc.invalidateQueries({ queryKey: ["nexus-widgets", result.userId] }),
+    onError: (e) =>
+      toast.error("Couldn't change the pin: " + (e as Error).message),
+  });
+}
+
+/**
  * Persist a drag-reorder atomically via the nexus_reorder_widgets RPC —
  * a single UPDATE server-side, so a partial failure can't leave position
  * collisions (the old Promise.all-of-row-updates could). `userId` is the
@@ -231,7 +322,10 @@ export function useDefaultWidgets(opts?: { enabled?: boolean }) {
         .select("*")
         .order("position", { ascending: true });
       if (error) throw error;
-      return data as NexusDefaultWidget[];
+      return (data ?? []).map((w) => ({
+        ...w,
+        featured: w.featured === true,
+      })) as NexusDefaultWidget[];
     },
     enabled: opts?.enabled ?? true,
   });
@@ -356,7 +450,7 @@ export function useInitializeUserNexus() {
       toast.success(
         data?.initialized
           ? "Nexus page initialized from the default layout."
-          : "Already initialized — nothing to do.",
+          : "Already initialized, nothing to do.",
       );
     },
     onError: (e) =>

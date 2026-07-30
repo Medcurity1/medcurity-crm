@@ -30,6 +30,9 @@ export const NEXUS_WIDGET_TYPES = [
   "pinned_records",
   "requests",
   "campaign_touches",
+  "wins",
+  "cold_call",
+  "recents",
 ] as const;
 export type NexusWidgetType = (typeof NEXUS_WIDGET_TYPES)[number];
 
@@ -41,6 +44,12 @@ export type PipelineWidgetConfig = Record<string, never>;
 /** Campaign Touches (S7) — MY upcoming campaign-generated tasks, scoped to
  *  the widget owner just like Tasks/Pipeline. No config. */
 export type CampaignTouchesWidgetConfig = Record<string, never>;
+/** Recent Wins (Nexus Phase 2) — team-wide closed-won feed. No config. */
+export type ColdCallWidgetConfig = Record<string, never>;
+export type WinsWidgetConfig = Record<string, never>;
+/** Recents (Nexus Phase 2) — the signed-in user's recently visited
+ *  records, read from localStorage. No config. */
+export type RecentsWidgetConfig = Record<string, never>;
 
 /** Entities the custom report builder can target. Imports is admin-only. */
 export type NexusReportEntity = "contacts" | "accounts" | "opportunities" | "imports";
@@ -99,18 +108,55 @@ export type NexusMetricKey =
   | "revenue_vs_goal"
   | "new_contacts"
   | "avg_deal_size"
-  | "pipeline_value";
+  | "pipeline_value"
+  // Ported from Home's kpi-registry (docket C2 round 4) so the landing-page
+  // swap cannot lose a number the team already watches. Each one keeps the
+  // Home KPI's exact query, filters and window; see metrics.ts for the
+  // per-metric provenance comments.
+  | "win_rate"
+  | "renewals_due_30"
+  | "renewals_due_60"
+  | "arr_at_risk"
+  | "renewals_in_progress"
+  | "active_customers"
+  | "total_contacts"
+  | "revenue_starting_quarter"
+  | "mql_count"
+  | "sql_count";
 
 export type NexusMetricScope = "personal" | "team";
 export type NexusMetricPeriod = "today" | "week" | "month" | "quarter";
 
-export interface MetricsWidgetConfig {
+/** One stat inside a Metrics widget (a metric plus how to read it). */
+export interface MetricsStatConfig {
   metric: NexusMetricKey;
   scope: NexusMetricScope;
   period: NexusMetricPeriod;
   /** Show % change vs the previous equivalent period. */
   compare: boolean;
 }
+
+/**
+ * Sanity cap on stats per Metrics widget. It is the size of the whole
+ * metric catalog, not a design limit: the two-stack layout lets a widget
+ * be as tall as it needs, so there is no reason to stop a user at 4.
+ */
+export const MAX_METRIC_STATS = 16;
+
+/**
+ * A Metrics widget holds an ORDERED LIST of stats, rendered as a tile
+ * grid. The first version of this widget stored ONE stat at the top level
+ * of the config ({ metric, scope, period, compare }); those rows are still
+ * out there in nexus_widgets.config (jsonb) and stay readable forever via
+ * normalizeMetricsConfig (metrics.ts), which is the only way either the
+ * widget or the builder reads this config. Nothing writes the old shape.
+ */
+export interface MetricsWidgetConfig {
+  stats: MetricsStatConfig[];
+}
+
+/** The pre-list stored shape. Read-only: kept so the reader can name it. */
+export type LegacyMetricsWidgetConfig = MetricsStatConfig;
 
 export type PinnedRecordType = "contact" | "account" | "opportunity";
 
@@ -140,6 +186,9 @@ export interface NexusWidgetConfigMap {
   pinned_records: PinnedRecordsWidgetConfig;
   requests: RequestsWidgetConfig;
   campaign_touches: CampaignTouchesWidgetConfig;
+  wins: WinsWidgetConfig;
+  cold_call: ColdCallWidgetConfig;
+  recents: RecentsWidgetConfig;
 }
 
 /** Any widget config (use the discriminated row types to narrow). */
@@ -153,6 +202,12 @@ interface NexusWidgetBase {
   color: NexusWidgetColor | null;
   icon: string | null;
   preview_count: PreviewCount;
+  /**
+   * Pinned above the "Your widgets" divider, into the briefing area
+   * (migration 20260729200000). Set from Customize mode. The two-pin cap
+   * is a client rule, not a constraint — see featured.ts.
+   */
+  featured: boolean;
   created_at: string;
   updated_at: string;
 }
