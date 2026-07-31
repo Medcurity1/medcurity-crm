@@ -77,7 +77,16 @@ export function useIdleLogout({
 
   const signOutAndRedirect = useCallback(async () => {
     clearAll();
-    await supabase.auth.signOut();
+    // scope "local": sign out THIS browser only (Margaret's 2026-07-31
+    // follow-up test). Bare signOut() defaults to scope "global", which
+    // revokes the user's session in EVERY browser — so her untouched
+    // Firefox hitting its 12h idle timer killed the Chrome she was actively
+    // working in (and, with all sessions dead, her Meddy presence heartbeat
+    // stopped = "shows me as offline"). Cross-BROWSER activity can't be
+    // shared (sharedActivity.ts's localStorage is per browser), so the idle
+    // logout must only ever take down its own browser. The manual Sign Out
+    // button (AuthProvider.signOut) deliberately stays global.
+    await supabase.auth.signOut({ scope: "local" });
     // Hard redirect so every in-memory state is blown away.
     window.location.href = "/login?reason=idle";
   }, [clearAll]);
