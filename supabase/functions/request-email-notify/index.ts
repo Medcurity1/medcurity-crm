@@ -158,13 +158,34 @@ serve(async (req) => {
       return json({ error: `token refresh failed: ${(e as Error).message}` }, 502);
     }
 
+    // Client-impact determination (MSD-957). Rachel's ask was that the
+    // client-facing decision appear IN the email, not just in a database
+    // column, so it is a first-class row in the details table for bugs.
+    const details = (reqRow.details ?? {}) as Record<string, unknown>;
+    const clientFacing = details.client_facing === true;
+    const cfReasoning =
+      typeof details.client_facing_reasoning === "string"
+        ? details.client_facing_reasoning
+        : "";
+    const cfSource = details.client_facing_source === "submitter" ? "submitter" : "ai";
+
     // Shared detail rows (From / Title / Priority) used by both templates.
     const detailRows = [
       `<table style="font-size:14px;border-collapse:collapse">`,
       `<tr><td style="padding:2px 12px 2px 0;color:#666">From</td><td>${escapeHtml(reqRow.requester_name ?? "Unknown")}</td></tr>`,
       `<tr><td style="padding:2px 12px 2px 0;color:#666">Title</td><td>${escapeHtml(reqRow.title)}</td></tr>`,
       `<tr><td style="padding:2px 12px 2px 0;color:#666">Priority</td><td>${escapeHtml(reqRow.priority)}</td></tr>`,
+      isBug
+        ? `<tr><td style="padding:2px 12px 2px 0;color:#666">Client-facing</td><td><strong style="color:${
+            clientFacing ? "#b91c1c" : "#166534"
+          }">${clientFacing ? "Yes" : "No"}</strong></td></tr>`
+        : "",
       `</table>`,
+      isBug && cfReasoning
+        ? `<p style="color:#666;font-size:13px;margin:6px 0 0">${escapeHtml(cfReasoning)}${
+            cfSource === "submitter" ? " (set by the person reporting it)" : ""
+          }</p>`
+        : "",
       reqRow.description
         ? `<p style="color:#444;white-space:pre-wrap">${escapeHtml(reqRow.description)}</p>`
         : "",
@@ -174,20 +195,30 @@ serve(async (req) => {
     let html: string;
 
     if (isFiledBug) {
-      // Informational bug notice. No links and no route back to Pulse: the
-      // ticket lives in the dev tools now, so we point people to Helm/Jira
-      // rather than the CRM. Deliberately does NOT say "no action needed" —
-      // the dev team still has to work it; there's just nothing to approve
-      // here. Reference the Jira key as plain text so it's easy to find.
+      // A bug affecting a client. It went straight to the dev team on purpose
+      // — nothing about it is waiting on a person — so this is a heads-up, not
+      // a request for action, and it points at Helm/Jira rather than back into
+      // Pulse. Deliberately does NOT say "no action needed": the dev team still
+      // has to work it; there is just nothing to approve.
       const ticket = reqRow.jira_issue_key
         ? ` as <strong>${escapeHtml(reqRow.jira_issue_key)}</strong>`
         : "";
-      subject = `New bug report: ${reqRow.title}`;
+      subject = `Client-impacting bug: ${reqRow.title}`;
       html = [
-        `<p>A new <strong>bug report</strong> came in and has been filed to Jira${ticket}.</p>`,
+        `<p>A bug came in that <strong>is affecting a client</strong>, so it went straight to the dev team${ticket} without waiting for review.</p>`,
         detailRows,
-        `<p>It's now with the dev team. Check <strong>Helm</strong> or <strong>Jira</strong> for the ticket and full details.</p>`,
-        `<p style="color:#999;font-size:12px">Sent by Pulse. Bug reports skip approval and go straight to the dev team — this is your heads-up that one landed.</p>`,
+        `<p>Check <strong>Helm</strong> or <strong>Jira</strong> for the ticket and full details.</p>`,
+        `<p style="color:#999;font-size:12px">Sent by Pulse. Bugs affecting clients skip the review queue so nothing holds them up — this is your heads-up that one landed.</p>`,
+      ].join("");
+    } else if (isBug) {
+      // A bug NOT affecting clients. Nothing has been filed. It is sitting in
+      // the review queue waiting on a decision, so this one does link back.
+      subject = `Bug report to review: ${reqRow.title}`;
+      html = [
+        `<p>A new <strong>bug report</strong> came in. It doesn't look like it's affecting clients, so nothing has been sent to the dev team yet — it's waiting on your call.</p>`,
+        detailRows,
+        `<p><a href="${APP_BASE}/nexus" style="display:inline-block;background:#1d4ed8;color:#fff;padding:9px 22px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:600">Review in Pulse</a></p>`,
+        `<p style="color:#999;font-size:12px">Sent by Pulse. Approving it files the Jira ticket; denying it closes the request.</p>`,
       ].join("");
     } else {
       const label = TYPE_LABEL[reqRow.type] ?? "request";

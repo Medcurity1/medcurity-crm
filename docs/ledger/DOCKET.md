@@ -21,12 +21,15 @@ Statuses: `IDEA` · `QUEUED` · `IN PROGRESS` · `BLOCKED` · `STAGING` (awaitin
 |---|---|---|---|---|---|
 | A3 | Campaign copy for 8-Touch + Warming presets | Jordan Mayer | The gate on Campaigns public launch (D1). | Presets still carry placeholder copy in the template editor | 2026-07-29 |
 | A4 | On-Site Fee: confirm "under 250" = 249-and-below | Molly | She answered in June ("$500 under 250, $1,000 for 250 or more"), but **383 prod accounts sit at exactly fte_count 250** — worth her saying yes with that number in view before they flip $500→$1,000. | `accounts?fte_count=eq.250&archived_at=is.null` count = 383 | 2026-07-29 |
+| A5 | MSD-957: does "gated" mean blocked, or reviewed? | Rachel | She asked bugs be "gated first by client-facing or not" (email 7/29 1:32pm). Built as **filed-and-flagged**, not blocked: the Jira ticket goes in immediately either way, and a client-facing bug leaves the Pulse request PENDING for her review. Blocking the filing would have delayed MSD-922 (BAA module broken, high) by 3 days. Needs her explicit yes. Also needs her definition of client-facing for the classifier prompt, and whether she'll close reviewed bugs herself. | Ask her; MSD-957 comment 2026-07-30 lists all four questions | 2026-07-30 |
 
 ---
 
 ## B. On staging — awaiting prod go-ahead
 
-_(none — everything staged today promoted to PROD 2026-07-27 in 81bec7d)_
+| # | Item | Who | Detail | Verify | Checked |
+|---|---|---|---|---|---|
+| B1 | MSD-957 client-impact gating for bug reports | Rachel (email 7/29) | Product bugs were auto-completed within ~1s of submit, so they never appeared in the Nexus Requests widget (`pendingOnly`) and carried no client-impact signal anywhere — 9 of the first 11 prod bugs reached Jira with nobody emailed. Bugs now route through Helm's `/api/nexus/bug-intake`, which classifies client-impact against the live Medcurity repo, files to Jira in every case, and returns the verdict; client-facing bugs stay PENDING in Pulse for review and the email states `Client-facing: Yes/No` with the reasoning. Submitter confirms/overrides the verdict on the form. **STAGING** `76a9ff4` — Helm side is live in prod (additive, bearer-gated); staging Supabase wired, prod deliberately not. Classifier scored **9/9** on the six real prod bugs plus three synthetic internal ones. **Awaiting Rachel: A5, then prod promote.** | `git log origin/main --oneline \| grep -i MSD-957` returns nothing | 2026-07-30 |
 
 ---
 

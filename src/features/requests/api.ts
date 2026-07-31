@@ -263,6 +263,62 @@ interface CreateRequestInput {
   details?: Record<string, unknown>;
   requesterName?: string | null;
   files?: File[];
+  /**
+   * Product bugs only (MSD-957). The confirmed client-impact call — Helm's
+   * classifier proposes it on the form and the submitter can flip it. Passed
+   * through to Helm on filing, where it overrides the automatic verdict.
+   */
+  clientFacing?: boolean;
+  /** The classifier output behind that call, so it can be stored on the row. */
+  classification?: BugClassification;
+}
+
+/**
+ * The client-impact verdict for a draft bug report (MSD-957). Produced by
+ * Helm's repo-grounded classifier, which reads the live Medcurity codebase to
+ * decide whether the reported defect is reachable by a paying customer.
+ *
+ * `degraded` means the classifier could not run. In that case `clientFacing`
+ * is always true and confidence is 0: the fail-safe direction is deliberate,
+ * because a missed client incident costs far more than an extra review.
+ */
+export interface BugClassification {
+  clientFacing: boolean;
+  confidence: number;
+  reasoning: string;
+  affectedAreas?: string[];
+  degraded?: boolean;
+}
+
+/**
+ * Ask Helm (via the edge function, so the API key stays server-side) whether a
+ * draft bug report affects clients. Read-only: files nothing, creates nothing.
+ * Never rejects — a failure resolves to the fail-safe client-facing verdict.
+ */
+export async function classifyDraftBug(draft: {
+  title: string;
+  description: string;
+  priority: RequestPriority;
+}): Promise<BugClassification> {
+  try {
+    const data = (await invokeRequestAction({
+      action: "classify_bug",
+      draftTitle: draft.title,
+      draftDescription: draft.description,
+      draftPriority: draft.priority,
+    })) as { classification?: BugClassification };
+    if (data?.classification) return data.classification;
+  } catch {
+    /* fall through to the fail-safe below */
+  }
+  return {
+    clientFacing: true,
+    confidence: 0,
+    reasoning:
+      "We couldn't check this automatically, so we're assuming clients are affected. Change it below if you know otherwise.",
+    affectedAreas: [],
+    degraded: true,
+  };
 }
 
 export interface CreateRequestResult {
@@ -274,7 +330,22 @@ export interface CreateRequestResult {
    * enhancements, and for bugs that fell back to the manual review flow
    * (Jira unconfigured or filing failed — the request stays pending).
    */
-  bugFiled: { jiraKey: string | null; jiraUrl: string | null } | null;
+  bugFiled: {
+    jiraKey: string | null;
+    jiraUrl: string | null;
+    /**
+     * MSD-957. True when the bug was judged to affect clients: the ticket is
+     * filed either way, but the Pulse request stays PENDING so it surfaces in
+     * the routed reviewer's Requests widget instead of auto-completing. Null
+     * when Helm wasn't reachable and the pre-MSD-957 direct-file path ran.
+     */
+    clientFacing: boolean | null;
+  } | null;
+  /**
+   * True when a bug was judged NOT client-facing and is therefore waiting for
+   * the product manager to triage it. No Jira ticket exists yet.
+   */
+  held: boolean;
 }
 
 export function useCreateRequest() {
@@ -290,7 +361,13 @@ export function useCreateRequest() {
           title: input.title,
           description: input.description ?? null,
           priority: input.priority,
-          details: input.details ?? {},
+          // The confirmed client-impact call rides in details alongside
+          // category (MSD-957). The insert-sanitize trigger strips the
+          // classifier's own provenance fields — those are server-written.
+          details:
+            typeof input.clientFacing === "boolean"
+              ? { ...(input.details ?? {}), client_facing: input.clientFacing }
+              : (input.details ?? {}),
           requester_user_id: uid,
           requester_name: input.requesterName ?? null,
         })
@@ -304,23 +381,45 @@ export function useCreateRequest() {
         ? await uploadRequestAttachments(data.id, input.files)
         : [];
 
-      // Product BUGS skip the approval flow: file straight to Jira right
-      // now (server-side — needs secrets). Attachments are already up, so
-      // they ride along onto the ticket. If filing fails or Jira isn't
-      // configured, the request stays pending and falls through to the
-      // normal reviewer email below so a human picks it up.
+      // The client-impact gate (MSD-957). A bug judged CLIENT-FACING goes
+      // straight to the dev team — server-side via Helm, which stamps the
+      // determination onto the Jira ticket — and the request completes. Those
+      // are the urgent ones; nothing about them waits on a person.
+      //
+      // A bug judged NOT client-facing files nothing. It stays pending so the
+      // product manager triages it first, exactly like an enhancement, and her
+      // Approve is what files it. Either way she gets an email.
       let bugFiled: CreateRequestResult["bugFiled"] = null;
+      let held = false;
       if (input.type === "product" && input.details?.category === "bug") {
         try {
           const res = (await invokeRequestAction({
             action: "file_bug",
             requestId: data.id,
+            clientFacing: input.clientFacing,
+            clientFacingReasoning: input.classification?.reasoning,
+            clientFacingConfidence: input.classification?.confidence,
+            clientFacingSource:
+              typeof input.clientFacing === "boolean" &&
+              input.classification &&
+              input.clientFacing !== input.classification.clientFacing
+                ? "submitter"
+                : "ai",
           })) as {
             filed: boolean;
+            held?: boolean;
             jiraKey: string | null;
             jiraUrl: string | null;
+            clientFacing?: boolean | null;
           };
-          if (res.filed) bugFiled = { jiraKey: res.jiraKey, jiraUrl: res.jiraUrl };
+          held = !!res.held;
+          if (res.filed) {
+            bugFiled = {
+              jiraKey: res.jiraKey,
+              jiraUrl: res.jiraUrl,
+              clientFacing: res.clientFacing ?? null,
+            };
+          }
         } catch {
           bugFiled = null;
         }
@@ -338,7 +437,7 @@ export function useCreateRequest() {
         .invoke("request-email-notify", { body: { requestId: data.id } })
         .catch(() => {});
 
-      return { request: data as CrmRequest, failedUploads, bugFiled };
+      return { request: data as CrmRequest, failedUploads, bugFiled, held };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["requests"] });
@@ -422,10 +521,22 @@ export function useCompleteRequest() {
  * generic "non-2xx" string).
  */
 async function invokeRequestAction(payload: {
-  action: "approve" | "summarize" | "design_prompt" | "file_bug";
-  requestId: string;
+  action: "approve" | "summarize" | "design_prompt" | "file_bug" | "classify_bug";
+  /** Required for every action except classify_bug, which runs before the row exists. */
+  requestId?: string;
   note?: string | null;
   regenerate?: boolean;
+  /** file_bug: the submitter's client-impact call, overriding the classifier. */
+  clientFacing?: boolean;
+  /** file_bug: the classifier's output, echoed back so the edge function can
+   * persist it under the service role (the insert trigger strips it). */
+  clientFacingReasoning?: string;
+  clientFacingConfidence?: number;
+  clientFacingSource?: string;
+  /** classify_bug: draft form fields, since there is no row to read them from. */
+  draftTitle?: string;
+  draftDescription?: string;
+  draftPriority?: string;
 }) {
   const { data, error } = await supabase.functions.invoke("product-request-action", {
     body: payload,

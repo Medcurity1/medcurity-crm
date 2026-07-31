@@ -1,6 +1,20 @@
 import { useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Palette, Package, Wrench, Send, Check, Plus, Paperclip, X, Bug, Sparkles } from "lucide-react";
+import {
+  Palette,
+  Package,
+  Wrench,
+  Send,
+  Check,
+  Plus,
+  Paperclip,
+  X,
+  Bug,
+  Sparkles,
+  Loader2,
+  Users,
+  ShieldCheck,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/PageHeader";
 import { useAuth } from "@/features/auth/AuthProvider";
@@ -21,11 +35,13 @@ import { toast } from "sonner";
 import type { RequestPriority } from "@/types/crm";
 import {
   useCreateRequest,
+  classifyDraftBug,
   PRIORITY_OPTIONS,
   COLLATERAL_AUDIENCES,
   COLLATERAL_FORMATS,
   CRM_CHANGE_TYPES,
   type ProductCategory,
+  type BugClassification,
 } from "./api";
 
 function PrioritySelect({
@@ -313,7 +329,8 @@ function ProductCategoryPicker({
     {
       value: "bug",
       label: "Bug",
-      blurb: "Something is broken. Goes straight to the product team's Jira — no approval step.",
+      blurb:
+        "Something is broken. If it's affecting a client it goes straight to the dev team; otherwise it's reviewed first.",
       icon: Bug,
     },
     {
@@ -353,6 +370,81 @@ function ProductCategoryPicker({
   );
 }
 
+/**
+ * Client-impact confirmation step for bug reports (MSD-957).
+ *
+ * Rachel asked that bugs be "gated first by client-facing or not". The people
+ * filing bugs can't reliably judge that on their own, so Helm reads the actual
+ * Medcurity codebase and proposes an answer — but the submitter often knows
+ * something the code doesn't ("a client called me about this"), so they get the
+ * final say. Deliberately shown as a confirmation, not a blank question: an
+ * unanswered required field is friction, a pre-filled one you can correct is not.
+ */
+function ClientImpactConfirm({
+  verdict,
+  value,
+  onChange,
+}: {
+  verdict: BugClassification;
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  const changed = value !== verdict.clientFacing;
+  return (
+    <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-900/50 dark:bg-amber-950/20">
+      <div className="flex items-start gap-2">
+        <Users className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-500" />
+        <div className="space-y-1">
+          <p className="text-sm font-medium">Is a client affected right now?</p>
+          <p className="text-xs text-muted-foreground">
+            {verdict.degraded
+              ? verdict.reasoning
+              : `We looked at the code and think the answer is ${
+                  verdict.clientFacing ? "yes" : "no"
+                }. ${verdict.reasoning}`}
+          </p>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {[
+          {
+            v: true,
+            label: "Yes — a client is affected",
+            hint: "Goes straight to the dev team, no waiting",
+          },
+          {
+            v: false,
+            label: "No — not urgent for clients",
+            hint: "Reviewed first, then queued with the dev team",
+          },
+        ].map((o) => (
+          <button
+            key={String(o.v)}
+            type="button"
+            onClick={() => onChange(o.v)}
+            aria-pressed={value === o.v}
+            className={cn(
+              "rounded-lg border p-3 text-left transition-colors",
+              value === o.v
+                ? "border-primary bg-background ring-1 ring-primary"
+                : "border-border bg-background/60 hover:bg-background",
+            )}
+          >
+            <span className="block text-sm font-medium">{o.label}</span>
+            <span className="mt-0.5 block text-xs text-muted-foreground">{o.hint}</span>
+          </button>
+        ))}
+      </div>
+      {changed && (
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <ShieldCheck className="h-3.5 w-3.5" />
+          Using your answer instead — it&apos;ll be noted on the ticket.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ProductForm() {
   const { profile } = useAuth();
   const create = useCreateRequest();
@@ -362,6 +454,11 @@ function ProductForm() {
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<RequestPriority>("low");
   const [files, setFiles] = useState<File[]>([]);
+  // Client-impact gate (MSD-957). `verdict` null means we haven't asked yet;
+  // once set, the form shows the confirmation step and Submit actually files.
+  const [verdict, setVerdict] = useState<BugClassification | null>(null);
+  const [clientFacing, setClientFacing] = useState(true);
+  const [checking, setChecking] = useState(false);
 
   function reset() {
     setCategory("");
@@ -369,17 +466,18 @@ function ProductForm() {
     setDescription("");
     setPriority("low");
     setFiles([]);
+    setVerdict(null);
+    setClientFacing(true);
+    setChecking(false);
   }
 
-  function submit() {
-    if (!category) {
-      toast.error("Choose Bug or Enhancement first.");
-      return;
-    }
-    if (!title.trim() || !description.trim()) {
-      toast.error("Add a title and a description.");
-      return;
-    }
+  // Editing the report after we've classified it invalidates the verdict —
+  // otherwise you could get a judgement on one description and file another.
+  function invalidateVerdict() {
+    if (verdict) setVerdict(null);
+  }
+
+  function actuallyCreate() {
     create.mutate(
       {
         type: "product",
@@ -389,6 +487,8 @@ function ProductForm() {
         requesterName: profile?.full_name ?? null,
         details: { category },
         files,
+        clientFacing: category === "bug" ? clientFacing : undefined,
+        classification: category === "bug" ? (verdict ?? undefined) : undefined,
       },
       {
         onSuccess: (res) => {
@@ -397,11 +497,14 @@ function ProductForm() {
               `Request submitted, but these files failed to upload: ${res.failedUploads.join(", ")}`,
             );
           } else if (res.bugFiled) {
+            const key = res.bugFiled.jiraKey;
             toast.success(
-              res.bugFiled.jiraKey
-                ? `Bug filed to Jira (${res.bugFiled.jiraKey}).`
-                : "Bug filed to Jira.",
+              key
+                ? `Client-impacting bug — sent straight to the dev team as ${key}.`
+                : "Client-impacting bug — sent straight to the dev team.",
             );
+          } else if (res.held) {
+            toast.success("Bug submitted — it'll be reviewed before it goes to the dev team.");
           } else if (category === "bug") {
             toast.success("Bug submitted — the product team will file it to Jira.");
           } else {
@@ -412,6 +515,44 @@ function ProductForm() {
         onError: (e) => toast.error("Could not submit: " + (e as Error).message),
       },
     );
+  }
+
+  async function submit() {
+    if (!category) {
+      toast.error("Choose Bug or Enhancement first.");
+      return;
+    }
+    if (!title.trim() || !description.trim()) {
+      toast.error("Add a title and a description.");
+      return;
+    }
+
+    // Enhancements are unchanged — they go to the existing review queue.
+    if (category !== "bug") {
+      actuallyCreate();
+      return;
+    }
+
+    // First click on a bug: get the client-impact read, then show it for
+    // confirmation. Second click files. classifyDraftBug never rejects — a
+    // failure resolves to the fail-safe "assume clients are affected".
+    if (!verdict) {
+      setChecking(true);
+      try {
+        const v = await classifyDraftBug({
+          title: title.trim(),
+          description: description.trim(),
+          priority,
+        });
+        setVerdict(v);
+        setClientFacing(v.clientFacing);
+      } finally {
+        setChecking(false);
+      }
+      return;
+    }
+
+    actuallyCreate();
   }
 
   if (submitted) {
@@ -428,14 +569,23 @@ function ProductForm() {
   return (
     <div className="space-y-4">
       <FromLine />
-      <ProductCategoryPicker value={category} onChange={setCategory} />
+      <ProductCategoryPicker
+        value={category}
+        onChange={(v) => {
+          setCategory(v);
+          invalidateVerdict();
+        }}
+      />
       <div className="space-y-2">
         <Label htmlFor="p-title">Title <span className="text-destructive">*</span></Label>
         <Input
           id="p-title"
           maxLength={200}
           value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(e) => {
+            setTitle(e.target.value);
+            invalidateVerdict();
+          }}
           placeholder={
             category === "bug"
               ? "Short name for what's broken"
@@ -450,7 +600,10 @@ function ProductForm() {
           rows={5}
           maxLength={4000}
           value={description}
-          onChange={(e) => setDescription(e.target.value)}
+          onChange={(e) => {
+            setDescription(e.target.value);
+            invalidateVerdict();
+          }}
           placeholder={
             category === "bug"
               ? "What's broken, where it happens, and how to reproduce it if you can..."
@@ -461,18 +614,41 @@ function ProductForm() {
         />
       </div>
       <AttachmentPicker files={files} onChange={setFiles} maxSizeMB={25} />
-      <PrioritySelect value={priority} onChange={setPriority} />
+      <PrioritySelect
+        value={priority}
+        onChange={(v) => {
+          setPriority(v);
+          invalidateVerdict();
+        }}
+      />
+      {category === "bug" && verdict && (
+        <ClientImpactConfirm
+          verdict={verdict}
+          value={clientFacing}
+          onChange={setClientFacing}
+        />
+      )}
       <p className="text-xs text-muted-foreground">
         {category === "bug"
-          ? "Bug reports skip review and are filed straight to the product team's Jira board, attachments included. The product team approves or denies from there."
+          ? "Bugs affecting a client go straight to the dev team so nothing holds them up. Everything else is reviewed first, then queued. Attachments come along either way."
           : category === "enhancement"
             ? "Enhancements are reviewed inside the CRM. If approved, the request is filed to the product team's Jira board, attachments included."
-            : "Bugs go straight to the product team's Jira board; enhancements are reviewed and approved first."}
+            : "Bugs go to the product team's Jira board; enhancements are reviewed and approved first."}
       </p>
       <div className="flex justify-end pt-2">
-        <Button onClick={submit} disabled={create.isPending} className="gap-2">
-          <Send className="h-4 w-4" />
-          {create.isPending ? "Submitting..." : "Submit request"}
+        <Button onClick={submit} disabled={create.isPending || checking} className="gap-2">
+          {checking ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Send className="h-4 w-4" />
+          )}
+          {checking
+            ? "Checking client impact..."
+            : create.isPending
+              ? "Submitting..."
+              : category === "bug" && !verdict
+                ? "Continue"
+                : "Submit request"}
         </Button>
       </div>
     </div>
