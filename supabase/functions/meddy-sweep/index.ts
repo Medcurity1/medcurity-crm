@@ -7,7 +7,7 @@
 //      still unassigned, not closed → meddy_missed_chat notification to
 //      everyone + alert email. Idempotent via missed_chat_alerted /
 //      missed_chat_emailed columns.
-//   2. Stale agents: available but no heartbeat for 2+ min → marked
+//   2. Stale agents: available but no heartbeat for 3+ min → marked
 //      unavailable; if nobody is left, waiting visitors get the
 //      agents-unavailable notice (ports the WS presence close handler).
 //
@@ -75,7 +75,10 @@ Deno.serve(async (req) => {
     out.purged = purgeIds.length;
   }
   const fiveMinAgo = new Date(now - 5 * 60 * 1000).toISOString();
-  const twoMinAgo = new Date(now - 2 * 60 * 1000).toISOString();
+  // 3 min = two missed/stretched 60s heartbeats (2026-07-31 availability fix
+  // — keep in lockstep with meddy_sweep_stale_agents() in 20260731170000 and
+  // meddy-chat's anyAvailable cutoff).
+  const staleAgentCutoff = new Date(now - 3 * 60 * 1000).toISOString();
 
   // ── 1. Missed chats ──────────────────────────────────────────────
   const { data: missed } = await svc
@@ -116,13 +119,13 @@ Deno.serve(async (req) => {
     .from("meddy_agent_status")
     .select("user_id")
     .eq("available", true)
-    .lt("last_seen", twoMinAgo);
+    .lt("last_seen", staleAgentCutoff);
   if (stale && stale.length > 0) {
     await svc
       .from("meddy_agent_status")
       .update({ available: false })
       .eq("available", true)
-      .lt("last_seen", twoMinAgo);
+      .lt("last_seen", staleAgentCutoff);
     out.agentsMarkedAway = stale.length;
     const { data: remaining } = await svc
       .from("meddy_agent_status")

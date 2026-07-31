@@ -910,7 +910,9 @@ Deno.serve(async (req) => {
         return json({ success: true });
       }
       case "status": {
-        const cutoff = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+        // 3 min = two missed/stretched 60s heartbeats (2026-07-31 availability
+        // fix — lockstep with meddy_sweep_stale_agents / meddy-sweep).
+        const cutoff = new Date(Date.now() - 3 * 60 * 1000).toISOString();
         const { data } = await svc
           .from("meddy_agent_status")
           .select("user_id")
