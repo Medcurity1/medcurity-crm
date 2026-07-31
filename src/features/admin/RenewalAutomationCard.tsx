@@ -66,7 +66,11 @@ const PREVIEW_STATUS_META: Record<
     tone: "warning",
   },
   before_baseline: { label: "Before start date", tone: "muted" },
-  has_live_renewal: { label: "Already has renewal", tone: "muted" },
+  // Covers BOTH "a child renewal already exists" and "someone dismissed this
+  // parent via renewal_suppressions" — the generator's has_live_renewal flag
+  // is an OR of the two (see 20260727130000), so the label must not claim a
+  // renewal exists when the row was actually dismissed (docket F9).
+  has_live_renewal: { label: "Renewal exists or dismissed", tone: "muted" },
   account_not_customer: { label: "Account not a customer", tone: "warning" },
   account_do_not_auto_renew: {
     label: "Do-not-auto-renew",
@@ -104,16 +108,12 @@ export function RenewalAutomationCard() {
   const qc = useQueryClient();
 
   const [lookahead, setLookahead] = useState<string>("");
-  const [pullAuto, setPullAuto] = useState<string>("");
-  const [pullSig, setPullSig] = useState<string>("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
 
   useEffect(() => {
     if (config) {
       setLookahead(String(config.lookahead_days));
-      setPullAuto(String(config.pullback_days_auto_renew));
-      setPullSig(String(config.pullback_days_signature_required));
     }
   }, [config]);
 
@@ -156,30 +156,6 @@ export function RenewalAutomationCard() {
       { lookahead_days: parsed },
       {
         onSuccess: () => toast.success("Lookahead updated"),
-        onError: (err: Error) =>
-          toast.error("Failed to update", { description: err.message }),
-      },
-    );
-  }
-
-  function handleSavePullback(kind: "auto" | "sig") {
-    const raw = kind === "auto" ? pullAuto : pullSig;
-    const parsed = Number.parseInt(raw, 10);
-    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 180) {
-      toast.error("Pull-back must be between 0 and 180 days");
-      return;
-    }
-    const current =
-      kind === "auto"
-        ? config?.pullback_days_auto_renew
-        : config?.pullback_days_signature_required;
-    if (parsed === current) return;
-    updateConfig.mutate(
-      kind === "auto"
-        ? { pullback_days_auto_renew: parsed }
-        : { pullback_days_signature_required: parsed },
-      {
-        onSuccess: () => toast.success("Pull-back updated"),
         onError: (err: Error) =>
           toast.error("Failed to update", { description: err.message }),
       },
@@ -241,8 +217,8 @@ export function RenewalAutomationCard() {
           </h2>
           <p className="text-sm text-muted-foreground max-w-2xl">
             Generates renewal opportunities for closed-won deals approaching
-            their contract end date. Auto-renew accounts get a 30-day pull-back;
-            those needing a new signature get 60 days. Runs daily at 09:00 UTC.
+            their contract end date, and reminds the owner 60 days before the
+            anniversary. Runs daily at 09:00 UTC.
           </p>
         </div>
         {loadingConfig ? (
@@ -286,8 +262,12 @@ export function RenewalAutomationCard() {
 
       <Separator className="mb-4" />
 
-      {/* Config row */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
+      {/* Config row. (The two "pull-back days" inputs that used to sit here
+          were removed 2026-07-31 — docket F8: the live generator
+          (20260727130000) reads only lookahead/lookback and hardcodes the
+          60-day reminder, so the dials did nothing. The config columns still
+          exist in renewal_automation_config, just unread.) */}
+      <div className="grid gap-4 sm:grid-cols-2 mb-6">
         <div className="space-y-2">
           <Label htmlFor="renewal-lookahead">Lookahead (days)</Label>
           <div className="flex gap-2">
@@ -304,40 +284,6 @@ export function RenewalAutomationCard() {
           </div>
           <p className="text-xs text-muted-foreground">
             How far ahead to look for ending contracts.
-          </p>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="pullback-auto">Pull-back: auto-renew</Label>
-          <Input
-            id="pullback-auto"
-            type="number"
-            min={0}
-            max={180}
-            value={pullAuto}
-            onChange={(e) => setPullAuto(e.target.value)}
-            onBlur={() => handleSavePullback("auto")}
-            disabled={!config || updateConfig.isPending}
-          />
-          <p className="text-xs text-muted-foreground">
-            Days before end date when auto_renew=true. (default 30)
-          </p>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="pullback-sig">Pull-back: signature</Label>
-          <Input
-            id="pullback-sig"
-            type="number"
-            min={0}
-            max={180}
-            value={pullSig}
-            onChange={(e) => setPullSig(e.target.value)}
-            onBlur={() => handleSavePullback("sig")}
-            disabled={!config || updateConfig.isPending}
-          />
-          <p className="text-xs text-muted-foreground">
-            Days when a new signature is required. (default 60)
           </p>
         </div>
 

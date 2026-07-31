@@ -15,6 +15,7 @@ import type {
 } from "./types";
 import { normalizeEmail, type SuppressionEntry } from "./suppression";
 import { isPositiveReplyCategory } from "./reply-extract";
+import { touchEventBucket, postEnrollmentDeal, influenceTotals, type InfluenceDeal } from "./campaign-metrics";
 import type { LeadList } from "@/types/crm";
 import { buildSmartQuery, parseSmartRules, smartRulesEmpty } from "@/features/lead-lists/lead-lists-api";
 
@@ -1288,11 +1289,49 @@ export function useCampaignReplies() {
   });
 }
 
+/** Per-campaign tally of UNHANDLED replies for the "N replies waiting"
+ *  attention flag (outside-review I35). Its own dedicated query — NOT the
+ *  50-row Replies-feed query above — because handled rows consume the feed's
+ *  cap slots, so at volume older unhandled replies fall off the feed's end
+ *  and a feed-derived tally silently under-counts. Filters on the real
+ *  handled_at column (20260731100000; stamped by mark-reply-handled in the
+ *  same UPDATE as payload.handled, so feed and tally can't disagree) and
+ *  fetches only campaign_id per row, aggregated client-side. The cap is a
+ *  runaway guard, not a display window: past it the tally reads "a lot,
+ *  everywhere", which is the right answer at that volume anyway. */
+const UNHANDLED_TALLY_CAP = 2000;
+
+export function useUnhandledReplyCounts() {
+  return useQuery({
+    queryKey: ["playbook", "unhandled-reply-counts"],
+    queryFn: async () => {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - REPLIES_LOOKBACK_DAYS);
+      const { data, error } = await supabase
+        .from("campaign_events")
+        .select("campaign_id")
+        .in("event_type", REPLY_EVENT_TYPES)
+        .is("handled_at", null)
+        .gte("created_at", cutoff.toISOString())
+        .limit(UNHANDLED_TALLY_CAP);
+      if (error) throw error;
+      const counts: Record<string, number> = {};
+      for (const row of (data ?? []) as { campaign_id: string | null }[]) {
+        if (!row.campaign_id) continue;
+        counts[row.campaign_id] = (counts[row.campaign_id] ?? 0) + 1;
+      }
+      return counts;
+    },
+  });
+}
+
 /** Mark a reply as handled (Campaigns overhaul Phase 3, S9) — stamps
- *  payload.handled on the campaign_events row via the playbook-smartlead
- *  edge function (campaign_events is service-role-write-only; a client can't
- *  update it directly — see the `mark-reply-handled` action's doc comment).
- *  The Replies feed dims/groups a handled row rather than removing it. */
+ *  payload.handled AND the handled_at column on the campaign_events row via
+ *  the playbook-smartlead edge function (campaign_events is
+ *  service-role-write-only; a client can't update it directly — see the
+ *  `mark-reply-handled` action's doc comment). The Replies feed dims/groups
+ *  a handled row rather than removing it; the invalidations refresh both the
+ *  feed and the "replies waiting" tally (I35) together. */
 export function useMarkReplyHandled() {
   const qc = useQueryClient();
   return useMutation({
@@ -1304,7 +1343,10 @@ export function useMarkReplyHandled() {
       if (data?.error) throw new Error(data.error);
       return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["playbook", "campaign-replies"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["playbook", "campaign-replies"] });
+      qc.invalidateQueries({ queryKey: ["playbook", "unhandled-reply-counts"] });
+    },
     onError: (e) => toast.error("Couldn't mark handled: " + (e as Error).message),
   });
 }
@@ -1640,7 +1682,7 @@ export function useCampaignTouchStats(campaignId: string | null) {
 export interface CampaignInfluence {
   /** Opportunities opened on an enrolled account AFTER that account's first
    *  enrollment in this campaign — influence, not proof of causation. */
-  deals: { id: string; name: string; amount: number | null; stage: string; created_at: string }[];
+  deals: InfluenceDeal[];
   wonTotal: number;
   openTotal: number;
   capped: boolean;
@@ -1706,29 +1748,17 @@ export function useCampaignInfluence(campaignId: string | null) {
           if (error) throw error;
           const batch = (data ?? []) as { id: string; name: string; amount: number | null; stage: string; created_at: string; account_id: string }[];
           for (const o of batch) {
-            const enrolledAt = minEnrolled.get(o.account_id);
-            if (enrolledAt == null) continue;
-            const created = new Date(o.created_at).getTime();
-            if (Number.isNaN(created) || created <= enrolledAt) continue;
-            // numeric columns can arrive as strings through PostgREST —
-            // coerce once here so totals and the sheet agree (repo-wide
-            // Number(amount) convention).
-            const amt = Number(o.amount ?? 0);
-            deals.push({ id: o.id, name: o.name, amount: Number.isFinite(amt) ? amt : null, stage: o.stage, created_at: o.created_at });
+            // Post-enrollment filter + amount coercion live in
+            // campaign-metrics.ts (pure, tested) — docket I38.
+            const deal = postEnrollmentDeal(o, minEnrolled.get(o.account_id));
+            if (deal) deals.push(deal);
           }
           if (batch.length < PAGE) break;
           if (page === 9) capped = true;
         }
       }
       deals.sort((a, b) => b.created_at.localeCompare(a.created_at));
-      let wonTotal = 0;
-      let openTotal = 0;
-      for (const d of deals) {
-        const amt = typeof d.amount === "number" && Number.isFinite(d.amount) ? d.amount : 0;
-        if (d.stage === "closed_won") wonTotal += amt;
-        else if (d.stage !== "closed_lost") openTotal += amt;
-      }
-      return { deals, wonTotal, openTotal, capped };
+      return { deals, ...influenceTotals(deals), capped };
     },
   });
 }
@@ -1740,31 +1770,9 @@ export interface CampaignEventStats {
   replied: number;
 }
 
-/** Which of the four funnel buckets an event_type string belongs to, or null
- *  if it's none of them (e.g. a bounce/unsubscribe/category-update row).
- *  event_type may be the raw Smartlead name (EMAIL_REPLY) or the canonical
- *  one (EMAIL_REPLIED) — see REPLY_EVENT_TYPES above — so this matches on
- *  substring the same defensive way _shared/webhook-normalize.ts's
- *  mapEventType does, rather than an exact-string lookup table. */
-/** The per-email table's classifier: eventTypeBucket plus the bounce case
- *  (the Engagement funnel deliberately excludes bounces; the per-email
- *  table includes them). One shared matcher underneath so the two tables
- *  on the detail sheet can never disagree about what counts as sent/open/
- *  click/reply (adversarial review — an inline second regex chain dropped
- *  EMAIL_SEND-shaped types the funnel counted). */
-function touchEventBucket(eventType: string): "sent" | "opened" | "clicked" | "replied" | "bounced" | null {
-  if (eventType.toLowerCase().includes("bounc")) return "bounced";
-  return eventTypeBucket(eventType);
-}
-
-function eventTypeBucket(eventType: string): keyof CampaignEventStats | null {
-  const t = eventType.toLowerCase();
-  if (t.includes("repl")) return "replied";
-  if (t.includes("click")) return "clicked";
-  if (t.includes("open")) return "opened";
-  if (t.includes("sent") || t.includes("send")) return "sent";
-  return null;
-}
+// touchEventBucket / eventTypeBucket live in campaign-metrics.ts (extracted
+// 2026-07-31, docket I38, so tests/campaignEventBuckets.test.ts can pin the
+// funnel-vs-per-email agreement) — imported at top.
 
 /** Total sent/opened/clicked/replied counts across EVERY campaign_events row
  *  for one campaign (not just the last-20 useCampaignEvents shows) — the

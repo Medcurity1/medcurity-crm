@@ -49,3 +49,40 @@ export function isPositiveReplyCategory(category: string | null | undefined): bo
   if (c.includes("meeting")) return true;
   return false;
 }
+
+// ---------------------------------------------------------------------------
+// Mailto guards for the Replies feed's Reply button (moved here from
+// CampaignReplies.tsx 2026-07-31, docket I38, so
+// tests/campaignReplyMailto.test.ts can pin the injection guards).
+// ---------------------------------------------------------------------------
+
+/** Best-effort subject for the mailto Reply button — the raw webhook body
+ *  sometimes carries the thread's subject; the campaign name is the honest
+ *  fallback. CR/LF are stripped BEFORE encoding (a percent-encoded CRLF
+ *  inside a mailto header value is exactly what RFC 6068 warns about) and
+ *  the subject is capped — an unbounded mailto URL gets silently dropped by
+ *  OS URL handlers, making the button do nothing. */
+export function replySubject(payload: unknown, campaignName: string | null | undefined): string {
+  const p = isPlainObject(payload) ? payload : {};
+  const data = isPlainObject(p.data) ? p.data : {};
+  for (const c of [p.subject, p.email_subject, data.subject, data.email_subject]) {
+    if (typeof c === "string" && c.trim()) {
+      const s = c.replace(/[\r\n]+/g, " ").trim().slice(0, 200);
+      if (!s) continue;
+      return /^re:/i.test(s) ? s : `Re: ${s}`;
+    }
+  }
+  return `Re: ${campaignName ?? "your email"}`;
+}
+
+/** The mailto recipient must be a plausible bare address — campaign_events
+ *  .email is the raw webhook value with no format validation, and an
+ *  unencoded "a@b.com?bcc=attacker@evil.com&" would inject recipients into
+ *  the rep's draft (adversarial review; same encode-the-recipient rule as
+ *  ActivityDetail's mailto builders). */
+export function mailtoRecipient(email: string | null): string | null {
+  if (!email) return null;
+  const e = email.trim();
+  if (!/^[^\s<>,;:"()[\]\\?&=]+@[^\s<>,;:"()[\]\\?&=]+\.[^\s<>,;:"()[\]\\?&=]+$/.test(e)) return null;
+  return encodeURIComponent(e);
+}

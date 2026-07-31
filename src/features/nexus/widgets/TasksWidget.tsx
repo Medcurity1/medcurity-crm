@@ -237,7 +237,7 @@ export function TasksWidget({
   if (!openTasks.length) {
     return (
       <p className="text-sm text-muted-foreground py-2">
-        No tasks due today — you're all clear!
+        No tasks due today. You're all clear.
       </p>
     );
   }

@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import {
+  markSharedActivity,
+  lastSharedActivityMs,
+  idleDeferralMs,
+} from "@/lib/sharedActivity";
 
 /**
  * Idle timeout + auto sign-out.
@@ -10,6 +15,16 @@ import { supabase } from "@/lib/supabase";
  *
  * Any real activity resets the timers. The warning modal's "Stay signed in"
  * button also resets.
+ *
+ * ACTIVITY IS SHARED ACROSS TABS (sharedActivity.ts — Margaret's 2026-07-31
+ * report). This hook's listeners only see the CURRENT tab, but signOut() is
+ * global (it kills the session in every tab via crossTabSession's mirror),
+ * so a forgotten background tab used to log out the tab someone was actively
+ * working in — its 60s warning invisible in a hidden tab. Now every tab
+ * stamps a shared last-activity timestamp, and this hook re-checks that
+ * stamp BOTH when the idle timer fires (before warning) and again before the
+ * actual sign-out — either check finding activity anywhere defers instead.
+ * A genuinely abandoned machine (no tab active anywhere) still logs out.
  *
  * Why auto-logout?
  *   Reps leave the CRM open on shared/unattended laptops. Anyone walking by
@@ -62,41 +77,85 @@ export function useIdleLogout({
 
   const signOutAndRedirect = useCallback(async () => {
     clearAll();
-    await supabase.auth.signOut();
+    // scope "local": sign out THIS browser only (Margaret's 2026-07-31
+    // follow-up test). Bare signOut() defaults to scope "global", which
+    // revokes the user's session in EVERY browser — so her untouched
+    // Firefox hitting its 12h idle timer killed the Chrome she was actively
+    // working in (and, with all sessions dead, her Meddy presence heartbeat
+    // stopped = "shows me as offline"). Cross-BROWSER activity can't be
+    // shared (sharedActivity.ts's localStorage is per browser), so the idle
+    // logout must only ever take down its own browser. The manual Sign Out
+    // button (AuthProvider.signOut) deliberately stays global.
+    await supabase.auth.signOut({ scope: "local" });
     // Hard redirect so every in-memory state is blown away.
     window.location.href = "/login?reason=idle";
   }, [clearAll]);
 
-  const startTimers = useCallback(() => {
-    clearAll();
-    if (!enabled) return;
+  const startTimers = useCallback(
+    (delayMs?: number) => {
+      clearAll();
+      if (!enabled) return;
 
-    idleTimerRef.current = window.setTimeout(() => {
-      setWarning(true);
-      setSecondsRemaining(Math.floor(warnMs / 1000));
+      idleTimerRef.current = window.setTimeout(() => {
+        // Someone may have been active in ANOTHER tab the whole time this
+        // tab sat idle — check the shared stamp before warning, and defer
+        // until the shared clock would actually cross the idle window.
+        const defer = idleDeferralMs(Date.now(), lastSharedActivityMs(), idleMs);
+        if (defer !== null) {
+          startTimersRef.current(defer);
+          return;
+        }
 
-      // Countdown ticker for the modal's "you'll be logged out in N
-      // seconds" text. Pure UI — the actual logout fires from warnTimer.
-      countdownRef.current = window.setInterval(() => {
-        setSecondsRemaining((s) => (s > 0 ? s - 1 : 0));
-      }, 1000);
+        setWarning(true);
+        setSecondsRemaining(Math.floor(warnMs / 1000));
 
-      warnTimerRef.current = window.setTimeout(() => {
-        void signOutAndRedirect();
-      }, warnMs);
-    }, idleMs);
-  }, [clearAll, enabled, idleMs, warnMs, signOutAndRedirect]);
+        // Countdown ticker for the modal's "you'll be logged out in N
+        // seconds" text. Pure UI — the actual logout fires from warnTimer.
+        countdownRef.current = window.setInterval(() => {
+          setSecondsRemaining((s) => (s > 0 ? s - 1 : 0));
+        }, 1000);
+
+        warnTimerRef.current = window.setTimeout(() => {
+          // Last-chance cross-tab check: activity elsewhere during the 60s
+          // warning (which the user can't see if THIS tab is backgrounded)
+          // must cancel the global sign-out, not lose the race to it.
+          const lateDefer = idleDeferralMs(Date.now(), lastSharedActivityMs(), idleMs);
+          if (lateDefer !== null) {
+            setWarning(false);
+            startTimersRef.current(lateDefer);
+            return;
+          }
+          void signOutAndRedirect();
+        }, warnMs);
+      }, delayMs ?? idleMs);
+    },
+    [clearAll, enabled, idleMs, warnMs, signOutAndRedirect],
+  );
+
+  // Self-reference so the timer callbacks above can restart with a computed
+  // delay without adding startTimers to its own dependency list.
+  const startTimersRef = useRef(startTimers);
+  useEffect(() => {
+    startTimersRef.current = startTimers;
+  }, [startTimers]);
 
   const handleActivity = useCallback(() => {
     // While the warning modal is open, ignore passive events — we only
     // reset if the user explicitly clicks "Stay signed in" (which calls
     // dismissWarning below). Otherwise a jittering trackpad could keep
-    // the session alive forever on an unattended machine.
+    // the session alive forever on an unattended machine. (Cross-tab this
+    // property survives: only the FOCUSED tab receives pointer events, and
+    // once its warning is up it stops stamping the shared clock too.)
     if (warning) return;
+    markSharedActivity();
     startTimers();
   }, [warning, startTimers]);
 
   const dismissWarning = useCallback(() => {
+    // An explicit "Stay signed in" click is unambiguous human presence —
+    // force the stamp past the 30s write throttle so sibling tabs' pending
+    // warnings see it immediately.
+    markSharedActivity({ force: true });
     setWarning(false);
     startTimers();
   }, [startTimers]);
