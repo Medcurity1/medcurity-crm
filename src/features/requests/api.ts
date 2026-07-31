@@ -288,6 +288,12 @@ export interface BugClassification {
   reasoning: string;
   affectedAreas?: string[];
   degraded?: boolean;
+  /**
+   * We gave up waiting (15s). `clientFacing` is NOT an answer in this case —
+   * the form must ask the submitter and require them to choose, because they
+   * know and we don't.
+   */
+  timedOut?: boolean;
 }
 
 /**
@@ -314,10 +320,11 @@ export async function classifyDraftBug(draft: {
   return {
     clientFacing: true,
     confidence: 0,
-    reasoning:
-      "We couldn't check this automatically, so we're assuming clients are affected. Change it below if you know otherwise.",
+    reasoning: "We couldn't check this automatically — please tell us.",
     affectedAreas: [],
     degraded: true,
+    // Treated the same as a timeout by the form: ask, don't assume.
+    timedOut: true,
   };
 }
 

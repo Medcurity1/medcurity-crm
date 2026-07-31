@@ -386,10 +386,15 @@ function ClientImpactConfirm({
   onChange,
 }: {
   verdict: BugClassification;
-  value: boolean;
+  /** null when we're asking rather than confirming — see `asking` below. */
+  value: boolean | null;
   onChange: (v: boolean) => void;
 }) {
-  const changed = value !== verdict.clientFacing;
+  // If the check ran out of time (or couldn't run), we have no verdict worth
+  // showing. Don't dress a guess up as an answer — just ask, and don't
+  // pre-select either option so the submitter has to actually decide.
+  const asking = !!verdict.timedOut;
+  const changed = !asking && value !== null && value !== verdict.clientFacing;
   return (
     <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-900/50 dark:bg-amber-950/20">
       <div className="flex items-start gap-2">
@@ -397,7 +402,7 @@ function ClientImpactConfirm({
         <div className="space-y-1">
           <p className="text-sm font-medium">Is a client affected right now?</p>
           <p className="text-xs text-muted-foreground">
-            {verdict.degraded
+            {asking
               ? verdict.reasoning
               : `We looked at the code and think the answer is ${
                   verdict.clientFacing ? "yes" : "no"
@@ -441,6 +446,9 @@ function ClientImpactConfirm({
           Using your answer instead — it&apos;ll be noted on the ticket.
         </p>
       )}
+      {asking && value === null && (
+        <p className="text-xs text-muted-foreground">Pick one to submit.</p>
+      )}
     </div>
   );
 }
@@ -457,7 +465,9 @@ function ProductForm() {
   // Client-impact gate (MSD-957). `verdict` null means we haven't asked yet;
   // once set, the form shows the confirmation step and Submit actually files.
   const [verdict, setVerdict] = useState<BugClassification | null>(null);
-  const [clientFacing, setClientFacing] = useState(true);
+  // null = we asked but nobody has answered yet (only happens when the check
+  // timed out, in which case there is no verdict to pre-fill from).
+  const [clientFacing, setClientFacing] = useState<boolean | null>(true);
   const [checking, setChecking] = useState(false);
 
   function reset() {
@@ -487,7 +497,7 @@ function ProductForm() {
         requesterName: profile?.full_name ?? null,
         details: { category },
         files,
-        clientFacing: category === "bug" ? clientFacing : undefined,
+        clientFacing: category === "bug" ? (clientFacing ?? undefined) : undefined,
         classification: category === "bug" ? (verdict ?? undefined) : undefined,
       },
       {
@@ -534,8 +544,8 @@ function ProductForm() {
     }
 
     // First click on a bug: get the client-impact read, then show it for
-    // confirmation. Second click files. classifyDraftBug never rejects — a
-    // failure resolves to the fail-safe "assume clients are affected".
+    // confirmation. Second click files. classifyDraftBug never rejects — it
+    // gives up after 15s and comes back flagged as timed out.
     if (!verdict) {
       setChecking(true);
       try {
@@ -545,10 +555,18 @@ function ProductForm() {
           priority,
         });
         setVerdict(v);
-        setClientFacing(v.clientFacing);
+        // A timed-out check has no verdict worth pre-filling. Leave the choice
+        // empty so the submitter actually answers rather than accepting a
+        // guess they never read.
+        setClientFacing(v.timedOut ? null : v.clientFacing);
       } finally {
         setChecking(false);
       }
+      return;
+    }
+
+    if (category === "bug" && clientFacing === null) {
+      toast.error("Let us know whether a client is affected.");
       return;
     }
 
