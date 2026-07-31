@@ -45,8 +45,12 @@ import {
   fetchEmailAccounts,
   buildSmartleadMetrics,
   mapSmartleadStatus,
-  type CampaignStatus,
 } from "../_shared/smartlead.ts";
+import {
+  resolveSyncedStatus,
+  firstNumber,
+  extractDailyLimit,
+} from "../_shared/smartlead-sync.ts";
 import {
   computeFirstSendDates,
   relativeStepOffsets,
@@ -528,29 +532,9 @@ interface CampaignStep {
   task_note_template?: string;
 }
 
-// Pulse-terminal campaign statuses a Smartlead import/sync pass must never
-// regress away from. mapSmartleadStatus can return null (missing/unexpected
-// Smartlead status string); previously it defaulted to "draft", which meant
-// a transient bad status from Smartlead's API — or a stopped/completed
-// campaign whose Smartlead-side status Smartlead itself reports oddly —
-// could silently flip a Pulse campaign back to "draft", re-arming sending
-// and re-showing the tracker's Delete action. See mapSmartleadStatus's doc
-// comment (_shared/smartlead.ts) for the full rationale.
-const CAMPAIGN_TERMINAL_STATUSES = new Set(["stopped", "completed"]);
-
-/** Resolve the status to write for an EXISTING campaign row being
- *  imported/synced from Smartlead. `mapped` is mapSmartleadStatus's result.
- *  Keeps the row's current status unchanged when: (a) mapped is null
- *  (unrecognized/missing Smartlead status — nothing to apply), or (b) the
- *  row is already Pulse-terminal (stopped/completed) and mapped would move
- *  it backward to draft/active. Otherwise applies `mapped`. */
-function resolveSyncedStatus(currentStatus: string, mapped: CampaignStatus | null): string {
-  if (!mapped) return currentStatus;
-  if (CAMPAIGN_TERMINAL_STATUSES.has(currentStatus) && (mapped === "draft" || mapped === "active")) {
-    return currentStatus;
-  }
-  return mapped;
-}
+// resolveSyncedStatus (terminal-status regression guard) lives in
+// _shared/smartlead-sync.ts (extracted 2026-07-31, docket I38, so
+// tests/smartleadSyncStatus.test.ts can import it) — imported at top.
 
 async function importCampaigns() {
   const campaigns = await fetchCampaigns();
@@ -2206,17 +2190,8 @@ interface InboxHealthEntry {
   total_leads_per_day: number;
 }
 
-/** First numeric-looking value among candidates, else null. Strips a
- *  trailing "%" (some Smartlead rate fields come back as "45.2%" strings —
- *  same pattern buildSmartleadMetrics already assumes for analytics). */
-function firstNumber(...candidates: unknown[]): number | null {
-  for (const v of candidates) {
-    if (v == null) continue;
-    const n = Number(String(v).replace(/%$/, "").trim());
-    if (Number.isFinite(n)) return n;
-  }
-  return null;
-}
+// firstNumber lives in _shared/smartlead-sync.ts (extracted 2026-07-31,
+// docket I38) — imported at top.
 
 /**
  * Best-effort per-inbox warmup read — GET /email-accounts/{id}/warmup-stats.
@@ -2247,23 +2222,9 @@ async function fetchInboxWarmup(emailAccountId: number): Promise<InboxHealthWarm
   }
 }
 
-/** Extract a plausible numeric daily-send limit off a Smartlead email-account
- *  list row. Field name UNVERIFIED — the client's useEmailAccounts only ever
- *  reads id/from_email/from_name off this same endpoint, so anything beyond
- *  those three is a best guess at the real field name. Reads every
- *  plausible variant and returns null (never a fabricated 0) when nothing
- *  matches, so the UI can honestly say "limit unknown" instead of implying a
- *  real 0/day cap. */
-function extractDailyLimit(row: Record<string, unknown>): number | null {
-  const warmupDetails = (row.warmup_details && typeof row.warmup_details === "object")
-    ? row.warmup_details as Record<string, unknown>
-    : undefined;
-  const n = firstNumber(
-    row.message_per_day, row.daily_sent_limit, row.max_email_per_day, row.daily_limit,
-    warmupDetails?.total_warmup_per_day,
-  );
-  return n != null && n > 0 ? n : null;
-}
+// extractDailyLimit lives in _shared/smartlead-sync.ts (extracted
+// 2026-07-31, docket I38, so tests/smartleadSyncStatus.test.ts can exercise
+// its never-fabricate-a-0 posture) — imported at top.
 
 /** Defensive top-level extraction for the /email-accounts response — same
  *  "array, or data/rows nested under a key" posture as extractLeadRows/
@@ -3645,14 +3606,16 @@ Deno.serve(async (req) => {
       return json({ success: true });
     }
     if (action === "mark-reply-handled") {
-      // Reply feed "Mark handled" (Campaigns overhaul Phase 3, S9). Rather
-      // than a new column/table, this stamps a `handled` object onto the
-      // campaign_events row's own payload jsonb — campaign_events is
+      // Reply feed "Mark handled" (Campaigns overhaul Phase 3, S9). Stamps a
+      // `handled` object onto the campaign_events row's payload jsonb (the
+      // feed reads it to dim/group the row and show who handled it) AND the
+      // real handled_at column (outside-review I35 — the "N replies waiting"
+      // tally filters on the column, see 20260731100000) in one UPDATE so
+      // the two can never disagree. campaign_events is
       // service-role-write-only (see 20260722180000_campaign_events_engine.sql's
       // RLS: admin can SELECT, nothing else for `authenticated`), so a
       // client-side "mark handled" has to go through this action rather than
-      // a direct table update. The Replies feed (useCampaignReplies) reads
-      // `payload.handled` to dim/group the row.
+      // a direct table update.
       const eventId = body.event_id as string;
       if (!eventId) throw new Error("event_id is required");
       const handledBy = await callerUserId(auth);
@@ -3662,11 +3625,15 @@ Deno.serve(async (req) => {
         .eq("id", eventId)
         .single();
       if (findErr || !row) throw new Error("Reply not found: " + (findErr?.message ?? eventId));
+      const handledStamp = { at: new Date().toISOString(), by: handledBy };
       const nextPayload = {
         ...((row.payload as Record<string, unknown> | null) ?? {}),
-        handled: { at: new Date().toISOString(), by: handledBy },
+        handled: handledStamp,
       };
-      const { error: updErr } = await svc.from("campaign_events").update({ payload: nextPayload }).eq("id", eventId);
+      const { error: updErr } = await svc
+        .from("campaign_events")
+        .update({ payload: nextPayload, handled_at: handledStamp.at })
+        .eq("id", eventId);
       if (updErr) throw new Error("Couldn't mark this reply handled: " + updErr.message);
       return json({ success: true });
     }

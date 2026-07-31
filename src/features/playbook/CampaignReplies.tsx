@@ -18,7 +18,7 @@ import { formatName, formatRelativeDate, formatDateTime } from "@/lib/formatters
 import { useAuth } from "@/features/auth/AuthProvider";
 import { LoadError } from "./LoadError";
 import { useCampaignReplies, useMarkReplyHandled, useLogReplyCall, type CampaignReplyRow } from "./api";
-import { extractReplyBody, isPositiveReplyCategory } from "./reply-extract";
+import { extractReplyBody, isPositiveReplyCategory, replySubject, mailtoRecipient } from "./reply-extract";
 
 function replyWho(row: CampaignReplyRow): string {
   const name = formatName(row.enrollment?.first_name ?? "", row.enrollment?.last_name ?? "").trim();
@@ -30,51 +30,22 @@ interface HandledInfo {
   by: string | null;
 }
 
+/** The feed's definition of "this reply is handled" — a real mark-handled
+ *  stamp with a timestamp, not any truthy `handled` key (the payload is the
+ *  raw webhook body, so a vendor field could collide). The tracker's
+ *  "N replies waiting" tally no longer derives from this feed — it filters
+ *  on the handled_at COLUMN via its own uncapped query (outside-review I35,
+ *  useUnhandledReplyCounts) — but the two can't disagree: mark-reply-handled
+ *  stamps payload.handled and handled_at in the same UPDATE, and
+ *  20260731100000 backfilled history. */
 function handledInfo(row: CampaignReplyRow): HandledInfo | null {
   const h = row.payload?.handled as HandledInfo | undefined;
   return h?.at ? h : null;
 }
 
-/** The ONE definition of "this reply is handled" — a real mark-handled
- *  stamp with a timestamp, not any truthy `handled` key (the payload is the
- *  raw webhook body, so a vendor field could collide). Exported so the
- *  tracker's "N replies waiting" tally (CampaignsTab) can never disagree
- *  with what this feed shows as handled (outside-review I27). */
-export function isReplyHandled(row: CampaignReplyRow): boolean {
-  return handledInfo(row) !== null;
-}
-
-/** Best-effort subject for the mailto Reply button — the raw webhook body
- *  sometimes carries the thread's subject; the campaign name is the honest
- *  fallback. */
-function replySubject(row: CampaignReplyRow): string {
-  const p = (row.payload ?? {}) as Record<string, unknown>;
-  const data = (typeof p.data === "object" && p.data !== null) ? p.data as Record<string, unknown> : {};
-  for (const c of [p.subject, p.email_subject, data.subject, data.email_subject]) {
-    if (typeof c === "string" && c.trim()) {
-      // CR/LF stripped BEFORE encoding (a percent-encoded CRLF inside a
-      // mailto header value is exactly what RFC 6068 warns about) and
-      // capped — an unbounded mailto URL gets silently dropped by OS URL
-      // handlers, making the button do nothing.
-      const s = c.replace(/[\r\n]+/g, " ").trim().slice(0, 200);
-      if (!s) continue;
-      return /^re:/i.test(s) ? s : `Re: ${s}`;
-    }
-  }
-  return `Re: ${row.campaign?.name ?? "your email"}`;
-}
-
-/** The mailto recipient must be a plausible bare address — campaign_events
- *  .email is the raw webhook value with no format validation, and an
- *  unencoded "a@b.com?bcc=attacker@evil.com&" would inject recipients into
- *  the rep's draft (adversarial review; same encode-the-recipient rule as
- *  ActivityDetail's mailto builders). */
-function mailtoRecipient(email: string | null): string | null {
-  if (!email) return null;
-  const e = email.trim();
-  if (!/^[^\s<>,;:"()[\]\\?&=]+@[^\s<>,;:"()[\]\\?&=]+\.[^\s<>,;:"()[\]\\?&=]+$/.test(e)) return null;
-  return encodeURIComponent(e);
-}
+// replySubject / mailtoRecipient (the Reply button's mailto injection
+// guards) live in reply-extract.ts (extracted 2026-07-31, docket I38, so
+// tests/campaignReplyMailto.test.ts can pin them) — imported above.
 
 function ReplyRow({
   row,
@@ -130,7 +101,7 @@ function ReplyRow({
       <div className="flex items-center gap-3 pt-0.5 flex-wrap">
         {mailtoRecipient(row.email) && (
           <a
-            href={`mailto:${mailtoRecipient(row.email)}?subject=${encodeURIComponent(replySubject(row))}`}
+            href={`mailto:${mailtoRecipient(row.email)}?subject=${encodeURIComponent(replySubject(row.payload, row.campaign?.name))}`}
             className="text-xs text-primary hover:underline"
             title="Opens a reply in your email app"
           >

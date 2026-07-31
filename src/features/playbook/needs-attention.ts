@@ -2,9 +2,11 @@
 // (outside-review I27). Pure, framework-free logic so it can be unit-tested
 // directly (tests/campaignNeedsAttention.test.ts), same convention as
 // suppression.ts / suggestion-apply.ts. CampaignsTab computes the inputs
-// (the unhandled-reply tally comes from the same useCampaignReplies query
-// the Replies feed already runs — no extra fetch) and renders the flags as
-// chips on the card plus a dedicated section above Ongoing.
+// (the unhandled-reply tally comes from useUnhandledReplyCounts, a dedicated
+// uncapped count over campaign_events.handled_at — outside-review I35; it
+// used to piggyback on the 50-row Replies-feed query, which under-counted at
+// volume) and renders the flags as chips on the card plus a dedicated
+// section above Ongoing.
 
 /** The subset of a campaign row the flag rules read — structural, so tests
  *  don't need a full Campaign. */

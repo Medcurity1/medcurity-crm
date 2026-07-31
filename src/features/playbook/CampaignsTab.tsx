@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { CampaignWizard } from "./CampaignWizard";
 import { TemplatesSection } from "./TemplatesSection";
-import { CampaignReplies, isReplyHandled } from "./CampaignReplies";
+import { CampaignReplies } from "./CampaignReplies";
 import { LoadError } from "./LoadError";
 import { CampaignCard, type CampaignRow } from "./CampaignCard";
 import { CampaignDetailSheet } from "./CampaignDetailSheet";
@@ -31,7 +31,7 @@ import {
   useSetCampaignStatus,
   useCampaignEnrollmentStats,
   useCampaignsMonthStats,
-  useCampaignReplies,
+  useUnhandledReplyCounts,
   useEmailAccounts,
 } from "./api";
 
@@ -113,30 +113,26 @@ export function CampaignsTab() {
     );
   }, [ownerFiltered, search]);
 
-  // "Needs you today" (outside-review I27): unhandled replies come from the
-  // same query the Replies feed below already runs — shared cache key, so
-  // this costs nothing extra. The section (and the pulling-out of flagged
-  // cards) waits until that query settles, so cards don't visibly jump
-  // between sections when it resolves mid-render.
-  const repliesQ = useCampaignReplies();
-  const repliesSettled = !repliesQ.isPending;
-  const unhandledByCampaign = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of repliesQ.data ?? []) {
-      if (isReplyHandled(r)) continue;
-      if (!r.campaign_id) continue;
-      m.set(r.campaign_id, (m.get(r.campaign_id) ?? 0) + 1);
-    }
-    return m;
-  }, [repliesQ.data]);
+  // "Needs you today" (outside-review I27): the unhandled-reply tally is a
+  // dedicated uncapped count query (outside-review I35 — it used to piggyback
+  // on the Replies feed's 50-row query, where handled rows consumed cap
+  // slots and older unhandled replies silently fell off the tally). The
+  // section (and the pulling-out of flagged cards) waits until that query
+  // settles, so cards don't visibly jump between sections when it resolves
+  // mid-render. A FAILED tally query is surfaced inline below (talliesError)
+  // instead of silently rendering "nothing needs you".
+  const unhandledQ = useUnhandledReplyCounts();
+  const talliesSettled = !unhandledQ.isPending;
+  const talliesError = unhandledQ.isError;
+  const unhandledByCampaign = unhandledQ.data;
 
   const now = Date.now();
   const attentionById = useMemo(() => {
     const m = new Map<string, AttentionFlag[]>();
-    if (!repliesSettled) return m;
+    if (!talliesSettled) return m;
     for (const c of filtered) {
       const flags = campaignAttentionFlags(c, {
-        unhandledReplies: unhandledByCampaign.get(c.id) ?? 0,
+        unhandledReplies: unhandledByCampaign?.[c.id] ?? 0,
         nowMs: now,
       });
       if (flags.length) m.set(c.id, flags);
@@ -145,7 +141,7 @@ export function CampaignsTab() {
     // `now` deliberately not a dep — it changes every render; the flags only
     // meaningfully change when the underlying data does.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtered, unhandledByCampaign, repliesSettled]);
+  }, [filtered, unhandledByCampaign, talliesSettled]);
 
   // Ongoing = draft + active + paused. Campaigns that need a human are
   // pulled OUT into their own section at the top. A terminal (completed/
@@ -310,6 +306,21 @@ export function CampaignsTab() {
             unhandled reply, a stall, a high bounce rate, or a forgotten
             draft, pulled out of its normal section so trouble is the FIRST
             thing on the tracker instead of buried in a flat list. */}
+        {/* A failed replies-tally query means the replies flag (the highest-
+            value signal here) may be missing — say so instead of quietly
+            rendering a calm page (outside-review I35). The other flags
+            (bounce/stall/draft) still work off the campaigns query. */}
+        {!isLoading && !isError && talliesError && (
+          <div className="rounded-md border border-amber-300/60 dark:border-amber-500/30 p-3 flex items-center gap-2 flex-wrap">
+            <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+            <p className="text-xs text-muted-foreground">
+              Couldn't check for waiting replies — "Needs you today" may be missing reply alerts.
+            </p>
+            <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => unhandledQ.refetch()}>
+              Retry
+            </Button>
+          </div>
+        )}
         {!isLoading && !isError && needsAttention.length > 0 && (
           <div className="rounded-md border border-amber-300/60 dark:border-amber-500/30 p-3 space-y-2">
             <h3 className="text-sm font-semibold flex items-center gap-1.5">

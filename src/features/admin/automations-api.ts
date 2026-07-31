@@ -170,8 +170,9 @@ export interface RenewalAutomationConfig {
   updated_at: string;
   /** When set, automation only runs against this single account. */
   test_account_id: string | null;
-  pullback_days_auto_renew: number;
-  pullback_days_signature_required: number;
+  // (pullback_days_auto_renew / pullback_days_signature_required still exist
+  // as columns but are read by nothing — the live generator (20260727130000)
+  // ignores them, and their admin inputs were removed 2026-07-31, docket F8.)
   /**
    * Fresh-start date: contracts already inside the renewal window on this
    * date are the team's manual backlog and are never auto-created. Set by
@@ -249,11 +250,7 @@ export function useUpdateRenewalAutomationConfig() {
       values: Partial<
         Pick<
           RenewalAutomationConfig,
-          | "enabled"
-          | "lookahead_days"
-          | "test_account_id"
-          | "pullback_days_auto_renew"
-          | "pullback_days_signature_required"
+          "enabled" | "lookahead_days" | "test_account_id"
         >
       >
     ) => {
@@ -269,7 +266,7 @@ export function useUpdateRenewalAutomationConfig() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["renewal_automation_config"] });
       qc.invalidateQueries({ queryKey: ["renewal_audit"] });
-      // Changing the config (lookahead/pullback/test account) changes what the
+      // Changing the config (lookahead/test account) changes what the
       // next run would generate, so refresh the preview too.
       qc.invalidateQueries({ queryKey: ["renewal_preview"] });
     },
