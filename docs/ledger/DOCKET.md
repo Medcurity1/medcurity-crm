@@ -27,7 +27,9 @@ Statuses: `IDEA` · `QUEUED` · `IN PROGRESS` · `BLOCKED` · `STAGING` (awaitin
 
 ## B. On staging — awaiting prod go-ahead
 
-_(none — the 2026-07-31 batch promoted to PROD in 9754705; MSD-957's old row here was retired as inaccurate, see A5)_
+| # | Item | Who | Detail | Verify | Checked |
+|---|---|---|---|---|---|
+| B1 | Meddy availability background-proof fix (PRIORITY 1) | Nathan 2026-07-31 ("go over every inch… implement the best way") | Reverts the 2026-07-21 perf-sweep regression (visible-only heartbeat guard starved the 2-min sweep → every backgrounded Pulse tab went unavailable in ~2-3 min, in ALL browsers; for 10 days new website chats notified nobody whenever the whole team was backgrounded). Fix: heartbeat now ticks from a Web Worker (immune to background timer throttling — src/lib/backgroundTicker.ts), staleness threshold widened 2→3 min in all three server spots (pg_cron fn via 20260731170000, meddy-sweep edge fn, meddy-chat anyAvailable), debug breadcrumb logs each beat with hidden-state. Frozen/discarded tabs still go away correctly (they can't notify anyone either); closed tabs still caught in ~12s by peer_offline. **Margaret + the whole team hit this on PROD until promoted.** | prod bundle's useMeddyPresence still has the `visibilityState !== "visible"` guard | 2026-07-31 |
 
 ---
 

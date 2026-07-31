@@ -21,23 +21,41 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
+import { startBackgroundTicker } from "@/lib/backgroundTicker";
 import { staffAction } from "./api";
 
 export function useMeddyPresence(enabled: boolean) {
   const qc = useQueryClient();
 
-  // 60s heartbeat — keeps the user "available" while the CRM is open anywhere.
+  // 60s heartbeat — keeps the user "available" while the CRM is open anywhere,
+  // INCLUDING backgrounded tabs.
+  //
+  // REGRESSION HISTORY (do not reintroduce): the 2026-07-21 perf sweep added
+  // `if (document.visibilityState !== "visible") return;` here to save a
+  // round-trip on hidden tabs, reasoning the sweep would "cover it". Backwards
+  // — the pg_cron sweep marks agents unavailable after 2-3 min WITHOUT a
+  // heartbeat, so that guard made every backgrounded Pulse tab go grey within
+  // minutes (Margaret's 2026-07-31 report; 10 days of website chats notifying
+  // nobody whenever the whole team had Pulse in a background tab). A hidden
+  // tab can still play sounds, show notifications, and take a chat — it MUST
+  // keep beating.
+  //
+  // The tick comes from a Web Worker (backgroundTicker.ts) because page
+  // timers are throttled in hidden tabs; worker timers aren't. A tab the
+  // browser truly freezes/discards stops beating and the sweep correctly
+  // marks it away — a frozen tab can't notify anyone either.
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
     const beat = () => {
-      // Don't burn a heartbeat (auth.getUser round-trip + writes) on hidden/
-      // background tabs. onVisible re-beats the instant the tab is foregrounded,
-      // and the pg_cron sweep + presence channel cover a genuinely gone session.
-      if (document.visibilityState !== "visible") return;
       staffAction("heartbeat")
         .then(() => {
           if (!cancelled) {
+            // Quiet breadcrumb (debug level): makes background beating
+            // provable from DevTools when someone next questions availability.
+            console.debug(
+              `[meddy] heartbeat ok (hidden: ${document.visibilityState !== "visible"})`,
+            );
             qc.invalidateQueries({ queryKey: ["meddy-team"] });
             if (qc.isMutating({ mutationKey: ["meddy-set-availability"] }) === 0) {
               qc.invalidateQueries({ queryKey: ["meddy-availability"] });
@@ -49,14 +67,15 @@ export function useMeddyPresence(enabled: boolean) {
         });
     };
     beat();
-    const interval = setInterval(beat, 60_000);
+    const stopTicker = startBackgroundTicker(60_000, beat);
     const onVisible = () => {
+      // Instant re-beat on foregrounding — snappy recovery after sleep/freeze.
       if (!document.hidden) beat();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      stopTicker();
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [qc, enabled]);
