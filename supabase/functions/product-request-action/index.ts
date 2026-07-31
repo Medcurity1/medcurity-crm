@@ -599,16 +599,21 @@ serve(async (req) => {
           classification: {
             clientFacing: true,
             confidence: 0,
-            reasoning:
-              "Automatic classification unavailable — assuming clients are affected so this gets a human look.",
+            reasoning: "We couldn't check this automatically — please tell us.",
             affectedAreas: [],
             degraded: true,
+            // timedOut makes the form ASK rather than present a guess as an
+            // answer. The submitter knows; we don't.
+            timedOut: true,
           },
         });
       }
       try {
+        // Helm caps itself at 15s; this is the backstop for a connection that
+        // never returns at all. A person is waiting on the submit button.
         const res = await fetch(helmClassifyUrl, {
           method: "POST",
+          signal: AbortSignal.timeout(18_000),
           headers: {
             "content-type": "application/json",
             authorization: `Bearer ${helmKey}`,
@@ -629,10 +634,12 @@ serve(async (req) => {
           classification: {
             clientFacing: true,
             confidence: 0,
-            reasoning:
-              "Automatic classification unavailable — assuming clients are affected so this gets a human look.",
+            reasoning: "We couldn't check this automatically — please tell us.",
             affectedAreas: [],
             degraded: true,
+            // timedOut makes the form ASK rather than present a guess as an
+            // answer. The submitter knows; we don't.
+            timedOut: true,
           },
         });
       }
