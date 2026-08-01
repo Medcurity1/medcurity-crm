@@ -21,6 +21,7 @@ import { type NexusWidget, type NexusWidgetType } from "./types";
 import { selectFeatured } from "./featured";
 import { useHeroTheme } from "./hero-themes";
 import { NexusGrid } from "./NexusGrid";
+import { DailyDealGame } from "@/features/daily-deal/DailyDealGame";
 import { FeaturedWidgets } from "./FeaturedWidgets";
 import { CustomizeBar } from "./CustomizeBar";
 import { useHomeLayoutImport } from "./home-import";
@@ -151,6 +152,10 @@ export function NexusPage() {
 
   return (
     <div className="space-y-6">
+      {/* Hidden mini-game #4 — triple-click the Nexus nav label to open the
+          morning paper. Renders nothing (zero cost) unless launched. */}
+      <DailyDealGame />
+
       {briefingFailed && (
         <>
           <div className="flex items-start justify-between gap-4">

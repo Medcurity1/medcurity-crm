@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { pipelineRunner } from "@/features/pipeline-runner/store";
 import { meddySweeper } from "@/features/meddy-sweeper/store";
 import { dealMerger } from "@/features/deal-merger/store";
+import { dailyDeal as dailyDealGame } from "@/features/daily-deal/store";
 import { PulseLogo } from "@/components/PulseLogo";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Button } from "@/components/ui/button";
@@ -66,7 +67,7 @@ type NavItem = {
    * When set, triple-clicking the label unlocks a hidden mini-game.
    * Normal navigation is unaffected. Each secret tab launches its own game.
    */
-  secret?: "pipeline" | "meddysweeper" | "dealmerger";
+  secret?: "pipeline" | "meddysweeper" | "dealmerger" | "dailydeal";
 };
 
 // Badge color presets. Admin = cool sky blue; New = red (draws the eye
@@ -106,7 +107,7 @@ const navItems: NavItem[] = [
   // Nexus: the customizable widget dashboard (Jordan V4). Lives at /nexus
   // while it's being tested; the classic Home dashboard is back at "/"
   // (Nathan, 2026-07-03).
-  { to: "/nexus", icon: Sparkles, label: "Nexus" },
+  { to: "/nexus", icon: Sparkles, label: "Nexus", secret: "dailydeal" },
 ];
 
 const adminItems: NavItem[] = [
@@ -136,6 +137,7 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
     pipeline: [],
     meddysweeper: [],
     dealmerger: [],
+    dailydeal: [],
   });
   function handleSecretClick(game: NonNullable<NavItem["secret"]>) {
     const now = performance.now();
@@ -146,6 +148,7 @@ export function Sidebar({ collapsed, onToggle, isMobile = false }: SidebarProps)
       secretClicks.current[game] = [];
       if (game === "meddysweeper") meddySweeper.launch();
       else if (game === "dealmerger") dealMerger.launch();
+      else if (game === "dailydeal") dailyDealGame.launch();
       else pipelineRunner.launch();
     }
   }
