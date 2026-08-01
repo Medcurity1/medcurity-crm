@@ -28,10 +28,11 @@ export function headlineFor(
   completed: boolean,
   won: boolean,
 ): string {
+  // House rule: no em dashes anywhere in the minigame (Nathan, 2026-07-31).
   if (completed) {
-    if (!won) return "WORD SLIPS THE NET — INQUIRY CONTINUES";
-    if (guesses.length === 1) return "SOLVED ON THE FIRST CALL — PRESSES STOP";
-    return `DEAL CLOSED IN ${guesses.length} — PRESSES STOP`;
+    if (!won) return "THE WORD GOT AWAY";
+    if (guesses.length === 1) return "SOLVED ON THE FIRST CALL";
+    return `DEAL CLOSED IN ${guesses.length}`;
   }
   if (guesses.length === 0) return "MYSTERY WORD STILL AT LARGE";
 
@@ -40,8 +41,8 @@ export function headlineFor(
   const y = [...marks].filter((m) => m === "y").length;
 
   if (g === 4) return "ONE LETTER SHORT OF A DEAL";
-  if (g >= 2) return `${g} LETTERS LOCKED IN, SOURCES CONFIRM`;
+  if (g >= 2) return `${g} LETTERS LOCKED IN`;
   if (g === 1) return "FIRST LETTER PINNED DOWN";
   if (y > 0) return "WARM TRAIL, WRONG ADDRESSES";
-  return "NO LEADS — REPORTERS UNDETERRED";
+  return "NO LEADS YET";
 }

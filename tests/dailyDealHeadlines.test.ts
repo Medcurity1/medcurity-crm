@@ -7,7 +7,24 @@ describe("headlineFor — the front page chases the word", () => {
   });
 
   it("nothing landed", () => {
-    expect(headlineFor([{ marks: "xxxxx" }], false, false)).toBe("NO LEADS — REPORTERS UNDETERRED");
+    expect(headlineFor([{ marks: "xxxxx" }], false, false)).toBe("NO LEADS YET");
+  });
+
+  it("no em dashes anywhere (house rule)", () => {
+    const states: Array<[Parameters<typeof headlineFor>[0], boolean, boolean]> = [
+      [[], false, false],
+      [[{ marks: "xxxxx" }], false, false],
+      [[{ marks: "xyxyx" }], false, false],
+      [[{ marks: "gxxxx" }], false, false],
+      [[{ marks: "gxgxy" }], false, false],
+      [[{ marks: "ggggx" }], false, false],
+      [[{ marks: "ggggg" }], true, true],
+      [[{ marks: "xxxxx" }, { marks: "ggggg" }], true, true],
+      [new Array(6).fill({ marks: "xxxxx" }), true, false],
+    ];
+    for (const [g, c, w] of states) {
+      expect(headlineFor(g, c, w)).not.toContain("—");
+    }
   });
 
   it("yellows only", () => {
@@ -19,7 +36,7 @@ describe("headlineFor — the front page chases the word", () => {
   });
 
   it("multiple greens report the count", () => {
-    expect(headlineFor([{ marks: "gxgxy" }], false, false)).toBe("2 LETTERS LOCKED IN, SOURCES CONFIRM");
+    expect(headlineFor([{ marks: "gxgxy" }], false, false)).toBe("2 LETTERS LOCKED IN");
   });
 
   it("four greens", () => {
@@ -28,15 +45,15 @@ describe("headlineFor — the front page chases the word", () => {
 
   it("only the LATEST guess drives the story", () => {
     expect(headlineFor([{ marks: "ggggx" }, { marks: "xxxxx" }], false, false))
-      .toBe("NO LEADS — REPORTERS UNDETERRED");
+      .toBe("NO LEADS YET");
   });
 
   it("win and loss editions", () => {
-    expect(headlineFor([{ marks: "ggggg" }], true, true)).toBe("SOLVED ON THE FIRST CALL — PRESSES STOP");
+    expect(headlineFor([{ marks: "ggggg" }], true, true)).toBe("SOLVED ON THE FIRST CALL");
     expect(headlineFor([{ marks: "xxxxx" }, { marks: "ggggg" }], true, true))
-      .toBe("DEAL CLOSED IN 2 — PRESSES STOP");
+      .toBe("DEAL CLOSED IN 2");
     expect(headlineFor(new Array(6).fill({ marks: "xxxxx" }), true, false))
-      .toBe("WORD SLIPS THE NET — INQUIRY CONTINUES");
+      .toBe("THE WORD GOT AWAY");
   });
 });
 

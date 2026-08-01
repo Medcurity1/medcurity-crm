@@ -16,10 +16,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { dailyDeal, useDailyDealOpen } from "./store";
-import { headlineFor, issueNumber } from "./headlines";
+import { headlineFor } from "./headlines";
+import { useAuth } from "@/features/auth/AuthProvider";
 import {
   useDailyDealState,
   useDailyDealGuess,
+  useDailyDealReset,
   type DDBoardRow,
   type DDGuess,
   type DDWeek,
@@ -78,7 +80,7 @@ function soundPref(): boolean {
 }
 
 function fmtMs(ms: number | null | undefined): string {
-  if (ms == null) return "—";
+  if (ms == null) return "-";
   const s = Math.round(ms / 1000);
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
@@ -99,7 +101,7 @@ function shareGrid(guesses: DDGuess[], won: boolean, today: string): string {
     .map((g) => [...g.marks].map((m) => (m === "g" ? "🟩" : m === "y" ? "🟨" : "⬛")).join(""))
     .join("\n");
   const score = won ? `${guesses.length}/6` : "X/6";
-  return `The Daily Deal — ${today} — ${score}\n${rows}`;
+  return `The Daily Deal · ${today} · ${score}\n${rows}`;
 }
 
 /** g beats y beats x for keyboard key coloring. */
@@ -125,6 +127,9 @@ export function DailyDealGame() {
 function DailyDealDialog() {
   const stateQ = useDailyDealState(true);
   const guessMut = useDailyDealGuess();
+  const resetMut = useDailyDealReset();
+  const { profile } = useAuth();
+  const isAdmin = ["admin", "super_admin"].includes(profile?.role ?? "");
 
   const [typed, setTyped] = useState("");
   const [shaking, setShaking] = useState(false);
@@ -191,7 +196,7 @@ function DailyDealDialog() {
       },
       onError: (e) => {
         setPendingRow(null);
-        nudge((e as Error).message || "Couldn't submit — try again");
+        nudge((e as Error).message || "Couldn't submit. Try again");
       },
     });
   }
@@ -269,17 +274,15 @@ function DailyDealDialog() {
       <style>{CSS}</style>
       <div className="dd-paper" onClick={(e) => e.stopPropagation()}>
         <button className="dd-close" onClick={() => dailyDeal.close()} aria-label="Close">×</button>
-        <button className="dd-sound" onClick={toggleSound} aria-label="Toggle sound">
-          {sound ? "🔔" : "🔕"}
-        </button>
 
         <div className="dd-masthead">
-          <div className="dd-ears">
-            <span>Vol. I · No. {st ? issueNumber(st.today) : "—"}</span>
-            <span>Price: One Cold Call</span>
-          </div>
           <div className="dd-rule" />
-          <h1>The Daily Deal</h1>
+          <h1>
+            The Daily Deal
+            <button className="dd-sound" onClick={toggleSound} aria-label="Toggle sound">
+              {sound ? "🔔" : "🔕"}
+            </button>
+          </h1>
           <div className="dd-rule" />
           <p className="dd-dateline">{st ? fmtDay(st.today) : "…"} · Pulse Arcade</p>
           {st?.mode === "play" && (
@@ -391,13 +394,24 @@ function DailyDealDialog() {
                 today={st.today}
                 board={st.board ?? []}
                 week={st.week ?? null}
+                onAdminReset={
+                  isAdmin
+                    ? () =>
+                        resetMut.mutate(undefined, {
+                          onSuccess: () => {
+                            setRevealPanel(false);
+                            setTyped("");
+                            toast.success("Fresh edition printed. New word is live.");
+                          },
+                          onError: (e) => toast.error((e as Error).message),
+                        })
+                    : null
+                }
               />
             )}
           </>
         )}
 
-        <p className="dd-footerline">Puzzles &amp; Games · Page B6</p>
-        <div className="dd-tearedge" />
       </div>
     </div>
   );
@@ -412,11 +426,12 @@ function PostGamePanel(props: {
   today: string;
   board: DDBoardRow[];
   week: DDWeek | null;
+  onAdminReset: (() => void) | null;
 }) {
   function share() {
     navigator.clipboard
       .writeText(shareGrid(props.guesses, props.won, props.today))
-      .then(() => toast.success("Result copied — paste it in chat"))
+      .then(() => toast.success("Result copied. Paste it in chat"))
       .catch(() => toast.error("Couldn't copy"));
   }
   return (
@@ -447,6 +462,12 @@ function PostGamePanel(props: {
       )}
 
       {props.week && <Standings week={props.week} title="This week so far" />}
+
+      {props.onAdminReset && (
+        <button className="dd-resetlink" onClick={props.onAdminReset}>
+          Restart today's edition (admin test tool)
+        </button>
+      )}
     </div>
   );
 }
@@ -462,7 +483,7 @@ function Standings({ week, title }: { week: DDWeek; title: string }) {
             <tr key={i} className={i === 0 ? "dd-leader" : undefined}>
               <td>{i + 1}. {s.name}</td>
               <td>{s.wins}W / {s.played}P</td>
-              <td>{s.avgGuesses ?? "—"} avg</td>
+              <td>{s.avgGuesses ?? "-"} avg</td>
               <td className="dd-pts">{s.points} pts</td>
             </tr>
           ))}
@@ -482,7 +503,7 @@ function WeekendRecap({ week }: { week: DDWeek }) {
           {week.days.map((d) => (
             <tr key={d.date}>
               <td>{fmtDay(d.date).split(",")[0]}</td>
-              <td className="dd-word">{d.word ? d.word.toUpperCase() : "—"}</td>
+              <td className="dd-word">{d.word ? d.word.toUpperCase() : "-"}</td>
               <td>{d.played > 0 ? `${d.solved}/${d.played} solved` : "no players"}</td>
             </tr>
           ))}
@@ -501,28 +522,17 @@ const CSS = `
   align-items:flex-start;justify-content:center;overflow-y:auto;padding:4vh 16px 6vh;}
 .dd-paper{position:relative;width:min(480px,94vw);background:#f7f2e5;color:#221d15;
   font-family:Georgia,'Times New Roman',serif;border:1px solid #b8ac93;
-  box-shadow:0 24px 70px rgba(0,0,0,.45), 0 2px 0 #fff inset;padding:20px 26px 30px;
+  box-shadow:0 24px 70px rgba(0,0,0,.45), 0 2px 0 #fff inset;padding:18px 24px 22px;
   background-image:
-    linear-gradient(90deg,transparent 13px,rgba(101,86,58,.22) 13px,rgba(101,86,58,.22) 14px,transparent 14px),
-    linear-gradient(270deg,transparent 13px,rgba(101,86,58,.22) 13px,rgba(101,86,58,.22) 14px,transparent 14px),
     radial-gradient(ellipse at 50% 0%,rgba(255,255,255,.5),transparent 60%),
     repeating-linear-gradient(0deg,transparent,transparent 27px,rgba(101,86,58,.05) 28px);}
 .dd-paper::after{content:"";position:absolute;left:0;right:0;top:44%;height:12px;
   pointer-events:none;
   background:linear-gradient(rgba(90,75,50,.05),rgba(255,255,255,.35) 50%,rgba(90,75,50,.07));}
-.dd-tearedge{position:absolute;left:0;right:0;bottom:-10px;height:10px;
-  background:
-    linear-gradient(-135deg,#f7f2e5 7px,transparent 0) 0 0/14px 10px repeat-x,
-    linear-gradient(135deg,#f7f2e5 7px,transparent 0) 7px 0/14px 10px repeat-x;
-  filter:drop-shadow(0 3px 2px rgba(0,0,0,.2));}
-.dd-footerline{text-align:center;font-size:10px;letter-spacing:.18em;text-transform:uppercase;
-  color:#8d7f63;border-top:1px solid #b8ac93;margin-top:18px;padding-top:6px;}
-.dd-ears{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.08em;
-  text-transform:uppercase;color:#6b5f49;margin-bottom:4px;font-style:italic;}
 .dd-headline{margin-top:9px;font-size:16px;font-weight:900;letter-spacing:.03em;
   font-variant:small-caps;line-height:1.15;}
-.dd-sound{position:absolute;top:9px;left:12px;border:none;background:none;font-size:15px;
-  cursor:pointer;opacity:.65;line-height:1;}
+.dd-sound{border:none;background:none;font-size:15px;cursor:pointer;opacity:.5;
+  line-height:1;margin-left:9px;vertical-align:middle;}
 .dd-sound:hover{opacity:1;}
 .dd-wait{animation:dd-waitpulse .9s ease-in-out infinite;border-color:#8d7f63;}
 @keyframes dd-waitpulse{50%{background:#ece2c8;transform:scale(.955);}}
@@ -610,6 +620,9 @@ const CSS = `
 .dd-weekend-head{text-align:center;font-size:22px;font-variant:small-caps;font-weight:900;
   margin-bottom:4px;}
 .dd-crown{text-align:center;font-size:15px;font-weight:700;margin-top:12px;}
+.dd-resetlink{display:block;margin:14px auto 0;border:none;background:none;cursor:pointer;
+  font-family:inherit;font-size:11px;color:#8d7f63;text-decoration:underline;font-style:italic;}
+.dd-resetlink:hover{color:#4c4335;}
 @media (max-width:430px){.dd-tile{width:46px;height:46px;font-size:23px;}
   .dd-key{min-width:26px;height:40px;font-size:12px;}}
 `;
