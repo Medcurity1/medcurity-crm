@@ -16,11 +16,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { dailyDeal, useDailyDealOpen } from "./store";
-import { useAuth } from "@/features/auth/AuthProvider";
 import {
   useDailyDealState,
   useDailyDealGuess,
-  useDailyDealReset,
   type DDBoardRow,
   type DDGuess,
   type DDWeek,
@@ -126,9 +124,6 @@ export function DailyDealGame() {
 function DailyDealDialog() {
   const stateQ = useDailyDealState(true);
   const guessMut = useDailyDealGuess();
-  const resetMut = useDailyDealReset();
-  const { profile } = useAuth();
-  const isAdmin = ["admin", "super_admin"].includes(profile?.role ?? "");
 
   const [typed, setTyped] = useState("");
   const [shaking, setShaking] = useState(false);
@@ -382,19 +377,6 @@ function DailyDealDialog() {
                 today={st.today}
                 board={st.board ?? []}
                 week={st.week ?? null}
-                onAdminReset={
-                  isAdmin
-                    ? () =>
-                        resetMut.mutate(undefined, {
-                          onSuccess: () => {
-                            setRevealPanel(false);
-                            setTyped("");
-                            toast.success("Fresh edition printed. New word is live.");
-                          },
-                          onError: (e) => toast.error((e as Error).message),
-                        })
-                    : null
-                }
               />
             )}
           </>
@@ -414,7 +396,6 @@ function PostGamePanel(props: {
   today: string;
   board: DDBoardRow[];
   week: DDWeek | null;
-  onAdminReset: (() => void) | null;
 }) {
   function share() {
     navigator.clipboard
@@ -450,12 +431,6 @@ function PostGamePanel(props: {
       )}
 
       {props.week && <Standings week={props.week} title="This week so far" />}
-
-      {props.onAdminReset && (
-        <button className="dd-resetlink" onClick={props.onAdminReset}>
-          Restart today's edition (admin test tool)
-        </button>
-      )}
     </div>
   );
 }
@@ -603,9 +578,6 @@ const CSS = `
 .dd-weekend-head{text-align:center;font-size:22px;font-variant:small-caps;font-weight:900;
   margin-bottom:4px;}
 .dd-crown{text-align:center;font-size:15px;font-weight:700;margin-top:12px;}
-.dd-resetlink{display:block;margin:14px auto 0;border:none;background:none;cursor:pointer;
-  font-family:inherit;font-size:11px;color:#8d7f63;text-decoration:underline;font-style:italic;}
-.dd-resetlink:hover{color:#4c4335;}
 @media (max-width:430px){.dd-tile{width:46px;height:46px;font-size:23px;}
   .dd-key{min-width:26px;height:40px;font-size:12px;}}
 `;

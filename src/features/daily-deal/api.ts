@@ -85,16 +85,6 @@ export function useDailyDealState(open: boolean) {
   });
 }
 
-/** Admin-only test/support tool: wipes today's puzzle so a fresh word gets
- *  picked on the next open. The server refuses if anyone else played today. */
-export function useDailyDealReset() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => invoke<{ success: boolean }>({ action: "reset-today" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["daily-deal", "state"] }),
-  });
-}
-
 export function useDailyDealGuess() {
   const qc = useQueryClient();
   return useMutation({

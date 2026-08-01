@@ -183,7 +183,7 @@ Deno.serve(async (req) => {
   if (!caller) return json({ error: "Not authenticated" }, 401);
   const { data: profile } = await svc
     .from("user_profiles")
-    .select("id, is_active, role")
+    .select("id, is_active")
     .eq("id", caller.id)
     .single();
   if (!profile?.is_active) return json({ error: "Not authorized" }, 403);
@@ -348,31 +348,6 @@ Deno.serve(async (req) => {
         board: done && names ? await todayBoard(today, names) : null,
         week: done && names ? await weekRecap(today, names, false) : null,
       });
-    }
-
-    if (action === "reset-today") {
-      // Admin-only test/support tool (Nathan, 2026-07-31: "reset the deal on
-      // staging so i can test new versions"). Wipes today's puzzle + results
-      // and lets ensure_puzzle pick a FRESH word on the next open. The old
-      // word stays burned (whoever played saw it, or got mark information
-      // about it). Refuses if any OTHER player has guessed today, so it can
-      // never nuke a real team leaderboard day.
-      if (!["admin", "super_admin"].includes(String(profile.role ?? ""))) {
-        return json({ error: "Admins only." }, 403);
-      }
-      const { data: results } = await svc
-        .from("daily_deal_results")
-        .select("user_id, guesses")
-        .eq("puzzle_date", today);
-      const othersPlayed = ((results ?? []) as ResultRow[]).some(
-        (r) => r.user_id !== caller.id && (r.guesses ?? []).length > 0,
-      );
-      if (othersPlayed) {
-        return json({ error: "Someone else already played today. Reset refused." }, 400);
-      }
-      await svc.from("daily_deal_results").delete().eq("puzzle_date", today);
-      await svc.from("daily_deal_puzzles").delete().eq("puzzle_date", today);
-      return json({ success: true });
     }
 
     if (action === "recap") {

@@ -27,9 +27,7 @@ Statuses: `IDEA` · `QUEUED` · `IN PROGRESS` · `BLOCKED` · `STAGING` (awaitin
 
 ## B. On staging — awaiting prod go-ahead
 
-| # | Item | Who | Detail | Verify | Checked |
-|---|---|---|---|---|---|
-| B2 | The Daily Deal — mini-game #4 (weekday word puzzle) | Nathan 2026-07-31 (evening, "off the clock") | Wordle-style shared daily word, weekdays only (PT), newspaper theme. Unlock: triple-click the Nexus nav label. Answers server-side only (daily-deal edge fn + service-role-only tables); 817 curated answers (zero-play days recycle their word — Nathan's rule); play-based weekday streaks; weekly points leaderboard (tries+speed+streak); weekend recap edition; full per-player history kept for the someday-arcade; resume mid-game. 21 logic tests. | `git log origin/main --oneline \| grep -i "daily deal"` returns nothing | 2026-07-31 |
+_(none — The Daily Deal promoted to PROD 2026-07-31 evening; see SHIPPED)_
 
 ---
 
