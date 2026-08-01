@@ -80,6 +80,7 @@ jobs:
           # gateway verifies the signature, the function trusts role=service_role.
           # Do NOT add --no-verify-jwt here — that would let a forged role claim
           # through. (Exact-key-match here caused the 2026-07-05 email outage.)
+          npx supabase functions deploy daily-deal
           npx supabase functions deploy sync-emails
           npx supabase functions deploy outlook-calendar-sync
           npx supabase functions deploy task-reminders
