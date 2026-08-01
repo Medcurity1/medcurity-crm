@@ -16,6 +16,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { dailyDeal, useDailyDealOpen } from "./store";
+import { headlineFor, issueNumber } from "./headlines";
 import {
   useDailyDealState,
   useDailyDealGuess,
@@ -30,6 +31,51 @@ const FLIP_STEP_MS = 280; // per-tile stagger
 const FLIP_SETTLE_MS = FLIP_STEP_MS * 4 + 620; // last tile started + flip time
 
 const KEY_ROWS = ["qwertyuiop", "asdfghjkl", "zxcvbnm"];
+
+// ── tiny newsroom sounds (opt-in, default OFF — same convention as Meddy
+// Sweeper's 8-bit audio). Synthesized on the fly; no assets. ──────────────
+let actx: AudioContext | null = null;
+function tone(freq: number, durMs: number, type: OscillatorType, gain = 0.025, delayMs = 0) {
+  try {
+    if (!actx) {
+      const AC = window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AC) return;
+      actx = new AC();
+    }
+    if (actx.state === "suspended") actx.resume().catch(() => {});
+    const t0 = actx.currentTime + delayMs / 1000;
+    const osc = actx.createOscillator();
+    const g = actx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    g.gain.setValueAtTime(gain, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + durMs / 1000);
+    osc.connect(g).connect(actx.destination);
+    osc.start(t0);
+    osc.stop(t0 + durMs / 1000 + 0.02);
+  } catch {
+    /* audio blocked — silent is fine */
+  }
+}
+const sfx = {
+  key: () => tone(1400, 28, "square", 0.012), // typewriter clack
+  flip: (delayMs: number) => tone(190, 55, "square", 0.02, delayMs), // press thock
+  stampWon: () => {
+    tone(90, 130, "square", 0.05);
+    tone(392, 110, "triangle", 0.03, 140);
+    tone(523, 200, "triangle", 0.03, 240);
+  },
+  stampLost: () => tone(72, 260, "sawtooth", 0.04),
+};
+
+function soundPref(): boolean {
+  try {
+    return localStorage.getItem("daily-deal-sound") === "on";
+  } catch {
+    return false;
+  }
+}
 
 function fmtMs(ms: number | null | undefined): string {
   if (ms == null) return "—";
@@ -83,6 +129,10 @@ function DailyDealDialog() {
   const [typed, setTyped] = useState("");
   const [shaking, setShaking] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // Row awaiting the server's verdict — its tiles pulse like a press warming
+  // up, which absorbs the round-trip instead of showing a dead pause.
+  const [pendingRow, setPendingRow] = useState<number | null>(null);
+  const [sound, setSound] = useState(soundPref);
   // Rows ≤ animatedUpTo flipped in a previous session/render — show settled.
   // The row currently flipping animates; everything is driven by row index.
   const [flippingRow, setFlippingRow] = useState<number | null>(null);
@@ -108,7 +158,7 @@ function DailyDealDialog() {
   }, [completed]);
 
   function submit() {
-    if (guessMut.isPending || completed || flippingRow !== null) return;
+    if (guessMut.isPending || completed || flippingRow !== null || pendingRow !== null) return;
     if (typed.length !== WORD_LEN) {
       nudge("Five letters needed");
       return;
@@ -122,16 +172,27 @@ function DailyDealDialog() {
       return;
     }
     const rowIdx = guesses.length;
+    setPendingRow(rowIdx);
     guessMut.mutate(typed, {
       onSuccess: (res) => {
         setTyped("");
+        setPendingRow(null);
         setFlippingRow(rowIdx);
+        if (soundRef.current) {
+          for (let c = 0; c < WORD_LEN; c++) sfx.flip(c * FLIP_STEP_MS);
+        }
         window.setTimeout(() => {
           setFlippingRow(null);
-          if (res.completed) setRevealPanel(true);
+          if (res.completed) {
+            setRevealPanel(true);
+            if (soundRef.current) (res.won ? sfx.stampWon : sfx.stampLost)();
+          }
         }, FLIP_SETTLE_MS);
       },
-      onError: (e) => nudge((e as Error).message || "Couldn't submit — try again"),
+      onError: (e) => {
+        setPendingRow(null);
+        nudge((e as Error).message || "Couldn't submit — try again");
+      },
     });
   }
 
@@ -145,10 +206,36 @@ function DailyDealDialog() {
   function onKey(key: string) {
     if (completed || st?.mode !== "play") return;
     if (key === "enter") submit();
-    else if (key === "back") setTyped((t) => t.slice(0, -1));
-    else if (/^[a-z]$/.test(key) && typed.length < WORD_LEN && flippingRow === null) {
+    else if (key === "back") {
+      if (soundRef.current && typed.length) sfx.key();
+      setTyped((t) => t.slice(0, -1));
+    } else if (
+      /^[a-z]$/.test(key) &&
+      typed.length < WORD_LEN &&
+      flippingRow === null &&
+      pendingRow === null
+    ) {
+      if (soundRef.current) sfx.key();
       setTyped((t) => t + key);
     }
+  }
+
+  // Ref mirror so the flip-sound timeouts see the live toggle without
+  // re-binding the keyboard effect.
+  const soundRef = useRef(sound);
+  useEffect(() => {
+    soundRef.current = sound;
+  }, [sound]);
+
+  function toggleSound() {
+    setSound((s) => {
+      try {
+        localStorage.setItem("daily-deal-sound", s ? "off" : "on");
+      } catch {
+        /* ignore */
+      }
+      return !s;
+    });
   }
 
   // Physical keyboard (capture-phase; owns typing while open, same as the
@@ -172,7 +259,7 @@ function DailyDealDialog() {
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [typed, guesses.length, completed, flippingRow, st?.mode]);
+  }, [typed, guesses.length, completed, flippingRow, pendingRow, st?.mode]);
 
   const keys = useMemo(() => keyStates(guesses), [guesses]);
   const stampVisible = completed && flippingRow === null;
@@ -182,14 +269,30 @@ function DailyDealDialog() {
       <style>{CSS}</style>
       <div className="dd-paper" onClick={(e) => e.stopPropagation()}>
         <button className="dd-close" onClick={() => dailyDeal.close()} aria-label="Close">×</button>
+        <button className="dd-sound" onClick={toggleSound} aria-label="Toggle sound">
+          {sound ? "🔔" : "🔕"}
+        </button>
 
         <div className="dd-masthead">
+          <div className="dd-ears">
+            <span>Vol. I · No. {st ? issueNumber(st.today) : "—"}</span>
+            <span>Price: One Cold Call</span>
+          </div>
           <div className="dd-rule" />
           <h1>The Daily Deal</h1>
           <div className="dd-rule" />
-          <p className="dd-dateline">
-            {st ? fmtDay(st.today) : "…"} · Medcurity Bureau · Free to subscribers
-          </p>
+          <p className="dd-dateline">{st ? fmtDay(st.today) : "…"} · Pulse Arcade</p>
+          {st?.mode === "play" && (
+            <p className="dd-headline">
+              {/* The front page chases the story — but never scoops a row
+                  that's still flipping. */}
+              {headlineFor(
+                flippingRow !== null ? guesses.slice(0, flippingRow) : guesses,
+                completed && flippingRow === null,
+                !!st.won,
+              )}
+            </p>
+          )}
         </div>
 
         {stateQ.isPending && <p className="dd-note">Fetching today's edition…</p>}
@@ -213,16 +316,25 @@ function DailyDealDialog() {
                     {Array.from({ length: WORD_LEN }).map((_, c) => {
                       const letter = g ? g.word[c] : isTyping ? typed[c] ?? "" : "";
                       const mark = g ? g.marks[c] : "";
+                      const isWaiting = pendingRow === r;
                       const cls = g
                         ? isFlipping
                           ? `dd-tile dd-flip dd-${mark}`
                           : `dd-tile dd-settled dd-${mark}`
-                        : "dd-tile" + (letter ? " dd-typed" : "");
+                        : isWaiting
+                          ? "dd-tile dd-typed dd-wait"
+                          : "dd-tile" + (letter ? " dd-typed" : "");
                       return (
                         <div
                           key={c}
                           className={cls}
-                          style={isFlipping ? { animationDelay: `${c * FLIP_STEP_MS}ms` } : undefined}
+                          style={
+                            isFlipping
+                              ? { animationDelay: `${c * FLIP_STEP_MS}ms` }
+                              : isWaiting
+                                ? { animationDelay: `${c * 120}ms` }
+                                : undefined
+                          }
                         >
                           {letter}
                         </div>
@@ -239,11 +351,6 @@ function DailyDealDialog() {
             </div>
 
             {note && <p className="dd-note dd-flash">{note}</p>}
-            {!completed && !note && (
-              <p className="dd-note dd-hint">
-                {guesses.length === 0 ? "6 tries. The ink tells the truth." : `${MAX_GUESSES - guesses.length} ${MAX_GUESSES - guesses.length === 1 ? "try" : "tries"} left`}
-              </p>
-            )}
             {completed && !st.won && st.answer && flippingRow === null && (
               <p className="dd-note">
                 The word was <strong>{st.answer.toUpperCase()}</strong>
@@ -288,6 +395,9 @@ function DailyDealDialog() {
             )}
           </>
         )}
+
+        <p className="dd-footerline">Puzzles &amp; Games · Page B6</p>
+        <div className="dd-tearedge" />
       </div>
     </div>
   );
@@ -390,9 +500,32 @@ const CSS = `
 .dd-overlay{position:fixed;inset:0;z-index:100;background:rgba(24,20,14,.55);display:flex;
   align-items:flex-start;justify-content:center;overflow-y:auto;padding:4vh 16px 6vh;}
 .dd-paper{position:relative;width:min(480px,94vw);background:#f7f2e5;color:#221d15;
-  font-family:Georgia,'Times New Roman',serif;border:1px solid #b8ac93;border-radius:3px;
-  box-shadow:0 24px 70px rgba(0,0,0,.45), 0 2px 0 #fff inset;padding:20px 22px 26px;
-  background-image:repeating-linear-gradient(0deg,transparent,transparent 27px,rgba(101,86,58,.05) 28px);}
+  font-family:Georgia,'Times New Roman',serif;border:1px solid #b8ac93;
+  box-shadow:0 24px 70px rgba(0,0,0,.45), 0 2px 0 #fff inset;padding:20px 26px 30px;
+  background-image:
+    linear-gradient(90deg,transparent 13px,rgba(101,86,58,.22) 13px,rgba(101,86,58,.22) 14px,transparent 14px),
+    linear-gradient(270deg,transparent 13px,rgba(101,86,58,.22) 13px,rgba(101,86,58,.22) 14px,transparent 14px),
+    radial-gradient(ellipse at 50% 0%,rgba(255,255,255,.5),transparent 60%),
+    repeating-linear-gradient(0deg,transparent,transparent 27px,rgba(101,86,58,.05) 28px);}
+.dd-paper::after{content:"";position:absolute;left:0;right:0;top:44%;height:12px;
+  pointer-events:none;
+  background:linear-gradient(rgba(90,75,50,.05),rgba(255,255,255,.35) 50%,rgba(90,75,50,.07));}
+.dd-tearedge{position:absolute;left:0;right:0;bottom:-10px;height:10px;
+  background:
+    linear-gradient(-135deg,#f7f2e5 7px,transparent 0) 0 0/14px 10px repeat-x,
+    linear-gradient(135deg,#f7f2e5 7px,transparent 0) 7px 0/14px 10px repeat-x;
+  filter:drop-shadow(0 3px 2px rgba(0,0,0,.2));}
+.dd-footerline{text-align:center;font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+  color:#8d7f63;border-top:1px solid #b8ac93;margin-top:18px;padding-top:6px;}
+.dd-ears{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.08em;
+  text-transform:uppercase;color:#6b5f49;margin-bottom:4px;font-style:italic;}
+.dd-headline{margin-top:9px;font-size:16px;font-weight:900;letter-spacing:.03em;
+  font-variant:small-caps;line-height:1.15;}
+.dd-sound{position:absolute;top:9px;left:12px;border:none;background:none;font-size:15px;
+  cursor:pointer;opacity:.65;line-height:1;}
+.dd-sound:hover{opacity:1;}
+.dd-wait{animation:dd-waitpulse .9s ease-in-out infinite;border-color:#8d7f63;}
+@keyframes dd-waitpulse{50%{background:#ece2c8;transform:scale(.955);}}
 .dd-close{position:absolute;top:8px;right:12px;border:none;background:none;font-size:26px;
   color:#6b5f49;cursor:pointer;line-height:1;font-family:inherit;}
 .dd-close:hover{color:#221d15;}
@@ -446,7 +579,6 @@ const CSS = `
 .dd-stamp-won{color:#2e6b46;}
 .dd-stamp-lost{color:#a33327;}
 .dd-note{text-align:center;font-size:14px;color:#4c4335;margin:8px 0;font-style:italic;}
-.dd-hint{color:#8d7f63;}
 .dd-flash{color:#a33327;font-weight:700;font-style:normal;}
 .dd-linkbtn{border:none;background:none;text-decoration:underline;cursor:pointer;
   font:inherit;color:#2e5a8a;}
