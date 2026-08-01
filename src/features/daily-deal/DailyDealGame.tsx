@@ -16,7 +16,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { dailyDeal, useDailyDealOpen } from "./store";
-import { headlineFor } from "./headlines";
 import { useAuth } from "@/features/auth/AuthProvider";
 import {
   useDailyDealState,
@@ -277,25 +276,14 @@ function DailyDealDialog() {
 
         <div className="dd-masthead">
           <div className="dd-rule" />
-          <h1>
-            The Daily Deal
+          <h1>The Daily Deal</h1>
+          <div className="dd-rule" />
+          <p className="dd-dateline">
+            {st ? fmtDay(st.today) : "…"} · Pulse Arcade
             <button className="dd-sound" onClick={toggleSound} aria-label="Toggle sound">
               {sound ? "🔔" : "🔕"}
             </button>
-          </h1>
-          <div className="dd-rule" />
-          <p className="dd-dateline">{st ? fmtDay(st.today) : "…"} · Pulse Arcade</p>
-          {st?.mode === "play" && (
-            <p className="dd-headline">
-              {/* The front page chases the story — but never scoops a row
-                  that's still flipping. */}
-              {headlineFor(
-                flippingRow !== null ? guesses.slice(0, flippingRow) : guesses,
-                completed && flippingRow === null,
-                !!st.won,
-              )}
-            </p>
-          )}
+          </p>
         </div>
 
         {stateQ.isPending && <p className="dd-note">Fetching today's edition…</p>}
@@ -526,13 +514,8 @@ const CSS = `
   background-image:
     radial-gradient(ellipse at 50% 0%,rgba(255,255,255,.5),transparent 60%),
     repeating-linear-gradient(0deg,transparent,transparent 27px,rgba(101,86,58,.05) 28px);}
-.dd-paper::after{content:"";position:absolute;left:0;right:0;top:44%;height:12px;
-  pointer-events:none;
-  background:linear-gradient(rgba(90,75,50,.05),rgba(255,255,255,.35) 50%,rgba(90,75,50,.07));}
-.dd-headline{margin-top:9px;font-size:16px;font-weight:900;letter-spacing:.03em;
-  font-variant:small-caps;line-height:1.15;}
-.dd-sound{border:none;background:none;font-size:15px;cursor:pointer;opacity:.5;
-  line-height:1;margin-left:9px;vertical-align:middle;}
+.dd-sound{border:none;background:none;font-size:12px;cursor:pointer;opacity:.85;
+  line-height:1;margin-left:7px;vertical-align:middle;padding:0;}
 .dd-sound:hover{opacity:1;}
 .dd-wait{animation:dd-waitpulse .9s ease-in-out infinite;border-color:#8d7f63;}
 @keyframes dd-waitpulse{50%{background:#ece2c8;transform:scale(.955);}}
