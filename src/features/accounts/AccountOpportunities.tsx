@@ -60,7 +60,11 @@ export function AccountOpportunities({ accountId }: { accountId: string }) {
                 <TableHead>Name</TableHead>
                 <TableHead>Stage</TableHead>
                 <TableHead className="text-right">Amount</TableHead>
-                <TableHead>Expected Close</TableHead>
+                {/* Close Date (Summer 8/3): closed deals show close_date (the
+                    actual landing date) — expected_close_date freezes as the
+                    pre-close forecast and misled here. Open deals show the
+                    forecast; the two mirror while a deal is open. */}
+                <TableHead>Close Date</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -85,7 +89,11 @@ export function AccountOpportunities({ accountId }: { accountId: string }) {
                     {formatCurrency(opp.amount)}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {formatDate(opp.expected_close_date)}
+                    {formatDate(
+                      opp.stage === "closed_won" || opp.stage === "closed_lost"
+                        ? (opp.close_date ?? opp.expected_close_date)
+                        : opp.expected_close_date,
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

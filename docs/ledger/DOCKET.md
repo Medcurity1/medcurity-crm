@@ -28,7 +28,9 @@ Statuses: `IDEA` · `QUEUED` · `IN PROGRESS` · `BLOCKED` · `STAGING` (awaitin
 
 ## B. On staging — awaiting prod go-ahead
 
-_(none — The Daily Deal promoted to PROD 2026-07-31 evening; see SHIPPED)_
+| # | Item | Who | Detail | Verify | Checked |
+|---|---|---|---|---|---|
+| B6 | Close-date display fix (closed deals show actual close_date) | Summer (CRM request 2026-08-03) | On staging: account-page opps card + main Opportunities list show close_date for closed_won/closed_lost rows, header "Close Date"; open rows unchanged. Promote on Nathan's word; Summer is on prod and still sees the forecast date there until then. | `git log origin/main --oneline \| grep -i "close-date display"` = 0 hits (not yet promoted) | 2026-08-03 |
 
 ---
 
