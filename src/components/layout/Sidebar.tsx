@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
+  FolderOpen,
   Home,
   Building2,
   Users,
@@ -117,6 +118,10 @@ const adminItems: NavItem[] = [
   // "Playbook"). AI ideas + Smartlead cold email + newsletters. Route stays
   // /playbook for stable deep-links. Admin-only (for now).
   { to: "/playbook", icon: Megaphone, label: "Campaigns", badge: { label: "Admin", className: ADMIN_BADGE } },
+  // Collateral (Jordan 8/4): the SharePoint sales-collateral library as a
+  // card grid. Admin-only while Jordan verifies tagging quality; flipping
+  // to sales = collateral_settings config + move this into navItems.
+  { to: "/collateral", icon: FolderOpen, label: "Collateral", badge: { label: "Admin", className: ADMIN_BADGE } },
   // Imports = the admin-only landing pen for raw lists (renamed from
   // "Leads" 2026-07-20 after the prod lead cleanup; reps don't see it —
   // admins clean + promote to Contacts or archive).

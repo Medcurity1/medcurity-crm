@@ -34,6 +34,7 @@ if (typeof window !== "undefined") {
   homePageImport();
 }
 const NexusPage = lazy(() => import("@/features/nexus/NexusPage").then(m => ({ default: m.NexusPage })));
+const CollateralPage = lazy(() => import("@/features/collateral/CollateralPage").then(m => ({ default: m.CollateralPage })));
 const MeddyPage = lazy(() => import("@/features/meddy/MeddyPage").then(m => ({ default: m.MeddyPage })));
 const SupportPage = lazy(() => import("@/features/support/SupportPage").then(m => ({ default: m.SupportPage })));
 const NotFound = lazy(() => import("@/features/NotFound").then(m => ({ default: m.NotFound })));
@@ -171,6 +172,11 @@ export default function App() {
                   <Route path="imports/:id/edit" element={<LegacyImportEditRedirect />} />
                   <Route path="leads/*" element={<LeadsPathRedirect />} />
                   <Route path="playbook" element={<AdminGate><PlaybookPage /></AdminGate>} />
+                  {/* Collateral (Jordan 8/4): admin-only at launch; the RLS
+                      role flag (collateral_settings) governs data access, so
+                      opening to sales later = config change + move this out
+                      of AdminGate + sidebar shuffle. */}
+                  <Route path="collateral" element={<AdminGate><CollateralPage /></AdminGate>} />
                   <Route path="partners" element={<PartnersPage />} />
                   <Route path="contacts" element={<ContactsList />} />
                   {/* Lists moved into the Reports hub (Nathan 2026-07-20). */}

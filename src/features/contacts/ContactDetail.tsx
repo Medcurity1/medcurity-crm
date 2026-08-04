@@ -23,6 +23,8 @@ import { RecordId } from "@/components/RecordId";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CollapsibleTabs } from "@/components/CollapsibleTabs";
+import { CollateralLibrary } from "@/features/collateral/CollateralLibrary";
+import { useCollateralVisibility } from "@/features/collateral/api";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatName, formatDateTime } from "@/lib/formatters";
@@ -123,6 +125,8 @@ export function ContactDetail() {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const canWrite = !!profile?.role && profile.role !== "read_only";
+  // Collateral record tab (Jordan 8/4): role-flag gated, admin-only at launch.
+  const { visible: collateralVisible } = useCollateralVisibility();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const { data: contact, isLoading, isError, error, refetch } = useContact(id);
   const { data: originatingLead } = useOriginatingLead(id);
@@ -465,6 +469,15 @@ export function ContactDetail() {
             label: "Tasks",
             content: <TasksPanel contactId={contact.id} />,
           },
+          ...(collateralVisible
+            ? [
+                {
+                  value: "collateral",
+                  label: "Collateral",
+                  content: <CollateralLibrary compact />,
+                },
+              ]
+            : []),
         ]}
       />
 

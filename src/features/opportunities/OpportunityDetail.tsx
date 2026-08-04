@@ -27,6 +27,8 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CollapsibleTabs } from "@/components/CollapsibleTabs";
+import { CollateralLibrary } from "@/features/collateral/CollateralLibrary";
+import { useCollateralVisibility } from "@/features/collateral/api";
 import {
   Table,
   TableBody,
@@ -244,6 +246,9 @@ function DiscountField({
 export function OpportunityDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  // Collateral record tab (Jordan 8/4): rendered only for roles the
+  // collateral_settings flag allows (admin-only at launch).
+  const { visible: collateralVisible } = useCollateralVisibility();
   const { data: opp, isLoading, isError, error, refetch } = useOpportunity(id);
   const { data: history } = useStageHistory(id);
   const { data: products } = useOpportunityProducts(id);
@@ -673,6 +678,15 @@ export function OpportunityDetail() {
             label: "Tasks",
             content: <TasksPanel opportunityId={opp.id} />,
           },
+          ...(collateralVisible
+            ? [
+                {
+                  value: "collateral",
+                  label: "Collateral",
+                  content: <CollateralLibrary compact />,
+                },
+              ]
+            : []),
           {
             value: "contacts",
             label: "Contacts",
