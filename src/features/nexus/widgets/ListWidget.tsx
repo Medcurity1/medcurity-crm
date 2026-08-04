@@ -7,7 +7,7 @@
 // contract as the Requests widget.
 
 import { useEffect, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Building2, ExternalLink, Sparkles, X } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -124,6 +124,12 @@ export function ListWidget({ widget, searchQuery, onDataUpdated }: NexusWidgetBo
     useListWidgetData(listId);
   const exclude = useExcludeFromSmartList();
   const removeMember = useRemoveFromList();
+  const qc = useQueryClient();
+  // useRemoveFromList predates this widget and invalidates only the Lists
+  // page keys — refresh this widget's own query so the row leaves the
+  // screen the moment it leaves the list.
+  const refreshSelf = () =>
+    qc.invalidateQueries({ queryKey: ["nexus-widget-data", "list"] });
 
   useEffect(() => {
     if (dataUpdatedAt) onDataUpdated?.(dataUpdatedAt);
@@ -222,7 +228,10 @@ export function ListWidget({ widget, searchQuery, onDataUpdated }: NexusWidgetBo
                       if (data.list!.is_dynamic) {
                         exclude.mutate({ listId: data.list!.id, contactId: row.contactId });
                       } else if (row.memberId) {
-                        removeMember.mutate({ memberId: row.memberId, listId: data.list!.id });
+                        removeMember.mutate(
+                          { memberId: row.memberId, listId: data.list!.id },
+                          { onSuccess: refreshSelf },
+                        );
                       }
                     }}
                   >
