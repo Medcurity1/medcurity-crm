@@ -26,7 +26,6 @@ export const NEXUS_WIDGET_TYPES = [
   "tasks",
   "pipeline",
   "custom_report",
-  "metrics",
   "pinned_records",
   "requests",
   "campaign_touches",
@@ -92,71 +91,9 @@ export interface CustomReportWidgetConfig {
 export const REPORT_MIN_COLUMNS = 3;
 export const REPORT_MAX_COLUMNS = 6;
 
-/**
- * Metric registry keys (Stage C builds the registry in metrics.ts; it may
- * extend this list — keep the union in sync with the registry).
- */
-export type NexusMetricKey =
-  | "calls_made"
-  | "emails_sent"
-  | "meetings_scheduled" // spec's "Demos Scheduled", labeled honestly
-  | "tasks_completed"
-  | "tasks_overdue"
-  | "open_opportunities"
-  | "deals_closed"
-  | "revenue_closed"
-  | "revenue_vs_goal"
-  | "new_contacts"
-  | "avg_deal_size"
-  | "pipeline_value"
-  // Ported from Home's kpi-registry (docket C2 round 4) so the landing-page
-  // swap cannot lose a number the team already watches. Each one keeps the
-  // Home KPI's exact query, filters and window; see metrics.ts for the
-  // per-metric provenance comments.
-  | "win_rate"
-  | "renewals_due_30"
-  | "renewals_due_60"
-  | "arr_at_risk"
-  | "renewals_in_progress"
-  | "active_customers"
-  | "total_contacts"
-  | "revenue_starting_quarter"
-  | "mql_count"
-  | "sql_count";
-
-export type NexusMetricScope = "personal" | "team";
-export type NexusMetricPeriod = "today" | "week" | "month" | "quarter";
-
-/** One stat inside a Metrics widget (a metric plus how to read it). */
-export interface MetricsStatConfig {
-  metric: NexusMetricKey;
-  scope: NexusMetricScope;
-  period: NexusMetricPeriod;
-  /** Show % change vs the previous equivalent period. */
-  compare: boolean;
-}
-
-/**
- * Sanity cap on stats per Metrics widget. It is the size of the whole
- * metric catalog, not a design limit: the two-stack layout lets a widget
- * be as tall as it needs, so there is no reason to stop a user at 4.
- */
-export const MAX_METRIC_STATS = 16;
-
-/**
- * A Metrics widget holds an ORDERED LIST of stats, rendered as a tile
- * grid. The first version of this widget stored ONE stat at the top level
- * of the config ({ metric, scope, period, compare }); those rows are still
- * out there in nexus_widgets.config (jsonb) and stay readable forever via
- * normalizeMetricsConfig (metrics.ts), which is the only way either the
- * widget or the builder reads this config. Nothing writes the old shape.
- */
-export interface MetricsWidgetConfig {
-  stats: MetricsStatConfig[];
-}
-
-/** The pre-list stored shape. Read-only: kept so the reader can name it. */
-export type LegacyMetricsWidgetConfig = MetricsStatConfig;
+// (The Metrics WIDGET and its metric-registry types were removed
+// 2026-08-04 — Nathan: superseded by the MetricsStrip. Stored rows were
+// deleted by migration 20260804200000, which kept a backup table.)
 
 export type PinnedRecordType = "contact" | "account" | "opportunity";
 
@@ -182,7 +119,6 @@ export interface NexusWidgetConfigMap {
   tasks: TasksWidgetConfig;
   pipeline: PipelineWidgetConfig;
   custom_report: CustomReportWidgetConfig;
-  metrics: MetricsWidgetConfig;
   pinned_records: PinnedRecordsWidgetConfig;
   requests: RequestsWidgetConfig;
   campaign_touches: CampaignTouchesWidgetConfig;

@@ -1,12 +1,14 @@
-// The Nexus first-visit tour: three popups, shown once, ever.
+// The Nexus first-visit tour: a handful of popups, shown once, ever.
 //
 // Armed only by NEXUS_IS_LANDING (see landing-flip.ts). Until swap day
 // this component returns null before it runs a single hook, so it costs
 // nothing to leave wired into NexusPage.
 //
-// Shape (Nathan, 2026-07-29): exactly three steps, each pinned to a real
+// Shape (Nathan, 2026-07-29 + 8/4): six stops, each pinned to a real
 // piece of the page, no skip button, one button per step that only moves
-// forward. Small team, so it should feel like a treat, not a chore.
+// forward. 8/4: grew from three to six as a learning tour, not just a
+// what's-new guide: metrics strip, the widget-type catalog, and the
+// Submit Request button joined the original three.
 //
 // Copy rules, same as the briefing: no em dashes, no filler, sentence
 // case, short plain phrases.
@@ -59,16 +61,24 @@ function markTourSeen(userId: string): void {
   }
 }
 
-// ── The three steps ──────────────────────────────────────────────────
+// ── The steps ────────────────────────────────────────────────────────
 
 interface TourStep {
-  /** Matches a data-tour attribute in Briefing.tsx / NexusPage.tsx. */
+  /** Matches a data-tour attribute in Briefing.tsx / NexusPage.tsx /
+   * MetricsStrip.tsx / RequestDialogProvider.tsx. */
   anchor: string;
   title: string;
   body: string;
   button: string;
+  /** Rendered as a compact two-column list under the body. */
+  items?: string[];
+  /** Skipped quietly when the anchor is missing (e.g. a hidden metrics
+   * strip) instead of blocking the whole tour. */
+  optional?: boolean;
 }
 
+// Six stops (Nathan 8/4: "more of a helpful learning process than just a
+// what's new guide" — a few extra clicks is fine).
 const STEPS: TourStep[] = [
   {
     anchor: "hero",
@@ -77,9 +87,33 @@ const STEPS: TourStep[] = [
     button: "Next",
   },
   {
+    anchor: "metrics",
+    title: "Your numbers, still clickable",
+    body: "The metrics from Home live here now. Every tile opens the exact list behind the number. Pick which ones show, or hide them, in Customize.",
+    button: "Next",
+    optional: true,
+  },
+  {
     anchor: "widgets",
     title: "Your widgets",
-    body: "Everything from Home lives here now. Same widgets, still yours to arrange.",
+    body: "The rest of Home lives down here: tasks, deals, wins, and more, still yours to arrange.",
+    button: "Next",
+  },
+  {
+    anchor: "add-widget",
+    title: "Widgets you can add",
+    body: "Each one is a live view you can rename, pin, and arrange:",
+    items: [
+      "Today's Tasks",
+      "My Open Opportunities",
+      "Recent Wins",
+      "Requests",
+      "Recents",
+      "Pinned Records",
+      "Cold Call List",
+      "Campaign Touches",
+      "Custom Report",
+    ],
     button: "Next",
   },
   {
@@ -88,7 +122,13 @@ const STEPS: TourStep[] = [
     body:
       NEXUS_IS_LANDING && NEXUS_FEEDBACK_LINK
         ? "Customize is where you add, remove, rearrange, and pin widgets. If something you need is missing, use the Something missing link."
-        : "Customize is where you add, remove, rearrange, and pin widgets. If something you need is missing, send it from the Requests tab.",
+        : "Customize is where you add, remove, rearrange, and pin widgets.",
+    button: "Next",
+  },
+  {
+    anchor: "submit-request",
+    title: "Requests moved up here",
+    body: "The Requests tab is now this button. Same forms, same flow, and it works from any page.",
     button: "Got it",
   },
 ];
@@ -100,8 +140,11 @@ const ANCHOR_WAIT_MS = 5000;
 const ANCHOR_POLL_MS = 120;
 
 // The highlight glides between steps and the page scrolls smoothly, so
-// keep re-measuring for a moment after each step change.
-const SETTLE_MS = 800;
+// keep re-measuring for a moment after each step change. 1600ms because a
+// long smooth scroll (top of page to the widgets area) can outlast 800ms,
+// which left the ring parked at a mid-scroll position (seen in the 8/4
+// launch walkthrough on step 5).
+const SETTLE_MS = 1600;
 
 // Geometry.
 const HOLE_PAD = 8;
@@ -154,6 +197,10 @@ function NexusTourRunner() {
   const [phase, setPhase] = useState<Phase>("waiting");
   const [step, setStep] = useState(0);
   const [frame, setFrame] = useState<Frame | null>(null);
+  // The steps this visit actually runs: every required step, plus the
+  // optional ones whose anchors exist (a hidden metrics strip just drops
+  // its step rather than blocking the tour).
+  const [steps, setSteps] = useState<TourStep[]>(STEPS);
 
   // Wait for every anchor to exist before starting. If they never all
   // show up (the briefing failed and fell back to the plain header, say)
@@ -172,7 +219,8 @@ function NexusTourRunner() {
 
     const tick = () => {
       if (cancelled) return;
-      if (STEPS.every((s) => anchorEl(s.anchor))) {
+      if (STEPS.filter((s) => !s.optional).every((s) => anchorEl(s.anchor))) {
+        setSteps(STEPS.filter((s) => !s.optional || anchorEl(s.anchor)));
         setPhase("running");
         return;
       }
@@ -194,7 +242,7 @@ function NexusTourRunner() {
   // smooth scroll, and stay honest on resize and scroll.
   useEffect(() => {
     if (phase !== "running") return;
-    const el = anchorEl(STEPS[step].anchor);
+    const el = anchorEl(steps[step].anchor);
     if (!el) {
       // Anchor disappeared mid tour (a refetch re-rendered the briefing
       // into an error state). Leave quietly, no done key.
@@ -232,12 +280,12 @@ function NexusTourRunner() {
       window.removeEventListener("resize", measure);
       window.removeEventListener("scroll", measure, true);
     };
-  }, [phase, step]);
+  }, [phase, step, steps]);
 
   if (phase !== "running" || !frame) return null;
 
-  const current = STEPS[step];
-  const last = step === STEPS.length - 1;
+  const current = steps[step];
+  const last = step === steps.length - 1;
 
   function advance() {
     if (!last) {
@@ -257,11 +305,12 @@ function NexusTourRunner() {
     height: frame.height + HOLE_PAD * 2,
   };
 
+  const cardH = current.items ? CARD_H_EST + 120 : CARD_H_EST;
   const roomBelow = frame.vh - (hole.top + hole.height) - GAP;
-  const below = roomBelow >= CARD_H_EST || hole.top < CARD_H_EST + GAP;
+  const below = roomBelow >= cardH || hole.top < cardH + GAP;
   const cardTop = below
-    ? Math.min(hole.top + hole.height + GAP, frame.vh - CARD_H_EST - EDGE)
-    : Math.max(EDGE, hole.top - GAP - CARD_H_EST);
+    ? Math.min(hole.top + hole.height + GAP, frame.vh - cardH - EDGE)
+    : Math.max(EDGE, hole.top - GAP - cardH);
 
   const centerX = frame.left + frame.width / 2;
   const cardLeft = Math.max(
@@ -315,7 +364,7 @@ function NexusTourRunner() {
         />
 
         <p className="text-[11px] font-medium uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
-          {step + 1} of {STEPS.length}
+          {step + 1} of {steps.length}
         </p>
         <h2 className="mt-1 text-base font-semibold tracking-tight">
           {current.title}
@@ -323,12 +372,28 @@ function NexusTourRunner() {
         <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
           {current.body}
         </p>
+        {current.items && (
+          <ul className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5">
+            {current.items.map((item) => (
+              <li
+                key={item}
+                className="flex items-center gap-1.5 text-xs text-foreground/90"
+              >
+                <span
+                  aria-hidden
+                  className="h-1 w-1 shrink-0 rounded-full bg-emerald-500"
+                />
+                {item}
+              </li>
+            ))}
+          </ul>
+        )}
 
         <div className="mt-4 flex items-center justify-between">
           <div className="flex items-center gap-1.5" aria-hidden>
-            {STEPS.map((s, i) => (
+            {steps.map((_s, i) => (
               <span
-                key={s.anchor}
+                key={i}
                 className={cn(
                   "h-1.5 rounded-full transition-all duration-300",
                   i === step

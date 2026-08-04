@@ -9,7 +9,6 @@ import type { NexusWidgetBodyProps } from "./WidgetShell";
 import { TasksWidget } from "./widgets/TasksWidget";
 import { PipelineWidget } from "./widgets/PipelineWidget";
 import { CustomReportWidget } from "./widgets/CustomReportWidget";
-import { MetricsWidget } from "./widgets/MetricsWidget";
 import { PinnedRecordsWidget } from "./widgets/PinnedRecordsWidget";
 import { RequestsWidget } from "./widgets/RequestsWidget";
 import { CampaignTouchesWidget } from "./widgets/CampaignTouchesWidget";
@@ -25,7 +24,6 @@ export const WIDGET_BODIES: Record<
   tasks: TasksWidget,
   pipeline: PipelineWidget,
   custom_report: CustomReportWidget,
-  metrics: MetricsWidget,
   pinned_records: PinnedRecordsWidget,
   requests: RequestsWidget,
   campaign_touches: CampaignTouchesWidget,

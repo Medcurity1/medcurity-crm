@@ -21,18 +21,21 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   DndContext,
+  DragOverlay,
+  MeasuringStrategy,
   closestCenter,
   KeyboardSensor,
   PointerSensor,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragStartEvent,
 } from "@dnd-kit/core";
 import {
   arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
-  rectSortingStrategy,
+  type SortingStrategy,
 } from "@dnd-kit/sortable";
 import { LayoutDashboard, Plus } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -46,8 +49,25 @@ import {
   useReorderWidgets,
 } from "./api";
 import { selectUnfeatured } from "./featured";
-import { SortableWidget } from "./SortableWidget";
+import { DragOverlayCard, SortableWidget } from "./SortableWidget";
 import { MAX_WIDGETS, type NexusWidget } from "./types";
+
+/**
+ * No live re-sorting mid-drag (Nathan 8/4 drag rework). The two-stack
+ * layout has variable-height cards in independent columns, which
+ * rectSortingStrategy (built for uniform grids) mispredicted — cards
+ * jumped and overlapped while dragging. Instead: cards hold still, the
+ * DragOverlay clone follows the pointer, the hovered card highlights as
+ * the drop target, and the real reorder happens on drop.
+ */
+const STATIC_WHILE_DRAGGING: SortingStrategy = () => null;
+
+/** Re-measure droppable rects while dragging — cheap at ≤8 widgets, and
+ * it keeps drop-target hit boxes honest as the page scrolls mid-drag. */
+const MEASURING = { droppable: { strategy: MeasuringStrategy.Always } };
+
+/** Settle animation for the dropped card. */
+const DROP_ANIMATION = { duration: 200, easing: "cubic-bezier(0.2, 0, 0, 1)" };
 
 // Kept as a re-export so anything that imported the registry from here
 // still resolves. The registry itself now lives in widget-bodies.ts.
@@ -216,6 +236,17 @@ export function NexusGrid({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
+  // The widget currently in hand; drives the DragOverlay clone.
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const activeWidget = useMemo(
+    () => (activeId ? (ordered.find((w) => w.id === activeId) ?? null) : null),
+    [activeId, ordered],
+  );
+
+  function handleDragStart(event: DragStartEvent) {
+    setActiveId(String(event.active.id));
+  }
+
   /**
    * A drop maps back to a position index through the widget it landed on.
    * Every visual slot in the two-stack layout IS a global index (stack =
@@ -234,6 +265,7 @@ export function NexusGrid({
    * rows keep their numbers and nothing collides.
    */
   function handleDragEnd(event: DragEndEvent) {
+    setActiveId(null);
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     const oldIndex = ordered.findIndex((w) => w.id === active.id);
@@ -339,17 +371,19 @@ export function NexusGrid({
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
+      measuring={MEASURING}
+      onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
+      onDragCancel={() => setActiveId(null)}
     >
       {/*
         `items` stays in global position order, which is also the reading
-        order of the two-stack layout (slot i sits at row i/2 of stack i%2).
-        That keeps rectSortingStrategy's measured rects in the same order the
-        user reads them, so the drag preview shifts the way the drop will.
+        order of the two-stack layout (slot i sits at row i/2 of stack i%2),
+        so a drop index converts straight back to a position number.
       */}
       <SortableContext
         items={ordered.map((w) => w.id)}
-        strategy={rectSortingStrategy}
+        strategy={STATIC_WHILE_DRAGGING}
       >
         {twoStacks ? (
           // Two independent stacks. `items-start` stops a column from being
@@ -373,6 +407,10 @@ export function NexusGrid({
           </div>
         )}
       </SortableContext>
+      {/* The picked-up card, following the pointer above everything. */}
+      <DragOverlay dropAnimation={DROP_ANIMATION}>
+        {activeWidget ? <DragOverlayCard widget={activeWidget} /> : null}
+      </DragOverlay>
     </DndContext>
   );
 }

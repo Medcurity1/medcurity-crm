@@ -20,7 +20,7 @@ interface ShortcutEntry {
 }
 
 const navigationShortcuts: ShortcutEntry[] = [
-  { keys: ["G", "H"], label: "Go to Home" },
+  { keys: ["G", "H"], label: "Go to Nexus (your home page)" },
   { keys: ["G", "A"], label: "Go to Accounts" },
   { keys: ["G", "L"], label: "Go to Leads" },
   { keys: ["G", "O"], label: "Go to Opportunities" },

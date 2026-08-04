@@ -77,40 +77,6 @@ function Square({ className }: { className?: string }) {
   );
 }
 
-function Spark() {
-  return (
-    <svg
-      aria-hidden
-      viewBox="0 0 40 12"
-      className="h-3 w-10 text-muted-foreground/40"
-      fill="none"
-    >
-      <polyline
-        points="0,9 8,6 16,8 24,3 32,5 40,1"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function StatTile() {
-  return (
-    <div className="space-y-1.5 rounded-md border border-muted-foreground/15 p-2">
-      <Bar w="55%" className="bg-muted-foreground/15" />
-      <div className="flex items-end justify-between gap-1">
-        <span
-          aria-hidden
-          className="block h-3 w-8 rounded-sm bg-muted-foreground/35"
-        />
-        <Spark />
-      </div>
-    </div>
-  );
-}
-
 // ── Per-type mocks ───────────────────────────────────────────────────
 
 const PREVIEWS: Record<NexusWidgetType, ReactNode> = {
@@ -142,12 +108,6 @@ const PREVIEWS: Record<NexusWidgetType, ReactNode> = {
           <Bar w="18%" />
         </div>
       ))}
-    </div>
-  ),
-  metrics: (
-    <div className="grid grid-cols-2 gap-2">
-      <StatTile />
-      <StatTile />
     </div>
   ),
   pinned_records: (

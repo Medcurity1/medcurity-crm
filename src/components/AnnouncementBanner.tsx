@@ -36,7 +36,15 @@ interface Announcement {
 //     ctaLabel: "See Platform stream",
 //     ctaRoute: "/support",
 //   }
-export const ACTIVE_ANNOUNCEMENT: Announcement | null = null;
+// Nexus launch (Nathan 2026-08-04): staged with the swap batch.
+export const ACTIVE_ANNOUNCEMENT: Announcement | null = {
+  id: "nexus-launch-2026-08",
+  title: "Nexus is your new home page",
+  message:
+    "Your briefing, your metrics, and your widgets in one place. Home is still in the sidebar if you need it, and requests now live behind the Submit Request button up top.",
+  ctaLabel: "Take a look",
+  ctaRoute: "/nexus",
+};
 
 function storageKey(id: string) {
   return `announcement-dismissed:${id}`;

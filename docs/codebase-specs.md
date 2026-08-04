@@ -192,7 +192,6 @@ supabase/
 | `/opportunities/:id/edit` | OpportunityForm | Yes | Edit opportunity |
 | `/pipeline` | PipelineBoard | Yes | Multi-pipeline kanban with custom views |
 | `/forecasting` | ForecastPage | Yes | Quarter-based revenue forecasting |
-| `/calendar` | ActivityCalendar | Yes | Monthly activity calendar grid |
 | `/activities` | ActivitiesListPage | Yes | Global activities list with filters |
 | `/analytics` | WinLossAnalysis | Yes | Win/Loss analytics + sales velocity |
 | `/renewals` | RenewalsQueue | Yes | Upcoming renewals by urgency |
@@ -363,12 +362,9 @@ supabase/
 - Weighted pipeline bar chart: stage probability weights (lead 0.1, qualified 0.3, proposal 0.6, verbal 0.9) applied to per-stage amounts
 - Color-coded bars per stage
 
-### Activity Calendar
-- Monthly calendar grid at `/calendar`
-- Click dates to see activities for that day in a side panel
-- Heat-map coloring: cells shade darker based on activity volume
-- Month navigation (prev/next/Today) and current-month highlighting
-- Activity items linked back to their related Account, Contact, or Opportunity
+### Activity Calendar (REMOVED 2026-08-04)
+- The monthly calendar grid at `/calendar` was removed (Nathan: confirmed unused).
+- All activity data remains visible in `/activities` and per-record timelines.
 
 ### Activities List
 - Dedicated listing page at `/activities` showing all activities across all records

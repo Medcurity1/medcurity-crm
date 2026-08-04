@@ -136,7 +136,9 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
  * and the actions — mark complete for collateral/CRM, approve/deny (with
  * AI summary) for product. Opened by clicking anywhere on the row.
  */
-function RequestDetailDialog({
+/** Exported for the Nexus briefing (Jordan M's 8/4 request): "Open request"
+ * there opens the specific request directly instead of a requests page. */
+export function RequestDetailDialog({
   request,
   open,
   onOpenChange,
@@ -385,7 +387,7 @@ function RequestDetailDialog({
             <p className="flex items-center gap-1 text-xs text-muted-foreground">
               <Clock className="h-3 w-3" />
               {STATUS_LABELS[request.status]} {fmtDate(request.completed_at)}
-              {request.decision_note ? ` — ${request.decision_note}` : ""}
+              {request.decision_note ? `: ${request.decision_note}` : ""}
             </p>
           )}
 
@@ -467,7 +469,7 @@ function RequestDetailDialog({
           {isPending && isProduct && request.jira_issue_key && (
             <p className="text-xs text-muted-foreground">
               This is already filed with the dev team as{" "}
-              <strong>{request.jira_issue_key}</strong> — closing it here just clears it
+              <strong>{request.jira_issue_key}</strong>; closing it here just clears it
               from the review queue.
             </p>
           )}
@@ -499,7 +501,7 @@ function RequestDetailDialog({
                 })
               }
             >
-              <Check className="h-4 w-4" /> Reviewed — close
+              <Check className="h-4 w-4" /> Mark reviewed
             </Button>
           )}
           {isPending && isProduct && !request.jira_issue_key && (
@@ -533,7 +535,7 @@ function RequestDetailDialog({
                       onSuccess: (res) => {
                         toast.success(
                           res?.jiraKey
-                            ? `Approved — filed ${res.jiraKey} in Jira.`
+                            ? `Approved: filed ${res.jiraKey} in Jira.`
                             : res && res.jiraConfigured === false
                               ? "Approved. (Jira isn't connected yet, so no ticket was filed.)"
                               : "Request approved.",

@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node '/Users/nathanagellatly/Desktop/AI - Work/Medcurity/Products/Pulse/.codex/hooks/production-guard.mjs'",
+            "timeout": 10,
+            "statusMessage": "Production guard check"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node '/Users/nathanagellatly/Desktop/AI - Work/Medcurity/Products/Pulse/.codex/hooks/production-guard.mjs'",
+            "timeout": 10,
+            "statusMessage": "Production guard check"
+          }
+        ]
+      }
+    ]
+  }
+}

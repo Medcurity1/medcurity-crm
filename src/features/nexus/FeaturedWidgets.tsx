@@ -10,9 +10,11 @@
 // inside the strip permutes the positions those two widgets already hold,
 // so nothing in the grid below shifts as a side effect.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   DndContext,
+  DragOverlay,
+  MeasuringStrategy,
   closestCenter,
   KeyboardSensor,
   PointerSensor,
@@ -24,14 +26,20 @@ import {
   arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
-  rectSortingStrategy,
+  type SortingStrategy,
 } from "@dnd-kit/sortable";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useRemoveWidget, useReorderWidgets } from "./api";
 import { selectFeatured } from "./featured";
-import { SortableWidget } from "./SortableWidget";
+import { DragOverlayCard, SortableWidget } from "./SortableWidget";
 import type { NexusWidget } from "./types";
+
+// Same drag model as NexusGrid (Nathan 8/4 rework): cards hold still, the
+// overlay clone follows the pointer, the hovered card is the drop target.
+const STATIC_WHILE_DRAGGING: SortingStrategy = () => null;
+const MEASURING = { droppable: { strategy: MeasuringStrategy.Always } };
+const DROP_ANIMATION = { duration: 200, easing: "cubic-bezier(0.2, 0, 0, 1)" };
 
 export interface FeaturedWidgetsProps {
   /** The user's full widget list; the pinned ones are picked out here. */
@@ -67,9 +75,16 @@ export function FeaturedWidgets({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const activeWidget = useMemo(
+    () => (activeId ? (featured.find((w) => w.id === activeId) ?? null) : null),
+    [activeId, featured],
+  );
+
   if (featured.length === 0) return null;
 
   function handleDragEnd(event: DragEndEvent) {
+    setActiveId(null);
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     const from = featured.findIndex((w) => w.id === active.id);
@@ -89,11 +104,14 @@ export function FeaturedWidgets({
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
+      measuring={MEASURING}
+      onDragStart={(e) => setActiveId(String(e.active.id))}
       onDragEnd={handleDragEnd}
+      onDragCancel={() => setActiveId(null)}
     >
       <SortableContext
         items={featured.map((w) => w.id)}
-        strategy={rectSortingStrategy}
+        strategy={STATIC_WHILE_DRAGGING}
       >
         <div
           className={cn(
@@ -118,6 +136,9 @@ export function FeaturedWidgets({
           ))}
         </div>
       </SortableContext>
+      <DragOverlay dropAnimation={DROP_ANIMATION}>
+        {activeWidget ? <DragOverlayCard widget={activeWidget} /> : null}
+      </DragOverlay>
     </DndContext>
   );
 }

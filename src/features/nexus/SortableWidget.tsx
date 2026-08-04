@@ -49,14 +49,29 @@ export function SortableWidget({
   onToggleFeatured,
   pinPending,
 }: SortableWidgetProps) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: widget.id, disabled: !editable });
-  const style = {
-    transform: CSS.Transform.toString(transform),
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
     transition,
-    opacity: isDragging ? 0.6 : 1,
-    zIndex: isDragging ? 10 : undefined,
+    isDragging,
+    isOver,
+    active,
+  } = useSortable({ id: widget.id, disabled: !editable });
+  // Drag rework (Nathan 8/4, "glitchy and odd"): a DragOverlay clone
+  // follows the pointer (see NexusGrid/FeaturedWidgets), so the card
+  // itself stays PUT while dragged — it fades into the "this is the slot
+  // you left" ghost, and the card under the pointer lights up as the drop
+  // target. No transform is applied mid-drag; the noop sorting strategy
+  // means neighbors don't mispredict shifts in the two variable-height
+  // stacks (the old rectSortingStrategy assumed a uniform grid and made
+  // everything jump around).
+  const style = {
+    transform: isDragging ? undefined : CSS.Transform.toString(transform),
+    transition: isDragging ? undefined : transition,
   };
+  const isDropTarget = isOver && !isDragging && !!active;
 
   const [searchQuery, setSearchQuery] = useState("");
   const [dataUpdatedAt, setDataUpdatedAt] = useState<number | undefined>();
@@ -73,7 +88,9 @@ export function SortableWidget({
       className={cn(
         "relative rounded-xl transition-all duration-200",
         customizing && "scale-[0.985] ring-2 ring-primary/25",
-        customizing && !isDragging && "opacity-95",
+        customizing && !isDragging && !isDropTarget && "opacity-95",
+        isDragging && "opacity-30 grayscale",
+        isDropTarget && "scale-[0.97] ring-2 ring-primary/70",
       )}
     >
       <WidgetShell
@@ -95,6 +112,30 @@ export function SortableWidget({
           searchQuery={searchQuery}
           onDataUpdated={setDataUpdatedAt}
         />
+      </WidgetShell>
+    </div>
+  );
+}
+
+/**
+ * The DragOverlay clone: the picked-up card that follows the pointer.
+ * Presentational only — no sortable hooks, no controls — with a lift
+ * (shadow + tiny tilt) so it reads as "in your hand". Bodies render from
+ * the same react-query cache as the real card, so it appears instantly.
+ */
+export function DragOverlayCard({ widget }: { widget: NexusWidget }) {
+  const Body = WIDGET_BODIES[widget.widget_type] ?? UnknownWidgetBody;
+  return (
+    <div className="pointer-events-none rotate-1 cursor-grabbing rounded-xl shadow-2xl ring-2 ring-primary/50">
+      <WidgetShell
+        widget={widget}
+        searchQuery=""
+        onSearchQueryChange={() => {}}
+        onEdit={() => {}}
+        onRemove={() => {}}
+        editable={false}
+      >
+        <Body widget={widget} searchQuery="" />
       </WidgetShell>
     </div>
   );

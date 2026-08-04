@@ -12,8 +12,8 @@
 // fails it renders nothing at all, so Nexus degrades to exactly the page
 // it is today rather than showing a broken banner.
 
-import { useMemo, useState, type ReactNode } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import { Plus, Phone, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,12 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { QuickTaskDialog } from "@/features/activities/QuickTaskDialog";
 import { useDayQueue, useSnoozeDayItem, type DayQueueRow } from "./day-queue-api";
 import { NEXUS_FEEDBACK_LINK } from "./landing-flip";
+import { useRequestDialog } from "@/features/requests/RequestDialogProvider";
+import { RequestDetailDialog } from "@/features/requests/RequestCard";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+import { toast } from "sonner";
+import type { CrmRequest } from "@/types/crm";
 import { getHeroTheme, useHeroTheme } from "./hero-themes";
 
 // ── Copy helpers ─────────────────────────────────────────────────────
@@ -142,6 +148,15 @@ export function cardLabel(row: DayQueueRow): string {
  * back to whatever record the row points at, so a branch added
  * server-side is useful the day it ships.
  */
+/** The request id rides in item_key ('request:<uuid>' — day-queue requests
+ * branch migration). Null for every other kind. */
+export function requestIdOf(row: DayQueueRow): string | null {
+  if (row.kind !== "request") return null;
+  return row.item_key.startsWith("request:")
+    ? row.item_key.slice("request:".length)
+    : null;
+}
+
 export function primaryAction(row: DayQueueRow, isAdmin = true): { label: string; to: string } {
   switch (row.kind) {
     case "reply":
@@ -178,7 +193,11 @@ export function primaryAction(row: DayQueueRow, isAdmin = true): { label: string
         to: row.account_id ? `/accounts/${row.account_id}` : "/activities",
       };
     case "request":
-      return { label: "Open request", to: "/requests" };
+      // Jordan M's 8/4 request: this used to dump her on the submit form.
+      // BriefingCard/ListRow intercept request rows and open the specific
+      // request in a dialog right here (requestIdOf below); this `to` is
+      // only the fallback if the id can't be read or the fetch fails.
+      return { label: "View request", to: "/admin?tab=requests" };
     default: {
       if (row.opportunity_id)
         return { label: "Open", to: `/opportunities/${row.opportunity_id}` };
@@ -210,12 +229,18 @@ export interface BriefingProps {
    * above the divider so the controls are next to what they change.
    */
   customizeSlot?: ReactNode;
+  /**
+   * The Metrics strip (Nathan 8/4): its own section under the three
+   * surfaced items and above the pinned widgets / divider.
+   */
+  metricsSlot?: ReactNode;
 }
 
 export function Briefing({
   dividerActions,
   featuredSlot,
   customizeSlot,
+  metricsSlot,
 }: BriefingProps) {
   const { profile, user } = useAuth();
   const isAdmin = ["admin", "super_admin"].includes(
@@ -235,6 +260,43 @@ export function Briefing({
     [rows],
   );
 
+  // "View request" opens the actual request right here (Jordan M, 8/4)
+  // instead of navigating anywhere. Falls back to the admin inbox if the
+  // row can't be fetched (deleted, or RLS says no).
+  const [requestId, setRequestId] = useState<string | null>(null);
+  const requestQuery = useQuery({
+    queryKey: ["briefing-request", requestId],
+    enabled: !!requestId,
+    queryFn: async () => {
+      const { data: req, error: reqError } = await supabase
+        .from("requests")
+        .select("*")
+        .eq("id", requestId!)
+        .maybeSingle();
+      if (reqError) throw reqError;
+      return (req ?? null) as CrmRequest | null;
+    },
+  });
+  const requestLookupFailed =
+    !!requestId &&
+    (requestQuery.isError || (requestQuery.isSuccess && requestQuery.data === null));
+  useEffect(() => {
+    if (!requestLookupFailed) return;
+    toast.error("Couldn't open that request. Taking you to the inbox instead.");
+    setRequestId(null);
+    navigate("/admin?tab=requests");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestLookupFailed]);
+
+  function handleOpen(row: DayQueueRow, to: string) {
+    const reqId = requestIdOf(row);
+    if (reqId) {
+      setRequestId(reqId);
+      return;
+    }
+    navigate(to);
+  }
+
   if (isError) {
     // Never break the tab over a briefing. Nexus falls back to the grid.
     console.error("Nexus briefing: day queue failed to load", error);
@@ -251,6 +313,7 @@ export function Briefing({
           ))}
         </div>
         {customizeSlot}
+        {metricsSlot}
         {featuredSlot}
         <DividerRow actions={dividerActions} />
       </div>
@@ -327,7 +390,7 @@ export function Briefing({
               row={row}
               isAdmin={isAdmin}
               rank={i + 1}
-              onOpen={(to) => navigate(to)}
+              onOpen={(to) => handleOpen(row, to)}
               onSnooze={() => snooze.mutate(row.item_key)}
               snoozing={snooze.isPending}
             />
@@ -356,8 +419,8 @@ export function Briefing({
                 <BriefingListRow
                   key={row.item_key}
                   row={row}
-              isAdmin={isAdmin}
-                  onOpen={(to) => navigate(to)}
+                  isAdmin={isAdmin}
+                  onOpen={(to) => handleOpen(row, to)}
                   onSnooze={() => snooze.mutate(row.item_key)}
                   snoozing={snooze.isPending}
                 />
@@ -367,6 +430,9 @@ export function Briefing({
         </div>
       )}
 
+      {/* Metrics strip: its own section under the surfaced items (Nathan 8/4). */}
+      {metricsSlot}
+
       {/* Pinned widgets, above the divider by definition. */}
       {featuredSlot}
 
@@ -375,11 +441,24 @@ export function Briefing({
       {/* Reuses the app's standard task dialog, with its attach-to-record
           picker, rather than inventing a second one. */}
       <QuickTaskDialog open={taskOpen} onOpenChange={setTaskOpen} />
+
+      {/* The specific request a "View request" click referred to (Jordan
+          M, 8/4). Mounted only while open; closing clears the id. */}
+      {requestId && requestQuery.data && (
+        <RequestDetailDialog
+          request={requestQuery.data}
+          open
+          onOpenChange={(o) => {
+            if (!o) setRequestId(null);
+          }}
+        />
+      )}
     </div>
   );
 }
 
 function DividerRow({ actions }: { actions?: ReactNode }) {
+  const { openRequestDialog } = useRequestDialog();
   return (
     <div data-tour="widgets" className="flex items-center gap-3 pt-1">
       <span className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -388,14 +467,16 @@ function DividerRow({ actions }: { actions?: ReactNode }) {
       <span className="flex-1 border-t border-dashed border-border" />
       {/* Transition-only escape hatch: live while Nexus is the landing
           page and Home is still fresh in everyone's memory. Both flags
-          live in landing-flip.ts. */}
+          live in landing-flip.ts. Opens the Submit Request popup on the
+          CRM form (the tab it used to deep-link to). */}
       {NEXUS_FEEDBACK_LINK && (
-        <Link
-          to="/requests?tab=crm"
+        <button
+          type="button"
+          onClick={() => openRequestDialog("crm")}
           className="text-xs text-primary underline underline-offset-4 hover:text-primary/80"
         >
           Something missing?
-        </Link>
+        </button>
       )}
       {actions}
     </div>

@@ -10,6 +10,10 @@ import { LoginPage } from "@/features/auth/LoginPage";
 import { ForgotPasswordPage } from "@/features/auth/ForgotPasswordPage";
 import { ResetPasswordPage } from "@/features/auth/ResetPasswordPage";
 import { AppLayout } from "@/components/layout/AppLayout";
+// Requests became a header popup (Nathan 2026-08-04); the /requests route
+// survives only as a redirect that opens the popup, so old bookmarks and
+// ?tab= deep links keep working.
+import { RequestsRedirect } from "@/features/requests/RequestsRedirect";
 import { setClientErrorAppVersion } from "@/lib/clientErrorLogger";
 import { BUILD_ID } from "@/lib/buildInfo";
 
@@ -30,7 +34,6 @@ if (typeof window !== "undefined") {
   homePageImport();
 }
 const NexusPage = lazy(() => import("@/features/nexus/NexusPage").then(m => ({ default: m.NexusPage })));
-const RequestsPage = lazy(() => import("@/features/requests/RequestsPage").then(m => ({ default: m.RequestsPage })));
 const MeddyPage = lazy(() => import("@/features/meddy/MeddyPage").then(m => ({ default: m.MeddyPage })));
 const SupportPage = lazy(() => import("@/features/support/SupportPage").then(m => ({ default: m.SupportPage })));
 const NotFound = lazy(() => import("@/features/NotFound").then(m => ({ default: m.NotFound })));
@@ -53,7 +56,6 @@ const ReportsHub = lazy(() => import("@/features/reports/ReportsHub").then(m => 
 const TeamDashboardTv = lazy(() => import("@/features/reports/TeamDashboardTv").then(m => ({ default: m.TeamDashboardTv })));
 // ForecastPage is now only reached via /reports?tab=forecasting and
 // lazy-loaded inside ReportsHub.
-const ActivityCalendar = lazy(() => import("@/features/activities/ActivityCalendar").then(m => ({ default: m.ActivityCalendar })));
 const ActivitiesListPage = lazy(() => import("@/features/activities/ActivitiesListPage").then(m => ({ default: m.ActivitiesListPage })));
 const ActivityDetail = lazy(() => import("@/features/activities/ActivityDetail").then(m => ({ default: m.ActivityDetail })));
 const ArrBaseDataset = lazy(() => import("@/features/reports/standard/ArrBaseDataset").then(m => ({ default: m.ArrBaseDataset })));
@@ -140,9 +142,12 @@ export default function App() {
                   {/* Classic dashboard stays at "/" while Nexus (the
                       customizable widget page) is tested at /nexus
                       (Nathan, 2026-07-03). */}
-                  <Route index element={<HomePage />} />
+                  {/* The swap (Nathan 2026-08-04): "/" lands on Nexus. Home
+                      stays reachable at /home until it's retired for good. */}
+                  <Route index element={<Navigate to="/nexus" replace />} />
+                  <Route path="home" element={<HomePage />} />
                   <Route path="nexus" element={<NexusPage />} />
-                  <Route path="requests" element={<RequestsPage />} />
+                  <Route path="requests" element={<RequestsRedirect />} />
                   <Route path="meddy" element={<MeddyPage />} />
                   {/* Meddy Support: platform (app.medcurity.com) Coach
                       escalations. Separate stream from /meddy by design. */}
@@ -178,7 +183,6 @@ export default function App() {
                   <Route path="opportunities/:id" element={<OpportunityDetail />} />
                   <Route path="opportunities/:id/edit" element={<OpportunityForm />} />
                   <Route path="pipeline" element={<PipelineBoard />} />
-                  <Route path="calendar" element={<ActivityCalendar />} />
                   <Route path="activities" element={<ActivitiesListPage />} />
                   <Route path="activities/:id" element={<ActivityDetail />} />
                   <Route path="products" element={<ProductsPage />} />

@@ -28,6 +28,7 @@ import { useHomeLayoutImport } from "./home-import";
 import { WidgetBuilder } from "./WidgetBuilder";
 import { WidgetGallery } from "./WidgetGallery";
 import { Briefing } from "./Briefing";
+import { MetricsStrip } from "./MetricsStrip";
 import { NexusTour } from "./NexusTour";
 import { useDayQueue } from "./day-queue-api";
 
@@ -150,6 +151,10 @@ export function NexusPage() {
     />
   );
 
+  // Home's clickable Key Metrics, carried onto Nexus as a section of its
+  // own (Nathan 8/4). Show/hide + metric picks live in Customize mode.
+  const metricsStrip = <MetricsStrip customizing={customizing} />;
+
   return (
     <div className="space-y-6">
       {/* Hidden mini-game #4 — triple-click the Nexus nav label to open the
@@ -170,6 +175,7 @@ export function NexusPage() {
             {customizeControl}
           </div>
           {customizeBar}
+          {metricsStrip}
           {featuredStrip}
         </>
       )}
@@ -179,6 +185,7 @@ export function NexusPage() {
       <Briefing
         dividerActions={briefingFailed ? undefined : customizeControl}
         customizeSlot={briefingFailed ? undefined : customizeBar}
+        metricsSlot={briefingFailed ? undefined : metricsStrip}
         featuredSlot={briefingFailed ? undefined : featuredStrip}
       />
 
