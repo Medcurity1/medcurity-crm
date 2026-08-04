@@ -26,8 +26,8 @@ import type { NexusWidget, NexusWidgetType, MetricsStatConfig } from "./types";
 const HOME_TO_NEXUS: Partial<Record<string, { type: NexusWidgetType; name: string }>> = {
   kpis: { type: "metrics", name: "Metrics" },
   tasks: { type: "tasks", name: "Today's Tasks" },
-  open_opps: { type: "pipeline", name: "Current Pipeline" },
-  pipeline_summary: { type: "pipeline", name: "Current Pipeline" },
+  open_opps: { type: "pipeline", name: "My Open Opportunities" },
+  pipeline_summary: { type: "pipeline", name: "My Open Opportunities" },
   recent_records: { type: "recents", name: "Recents" },
   recent_activity: { type: "recents", name: "Recents" },
   team_activity_feed: { type: "wins", name: "Recent Wins" },

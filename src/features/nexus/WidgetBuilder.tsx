@@ -161,11 +161,13 @@ export const TYPE_META: Record<
     defaultName: "Today's Tasks",
   },
   pipeline: {
-    label: "Current Pipeline",
+    // Renamed from "Current Pipeline" 2026-08-04 (Nathan/Rachel): same
+    // widget, but named like the Home panel so people recognize it.
+    label: "My Open Opportunities",
     description: "Your open opportunities, closest close date first.",
     galleryBlurb: "Your open deals, soonest close first.",
     icon: Kanban,
-    defaultName: "Current Pipeline",
+    defaultName: "My Open Opportunities",
   },
   custom_report: {
     label: "Custom Report",

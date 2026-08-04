@@ -7,7 +7,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  GripVertical,
+  GripHorizontal,
   Pencil,
   Search,
   X,
@@ -174,23 +174,29 @@ export function WidgetShell({
         />
       )}
 
-      <CardHeader className="flex flex-row items-center gap-2 space-y-0 px-4">
-        {editable && (
+      {/* Grab bar, top-center (Nathan 8/4: Rachel and Jordan both missed the
+          old corner grip). Horizontal dots + the middle placement read as
+          "grab here", like a phone-widget handle. Only rendered when this
+          shell is actually sortable. */}
+      {editable && dragHandleProps && (
+        <div className="-mt-2 -mb-3 flex justify-center">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground shrink-0 touch-none"
+                className="cursor-grab active:cursor-grabbing rounded-md px-4 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground touch-none"
                 aria-label="Drag to reorder widget"
                 {...dragHandleProps}
               >
-                <GripVertical className="h-4 w-4" />
+                <GripHorizontal className="h-4 w-4" />
               </button>
             </TooltipTrigger>
-            <TooltipContent>Drag to reorder</TooltipContent>
+            <TooltipContent>Drag to move this widget</TooltipContent>
           </Tooltip>
-        )}
+        </div>
+      )}
 
+      <CardHeader className="flex flex-row items-center gap-2 space-y-0 px-4">
         <div className="min-w-0 flex-1">
           <CardTitle className="text-base flex items-center gap-2 min-w-0">
             {Icon && (

@@ -136,7 +136,9 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
  * and the actions — mark complete for collateral/CRM, approve/deny (with
  * AI summary) for product. Opened by clicking anywhere on the row.
  */
-function RequestDetailDialog({
+/** Exported for the Nexus briefing (Jordan M's 8/4 request): "Open request"
+ * there opens the specific request directly instead of a requests page. */
+export function RequestDetailDialog({
   request,
   open,
   onOpenChange,

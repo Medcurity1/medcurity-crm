@@ -11,13 +11,15 @@ import type { KpiDefinition } from "./kpi-registry";
 // hover glow, in the spirit of the Ask AI button. Dark-mode safe.
 // ---------------------------------------------------------------------------
 
-interface Accent {
+export interface Accent {
   badge: string; // gradient bg for the icon chip
   icon: string; // icon color
   glow: string; // colored shadow on hover
 }
 
-const CATEGORY_ACCENTS: Record<string, Accent> = {
+// Exported for the Nexus MetricsStrip, which renders the same KPIs as
+// smaller tiles with the same per-category accents.
+export const CATEGORY_ACCENTS: Record<string, Accent> = {
   sales: {
     badge: "from-emerald-500/20 to-emerald-500/[0.04]",
     icon: "text-emerald-500",
@@ -40,7 +42,7 @@ const CATEGORY_ACCENTS: Record<string, Accent> = {
   },
 };
 
-const DEFAULT_ACCENT: Accent = {
+export const DEFAULT_ACCENT: Accent = {
   badge: "from-slate-500/15 to-slate-500/[0.04]",
   icon: "text-muted-foreground",
   glow: "hover:shadow-primary/10",
@@ -50,7 +52,7 @@ const DEFAULT_ACCENT: Accent = {
 // Value formatter
 // ---------------------------------------------------------------------------
 
-function formatKpiValue(value: string | number, format: KpiDefinition["format"]): string {
+export function formatKpiValue(value: string | number, format: KpiDefinition["format"]): string {
   if (typeof value === "string") return value;
   switch (format) {
     case "currency":
