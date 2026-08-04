@@ -18,7 +18,6 @@ import {
   LogOut,
   KeyRound,
   Search,
-  Calendar as CalendarIcon,
   Clock,
   Sparkles,
   ExternalLink,
@@ -101,9 +100,8 @@ const navItems: NavItem[] = [
   // "New" badge retired 2026-07-02 (Nathan).
   // Requests tab removed 2026-08-04 (Nathan): it's now the Submit Request
   // popup in the top bar (RequestDialogProvider), openable from any page.
-  // Calendar demoted to the bottom of this group (Nathan 2026-07-20: rarely
-  // used); its full removal is docketed (D13).
-  { to: "/calendar", icon: CalendarIcon, label: "Calendar" },
+  // Calendar tab removed 2026-08-04 (Nathan: confirmed nobody uses it).
+  // Activities remain visible in /activities and per-record timelines.
   // Nexus: the customizable widget dashboard (Jordan V4). Lives at /nexus
   // while it's being tested; the classic Home dashboard is back at "/"
   // (Nathan, 2026-07-03).

@@ -90,7 +90,7 @@ main (SAFE — original scaffold, untouched)
 | Keyboard Shortcuts | ✅ Complete | Cmd+N quick create, G+key navigation |
 | Forecasting | ✅ Complete | Quarterly forecast with weighted pipeline |
 | Win/Loss Analytics | ✅ Complete | Sales velocity, loss reasons, win rate by rep |
-| Activity Calendar | ✅ Complete | Monthly view of all activities |
+| Activity Calendar | 🗑️ Removed 2026-08-04 | Was unused; activities live in the Activities list |
 | Process Automations | ✅ Complete | Trigger-based rules (e.g., Closed Won → set account Active) |
 | Duplicate Detection | ✅ Complete | Warns when creating duplicate records |
 | Customizable Dashboard | ✅ Complete | Choose which KPI cards and widgets to show |
@@ -323,7 +323,7 @@ src/
 │   ├── leads/                 # Same pattern + ConvertLeadDialog
 │   ├── opportunities/         # Same pattern + Pipeline, StageBar
 │   ├── products/              # Products + Price Books
-│   ├── activities/            # Timeline, Calendar, Tasks
+│   ├── activities/            # Timeline, Tasks (Calendar removed 2026-08-04)
 │   ├── sequences/             # Sales cadences
 │   ├── lead-lists/            # Targeted lists
 │   ├── reports/               # Report builder + dashboard

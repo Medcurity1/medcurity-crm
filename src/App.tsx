@@ -56,7 +56,6 @@ const ReportsHub = lazy(() => import("@/features/reports/ReportsHub").then(m => 
 const TeamDashboardTv = lazy(() => import("@/features/reports/TeamDashboardTv").then(m => ({ default: m.TeamDashboardTv })));
 // ForecastPage is now only reached via /reports?tab=forecasting and
 // lazy-loaded inside ReportsHub.
-const ActivityCalendar = lazy(() => import("@/features/activities/ActivityCalendar").then(m => ({ default: m.ActivityCalendar })));
 const ActivitiesListPage = lazy(() => import("@/features/activities/ActivitiesListPage").then(m => ({ default: m.ActivitiesListPage })));
 const ActivityDetail = lazy(() => import("@/features/activities/ActivityDetail").then(m => ({ default: m.ActivityDetail })));
 const ArrBaseDataset = lazy(() => import("@/features/reports/standard/ArrBaseDataset").then(m => ({ default: m.ArrBaseDataset })));
@@ -181,7 +180,6 @@ export default function App() {
                   <Route path="opportunities/:id" element={<OpportunityDetail />} />
                   <Route path="opportunities/:id/edit" element={<OpportunityForm />} />
                   <Route path="pipeline" element={<PipelineBoard />} />
-                  <Route path="calendar" element={<ActivityCalendar />} />
                   <Route path="activities" element={<ActivitiesListPage />} />
                   <Route path="activities/:id" element={<ActivityDetail />} />
                   <Route path="products" element={<ProductsPage />} />

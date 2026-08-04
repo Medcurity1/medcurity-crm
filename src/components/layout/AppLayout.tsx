@@ -38,7 +38,6 @@ const pathMap: Record<string, string> = {
   pipeline: "Pipeline",
   renewals: "Renewals",
   partners: "Partners",
-  calendar: "Calendar",
   activities: "Activities",
   products: "Products",
   reports: "Reports",
@@ -252,15 +251,18 @@ export function AppLayout() {
             {/* Submit Request popup trigger (replaced the /requests tab —
                 Nathan 2026-08-04). Provider is the outermost wrapper below. */}
             <SubmitRequestButton />
+            {/* Always-visible pill border so Ask AI reads as Submit Request's
+                sibling instead of floating label-only beside it (Nathan 8/4).
+                Violet family = the AI palette; Requests owns the warm one. */}
             <Button
               type="button"
-              variant="ghost"
+              variant="outline"
               size="sm"
               onClick={() => setShowAssistant(true)}
               title="Ask AI  (G then I)"
-              className="gap-1.5"
+              className="gap-1.5 rounded-full border-violet-500/40 bg-gradient-to-r from-violet-500/10 via-fuchsia-500/10 to-indigo-500/10 hover:border-violet-500/70 hover:from-violet-500/20 hover:via-fuchsia-500/20 hover:to-indigo-500/20 dark:border-violet-400/40"
             >
-              <Sparkles className="h-4 w-4 text-primary" />
+              <Sparkles className="h-4 w-4 text-violet-600 dark:text-violet-400" />
               <span className="hidden sm:inline">Ask AI</span>
             </Button>
             <NotificationsDropdown />

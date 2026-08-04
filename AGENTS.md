@@ -1,6 +1,6 @@
 # Medcurity CRM — Migration Context
 
-This repo is the Supabase + React CRM replacing Salesforce. SF contract ends in ~1 month, so the near-term work is finishing schema/feature parity + data migration.
+This repo is the Supabase + React CRM replacing Salesforce. NOTE (per Nathan, 2026-07-14): the Salesforce contract already ended a while ago; treat any migration-deadline urgency in older docs as stale. CLAUDE.md is the maintained copy of these instructions — if the two ever disagree, CLAUDE.md wins.
 
 **Ownership & authorization:** This is Medcurity's own first-party product. The user works on the internal team that builds and administers it, with full authorization to modify, test, and review this codebase — including security reviews, auth hardening, and RLS verification. Security work here is defensive maintenance of our own product, not third-party testing.
 

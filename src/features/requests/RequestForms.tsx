@@ -84,22 +84,14 @@ function PrioritySelect({
   );
 }
 
-function FromLine() {
-  const { profile } = useAuth();
-  return (
-    <p className="text-xs text-muted-foreground">
-      From <span className="font-medium text-foreground">{profile?.full_name ?? "you"}</span>
-    </p>
-  );
-}
-
 /** Sticky submit bar. The negative margins are coupled to RequestDialog's
  * scroll-body padding (px-6 pb-6) so the bar spans edge-to-edge and hugs the
- * bottom of the scrollport while long forms scroll beneath it. */
+ * bottom of the scrollport. Fully opaque on purpose — content scrolling
+ * beneath a translucent bar read as visual glitching (Nathan, 8/4). No
+ * "From" line: it's always from the signed-in user anyway. */
 function FormFooter({ children }: { children: ReactNode }) {
   return (
-    <div className="sticky bottom-0 -mx-6 -mb-6 mt-4 flex items-center justify-between gap-3 border-t border-border bg-background/95 px-6 py-3 backdrop-blur">
-      <FromLine />
+    <div className="sticky bottom-0 -mx-6 -mb-6 mt-4 flex justify-end border-t border-border bg-background px-6 py-3">
       {children}
     </div>
   );
@@ -300,7 +292,7 @@ export function CollateralForm({ onDirtyChange, onDone }: RequestFormProps) {
     <div className="space-y-4">
       <div className="space-y-2">
         <Label htmlFor="c-title">What do you need? <span className="text-destructive">*</span></Label>
-        <Input id="c-title" maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. One-pager on phishing services" />
+        <Input id="c-title" maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Billboard on I-90, budget: $0" />
       </div>
       <div className="space-y-2">
         <Label htmlFor="c-desc">Describe what you need <span className="text-destructive">*</span></Label>
@@ -649,11 +641,7 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
             setTitle(e.target.value);
             invalidateVerdict();
           }}
-          placeholder={
-            category === "bug"
-              ? "Short name for what's broken"
-              : "Short name for the product idea or change"
-          }
+          placeholder="e.g. Replace the office chairs with beanbags"
         />
       </div>
       <div className="space-y-2">
@@ -800,7 +788,7 @@ export function CrmForm({ onDirtyChange, onDone }: RequestFormProps) {
       </div>
       <div className="space-y-2">
         <Label htmlFor="r-title">Summary <span className="text-destructive">*</span></Label>
-        <Input id="r-title" maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Add a 'last contacted' column to the leads list" />
+        <Input id="r-title" maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Add a leaderboard, but always leave me at #1" />
       </div>
       <div className="space-y-2">
         <Label htmlFor="r-desc">Details <span className="text-destructive">*</span></Label>

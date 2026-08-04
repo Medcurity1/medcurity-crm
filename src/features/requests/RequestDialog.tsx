@@ -86,11 +86,13 @@ export function RequestDialog({
           showCloseButton={false}
           className="gap-0 overflow-hidden p-0 sm:max-w-[600px]"
         >
-          {/* Aurora header band */}
+          {/* Ember header band — deliberately warm so Requests reads as its
+              own thing, distinct from the violet/blue reserved for AI
+              features (Nathan, 8/4). */}
           <div className="relative overflow-hidden px-6 pb-4 pt-5 text-white">
-            <div className="absolute inset-0 bg-gradient-to-br from-indigo-600 via-violet-600 to-teal-500" />
-            <div className="absolute -right-8 -top-12 h-40 w-40 rounded-full bg-fuchsia-400/40 blur-3xl" />
-            <div className="absolute -bottom-16 -left-10 h-44 w-44 rounded-full bg-cyan-300/40 blur-3xl" />
+            <div className="absolute inset-0 bg-gradient-to-br from-orange-500 via-red-500 to-rose-600" />
+            <div className="absolute -right-8 -top-12 h-40 w-40 rounded-full bg-amber-300/40 blur-3xl" />
+            <div className="absolute -bottom-16 -left-10 h-44 w-44 rounded-full bg-rose-300/40 blur-3xl" />
             <div className="relative">
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -121,7 +123,7 @@ export function RequestDialog({
                     className={cn(
                       "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors",
                       tab === t.value
-                        ? "bg-white text-violet-700 shadow-sm"
+                        ? "bg-white text-orange-700 shadow-sm"
                         : "text-white/85 hover:bg-white/10",
                     )}
                   >
