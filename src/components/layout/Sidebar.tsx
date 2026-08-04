@@ -72,10 +72,12 @@ type NavItem = {
 // to a freshly launched tab). COMING_SOON ("bg-orange-500 text-white")
 // retired 2026-07-03 with the old /nexus placeholder tab.
 const ADMIN_BADGE = "bg-sky-500 text-white";
-// Nexus launch highlight (Nathan 2026-08-04: "not really new but it
-// should get a highlight" — he leaned Launched over New). Emerald to
-// match the tour + Evergreen hero. Retire once the launch is old news.
-const LAUNCHED_BADGE = "bg-emerald-500 text-white";
+// Nexus launch highlight (Nathan 2026-08-04): a blue-focused gradient
+// pill per his call. Retire once the launch is old news.
+const LAUNCHED_BADGE =
+  "bg-gradient-to-r from-sky-400 via-blue-500 to-indigo-500 text-white shadow-sm shadow-blue-500/30";
+// Home is on its way out (kept until the team confirms nothing is missed).
+const LEAVING_BADGE = "bg-red-500 text-white";
 
 const navItems: NavItem[] = [
   // The swap (Nathan 2026-08-04): Nexus is the landing page and top tab;
@@ -107,7 +109,7 @@ const navItems: NavItem[] = [
   // popup in the top bar (RequestDialogProvider), openable from any page.
   // Calendar tab removed 2026-08-04 (Nathan: confirmed nobody uses it).
   // Activities remain visible in /activities and per-record timelines.
-  { to: "/home", icon: Home, label: "Home" },
+  { to: "/home", icon: Home, label: "Home", badge: { label: "Leaving soon", className: LEAVING_BADGE } },
 ];
 
 const adminItems: NavItem[] = [
