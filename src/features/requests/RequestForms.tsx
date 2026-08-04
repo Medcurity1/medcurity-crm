@@ -84,14 +84,14 @@ function PrioritySelect({
   );
 }
 
-/** Sticky submit bar. The negative margins are coupled to RequestDialog's
- * scroll-body padding (px-6 pb-6) so the bar spans edge-to-edge and hugs the
- * bottom of the scrollport. Fully opaque on purpose — content scrolling
- * beneath a translucent bar read as visual glitching (Nathan, 8/4). No
- * "From" line: it's always from the signed-in user anyway. */
+/** Sticky submit bar. -mx-6 is coupled to RequestDialog's scroll-body px-6
+ * so the bar spans edge-to-edge; the body deliberately has NO bottom padding
+ * (a negative-bottom-margin variant left a strip where scrolling content
+ * peeked out under the bar — Nathan, 8/4). Fully opaque for the same reason.
+ * No "From" line: it's always from the signed-in user anyway. */
 function FormFooter({ children }: { children: ReactNode }) {
   return (
-    <div className="sticky bottom-0 -mx-6 -mb-6 mt-4 flex justify-end border-t border-border bg-background px-6 py-3">
+    <div className="sticky bottom-0 -mx-6 mt-4 flex justify-end border-t border-border bg-background px-6 py-3">
       {children}
     </div>
   );

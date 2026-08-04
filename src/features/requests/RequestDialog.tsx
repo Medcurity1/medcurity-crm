@@ -134,9 +134,11 @@ export function RequestDialog({
               </div>
             </div>
           </div>
-          {/* Scrolling form body. Padding is load-bearing: FormFooter's
-              negative margins (-mx-6 -mb-6) assume px-6 pb-6 here. */}
-          <div className="max-h-[min(62vh,560px)] overflow-y-auto px-6 pb-6 pt-5">
+          {/* Scrolling form body. Padding is load-bearing: FormFooter's -mx-6
+              assumes px-6 here, and the missing bottom padding is deliberate —
+              it lets the sticky footer sit flush with the scrollport bottom so
+              no strip of content can peek out beneath it (Nathan, 8/4). */}
+          <div className="max-h-[min(62vh,560px)] overflow-y-auto px-6 pt-5">
             {tab === "collateral" && (
               <CollateralForm onDirtyChange={handleDirty} onDone={onClose} />
             )}
