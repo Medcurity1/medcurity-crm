@@ -94,7 +94,8 @@ drop policy if exists "collateral_items_read_by_flag" on public.collateral_items
 create policy "collateral_items_read_by_flag" on public.collateral_items
   for select to authenticated
   using (
-    public.current_app_role() = any (
+    -- current_app_role() returns the app_role ENUM; cast for the text[] flag.
+    (public.current_app_role())::text = any (
       (select s.visible_to_roles from public.collateral_settings s where s.id = 1)
     )
   );
