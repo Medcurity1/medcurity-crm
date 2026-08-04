@@ -140,8 +140,11 @@ const ANCHOR_WAIT_MS = 5000;
 const ANCHOR_POLL_MS = 120;
 
 // The highlight glides between steps and the page scrolls smoothly, so
-// keep re-measuring for a moment after each step change.
-const SETTLE_MS = 800;
+// keep re-measuring for a moment after each step change. 1600ms because a
+// long smooth scroll (top of page to the widgets area) can outlast 800ms,
+// which left the ring parked at a mid-scroll position (seen in the 8/4
+// launch walkthrough on step 5).
+const SETTLE_MS = 1600;
 
 // Geometry.
 const HOLE_PAD = 8;
