@@ -1105,6 +1105,16 @@ export async function fetchRecipientsByList(list: LeadList): Promise<Recipient[]
     // audiences too — a removed contact must not resurface in a launch.
     const { fetchListExclusionIds } = await import("@/features/lead-lists/lead-lists-api");
     const excludedIds = await fetchListExclusionIds(list.id);
+    // Hybrid smart lists (Nathan 8/4): hand-added members join the
+    // audience alongside the rule matches.
+    const { data: manualRows } = await supabase
+      .from("lead_list_members")
+      .select("contact:contacts(id, first_name, last_name, email, account_id, account:accounts!account_id(name))")
+      .eq("list_id", list.id)
+      .not("contact_id", "is", null);
+    for (const m of (manualRows ?? []) as unknown as Array<{ contact: Record<string, unknown> | null }>) {
+      if (m.contact) all.push(m.contact);
+    }
     // A multi-tag rule returns one row per matching tag through the inner
     // embed — dedupe by contact id (same as useSmartListMembers).
     const seen = new Set<string>();

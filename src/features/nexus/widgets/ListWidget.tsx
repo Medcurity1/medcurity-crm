@@ -54,7 +54,7 @@ function useListWidgetData(listId: string | null) {
       if (list.is_dynamic) {
         const rules = parseSmartRules(list as LeadList);
         if (smartRulesEmpty(rules)) return { list: list as LeadList, rows: [] };
-        const [excluded, res] = await Promise.all([
+        const [excluded, res, manual] = await Promise.all([
           fetchListExclusionIds(list.id),
           buildSmartQuery(
             rules,
@@ -62,10 +62,28 @@ function useListWidgetData(listId: string | null) {
           )
             .order("last_name", { ascending: true, nullsFirst: false })
             .limit(500),
+          supabase
+            .from("lead_list_members")
+            .select("contact:contacts(id, first_name, last_name, account:accounts!account_id(name))")
+            .eq("list_id", list.id)
+            .not("contact_id", "is", null),
         ]);
         if (res.error) throw res.error;
         const seen = new Set<string>();
         const rows: ListRowData[] = [];
+        // Hand-added members first (hybrid smart lists, Nathan 8/4).
+        for (const m of (manual.data ?? []) as unknown as Array<{
+          contact: { id: string; first_name: string | null; last_name: string | null; account: { name: string } | null } | null;
+        }>) {
+          if (!m.contact || seen.has(m.contact.id) || excluded.has(m.contact.id)) continue;
+          seen.add(m.contact.id);
+          rows.push({
+            contactId: m.contact.id,
+            memberId: null,
+            name: [m.contact.first_name, m.contact.last_name].filter(Boolean).join(" ") || "Unnamed",
+            account: m.contact.account?.name ?? null,
+          });
+        }
         for (const raw of (res.data ?? []) as unknown as Array<{
           id: string;
           first_name: string | null;
