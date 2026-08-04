@@ -7,7 +7,6 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   Ban,
-  BarChart3,
   History, PhoneCall,
   Inbox,
   Kanban,
@@ -59,10 +58,8 @@ import {
 import { NEXUS_WIDGET_ICONS, WIDGET_ACCENT_CLASSES } from "./WidgetShell";
 import { defaultReportConfig, normalizeReportConfig } from "./report-engine";
 import { CustomReportPanel } from "./panels/CustomReportPanel";
-import { MetricsPanel } from "./panels/MetricsPanel";
 import { PinnedRecordsPanel, normalizePinnedConfig } from "./panels/PinnedRecordsPanel";
 import { RequestsPanel, normalizeRequestsConfig } from "./panels/RequestsPanel";
-import { getMetricDef, normalizeMetricsConfig } from "./metrics";
 
 
 /** Starting config per type for a freshly-picked widget type. */
@@ -70,8 +67,6 @@ function defaultConfigFor(type: NexusWidgetType): NexusWidgetConfig {
   switch (type) {
     case "custom_report":
       return defaultReportConfig();
-    case "metrics":
-      return normalizeMetricsConfig(null);
     case "pinned_records":
       return normalizePinnedConfig(null);
     case "requests":
@@ -93,8 +88,6 @@ function normalizeConfigFor(
   switch (type) {
     case "custom_report":
       return normalizeReportConfig(raw);
-    case "metrics":
-      return normalizeMetricsConfig(raw);
     case "pinned_records":
       return normalizePinnedConfig(raw);
     case "requests":
@@ -122,15 +115,6 @@ export function validateWidgetConfig(
       return `Pick ${REPORT_MIN_COLUMNS}–${REPORT_MAX_COLUMNS} columns.`;
     }
     if (!cfg.sort?.field) return "Pick a sort column.";
-  }
-  if (type === "metrics") {
-    // Read through the same normalizer the widget uses, so a legacy
-    // single-stat config validates as the one-stat list it renders as.
-    const { stats } = normalizeMetricsConfig(config);
-    if (stats.length === 0) return "Add at least one stat.";
-    if (stats.some((s) => !getMetricDef(s.metric))) {
-      return "One stat's metric is no longer available. Pick another.";
-    }
   }
   return null;
 }
@@ -175,13 +159,6 @@ export const TYPE_META: Record<
     galleryBlurb: "Any list you want, filtered and sorted.",
     icon: Table2,
     defaultName: "Custom Report",
-  },
-  metrics: {
-    label: "Metrics",
-    description: "Key stats as big numbers, two per row, with mini trend lines.",
-    galleryBlurb: "Big numbers with a trend line.",
-    icon: BarChart3,
-    defaultName: "Metrics",
   },
   pinned_records: {
     label: "Pinned Records",
@@ -315,11 +292,6 @@ export function WidgetBuilder({
     // previous type's default (or blank).
     if (!name.trim() || name === TYPE_META[type].defaultName) {
       setName(TYPE_META[next].defaultName);
-    }
-    // Metrics hides the preview-rows control — reset a stale count picked
-    // for a previous type so it isn't silently persisted on the widget.
-    if (next === "metrics") {
-      setPreviewCount(DEFAULT_PREVIEW_COUNT);
     }
     // Returning to the widget's original type restores its saved config;
     // any other switch starts from that type's defaults.
@@ -567,8 +539,8 @@ export function WidgetBuilder({
           {/* 4-7. Per-type configuration */}
           <TypeConfigPanel type={type} config={config} onConfigChange={setConfig} />
 
-          {/* 8. Preview count (Metrics has no rows, so it has no count) */}
-          {type !== "metrics" && (
+          {/* 8. Preview count */}
+          {(
             <div className="space-y-2">
               <Label>Preview rows</Label>
               <Select
@@ -663,8 +635,6 @@ function TypeConfigPanel({ type, config, onConfigChange }: TypeConfigPanelProps)
       );
     case "custom_report":
       return <CustomReportPanel config={config} onConfigChange={onConfigChange} />;
-    case "metrics":
-      return <MetricsPanel config={config} onConfigChange={onConfigChange} />;
     case "pinned_records":
       return <PinnedRecordsPanel config={config} onConfigChange={onConfigChange} />;
     case "requests":
