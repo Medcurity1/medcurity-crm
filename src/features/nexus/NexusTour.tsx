@@ -106,6 +106,7 @@ const STEPS: TourStep[] = [
     items: [
       "Today's Tasks",
       "My Open Opportunities",
+      "List",
       "Recent Wins",
       "Requests",
       "Recents",

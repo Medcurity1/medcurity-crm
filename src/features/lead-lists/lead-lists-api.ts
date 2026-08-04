@@ -190,6 +190,9 @@ export interface SmartListRules {
   customer_status?: string[];
   has_phone?: boolean;
   has_email?: boolean;
+  /** New MQL or SQL stamped within the last N months (Summer's 8/4
+   * auto-list: work fresh marketing/sales-qualified contacts). */
+  mql_sql_within_months?: number;
 }
 
 export interface SmartMemberRow {
@@ -250,6 +253,12 @@ export function buildSmartQuery(rules: SmartListRules, selectCols: string): any 
   if (rules.owner_ids?.length) q = q.in("owner_user_id", rules.owner_ids);
   if (rules.has_phone) q = q.not("phone", "is", null);
   if (rules.has_email) q = q.not("email", "is", null);
+  if (rules.mql_sql_within_months) {
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - rules.mql_sql_within_months);
+    const iso = cutoff.toISOString().slice(0, 10);
+    q = q.or(`mql_date.gte.${iso},sql_date.gte.${iso}`);
+  }
   return q;
 }
 
@@ -262,13 +271,47 @@ export function smartRulesEmpty(rules: SmartListRules): boolean {
     !rules.owner_ids?.length &&
     !rules.customer_status?.length &&
     !rules.has_phone &&
-    !rules.has_email
+    !rules.has_email &&
+    !rules.mql_sql_within_months
   );
 }
 
 /** Live members of a smart list (deduped — a multi-tag match returns one
  * row per matching tag through the inner embed). Capped at SMART_FETCH_CAP;
  * `capped` tells the UI to say "2,000+". */
+/** Contact ids the owner has removed from a SMART list ("worked it") —
+ * subtracted by every resolver so the live rule can't re-add them. */
+export async function fetchListExclusionIds(listId: string): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from("lead_list_exclusions")
+    .select("contact_id")
+    .eq("list_id", listId);
+  if (error) throw error;
+  return new Set((data ?? []).map((r) => r.contact_id as string));
+}
+
+/** Remove a contact from a smart list, stickily: the exclusion row keeps
+ * the live rule from re-adding them next resolve. */
+export function useExcludeFromSmartList() {
+  const qc = useQueryClient();
+  const { user } = useAuth();
+  return useMutation({
+    mutationFn: async ({ listId, contactId }: { listId: string; contactId: string }) => {
+      const { error } = await supabase.from("lead_list_exclusions").upsert(
+        { list_id: listId, contact_id: contactId, excluded_by: user?.id ?? null },
+        { onConflict: "list_id,contact_id" },
+      );
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["smart-list-members"] });
+      qc.invalidateQueries({ queryKey: ["nexus-widget-data", "list"] });
+      toast.success("Removed. The rule won't add them back.");
+    },
+    onError: (e) => toast.error("Couldn't remove: " + (e as Error).message),
+  });
+}
+
 export function useSmartListMembers(list: LeadList | null) {
   const rules = list ? parseSmartRules(list) : null;
   return useQuery({
@@ -278,17 +321,21 @@ export function useSmartListMembers(list: LeadList | null) {
       if (!rules || smartRulesEmpty(rules)) {
         return { rows: [] as SmartMemberRow[], capped: false };
       }
-      const { data, error } = await buildSmartQuery(
-        rules,
-        "id, first_name, last_name, email, phone, account:accounts!account_id(name)",
-      )
-        .order("last_name", { ascending: true, nullsFirst: false })
-        .limit(SMART_FETCH_CAP);
+      const [excluded, res] = await Promise.all([
+        fetchListExclusionIds(list!.id),
+        buildSmartQuery(
+          rules,
+          "id, first_name, last_name, email, phone, account:accounts!account_id(name)",
+        )
+          .order("last_name", { ascending: true, nullsFirst: false })
+          .limit(SMART_FETCH_CAP),
+      ]);
+      const { data, error } = res;
       if (error) throw error;
       const seen = new Set<string>();
       const rows: SmartMemberRow[] = [];
       for (const r of (data ?? []) as unknown as SmartMemberRow[]) {
-        if (seen.has(r.id)) continue;
+        if (seen.has(r.id) || excluded.has(r.id)) continue;
         seen.add(r.id);
         rows.push(r);
       }

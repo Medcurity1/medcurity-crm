@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   ListChecks, Plus, Pencil, Trash2, X, Search, UserPlus2, Sparkles,
@@ -60,6 +60,17 @@ export function ListsPage() {
   const { data: lists, isLoading } = useLeadLists();
   const { data: counts } = useLeadListMemberCount();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // ?list=<id> deep link (the Nexus List widget's "Open list" footer).
+  const [searchParams] = useSearchParams();
+  const deepLinked = useRef(false);
+  useEffect(() => {
+    if (deepLinked.current) return;
+    const target = searchParams.get("list");
+    if (target) {
+      deepLinked.current = true;
+      setSelectedId(target);
+    }
+  }, [searchParams]);
   const [createOpen, setCreateOpen] = useState(false);
 
   const selected = useMemo(
@@ -543,6 +554,7 @@ function CreateOrRenameListDialog({
   const [statuses, setStatuses] = useState<string[]>(existingRules.customer_status ?? []);
   const [hasPhone, setHasPhone] = useState(!!existingRules.has_phone);
   const [hasEmail, setHasEmail] = useState(!!existingRules.has_email);
+  const [mqlSqlMonths, setMqlSqlMonths] = useState<number>(existingRules.mql_sql_within_months ?? 0);
 
   // The dialog instance persists across opens (it isn't keyed/remounted), so
   // every field must re-initialize on open — otherwise the Working/Smart
@@ -561,6 +573,7 @@ function CreateOrRenameListDialog({
     setStatuses(r.customer_status ?? []);
     setHasPhone(!!r.has_phone);
     setHasEmail(!!r.has_email);
+    setMqlSqlMonths(r.mql_sql_within_months ?? 0);
     // Reset only when the dialog OPENS — a background lists refetch while the
     // user is typing must not clobber their edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -573,6 +586,7 @@ function CreateOrRenameListDialog({
     customer_status: statuses.length ? statuses : undefined,
     has_phone: hasPhone || undefined,
     has_email: hasEmail || undefined,
+    mql_sql_within_months: mqlSqlMonths || undefined,
   };
 
   async function submit() {
@@ -698,6 +712,28 @@ function CreateOrRenameListDialog({
                     options={(users ?? []).map((u) => ({ value: u.id, label: u.full_name ?? "Unknown" }))}
                   />
                 </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>New MQL or SQL within</Label>
+                <Select
+                  value={String(mqlSqlMonths)}
+                  onValueChange={(v) => setMqlSqlMonths(Number(v))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">Off</SelectItem>
+                    <SelectItem value="3">Last 3 months</SelectItem>
+                    <SelectItem value="4">Last 4 months</SelectItem>
+                    <SelectItem value="6">Last 6 months</SelectItem>
+                    <SelectItem value="12">Last 12 months</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Contacts whose MQL or SQL date was stamped in that window.
+                  Remove people as you work them; the rule won't re-add them.
+                </p>
               </div>
               <div className="space-y-1.5">
                 <Label>Account status</Label>

@@ -1101,13 +1101,17 @@ export async function fetchRecipientsByList(list: LeadList): Promise<Recipient[]
       all.push(...batch);
       if (batch.length < PAGE) break;
     }
+    // Sticky removals ("worked it", Summer 8/4) apply to campaign
+    // audiences too — a removed contact must not resurface in a launch.
+    const { fetchListExclusionIds } = await import("@/features/lead-lists/lead-lists-api");
+    const excludedIds = await fetchListExclusionIds(list.id);
     // A multi-tag rule returns one row per matching tag through the inner
     // embed — dedupe by contact id (same as useSmartListMembers).
     const seen = new Set<string>();
     const out: Recipient[] = [];
     for (const c of all) {
       const id = c.id as string;
-      if (seen.has(id)) continue;
+      if (seen.has(id) || excludedIds.has(id)) continue;
       seen.add(id);
       if (typeof c.email !== "string" || !c.email.trim()) continue;
       out.push({
