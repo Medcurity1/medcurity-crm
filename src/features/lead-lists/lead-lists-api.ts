@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
+import { toast } from "sonner";
+import { useAuth } from "@/features/auth/AuthProvider";
 import type { LeadList, LeadListMember } from "@/types/crm";
 import { buildPersonSearchClause } from "@/lib/search-clause";
 
