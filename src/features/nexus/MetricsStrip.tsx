@@ -190,7 +190,7 @@ export function MetricsStrip({ customizing }: { customizing: boolean }) {
       )}
 
       {visible && activeKpis.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
           {activeKpis.map((kpi) => (
             <NexusKpiTile key={kpi.id} kpi={kpi} userId={userId} />
           ))}
