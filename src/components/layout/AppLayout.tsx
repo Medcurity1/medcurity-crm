@@ -45,6 +45,7 @@ const pathMap: Record<string, string> = {
   forecasting: "Reports",
   analytics: "Reports",
   playbook: "Campaigns",
+  collateral: "Collateral",
   meddy: "Meddy",
   nexus: "Nexus",
   support: "Meddy",

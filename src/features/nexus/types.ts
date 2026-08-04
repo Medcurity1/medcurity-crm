@@ -32,6 +32,7 @@ export const NEXUS_WIDGET_TYPES = [
   "wins",
   "cold_call",
   "recents",
+  "list",
 ] as const;
 export type NexusWidgetType = (typeof NEXUS_WIDGET_TYPES)[number];
 
@@ -107,6 +108,11 @@ export interface PinnedRecordsWidgetConfig {
   records: PinnedRecordRef[];
 }
 
+/** One lead list rendered as widget rows (Summer, 8/4). */
+export interface ListWidgetConfig {
+  list_id: string | null;
+}
+
 export type RequestsWidgetCategory = "collateral" | "product" | "crm" | "all";
 
 export interface RequestsWidgetConfig {
@@ -125,6 +131,7 @@ export interface NexusWidgetConfigMap {
   wins: WinsWidgetConfig;
   cold_call: ColdCallWidgetConfig;
   recents: RecentsWidgetConfig;
+  list: ListWidgetConfig;
 }
 
 /** Any widget config (use the discriminated row types to narrow). */

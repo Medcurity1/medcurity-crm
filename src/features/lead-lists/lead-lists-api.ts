@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
+import { toast } from "sonner";
+import { useAuth } from "@/features/auth/AuthProvider";
 import type { LeadList, LeadListMember } from "@/types/crm";
 import { buildPersonSearchClause } from "@/lib/search-clause";
 
@@ -190,6 +192,22 @@ export interface SmartListRules {
   customer_status?: string[];
   has_phone?: boolean;
   has_email?: boolean;
+  /** New MQL or SQL stamped within the last N months (legacy shape;
+   * still honored). New lists store mql_sql_within_days instead. */
+  mql_sql_within_months?: number;
+  /** New MQL or SQL stamped within the last N DAYS (Nathan 8/4: fully
+   * custom timeframe — the UI offers days/weeks/months/years and stores
+   * the equivalent day count). */
+  mql_sql_within_days?: number;
+}
+
+/** The MQL/SQL window in days, honoring both stored shapes. */
+export function mqlSqlWindowDays(rules: SmartListRules): number | null {
+  if (rules.mql_sql_within_days && rules.mql_sql_within_days > 0)
+    return Math.round(rules.mql_sql_within_days);
+  if (rules.mql_sql_within_months && rules.mql_sql_within_months > 0)
+    return Math.round(rules.mql_sql_within_months * 30);
+  return null;
 }
 
 export interface SmartMemberRow {
@@ -221,6 +239,15 @@ export function smartRuleChips(
     chips.push(`Status: ${rules.customer_status.map(statusLabel).join(" or ")}`);
   if (rules.has_phone) chips.push("Has a phone");
   if (rules.has_email) chips.push("Has an email");
+  const windowDays = mqlSqlWindowDays(rules);
+  if (windowDays) {
+    const pretty =
+      windowDays % 365 === 0 ? `${windowDays / 365} year${windowDays === 365 ? "" : "s"}`
+      : windowDays % 30 === 0 ? `${windowDays / 30} month${windowDays === 30 ? "" : "s"}`
+      : windowDays % 7 === 0 ? `${windowDays / 7} week${windowDays === 7 ? "" : "s"}`
+      : `${windowDays} day${windowDays === 1 ? "" : "s"}`;
+    chips.push(`New MQL/SQL in last ${pretty}`);
+  }
   return chips;
 }
 
@@ -250,6 +277,12 @@ export function buildSmartQuery(rules: SmartListRules, selectCols: string): any 
   if (rules.owner_ids?.length) q = q.in("owner_user_id", rules.owner_ids);
   if (rules.has_phone) q = q.not("phone", "is", null);
   if (rules.has_email) q = q.not("email", "is", null);
+  const windowDays = mqlSqlWindowDays(rules);
+  if (windowDays) {
+    const cutoff = new Date(Date.now() - windowDays * 86_400_000);
+    const iso = cutoff.toISOString().slice(0, 10);
+    q = q.or(`mql_date.gte.${iso},sql_date.gte.${iso}`);
+  }
   return q;
 }
 
@@ -262,13 +295,118 @@ export function smartRulesEmpty(rules: SmartListRules): boolean {
     !rules.owner_ids?.length &&
     !rules.customer_status?.length &&
     !rules.has_phone &&
-    !rules.has_email
+    !rules.has_email &&
+    !mqlSqlWindowDays(rules)
   );
 }
 
 /** Live members of a smart list (deduped — a multi-tag match returns one
  * row per matching tag through the inner embed). Capped at SMART_FETCH_CAP;
  * `capped` tells the UI to say "2,000+". */
+/** Contact ids the owner has removed from a SMART list ("worked it") —
+ * subtracted by every resolver so the live rule can't re-add them. */
+export async function fetchListExclusionIds(listId: string): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from("lead_list_exclusions")
+    .select("contact_id")
+    .eq("list_id", listId);
+  if (error) throw error;
+  return new Set((data ?? []).map((r) => r.contact_id as string));
+}
+
+/** Remove a contact from a smart list, stickily: the exclusion row keeps
+ * the live rule from re-adding them next resolve. */
+export function useExcludeFromSmartList() {
+  const qc = useQueryClient();
+  const { user } = useAuth();
+  return useMutation({
+    mutationFn: async ({ listId, contactId }: { listId: string; contactId: string }) => {
+      const { error } = await supabase.from("lead_list_exclusions").upsert(
+        { list_id: listId, contact_id: contactId, excluded_by: user?.id ?? null },
+        { onConflict: "list_id,contact_id" },
+      );
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["smart-list-members"] });
+      qc.invalidateQueries({ queryKey: ["nexus-widget-data", "list"] });
+      toast.success("Removed. The rule won't add them back.");
+    },
+    onError: (e) => toast.error("Couldn't remove: " + (e as Error).message),
+  });
+}
+
+/** The removed-and-kept-off people of a smart list, for the Restore UI. */
+export function useListExclusions(listId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ["list-exclusions", listId],
+    enabled: !!listId && enabled,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("lead_list_exclusions")
+        .select("id, contact_id, excluded_at, contact:contacts(first_name, last_name, account:accounts!account_id(name))")
+        .eq("list_id", listId!)
+        .order("excluded_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as unknown as Array<{
+        id: string;
+        contact_id: string;
+        excluded_at: string;
+        contact: { first_name: string | null; last_name: string | null; account: { name: string } | null } | null;
+      }>;
+    },
+  });
+}
+
+/** Undo a smart-list removal: the rule can match them again immediately. */
+export function useRestoreToSmartList() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ exclusionId }: { exclusionId: string; listId: string }) => {
+      const { error } = await supabase
+        .from("lead_list_exclusions")
+        .delete()
+        .eq("id", exclusionId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["list-exclusions"] });
+      qc.invalidateQueries({ queryKey: ["smart-list-members"] });
+      qc.invalidateQueries({ queryKey: ["nexus-widget-data", "list"] });
+      toast.success("Restored to the list");
+    },
+    onError: (e) => toast.error("Couldn't restore: " + (e as Error).message),
+  });
+}
+
+/** Hand-add a contact to a SMART list: membership row + clear any
+ * exclusion, so "add them back" always just works (Nathan 8/4). */
+export function useAddToSmartList() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ listId, contactId }: { listId: string; contactId: string }) => {
+      const { error: exErr } = await supabase
+        .from("lead_list_exclusions")
+        .delete()
+        .eq("list_id", listId)
+        .eq("contact_id", contactId);
+      if (exErr) throw exErr;
+      const { error } = await supabase
+        .from("lead_list_members")
+        .upsert({ list_id: listId, contact_id: contactId }, { onConflict: "list_id,contact_id", ignoreDuplicates: true });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["list-exclusions"] });
+      qc.invalidateQueries({ queryKey: ["smart-list-members"] });
+      qc.invalidateQueries({ queryKey: ["lead-list-members"] });
+      qc.invalidateQueries({ queryKey: ["nexus-widget-data", "list"] });
+      toast.success("Added to the list");
+    },
+    onError: (e) => toast.error("Couldn't add: " + (e as Error).message),
+  });
+}
+
 export function useSmartListMembers(list: LeadList | null) {
   const rules = list ? parseSmartRules(list) : null;
   return useQuery({
@@ -278,17 +416,34 @@ export function useSmartListMembers(list: LeadList | null) {
       if (!rules || smartRulesEmpty(rules)) {
         return { rows: [] as SmartMemberRow[], capped: false };
       }
-      const { data, error } = await buildSmartQuery(
-        rules,
-        "id, first_name, last_name, email, phone, account:accounts!account_id(name)",
-      )
-        .order("last_name", { ascending: true, nullsFirst: false })
-        .limit(SMART_FETCH_CAP);
+      const [excluded, res, manual] = await Promise.all([
+        fetchListExclusionIds(list!.id),
+        buildSmartQuery(
+          rules,
+          "id, first_name, last_name, email, phone, account:accounts!account_id(name)",
+        )
+          .order("last_name", { ascending: true, nullsFirst: false })
+          .limit(SMART_FETCH_CAP),
+        // Hybrid (Nathan 8/4): hand-added members ride along even when the
+        // rule doesn't match them, so a mis-removal is fixable and a smart
+        // list can carry the odd extra person.
+        supabase
+          .from("lead_list_members")
+          .select("contact:contacts(id, first_name, last_name, email, phone, account:accounts!account_id(name))")
+          .eq("list_id", list!.id)
+          .not("contact_id", "is", null),
+      ]);
+      const { data, error } = res;
       if (error) throw error;
       const seen = new Set<string>();
       const rows: SmartMemberRow[] = [];
+      for (const m of (manual.data ?? []) as unknown as Array<{ contact: SmartMemberRow | null }>) {
+        if (!m.contact || seen.has(m.contact.id) || excluded.has(m.contact.id)) continue;
+        seen.add(m.contact.id);
+        rows.push(m.contact);
+      }
       for (const r of (data ?? []) as unknown as SmartMemberRow[]) {
-        if (seen.has(r.id)) continue;
+        if (seen.has(r.id) || excluded.has(r.id)) continue;
         seen.add(r.id);
         rows.push(r);
       }

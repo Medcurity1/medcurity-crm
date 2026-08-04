@@ -93,21 +93,20 @@ export function RequestsWidget({
     );
   }
 
-  // Preview = top N rows, then the in-widget search filters ONLY those
-  // loaded rows (same contract as the other widget bodies). This used to
-  // render every pending request inside a fixed-height scroll box; in the
-  // two-stack layout widgets are as tall as their content, so the "rows
-  // shown" setting is the size knob and the list simply grows to it. The
-  // total is still reported in the footer below.
-  const preview = all.slice(0, widget.preview_count);
+  // Every pending row renders; the "rows shown" setting is the HEIGHT of
+  // the window and anything past it scrolls (Nathan 8/4: five was a hard
+  // cap with no way to reach the sixth request). Search filters the full
+  // list, so a match beyond the fold is findable too. The total is still
+  // reported in the footer below.
   const q = searchQuery.trim().toLowerCase();
   const visible = q
-    ? preview.filter((r) =>
+    ? all.filter((r) =>
         [r.title, r.status, r.priority, r.type].some((s) =>
           s?.toLowerCase().includes(q),
         ),
       )
-    : preview;
+    : all;
+  const overflowing = visible.length > widget.preview_count;
 
   return (
     <div>
@@ -116,14 +115,21 @@ export function RequestsWidget({
           No rows match your filter.
         </p>
       ) : (
-        <div className="space-y-2">
+        <div
+          className="space-y-2 overflow-y-auto pr-1"
+          // ~72px per card incl. gap; the setting keeps its old meaning as
+          // the widget's visual size, it just stopped hiding rows.
+          style={{ maxHeight: widget.preview_count * 72 }}
+        >
           {visible.map((r) => (
             <RequestCard key={r.id} request={r} showType={category === "all"} />
           ))}
         </div>
       )}
 
-      <div className="pt-2 text-xs text-muted-foreground">{all.length} pending</div>
+      <div className="pt-2 text-xs text-muted-foreground">
+        {all.length} pending{overflowing ? " · scroll for the rest" : ""}
+      </div>
     </div>
   );
 }

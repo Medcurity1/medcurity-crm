@@ -15,6 +15,7 @@ import {
 } from "@/features/activities/taskOrder";
 import { describeRecurrence } from "@/features/activities/recurrence";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Building2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDate } from "@/lib/formatters";
 import { WidgetError } from "./WidgetError";
@@ -292,9 +293,14 @@ export function TasksWidget({
                     {accountLink && (
                       <Link
                         to={accountLink.href}
-                        className="hover:text-primary hover:underline truncate"
+                        className="flex min-w-0 items-center gap-1 hover:text-primary hover:underline"
+                        title={`Account: ${accountLink.label}`}
                       >
-                        {accountLink.label}
+                        {/* Company icon so the context line can't read as a
+                            person's name (Summer 8/4: thought these were
+                            other people's tasks — they're accounts). */}
+                        <Building2 className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{accountLink.label}</span>
                       </Link>
                     )}
                     {accountLink && related && <span className="shrink-0">·</span>}

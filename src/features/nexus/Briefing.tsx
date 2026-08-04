@@ -13,7 +13,7 @@
 // it is today rather than showing a broken banner.
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, Phone, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -264,6 +264,19 @@ export function Briefing({
   // instead of navigating anywhere. Falls back to the admin inbox if the
   // row can't be fetched (deleted, or RLS says no).
   const [requestId, setRequestId] = useState<string | null>(null);
+  // Bell deep-link (Nathan 8/4): a request notification navigates to
+  // /nexus?request=<id>; open that request's dialog and strip the param
+  // so refresh/back doesn't reopen it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const rid = searchParams.get("request");
+    if (!rid) return;
+    setRequestId(rid);
+    const next = new URLSearchParams(searchParams);
+    next.delete("request");
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
   const requestQuery = useQuery({
     queryKey: ["briefing-request", requestId],
     enabled: !!requestId,

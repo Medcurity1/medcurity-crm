@@ -15,6 +15,7 @@ import { CampaignTouchesWidget } from "./widgets/CampaignTouchesWidget";
 import { WinsWidget } from "./widgets/WinsWidget";
 import { ColdCallListWidget } from "./widgets/ColdCallListWidget";
 import { RecentsWidget } from "./widgets/RecentsWidget";
+import { ListWidget } from "./widgets/ListWidget";
 import type { NexusWidgetType } from "./types";
 
 export const WIDGET_BODIES: Record<
@@ -30,4 +31,5 @@ export const WIDGET_BODIES: Record<
   wins: WinsWidget,
   cold_call: ColdCallListWidget,
   recents: RecentsWidget,
+  list: ListWidget,
 };

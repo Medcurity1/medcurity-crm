@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  ListChecks, Plus, Pencil, Trash2, X, Search, UserPlus2, Sparkles,
+  ArrowLeft, ListChecks, Megaphone, Plus, Pencil, RotateCcw, Trash2, X, Search, UserPlus2, Snowflake, Sparkles,
 } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -11,7 +11,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -34,7 +40,12 @@ import {
   useSearchContactsForList,
   useBulkAddContactsToList,
   useSmartListMembers,
+  useListExclusions,
+  useRestoreToSmartList,
+  useAddToSmartList,
+  useExcludeFromSmartList,
   useFreezeSmartList,
+  mqlSqlWindowDays,
   useActivateAccountsForContacts,
   parseSmartRules,
   smartRuleChips,
@@ -42,6 +53,14 @@ import {
   type SmartListRules,
 } from "./lead-lists-api";
 import { MultiSelect } from "@/components/MultiSelect";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import { AddToListDialog } from "./AddToListDialog";
+import { QuickCampaignDialog } from "@/features/playbook/QuickCampaignDialog";
 import { useTags } from "@/features/tags/api";
 import { useUsers } from "@/features/accounts/api";
 import { US_STATES } from "@/lib/us-states";
@@ -60,6 +79,17 @@ export function ListsPage() {
   const { data: lists, isLoading } = useLeadLists();
   const { data: counts } = useLeadListMemberCount();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // ?list=<id> deep link (the Nexus List widget's "Open list" footer).
+  const [searchParams] = useSearchParams();
+  const deepLinked = useRef(false);
+  useEffect(() => {
+    if (deepLinked.current) return;
+    const target = searchParams.get("list");
+    if (target) {
+      deepLinked.current = true;
+      setSelectedId(target);
+    }
+  }, [searchParams]);
   const [createOpen, setCreateOpen] = useState(false);
 
   const selected = useMemo(
@@ -67,16 +97,30 @@ export function ListsPage() {
     [lists, selectedId],
   );
 
+  // Two stages (Nathan 8/4: "lists should be chosen first, then open up in
+  // a much more beautiful display"): a card gallery of lists, then the
+  // chosen list takes the full width.
+  if (selected) {
+    return (
+      <ListWorkspace
+        key={selected.id}
+        list={selected}
+        onBack={() => setSelectedId(null)}
+        onDeleted={() => setSelectedId(null)}
+        onFrozen={(id) => setSelectedId(id)}
+      />
+    );
+  }
+
   return (
     <div>
-      {/* Slim header — this page lives inside the Reports hub tab, which
-          already renders the page-level header. */}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <p className="text-sm text-muted-foreground max-w-2xl">
-          A list is exactly what you put in it — adding or removing people never
-          changes their status. Lists marked{" "}
+          A list is exactly what you put in it. Adding or removing people never
+          changes their status; lists marked{" "}
           <span className="font-medium">working call list</span> are the
-          exception: those drive the account&apos;s Sales Status.
+          exception and drive the account&apos;s Sales Status. Smart lists fill
+          themselves from rules.
         </p>
         <Button onClick={() => setCreateOpen(true)}>
           <Plus className="h-4 w-4 mr-2" />
@@ -91,9 +135,9 @@ export function ListsPage() {
       />
 
       {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-12 w-full" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-32 rounded-xl" />
           ))}
         </div>
       ) : !lists?.length ? (
@@ -104,115 +148,303 @@ export function ListsPage() {
           action={{ label: "New list", onClick: () => setCreateOpen(true) }}
         />
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4 items-start">
-          <Card>
-            <CardContent className="p-2">
-              <div className="space-y-1">
-                {lists.map((l) => (
-                  <button
-                    key={l.id}
-                    type="button"
-                    onClick={() => setSelectedId(l.id)}
-                    className={cn(
-                      "w-full text-left rounded-md px-3 py-2 hover:bg-muted transition-colors",
-                      selectedId === l.id && "bg-muted",
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium truncate">{l.name}</span>
-                      <Badge variant="secondary">{l.is_dynamic ? "auto" : (counts?.[l.id] ?? 0)}</Badge>
-                    </div>
-                    {l.description && (
-                      <p className="text-xs text-muted-foreground truncate">{l.description}</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          {lists.map((l) => (
+            <button
+              key={l.id}
+              type="button"
+              onClick={() => setSelectedId(l.id)}
+              className="group flex flex-col rounded-xl border bg-card p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
+            >
+              <div className="flex items-start gap-2.5">
+                <span className={cn(
+                  "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br",
+                  l.is_dynamic
+                    ? "from-violet-500/20 to-violet-500/[0.05]"
+                    : "from-sky-500/20 to-sky-500/[0.05]",
+                )}>
+                  {l.is_dynamic
+                    ? <Sparkles className="h-4 w-4 text-violet-500" />
+                    : <ListChecks className="h-4 w-4 text-sky-500" />}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium leading-snug truncate">{l.name}</p>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {l.is_dynamic && (
+                      <Badge variant="outline" className="text-[10px]">
+                        <Sparkles className="h-2.5 w-2.5 mr-1" /> Smart
+                      </Badge>
                     )}
                     {l.is_working_list && (
-                      <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">
+                      <Badge variant="outline" className="text-[10px] text-amber-600 dark:text-amber-400 border-amber-500/40">
                         Working call list
-                      </span>
+                      </Badge>
                     )}
-                    {l.is_dynamic && (
-                      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground mt-0.5">
-                        <Sparkles className="h-3 w-3" />
-                        smart list
-                      </span>
-                    )}
-                  </button>
-                ))}
+                  </div>
+                </div>
               </div>
-            </CardContent>
-          </Card>
-
-          {selected ? (
-            selected.is_dynamic ? (
-              <SmartListDetail key={selected.id} list={selected} onDeleted={() => setSelectedId(null)} onFrozen={(id) => setSelectedId(id)} />
-            ) : (
-              <ListDetail key={selected.id} list={selected} onDeleted={() => setSelectedId(null)} />
-            )
-          ) : (
-            <Card>
-              <CardContent className="py-16 text-center text-sm text-muted-foreground">
-                Select a list to see and manage its members.
-              </CardContent>
-            </Card>
-          )}
+              {l.description && (
+                <p className="mt-2 text-xs text-muted-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden">
+                  {l.description}
+                </p>
+              )}
+              <p className="mt-auto pt-3 text-xs text-muted-foreground">
+                {l.is_dynamic
+                  ? "Fills itself from rules"
+                  : `${(counts?.[l.id] ?? 0).toLocaleString()} ${(counts?.[l.id] ?? 0) === 1 ? "person" : "people"}`}
+              </p>
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            className="flex min-h-32 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-4 text-center transition-colors hover:border-primary/50 hover:bg-muted/40"
+          >
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
+              <Plus className="h-4 w-4" />
+            </span>
+            <span className="text-sm font-medium">New list</span>
+          </button>
         </div>
       )}
     </div>
   );
 }
 
-function ListDetail({ list, onDeleted }: { list: LeadList; onDeleted: () => void }) {
-  const { data: members, isLoading } = useLeadListMembers(list.id);
+// ── One workspace for both list kinds ────────────────────────────────
+
+interface WorkRow {
+  contactId: string;
+  memberId: string | null; // static membership row when there is one
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+  phone: string | null;
+  account: string | null;
+}
+
+function ListWorkspace({
+  list,
+  onBack,
+  onDeleted,
+  onFrozen,
+}: {
+  list: LeadList;
+  onBack: () => void;
+  onDeleted: () => void;
+  onFrozen: (newListId: string) => void;
+}) {
+  const { profile } = useAuth();
+  const role = profile?.role ?? "";
+  const canWrite = ["sales", "renewals", "admin", "super_admin"].includes(role);
+  const isAdmin = ["admin", "super_admin"].includes(role);
+
+  const staticMembers = useLeadListMembers(list.is_dynamic ? undefined : list.id);
+  const smartMembers = useSmartListMembers(list.is_dynamic ? list : null);
+  const exclusions = useListExclusions(list.id, list.is_dynamic);
+
   const removeMutation = useRemoveFromList();
+  const exclude = useExcludeFromSmartList();
+  const restore = useRestoreToSmartList();
+  const addSmart = useAddToSmartList();
+  const bulkAdd = useBulkAddContactsToList();
   const deleteMutation = useDeleteLeadList();
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  const freezeMutation = useFreezeSmartList();
+  const activateAccounts = useActivateAccountsForContacts();
+
+  const isLoading = list.is_dynamic ? smartMembers.isLoading : staticMembers.isLoading;
+
+  const rows: WorkRow[] = useMemo(() => {
+    if (list.is_dynamic) {
+      const memberIdByContact = new Map(
+        (staticMembers.data ?? [])
+          .filter((m) => m.contact)
+          .map((m) => [m.contact!.id, m.id] as const),
+      );
+      return (smartMembers.data?.rows ?? []).map((r) => ({
+        contactId: r.id,
+        memberId: memberIdByContact.get(r.id) ?? null,
+        firstName: r.first_name,
+        lastName: r.last_name,
+        email: r.email,
+        phone: r.phone,
+        account: r.account?.name ?? null,
+      }));
+    }
+    return (staticMembers.data ?? [])
+      .filter((m) => m.contact)
+      .map((m) => ({
+        contactId: m.contact!.id,
+        memberId: m.id,
+        firstName: m.contact!.first_name,
+        lastName: m.contact!.last_name,
+        email: m.contact!.email,
+        phone: m.contact!.phone,
+        account: (m.contact as { account?: { name?: string } | null })?.account?.name ?? null,
+      }));
+  }, [list.is_dynamic, staticMembers.data, smartMembers.data]);
+
+  // ACTIVE smart working list: additive Sales-Status reconcile (unchanged
+  // behavior from the pre-rebuild page — on-only, never deactivates).
+  const memberIdsKey = rows.map((r) => r.contactId).join(",");
+  useEffect(() => {
+    if (!list.is_dynamic || !canWrite || !list.is_working_list || !rows.length) return;
+    activateAccounts.mutate(rows.map((r) => r.contactId));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list.id, list.is_working_list, memberIdsKey]);
+
+  const [filter, setFilter] = useState("");
   const [search, setSearch] = useState("");
   const { data: candidates } = useSearchContactsForList(search, list.id);
-  const bulkAdd = useBulkAddContactsToList();
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [showRemoved, setShowRemoved] = useState(false);
+  const [campaignContacts, setCampaignContacts] = useState<WorkRow[] | null>(null);
+  const [addToListIds, setAddToListIds] = useState<string[] | null>(null);
 
-  const contactMembers = (members ?? []).filter((m) => m.contact);
+  const visible = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) =>
+      [r.firstName, r.lastName, r.email, r.account]
+        .map((v) => (v ?? "").toLowerCase())
+        .some((v) => v.includes(q)),
+    );
+  }, [rows, filter]);
 
-  async function addCandidate(contactId: string) {
-    try {
-      await bulkAdd.mutateAsync({ list_id: list.id, contact_ids: [contactId] });
-      toast.success("Added to list");
-    } catch (e) {
-      toast.error((e as Error).message);
+  function removeRow(row: WorkRow) {
+    if (list.is_dynamic) {
+      // Sticky removal for smart lists; also drop a manual membership row
+      // if one exists, so the hybrid union can't resurrect them.
+      exclude.mutate({ listId: list.id, contactId: row.contactId });
+      if (row.memberId) {
+        removeMutation.mutate({ memberId: row.memberId, listId: list.id });
+      }
+    } else if (row.memberId) {
+      removeMutation.mutate(
+        { memberId: row.memberId, listId: list.id },
+        { onSuccess: () => toast.success("Removed from list") },
+      );
     }
   }
 
-  return (
-    <Card>
-      <CardContent className="py-4 space-y-4">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="min-w-0">
-            <h3 className="text-lg font-semibold truncate">
-              {list.name}
-              {list.is_working_list && (
-                <Badge variant="outline" className="ml-2 align-middle text-amber-600 dark:text-amber-400 border-amber-500/40">
-                  Working call list
-                </Badge>
-              )}
-            </h3>
-            {list.description && (
-              <p className="text-sm text-muted-foreground">{list.description}</p>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setRenameOpen(true)}>
-              <Pencil className="h-4 w-4 mr-1" />
-              Rename
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setDeleteOpen(true)}>
-              <Trash2 className="h-4 w-4 mr-1" />
-              Delete list
-            </Button>
-          </div>
-        </div>
+  async function addCandidate(contactId: string) {
+    if (list.is_dynamic) {
+      addSmart.mutate({ listId: list.id, contactId });
+    } else {
+      try {
+        await bulkAdd.mutateAsync({ list_id: list.id, contact_ids: [contactId] });
+        toast.success("Added to list");
+      } catch (e) {
+        toast.error((e as Error).message);
+      }
+    }
+  }
 
-        <div className="relative max-w-sm">
+  const { data: tags } = useTags();
+  const { data: users } = useUsers();
+  const ruleChips = list.is_dynamic
+    ? smartRuleChips(
+        parseSmartRules(list),
+        (id) => tags?.find((t) => t.id === id)?.name ?? "?",
+        (id) => users?.find((u) => u.id === id)?.full_name ?? "?",
+        (v) => customerStatusLabel(v as CustomerStatus),
+      )
+    : [];
+
+  const removedRows = exclusions.data ?? [];
+
+  return (
+    <div className="space-y-4">
+      {/* Stage-2 header: back + identity + actions */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <button
+            type="button"
+            onClick={onBack}
+            className="mb-1 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" /> All lists
+          </button>
+          <h3 className="text-xl font-semibold tracking-tight flex flex-wrap items-center gap-2">
+            {list.name}
+            {list.is_dynamic && (
+              <Badge variant="outline">
+                <Sparkles className="h-3 w-3 mr-1" /> Smart list
+              </Badge>
+            )}
+            {list.is_working_list && (
+              <Badge variant="outline" className="text-amber-600 dark:text-amber-400 border-amber-500/40">
+                Working call list
+              </Badge>
+            )}
+          </h3>
+          {list.description && (
+            <p className="text-sm text-muted-foreground mt-0.5">{list.description}</p>
+          )}
+          {ruleChips.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {ruleChips.map((c) => (
+                <Badge key={c} variant="secondary" className="font-normal">{c}</Badge>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {isAdmin && (
+            <Button
+              size="sm"
+              className="gap-1.5"
+              disabled={rows.length === 0}
+              onClick={() => setCampaignContacts(rows)}
+            >
+              <Megaphone className="h-4 w-4" />
+              Start campaign
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+            <Pencil className="h-4 w-4 mr-1" />
+            {list.is_dynamic ? "Edit rules" : "Rename"}
+          </Button>
+          {list.is_dynamic && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={freezeMutation.isPending || rows.length === 0}
+              onClick={() =>
+                freezeMutation.mutate(list, {
+                  onSuccess: (r) => {
+                    toast.success(`Froze ${r.added.toLocaleString()} contacts into "${r.list.name}"`);
+                    onFrozen(r.list.id);
+                  },
+                  onError: (e) => toast.error((e as Error).message),
+                })
+              }
+            >
+              <Snowflake className="h-4 w-4 mr-1" />
+              {freezeMutation.isPending ? "Freezing…" : "Freeze"}
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={() => setDeleteOpen(true)}>
+            <Trash2 className="h-4 w-4 mr-1" />
+            Delete
+          </Button>
+        </div>
+      </div>
+
+      {/* Filter members + add people, side by side */}
+      <div className="flex flex-wrap gap-2">
+        <div className="relative flex-1 min-w-52 max-w-sm">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder={`Filter ${rows.length.toLocaleString()} ${rows.length === 1 ? "person" : "people"}...`}
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="pl-8"
+          />
+        </div>
+        <div className="relative flex-1 min-w-52 max-w-sm">
+          <UserPlus2 className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search contacts to add..."
             value={search}
@@ -234,7 +466,7 @@ function ListDetail({ list, onDeleted }: { list: LeadList; onDeleted: () => void
                   <span className="truncate">
                     {c.first_name} {c.last_name}
                     {c.account?.name && (
-                      <span className="text-muted-foreground"> — {c.account.name}</span>
+                      <span className="text-muted-foreground"> · {c.account.name}</span>
                     )}
                   </span>
                   <UserPlus2 className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -243,259 +475,157 @@ function ListDetail({ list, onDeleted }: { list: LeadList; onDeleted: () => void
             </div>
           )}
         </div>
+      </div>
 
-        {isLoading ? (
-          <Skeleton className="h-32 w-full" />
-        ) : contactMembers.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">
-            No members yet — search above, or select contacts on the Contacts tab and “Add to list”.
-          </p>
-        ) : (
-          <div className="border rounded-lg overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Account</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Phone</TableHead>
-                  <TableHead className="w-10" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {contactMembers.map((m) => (
-                  <TableRow key={m.id}>
-                    <TableCell>
-                      <Link
-                        to={`/contacts/${m.contact!.id}`}
-                        className="font-medium text-primary hover:underline"
-                      >
-                        {m.contact!.first_name} {m.contact!.last_name}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {(m.contact as { account?: { name?: string } | null })?.account?.name ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-sm">{m.contact!.email ?? "—"}</TableCell>
-                    <TableCell className="text-sm">
-                      {m.contact!.phone ? formatPhone(m.contact!.phone) : "—"}
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        title="Remove from list"
-                        disabled={removeMutation.isPending}
-                        onClick={() =>
-                          removeMutation.mutate(
-                            { memberId: m.id, listId: list.id },
-                            {
-                              onSuccess: () => toast.success("Removed from list"),
-                              onError: (e) => toast.error((e as Error).message),
-                            },
-                          )
-                        }
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-
-        <p className="text-xs text-muted-foreground">
-          {list.is_working_list
-            ? "Working call list: adding people marks their accounts as actively worked, and removing an account's last working-list contact switches it back (that's how Sales Status stays honest)."
-            : "Regular list: adding or removing people never changes anyone's status."}
-        </p>
-      </CardContent>
-
-      <CreateOrRenameListDialog
-        open={renameOpen}
-        onOpenChange={setRenameOpen}
-        existing={list}
-      />
-      <ConfirmDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        title={`Delete “${list.name}”?`}
-        description={
-          list.is_working_list
-            ? "The list and its memberships go away; the contacts themselves are untouched. Accounts this call list marked as actively-worked keep that status - review Sales Status if needed. This can't be undone."
-            : "The list and its memberships go away; the contacts themselves are untouched. This can't be undone."
-        }
-        confirmLabel="Delete list"
-        destructive
-        onConfirm={() =>
-          deleteMutation.mutate(list.id, {
-            onSuccess: () => {
-              toast.success("List deleted");
-              onDeleted();
-            },
-            onError: (e) => toast.error((e as Error).message),
-          })
-        }
-      />
-    </Card>
-  );
-}
-
-function SmartListDetail({
-  list,
-  onDeleted,
-  onFrozen,
-}: {
-  list: LeadList;
-  onDeleted: () => void;
-  onFrozen: (newListId: string) => void;
-}) {
-  const { profile } = useAuth();
-  const canWrite = ["sales", "renewals", "admin", "super_admin"].includes(profile?.role ?? "");
-  const { data, isLoading } = useSmartListMembers(list);
-  const deleteMutation = useDeleteLeadList();
-  const freezeMutation = useFreezeSmartList();
-  const activateAccounts = useActivateAccountsForContacts();
-  // ACTIVE smart list: additive Sales-Status reconcile whenever the live
-  // membership resolves (open/rule-change). Only ever flips accounts ON.
-  const memberIdsKey = (data?.rows ?? []).map((r) => r.id).join(",");
-  useEffect(() => {
-    // read_only viewers skip the reconcile (the RPC would reject them).
-    if (!canWrite || !list.is_working_list || !data?.rows?.length) return;
-    activateAccounts.mutate(data.rows.map((r) => r.id));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [list.id, list.is_working_list, memberIdsKey]);
-  const [editOpen, setEditOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const { data: tags } = useTags();
-  const { data: users } = useUsers();
-
-  const rules = parseSmartRules(list);
-  const chips = smartRuleChips(
-    rules,
-    (id) => tags?.find((t) => t.id === id)?.name ?? "?",
-    (id) => users?.find((u) => u.id === id)?.full_name ?? "?",
-    (v) => customerStatusLabel(v as CustomerStatus),
-  );
-  const rows = data?.rows ?? [];
-
-  return (
-    <Card>
-      <CardContent className="py-4 space-y-4">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="min-w-0">
-            <h3 className="text-lg font-semibold truncate">
-              {list.name}
-              <Badge variant="outline" className="ml-2 align-middle">
-                <Sparkles className="h-3 w-3 mr-1" />
-                Smart list
-              </Badge>
-              {list.is_working_list && (
-                <Badge variant="outline" className="ml-2 align-middle text-amber-600 dark:text-amber-400 border-amber-500/40">
-                  Active working list
-                </Badge>
-              )}
-            </h3>
-            {list.description && (
-              <p className="text-sm text-muted-foreground">{list.description}</p>
-            )}
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {chips.map((c) => (
-                <Badge key={c} variant="secondary" className="font-normal">{c}</Badge>
-              ))}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
-              <Pencil className="h-4 w-4 mr-1" />
-              Edit rules
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={freezeMutation.isPending || rows.length === 0}
-              onClick={() =>
-                freezeMutation.mutate(list, {
-                  onSuccess: (r) => {
-                    toast.success(`Froze ${r.added.toLocaleString()} contacts into "${r.list.name}"`);
-                    onFrozen(r.list.id);
-                  },
-                  onError: (e) => toast.error((e as Error).message),
-                })
-              }
-            >
-              {freezeMutation.isPending ? "Freezing…" : "Freeze into regular list"}
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setDeleteOpen(true)}>
-              <Trash2 className="h-4 w-4 mr-1" />
-              Delete
-            </Button>
-          </div>
+      {/* The people */}
+      {isLoading ? (
+        <Skeleton className="h-48 w-full rounded-xl" />
+      ) : rows.length === 0 ? (
+        <div className="rounded-xl border border-dashed py-12 text-center text-sm text-muted-foreground">
+          {list.is_dynamic
+            ? "Nobody matches the rules yet, and nobody has been added by hand. The moment someone matches, they appear here."
+            : "No members yet. Search above, or select contacts on the Contacts tab and “Add to list”."}
         </div>
-
-        {isLoading ? (
-          <Skeleton className="h-32 w-full" />
-        ) : rows.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">
-            Nobody matches these rules right now — the moment someone does
-            (say, they get the tag), they appear here automatically.
-          </p>
-        ) : (
-          <>
-            <p className="text-xs text-muted-foreground">
-              {data?.capped ? "2,000+" : rows.length.toLocaleString()} matching
-              contact{rows.length === 1 ? "" : "s"} — updates by itself as
-              contacts change.
-            </p>
-            <div className="border rounded-lg overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Account</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Phone</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.slice(0, 200).map((r) => (
-                    <TableRow key={r.id}>
+      ) : visible.length === 0 ? (
+        <div className="rounded-xl border border-dashed py-12 text-center text-sm text-muted-foreground">
+          Nobody matches that filter.
+        </div>
+      ) : (
+        <div className="border rounded-xl overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Account</TableHead>
+                <TableHead>Email</TableHead>
+                <TableHead>Phone</TableHead>
+                <TableHead className="w-10" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visible.slice(0, 500).map((row) => (
+                <ContextMenu key={row.contactId}>
+                  <ContextMenuTrigger asChild>
+                    <TableRow className="group">
                       <TableCell>
-                        <Link to={`/contacts/${r.id}`} className="font-medium text-primary hover:underline">
-                          {r.first_name} {r.last_name}
+                        <Link
+                          to={`/contacts/${row.contactId}`}
+                          className="font-medium text-primary hover:underline"
+                        >
+                          {row.firstName} {row.lastName}
                         </Link>
                       </TableCell>
-                      <TableCell className="text-sm">{r.account?.name ?? "—"}</TableCell>
-                      <TableCell className="text-sm">{r.email ?? "—"}</TableCell>
-                      <TableCell className="text-sm">{r.phone ? formatPhone(r.phone) : "—"}</TableCell>
+                      <TableCell className="text-sm">{row.account ?? "\u2014"}</TableCell>
+                      <TableCell className="text-sm">{row.email ?? "\u2014"}</TableCell>
+                      <TableCell className="text-sm">
+                        {row.phone ? formatPhone(row.phone) : "\u2014"}
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          title={list.is_dynamic ? "Remove and keep off" : "Remove from list"}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={() => removeRow(row)}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-            {rows.length > 200 && (
-              <p className="text-xs text-muted-foreground">
-                Showing the first 200 — freeze the list (or export a report) to work the full set.
-              </p>
-            )}
-          </>
-        )}
-
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem asChild>
+                      <Link to={`/contacts/${row.contactId}`}>Open contact</Link>
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => setAddToListIds([row.contactId])}>
+                      Add to another list…
+                    </ContextMenuItem>
+                    {isAdmin && (
+                      <ContextMenuItem onClick={() => setCampaignContacts([row])}>
+                        Start a campaign…
+                      </ContextMenuItem>
+                    )}
+                    <ContextMenuItem
+                      className="text-destructive focus:text-destructive"
+                      onClick={() => removeRow(row)}
+                    >
+                      {list.is_dynamic ? "Remove and keep off" : "Remove from list"}
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+      {visible.length > 500 && (
         <p className="text-xs text-muted-foreground">
-          {list.is_working_list
-            ? "Rule-driven and ACTIVE: matching contacts mark their accounts as actively worked (on-only — dropping off the rules never deactivates anyone). Freeze it into a regular list to take over manually."
-            : "Smart lists are rule-driven, so people can't be added or removed by hand — freeze it into a regular list to take over manually. Never touches anyone's status."}
+          Showing the first 500 of {visible.length.toLocaleString()}. Use the filter to narrow.
         </p>
-      </CardContent>
+      )}
+
+      {/* Removed-and-kept-off, restorable (smart lists only) */}
+      {list.is_dynamic && removedRows.length > 0 && (
+        <div className="rounded-xl border p-3">
+          <button
+            type="button"
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+            onClick={() => setShowRemoved((v) => !v)}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            {removedRows.length} removed and kept off
+            <span className="text-xs">({showRemoved ? "hide" : "show"})</span>
+          </button>
+          {showRemoved && (
+            <div className="mt-2 space-y-1">
+              {removedRows.map((ex) => (
+                <div key={ex.id} className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-muted/50">
+                  <span className="min-w-0 truncate text-sm">
+                    {ex.contact
+                      ? `${ex.contact.first_name ?? ""} ${ex.contact.last_name ?? ""}`.trim() || "Unnamed"
+                      : "Unknown contact"}
+                    {ex.contact?.account?.name && (
+                      <span className="text-muted-foreground"> · {ex.contact.account.name}</span>
+                    )}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7"
+                    disabled={restore.isPending}
+                    onClick={() => restore.mutate({ exclusionId: ex.id, listId: list.id })}
+                  >
+                    Restore
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <p className="text-xs text-muted-foreground">
+        {list.is_dynamic
+          ? (list.is_working_list
+              ? "Rule-driven and ACTIVE: matching contacts mark their accounts as actively worked (on-only). You can also add people by hand, and removals stick until you restore them."
+              : "Rule-driven, plus anyone you add by hand. Removals stick until you restore them below. Never touches anyone's status.")
+          : (list.is_working_list
+              ? "Working call list: adding people marks their accounts as actively worked, and removing an account's last working-list contact switches it back."
+              : "Regular list: adding or removing people never changes anyone's status.")}
+      </p>
 
       <CreateOrRenameListDialog open={editOpen} onOpenChange={setEditOpen} existing={list} />
       <ConfirmDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
-        title={`Delete "${list.name}"?`}
-        description="The smart list's rules go away; the contacts themselves are untouched. This can't be undone."
+        title={`Delete “${list.name}”?`}
+        description={
+          list.is_dynamic
+            ? "The smart list's rules go away; the contacts themselves are untouched. This can't be undone."
+            : list.is_working_list
+              ? "The list and its memberships go away; the contacts themselves are untouched. Accounts this call list marked as actively-worked keep that status - review Sales Status if needed. This can't be undone."
+              : "The list and its memberships go away; the contacts themselves are untouched. This can't be undone."
+        }
         confirmLabel="Delete list"
         destructive
         onConfirm={() =>
@@ -508,8 +638,45 @@ function SmartListDetail({
           })
         }
       />
-    </Card>
+      {addToListIds && (
+        <AddToListDialog
+          open
+          onOpenChange={(o) => {
+            if (!o) setAddToListIds(null);
+          }}
+          contactIds={addToListIds}
+        />
+      )}
+      {isAdmin && campaignContacts && (
+        <QuickCampaignDialog
+          open
+          onOpenChange={(o) => {
+            if (!o) setCampaignContacts(null);
+          }}
+          contacts={campaignContacts.map((r) => ({
+            id: r.contactId,
+            first_name: r.firstName,
+            last_name: r.lastName,
+            email: r.email,
+            account: r.account ? { name: r.account } : null,
+          }))}
+        />
+      )}
+    </div>
   );
+}
+
+
+type WindowUnit = "day" | "week" | "month" | "year";
+const WINDOW_UNIT_DAYS: Record<WindowUnit, number> = { day: 1, week: 7, month: 30, year: 365 };
+
+/** 120 days → {n: 4, unit: month}; picks the largest clean unit. */
+function windowToParts(days: number | null): { n: number; unit: WindowUnit } {
+  if (!days || days <= 0) return { n: 0, unit: "month" };
+  if (days % 365 === 0) return { n: days / 365, unit: "year" };
+  if (days % 30 === 0) return { n: days / 30, unit: "month" };
+  if (days % 7 === 0) return { n: days / 7, unit: "week" };
+  return { n: days, unit: "day" };
 }
 
 function CreateOrRenameListDialog({
@@ -543,6 +710,9 @@ function CreateOrRenameListDialog({
   const [statuses, setStatuses] = useState<string[]>(existingRules.customer_status ?? []);
   const [hasPhone, setHasPhone] = useState(!!existingRules.has_phone);
   const [hasEmail, setHasEmail] = useState(!!existingRules.has_email);
+  const initialWindow = windowToParts(mqlSqlWindowDays(existingRules));
+  const [mqlSqlN, setMqlSqlN] = useState<number>(initialWindow.n);
+  const [mqlSqlUnit, setMqlSqlUnit] = useState<WindowUnit>(initialWindow.unit);
 
   // The dialog instance persists across opens (it isn't keyed/remounted), so
   // every field must re-initialize on open — otherwise the Working/Smart
@@ -561,6 +731,9 @@ function CreateOrRenameListDialog({
     setStatuses(r.customer_status ?? []);
     setHasPhone(!!r.has_phone);
     setHasEmail(!!r.has_email);
+    const w = windowToParts(mqlSqlWindowDays(r));
+    setMqlSqlN(w.n);
+    setMqlSqlUnit(w.unit);
     // Reset only when the dialog OPENS — a background lists refetch while the
     // user is typing must not clobber their edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -573,6 +746,8 @@ function CreateOrRenameListDialog({
     customer_status: statuses.length ? statuses : undefined,
     has_phone: hasPhone || undefined,
     has_email: hasEmail || undefined,
+    mql_sql_within_days:
+      mqlSqlN > 0 ? mqlSqlN * WINDOW_UNIT_DAYS[mqlSqlUnit] : undefined,
   };
 
   async function submit() {
@@ -698,6 +873,35 @@ function CreateOrRenameListDialog({
                     options={(users ?? []).map((u) => ({ value: u.id, label: u.full_name ?? "Unknown" }))}
                   />
                 </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>New MQL or SQL within the last</Label>
+                <div className="flex gap-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    value={mqlSqlN || ""}
+                    placeholder="Off"
+                    onChange={(e) => setMqlSqlN(Math.max(0, Number(e.target.value) || 0))}
+                    className="w-24"
+                  />
+                  <Select value={mqlSqlUnit} onValueChange={(v) => setMqlSqlUnit(v as WindowUnit)}>
+                    <SelectTrigger className="flex-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="day">days</SelectItem>
+                      <SelectItem value="week">weeks</SelectItem>
+                      <SelectItem value="month">months</SelectItem>
+                      <SelectItem value="year">years</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Any number works (4 days, 8 months, 1 year). Leave the number
+                  empty to turn this rule off. Removing someone keeps them off
+                  until you restore them.
+                </p>
               </div>
               <div className="space-y-1.5">
                 <Label>Account status</Label>

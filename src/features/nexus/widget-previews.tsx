@@ -110,6 +110,13 @@ const PREVIEWS: Record<NexusWidgetType, ReactNode> = {
       ))}
     </div>
   ),
+  list: (
+    <div className="space-y-2.5">
+      <Row lead={<Dot className="bg-primary/50" />} main="72%" sub="40%" trail={<Bar w="6%" />} />
+      <Row lead={<Dot className="bg-primary/50" />} main="58%" sub="34%" trail={<Bar w="6%" />} />
+      <Row lead={<Dot className="bg-primary/50" />} main="66%" sub="42%" trail={<Bar w="6%" />} />
+    </div>
+  ),
   pinned_records: (
     <div className="space-y-2.5">
       <Row lead={<Dot className="bg-primary/50" />} main="74%" sub="42%" />

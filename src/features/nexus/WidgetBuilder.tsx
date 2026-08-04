@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import {
   Ban,
   History, PhoneCall,
+  ListChecks,
   Inbox,
   Kanban,
   ListTodo,
@@ -35,6 +36,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { useLeadLists } from "@/features/lead-lists/lead-lists-api";
 import {
   useAddDefaultWidget,
   useAddWidget,
@@ -71,6 +73,8 @@ function defaultConfigFor(type: NexusWidgetType): NexusWidgetConfig {
       return normalizePinnedConfig(null);
     case "requests":
       return normalizeRequestsConfig(null);
+    case "list":
+      return { list_id: null };
     default:
       return {};
   }
@@ -92,6 +96,10 @@ function normalizeConfigFor(
       return normalizePinnedConfig(raw);
     case "requests":
       return normalizeRequestsConfig(raw);
+    case "list": {
+      const cfg = raw as Partial<import("./types").ListWidgetConfig>;
+      return { list_id: typeof cfg.list_id === "string" ? cfg.list_id : null };
+    }
     default:
       return {};
   }
@@ -115,6 +123,10 @@ export function validateWidgetConfig(
       return `Pick ${REPORT_MIN_COLUMNS}–${REPORT_MAX_COLUMNS} columns.`;
     }
     if (!cfg.sort?.field) return "Pick a sort column.";
+  }
+  if (type === "list") {
+    const cfg = config as Partial<import("./types").ListWidgetConfig>;
+    if (!cfg.list_id) return "Pick a list to show.";
   }
   return null;
 }
@@ -194,6 +206,13 @@ export const TYPE_META: Record<
     galleryBlurb: "Where you have been lately.",
     icon: History,
     defaultName: "Recents",
+  },
+  list: {
+    label: "List",
+    description: "One of your lists, right on Nexus. Work it row by row.",
+    galleryBlurb: "Your list, one X per worked row.",
+    icon: ListChecks,
+    defaultName: "My List",
   },
   cold_call: {
     label: "Cold Call List",
@@ -639,5 +658,45 @@ function TypeConfigPanel({ type, config, onConfigChange }: TypeConfigPanelProps)
       return <PinnedRecordsPanel config={config} onConfigChange={onConfigChange} />;
     case "requests":
       return <RequestsPanel config={config} onConfigChange={onConfigChange} />;
+    case "list":
+      return <ListPanel config={config} onConfigChange={onConfigChange} />;
   }
+}
+
+
+/** List widget settings: which of your lists to show (Summer, 8/4). */
+function ListPanel({
+  config,
+  onConfigChange,
+}: {
+  config: NexusWidgetConfig;
+  onConfigChange: (c: NexusWidgetConfig) => void;
+}) {
+  const { data: lists } = useLeadLists();
+  const cfg = config as Partial<import("./types").ListWidgetConfig>;
+  return (
+    <div className="space-y-2">
+      <Label>Which list?</Label>
+      <Select
+        value={cfg.list_id ?? ""}
+        onValueChange={(v) => onConfigChange({ list_id: v })}
+      >
+        <SelectTrigger>
+          <SelectValue placeholder="Pick a list" />
+        </SelectTrigger>
+        <SelectContent>
+          {(lists ?? []).map((l) => (
+            <SelectItem key={l.id} value={l.id}>
+              {l.name}
+              {l.is_dynamic ? " (smart)" : ""}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-muted-foreground">
+        Smart lists update themselves; removing someone from the widget keeps
+        them off. Create and manage lists under Reports, in the Lists tab.
+      </p>
+    </div>
+  );
 }

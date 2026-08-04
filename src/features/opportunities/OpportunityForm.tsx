@@ -708,7 +708,12 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       stage: values.stage,
       amount: Number(values.amount),
       expected_close_date: emptyToNull(values.expected_close_date),
-      close_date: emptyToNull(values.close_date),
+      // close_date is only a real fact once the deal is closed (Summer,
+      // 8/4). While open we never send it: the DB mirror keeps it in
+      // step with the forecast for reporting, invisibly.
+      ...(values.stage === "closed_won" || values.stage === "closed_lost"
+        ? { close_date: emptyToNull(values.close_date) }
+        : {}),
       contract_start_date: emptyToNull(values.contract_start_date),
       contract_end_date: emptyToNull(values.contract_end_date),
       contract_length_months: emptyToNull(values.contract_length_months),
@@ -1480,12 +1485,24 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="close_date">Close Date</Label>
-                  <Input id="close_date" type="date" {...register("close_date")} />
-                  <p className="text-xs text-muted-foreground">
-                    Auto-filled when stage changes to Closed Won or Closed
-                    Lost. Editable for corrections / data cleanup — every
-                    change is audit-logged.
-                  </p>
+                  {watchedStage === "closed_won" || watchedStage === "closed_lost" ? (
+                    <>
+                      <Input id="close_date" type="date" {...register("close_date")} />
+                      <p className="text-xs text-muted-foreground">
+                        Auto-filled when the deal closed. Editable for
+                        corrections / data cleanup — every change is
+                        audit-logged.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <Input id="close_date" type="text" value="" placeholder="Set at close" disabled />
+                      <p className="text-xs text-muted-foreground">
+                        Stays empty until the deal closes, then fills with
+                        the actual close date automatically.
+                      </p>
+                    </>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="contract_start_date">Contract Start<RequiredIndicator fieldKey="contract_start_date" requiredFields={requiredKeys} /></Label>
