@@ -446,12 +446,12 @@ function ClientImpactConfirm({
         {[
           {
             v: true,
-            label: "Yes — a client is affected",
+            label: "Yes, a client is affected",
             hint: "Goes straight to the dev team, no waiting",
           },
           {
             v: false,
-            label: "No — not urgent for clients",
+            label: "No, not urgent for clients",
             hint: "Reviewed first, then queued with the dev team",
           },
         ].map((o) => (
@@ -475,7 +475,7 @@ function ClientImpactConfirm({
       {changed && (
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <ShieldCheck className="h-3.5 w-3.5" />
-          Using your answer instead — it&apos;ll be noted on the ticket.
+          Using your answer instead. It&apos;ll be noted on the ticket.
         </p>
       )}
       {asking && value === null && (
@@ -547,13 +547,13 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
             const key = res.bugFiled.jiraKey;
             toast.success(
               key
-                ? `Client-impacting bug — sent straight to the dev team as ${key}.`
-                : "Client-impacting bug — sent straight to the dev team.",
+                ? `Client-impacting bug: sent straight to the dev team as ${key}.`
+                : "Client-impacting bug: sent straight to the dev team.",
             );
           } else if (res.held) {
-            toast.success("Bug submitted — it'll be reviewed before it goes to the dev team.");
+            toast.success("Bug submitted. It'll be reviewed before it goes to the dev team.");
           } else if (category === "bug") {
-            toast.success("Bug submitted — the product team will file it to Jira.");
+            toast.success("Bug submitted. The product team will file it to Jira.");
           } else {
             toast.success("Request submitted");
           }

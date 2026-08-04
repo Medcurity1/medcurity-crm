@@ -1,12 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { MessageSquarePlus, Palette, Package, Wrench, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -84,26 +79,25 @@ export function RequestDialog({
       <Dialog open onOpenChange={(o) => { if (!o) attemptClose(); }}>
         <DialogContent
           showCloseButton={false}
+          // No description on purpose (Nathan 8/4: redundant, and dropping it
+          // slims the header); the explicit undefined opts out of Radix's
+          // missing-Description warning.
+          aria-describedby={undefined}
           className="gap-0 overflow-hidden p-0 sm:max-w-[600px]"
         >
           {/* Ember header band — deliberately warm so Requests reads as its
               own thing, distinct from the violet/blue reserved for AI
               features (Nathan, 8/4). */}
-          <div className="relative overflow-hidden px-6 pb-4 pt-5 text-white">
+          <div className="relative overflow-hidden px-6 pb-3.5 pt-4 text-white">
             <div className="absolute inset-0 bg-gradient-to-br from-orange-500 via-red-500 to-rose-600" />
             <div className="absolute -right-8 -top-12 h-40 w-40 rounded-full bg-amber-300/40 blur-3xl" />
             <div className="absolute -bottom-16 -left-10 h-44 w-44 rounded-full bg-rose-300/40 blur-3xl" />
             <div className="relative">
               <div className="flex items-start justify-between gap-4">
-                <div>
-                  <DialogTitle className="flex items-center gap-2 text-lg font-semibold text-white">
-                    <MessageSquarePlus className="h-5 w-5" />
-                    Submit a request
-                  </DialogTitle>
-                  <DialogDescription className="mt-0.5 text-sm text-white/85">
-                    It goes straight to the right person — no hunting for who to ask.
-                  </DialogDescription>
-                </div>
+                <DialogTitle className="flex items-center gap-2 text-lg font-semibold text-white">
+                  <MessageSquarePlus className="h-5 w-5" />
+                  Submit a request
+                </DialogTitle>
                 <button
                   type="button"
                   aria-label="Close"
@@ -113,7 +107,7 @@ export function RequestDialog({
                   <X className="h-4 w-4" />
                 </button>
               </div>
-              <div className="mt-4 flex w-fit gap-1 rounded-full bg-white/15 p-1 backdrop-blur-sm">
+              <div className="mt-3 flex w-fit gap-1 rounded-full bg-white/15 p-1 backdrop-blur-sm">
                 {TABS.map((t) => (
                   <button
                     key={t.value}

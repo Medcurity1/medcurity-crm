@@ -118,7 +118,7 @@ export function SubmitRequestButton() {
           <div className="overflow-hidden rounded-xl bg-gradient-to-br from-orange-500 via-red-500 to-rose-600 p-4 text-white shadow-xl">
             <p className="text-sm font-semibold">Requests moved up here!</p>
             <p className="mt-1 text-xs text-white/90">
-              The Requests tab is now this button — same forms, same flow, but
+              The Requests tab is now this button. Same forms, same flow, but
               you can submit from any page.
             </p>
             <button
