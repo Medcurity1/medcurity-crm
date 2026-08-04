@@ -13,7 +13,7 @@
 // it is today rather than showing a broken banner.
 
 import { useMemo, useState, type ReactNode } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Plus, Phone, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { QuickTaskDialog } from "@/features/activities/QuickTaskDialog";
 import { useDayQueue, useSnoozeDayItem, type DayQueueRow } from "./day-queue-api";
 import { NEXUS_FEEDBACK_LINK } from "./landing-flip";
+import { useRequestDialog } from "@/features/requests/RequestDialogProvider";
 import { getHeroTheme, useHeroTheme } from "./hero-themes";
 
 // ── Copy helpers ─────────────────────────────────────────────────────
@@ -178,7 +179,10 @@ export function primaryAction(row: DayQueueRow, isAdmin = true): { label: string
         to: row.account_id ? `/accounts/${row.account_id}` : "/activities",
       };
     case "request":
-      return { label: "Open request", to: "/requests" };
+      // The reviewer's inbox. /requests is now just the submit popup (Nathan
+      // 2026-08-04), so "a request is waiting for you" points at Admin
+      // Settings → Requests — today's routed reviewers are all admins.
+      return { label: "Open request", to: "/admin?tab=requests" };
     default: {
       if (row.opportunity_id)
         return { label: "Open", to: `/opportunities/${row.opportunity_id}` };
@@ -380,6 +384,7 @@ export function Briefing({
 }
 
 function DividerRow({ actions }: { actions?: ReactNode }) {
+  const { openRequestDialog } = useRequestDialog();
   return (
     <div data-tour="widgets" className="flex items-center gap-3 pt-1">
       <span className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -388,14 +393,16 @@ function DividerRow({ actions }: { actions?: ReactNode }) {
       <span className="flex-1 border-t border-dashed border-border" />
       {/* Transition-only escape hatch: live while Nexus is the landing
           page and Home is still fresh in everyone's memory. Both flags
-          live in landing-flip.ts. */}
+          live in landing-flip.ts. Opens the Submit Request popup on the
+          CRM form (the tab it used to deep-link to). */}
       {NEXUS_FEEDBACK_LINK && (
-        <Link
-          to="/requests?tab=crm"
+        <button
+          type="button"
+          onClick={() => openRequestDialog("crm")}
           className="text-xs text-primary underline underline-offset-4 hover:text-primary/80"
         >
           Something missing?
-        </Link>
+        </button>
       )}
       {actions}
     </div>

@@ -8,6 +8,7 @@ import { AiAssistantDialog } from "@/components/AiAssistantDialog";
 import { Button } from "@/components/ui/button";
 import { Menu as MenuIcon, Sparkles } from "lucide-react";
 import { WelcomeWizard } from "@/features/auth/WelcomeWizard";
+import { RequestDialogProvider, SubmitRequestButton } from "@/features/requests/RequestDialogProvider";
 import { QuickCreateDialog } from "@/components/QuickCreateDialog";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { useFrozenAnimationGuard } from "@/hooks/useFrozenAnimationGuard";
@@ -194,6 +195,7 @@ export function AppLayout() {
       window.location.hostname === "127.0.0.1");
 
   return (
+    <RequestDialogProvider>
     <div className="flex h-screen overflow-hidden">
       {/* Mobile overlay */}
       {isMobile && !collapsed && (
@@ -247,6 +249,9 @@ export function AppLayout() {
           </div>
           <div className="flex items-center gap-1">
             <GlobalSearch />
+            {/* Submit Request popup trigger (replaced the /requests tab —
+                Nathan 2026-08-04). Provider is the outermost wrapper below. */}
+            <SubmitRequestButton />
             <Button
               type="button"
               variant="ghost"
@@ -346,5 +351,6 @@ export function AppLayout() {
         </Suspense>
       )}
     </div>
+    </RequestDialogProvider>
   );
 }

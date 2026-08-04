@@ -1,9 +1,5 @@
-import { useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  Palette,
-  Package,
-  Wrench,
   Send,
   Check,
   Plus,
@@ -16,14 +12,11 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PageHeader } from "@/components/PageHeader";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -43,6 +36,27 @@ import {
   type ProductCategory,
   type BugClassification,
 } from "./api";
+
+/** The three request forms. Shared by RequestDialog (the only mount since the
+ * Requests tab moved into the header popup — Nathan, 2026-08-04). */
+export type RequestTab = "collateral" | "product" | "crm";
+
+interface RequestFormProps {
+  /** Reports whether the form holds unsubmitted user input (drives the
+   * dialog's discard-on-close confirmation). Reported false on unmount. */
+  onDirtyChange?: (dirty: boolean) => void;
+  /** Rendered as a "Done" button on the submitted panel (closes the dialog). */
+  onDone?: () => void;
+}
+
+/** Reports dirtiness up to the dialog; clears the flag on unmount so a
+ * switched-away-from form can't leave a stale "dirty" verdict behind. */
+function useDirtyReport(dirty: boolean, onDirtyChange?: (d: boolean) => void) {
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+}
 
 function PrioritySelect({
   value,
@@ -76,6 +90,18 @@ function FromLine() {
     <p className="text-xs text-muted-foreground">
       From <span className="font-medium text-foreground">{profile?.full_name ?? "you"}</span>
     </p>
+  );
+}
+
+/** Sticky submit bar. The negative margins are coupled to RequestDialog's
+ * scroll-body padding (px-6 pb-6) so the bar spans edge-to-edge and hugs the
+ * bottom of the scrollport while long forms scroll beneath it. */
+function FormFooter({ children }: { children: ReactNode }) {
+  return (
+    <div className="sticky bottom-0 -mx-6 -mb-6 mt-4 flex items-center justify-between gap-3 border-t border-border bg-background/95 px-6 py-3 backdrop-blur">
+      <FromLine />
+      {children}
+    </div>
   );
 }
 
@@ -166,7 +192,7 @@ function AttachmentPicker({
   );
 }
 
-function SubmittedPanel({ onAnother }: { onAnother: () => void }) {
+function SubmittedPanel({ onAnother, onDone }: { onAnother: () => void; onDone?: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center py-10 text-center">
       <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-500/20">
@@ -176,15 +202,18 @@ function SubmittedPanel({ onAnother }: { onAnother: () => void }) {
       <p className="mt-1 max-w-sm text-sm text-muted-foreground">
         Thanks! The right team has been notified and will take it from here.
       </p>
-      <Button variant="outline" className="mt-5 gap-2" onClick={onAnother}>
-        <Plus className="h-4 w-4" /> Submit another
-      </Button>
+      <div className="mt-5 flex items-center gap-2">
+        <Button variant="outline" className="gap-2" onClick={onAnother}>
+          <Plus className="h-4 w-4" /> Submit another
+        </Button>
+        {onDone && <Button onClick={onDone}>Done</Button>}
+      </div>
     </div>
   );
 }
 
 // ── Collateral ───────────────────────────────────────────────────────
-function CollateralForm() {
+export function CollateralForm({ onDirtyChange, onDone }: RequestFormProps) {
   const { profile } = useAuth();
   const create = useCreateRequest();
   const [submitted, setSubmitted] = useState(false);
@@ -196,6 +225,17 @@ function CollateralForm() {
   const [usage, setUsage] = useState("");
   const [priority, setPriority] = useState<RequestPriority>("low");
   const [files, setFiles] = useState<File[]>([]);
+
+  const dirty =
+    !submitted &&
+    (title.trim() !== "" ||
+      description.trim() !== "" ||
+      audience !== "" ||
+      format !== "" ||
+      partnerOrEvent.trim() !== "" ||
+      usage.trim() !== "" ||
+      files.length > 0);
+  useDirtyReport(dirty, onDirtyChange);
 
   function reset() {
     setTitle("");
@@ -247,6 +287,7 @@ function CollateralForm() {
   if (submitted) {
     return (
       <SubmittedPanel
+        onDone={onDone}
         onAnother={() => {
           reset();
           setSubmitted(false);
@@ -257,7 +298,6 @@ function CollateralForm() {
 
   return (
     <div className="space-y-4">
-      <FromLine />
       <div className="space-y-2">
         <Label htmlFor="c-title">What do you need? <span className="text-destructive">*</span></Label>
         <Input id="c-title" maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. One-pager on phishing services" />
@@ -300,12 +340,12 @@ function CollateralForm() {
       </div>
       <AttachmentPicker files={files} onChange={setFiles} maxSizeMB={5} />
       <PrioritySelect value={priority} onChange={setPriority} />
-      <div className="flex justify-end pt-2">
+      <FormFooter>
         <Button onClick={submit} disabled={create.isPending} className="gap-2">
           <Send className="h-4 w-4" />
           {create.isPending ? "Submitting..." : "Submit request"}
         </Button>
-      </div>
+      </FormFooter>
     </div>
   );
 }
@@ -453,7 +493,7 @@ function ClientImpactConfirm({
   );
 }
 
-function ProductForm() {
+export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
   const { profile } = useAuth();
   const create = useCreateRequest();
   const [submitted, setSubmitted] = useState(false);
@@ -469,6 +509,11 @@ function ProductForm() {
   // timed out, in which case there is no verdict to pre-fill from).
   const [clientFacing, setClientFacing] = useState<boolean | null>(true);
   const [checking, setChecking] = useState(false);
+
+  const dirty =
+    !submitted &&
+    (category !== "" || title.trim() !== "" || description.trim() !== "" || files.length > 0);
+  useDirtyReport(dirty, onDirtyChange);
 
   function reset() {
     setCategory("");
@@ -576,6 +621,7 @@ function ProductForm() {
   if (submitted) {
     return (
       <SubmittedPanel
+        onDone={onDone}
         onAnother={() => {
           reset();
           setSubmitted(false);
@@ -586,7 +632,6 @@ function ProductForm() {
 
   return (
     <div className="space-y-4">
-      <FromLine />
       <ProductCategoryPicker
         value={category}
         onChange={(v) => {
@@ -653,7 +698,7 @@ function ProductForm() {
             ? "Enhancements are reviewed inside the CRM. If approved, the request is filed to the product team's Jira board, attachments included."
             : "Bugs go to the product team's Jira board; enhancements are reviewed and approved first."}
       </p>
-      <div className="flex justify-end pt-2">
+      <FormFooter>
         <Button onClick={submit} disabled={create.isPending || checking} className="gap-2">
           {checking ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -668,13 +713,13 @@ function ProductForm() {
                 ? "Continue"
                 : "Submit request"}
         </Button>
-      </div>
+      </FormFooter>
     </div>
   );
 }
 
 // ── CRM ──────────────────────────────────────────────────────────────
-function CrmForm() {
+export function CrmForm({ onDirtyChange, onDone }: RequestFormProps) {
   const { profile } = useAuth();
   const create = useCreateRequest();
   const [submitted, setSubmitted] = useState(false);
@@ -683,6 +728,11 @@ function CrmForm() {
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<RequestPriority>("low");
   const [files, setFiles] = useState<File[]>([]);
+
+  const dirty =
+    !submitted &&
+    (changeType !== "" || title.trim() !== "" || description.trim() !== "" || files.length > 0);
+  useDirtyReport(dirty, onDirtyChange);
 
   function reset() {
     setChangeType("");
@@ -726,6 +776,7 @@ function CrmForm() {
   if (submitted) {
     return (
       <SubmittedPanel
+        onDone={onDone}
         onAnother={() => {
           reset();
           setSubmitted(false);
@@ -736,7 +787,6 @@ function CrmForm() {
 
   return (
     <div className="space-y-4">
-      <FromLine />
       <div className="space-y-2">
         <Label>Type of change</Label>
         <Select value={changeType} onValueChange={setChangeType}>
@@ -758,56 +808,12 @@ function CrmForm() {
       </div>
       <PrioritySelect value={priority} onChange={setPriority} />
       <AttachmentPicker files={files} onChange={setFiles} maxSizeMB={10} />
-      <div className="flex justify-end pt-2">
+      <FormFooter>
         <Button onClick={submit} disabled={create.isPending} className="gap-2">
           <Send className="h-4 w-4" />
           {create.isPending ? "Submitting..." : "Submit request"}
         </Button>
-      </div>
-    </div>
-  );
-}
-
-export function RequestsPage() {
-  const [searchParams] = useSearchParams();
-  const tabParam = searchParams.get("tab") ?? "";
-  const initialTab = ["collateral", "product", "crm"].includes(tabParam) ? tabParam : "collateral";
-  return (
-    <div className="mx-auto max-w-2xl">
-      <PageHeader
-        title="Requests"
-        description="Submit a request and the right person gets notified. Track progress as it's worked."
-      />
-      {/* ?tab=crm|product|collateral picks the starting tab (the Nexus
-          "Something missing?" link sends people straight to CRM). */}
-      <Tabs defaultValue={initialTab}>
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="collateral" className="gap-2">
-            <Palette className="h-4 w-4" /> Collateral
-          </TabsTrigger>
-          <TabsTrigger value="product" className="gap-2">
-            <Package className="h-4 w-4" /> Product
-          </TabsTrigger>
-          <TabsTrigger value="crm" className="gap-2">
-            <Wrench className="h-4 w-4" /> CRM
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="collateral">
-          <Card className="p-6">
-            <CollateralForm />
-          </Card>
-        </TabsContent>
-        <TabsContent value="product">
-          <Card className="p-6">
-            <ProductForm />
-          </Card>
-        </TabsContent>
-        <TabsContent value="crm">
-          <Card className="p-6">
-            <CrmForm />
-          </Card>
-        </TabsContent>
-      </Tabs>
+      </FormFooter>
     </div>
   );
 }

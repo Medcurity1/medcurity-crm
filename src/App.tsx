@@ -10,6 +10,10 @@ import { LoginPage } from "@/features/auth/LoginPage";
 import { ForgotPasswordPage } from "@/features/auth/ForgotPasswordPage";
 import { ResetPasswordPage } from "@/features/auth/ResetPasswordPage";
 import { AppLayout } from "@/components/layout/AppLayout";
+// Requests became a header popup (Nathan 2026-08-04); the /requests route
+// survives only as a redirect that opens the popup, so old bookmarks and
+// ?tab= deep links keep working.
+import { RequestsRedirect } from "@/features/requests/RequestsRedirect";
 import { setClientErrorAppVersion } from "@/lib/clientErrorLogger";
 import { BUILD_ID } from "@/lib/buildInfo";
 
@@ -30,7 +34,6 @@ if (typeof window !== "undefined") {
   homePageImport();
 }
 const NexusPage = lazy(() => import("@/features/nexus/NexusPage").then(m => ({ default: m.NexusPage })));
-const RequestsPage = lazy(() => import("@/features/requests/RequestsPage").then(m => ({ default: m.RequestsPage })));
 const MeddyPage = lazy(() => import("@/features/meddy/MeddyPage").then(m => ({ default: m.MeddyPage })));
 const SupportPage = lazy(() => import("@/features/support/SupportPage").then(m => ({ default: m.SupportPage })));
 const NotFound = lazy(() => import("@/features/NotFound").then(m => ({ default: m.NotFound })));
@@ -142,7 +145,7 @@ export default function App() {
                       (Nathan, 2026-07-03). */}
                   <Route index element={<HomePage />} />
                   <Route path="nexus" element={<NexusPage />} />
-                  <Route path="requests" element={<RequestsPage />} />
+                  <Route path="requests" element={<RequestsRedirect />} />
                   <Route path="meddy" element={<MeddyPage />} />
                   {/* Meddy Support: platform (app.medcurity.com) Coach
                       escalations. Separate stream from /meddy by design. */}
