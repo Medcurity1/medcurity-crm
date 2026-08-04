@@ -28,7 +28,9 @@ Statuses: `IDEA` · `QUEUED` · `IN PROGRESS` · `BLOCKED` · `STAGING` (awaitin
 
 ## B. On staging — awaiting prod go-ahead
 
-_(none — the 2026-08-04 evening batch promoted to PROD, merge 1f9d0ad; see SHIPPED)_
+| # | Item | Detail | Verify | Checked |
+|---|---|---|---|---|
+| B20 | Renewal nudges + signature tasks retargeted to the ASSESSOR (settles D15; Nathan 8/4: "meant to be for the assessor all along", seller = fallback only) | Migration 20260805030000: rep_day_queue renewals branch and the generator's "New signature needed" task both now target coalesce(assigned_assessor_id, owner_user_id). Child renewal deal owner was already assessor-first since April. Effect: expiring-contract warnings move off sellers like Summer wherever an assessor is set; pre-July deals without one still fall back to the seller. NOTE the 4 real no-renewal gaps she surfaced (Orchid Health 8/4, Galvanic 8/7, Hearing Doctors NJ 8/12, Blue Mtn UT 8/15) still need a human regardless of who gets the nudge. | grep -c "coalesce(o.assigned_assessor_id" supabase/migrations/20260805030000_renewal_nudges_to_assessor.sql = 1 | 2026-08-04 |
 
 ---
 
@@ -46,7 +48,6 @@ _(none — the 2026-08-04 evening batch promoted to PROD, merge 1f9d0ad; see SHI
 
 | # | Item | Who | Detail | Verify | Checked |
 |---|---|---|---|---|---|
-| D15 | Renewal-nudge audience: seller or renewals team? (Summer's 8/4 report) | Nathan decides | The briefing's "Renewal N days out, no deal open yet" rows go to the OWNER OF THE EXPIRING CLOSED-WON CONTRACT (rep_day_queue renewals CTE, 20260729130000) — for Summer that's 9 contracts ending within 60 days, several with genuinely NO renewal deal open anywhere (Orchid Health 8/4, Galvanic Health 8/7, Hearing Doctors of NJ 8/12, Blue Mountain UT 8/15 — real coverage gaps the nudge is designed to catch; PPoU correctly suppressed by Dan's open deals). She expected assessors to get these. Options: (a) keep with the seller as safety net, (b) rescope to the renewals team/claim-queue watchers, (c) both. Also worth someone eyeballing those no-deal accounts regardless — the automation has no child for them (possibly D10's anchor-horizon effect or dismissals). One-CTE change once decided. | rep_day_queue renewals CTE still filters o.owner_user_id = auth.uid() | 2026-08-04 |
 | D1 | Campaigns public launch checklist | Nathan | (1) Jordan's copy into presets; (2) flip ACTIVE_ANNOUNCEMENT in AnnouncementBanner.tsx; (3) remove admin gates at the 3 flip points (App.tsx route, Sidebar adminItems, ContactsList right-click). Also decide the 2 Playbook GH workflows disabled since 6/26 — likely superseded by the Campaigns engine. Prod Smartlead activation is COMPLETE (2026-07-29, Nathan's "turn the nightly thing on"): API key was already set; the campaigns_daily_sweep cron is now installed on prod (10 13 UTC daily, key-inline command pasted by Nathan himself — GUC route blocked by 42501 on prod) and proven with a supervised run: ok=true, 0 errors, 49 campaigns synced, 13 left for next run by the step-1 budget. (The leads_per_day clamp, formerly item 4 here, shipped 2026-07-27 — see SHIPPED.) | `grep -n ACTIVE_ANNOUNCEMENT src/components/AnnouncementBanner.tsx` | 2026-08-04 |
 | D2 | On-Site Fee: price on raw headcount | Molly | Tier buckets can't express her rule (250 sits inside "101-250", and that bucket function is global to all pricing). Fix = price this ONE fee off `coalesce(fte_count, employees)` with the split at ≥250 → $1,000. Gated on A4. | `grep -n 'employees <= 250' src/lib/formatters.ts` still global | 2026-08-04 |
 | D3 | On-Site Fee: auto-add when on-site SRA selected | Molly | Her Q3 answer said yes. Never started. | `grep -rn 'on-site-fee' src/features/opportunities/` returns nothing | 2026-08-04 |
