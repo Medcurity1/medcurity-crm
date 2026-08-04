@@ -3,6 +3,7 @@
 // so admin preview shows the target user's data. Rendered as compact rows
 // (not the full 5-column table) because widgets live at half page width.
 
+import { Building2 } from "lucide-react";
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -118,11 +119,19 @@ export function PipelineWidget({
                 >
                   {opp.name}
                 </Link>
-                <p className="text-xs text-muted-foreground truncate">
-                  {opp.account?.name ?? ""}
-                  {opp.expected_close_date
-                    ? ` · Closes ${formatDate(opp.expected_close_date)}`
-                    : ""}
+                <p
+                  className="flex items-center gap-1 text-xs text-muted-foreground"
+                  title={opp.account?.name ? `Account: ${opp.account.name}` : undefined}
+                >
+                  {opp.account?.name && (
+                    <Building2 className="h-3 w-3 shrink-0" />
+                  )}
+                  <span className="truncate">
+                    {opp.account?.name ?? ""}
+                    {opp.expected_close_date
+                      ? ` · Closes ${formatDate(opp.expected_close_date)}`
+                      : ""}
+                  </span>
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">

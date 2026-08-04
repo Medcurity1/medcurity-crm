@@ -539,8 +539,20 @@ export function OpportunityDetail() {
             <CardTitle className="text-xs text-muted-foreground font-medium">Close Date</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
-            <p className="text-sm font-semibold">
-              {opp.close_date ? formatDate(opp.close_date) : "\u2014"}
+            {/* Only meaningful once closed (Summer, 8/4): while open the
+                DB mirrors the forecast into close_date for reporting, but
+                showing that here read as "the close date already happened". */}
+            <p
+              className="text-sm font-semibold"
+              title={
+                ["closed_won", "closed_lost"].includes(opp.stage)
+                  ? undefined
+                  : "Set automatically when the deal closes"
+              }
+            >
+              {["closed_won", "closed_lost"].includes(opp.stage) && opp.close_date
+                ? formatDate(opp.close_date)
+                : "\u2014"}
             </p>
           </CardContent>
         </Card>
@@ -755,7 +767,14 @@ export function OpportunityDetail() {
             label="Auto Renewal"
             value={opp.auto_renewal ? "\u2713 Yes" : "\u2717 No"}
           />
-          <Field label="Close Date" value={formatDate(opp.close_date)} />
+          <Field
+            label="Close Date"
+            value={
+              ["closed_won", "closed_lost"].includes(opp.stage)
+                ? formatDate(opp.close_date)
+                : null
+            }
+          />
           <Field label="Promo Code" value={opp.promo_code} />
           {/* Bundle-deal flag — when true, any per-line discount on this
               opp is a bundle/flat-rate adjustment (rep discounted one

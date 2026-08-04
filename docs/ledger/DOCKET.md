@@ -29,7 +29,11 @@ Statuses: `IDEA` · `QUEUED` · `IN PROGRESS` · `BLOCKED` · `STAGING` (awaitin
 
 ## B. On staging — awaiting prod go-ahead
 
-_(none — the 2026-08-04 Nexus-launch batch promoted to PROD, merge 43f66d6; see SHIPPED)_
+| # | Item | Detail | Verify | Checked |
+|---|---|---|---|---|
+| B16 | Close Date invisible until a deal actually closes | Summer's 8/4 CRM request (Nathan checks it off): the DB deliberately mirrors the forecast into close_date while a deal is open (20260508000002, so reports filtering close_date never see stale forecasts) — but the detail page and edit form SHOWED that mirror, reading as "the close date already happened". Fix is display-level, data untouched: detail card + details Field show a dash with a "set automatically when the deal closes" hint while open; the edit form swaps the close-date input for a disabled "Set at close" placeholder on open deals and never sends close_date while open (the mirror keeps managing it invisibly; closing via the form still auto-stamps). | `grep -n '"Set at close"' src/features/opportunities/OpportunityForm.tsx` | 2026-08-04 |
+| B17 | Request bell notifications open the request | Nathan 8/4: clicking a request notification "doesn't take you anywhere" — the trigger linked bare '/nexus', a no-op now that Nexus IS the landing page. Migration 20260804233000 re-emits notify_request_recipients with '/nexus?request=<id>'; Briefing reads the param, opens that request's RequestDetailDialog (Jordan-fix plumbing), and strips the param. Old notification rows keep the bare link (still navigate; just don't auto-open). | `grep -n "request=' || new.id" supabase/migrations/20260804233000_request_notification_deep_link.sql` | 2026-08-04 |
+| B18 | Widget context lines can't read as owners anymore | Summer's 8/4 "personalize widgets" request (Nathan checks it off) — INVESTIGATION FIRST: her widgets were already personal; probe of her exact widget queries on prod returned precisely her screenshot's rows (all owner=Summer — "Remmie"/"BM Supply" are ACCOUNTS, "Jeff Polanco" a contact). No data change; polish shipped: Today's Tasks + My Open Opportunities row context lines now carry a small building icon + "Account:" tooltip so account names can't read as other people's items. | `grep -n Building2 src/features/nexus/widgets/TasksWidget.tsx` | 2026-08-04 |
 
 ---
 
