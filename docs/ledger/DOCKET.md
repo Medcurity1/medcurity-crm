@@ -28,10 +28,7 @@ Statuses: `IDEA` · `QUEUED` · `IN PROGRESS` · `BLOCKED` · `STAGING` (awaitin
 
 ## B. On staging — awaiting prod go-ahead
 
-| # | Item | Who | Detail | Verify | Checked |
-|---|---|---|---|---|---|
-| B6 | Close-date display fix (closed deals show actual close_date) | Summer (CRM request 2026-08-03) | On staging: account-page opps card + main Opportunities list show close_date for closed_won/closed_lost rows, header "Close Date"; open rows unchanged. Promote on Nathan's word; Summer is on prod and still sees the forecast date there until then. | `git log origin/main --oneline \| grep -i "close-date display"` = 0 hits (not yet promoted) | 2026-08-03 |
-| B7 | Security Monitoring product (migrations 20260803180000 + 190000 description fix) | Summer (CRM request 2026-08-03) | On staging: product + $400 standalone at 1-20 in all 12 books. Larger bands carry NO standalone price because the 2026-07-16 sheet marks them "incl." (included in the bundles at those sizes) — Nathan corrected the earlier "ladder unresolved" misread, which belongs only to the sheet's BA-Standard add-on open item ("$400+"); add-on/edge cases use manual price entry. Summer books her 7/31 sale at $100 manually (pre-update price, per Makena). Promote on Nathan's word — she can't book the sale until it's on prod. | `git log origin/main --oneline \| grep -i "security monitoring"` = 0 hits (not yet promoted) | 2026-08-03 |
+_(none — Summer's close-date fix + Security Monitoring product promoted to PROD 2026-08-03 ~3:45pm PT, merge 8462e74; see SHIPPED)_
 
 ---
 
