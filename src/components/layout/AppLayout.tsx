@@ -30,7 +30,8 @@ import { AnnouncementBanner } from "@/components/AnnouncementBanner";
 import { NotificationPermissionPrompt } from "@/components/NotificationPermissionPrompt";
 
 const pathMap: Record<string, string> = {
-  "": "Home",
+  "": "Nexus",
+  home: "Home",
   accounts: "Accounts",
   contacts: "Contacts",
   leads: "Leads",

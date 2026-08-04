@@ -14,7 +14,9 @@
  * transition feedback link. While it is `false` both features render
  * nothing at all and cost nothing.
  */
-export const NEXUS_IS_LANDING: boolean = false;
+// Flipped 2026-08-04 (Nathan): staged with the launch batch; goes to prod
+// with the same promote that ships the tab swap.
+export const NEXUS_IS_LANDING: boolean = true;
 
 /**
  * True while we are still inside the transition window (Home just went

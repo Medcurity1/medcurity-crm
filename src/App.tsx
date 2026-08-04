@@ -142,7 +142,10 @@ export default function App() {
                   {/* Classic dashboard stays at "/" while Nexus (the
                       customizable widget page) is tested at /nexus
                       (Nathan, 2026-07-03). */}
-                  <Route index element={<HomePage />} />
+                  {/* The swap (Nathan 2026-08-04): "/" lands on Nexus. Home
+                      stays reachable at /home until it's retired for good. */}
+                  <Route index element={<Navigate to="/nexus" replace />} />
+                  <Route path="home" element={<HomePage />} />
                   <Route path="nexus" element={<NexusPage />} />
                   <Route path="requests" element={<RequestsRedirect />} />
                   <Route path="meddy" element={<MeddyPage />} />

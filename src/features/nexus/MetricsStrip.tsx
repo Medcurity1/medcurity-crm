@@ -158,7 +158,9 @@ export function MetricsStrip({ customizing }: { customizing: boolean }) {
   if (!userId) return null;
 
   return (
-    <div className="space-y-3">
+    // data-tour anchors the tour's metrics step (NexusTour). The step is
+    // optional there: a user who hid the strip just doesn't get it.
+    <div className="space-y-3" data-tour="metrics">
       {customizing && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-primary/40 bg-primary/5 px-4 py-2.5">
           <div className="flex items-center gap-1.5 text-sm font-medium">

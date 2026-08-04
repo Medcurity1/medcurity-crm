@@ -72,11 +72,16 @@ type NavItem = {
 // to a freshly launched tab). COMING_SOON ("bg-orange-500 text-white")
 // retired 2026-07-03 with the old /nexus placeholder tab.
 const ADMIN_BADGE = "bg-sky-500 text-white";
-// NEW_BADGE ("bg-red-500 text-white") retired 2026-07-02 — re-add when the
-// next fresh tab launches.
+// Nexus launch highlight (Nathan 2026-08-04: "not really new but it
+// should get a highlight" — he leaned Launched over New). Emerald to
+// match the tour + Evergreen hero. Retire once the launch is old news.
+const LAUNCHED_BADGE = "bg-emerald-500 text-white";
 
 const navItems: NavItem[] = [
-  { to: "/", icon: Home, label: "Home" },
+  // The swap (Nathan 2026-08-04): Nexus is the landing page and top tab;
+  // Home moved to the bottom of this group, still reachable at /home
+  // until it's confirmed unneeded and retired.
+  { to: "/nexus", icon: Sparkles, label: "Nexus", secret: "dailydeal", badge: { label: "Launched", className: LAUNCHED_BADGE } },
   // Meddy: website chat command center. Live as of 2026-06-16 (the website
   // chat now points at the CRM). Sits right under Home so reps catch incoming
   // website chats first. "New" badge flags the freshly launched tab.
@@ -102,10 +107,7 @@ const navItems: NavItem[] = [
   // popup in the top bar (RequestDialogProvider), openable from any page.
   // Calendar tab removed 2026-08-04 (Nathan: confirmed nobody uses it).
   // Activities remain visible in /activities and per-record timelines.
-  // Nexus: the customizable widget dashboard (Jordan V4). Lives at /nexus
-  // while it's being tested; the classic Home dashboard is back at "/"
-  // (Nathan, 2026-07-03).
-  { to: "/nexus", icon: Sparkles, label: "Nexus", secret: "dailydeal" },
+  { to: "/home", icon: Home, label: "Home" },
 ];
 
 const adminItems: NavItem[] = [
