@@ -12,7 +12,8 @@ import {
   Sparkles,
   UserSearch,
 } from "lucide-react";
-import { PageHeader } from "@/components/PageHeader";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -127,12 +128,8 @@ export function ReportsHub() {
   };
 
   if (zone === "home") {
-    return (
-      <div className="space-y-4">
-        <PageHeader title="Reports" />
-        <HubHome onGo={go} onOpenList={openList} />
-      </div>
-    );
+    // No page H1: the top bar already says Reports, the cards do the rest.
+    return <HubHome onGo={go} onOpenList={openList} />;
   }
 
   if (zone === "insights") {
@@ -250,9 +247,37 @@ function HubHome({
 }) {
   const { data: lists } = useLeadLists();
   const { data: counts } = useLeadListMemberCount();
+  // Three live numbers so the numbers zone shows numbers before any click.
+  const { data: kpi } = useQuery({
+    queryKey: ["reports-hub-kpis"],
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const monthStart = new Date();
+      monthStart.setDate(1);
+      const [open, mql] = await Promise.all([
+        supabase
+          .from("opportunities")
+          .select("amount")
+          .not("stage", "in", "(closed_won,closed_lost)")
+          .is("archived_at", null),
+        supabase
+          .from("contacts")
+          .select("id", { count: "exact", head: true })
+          .gte("mql_date", monthStart.toISOString().slice(0, 10)),
+      ]);
+      const amounts = open.data ?? [];
+      return {
+        openCount: amounts.length,
+        openSum: amounts.reduce((s, r) => s + (r.amount ?? 0), 0),
+        mql: mql.count ?? 0,
+      };
+    },
+  });
+  const money = (n: number) =>
+    n >= 1_000_000 ? `$${(n / 1_000_000).toFixed(1)}M` : `$${Math.round(n / 1000)}k`;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-1">
       {/* INSIGHTS */}
       <section className="flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm">
         <button
@@ -272,6 +297,20 @@ function HubHome({
             <ChevronRight className="ml-auto h-5 w-5 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5" />
           </div>
         </button>
+        <div className="mb-2 grid grid-cols-3 gap-2 px-5">
+          {(
+            [
+              [kpi ? money(kpi.openSum) : "...", "Open pipeline"],
+              [kpi ? String(kpi.openCount) : "...", "Open deals"],
+              [kpi ? String(kpi.mql) : "...", "MQLs this month"],
+            ] as const
+          ).map(([value, label]) => (
+            <div key={label} className="rounded-xl border bg-muted/30 px-3 py-2.5">
+              <p className="text-lg font-semibold leading-tight tabular-nums">{value}</p>
+              <p className="text-[11px] text-muted-foreground">{label}</p>
+            </div>
+          ))}
+        </div>
         <div className="flex-1 space-y-1 px-3 pb-4">
           {(
             [
