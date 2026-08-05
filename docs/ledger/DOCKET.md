@@ -28,9 +28,7 @@ Statuses: `IDEA` · `QUEUED` · `IN PROGRESS` · `BLOCKED` · `STAGING` (awaitin
 
 ## B. On staging — awaiting prod go-ahead
 
-| # | Item | Detail | Verify | Checked |
-|---|---|---|---|---|
-| B20 | Renewal nudges + signature tasks retargeted to the ASSESSOR (settles D15; Nathan 8/4: "meant to be for the assessor all along", seller = fallback only) | Migration 20260805030000: rep_day_queue renewals branch and the generator's "New signature needed" task both now target coalesce(assigned_assessor_id, owner_user_id). Child renewal deal owner was already assessor-first since April. Effect: expiring-contract warnings move off sellers like Summer wherever an assessor is set; pre-July deals without one still fall back to the seller. NOTE the 4 real no-renewal gaps she surfaced (Orchid Health 8/4, Galvanic 8/7, Hearing Doctors NJ 8/12, Blue Mtn UT 8/15) still need a human regardless of who gets the nudge. | grep -c "coalesce(o.assigned_assessor_id" supabase/migrations/20260805030000_renewal_nudges_to_assessor.sql = 1 | 2026-08-04 |
+_(none)_
 
 ---
 
