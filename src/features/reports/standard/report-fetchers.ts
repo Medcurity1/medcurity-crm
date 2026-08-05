@@ -60,6 +60,7 @@ export async function fetchAccountsById(ids: Set<string>): Promise<
       created_at: string;
       account_number: string | null;
       account_type: string | null;
+      every_other_year: boolean | null;
     }
   >
 > {
@@ -72,7 +73,7 @@ export async function fetchAccountsById(ids: Set<string>): Promise<
     const { data, error } = await supabase
       .from("accounts")
       .select(
-        "id, name, customer_status, owner_user_id, renewal_type, notes, lead_source, created_at, account_number, account_type",
+        "id, name, customer_status, owner_user_id, renewal_type, notes, lead_source, created_at, account_number, account_type, every_other_year",
       )
       .in("id", chunk);
     if (error) throw error;

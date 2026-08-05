@@ -131,7 +131,11 @@ export function ArpcByQuarter() {
       // aren't undercounted. Mirrors v_marketing_suppression's customer-hood.
       const windowStart = allQuarters[0].start;
       const windowEnd = allQuarters[allQuarters.length - 1].end;
-      const nullContractFloor = addDaysIso(windowStart, -365);
+      // Floors widened by 12 months so every-other-year accounts (whose
+      // coverage extends a year past the contract math) are admitted; the
+      // per-opp classification below applies the precise rule.
+      const nullContractFloor = addDaysIso(windowStart, -730);
+      const contractEndFloor = addDaysIso(windowStart, -365);
       const opps = await fetchAllRows<OppRaw>(() =>
         supabase
           .from("opportunities")
@@ -140,7 +144,7 @@ export function ArpcByQuarter() {
           .is("archived_at", null)
           .lte("close_date", windowEnd)
           .or(
-            `close_date.gte.${nullContractFloor},contract_end_date.gte.${windowStart}`,
+            `close_date.gte.${nullContractFloor},contract_end_date.gte.${contractEndFloor}`,
           )
           .order("close_date", { ascending: true }),
       );
@@ -183,7 +187,12 @@ export function ArpcByQuarter() {
       for (const q of allQuarters) activeByQuarter.set(q.sortKey, new Set());
       for (const o of opps) {
         if (!o.close_date || !o.account_id) continue;
-        const effEnd = o.contract_end_date ?? addDaysIso(o.close_date, 365);
+        // Every-other-year accounts stay covered 12 extra months (their gap
+        // year), matching derive_account_customer_status.
+        const effEndBase = o.contract_end_date ?? addDaysIso(o.close_date, 365);
+        const effEnd = accounts.get(o.account_id)?.every_other_year
+          ? addDaysIso(effEndBase, 365)
+          : effEndBase;
         for (const q of allQuarters) {
           // Active at Q.end if it had closed by then AND contract still covers Q.end.
           if (o.close_date <= q.end && effEnd >= q.end) {

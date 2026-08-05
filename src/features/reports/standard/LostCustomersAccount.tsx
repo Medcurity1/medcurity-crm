@@ -53,7 +53,9 @@ import { fetchAccountsById, fetchAllRows } from "./report-fetchers";
  *   iff it has at least one Closed-Won opp where the opp is "still
  *   open" — meaning contract_end_date >= today if it's set,
  *   otherwise close_date >= today - 365 days (i.e. assume a 1-year
- *   contract if no contract_end_date was captured).
+ *   contract if no contract_end_date was captured). Every-other-year
+ *   accounts get 12 extra months of coverage (their planned gap year;
+ *   2026-08-05, matches derive_account_customer_status).
  *
  * "Lost" then = the account was active at some point in the past but
  * is no longer active per the rule above. The "lost quarter" is the
@@ -168,15 +170,20 @@ export function LostCustomersAccount() {
       for (const [accountId, info] of perAccount) {
         const latest = info.latest;
         const closeDate = latest.close_date as string;
+        const acc = accounts.get(accountId);
         // Effective end = contract_end_date if present, otherwise
-        // close_date + 365 (assumed 1-year contract).
-        const effectiveEnd = latest.contract_end_date
+        // close_date + 365 (assumed 1-year contract). Every-other-year
+        // accounts get 12 extra months: their gap year is the planned
+        // cadence, not a lapse (matches derive_account_customer_status).
+        const effectiveEndBase = latest.contract_end_date
           ? (latest.contract_end_date as string)
           : addDaysIso(closeDate, 365);
+        const effectiveEnd = acc?.every_other_year
+          ? addDaysIso(effectiveEndBase, 365)
+          : effectiveEndBase;
         // Active if effective end is in the future. Skip — they're not lost.
         if (effectiveEnd >= todayIso) continue;
         const lostBucket = quarterOf(effectiveEnd);
-        const acc = accounts.get(accountId);
         lost.push({
           account_id: accountId,
           account_name: acc?.name ?? "Unknown",
