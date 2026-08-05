@@ -196,6 +196,7 @@ export function ReportsHub() {
         next.delete("chip");
         next.delete("report");
         next.delete("new");
+        next.delete("entity");
         for (const [k, v] of Object.entries(extra ?? {})) next.set(k, v);
         return next;
       },
@@ -508,6 +509,50 @@ function HubHome({
                 <ChevronRight className="h-3 w-3" />
               </button>
             )}
+          </div>
+        </div>
+      </section>
+
+      {/* The actual report-pulling act, front and center: pick your data,
+          land in the builder with it preselected. */}
+      <section className="lg:col-span-2 rounded-2xl border bg-card p-4 shadow-sm transition-all duration-200 hover:border-primary/30 hover:shadow-md">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+          <button
+            type="button"
+            onClick={() => onGo("insights", "custom")}
+            onMouseEnter={prefetchInsights}
+            className="flex items-center gap-3 text-left"
+          >
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 to-primary/[0.06]">
+              <SlidersHorizontal className="h-5 w-5 text-primary" />
+            </span>
+            <span>
+              <span className="block font-semibold leading-tight">Build a report</span>
+              <span className="block text-sm text-muted-foreground">
+                Any data, filtered your way
+              </span>
+            </span>
+          </button>
+          <div className="flex flex-wrap gap-1.5">
+            {(
+              [
+                ["accounts", "Accounts"],
+                ["contacts", "Contacts"],
+                ["opportunities", "Deals"],
+                ["activities", "Activities"],
+                ["opportunity_products", "Products"],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onMouseEnter={prefetchInsights}
+                onClick={() => onGo("insights", "custom", { entity: key })}
+                className="rounded-full border bg-card px-3 py-1.5 text-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-sm"
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </div>
       </section>
