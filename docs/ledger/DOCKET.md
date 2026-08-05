@@ -28,7 +28,9 @@ Statuses: `IDEA` · `QUEUED` · `IN PROGRESS` · `BLOCKED` · `STAGING` (awaitin
 
 ## B. On staging — awaiting prod go-ahead
 
-_(none)_
+| # | Item | Detail | Verify | Checked |
+|---|---|---|---|---|
+| B21 | Lists workspace power tools (Nathan 8/4 late: "make lists even better. adding sorting and any other helpful features") | Sortable columns (Name/Account/Email/Phone, asc/desc/off, empties sink, per-list persistence), checkbox multi-select + bulk bar (Add to another list / Start a campaign [admin] / Copy emails / Remove honoring smart-list keep-off / Clear), one-round-trip useBulkRemoveFromList (single toast), Copy emails + Export CSV of the filtered view in the header. | grep -c "useBulkRemoveFromList" src/features/lead-lists/lead-lists-api.ts >= 1 | 2026-08-04 |
 
 ---
 

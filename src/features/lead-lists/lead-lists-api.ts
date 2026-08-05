@@ -337,6 +337,59 @@ export function useExcludeFromSmartList() {
 }
 
 /** The removed-and-kept-off people of a smart list, for the Restore UI. */
+/** Bulk removal in one round trip with one toast (the single-row hooks
+ * toast per call, which turns a 50-row sweep into 50 toasts). Smart lists
+ * get sticky exclusion rows plus manual-member cleanup so the hybrid
+ * union can't resurrect anyone; static lists just lose membership rows. */
+export function useBulkRemoveFromList() {
+  const qc = useQueryClient();
+  const { user } = useAuth();
+  return useMutation({
+    mutationFn: async ({
+      list,
+      contactIds,
+      memberIds,
+    }: {
+      list: LeadList;
+      contactIds: string[];
+      memberIds: string[];
+    }) => {
+      if (list.is_dynamic && contactIds.length) {
+        const { error } = await supabase.from("lead_list_exclusions").upsert(
+          contactIds.map((contact_id) => ({
+            list_id: list.id,
+            contact_id,
+            excluded_by: user?.id ?? null,
+          })),
+          { onConflict: "list_id,contact_id" },
+        );
+        if (error) throw error;
+      }
+      if (memberIds.length) {
+        const { error } = await supabase
+          .from("lead_list_members")
+          .delete()
+          .in("id", memberIds);
+        if (error) throw error;
+      }
+      return contactIds.length;
+    },
+    onSuccess: (count, vars) => {
+      qc.invalidateQueries({ queryKey: ["lead-list-members", vars.list.id] });
+      qc.invalidateQueries({ queryKey: ["lead-list-member-counts"] });
+      qc.invalidateQueries({ queryKey: ["smart-list-members"] });
+      qc.invalidateQueries({ queryKey: ["list-exclusions", vars.list.id] });
+      qc.invalidateQueries({ queryKey: ["nexus-widget-data", "list"] });
+      toast.success(
+        vars.list.is_dynamic
+          ? `Removed ${count} and kept them off`
+          : `Removed ${count} from the list`,
+      );
+    },
+    onError: (e) => toast.error("Couldn't remove: " + (e as Error).message),
+  });
+}
+
 export function useListExclusions(listId: string | undefined, enabled = true) {
   return useQuery({
     queryKey: ["list-exclusions", listId],
