@@ -10,6 +10,7 @@ import {
   Plus,
   SlidersHorizontal,
   Sparkles,
+  Star,
   UserSearch,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -172,7 +173,7 @@ export function ReportsHub() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { zone, insightsView, listsView } = resolve(searchParams);
 
-  const go = (tab: string, view?: string) => {
+  const go = (tab: string, view?: string, extra?: Record<string, string>) => {
     const labels: Record<string, string> = {
       "insights/catalog": "Report catalog",
       "insights/team": "Team dashboard",
@@ -192,6 +193,9 @@ export function ReportsHub() {
         if (view) next.set("view", view);
         else next.delete("view");
         next.delete("list");
+        next.delete("chip");
+        next.delete("report");
+        for (const [k, v] of Object.entries(extra ?? {})) next.set(k, v);
         return next;
       },
       { replace: true },
@@ -326,7 +330,7 @@ function HubHome({
   onGo,
   onOpenList,
 }: {
-  onGo: (tab: string, view?: string) => void;
+  onGo: (tab: string, view?: string, extra?: Record<string, string>) => void;
   onOpenList: (id: string, label?: string) => void;
 }) {
   const recents = topRecents(4);
@@ -409,12 +413,17 @@ function HubHome({
               ["catalog", LibraryBig, "Report catalog", "Financial, pipeline, marketing, renewals"],
               ["team", LayoutDashboard, "Team dashboard", "The whole team at a glance"],
               ["custom", SlidersHorizontal, "Custom report", "Build one over any data"],
+              ["starred", Star, "Starred reports", "Your favorites, one click"],
             ] as const
           ).map(([view, Icon, label, sub]) => (
             <button
               key={view}
               type="button"
-              onClick={() => onGo("insights", view)}
+              onClick={() =>
+                view === "starred"
+                  ? onGo("insights", "catalog", { chip: "fav" })
+                  : onGo("insights", view)
+              }
               className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors hover:bg-muted"
             >
               <Icon className="h-4 w-4 shrink-0 text-emerald-500/80" />

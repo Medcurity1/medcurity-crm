@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Download } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { PageHeader } from "@/components/PageHeader";
+import { AddToListDialog } from "@/features/lead-lists/AddToListDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -50,6 +51,7 @@ interface SqlRow {
 
 export function SqlAccounts() {
   const [range, setRange] = useState<DateRangeKey>("current_quarter");
+  const [listOpen, setListOpen] = useState(false);
   const { start, end } = resolveRange(range);
 
   const { data: rows, isLoading, error } = useQuery({
@@ -188,6 +190,14 @@ export function SqlAccounts() {
                 ))}
               </SelectContent>
             </Select>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isLoading || !rows?.length}
+              onClick={() => setListOpen(true)}
+            >
+              Save as list
+            </Button>
             <Button variant="outline" size="sm" onClick={exportCsv} disabled={isLoading}>
               <Download className="h-4 w-4 mr-1" />
               Export CSV
@@ -283,6 +293,12 @@ export function SqlAccounts() {
           )}
         </CardContent>
       </Card>
+
+      <AddToListDialog
+        open={listOpen}
+        onOpenChange={setListOpen}
+        contactIds={[...new Set((rows ?? []).map((r) => r.contact_id))]}
+      />
     </div>
   );
 }

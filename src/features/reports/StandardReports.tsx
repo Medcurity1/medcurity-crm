@@ -373,7 +373,11 @@ export function StandardReports() {
 
   const favs = useMemo(() => favData ?? new Set<string>(), [favData]);
   const [search, setSearch] = useState("");
-  const [chip, setChip] = useState<Chip>("all");
+  const [chip, setChip] = useState<Chip>(() => {
+    // Deep-linkable filter (the landing's "Starred reports" row uses ?chip=fav)
+    const c = new URLSearchParams(window.location.search).get("chip");
+    return c && ["all", "fav", "mine", "shared", "standard"].includes(c) ? (c as Chip) : "all";
+  });
 
   const q = search.trim().toLowerCase();
   const savedReports = saved ?? [];
@@ -454,6 +458,41 @@ export function StandardReports() {
           </Link>
         </div>
       </div>
+
+      {/* Gold-star row: favorites one click away, whatever filter is active */}
+      {chip === "all" && favs.size > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-1.5">
+          <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+          {[...favs].map((ref) => {
+            if (ref.startsWith("standard:")) {
+              const r = REPORTS.find((x) => `standard:${x.id}` === ref);
+              if (!r || r.status !== "live") return null;
+              return (
+                <button
+                  key={ref}
+                  type="button"
+                  onClick={() => navigate(`/reports/standard/${r.id}`)}
+                  className="rounded-full border border-amber-500/30 bg-amber-500/[0.06] px-2.5 py-1 text-xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm"
+                >
+                  {r.title}
+                </button>
+              );
+            }
+            const rep = savedReports.find((x) => `saved:${x.id}` === ref);
+            if (!rep) return null;
+            return (
+              <button
+                key={ref}
+                type="button"
+                onClick={() => navigate(`/reports?tab=insights&view=custom&report=${rep.id}`)}
+                className="rounded-full border border-amber-500/30 bg-amber-500/[0.06] px-2.5 py-1 text-xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm"
+              >
+                {rep.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {totalVisible === 0 ? (
         <p className="text-sm text-muted-foreground py-10 text-center">
