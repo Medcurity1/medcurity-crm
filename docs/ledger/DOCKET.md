@@ -31,6 +31,7 @@ Statuses: `IDEA` · `QUEUED` · `IN PROGRESS` · `BLOCKED` · `STAGING` (awaitin
 | # | Item | Detail | Verify | Checked |
 |---|---|---|---|---|
 | B21 | Lists workspace power tools (Nathan 8/4 late: "make lists even better. adding sorting and any other helpful features") | Sortable columns (Name/Account/Email/Phone, asc/desc/off, empties sink, per-list persistence), checkbox multi-select + bulk bar (Add to another list / Start a campaign [admin] / Copy emails / Remove honoring smart-list keep-off / Clear), one-round-trip useBulkRemoveFromList (single toast), Copy emails + Export CSV of the filtered view in the header. | grep -c "useBulkRemoveFromList" src/features/lead-lists/lead-lists-api.ts >= 1 | 2026-08-04 |
+| B22 | Reports tab restructure phase 1: two-zone hub (Insights + Lists) with a card front door (Nathan 8/4 late, "i say do it") | ReportsHub rebuilt: landing = two zone cards (Insights: catalog/team dash/custom report rows; Lists: quick actions + live top-5 lists with counts); Insights folds in Team Dashboard + full Builder as "Custom report"; Lists gains "Pull people" (Builder in people mode, entity picker scoped to contacts/accounts); all legacy ?tab= values redirect (standard, team-dashboard, reports, lists&list=). Phases 2-4 (report template unification, bridges on standard reports, guided pull flow) not started. | grep -c 'mode="people"' src/features/reports/ReportsHub.tsx = 1 | 2026-08-04 |
 
 ---
 

@@ -426,9 +426,11 @@ function getRelationOptions(
 function EntitySelector({
   value,
   onChange,
+  allowed,
 }: {
   value: string;
   onChange: (v: string) => void;
+  allowed?: readonly string[];
 }) {
   return (
     <div className="space-y-1.5">
@@ -438,7 +440,7 @@ function EntitySelector({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {ENTITY_KEYS.map((key) => (
+          {(allowed ?? ENTITY_KEYS).map((key) => (
             <SelectItem key={key} value={key}>
               {ENTITY_DEFS[key].label}
             </SelectItem>
@@ -2000,12 +2002,18 @@ function ReportsSidebar({
 // Main Component
 // ---------------------------------------------------------------------------
 
-export function ReportBuilder() {
+/** mode="people" is the Lists-zone door: same engine, but the entity
+ * picker only offers people-shaped datasets so every result can become a
+ * list. mode="full" (Insights' Custom report) offers everything. */
+export function ReportBuilder({ mode = "full" }: { mode?: "full" | "people" } = {}) {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState("builder");
+  const allowedEntities = mode === "people" ? (["contacts", "accounts"] as const) : undefined;
 
   // Builder state
-  const [config, setConfig] = useState<ReportConfig>(() => makeDefaultConfig("accounts"));
+  const [config, setConfig] = useState<ReportConfig>(() =>
+    makeDefaultConfig(mode === "people" ? "contacts" : "accounts"),
+  );
   const [hasRun, setHasRun] = useState(false);
   const [runTrigger, setRunTrigger] = useState(0);
   const [activeReportId, setActiveReportId] = useState<string | null>(null);
@@ -2288,7 +2296,7 @@ export function ReportBuilder() {
                 <Card>
                   <CardContent className="pt-6 space-y-6">
                     {/* Entity selector */}
-                    <EntitySelector value={config.entity} onChange={handleEntityChange} />
+                    <EntitySelector value={config.entity} onChange={handleEntityChange} allowed={allowedEntities} />
 
                     {/* Column picker */}
                     <ColumnPicker
