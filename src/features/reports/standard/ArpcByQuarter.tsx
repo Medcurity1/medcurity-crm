@@ -187,12 +187,16 @@ export function ArpcByQuarter() {
       for (const q of allQuarters) activeByQuarter.set(q.sortKey, new Set());
       for (const o of opps) {
         if (!o.close_date || !o.account_id) continue;
-        // Every-other-year accounts stay covered 12 extra months (their gap
-        // year), matching derive_account_customer_status.
+        // Accounts renewing every N years stay covered (N-1) extra years
+        // (their planned gap), matching derive_account_customer_status.
+        const acc = accounts.get(o.account_id);
+        const cadence =
+          acc?.renewal_cadence_years ?? (acc?.every_other_year ? 2 : 1);
         const effEndBase = o.contract_end_date ?? addDaysIso(o.close_date, 365);
-        const effEnd = accounts.get(o.account_id)?.every_other_year
-          ? addDaysIso(effEndBase, 365)
-          : effEndBase;
+        const effEnd =
+          cadence > 1
+            ? addDaysIso(effEndBase, (cadence - 1) * 365)
+            : effEndBase;
         for (const q of allQuarters) {
           // Active at Q.end if it had closed by then AND contract still covers Q.end.
           if (o.close_date <= q.end && effEnd >= q.end) {

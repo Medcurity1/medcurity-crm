@@ -235,6 +235,9 @@ export interface Account {
   account_number: string | null;
   // Scheduling
   every_other_year: boolean;
+  /** Canonical renewal cadence in years (1 = annual, 2 = every other year,
+   * 3 = tri-annual). every_other_year is a synced legacy alias for 2. */
+  renewal_cadence_years: number;
   do_not_auto_renew: boolean;
   // Description & next steps
   description: string | null;

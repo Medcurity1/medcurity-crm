@@ -172,15 +172,19 @@ export function LostCustomersAccount() {
         const closeDate = latest.close_date as string;
         const acc = accounts.get(accountId);
         // Effective end = contract_end_date if present, otherwise
-        // close_date + 365 (assumed 1-year contract). Every-other-year
-        // accounts get 12 extra months: their gap year is the planned
-        // cadence, not a lapse (matches derive_account_customer_status).
+        // close_date + 365 (assumed 1-year contract). Accounts renewing
+        // every N years get (N-1) extra years: their gap years are the
+        // planned cadence, not a lapse (matches
+        // derive_account_customer_status).
+        const cadence =
+          acc?.renewal_cadence_years ?? (acc?.every_other_year ? 2 : 1);
         const effectiveEndBase = latest.contract_end_date
           ? (latest.contract_end_date as string)
           : addDaysIso(closeDate, 365);
-        const effectiveEnd = acc?.every_other_year
-          ? addDaysIso(effectiveEndBase, 365)
-          : effectiveEndBase;
+        const effectiveEnd =
+          cadence > 1
+            ? addDaysIso(effectiveEndBase, (cadence - 1) * 365)
+            : effectiveEndBase;
         // Active if effective end is in the future. Skip — they're not lost.
         if (effectiveEnd >= todayIso) continue;
         const lostBucket = quarterOf(effectiveEnd);

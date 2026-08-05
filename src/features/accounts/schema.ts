@@ -66,6 +66,7 @@ export const accountSchema = z.object({
   active_since: z.string().optional().or(z.literal("")),
   renewal_type: z.enum(["auto_renew", "manual_renew", "no_auto_renew", "full_auto_renew", "platform_only_auto_renew"]).optional().or(z.literal("")),
   every_other_year: z.boolean().optional(),
+  renewal_cadence_years: z.number().int().min(1).max(5).optional(),
   contracts: z.string().optional().or(z.literal("")),
   current_contract_start_date: z.string().optional().or(z.literal("")),
   current_contract_end_date: z.string().optional().or(z.literal("")),

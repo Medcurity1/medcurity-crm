@@ -703,6 +703,8 @@ export function AccountDetail() {
           "updated_at",
           // Booleans handled as read-only display for now
           "every_other_year",
+          // Cadence is edited via the main Edit form's select (1/2/3)
+          "renewal_cadence_years",
           "do_not_auto_renew",
           "do_not_contact",
           "partner_prospect",

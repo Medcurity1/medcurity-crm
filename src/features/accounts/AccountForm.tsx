@@ -178,7 +178,8 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
           annual_revenue: account.annual_revenue ?? "",
           active_since: account.active_since ?? "",
           renewal_type: account.renewal_type ?? "",
-          every_other_year: account.every_other_year ?? false,
+          renewal_cadence_years:
+            account.renewal_cadence_years ?? (account.every_other_year ? 2 : 1),
           contracts: account.contracts ?? "",
           current_contract_start_date: account.current_contract_start_date ?? "",
           current_contract_end_date: account.current_contract_end_date ?? "",
@@ -236,7 +237,7 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
           annual_revenue: "",
           active_since: "",
           renewal_type: "",
-          every_other_year: false,
+          renewal_cadence_years: 1,
           contracts: "",
           current_contract_start_date: "",
           current_contract_end_date: "",
@@ -470,7 +471,10 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
       annual_revenue: emptyToNull(values.annual_revenue),
       active_since: emptyToNull(values.active_since),
       renewal_type: emptyToNull(values.renewal_type),
-      every_other_year: values.every_other_year ?? false,
+      // Cadence is canonical; the DB sync trigger keeps the legacy
+      // every_other_year boolean aligned (= cadence 2), so the form no
+      // longer sends the boolean at all.
+      renewal_cadence_years: values.renewal_cadence_years ?? 1,
       contracts: emptyToNull(values.contracts),
       current_contract_start_date: emptyToNull(values.current_contract_start_date),
       current_contract_end_date: emptyToNull(values.current_contract_end_date),
@@ -1009,15 +1013,26 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                     allowClear
                   />
                 </div>
-                <div className="flex items-center gap-2 pt-6">
-                  <Checkbox
-                    id="every_other_year"
-                    checked={watch("every_other_year") ?? false}
-                    onCheckedChange={(v) => setValue("every_other_year", v === true)}
-                  />
-                  <Label htmlFor="every_other_year" className="text-sm font-normal cursor-pointer">
-                    Every Other Year
-                  </Label>
+                <div className="space-y-2">
+                  <Label>Renews Every</Label>
+                  <Select
+                    value={String(watch("renewal_cadence_years") ?? 1)}
+                    onValueChange={(v) => setValue("renewal_cadence_years", Number(v))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">Year (standard)</SelectItem>
+                      <SelectItem value="2">2 Years</SelectItem>
+                      <SelectItem value="3">3 Years</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Bi-annual and tri-annual clients keep their Customer
+                    status through planned gap years, and renewals generate
+                    on the right anniversary.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="contracts">Contracts<RequiredIndicator fieldKey="contracts" requiredFields={requiredKeys} /></Label>
