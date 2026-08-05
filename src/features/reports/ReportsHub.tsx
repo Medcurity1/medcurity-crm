@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -68,6 +68,81 @@ function LazyPanel({ children }: { children: React.ReactNode }) {
  * -> insights custom view, ?tab=lists (+&list=) unchanged.
  */
 
+// ── Jump back in: recency + frequency blend, stored locally (item 21) ──
+type RecentEntry = { k: string; label: string; tab: string; view?: string; list?: string; n: number; ts: number };
+const RECENTS_KEY = "pulse_reports_recents";
+export function recordReportsVisit(e: Omit<RecentEntry, "n" | "ts">) {
+  try {
+    const all: RecentEntry[] = JSON.parse(localStorage.getItem(RECENTS_KEY) ?? "[]");
+    const hit = all.find((x) => x.k === e.k);
+    if (hit) {
+      hit.n += 1;
+      hit.ts = Date.now();
+      Object.assign(hit, e);
+    } else {
+      all.push({ ...e, n: 1, ts: Date.now() });
+    }
+    localStorage.setItem(RECENTS_KEY, JSON.stringify(all.slice(-30)));
+  } catch {
+    /* private mode etc.: the strip just stays empty */
+  }
+}
+function topRecents(limit: number): RecentEntry[] {
+  try {
+    const all: RecentEntry[] = JSON.parse(localStorage.getItem(RECENTS_KEY) ?? "[]");
+    const now = Date.now();
+    // score = frequency damped by age (half-life ~3 days)
+    return all
+      .map((e) => ({ e, s: e.n * Math.pow(0.5, (now - e.ts) / (3 * 864e5)) }))
+      .sort((a, b) => b.s - a.s)
+      .slice(0, limit)
+      .map((x) => x.e);
+  } catch {
+    return [];
+  }
+}
+
+/** Count-up animation for KPI values like "$817k" or "42" (item 9). */
+function CountUp({ value }: { value: string }) {
+  const [shown, setShown] = useState(value);
+  const done = useRef(false);
+  useEffect(() => {
+    if (done.current) {
+      setShown(value);
+      return;
+    }
+    const m = value.match(/^([^0-9]*)([\d.]+)(.*)$/);
+    if (!m) {
+      setShown(value);
+      return;
+    }
+    done.current = true;
+    const [, pre, numStr, post] = m;
+    const target = parseFloat(numStr);
+    const decimals = numStr.includes(".") ? 1 : 0;
+    const t0 = performance.now();
+    let raf = 0;
+    const tick = (t: number) => {
+      const p = Math.min(1, (t - t0) / 650);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setShown(`${pre}${(target * eased).toFixed(decimals)}${post}`);
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
+  return <>{shown}</>;
+}
+
+const prefetchInsights = () => {
+  void import("./StandardReports");
+  void import("./TeamDashboard");
+};
+const prefetchLists = () => {
+  void import("@/features/lead-lists/ListsPage");
+  void import("./ReportBuilder");
+};
+
 type Zone = "home" | "insights" | "lists";
 type InsightsView = "catalog" | "team" | "custom";
 type ListsView = "browse" | "pull";
@@ -98,6 +173,14 @@ export function ReportsHub() {
   const { zone, insightsView, listsView } = resolve(searchParams);
 
   const go = (tab: string, view?: string) => {
+    const labels: Record<string, string> = {
+      "insights/catalog": "Report catalog",
+      "insights/team": "Team dashboard",
+      "insights/custom": "Custom report",
+      "lists/pull": "Pull people",
+    };
+    const k = `${tab}/${view ?? (tab === "insights" ? "catalog" : "")}`;
+    if (labels[k]) recordReportsVisit({ k, label: labels[k], tab, view });
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -115,7 +198,8 @@ export function ReportsHub() {
     );
   };
 
-  const openList = (id: string) => {
+  const openList = (id: string, label?: string) => {
+    if (label) recordReportsVisit({ k: `list/${id}`, label, tab: "lists", list: id });
     setSearchParams(
       () => {
         const next = new URLSearchParams();
@@ -215,7 +299,7 @@ function ZoneBar({
   right?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="sticky top-0 z-20 -mx-1 flex flex-wrap items-center gap-2 rounded-lg bg-background/90 px-1 py-1.5 backdrop-blur supports-[backdrop-filter]:bg-background/70">
       <button
         type="button"
         onClick={onHome}
@@ -243,8 +327,9 @@ function HubHome({
   onOpenList,
 }: {
   onGo: (tab: string, view?: string) => void;
-  onOpenList: (id: string) => void;
+  onOpenList: (id: string, label?: string) => void;
 }) {
+  const recents = topRecents(4);
   const { data: lists } = useLeadLists();
   const { data: counts } = useLeadListMemberCount();
   // Three live numbers so the numbers zone shows numbers before any click.
@@ -279,10 +364,11 @@ function HubHome({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-1">
       {/* INSIGHTS */}
-      <section className="flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm">
+      <section className="flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-500/40 hover:shadow-md">
         <button
           type="button"
           onClick={() => onGo("insights")}
+          onMouseEnter={prefetchInsights}
           className="group relative px-5 pb-4 pt-5 text-left"
         >
           <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-400 via-teal-500 to-cyan-500" />
@@ -306,7 +392,13 @@ function HubHome({
             ] as const
           ).map(([value, label]) => (
             <div key={label} className="rounded-xl border bg-muted/30 px-3 py-2.5">
-              <p className="text-lg font-semibold leading-tight tabular-nums">{value}</p>
+              {kpi ? (
+                <p className="text-lg font-semibold leading-tight tabular-nums">
+                  <CountUp value={value} />
+                </p>
+              ) : (
+                <Skeleton className="mb-0.5 h-6 w-14" />
+              )}
               <p className="text-[11px] text-muted-foreground">{label}</p>
             </div>
           ))}
@@ -337,10 +429,11 @@ function HubHome({
       </section>
 
       {/* LISTS */}
-      <section className="flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm">
+      <section className="flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-sky-500/40 hover:shadow-md">
         <button
           type="button"
           onClick={() => onGo("lists")}
+          onMouseEnter={prefetchLists}
           className="group relative px-5 pb-4 pt-5 text-left"
         >
           <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-sky-400 via-blue-500 to-indigo-500" />
@@ -371,7 +464,7 @@ function HubHome({
               <button
                 key={l.id}
                 type="button"
-                onClick={() => onOpenList(l.id)}
+                onClick={() => onOpenList(l.id, l.name)}
                 className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-muted"
               >
                 {l.is_dynamic ? (
@@ -403,6 +496,32 @@ function HubHome({
           </div>
         </div>
       </section>
+
+      {recents.length > 0 && (
+        <div className="lg:col-span-2">
+          <p className="mb-1.5 px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Jump back in
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {recents.map((r) => (
+              <button
+                key={r.k}
+                type="button"
+                onMouseEnter={r.tab === "insights" ? prefetchInsights : prefetchLists}
+                onClick={() => (r.list ? onOpenList(r.list, r.label) : onGo(r.tab, r.view))}
+                className="flex items-center gap-1.5 rounded-full border bg-card px-3 py-1.5 text-sm shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+              >
+                {r.list ? (
+                  <ListChecks className="h-3.5 w-3.5 text-sky-500" />
+                ) : (
+                  <BarChart3 className="h-3.5 w-3.5 text-emerald-500" />
+                )}
+                {r.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
