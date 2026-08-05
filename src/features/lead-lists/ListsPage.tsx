@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, ClipboardCopy, Download, ListChecks, Megaphone, Plus, Pencil, RotateCcw, Trash2, X, Search, UserPlus2, Snowflake, Sparkles,
+  ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, ClipboardCopy, ClipboardPaste, Download, ListChecks, Megaphone, Plus, Pencil, RotateCcw, Trash2, X, Search, UserPlus2, Snowflake, Sparkles,
 } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -62,6 +62,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { AddToListDialog } from "./AddToListDialog";
+import { PastePeopleDialog } from "./PastePeopleDialog";
 import { QuickCampaignDialog } from "@/features/playbook/QuickCampaignDialog";
 import { useTags } from "@/features/tags/api";
 import { useUsers } from "@/features/accounts/api";
@@ -384,6 +385,7 @@ function ListWorkspace({
     }
   });
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [pasteOpen, setPasteOpen] = useState(false);
 
   function toggleSort(key: SortKey) {
     setSort((prev) => {
@@ -547,6 +549,17 @@ function ListWorkspace({
             >
               <Snowflake className="h-4 w-4 mr-1" />
               {freezeMutation.isPending ? "Freezing…" : "Freeze"}
+            </Button>
+          )}
+          {canWrite && (
+            <Button
+              variant="outline"
+              size="sm"
+              title="Paste emails or a CSV and match them into this list"
+              onClick={() => setPasteOpen(true)}
+            >
+              <ClipboardPaste className="h-4 w-4 mr-1" />
+              Paste people
             </Button>
           )}
           <Button
@@ -866,6 +879,7 @@ function ListWorkspace({
           })
         }
       />
+      <PastePeopleDialog open={pasteOpen} onOpenChange={setPasteOpen} list={list} />
       {addToListIds && (
         <AddToListDialog
           open
