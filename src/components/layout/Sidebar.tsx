@@ -75,8 +75,14 @@ type NavItem = {
 const ADMIN_BADGE = "bg-sky-500 text-white";
 // Nexus launch highlight (Nathan 2026-08-04): a blue-focused gradient
 // pill per his call. Retire once the launch is old news.
+// bg-origin-border + bg-no-repeat (Nathan 2026-08-05): the Badge base has a
+// 1px transparent border, and by default the gradient image spans only the
+// padding box while the border strip fills with wrapped repeat colors — on
+// scaled displays the pill's rounded caps read as a flat backing plate
+// behind a gradient rectangle. Spanning the border box stretches the
+// gradient across the full pill.
 const LAUNCHED_BADGE =
-  "bg-gradient-to-r from-sky-400 via-blue-500 to-indigo-500 text-white shadow-sm shadow-blue-500/30";
+  "bg-gradient-to-r from-sky-400 via-blue-500 to-indigo-500 bg-origin-border bg-no-repeat text-white shadow-sm shadow-blue-500/30";
 // Home is on its way out (kept until the team confirms nothing is missed).
 const LEAVING_BADGE = "bg-red-500 text-white";
 
