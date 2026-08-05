@@ -284,7 +284,11 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
           fte_range: "",
           created_by_automation: false,
           assigned_assessor_id: null,
-          original_sales_rep_id: null,
+          // The owner at creation is the seller; this field preserves that
+          // credit when renewals later hand ownership to the assessor
+          // (Summer 2026-08-04). Follows the Owner field until the rep
+          // touches it directly — see the owner-follow effect below.
+          original_sales_rep_id: profile?.id ?? null,
           custom_fields: {},
         },
   });
@@ -299,6 +303,21 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.id]);
+
+  // Original Sales Rep follows Owner during create (someone creating an
+  // opp on a rep's behalf sets Owner, and the sales credit should land on
+  // that rep, not the person typing). Stops the moment the rep field is
+  // touched directly. A BEFORE INSERT trigger backstops this for create
+  // surfaces without the form (20260805160000).
+  const origRepTouchedRef = useRef(false);
+  const watchedOwnerId = watch("owner_user_id");
+  useEffect(() => {
+    if (isEditing || origRepTouchedRef.current) return;
+    if ((watchedOwnerId ?? null) !== (getValues("original_sales_rep_id") ?? null)) {
+      setValue("original_sales_rep_id", watchedOwnerId ?? null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedOwnerId, isEditing]);
 
   // Warn before losing edits: RHF dirty state, plus (create mode) any
   // staged products — those live outside the form but are just as easy
@@ -400,6 +419,27 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       setValue("fte_range", fteRange as OpportunityFormValues["fte_range"]);
     }
   }, [watchedAccountId, selectedAccount, isEditing, setValue, getValues, opp]);
+
+  // Lead source fallback from the PRIMARY CONTACT (Summer 2026-08-04):
+  // only 2% of accounts carry a lead source but 63% of contacts do, so
+  // when the account gave us nothing, picking a primary contact fills the
+  // pair from there. Create-only, blank-only, and visible before saving —
+  // same rules as the account pull above. The BEFORE INSERT trigger
+  // (20260805160000) backstops non-form create paths.
+  const watchedPrimaryContactId = watch("primary_contact_id");
+  useEffect(() => {
+    if (isEditing || !watchedPrimaryContactId || !contacts?.length) return;
+    const contact = contacts.find((c) => c.id === watchedPrimaryContactId);
+    if (!contact?.lead_source) return;
+    const isBlank = (v: unknown) =>
+      v === null || v === undefined || (typeof v === "string" && v.trim() === "");
+    if (isBlank(getValues("lead_source"))) {
+      setValue("lead_source", contact.lead_source as OpportunityFormValues["lead_source"]);
+      if (isBlank(getValues("lead_source_detail")) && contact.lead_source_detail) {
+        setValue("lead_source_detail", contact.lead_source_detail);
+      }
+    }
+  }, [watchedPrimaryContactId, contacts, isEditing, setValue, getValues]);
 
   // Keep Amount = Subtotal × (1 − Discount/100) so reps see the impact
   // of a discount on the deal total in real time. Discount is a PERCENT
@@ -1201,7 +1241,10 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
                   <Label>Original Sales Rep</Label>
                   <Select
                     value={watch("original_sales_rep_id") ?? "unassigned"}
-                    onValueChange={(v) => setValue("original_sales_rep_id", v === "unassigned" ? null : v)}
+                    onValueChange={(v) => {
+                      origRepTouchedRef.current = true;
+                      setValue("original_sales_rep_id", v === "unassigned" ? null : v);
+                    }}
                   >
                     <SelectTrigger><SelectValue placeholder="Select sales rep" /></SelectTrigger>
                     <SelectContent>
