@@ -195,6 +195,7 @@ export function ReportsHub() {
         next.delete("list");
         next.delete("chip");
         next.delete("report");
+        next.delete("new");
         for (const [k, v] of Object.entries(extra ?? {})) next.set(k, v);
         return next;
       },
@@ -459,7 +460,12 @@ function HubHome({
         </button>
         <div className="flex-1 px-3 pb-4">
           <div className="mb-2 flex gap-2 px-2">
-            <Button variant="outline" size="sm" className="h-8" onClick={() => onGo("lists")}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8"
+              onClick={() => onGo("lists", undefined, { new: "1" })}
+            >
               <Plus className="h-3.5 w-3.5 mr-1" />
               New list
             </Button>

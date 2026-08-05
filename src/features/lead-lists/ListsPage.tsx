@@ -94,6 +94,16 @@ export function ListsPage() {
     }
   }, [searchParams]);
   const [createOpen, setCreateOpen] = useState(false);
+  // ?new=1 (the landing's New list button): arrive with the create dialog
+  // already open. Ref-guarded like ?list so closing it doesn't re-trigger.
+  const newLinked = useRef(false);
+  useEffect(() => {
+    if (newLinked.current) return;
+    if (searchParams.get("new")) {
+      newLinked.current = true;
+      setCreateOpen(true);
+    }
+  }, [searchParams]);
 
   const selected = useMemo(
     () => lists?.find((l) => l.id === selectedId) ?? null,
