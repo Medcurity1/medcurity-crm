@@ -29,7 +29,9 @@ Statuses: `IDEA` · `QUEUED` · `IN PROGRESS` · `BLOCKED` · `STAGING` (awaitin
 
 ## B. On staging — awaiting prod go-ahead
 
-_(none)_
+| # | Item | Detail | Verify | Checked |
+|---|---|---|---|---|
+| B24 | Launched badge gradient fix (Nathan 8/5, staging-only per his ask) | The Nexus "LAUNCHED" pill read as a gradient rectangle on a flat backing plate: the Badge base's 1px transparent border painted with wrapped background-repeat colors while the gradient spanned only the padding box. Fix = bg-origin-border + bg-no-repeat on LAUNCHED_BADGE (Sidebar.tsx), commit 1244222, staging CI 31051085085 green, live-verified (computed bgOrigin border-box + clean zoom). Promote whenever Nathan says; rides free with the next promote. | `grep -n "bg-origin-border" src/components/layout/Sidebar.tsx` | 2026-08-05 |
 
 ---
 
