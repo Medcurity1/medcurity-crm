@@ -14,6 +14,8 @@ import {
   ChevronDown,
   Columns3,
   Download,
+  ListChecks,
+  Megaphone,
   FileSpreadsheet,
   Table2,
   BarChart3,
@@ -82,6 +84,11 @@ import {
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useTags } from "@/features/tags/api";
 import { AddToListDialog } from "@/features/lead-lists/AddToListDialog";
+import { supabase } from "@/lib/supabase";
+import {
+  QuickCampaignDialog,
+  type QuickCampaignContact,
+} from "@/features/playbook/QuickCampaignDialog";
 import { useUsers, useAccounts } from "@/features/accounts/api";
 import { RelationCombobox } from "./RelationCombobox";
 import { useContacts } from "@/features/contacts/api";
@@ -426,9 +433,11 @@ function getRelationOptions(
 function EntitySelector({
   value,
   onChange,
+  allowed,
 }: {
   value: string;
   onChange: (v: string) => void;
+  allowed?: readonly string[];
 }) {
   return (
     <div className="space-y-1.5">
@@ -438,7 +447,7 @@ function EntitySelector({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {ENTITY_KEYS.map((key) => (
+          {(allowed ?? ENTITY_KEYS).map((key) => (
             <SelectItem key={key} value={key}>
               {ENTITY_DEFS[key].label}
             </SelectItem>
@@ -1264,8 +1273,11 @@ function ResultsTable({
 
   if (data.length === 0) {
     return (
-      <div className="text-center py-12 text-muted-foreground">
-        No results found. Adjust your filters or run the report.
+      <div className="mt-6 rounded-xl border border-dashed py-12 text-center">
+        <p className="text-sm font-medium">Nobody matches those filters</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Loosen or remove a filter and run it again.
+        </p>
       </div>
     );
   }
@@ -1414,12 +1426,18 @@ function ResultsTable({
                   return (
                     <TableHead
                       key={col.key}
-                      className="sticky top-0 z-10 bg-background whitespace-nowrap"
+                      className={cn(
+                        "sticky top-0 z-10 bg-background whitespace-nowrap",
+                        isNumericColType(col.type) && "text-right",
+                      )}
                     >
                       <button
                         type="button"
                         onClick={() => toggleSort(col.key)}
-                        className="inline-flex items-center gap-1 hover:text-foreground"
+                        className={cn(
+                          "inline-flex items-center gap-1 hover:text-foreground",
+                          isNumericColType(col.type) && "justify-end",
+                        )}
                         title="Sort by this column"
                       >
                         {col.label}
@@ -1461,7 +1479,13 @@ function ResultsTable({
                       const formatted = formatCellValue(rawValue, col);
 
                       return (
-                        <TableCell key={col.key} className="whitespace-nowrap">
+                        <TableCell
+                          key={col.key}
+                          className={cn(
+                            "whitespace-nowrap",
+                            isNumericColType(col.type) && "text-right tabular-nums",
+                          )}
+                        >
                           {col.type === "enum" ? (
                             <Badge variant="secondary">{formatted}</Badge>
                           ) : col.type === "boolean" ? (
@@ -2000,12 +2024,40 @@ function ReportsSidebar({
 // Main Component
 // ---------------------------------------------------------------------------
 
-export function ReportBuilder() {
-  const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState("builder");
+/** mode="people" is the Lists-zone door: same engine, but the entity
+ * picker only offers people-shaped datasets so every result can become a
+ * list. mode="full" (Insights' Custom report) offers everything. */
+// Recent pulls (people mode): last few run configurations, one click to
+// rerun. Local to the browser on purpose — it's a convenience, not data.
+type RecentPull = { label: string; config: ReportConfig; ts: number };
+const RECENT_PULLS_KEY = "pulse_recent_pulls";
+function readRecentPulls(): RecentPull[] {
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_PULLS_KEY) ?? "[]");
+  } catch {
+    return [];
+  }
+}
 
-  // Builder state
-  const [config, setConfig] = useState<ReportConfig>(() => makeDefaultConfig("accounts"));
+export function ReportBuilder({ mode = "full" }: { mode?: "full" | "people" } = {}) {
+  const { user, profile } = useAuth();
+  const isPeople = mode === "people";
+  const isAdmin = ["admin", "super_admin"].includes(
+    (profile as { role?: string } | null)?.role ?? "",
+  );
+  const [activeTab, setActiveTab] = useState("builder");
+  const allowedEntities = mode === "people" ? (["contacts", "accounts"] as const) : undefined;
+
+  // Builder state (?entity= preselects, e.g. the landing's Build-a-report chips)
+  const [config, setConfig] = useState<ReportConfig>(() => {
+    const urlEntity = new URLSearchParams(window.location.search).get("entity");
+    const valid =
+      urlEntity && (ENTITY_KEYS as readonly string[]).includes(urlEntity) ? urlEntity : null;
+    if (mode === "people") {
+      return makeDefaultConfig(valid === "accounts" ? "accounts" : "contacts");
+    }
+    return makeDefaultConfig(valid ?? "accounts");
+  });
   const [hasRun, setHasRun] = useState(false);
   const [runTrigger, setRunTrigger] = useState(0);
   const [activeReportId, setActiveReportId] = useState<string | null>(null);
@@ -2063,6 +2115,136 @@ export function ReportBuilder() {
 
   // We pass a stable reference for the query to avoid re-fetching on every render
   const queryConfig = useMemo(() => (hasRun ? config : null), [hasRun, runTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // People-mode extras: recent pulls + the finishing actions.
+  const [pulls, setPulls] = useState<RecentPull[]>(readRecentPulls);
+  const [campaignContacts, setCampaignContacts] = useState<QuickCampaignContact[] | null>(null);
+  const [campaignFetching, setCampaignFetching] = useState(false);
+  useEffect(() => {
+    if (!isPeople || !queryConfig) return;
+    try {
+      const sig = JSON.stringify({ e: queryConfig.entity, f: queryConfig.filters });
+      const rest = readRecentPulls().filter(
+        (p) => JSON.stringify({ e: p.config.entity, f: p.config.filters }) !== sig,
+      );
+      const nFilters = (queryConfig.filters ?? []).length;
+      const label = `${ENTITY_DEFS[queryConfig.entity]?.label ?? queryConfig.entity} with ${nFilters} ${nFilters === 1 ? "filter" : "filters"}`;
+      const next = [{ label, config: queryConfig, ts: Date.now() }, ...rest].slice(0, 5);
+      localStorage.setItem(RECENT_PULLS_KEY, JSON.stringify(next));
+      setPulls(next);
+    } catch {
+      /* storage unavailable: chips just don't persist */
+    }
+  }, [isPeople, queryConfig]);
+
+  const applyPull = (p: RecentPull) => {
+    setConfig(p.config);
+    setHasRun(true);
+    setRunTrigger((t) => t + 1);
+  };
+
+  // Accounts result -> list: a list holds PEOPLE, so the user picks which
+  // people at those companies (primary contacts or everyone).
+  const [acctChoice, setAcctChoice] = useState<{
+    accountIds: string[];
+    primary: number;
+    all: number;
+  } | null>(null);
+
+  const gatherAndOpenList = async () => {
+    if (!queryConfig) return;
+    setListFetching(true);
+    try {
+      const ids = await fetchAllReportIds(queryConfig);
+      if (!ids.length) {
+        toast.error("Nothing in this result to save.");
+        return;
+      }
+      if (queryConfig.entity === "contacts") {
+        setListIds(ids);
+        setListOpen(true);
+        return;
+      }
+      // accounts: count the people first so the choice shows real numbers
+      // (chunked .in() so huge results don't blow the URL length cap)
+      let primary = 0;
+      let all = 0;
+      for (let i = 0; i < ids.length; i += 150) {
+        const chunk = ids.slice(i, i + 150);
+        const [p, a] = await Promise.all([
+          supabase
+            .from("contacts")
+            .select("id", { count: "exact", head: true })
+            .in("account_id", chunk)
+            .eq("is_primary", true),
+          supabase
+            .from("contacts")
+            .select("id", { count: "exact", head: true })
+            .in("account_id", chunk),
+        ]);
+        primary += p.count ?? 0;
+        all += a.count ?? 0;
+      }
+      if (!all) {
+        toast.error("No contacts exist at these accounts yet.");
+        return;
+      }
+      setAcctChoice({ accountIds: ids, primary, all });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setListFetching(false);
+    }
+  };
+
+  const resolveAccountContacts = async (primaryOnly: boolean) => {
+    if (!acctChoice) return;
+    try {
+      const found: string[] = [];
+      for (let i = 0; i < acctChoice.accountIds.length; i += 150) {
+        const chunk = acctChoice.accountIds.slice(i, i + 150);
+        let q = supabase.from("contacts").select("id").in("account_id", chunk).limit(5000);
+        if (primaryOnly) q = q.eq("is_primary", true);
+        const { data, error } = await q;
+        if (error) throw error;
+        found.push(...(data ?? []).map((r) => r.id as string));
+      }
+      if (!found.length) {
+        toast.error(
+          primaryOnly ? "None of these accounts has a primary contact set." : "No contacts found.",
+        );
+        return;
+      }
+      setListIds([...new Set(found)]);
+      setListOpen(true);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setAcctChoice(null);
+    }
+  };
+
+  const startCampaignFromResults = async () => {
+    if (!queryConfig) return;
+    setCampaignFetching(true);
+    try {
+      const ids = await fetchAllReportIds(queryConfig);
+      if (!ids.length) {
+        toast.error("No contacts in this result.");
+        return;
+      }
+      const { data, error } = await supabase
+        .from("contacts")
+        .select("id, first_name, last_name, email, account:accounts!account_id(name)")
+        .in("id", ids.slice(0, 500));
+      if (error) throw error;
+      setCampaignContacts((data ?? []) as unknown as QuickCampaignContact[]);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setCampaignFetching(false);
+    }
+  };
   const {
     data: results,
     isLoading: resultsLoading,
@@ -2288,7 +2470,7 @@ export function ReportBuilder() {
                 <Card>
                   <CardContent className="pt-6 space-y-6">
                     {/* Entity selector */}
-                    <EntitySelector value={config.entity} onChange={handleEntityChange} />
+                    <EntitySelector value={config.entity} onChange={handleEntityChange} allowed={allowedEntities} />
 
                     {/* Column picker */}
                     <ColumnPicker
@@ -2338,7 +2520,9 @@ export function ReportBuilder() {
                           Save as New
                         </Button>
                       )}
-                      {hasRun && (results?.data?.length ?? 0) > 0 && (
+                      {!["contacts", "accounts"].includes(config.entity) &&
+                        hasRun &&
+                        (results?.data?.length ?? 0) > 0 && (
                         <>
                           <Button
                             variant="outline"
@@ -2356,34 +2540,26 @@ export function ReportBuilder() {
                             <FileSpreadsheet className="h-4 w-4 mr-1.5" />
                             {exporting ? "Exporting…" : "Export Excel"}
                           </Button>
-                          {config.entity === "contacts" && (
-                            <Button
-                              variant="outline"
-                              disabled={listFetching}
-                              onClick={async () => {
-                                if (!queryConfig) return;
-                                setListFetching(true);
-                                try {
-                                  const ids = await fetchAllReportIds(queryConfig);
-                                  if (!ids.length) {
-                                    toast.error("No contacts in this result to save.");
-                                    return;
-                                  }
-                                  setListIds(ids);
-                                  setListOpen(true);
-                                } catch (e) {
-                                  toast.error((e as Error).message);
-                                } finally {
-                                  setListFetching(false);
-                                }
-                              }}
-                            >
-                              {listFetching ? "Gathering…" : "Save as list"}
-                            </Button>
-                          )}
                         </>
                       )}
                     </div>
+
+                    {/* Recent pulls: one click back into a query (people mode) */}
+                    {isPeople && pulls.length > 0 && (
+                      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs text-muted-foreground">Recent pulls:</span>
+                        {pulls.map((p) => (
+                          <button
+                            key={p.ts}
+                            type="button"
+                            onClick={() => applyPull(p)}
+                            className="rounded-full border bg-card px-2.5 py-1 text-xs transition-colors hover:bg-muted"
+                          >
+                            {p.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
 
                     {/* Results */}
                     {hasRun && (
@@ -2395,6 +2571,40 @@ export function ReportBuilder() {
                           isLoading={resultsLoading}
                           count={results?.count ?? 0}
                         />
+                      </div>
+                    )}
+
+                    {/* People-shaped results get the big finishing moves in
+                        BOTH modes (item 23; accounts resolve to their people) */}
+                    {["contacts", "accounts"].includes(config.entity) &&
+                      hasRun &&
+                      (results?.data?.length ?? 0) > 0 && (
+                      <div className="mt-4 rounded-xl border bg-gradient-to-r from-sky-500/10 via-blue-500/[0.06] to-transparent p-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="mr-1 text-sm font-medium">Turn this into action:</span>
+                          <Button disabled={listFetching} onClick={gatherAndOpenList}>
+                            <ListChecks className="h-4 w-4 mr-1.5" />
+                            {listFetching ? "Gathering…" : "Save as list"}
+                          </Button>
+                          {config.entity === "contacts" && isAdmin && (
+                            <Button
+                              variant="outline"
+                              disabled={campaignFetching}
+                              onClick={startCampaignFromResults}
+                            >
+                              <Megaphone className="h-4 w-4 mr-1.5" />
+                              {campaignFetching ? "Gathering…" : "Start a campaign…"}
+                            </Button>
+                          )}
+                          <Button
+                            variant="outline"
+                            disabled={exporting}
+                            onClick={() => handleExport("csv")}
+                          >
+                            <Download className="h-4 w-4 mr-1.5" />
+                            {exporting ? "Exporting…" : "Export CSV"}
+                          </Button>
+                        </div>
                       </div>
                     )}
                   </CardContent>
@@ -2410,6 +2620,41 @@ export function ReportBuilder() {
         onOpenChange={setListOpen}
         contactIds={listIds}
       />
+
+      {acctChoice && (
+        <Dialog open onOpenChange={(o) => !o && setAcctChoice(null)}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>These are companies</DialogTitle>
+              <DialogDescription>
+                A list holds people. Which people at these {acctChoice.accountIds.length}{" "}
+                {acctChoice.accountIds.length === 1 ? "account" : "accounts"} should go in?
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex flex-col gap-2">
+              <Button
+                disabled={!acctChoice.primary}
+                onClick={() => void resolveAccountContacts(true)}
+              >
+                Primary contacts only ({acctChoice.primary})
+              </Button>
+              <Button variant="outline" onClick={() => void resolveAccountContacts(false)}>
+                Everyone at these accounts ({acctChoice.all})
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {campaignContacts && (
+        <QuickCampaignDialog
+          open
+          onOpenChange={(o) => {
+            if (!o) setCampaignContacts(null);
+          }}
+          contacts={campaignContacts}
+        />
+      )}
 
       <SaveReportDialog
         open={saveOpen}

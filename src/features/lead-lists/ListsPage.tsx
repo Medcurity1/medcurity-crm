@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  ArrowLeft, ListChecks, Megaphone, Plus, Pencil, RotateCcw, Trash2, X, Search, UserPlus2, Snowflake, Sparkles,
+  ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, ClipboardCopy, ClipboardPaste, Download, ListChecks, Megaphone, Plus, Pencil, RotateCcw, Trash2, X, Search, UserPlus2, Snowflake, Sparkles,
 } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import {
   Select,
@@ -37,6 +38,7 @@ import {
   useLeadListMembers,
   useLeadListMemberCount,
   useRemoveFromList,
+  useBulkRemoveFromList,
   useSearchContactsForList,
   useBulkAddContactsToList,
   useSmartListMembers,
@@ -60,6 +62,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { AddToListDialog } from "./AddToListDialog";
+import { PastePeopleDialog } from "./PastePeopleDialog";
 import { QuickCampaignDialog } from "@/features/playbook/QuickCampaignDialog";
 import { useTags } from "@/features/tags/api";
 import { useUsers } from "@/features/accounts/api";
@@ -91,6 +94,16 @@ export function ListsPage() {
     }
   }, [searchParams]);
   const [createOpen, setCreateOpen] = useState(false);
+  // ?new=1 (the landing's New list button): arrive with the create dialog
+  // already open. Ref-guarded like ?list so closing it doesn't re-trigger.
+  const newLinked = useRef(false);
+  useEffect(() => {
+    if (newLinked.current) return;
+    if (searchParams.get("new")) {
+      newLinked.current = true;
+      setCreateOpen(true);
+    }
+  }, [searchParams]);
 
   const selected = useMemo(
     () => lists?.find((l) => l.id === selectedId) ?? null,
@@ -213,6 +226,78 @@ export function ListsPage() {
 
 // ── One workspace for both list kinds ────────────────────────────────
 
+type SortKey = "name" | "account" | "email" | "phone";
+
+function sortValue(r: WorkRow, key: SortKey): string {
+  switch (key) {
+    case "name":
+      return `${r.firstName ?? ""} ${r.lastName ?? ""}`.trim();
+    case "account":
+      return r.account ?? "";
+    case "email":
+      return r.email ?? "";
+    case "phone":
+      return r.phone ?? "";
+  }
+}
+
+function copyEmails(rows: WorkRow[]) {
+  const emails = [...new Set(rows.map((r) => r.email?.trim()).filter((e): e is string => !!e))];
+  if (!emails.length) {
+    toast.info("No email addresses in that set");
+    return;
+  }
+  void navigator.clipboard.writeText(emails.join(", ")).then(
+    () => toast.success(`Copied ${emails.length} ${emails.length === 1 ? "email" : "emails"}`),
+    () => toast.error("Couldn't reach the clipboard"),
+  );
+}
+
+function exportCsv(listName: string, rows: WorkRow[]) {
+  const esc = (v: string | null) => `"${(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [
+    ["First name", "Last name", "Account", "Email", "Phone"].join(","),
+    ...rows.map((r) =>
+      [esc(r.firstName), esc(r.lastName), esc(r.account), esc(r.email), esc(r.phone)].join(","),
+    ),
+  ];
+  // BOM so Excel opens it as UTF-8
+  const blob = new Blob(["\uFEFF" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${listName.replace(/[^\w-]+/g, "_") || "list"}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast.success(`Exported ${rows.length} ${rows.length === 1 ? "row" : "rows"}`);
+}
+
+function SortHead({
+  label,
+  k,
+  sort,
+  onToggle,
+}: {
+  label: string;
+  k: SortKey;
+  sort: { key: SortKey; dir: 1 | -1 } | null;
+  onToggle: (k: SortKey) => void;
+}) {
+  const active = sort?.key === k;
+  const Icon = active && sort ? (sort.dir === 1 ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <TableHead>
+      <button
+        type="button"
+        onClick={() => onToggle(k)}
+        className={cn("flex items-center gap-1 hover:text-foreground", active && "text-foreground")}
+      >
+        {label}
+        <Icon className={cn("h-3.5 w-3.5", !active && "text-muted-foreground/50")} />
+      </button>
+    </TableHead>
+  );
+}
+
 interface WorkRow {
   contactId: string;
   memberId: string | null; // static membership row when there is one
@@ -251,6 +336,7 @@ function ListWorkspace({
   const deleteMutation = useDeleteLeadList();
   const freezeMutation = useFreezeSmartList();
   const activateAccounts = useActivateAccountsForContacts();
+  const bulkRemove = useBulkRemoveFromList();
 
   const isLoading = list.is_dynamic ? smartMembers.isLoading : staticMembers.isLoading;
 
@@ -301,16 +387,66 @@ function ListWorkspace({
   const [showRemoved, setShowRemoved] = useState(false);
   const [campaignContacts, setCampaignContacts] = useState<WorkRow[] | null>(null);
   const [addToListIds, setAddToListIds] = useState<string[] | null>(null);
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(`pulse_list_sort:${list.id}`) ?? "null");
+    } catch {
+      return null;
+    }
+  });
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [pasteOpen, setPasteOpen] = useState(false);
+
+  function toggleSort(key: SortKey) {
+    setSort((prev) => {
+      const next =
+        prev?.key !== key
+          ? { key, dir: 1 as const }
+          : prev.dir === 1
+            ? { key, dir: -1 as const }
+            : null;
+      localStorage.setItem(`pulse_list_sort:${list.id}`, JSON.stringify(next));
+      return next;
+    });
+  }
 
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
-      [r.firstName, r.lastName, r.email, r.account]
-        .map((v) => (v ?? "").toLowerCase())
-        .some((v) => v.includes(q)),
-    );
-  }, [rows, filter]);
+    const out = !q
+      ? [...rows]
+      : rows.filter((r) =>
+          [r.firstName, r.lastName, r.email, r.account]
+            .map((v) => (v ?? "").toLowerCase())
+            .some((v) => v.includes(q)),
+        );
+    if (sort) {
+      out.sort((a, b) => {
+        const va = sortValue(a, sort.key);
+        const vb = sortValue(b, sort.key);
+        if (!va && !vb) return 0;
+        if (!va) return 1; // empties sink regardless of direction
+        if (!vb) return -1;
+        return va.localeCompare(vb, undefined, { sensitivity: "base" }) * sort.dir;
+      });
+    }
+    return out;
+  }, [rows, filter, sort]);
+
+  const shown = visible.slice(0, 500);
+  const selectedRows = useMemo(
+    () => rows.filter((r) => checked.has(r.contactId)),
+    [rows, checked],
+  );
+
+  // Selection follows the data: ids that leave the list leave the selection.
+  useEffect(() => {
+    setChecked((prev) => {
+      if (!prev.size) return prev;
+      const ids = new Set(rows.map((r) => r.contactId));
+      const next = new Set([...prev].filter((id) => ids.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [rows]);
 
   function removeRow(row: WorkRow) {
     if (list.is_dynamic) {
@@ -425,6 +561,35 @@ function ListWorkspace({
               {freezeMutation.isPending ? "Freezing…" : "Freeze"}
             </Button>
           )}
+          {canWrite && (
+            <Button
+              variant="outline"
+              size="sm"
+              title="Paste emails or a CSV and match them into this list"
+              onClick={() => setPasteOpen(true)}
+            >
+              <ClipboardPaste className="h-4 w-4 mr-1" />
+              Paste people
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            title="Copy every email in the current view"
+            onClick={() => copyEmails(visible)}
+          >
+            <ClipboardCopy className="h-4 w-4 mr-1" />
+            Copy emails
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            title="Download the current view as a CSV"
+            onClick={() => exportCsv(list.name, visible)}
+          >
+            <Download className="h-4 w-4 mr-1" />
+            Export
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setDeleteOpen(true)}>
             <Trash2 className="h-4 w-4 mr-1" />
             Delete
@@ -477,6 +642,67 @@ function ListWorkspace({
         </div>
       </div>
 
+      {/* Bulk action bar — appears once anything is checked */}
+      {checked.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-muted/40 px-3 py-2">
+          <span className="text-sm font-medium">
+            {checked.size} selected
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setAddToListIds(selectedRows.map((r) => r.contactId))}
+          >
+            Add to another list…
+          </Button>
+          {isAdmin && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCampaignContacts(selectedRows)}
+            >
+              <Megaphone className="h-4 w-4 mr-1" />
+              Start a campaign…
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={() => copyEmails(selectedRows)}>
+            <ClipboardCopy className="h-4 w-4 mr-1" />
+            Copy emails
+          </Button>
+          {canWrite && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              disabled={bulkRemove.isPending}
+              onClick={() =>
+                bulkRemove.mutate(
+                  {
+                    list,
+                    contactIds: selectedRows.map((r) => r.contactId),
+                    memberIds: selectedRows
+                      .map((r) => r.memberId)
+                      .filter((id): id is string => !!id),
+                  },
+                  { onSuccess: () => setChecked(new Set()) },
+                )
+              }
+            >
+              <X className="h-4 w-4 mr-1" />
+              {list.is_dynamic ? "Remove and keep off" : "Remove from list"}
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto"
+            onClick={() => setChecked(new Set())}
+          >
+            Clear
+          </Button>
+        </div>
+      )}
+
       {/* The people */}
       {isLoading ? (
         <Skeleton className="h-48 w-full rounded-xl" />
@@ -495,18 +721,43 @@ function ListWorkspace({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Account</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Phone</TableHead>
+                <TableHead className="w-8">
+                  <Checkbox
+                    checked={shown.length > 0 && shown.every((r) => checked.has(r.contactId))}
+                    onCheckedChange={(v) =>
+                      setChecked(v ? new Set(shown.map((r) => r.contactId)) : new Set())
+                    }
+                    aria-label="Select everyone shown"
+                  />
+                </TableHead>
+                <SortHead label="Name" k="name" sort={sort} onToggle={toggleSort} />
+                <SortHead label="Account" k="account" sort={sort} onToggle={toggleSort} />
+                <SortHead label="Email" k="email" sort={sort} onToggle={toggleSort} />
+                <SortHead label="Phone" k="phone" sort={sort} onToggle={toggleSort} />
                 <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {visible.slice(0, 500).map((row) => (
+              {shown.map((row) => (
                 <ContextMenu key={row.contactId}>
                   <ContextMenuTrigger asChild>
-                    <TableRow className="group">
+                    <TableRow
+                      className={cn("group", checked.has(row.contactId) && "bg-muted/40")}
+                    >
+                      <TableCell className="w-8">
+                        <Checkbox
+                          checked={checked.has(row.contactId)}
+                          onCheckedChange={() =>
+                            setChecked((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(row.contactId)) next.delete(row.contactId);
+                              else next.add(row.contactId);
+                              return next;
+                            })
+                          }
+                          aria-label={`Select ${row.firstName ?? ""} ${row.lastName ?? ""}`.trim()}
+                        />
+                      </TableCell>
                       <TableCell>
                         <Link
                           to={`/contacts/${row.contactId}`}
@@ -638,6 +889,7 @@ function ListWorkspace({
           })
         }
       />
+      <PastePeopleDialog open={pasteOpen} onOpenChange={setPasteOpen} list={list} />
       {addToListIds && (
         <AddToListDialog
           open
