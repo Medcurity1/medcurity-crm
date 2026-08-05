@@ -28,11 +28,7 @@ Statuses: `IDEA` · `QUEUED` · `IN PROGRESS` · `BLOCKED` · `STAGING` (awaitin
 
 ## B. On staging — awaiting prod go-ahead
 
-| # | Item | Detail | Verify | Checked |
-|---|---|---|---|---|
-| B21 | Lists workspace power tools (Nathan 8/4 late: "make lists even better. adding sorting and any other helpful features") | Sortable columns (Name/Account/Email/Phone, asc/desc/off, empties sink, per-list persistence), checkbox multi-select + bulk bar (Add to another list / Start a campaign [admin] / Copy emails / Remove honoring smart-list keep-off / Clear), one-round-trip useBulkRemoveFromList (single toast), Copy emails + Export CSV of the filtered view in the header. | grep -c "useBulkRemoveFromList" src/features/lead-lists/lead-lists-api.ts >= 1 | 2026-08-04 |
-| B22 | Reports tab restructure phase 1: two-zone hub (Insights + Lists) with a card front door (Nathan 8/4 late, "i say do it") | ReportsHub rebuilt: landing = two zone cards (Insights: catalog/team dash/custom report rows; Lists: quick actions + live top-5 lists with counts); Insights folds in Team Dashboard + full Builder as "Custom report"; Lists gains "Pull people" (Builder in people mode, entity picker scoped to contacts/accounts); all legacy ?tab= values redirect (standard, team-dashboard, reports, lists&list=). Phases 2-4 (report template unification, bridges on standard reports, guided pull flow) not started. | grep -c 'mode="people"' src/features/reports/ReportsHub.tsx = 1 | 2026-08-04 |
-| B23 | Reports polish round: ALL PICKED ITEMS BUILT + VERIFIED on staging (Nathan 8/4-8/5) | Done across 4 commits (through 84e8ead): favorites gold-star row + landing Starred entry + ?chip=fav deep link; SQL Accounts save-as-list bridge (MQL Contacts already had one); recent pulls chips (localStorage, one-click rerun); Paste people dialog (email/CSV matcher w/ preview, hybrid-smart-aware; live-verified matching 1 real + rejecting unknowns); KPI count-up; shaped skeletons; hover prefetch; designed empty state; results-table numeric alignment; Jump back in strip (recency+frequency); card hover lift; Pull people finish bar (Save as list / Start a campaign / Export CSV, live-verified); sticky blur zone bar; icons already consistent (no churn). Skipped per Nathan: template unification; report layouts untouched incl. Chad's financial. AWAITING PROD PUSH together with B21 + B22. | git log --oneline 880cc7f..origin/Staging | 2026-08-05 |
+_(none)_
 
 ---
 
