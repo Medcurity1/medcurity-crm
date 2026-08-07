@@ -328,3 +328,26 @@ export function useSetPrimaryContact() {
     },
   });
 }
+
+/**
+ * Clear a contact's primary flag, leaving the account with no primary.
+ * A plain column update (same write path as the edit form's checkbox) —
+ * no demote/promote race is possible when only turning one flag off.
+ */
+export function useUnsetPrimaryContact() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id }: { id: string }) => {
+      const { error } = await supabase
+        .from("contacts")
+        .update({ is_primary: false })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["contacts", vars.id] });
+      qc.invalidateQueries({ queryKey: ["account-contacts"] });
+    },
+  });
+}

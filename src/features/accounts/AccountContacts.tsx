@@ -1,11 +1,15 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Users, Star, Archive } from "lucide-react";
+import { Plus, Users, Star, Archive, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import type { Contact } from "@/types/crm";
-import { useSetPrimaryContact, useArchiveContact } from "@/features/contacts/api";
+import {
+  useSetPrimaryContact,
+  useUnsetPrimaryContact,
+  useArchiveContact,
+} from "@/features/contacts/api";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EmptyState } from "@/components/EmptyState";
@@ -32,6 +36,7 @@ import { ContactFlagBadges } from "@/features/contacts/ContactFlagBadges";
 export function AccountContacts({ accountId }: { accountId: string }) {
   const navigate = useNavigate();
   const setPrimary = useSetPrimaryContact();
+  const unsetPrimary = useUnsetPrimaryContact();
   const archiveContact = useArchiveContact();
   const [archiveTarget, setArchiveTarget] = useState<Contact | null>(null);
   const { data: contacts, isLoading } = useQuery({
@@ -128,13 +133,37 @@ export function AccountContacts({ accountId }: { accountId: string }) {
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
                     {c.is_primary ? (
-                      <Badge
-                        variant="secondary"
-                        className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                      <button
+                        type="button"
+                        title="Remove primary"
+                        aria-label={`Remove ${formatName(c.first_name, c.last_name)} as primary contact`}
+                        disabled={unsetPrimary.isPending}
+                        className="group"
+                        onClick={() =>
+                          unsetPrimary.mutate(
+                            { id: c.id },
+                            {
+                              onSuccess: () =>
+                                toast.success(
+                                  `${formatName(c.first_name, c.last_name)} is no longer the primary contact.`,
+                                ),
+                              onError: (err: Error) =>
+                                toast.error("Couldn't remove primary", {
+                                  description: err.message,
+                                }),
+                            },
+                          )
+                        }
                       >
-                        <Star className="h-3 w-3 mr-1 fill-current" />
-                        Primary
-                      </Badge>
+                        <Badge
+                          variant="secondary"
+                          className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 cursor-pointer group-hover:bg-emerald-200 dark:group-hover:bg-emerald-900/70"
+                        >
+                          <Star className="h-3 w-3 mr-1 fill-current group-hover:hidden" />
+                          <X className="h-3 w-3 mr-1 hidden group-hover:block" />
+                          Primary
+                        </Badge>
+                      </button>
                     ) : (
                       <Button
                         variant="ghost"
