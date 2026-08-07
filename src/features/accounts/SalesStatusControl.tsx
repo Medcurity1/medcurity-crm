@@ -7,7 +7,7 @@ import type { Account, Contact } from "@/types/crm";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useUpdateAccount } from "./api";
 import { StatusBadge } from "@/components/StatusBadge";
-import { salesStatusLabel, formatName } from "@/lib/formatters";
+import { salesStatusLabel, formatName, defaultFollowUpDate } from "@/lib/formatters";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -163,7 +163,13 @@ export function SalesStatusControl({ account }: { account: Account }) {
             <Switch
               id="quick-sales-active"
               checked={active}
-              onCheckedChange={(v) => setActive(v === true)}
+              onCheckedChange={(v) => {
+                setActive(v === true);
+                // One-click activation (Summer 8/6): pre-fill a default
+                // follow-up date instead of blocking the save on it. She
+                // can change it before saving.
+                if (v === true && !followUp) setFollowUp(defaultFollowUpDate());
+              }}
             />
             <Label htmlFor="quick-sales-active" className="cursor-pointer text-sm">
               {active ? "Active — being worked" : "Inactive"}

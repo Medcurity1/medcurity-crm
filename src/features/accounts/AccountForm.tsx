@@ -13,7 +13,7 @@ import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { getMissingRequiredFields, formatFieldLabel } from "@/lib/requiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { accountSchema, type AccountFormValues } from "./schema";
-import { FTE_RANGES, employeesToFteRange, INDUSTRY_CATEGORY_OPTIONS } from "@/lib/formatters";
+import { FTE_RANGES, employeesToFteRange, INDUSTRY_CATEGORY_OPTIONS, defaultFollowUpDate } from "@/lib/formatters";
 import { US_STATES } from "@/lib/us-states";
 import { looksLikeUsZip, zipToTimeZone } from "@/lib/us-zip";
 import { PhoneInput } from "@/components/PhoneInput";
@@ -660,6 +660,12 @@ function AccountFormInner({ account, users }: { account: Account | undefined; us
                           // follow-up date.
                           if (v !== true) {
                             setValue("next_follow_up_date", "", { shouldDirty: true });
+                          } else if (!watch("next_follow_up_date")) {
+                            // One-click activation (Summer 8/6): pre-fill a
+                            // default date instead of failing validation.
+                            setValue("next_follow_up_date", defaultFollowUpDate(), {
+                              shouldDirty: true,
+                            });
                           }
                         }}
                       />

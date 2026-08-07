@@ -1,4 +1,4 @@
-import { format, formatDistanceToNow, parseISO, differenceInDays, isValid } from "date-fns";
+import { format, formatDistanceToNow, parseISO, differenceInDays, isValid, addDays } from "date-fns";
 import type { OpportunityStage, CustomerStatus, SalesStatus, RenewalType, ActivityType, OpportunityKind, OpportunityBusinessType, OpportunityTeam, LeadStatus, LeadSource, PaymentFrequency, LeadQualification, IndustryCategory, ProjectSegment } from "@/types/crm";
 
 export function formatCurrency(amount: number): string {
@@ -100,6 +100,16 @@ export function formatRelativeDate(dateString: string | null): string {
 export function daysUntil(dateString: string | null): number | null {
   if (!dateString) return null;
   return differenceInDays(parseISO(dateString), new Date());
+}
+
+/**
+ * Default Next Follow Up Date when an account is flipped to sales-active
+ * without one: ~a month out. Keeps activation to one click (Summer's
+ * prospecting flow, 8/6) while active accounts keep the invariant of
+ * always carrying a follow-up date.
+ */
+export function defaultFollowUpDate(): string {
+  return format(addDays(new Date(), 30), "yyyy-MM-dd");
 }
 
 export function formatName(firstName: string, lastName: string): string {

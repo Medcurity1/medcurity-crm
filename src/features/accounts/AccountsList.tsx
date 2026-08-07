@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState, useUrlArrayState, useUrlSortState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Building2, Plus, Search } from "lucide-react";
+import { Building2, Plus, Search, Target } from "lucide-react";
 import { useAccounts, useArchiveAccount, useBulkUpdateOwner, useBulkDeleteAccounts, useUsers, useStatesInUse } from "./api";
 import { stateLabel } from "@/lib/us-states";
 import { toast } from "sonner";
@@ -163,6 +163,27 @@ export function AccountsList() {
 
   function handleSort(next: SortState) {
     setSortState(next);
+    setPage(0);
+  }
+
+  // "My Prospects" = sales-active + Prospecting sub-status + owned by me.
+  const myProspectsOn =
+    salesFilter === "active" &&
+    subStatusFilter.length === 1 &&
+    subStatusFilter[0] === "prospecting" &&
+    ownerFilter.length === 1 &&
+    ownerFilter[0] === "mine";
+
+  function toggleMyProspects() {
+    if (myProspectsOn) {
+      setSalesFilter("all");
+      setSubStatusFilter([]);
+      setOwnerFilter([]);
+    } else {
+      setSalesFilter("active");
+      setSubStatusFilter(["prospecting"]);
+      setOwnerFilter(["mine"]);
+    }
     setPage(0);
   }
 
@@ -359,6 +380,17 @@ export function AccountsList() {
       />
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
+        {/* One-click self-building view (Summer 8/6): my accounts in
+            Prospecting. Toggle off restores the unfiltered list. */}
+        <Button
+          variant={myProspectsOn ? "default" : "outline"}
+          size="sm"
+          onClick={toggleMyProspects}
+          title="My accounts in Prospecting"
+        >
+          <Target className="h-4 w-4 mr-1.5" />
+          My Prospects
+        </Button>
         <div className="relative min-w-[220px] w-full sm:w-auto sm:flex-1 sm:max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
