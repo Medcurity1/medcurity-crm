@@ -27,6 +27,16 @@ import {
 import { toast } from "sonner";
 import type { RequestPriority } from "@/types/crm";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   useCreateRequest,
   classifyDraftBug,
   PRIORITY_OPTIONS,
@@ -36,6 +46,7 @@ import {
   type ProductCategory,
   type BugClassification,
 } from "./api";
+import { shouldWarnNotABug } from "./bug-warning";
 
 /** The three request forms. Shared by RequestDialog (the only mount since the
  * Requests tab moved into the header popup — Nathan, 2026-08-04). */
@@ -362,7 +373,7 @@ function ProductCategoryPicker({
       value: "bug",
       label: "Bug",
       blurb:
-        "Something is broken. If it's affecting a client it goes straight to the dev team; otherwise it's reviewed first.",
+        "Something is broken. Only time-sensitive bugs affecting a client go straight to the dev team; everything else is reviewed first.",
       icon: Bug,
     },
     {
@@ -446,8 +457,8 @@ function ClientImpactConfirm({
         {[
           {
             v: true,
-            label: "Yes, a client is affected",
-            hint: "Goes straight to the dev team, no waiting",
+            label: "Yes, a client is affected right now",
+            hint: "Time-sensitive bugs only: goes straight to the dev team",
           },
           {
             v: false,
@@ -501,6 +512,10 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
   // timed out, in which case there is no verdict to pre-fill from).
   const [clientFacing, setClientFacing] = useState<boolean | null>(true);
   const [checking, setChecking] = useState(false);
+  // MSD-999: the not-a-bug warning. `open` shows the dialog; `bypassed` means
+  // the submitter saw it for THIS verdict and chose straight-to-dev anyway.
+  const [notABugWarnOpen, setNotABugWarnOpen] = useState(false);
+  const [notABugBypassed, setNotABugBypassed] = useState(false);
 
   const dirty =
     !submitted &&
@@ -516,12 +531,27 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
     setVerdict(null);
     setClientFacing(true);
     setChecking(false);
+    setNotABugWarnOpen(false);
+    setNotABugBypassed(false);
   }
 
   // Editing the report after we've classified it invalidates the verdict —
   // otherwise you could get a judgement on one description and file another.
+  // The not-a-bug bypass is scoped to a verdict, so it resets with it.
   function invalidateVerdict() {
     if (verdict) setVerdict(null);
+    if (notABugBypassed) setNotABugBypassed(false);
+  }
+
+  // The submitter picked an answer on the client-impact card. Choosing the
+  // straight-to-dev path when the classifier says this isn't a bug gets the
+  // warning dialog instead of silently proceeding (MSD-999).
+  function chooseClientFacing(v: boolean) {
+    if (v && shouldWarnNotABug(verdict, true, notABugBypassed)) {
+      setNotABugWarnOpen(true);
+      return;
+    }
+    setClientFacing(v);
   }
 
   function actuallyCreate() {
@@ -607,6 +637,18 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
       return;
     }
 
+    // Backstop for the pre-filled case: if "Yes" stood from the classifier's
+    // own pre-fill and was never clicked, the warning still gets its moment
+    // before anything files straight to dev (MSD-999).
+    if (
+      category === "bug" &&
+      clientFacing === true &&
+      shouldWarnNotABug(verdict, true, notABugBypassed)
+    ) {
+      setNotABugWarnOpen(true);
+      return;
+    }
+
     actuallyCreate();
   }
 
@@ -676,12 +718,60 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
         <ClientImpactConfirm
           verdict={verdict}
           value={clientFacing}
-          onChange={setClientFacing}
+          onChange={chooseClientFacing}
         />
       )}
+      <AlertDialog open={notABugWarnOpen} onOpenChange={setNotABugWarnOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>This looks like a request, not a bug</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                {verdict?.reasoning && (
+                  <p className="rounded-md border bg-muted/50 p-3 text-sm italic">
+                    &ldquo;{verdict.reasoning}&rdquo;
+                  </p>
+                )}
+                <p>
+                  <strong>
+                    Only time-sensitive bugs that are affecting a client right now
+                    should go straight to the dev team.
+                  </strong>{" "}
+                  Everything else (enhancements, new ideas, wording changes, and
+                  process or workflow requests) needs to go through the reviewer
+                  first, even when a client is involved.
+                </p>
+                <p>
+                  Sending it through review doesn&apos;t bury it: the reviewer is
+                  emailed right away and approves it onto the dev board.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction
+              onClick={() => {
+                setClientFacing(false);
+                setNotABugWarnOpen(false);
+              }}
+            >
+              Send it through review (recommended)
+            </AlertDialogAction>
+            <AlertDialogCancel
+              onClick={() => {
+                setNotABugBypassed(true);
+                setClientFacing(true);
+                setNotABugWarnOpen(false);
+              }}
+            >
+              It&apos;s a time-sensitive bug, send it straight to dev
+            </AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <p className="text-xs text-muted-foreground">
         {category === "bug"
-          ? "Bugs affecting a client go straight to the dev team so nothing holds them up. Everything else is reviewed first, then queued. Attachments come along either way."
+          ? "Only time-sensitive bugs actively affecting a client go straight to the dev team. Everything else, including anything that's really a request or enhancement, is reviewed first, then queued. Attachments come along either way."
           : category === "enhancement"
             ? "Enhancements are reviewed inside the CRM. If approved, the request is filed to the product team's Jira board, attachments included."
             : "Bugs go to the product team's Jira board; enhancements are reviewed and approved first."}

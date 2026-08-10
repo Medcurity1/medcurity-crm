@@ -55,6 +55,15 @@ const FROM_ADDRESS = (
 ).trim();
 const APP_BASE = (Deno.env.get("APP_BASE_URL") ?? "https://crm.medcurity.com")
   .replace(/\/+$/, "");
+// Helm's ticket board (MSD-999): emails that reference a filed ticket link to
+// it in Helm. /tickets?view=list&q=<key> pulls up exactly that ticket.
+const HELM_BASE = (
+  Deno.env.get("HELM_APP_URL") ?? "https://app-helm-prod-ad7881.azurewebsites.net"
+).replace(/\/+$/, "");
+
+function helmTicketUrl(jiraKey: string): string {
+  return `${HELM_BASE}/tickets?view=list&q=${encodeURIComponent(jiraKey)}`;
+}
 
 const TYPE_LABEL: Record<string, string> = {
   collateral: "collateral request",
@@ -193,22 +202,34 @@ serve(async (req) => {
 
     let subject: string;
     let html: string;
+    // MSD-999 (Rachel): every email about a client-facing ticket that went
+    // straight to the dev team is HIGH IMPORTANCE — it's the only signal that
+    // work skipped the review queue. Review emails stay normal.
+    let importance: "high" | "normal" = "normal";
 
     if (isFiledBug) {
       // A bug affecting a client. It went straight to the dev team on purpose
       // — nothing about it is waiting on a person — so this is a heads-up, not
-      // a request for action, and it points at Helm/Jira rather than back into
-      // Pulse. Deliberately does NOT say "no action needed": the dev team still
-      // has to work it; there is just nothing to approve.
-      const ticket = reqRow.jira_issue_key
-        ? ` as <strong>${escapeHtml(reqRow.jira_issue_key)}</strong>`
+      // a request for action, and it links to the ticket in Helm rather than
+      // back into Pulse. Deliberately does NOT say "no action needed": the dev
+      // team still has to work it; there is just nothing to approve.
+      importance = "high";
+      const key = reqRow.jira_issue_key as string | null;
+      const ticket = key
+        ? ` as <a href="${helmTicketUrl(key)}" style="font-weight:600">${escapeHtml(key)}</a>`
         : "";
       subject = `Client-impacting bug: ${reqRow.title}`;
       html = [
         `<p>A bug came in that <strong>is affecting a client</strong>, so it went straight to the dev team${ticket} without waiting for review.</p>`,
         detailRows,
-        `<p>Check <strong>Helm</strong> or <strong>Jira</strong> for the ticket and full details.</p>`,
-        `<p style="color:#999;font-size:12px">Sent by Pulse. Bugs affecting clients skip the review queue so nothing holds them up — this is your heads-up that one landed.</p>`,
+        key
+          ? `<p><a href="${helmTicketUrl(key)}" style="display:inline-block;background:#1d4ed8;color:#fff;padding:9px 22px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:600">Open ${escapeHtml(key)} in Helm</a>${
+              reqRow.jira_issue_url
+                ? `&nbsp;&nbsp;<a href="${reqRow.jira_issue_url}" style="font-size:13px">View in Jira</a>`
+                : ""
+            }</p>`
+          : `<p>Check <strong>Helm</strong> or <strong>Jira</strong> for the ticket and full details.</p>`,
+        `<p style="color:#999;font-size:12px">Sent by Pulse. Time-sensitive bugs affecting clients skip the review queue so nothing holds them up — this is your heads-up that one landed. It's been assigned to Makena.</p>`,
       ].join("");
     } else if (isBug) {
       // A bug NOT affecting clients. Nothing has been filed. It is sitting in
@@ -240,6 +261,7 @@ serve(async (req) => {
       body: JSON.stringify({
         message: {
           subject,
+          importance,
           body: { contentType: "HTML", content: html },
           from: { emailAddress: { address: FROM_ADDRESS } },
           toRecipients: recipientEmails.map((address) => ({

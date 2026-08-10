@@ -52,10 +52,28 @@ function jiraBaseUrl(): string {
   return (Deno.env.get("JIRA_BASE_URL") ?? "").trim().replace(/\/+$/, "");
 }
 
+// ── Auto-assignment (MSD-999; Rachel + Makena, 2026-08-10) ───────────
+// Every ticket that goes straight to the dev team is assigned to Makena;
+// every ticket filed through the review path is assigned to Rachel. The
+// Helm bug-intake route carries its own copy of the Makena default (that
+// path files most straight-to-dev tickets); this pair covers the filings
+// made from THIS function — the reviewer-approved tickets and the
+// Helm-unreachable direct-file fallback. Env-overridable so a people
+// change never needs a deploy.
+function devAssigneeId(): string {
+  return (
+    Deno.env.get("JIRA_ASSIGNEE_DEV") ?? "712020:b65beec3-8895-44eb-9937-74eea95ea53b" // Makena
+  ).trim();
+}
+function reviewedAssigneeId(): string {
+  return (Deno.env.get("JIRA_ASSIGNEE_REVIEWED") ?? "5f7ba88d459d4200699631a5").trim(); // Rachel
+}
+
 async function createJiraIssue(
   title: string,
   descriptionText: string,
   issueTypeName: string,
+  assigneeAccountId?: string,
 ) {
   const auth = jiraAuth();
   const base = jiraBaseUrl();
@@ -90,6 +108,9 @@ async function createJiraIssue(
         issuetype: issueTypeField,
         summary: title,
         description: descriptionText,
+        // accountId works on both v2 and v3 create since the GDPR changes;
+        // Helm's own createIssue uses the same shape.
+        ...(assigneeAccountId ? { assignee: { accountId: assigneeAccountId } } : {}),
       },
     }),
   });
@@ -184,7 +205,7 @@ function issueTypeFor(reqRow: any): string {
  * Throws only on issue creation failure; the rest is best-effort.
  */
 // deno-lint-ignore no-explicit-any
-async function fileRequestToJira(svc: any, reqRow: any, requestId: string) {
+async function fileRequestToJira(svc: any, reqRow: any, requestId: string, assigneeId?: string) {
   let jiraKey: string | null = reqRow.jira_issue_key ?? null;
   let jiraUrl: string | null = reqRow.jira_issue_url ?? null;
   if (jiraKey) return { jiraKey, jiraUrl };
@@ -193,7 +214,7 @@ async function fileRequestToJira(svc: any, reqRow: any, requestId: string) {
   const descText =
     `Requester: ${requesterName}\nPriority: ${reqRow.priority}\n\n${reqRow.description ?? ""}`;
 
-  const jira = await createJiraIssue(reqRow.title, descText, issueTypeFor(reqRow));
+  const jira = await createJiraIssue(reqRow.title, descText, issueTypeFor(reqRow), assigneeId);
   jiraKey = jira.key;
   jiraUrl = jira.url;
   await svc
@@ -272,7 +293,9 @@ async function fileBugDirect(svc: any, reqRow: any, requestId: string, callerId:
   if (!claimed) return json({ error: "Request is no longer pending" }, 409);
 
   try {
-    const { jiraKey, jiraUrl } = await fileRequestToJira(svc, reqRow, requestId);
+    // Straight-to-dev (Helm was unreachable, but the routing decision stands),
+    // so this one is Makena's.
+    const { jiraKey, jiraUrl } = await fileRequestToJira(svc, reqRow, requestId, devAssigneeId());
     return json({ filed: true, jiraConfigured: true, jiraKey, jiraUrl, clientFacing: null });
   } catch (e) {
     // Roll back to pending so the reviewers' manual approve stays available.
@@ -914,7 +937,9 @@ serve(async (req) => {
       if (jiraAuth() && jiraBaseUrl()) {
         jiraConfigured = true;
         try {
-          const filed = await fileRequestToJira(svc, reqRow, requestId);
+          // Reviewer-approved → assigned to Rachel (MSD-999 assignment rule:
+          // straight-to-dev is Makena's; everything reviewed is Rachel's).
+          const filed = await fileRequestToJira(svc, reqRow, requestId, reviewedAssigneeId());
           jiraKey = filed.jiraKey;
           jiraUrl = filed.jiraUrl;
         } catch (e) {

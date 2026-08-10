@@ -284,6 +284,14 @@ interface CreateRequestInput {
  */
 export interface BugClassification {
   clientFacing: boolean;
+  /**
+   * MSD-999: false when the classifier read the report as a request or
+   * enhancement rather than a defect. Picking "Yes — a client is affected"
+   * on a false here triggers the are-you-sure warning (only time-sensitive
+   * client-facing BUGS should skip review). Optional because older Helm
+   * responses may omit it; treat missing as true (no warning).
+   */
+  looksLikeBug?: boolean;
   confidence: number;
   reasoning: string;
   affectedAreas?: string[];
@@ -319,6 +327,8 @@ export async function classifyDraftBug(draft: {
   }
   return {
     clientFacing: true,
+    // No verdict, no warning — the not-a-bug nudge only fires on a real read.
+    looksLikeBug: true,
     confidence: 0,
     reasoning: "We couldn't check this automatically — please tell us.",
     affectedAreas: [],
