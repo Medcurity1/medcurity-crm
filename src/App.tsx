@@ -16,6 +16,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { RequestsRedirect } from "@/features/requests/RequestsRedirect";
 import { setClientErrorAppVersion } from "@/lib/clientErrorLogger";
 import { BUILD_ID } from "@/lib/buildInfo";
+import { HOME_RETIRED } from "@/features/nexus/landing-flip";
 
 // Stamp client-error telemetry with the running build so "was this fixed
 // by the next deploy?" is answerable from the log.
@@ -30,7 +31,9 @@ setClientErrorAppVersion(BUILD_ID);
 // behavior change.
 const homePageImport = () => import("@/features/dashboard/HomePage").then(m => ({ default: m.HomePage }));
 const HomePage = lazy(homePageImport);
-if (typeof window !== "undefined") {
+// Skip the cache-warming hint while Home is soft-retired — no one can
+// reach the page, so don't spend the download. (Restore = flip the flag.)
+if (typeof window !== "undefined" && !HOME_RETIRED) {
   homePageImport();
 }
 const NexusPage = lazy(() => import("@/features/nexus/NexusPage").then(m => ({ default: m.NexusPage })));
@@ -145,8 +148,14 @@ export default function App() {
                       (Nathan, 2026-07-03). */}
                   {/* The swap (Nathan 2026-08-04): "/" lands on Nexus. Home
                       stays reachable at /home until it's retired for good. */}
+                  {/* Home SOFT-retired 2026-08-11 (Nathan): /home bounces to
+                      Nexus while HOME_RETIRED is true; HomePage code stays
+                      for an instant restore during the watch window. */}
                   <Route index element={<Navigate to="/nexus" replace />} />
-                  <Route path="home" element={<HomePage />} />
+                  <Route
+                    path="home"
+                    element={HOME_RETIRED ? <Navigate to="/nexus" replace /> : <HomePage />}
+                  />
                   <Route path="nexus" element={<NexusPage />} />
                   <Route path="requests" element={<RequestsRedirect />} />
                   <Route path="meddy" element={<MeddyPage />} />

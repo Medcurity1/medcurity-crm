@@ -37,19 +37,19 @@ describe("evaluateCloseReadiness (pure decision logic)", () => {
 
   it("flags a blank phone", () => {
     expect(evaluateCloseReadiness(ALL, { ...fullAccount, phone: "" }, [emailedContact])).toEqual([
-      "Account phone number",
+      "a phone number on the account (Phone field)",
     ]);
   });
 
   it("treats a whitespace-only phone as blank", () => {
     expect(evaluateCloseReadiness(ALL, { ...fullAccount, phone: "   " }, [emailedContact])).toEqual([
-      "Account phone number",
+      "a phone number on the account (Phone field)",
     ]);
   });
 
   it("flags a blank FTE range", () => {
     expect(evaluateCloseReadiness(ALL, { ...fullAccount, fte_range: null }, [emailedContact])).toEqual([
-      "FTE range",
+      "an FTE range on the account",
     ]);
   });
 
@@ -75,7 +75,7 @@ describe("evaluateCloseReadiness (pure decision logic)", () => {
         fte_range: "  ",
         fte_count: 0,
       }),
-    ).toEqual(["FTE range"]);
+    ).toEqual(["an FTE range on the account"]);
   });
 
   it("account FTE present wins regardless of deal values", () => {
@@ -87,7 +87,7 @@ describe("evaluateCloseReadiness (pure decision logic)", () => {
   it("requires street, city, state AND zip for the billing address", () => {
     for (const missingCol of ["billing_street", "billing_city", "billing_state", "billing_zip"] as const) {
       const acct = { ...fullAccount, [missingCol]: "" };
-      expect(evaluateCloseReadiness(ALL, acct, [emailedContact])).toEqual(["Billing address"]);
+      expect(evaluateCloseReadiness(ALL, acct, [emailedContact])).toEqual(["a complete billing address on the account (street, city, state, and ZIP)"]);
     }
   });
 
@@ -99,7 +99,7 @@ describe("evaluateCloseReadiness (pure decision logic)", () => {
 
   it("flags a missing contact email when the account has no contacts", () => {
     expect(evaluateCloseReadiness(["contact_email"], fullAccount, [])).toEqual([
-      "A contact email address",
+      "an email address on at least one of the account's contacts",
     ]);
   });
 
@@ -125,7 +125,7 @@ describe("evaluateCloseReadiness (pure decision logic)", () => {
       evaluateCloseReadiness(["contact_email"], fullAccount, [
         { is_primary: true, first_name: "Jane", last_name: "Doe", email: "", email2: "  ", email3: null },
       ]),
-    ).toEqual(["A contact email address (primary contact Jane Doe has none)"]);
+    ).toEqual(["an email address on at least one of the account's contacts (primary contact Jane Doe has none)"]);
   });
 
   it("falls back to the generic label when there is no primary contact", () => {
@@ -133,22 +133,22 @@ describe("evaluateCloseReadiness (pure decision logic)", () => {
       evaluateCloseReadiness(["contact_email"], fullAccount, [
         { is_primary: false, first_name: "Al", last_name: "Roe", email: "" },
       ]),
-    ).toEqual(["A contact email address"]);
+    ).toEqual(["an email address on at least one of the account's contacts"]);
   });
 
   it("only enforces the configured subset of keys", () => {
     // Everything blank, but only phone is enforced -> only phone is flagged.
     const blank = { phone: "", fte_range: "", billing_street: "", billing_city: "", billing_state: "", billing_zip: "" };
-    expect(evaluateCloseReadiness(["account_phone"], blank, [])).toEqual(["Account phone number"]);
+    expect(evaluateCloseReadiness(["account_phone"], blank, [])).toEqual(["a phone number on the account (Phone field)"]);
   });
 
   it("reports multiple missing items in key order", () => {
     const blank = { phone: "", fte_range: "", billing_street: "", billing_city: "", billing_state: "", billing_zip: "" };
     expect(evaluateCloseReadiness(ALL, blank, [])).toEqual([
-      "Account phone number",
-      "Billing address",
-      "FTE range",
-      "A contact email address",
+      "a phone number on the account (Phone field)",
+      "a complete billing address on the account (street, city, state, and ZIP)",
+      "an FTE range on the account",
+      "an email address on at least one of the account's contacts",
     ]);
   });
 
@@ -170,7 +170,7 @@ describe("evaluateCloseReadiness (pure decision logic)", () => {
         ...noServicesOpp,
         services_included: true,
       }),
-    ).toEqual(["An assigned assessor (this deal includes services)"]);
+    ).toEqual(["an Assigned Assessor on this deal (it includes services)"]);
   });
 
   it("blocks when a service dollar amount is present (string form input too)", () => {
@@ -180,7 +180,7 @@ describe("evaluateCloseReadiness (pure decision logic)", () => {
           ...noServicesOpp,
           service_amount: amt,
         }),
-      ).toEqual(["An assigned assessor (this deal includes services)"]);
+      ).toEqual(["an Assigned Assessor on this deal (it includes services)"]);
     }
   });
 
@@ -190,7 +190,7 @@ describe("evaluateCloseReadiness (pure decision logic)", () => {
         ...noServicesOpp,
         has_service_line_items: true,
       }),
-    ).toEqual(["An assigned assessor (this deal includes services)"]);
+    ).toEqual(["an Assigned Assessor on this deal (it includes services)"]);
   });
 
   it("passes a service deal once an assessor is named", () => {
@@ -228,10 +228,37 @@ describe("formatCloseReadinessMessage", () => {
     expect(formatCloseReadinessMessage([])).toBe("");
   });
 
-  it("lists the missing items", () => {
-    const msg = formatCloseReadinessMessage(["Account phone number", "FTE range"]);
+  it("lists the missing items joined with semicolons", () => {
+    const msg = formatCloseReadinessMessage([
+      "a phone number on the account (Phone field)",
+      "an FTE range on the account",
+    ]);
     expect(msg).toContain("Closed Won");
-    expect(msg).toContain("Account phone number, FTE range");
+    expect(msg).toContain(
+      "a phone number on the account (Phone field); an FTE range on the account",
+    );
+    expect(msg).toContain("Fill these in");
+  });
+
+  it("names the account when provided (Jordan's 8/10 ticket: 'the account' alone is ambiguous)", () => {
+    const msg = formatCloseReadinessMessage(
+      ["a phone number on the account (Phone field)"],
+      "Extivita-RTP, LLC",
+    );
+    expect(msg).toBe(
+      "Can't mark this deal Closed Won yet. Still needed: a phone number on the account (Phone field). " +
+        "The account is Extivita-RTP, LLC. Fill this in, then try closing again.",
+    );
+    // The regression that started D17: the message must never contain the
+    // phrase "account number" — that reads like the auto-assigned Account
+    // Number, a field users can't even edit.
+    expect(msg.toLowerCase()).not.toContain("account number");
+  });
+
+  it("omits the account sentence when the name is unknown", () => {
+    const msg = formatCloseReadinessMessage(["an FTE range on the account"], null);
+    expect(msg).not.toContain("The account is");
+    expect(msg).toContain("Fill this in");
   });
 });
 
@@ -290,6 +317,7 @@ describe("checkCloseReadiness (wiring + fallback)", () => {
     expect(await checkCloseReadiness(client, null)).toEqual({
       ready: false,
       missing: ["Account information could not be loaded"],
+      accountName: null,
     });
   });
 
@@ -310,7 +338,7 @@ describe("checkCloseReadiness (wiring + fallback)", () => {
     });
     const res = await checkCloseReadiness(client, "acct-1", "opp-1");
     expect(res.ready).toBe(false);
-    expect(res.missing).toEqual(["An assigned assessor (this deal includes services)"]);
+    expect(res.missing).toEqual(["an Assigned Assessor on this deal (it includes services)"]);
   });
 
   it("passes a service deal whose fetched row already names an assessor", async () => {
@@ -325,7 +353,7 @@ describe("checkCloseReadiness (wiring + fallback)", () => {
       contacts: { data: [emailedContact], error: null },
     });
     const res = await checkCloseReadiness(client, "acct-1", "opp-1");
-    expect(res).toEqual({ ready: true, missing: [] });
+    expect(res).toEqual({ ready: true, missing: [], accountName: null });
   });
 
   it("enforces all four when config is absent and blocks an incomplete account", async () => {
@@ -348,16 +376,21 @@ describe("checkCloseReadiness (wiring + fallback)", () => {
     });
     const res = await checkCloseReadiness(client, "acct-1");
     expect(res.ready).toBe(false);
-    expect(res.missing).toEqual(["Account phone number", "FTE range", "A contact email address"]);
+    expect(res.missing).toEqual(["a phone number on the account (Phone field)", "an FTE range on the account", "an email address on at least one of the account's contacts"]);
   });
 
   it("returns ready when the account is complete and a contact has an email", async () => {
     const client = mockClient({
       required_field_config: { data: [], error: null },
-      accounts: { data: fullAccount, error: null },
+      accounts: { data: { ...fullAccount, name: "Acme Health" }, error: null },
       contacts: { data: [emailedContact], error: null },
     });
-    expect(await checkCloseReadiness(client, "acct-1")).toEqual({ ready: true, missing: [] });
+    // accountName rides along so the toast can name WHICH account to fix.
+    expect(await checkCloseReadiness(client, "acct-1")).toEqual({
+      ready: true,
+      missing: [],
+      accountName: "Acme Health",
+    });
   });
 
   it("blocks when the account row cannot be loaded", async () => {

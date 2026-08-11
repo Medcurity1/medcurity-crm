@@ -690,7 +690,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       ).length > 0
     ) {
       toast.error(
-        "This deal includes services — pick an Assigned Assessor before marking it Closed Won."
+        "This deal includes services. Pick an Assigned Assessor (on this deal form) before marking it Closed Won."
       );
       return;
     }
@@ -717,7 +717,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       // Pass the deal's IN-FLIGHT values (not a DB fetch) — this save may
       // be the one setting the assessor, and on create the row doesn't
       // exist yet.
-      const { ready, missing } = await checkCloseReadiness(supabase, values.account_id, {
+      const { ready, missing, accountName } = await checkCloseReadiness(supabase, values.account_id, {
         services_included: values.services_included ?? false,
         // blankableNumber leaves the field loosely typed; normalize to a
         // plain number (blank -> 0 = "no service amount signal").
@@ -732,7 +732,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
         fte_count: Number(values.fte_count ?? 0) > 0 ? Number(values.fte_count) : null,
       });
       if (!ready) {
-        toast.error(formatCloseReadinessMessage(missing));
+        toast.error(formatCloseReadinessMessage(missing, accountName));
         return;
       }
     }
