@@ -29,10 +29,7 @@ Statuses: `IDEA` · `QUEUED` · `IN PROGRESS` · `BLOCKED` · `STAGING` (awaitin
 
 ## B. On staging — awaiting prod go-ahead
 
-| # | Item | Who | Detail | Verify | Checked |
-|---|---|---|---|---|---|
-| B29 | Home tab SOFT-removed (hidden, not deleted) | Nathan 8/11 | One flag (`HOME_RETIRED` in src/features/nexus/landing-flip.ts, true): sidebar row hidden, /home redirects to /nexus, HomePage chunk cache-warm skipped. ALL Home code kept — restore during the ~2-week watch window = flip the flag to false, nothing else. "Something missing?" feedback link deliberately stays on through the window (that's the complaint channel). HARD remove afterwards (needs its own go): delete HomePage.tsx + route + sidebar row + flag, set NEXUS_FEEDBACK_LINK false. | `grep -n "HOME_RETIRED: boolean = true" src/features/nexus/landing-flip.ts` on Staging; awaiting promote = same grep on origin/main empty | 2026-08-11 |
-| B28 | Close-gate toast rewrite (was D17) | Jordan Scherich (8/10 ticket) + Nathan's go 8/11 | Every blocked-close item now says what's missing AND where it lives ("a phone number on the account (Phone field)" instead of "Account phone number" — the label Jordan misread as "account number"); the toast names the account ("The account is Extivita-RTP, LLC.") since a pipeline drag shows no account; items join with semicolons; singular/plural "Fill this in/these in"; the separate services-assessor toast also de-dashed and points at the deal form. checkCloseReadiness now returns accountName (accounts select adds name); all 4 call sites pass it. 40 closeReadiness tests updated/added incl. a regression: message must never contain the phrase "account number". Full suite 447 green, tsc clean. PROD IMPACT when promoted: Jordan's exact toast becomes self-explanatory. | `grep -n "a phone number on the account (Phone field)" src/lib/closeReadiness.ts` on Staging; awaiting promote = `git log origin/main --oneline \| grep -i "close-gate toast"` empty | 2026-08-11 |
+_(none)_
 
 ---
 
@@ -133,3 +130,4 @@ Source: `docs/audit/2026-07-28-campaigns-outside-review.md` (61-agent read-only 
 | # | Item | Detail |
 |---|---|---|
 | H1 | Meddy widget 1h cache | Keep the meddy-chat edge fn backward-compatible ≥1h after widget-affecting deploys. |
+| H3 | Home hard-remove decision (~2026-08-25) | Soft remove hit prod 8/11 (SHIPPED, promote fcfd6f2). If the ~2-week watch window stays quiet, ask Nathan for the HARD-remove go: delete HomePage.tsx + /home route + sidebar row + HOME_RETIRED flag, set NEXUS_FEEDBACK_LINK false. If anyone complains meanwhile: flip HOME_RETIRED false (one-line restore). |
