@@ -27,3 +27,20 @@ export const NEXUS_IS_LANDING: boolean = true;
  * nothing.
  */
 export const NEXUS_FEEDBACK_LINK: boolean = true;
+
+/**
+ * The SOFT remove of the Home tab (Nathan, 2026-08-11): while `true`, Home
+ * disappears from the sidebar and /home redirects to /nexus — nobody can
+ * reach the page. ALL of Home's code stays (HomePage.tsx, its route, its
+ * sidebar row); flipping this back to `false` restores it in an instant if
+ * anyone misses it during the watch window (a couple of weeks).
+ *
+ * NEXUS_FEEDBACK_LINK stays true through the watch window on purpose —
+ * the "Something missing?" link is exactly how people are expected to
+ * complain if Home's absence hurts.
+ *
+ * The HARD remove, when the window passes quietly: delete HomePage.tsx +
+ * the /home route + the sidebar row + this flag, and set
+ * NEXUS_FEEDBACK_LINK false.
+ */
+export const HOME_RETIRED: boolean = true;

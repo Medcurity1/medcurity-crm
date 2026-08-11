@@ -26,6 +26,7 @@ import {
   Megaphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { HOME_RETIRED } from "@/features/nexus/landing-flip";
 import { pipelineRunner } from "@/features/pipeline-runner/store";
 import { meddySweeper } from "@/features/meddy-sweeper/store";
 import { dealMerger } from "@/features/deal-merger/store";
@@ -116,7 +117,12 @@ const navItems: NavItem[] = [
   // popup in the top bar (RequestDialogProvider), openable from any page.
   // Calendar tab removed 2026-08-04 (Nathan: confirmed nobody uses it).
   // Activities remain visible in /activities and per-record timelines.
-  { to: "/home", icon: Home, label: "Home", badge: { label: "Leaving soon", className: LEAVING_BADGE } },
+  // Home SOFT-removed 2026-08-11 (Nathan): hidden while HOME_RETIRED is
+  // true, restorable by flipping that one flag (landing-flip.ts). The row
+  // below stays so the restore is a one-line flag change, not a rebuild.
+  ...(HOME_RETIRED
+    ? []
+    : [{ to: "/home", icon: Home, label: "Home", badge: { label: "Leaving soon", className: LEAVING_BADGE } }]),
 ];
 
 const adminItems: NavItem[] = [
