@@ -45,17 +45,29 @@ export const CLOSE_READINESS_KEYS = [
 
 export type CloseReadinessKey = (typeof CLOSE_READINESS_KEYS)[number];
 
+/**
+ * Item wording rule (Jordan, 2026-08-10 — docket D17): every item must say
+ * WHAT is missing and WHERE it lives, in words that can't be skimmed into
+ * something else. "Account phone number" was read as "account number", and
+ * the Account Number field doesn't even exist on the form anymore (it's
+ * auto-assigned) — a week-long dead end. Items read as list fragments after
+ * "Still needed:", so they start lowercase and are joined with semicolons.
+ */
 const LABELS: Record<CloseReadinessKey, string> = {
-  account_phone: "Account phone number",
-  account_billing_address: "Billing address",
-  account_fte_range: "FTE range",
-  contact_email: "A contact email address",
-  assigned_assessor: "An assigned assessor (this deal includes services)",
+  account_phone: "a phone number on the account (Phone field)",
+  account_billing_address:
+    "a complete billing address on the account (street, city, state, and ZIP)",
+  account_fte_range: "an FTE range on the account",
+  contact_email: "an email address on at least one of the account's contacts",
+  assigned_assessor: "an Assigned Assessor on this deal (it includes services)",
 };
 
 export interface CloseReadinessResult {
   ready: boolean;
   missing: string[];
+  /** The account's display name, when it could be loaded — lets the toast
+   *  say WHICH account to fix (a pipeline drag doesn't show one). */
+  accountName?: string | null;
 }
 
 /** Minimal shapes so the pure evaluator is trivially unit-testable. */
@@ -200,7 +212,7 @@ export function evaluateCloseReadiness(
         : "";
       missing.push(
         primary && primaryName
-          ? `A contact email address (primary contact ${primaryName} has none)`
+          ? `an email address on at least one of the account's contacts (primary contact ${primaryName} has none)`
           : LABELS.contact_email,
       );
     }
@@ -262,7 +274,11 @@ export async function checkCloseReadiness(
   opportunity?: string | CloseReadinessOpportunity | null,
 ): Promise<CloseReadinessResult> {
   if (!accountId) {
-    return { ready: false, missing: ["Account information could not be loaded"] };
+    return {
+      ready: false,
+      missing: ["Account information could not be loaded"],
+      accountName: null,
+    };
   }
 
   const keys = await getEnforcedCloseKeys(supabase);
@@ -281,7 +297,11 @@ export async function checkCloseReadiness(
         .eq("id", opportunity)
         .maybeSingle();
       if (oppErr || !oppRow) {
-        return { ready: false, missing: ["Opportunity information could not be loaded"] };
+        return {
+          ready: false,
+          missing: ["Opportunity information could not be loaded"],
+          accountName: null,
+        };
       }
       let hasServiceLine = false;
       if (keys.includes("assigned_assessor")) {
@@ -290,7 +310,11 @@ export async function checkCloseReadiness(
           .select("product:products!product_id(product_family)")
           .eq("opportunity_id", opportunity);
         if (linesErr) {
-          return { ready: false, missing: ["Opportunity information could not be loaded"] };
+          return {
+            ready: false,
+            missing: ["Opportunity information could not be loaded"],
+            accountName: null,
+          };
         }
         hasServiceLine = (lines ?? []).some((l) => {
           const fam =
@@ -307,13 +331,21 @@ export async function checkCloseReadiness(
 
   const { data: account, error: acctErr } = await supabase
     .from("accounts")
-    .select("phone, fte_range, employees, billing_street, billing_city, billing_state, billing_zip")
+    .select("name, phone, fte_range, employees, billing_street, billing_city, billing_state, billing_zip")
     .eq("id", accountId)
     .maybeSingle();
 
   if (acctErr) {
-    return { ready: false, missing: ["Account information could not be loaded"] };
+    return {
+      ready: false,
+      missing: ["Account information could not be loaded"],
+      accountName: null,
+    };
   }
+  const accountName =
+    typeof (account as { name?: unknown } | null)?.name === "string"
+      ? ((account as { name: string }).name)
+      : null;
 
   // Back-fill: the account is missing its FTE range but the deal being
   // closed carries one — copy it up (plus the raw count when the account
@@ -361,15 +393,28 @@ export async function checkCloseReadiness(
   }
 
   const missing = evaluateCloseReadiness(keys, (account as CloseReadinessAccount) ?? null, contacts, opp);
-  return { ready: missing.length === 0, missing };
+  return { ready: missing.length === 0, missing, accountName };
 }
 
-/** Friendly, toast-ready message. Items are self-descriptive (account
- *  fields name the account; the assessor item names the deal). */
-export function formatCloseReadinessMessage(missing: string[]): string {
+/**
+ * Friendly, toast-ready message. Items are self-locating fragments (each
+ * says what's missing AND where it lives — see the LABELS comment), joined
+ * with semicolons because they may contain commas/parens. Naming the
+ * account matters: from a pipeline drag or the deals list, "the account"
+ * is otherwise ambiguous, and Jordan's 8/10 ticket showed a vague message
+ * costs a week of stuck retries. Plain sentences, no dashes (Nathan's
+ * copy style).
+ */
+export function formatCloseReadinessMessage(
+  missing: string[],
+  accountName?: string | null,
+): string {
   if (missing.length === 0) return "";
+  const list = missing.join("; ");
+  const where = accountName ? ` The account is ${accountName}.` : "";
+  const fill = missing.length === 1 ? "Fill this in" : "Fill these in";
   return (
-    `Can't mark this deal Closed Won yet — still needed: ${missing.join(", ")}. ` +
-    `Fill these in, then try again.`
+    `Can't mark this deal Closed Won yet. Still needed: ${list}.` +
+    `${where} ${fill}, then try closing again.`
   );
 }

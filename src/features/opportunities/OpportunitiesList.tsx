@@ -162,9 +162,9 @@ function InlineStage({
           // Select is controlled by o.stage, so returning without mutating
           // leaves it showing the current stage.
           if (v === "closed_won") {
-            const { ready, missing } = await checkCloseReadiness(supabase, o.account_id, o.id);
+            const { ready, missing, accountName } = await checkCloseReadiness(supabase, o.account_id, o.id);
             if (!ready) {
-              toast.error(formatCloseReadinessMessage(missing));
+              toast.error(formatCloseReadinessMessage(missing, accountName));
               return;
             }
           }

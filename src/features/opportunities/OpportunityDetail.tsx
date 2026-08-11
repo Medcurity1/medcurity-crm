@@ -402,9 +402,9 @@ export function OpportunityDetail() {
   const requestStageChange = async (stage: OpportunityStage) => {
     if (stage === opp.stage) return;
     if (stage === "closed_won") {
-      const { ready, missing } = await checkCloseReadiness(supabase, opp.account_id, opp.id);
+      const { ready, missing, accountName } = await checkCloseReadiness(supabase, opp.account_id, opp.id);
       if (!ready) {
-        toast.error(formatCloseReadinessMessage(missing));
+        toast.error(formatCloseReadinessMessage(missing, accountName));
         return;
       }
     }
