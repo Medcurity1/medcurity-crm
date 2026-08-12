@@ -21,6 +21,40 @@ export interface CollateralItemLike {
   pinned: boolean;
 }
 
+// ── v1.1 additions (Jordan's 2026-08-11 spec) ────────────────────────
+
+/** §4: "Review due" mirrors the library's Needs Review cycle. */
+export const REVIEW_DUE_DAYS = 180;
+
+/**
+ * An asset whose Last Reviewed is more than 180 days old gets the amber
+ * "Review due" badge. No Last Reviewed value = no badge (the library's
+ * Status gate is the authority on whether it should render at all).
+ */
+export function isReviewDue(
+  lastReviewed: string | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (!lastReviewed) return false;
+  const d = new Date(lastReviewed);
+  if (Number.isNaN(d.getTime())) return false;
+  return now.getTime() - d.getTime() > REVIEW_DUE_DAYS * 86_400_000;
+}
+
+export type FileKind = "pdf" | "doc" | "slides" | "sheet" | "image" | "file";
+
+/** File-type glyph selection from the filename/URL extension. */
+export function fileKind(nameOrUrl: string | null | undefined): FileKind {
+  const m = (nameOrUrl ?? "").toLowerCase().match(/\.([a-z0-9]+)(?:[?#].*)?$/);
+  const ext = m?.[1] ?? "";
+  if (ext === "pdf") return "pdf";
+  if (["doc", "docx", "rtf"].includes(ext)) return "doc";
+  if (["ppt", "pptx", "key"].includes(ext)) return "slides";
+  if (["xls", "xlsx", "csv"].includes(ext)) return "sheet";
+  if (["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext)) return "image";
+  return "file";
+}
+
 /** One selectable chip; family parents carry their children. */
 export interface Chip {
   value: string;

@@ -1,0 +1,330 @@
+/* Collateral tab — Medcurity brand, ROUTE-SCOPED (Jordan v1.1 §0/§4).
+ *
+ * Every rule here is namespaced .collat-*; nothing redefines app-root CSS
+ * variables, the shared theme, or any component other routes consume. The
+ * canvas is deliberately the platform dashboard's LIGHT look (white cards,
+ * ice chips, navy text on faint blue-gray) in BOTH Pulse themes — Jordan:
+ * a visual difference from the rest of Pulse is acceptable; changes
+ * outside this tab are not. Colors are therefore literal, not tokens.
+ *
+ * Color rules (§4): color means something or it is not there. Green =
+ * healthy, amber/orange = needs attention, blue = actionable, teal = the
+ * single primary CTA, ONE warm peach moment on the hero. No decorative
+ * color anywhere else.
+ */
+
+.collat-root {
+  --c-font: "Plus Jakarta Sans", -apple-system, system-ui, sans-serif;
+  --c-navy-900: #0a1f33;
+  --c-navy-700: #0f2740;
+  --c-slate-600: #4a5c6e;
+  --c-ice-100: #eef6fc;
+  --c-ice-edge: #d9e8f5;
+  --c-teal-500: #2ec4b6;
+  --c-teal-600: #21a596;
+  --c-sky-400: #68adde;
+  --c-blue-600: #0071bc;
+  --c-link: #1b6fc2;
+  --c-bg-app: #f5f8fb;
+  --c-card-edge: #e3ecf4;
+  --c-attention: #d9531e;
+  --c-attention-bg: #fdf1e7;
+  --c-positive: #22a06b;
+  --c-positive-bg: #e9f7f0;
+  --c-shadow: 0 1px 3px rgba(10, 31, 51, 0.08);
+  font-family: var(--c-font);
+  color: var(--c-navy-900);
+}
+
+/* ── Canvas ─────────────────────────────────────────────────────────── */
+.collat-canvas {
+  background: var(--c-bg-app);
+  border: 1px solid var(--c-card-edge);
+  border-radius: 18px;
+  padding: 1.25rem;
+}
+@media (min-width: 640px) {
+  .collat-canvas {
+    padding: 1.5rem;
+  }
+}
+
+/* ── Hero: the one warm moment (§4) ─────────────────────────────────── */
+.collat-hero {
+  background: linear-gradient(90deg, #fdf6ee, #fbe8d6);
+  border: 1px solid #f3ddc2;
+  border-radius: 14px;
+  padding: 1.1rem 1.25rem;
+}
+.collat-hero h1 {
+  color: var(--c-navy-900);
+  font-weight: 800;
+  font-size: 1.45rem;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+.collat-hero p {
+  color: var(--c-slate-600);
+  font-size: 0.85rem;
+  margin-top: 0.2rem;
+}
+
+/* ── Buttons: teal = the single primary; secondary = white + slate ──── */
+.collat-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--c-teal-500);
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 0.82rem;
+  border-radius: 9999px;
+  padding: 0.45rem 1rem;
+  border: 1px solid transparent;
+  transition: background-color 0.15s ease, transform 0.15s ease;
+}
+.collat-btn-primary:hover {
+  background: var(--c-teal-600);
+  transform: translateY(-1px);
+}
+.collat-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #ffffff;
+  color: var(--c-navy-700);
+  font-weight: 500;
+  font-size: 0.82rem;
+  border-radius: 9999px;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid #c9d6e2;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.collat-btn-secondary:hover {
+  border-color: var(--c-sky-400);
+  background: var(--c-ice-100);
+}
+.collat-btn-secondary:disabled {
+  opacity: 0.6;
+}
+
+/* ── Search ─────────────────────────────────────────────────────────── */
+.collat-search {
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid var(--c-card-edge);
+  border-radius: 12px;
+  padding: 0.6rem 0.9rem 0.6rem 2.4rem;
+  font-size: 0.9rem;
+  font-family: var(--c-font);
+  color: var(--c-navy-900);
+  box-shadow: var(--c-shadow);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.collat-search::placeholder {
+  color: #8ba0b3;
+}
+.collat-search:focus {
+  outline: none;
+  border-color: var(--c-sky-400);
+  box-shadow: 0 0 0 3px rgba(104, 173, 222, 0.25);
+}
+
+/* ── Chips: ice fill, navy text; selected = navy fill, white text ───── */
+.collat-label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--c-slate-600);
+}
+.collat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: var(--c-ice-100);
+  color: var(--c-navy-700);
+  border: 1px solid var(--c-ice-edge);
+  border-radius: 9999px;
+  padding: 0.28rem 0.75rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  transition: background-color 0.13s ease, color 0.13s ease, border-color 0.13s ease;
+}
+.collat-chip:hover {
+  border-color: var(--c-sky-400);
+}
+.collat-chip[aria-pressed="true"],
+.collat-chip--on {
+  background: var(--c-navy-700);
+  color: #ffffff;
+  border-color: var(--c-navy-700);
+}
+
+/* ── Cards ──────────────────────────────────────────────────────────── */
+.collat-card {
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border: 1px solid var(--c-card-edge);
+  border-radius: 14px;
+  padding: 0.9rem;
+  box-shadow: var(--c-shadow);
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+.collat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(10, 31, 51, 0.12);
+}
+/* Pinned = the platform's "these matter most" navy top edge. */
+.collat-card--pinned {
+  border-top: 3px solid var(--c-navy-700);
+}
+.collat-card h3 {
+  color: var(--c-navy-900);
+  font-weight: 700;
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+.collat-icon {
+  display: grid;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 10px;
+  background: var(--c-ice-100);
+  color: var(--c-blue-600);
+  flex-shrink: 0;
+}
+
+/* Tag chips on cards: quieter than filter chips (they inform, not act). */
+.collat-tag {
+  display: inline-flex;
+  align-items: center;
+  background: var(--c-ice-100);
+  color: var(--c-navy-700);
+  border-radius: 9999px;
+  padding: 0.14rem 0.55rem;
+  font-size: 0.66rem;
+  font-weight: 600;
+}
+.collat-tag--muted {
+  background: #ffffff;
+  border: 1px solid var(--c-card-edge);
+  color: var(--c-slate-600);
+}
+
+/* Badges: every color carries state (§4). */
+.collat-badge-prospect {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: rgba(46, 196, 182, 0.14);
+  color: #0f766e;
+  border-radius: 9999px;
+  padding: 0.14rem 0.55rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+.collat-badge-internal {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--c-attention-bg);
+  color: #b45309;
+  border-radius: 9999px;
+  padding: 0.14rem 0.55rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+.collat-badge-due {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--c-attention-bg);
+  color: var(--c-attention);
+  border-radius: 9999px;
+  padding: 0.14rem 0.55rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+/* Actions: blue links with arrows — the platform's affordance (§4). */
+.collat-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--c-link);
+  font-size: 0.78rem;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 0.2rem 0.3rem;
+  transition: color 0.13s ease;
+}
+.collat-link:hover {
+  color: var(--c-navy-700);
+  text-decoration: underline;
+}
+
+.collat-meta {
+  color: var(--c-slate-600);
+  font-size: 0.7rem;
+}
+
+/* ── Sections / dividers / empty state ──────────────────────────────── */
+.collat-divider {
+  border-top: 1px dashed var(--c-ice-edge);
+}
+.collat-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  background: #ffffff;
+  border: 1px dashed #c9d6e2;
+  border-radius: 14px;
+  padding: 2.75rem 1.5rem;
+  text-align: center;
+}
+.collat-empty h3 {
+  color: var(--c-navy-900);
+  font-weight: 700;
+  font-size: 1rem;
+}
+.collat-empty p {
+  color: var(--c-slate-600);
+  font-size: 0.85rem;
+  max-width: 26rem;
+}
+.collat-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 9999px;
+  background: var(--c-ice-100);
+  color: var(--c-blue-600);
+}
+
+/* Admin pin affordance (ghost icon button on white cards). */
+.collat-iconbtn {
+  display: grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 8px;
+  color: #8ba0b3;
+  transition: background-color 0.13s ease, color 0.13s ease;
+}
+.collat-iconbtn:hover {
+  background: var(--c-ice-100);
+  color: var(--c-navy-700);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .collat-card,
+  .collat-card:hover,
+  .collat-btn-primary:hover {
+    transform: none;
+  }
+}

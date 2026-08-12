@@ -1,17 +1,36 @@
-// The Collateral page (Jordan's 2026-08-04 change request; admin-only at
-// launch — flipping to sales is a config change on collateral_settings
-// plus moving the sidebar entry). The same library component also mounts
-// as a tab on contact and deal records.
+// The Collateral page — Jordan's v1.1 spec (2026-08-11).
+//
+// Pulse is a VIEWER of the SharePoint Sales Collateral library: the tab
+// reads the mirror, exposes zero write paths (§3), and lives in exactly
+// one place — this admin-gated route (§2). The look is the Medcurity
+// platform's light language (§4), scoped entirely to .collat-* classes in
+// collateral.css; nothing shared is restyled (§0). The page header keeps
+// Pulse's placement (title top-left, actions top-right) but is composed
+// locally so the shared PageHeader component stays untouched.
 
-import { useMemo, useState } from "react";
-import { FolderOpen, MessageSquarePlus, Plus, RefreshCw } from "lucide-react";
-import { PageHeader } from "@/components/PageHeader";
-import { Button } from "@/components/ui/button";
+import { useEffect } from "react";
+import { ArrowRight, FolderOpen, RefreshCw } from "lucide-react";
 import { useRequestDialog } from "@/features/requests/RequestDialogProvider";
 import { CollateralLibrary } from "./CollateralLibrary";
-import { CollateralItemDialog } from "./CollateralItemDialog";
-import { useCollateralItems, useSyncCollateral, type CollateralItem } from "./api";
+import { useSyncCollateral } from "./api";
 import { useAuth } from "@/features/auth/AuthProvider";
+import "./collateral.css";
+
+/** Load Plus Jakarta Sans for this route only (§4 typography). The link
+ * is injected once and scoped in effect: only .collat-root uses the
+ * family, with system-ui fallbacks if the fetch is blocked. */
+function useJakartaFont() {
+  useEffect(() => {
+    const id = "collat-jakarta-font";
+    if (document.getElementById(id)) return;
+    const link = document.createElement("link");
+    link.id = id;
+    link.rel = "stylesheet";
+    link.href =
+      "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap";
+    document.head.appendChild(link);
+  }, []);
+}
 
 export function CollateralPage() {
   const { profile } = useAuth();
@@ -19,94 +38,56 @@ export function CollateralPage() {
     ((profile as { role?: string } | null)?.role ?? ""),
   );
   const { openRequestDialog } = useRequestDialog();
-  const { data: items } = useCollateralItems();
   const sync = useSyncCollateral();
-
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editing, setEditing] = useState<CollateralItem | null>(null);
-
-  const known = useMemo(() => {
-    const all = items ?? [];
-    const uniq = (vals: string[]) => [...new Set(vals.filter(Boolean))];
-    return {
-      assetTypes: uniq(all.map((i) => i.asset_type ?? "")),
-      products: uniq(all.flatMap((i) => i.products)),
-      segments: uniq(all.flatMap((i) => i.segments)),
-      uses: uniq(all.flatMap((i) => i.uses)),
-    };
-  }, [items]);
+  useJakartaFont();
 
   return (
-    <div className="mx-auto max-w-6xl">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <PageHeader
-          title="Collateral"
-          description="Find the right asset and copy its link without leaving Pulse."
-        />
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={() => openRequestDialog("collateral")}
-          >
-            <MessageSquarePlus className="h-4 w-4" />
-            Request collateral
-          </Button>
-          {isAdmin && (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5"
+    <div className="collat-root mx-auto max-w-6xl">
+      <div className="collat-canvas space-y-4">
+        {/* Hero — the page's single warm moment (§4). */}
+        <div className="collat-hero flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1>Collateral</h1>
+            <p>
+              The Sales Collateral library, ready to send. Search it, copy a
+              link, drop it in your email.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {isAdmin && (
+              <button
+                type="button"
+                className="collat-btn-secondary"
                 onClick={() => sync.mutate()}
                 disabled={sync.isPending}
               >
-                <RefreshCw className={sync.isPending ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
-                {sync.isPending ? "Syncing..." : "Sync SharePoint"}
-              </Button>
-              <Button
-                size="sm"
-                className="gap-1.5"
-                onClick={() => {
-                  setEditing(null);
-                  setDialogOpen(true);
-                }}
-              >
-                <Plus className="h-4 w-4" />
-                Add asset
-              </Button>
-            </>
-          )}
+                <RefreshCw className={sync.isPending ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
+                {sync.isPending ? "Syncing…" : "Sync SharePoint"}
+              </button>
+            )}
+            {/* The one teal primary (§4): a request to admins, not a write. */}
+            <button
+              type="button"
+              className="collat-btn-primary"
+              onClick={() => openRequestDialog("collateral")}
+            >
+              Request collateral
+              <ArrowRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
+
+        <CollateralLibrary />
+
+        {isAdmin && (
+          <p className="collat-meta flex items-center gap-1.5">
+            <FolderOpen className="h-3.5 w-3.5" />
+            Curation lives in SharePoint: upload, tag, and set Status there.
+            Files marked Current appear here on the next sync — Pulse never
+            writes to the library.
+          </p>
+        )}
       </div>
-
-      <div className="mt-4">
-        <CollateralLibrary
-          onEdit={(item) => {
-            setEditing(item);
-            setDialogOpen(true);
-          }}
-        />
-      </div>
-
-      {isAdmin && (
-        <p className="mt-6 flex items-center gap-1.5 text-xs text-muted-foreground">
-          <FolderOpen className="h-3.5 w-3.5" />
-          Assets live in the SharePoint Sales Collateral library. Pulse mirrors
-          them here so reps can search, filter, and copy links mid-call.
-        </p>
-      )}
-
-      <CollateralItemDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        item={editing}
-        knownAssetTypes={known.assetTypes}
-        knownProducts={known.products}
-        knownSegments={known.segments}
-        knownUses={known.uses}
-      />
     </div>
   );
 }

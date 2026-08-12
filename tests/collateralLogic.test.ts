@@ -173,3 +173,77 @@ describe("initialSegmentSelection", () => {
     expect(initialSegmentSelection([], chips)).toEqual([]);
   });
 });
+
+// ── v1.1 (Jordan 2026-08-11): freshness badge, file glyphs, source guard ──
+
+import { isReviewDue, fileKind } from "@/features/collateral/collateral-logic";
+import { readFileSync } from "fs";
+import path from "path";
+
+describe("isReviewDue (the 180-day Review due badge)", () => {
+  const now = new Date(2026, 7, 12);
+  const daysAgo = (n: number) =>
+    new Date(now.getTime() - n * 86_400_000).toISOString().slice(0, 10);
+
+  it("is not due without a Last Reviewed value (Status is the authority)", () => {
+    expect(isReviewDue(null, now)).toBe(false);
+    expect(isReviewDue(undefined, now)).toBe(false);
+    expect(isReviewDue("not a date", now)).toBe(false);
+  });
+
+  it("flips at more than 180 days", () => {
+    expect(isReviewDue(daysAgo(30), now)).toBe(false);
+    expect(isReviewDue(daysAgo(179), now)).toBe(false);
+    expect(isReviewDue(daysAgo(181), now)).toBe(true);
+    expect(isReviewDue(daysAgo(400), now)).toBe(true);
+  });
+});
+
+describe("fileKind (card glyph from the extension)", () => {
+  it("maps common extensions and falls back to a generic file", () => {
+    expect(fileKind("https://x.sharepoint.com/sites/a/Doc.pdf")).toBe("pdf");
+    expect(fileKind("Battlecard.PPTX")).toBe("slides");
+    expect(fileKind("one-pager.docx")).toBe("doc");
+    expect(fileKind("pricing.xlsx")).toBe("sheet");
+    expect(fileKind("diagram.png?web=1")).toBe("image");
+    expect(fileKind("weird.zip")).toBe("file");
+    expect(fileKind(null)).toBe("file");
+  });
+});
+
+describe("collateral-sync source guard (spec §1: single allowed source)", () => {
+  const source = readFileSync(
+    path.resolve(__dirname, "..", "supabase", "functions", "collateral-sync", "index.ts"),
+    "utf8",
+  );
+
+  it("defaults to the Sales Collateral driveId and reads drive-scoped only", () => {
+    // The one allowed drive, baked as the default.
+    expect(source).toContain("b!fr6BIkRZf0iQUhexpYPhRdBJHa64QeNDn7NMQhwr-wLgoKJCme8PSqjSsQ-ZsLgO");
+    expect(source).toContain("/drives/");
+    // Never a site-scoped search (how Shared Documents leaked in before).
+    expect(source).not.toMatch(/\/search\(/);
+    // The known-bad Shared Documents drive must never be referenced.
+    expect(source).not.toContain("wLih2oXpvABR6uZaI3rOm5e");
+  });
+
+  it("filters to Status = Current and maps the spec's internal field names", () => {
+    expect(source).toContain('"Current"');
+    for (const internal of [
+      "Asset_x0020_Type",
+      "Last_x0020_Reviewed",
+      '"Product"',
+      '"Segment"',
+      '"Stage"',
+      '"Use"',
+      '"Status"',
+      '"Owner"',
+    ]) {
+      expect(source).toContain(internal);
+    }
+  });
+
+  it("deletes rows that leave the library (mirror, not archive)", () => {
+    expect(source).toContain(".delete()");
+  });
+});
