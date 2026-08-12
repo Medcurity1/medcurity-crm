@@ -743,8 +743,9 @@ function MergeHistoryPanel() {
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Every account merge, newest first. Undo puts the records back where they were.
-        (Partner links removed during a merge aren't restored — re-add them if needed.)
+        Every account merge, newest first. Undo puts the records back where they were,
+        partner links included (a link is skipped only if one of its accounts was
+        hard-deleted since, or an identical link already exists).
       </p>
       <div className="overflow-x-auto">
         <Table>
