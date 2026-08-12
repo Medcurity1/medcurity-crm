@@ -177,6 +177,14 @@ serve(async (req) => {
         ? details.client_facing_reasoning
         : "";
     const cfSource = details.client_facing_source === "submitter" ? "submitter" : "ai";
+    // No automatic verdict was produced — the codebase check failed or timed
+    // out and a person answered unaided (2026-08-12). A "No" from that path
+    // was rendering as a calm green "No" in exactly the same layout as a
+    // 0.95-confidence verdict, in a normal-importance email. It shouldn't.
+    const cfDegraded =
+      typeof details.client_facing_degraded === "boolean"
+        ? details.client_facing_degraded
+        : !!cfReasoning && Number(details.client_facing_confidence) === 0;
 
     // Shared detail rows (From / Title / Priority) used by both templates.
     const detailRows = [
@@ -186,11 +194,16 @@ serve(async (req) => {
       `<tr><td style="padding:2px 12px 2px 0;color:#666">Priority</td><td>${escapeHtml(reqRow.priority)}</td></tr>`,
       isBug
         ? `<tr><td style="padding:2px 12px 2px 0;color:#666">Client-facing</td><td><strong style="color:${
-            clientFacing ? "#b91c1c" : "#166534"
-          }">${clientFacing ? "Yes" : "No"}</strong></td></tr>`
+            clientFacing ? "#b91c1c" : cfDegraded ? "#b45309" : "#166534"
+          }">${clientFacing ? "Yes" : "No"}${
+            cfDegraded ? " — not verified" : ""
+          }</strong></td></tr>`
         : "",
       `</table>`,
-      isBug && cfReasoning
+      isBug && cfDegraded
+        ? `<p style="background:#fef2f2;border-left:3px solid #dc2626;padding:8px 12px;color:#7f1d1d;font-size:13px;margin:8px 0 0"><strong>The automatic check didn't run on this one.</strong> Nothing read the codebase, so the answer above is the reporter's own call. If it turns out a client is affected, it should go to the dev team now rather than wait here.</p>`
+        : "",
+      isBug && cfReasoning && !cfDegraded
         ? `<p style="color:#666;font-size:13px;margin:6px 0 0">${escapeHtml(cfReasoning)}${
             cfSource === "submitter" ? " (set by the person reporting it)" : ""
           }</p>`
@@ -234,9 +247,18 @@ serve(async (req) => {
     } else if (isBug) {
       // A bug NOT affecting clients. Nothing has been filed. It is sitting in
       // the review queue waiting on a decision, so this one does link back.
-      subject = `Bug report to review: ${reqRow.title}`;
+      //
+      // If no automatic check ran, this email is the only thing standing
+      // between an unverified "no" and a queue with no SLA — so it says so in
+      // the subject line and goes out high importance.
+      if (cfDegraded) importance = "high";
+      subject = cfDegraded
+        ? `Bug report to review (check failed): ${reqRow.title}`
+        : `Bug report to review: ${reqRow.title}`;
       html = [
-        `<p>A new <strong>bug report</strong> came in. It doesn't look like it's affecting clients, so nothing has been sent to the dev team yet — it's waiting on your call.</p>`,
+        cfDegraded
+          ? `<p>A new <strong>bug report</strong> came in, and the automatic client-impact check <strong>failed</strong> on it. It was marked as not affecting clients by the person reporting it, so nothing has been sent to the dev team — please sanity-check that before it waits.</p>`
+          : `<p>A new <strong>bug report</strong> came in. It doesn't look like it's affecting clients, so nothing has been sent to the dev team yet — it's waiting on your call.</p>`,
         detailRows,
         `<p><a href="${APP_BASE}/nexus" style="display:inline-block;background:#1d4ed8;color:#fff;padding:9px 22px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:600">Review in Pulse</a></p>`,
         `<p style="color:#999;font-size:12px">Sent by Pulse. Approving it files the Jira ticket; denying it closes the request.</p>`,

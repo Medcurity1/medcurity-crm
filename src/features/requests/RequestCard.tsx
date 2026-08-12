@@ -115,11 +115,34 @@ function clientFacing(r: CrmRequest): boolean | null {
   return typeof v === "boolean" ? v : null;
 }
 
-function clientFacingNote(r: CrmRequest): { reasoning: string; bySubmitter: boolean } | null {
+/**
+ * True when NO automatic verdict was produced — the classifier failed or timed
+ * out and the value on the row is a person's unaided guess (MSD-957 follow-up,
+ * 2026-08-12). This has to be visible: a "no" nobody checked was rendering
+ * identically to a 0.95-confidence "no", and the one that slipped through was
+ * blocking a named client.
+ *
+ * `client_facing_degraded` is the explicit flag; the confidence check is the
+ * fallback for rows written before it existed (a real verdict never scores 0).
+ */
+function clientFacingDegraded(r: CrmRequest): boolean {
+  const d = (r.details ?? {}) as Record<string, unknown>;
+  if (typeof d.client_facing_degraded === "boolean") return d.client_facing_degraded;
+  if (d.client_facing_reasoning == null) return false;
+  return Number(d.client_facing_confidence) === 0;
+}
+
+function clientFacingNote(
+  r: CrmRequest,
+): { reasoning: string; bySubmitter: boolean; degraded: boolean } | null {
   const d = (r.details ?? {}) as Record<string, unknown>;
   const reasoning = typeof d.client_facing_reasoning === "string" ? d.client_facing_reasoning : "";
   if (!reasoning) return null;
-  return { reasoning, bySubmitter: d.client_facing_source === "submitter" };
+  return {
+    reasoning,
+    bySubmitter: d.client_facing_source === "submitter",
+    degraded: clientFacingDegraded(r),
+  };
 }
 
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
@@ -240,6 +263,11 @@ export function RequestDetailDialog({
             {clientFacing(request) === true && (
               <Badge className="text-[10px] border-transparent bg-amber-100 text-amber-900 dark:bg-amber-500/20 dark:text-amber-300">
                 Affects clients
+              </Badge>
+            )}
+            {clientFacing(request) === false && clientFacingDegraded(request) && (
+              <Badge className="text-[10px] border-transparent bg-rose-100 text-rose-900 dark:bg-rose-500/20 dark:text-rose-300">
+                Check failed
               </Badge>
             )}
             <Badge className={cn("text-[10px] border-transparent", PRIORITY_BADGE[request.priority])}>
@@ -452,17 +480,31 @@ export function RequestDetailDialog({
               of Working Notes above (Nathan 7/24) — one notes surface, not two. */}
           {/* Why this bug is sitting in the review queue at all (MSD-957). */}
           {clientFacingNote(request) && (
-            <div className="rounded-md border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900/50 dark:bg-amber-950/20">
+            <div
+              className={
+                clientFacingNote(request)!.degraded
+                  ? "rounded-md border border-rose-300 bg-rose-50/70 p-3 dark:border-rose-900/50 dark:bg-rose-950/20"
+                  : "rounded-md border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900/50 dark:bg-amber-950/20"
+              }
+            >
               <p className="text-xs font-medium">
-                {clientFacing(request) ? "Affects clients" : "Does not affect clients"}
+                {clientFacingNote(request)!.degraded
+                  ? "Automatic check failed — nobody verified this"
+                  : clientFacing(request)
+                    ? "Affects clients"
+                    : "Does not affect clients"}
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {clientFacingNote(request)!.reasoning}
               </p>
               <p className="mt-1 text-[11px] text-muted-foreground">
-                {clientFacingNote(request)!.bySubmitter
-                  ? "Set by the person who reported it."
-                  : "Determined automatically from the codebase."}
+                {clientFacingNote(request)!.degraded
+                  ? `The codebase check didn't run, so "${
+                      clientFacing(request) ? "affects clients" : "does not affect clients"
+                    }" is the reporter's own call with nothing behind it. Worth a second look before deciding.`
+                  : clientFacingNote(request)!.bySubmitter
+                    ? "Set by the person who reported it."
+                    : "Determined automatically from the codebase."}
               </p>
             </div>
           )}
@@ -621,6 +663,11 @@ export function RequestCard({
           {clientFacing(request) === true && (
             <Badge className="shrink-0 text-[10px] border-transparent bg-amber-100 text-amber-900 dark:bg-amber-500/20 dark:text-amber-300">
               Affects clients
+            </Badge>
+          )}
+          {clientFacing(request) === false && clientFacingDegraded(request) && (
+            <Badge className="shrink-0 text-[10px] border-transparent bg-rose-100 text-rose-900 dark:bg-rose-500/20 dark:text-rose-300">
+              Check failed
             </Badge>
           )}
           <Badge
