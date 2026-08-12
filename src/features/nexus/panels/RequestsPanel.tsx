@@ -4,6 +4,8 @@
 
 import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
+import { REQUEST_TYPE_TINT } from "@/features/requests/api";
+import type { RequestType } from "@/types/crm";
 import type { RequestsWidgetCategory, RequestsWidgetConfig } from "../types";
 
 export function normalizeRequestsConfig(raw: unknown): RequestsWidgetConfig {
@@ -61,7 +63,20 @@ export function RequestsPanel({
                 {selected && <span className="h-2 w-2 rounded-full bg-primary" />}
               </span>
               <span className="min-w-0">
-                <span className="block text-sm font-medium">{opt.label}</span>
+                <span className="flex items-center gap-1.5 text-sm font-medium">
+                  {/* Swatch matches the tint each form's rows carry in the
+                      widget — the picker doubles as the color legend. */}
+                  {opt.value !== "all" && (
+                    <span
+                      className={cn(
+                        "h-2 w-2 shrink-0 rounded-full",
+                        REQUEST_TYPE_TINT[opt.value as RequestType].dot,
+                      )}
+                      aria-hidden
+                    />
+                  )}
+                  {opt.label}
+                </span>
                 <span className="block text-xs text-muted-foreground">{opt.hint}</span>
               </span>
             </button>

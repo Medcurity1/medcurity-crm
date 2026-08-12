@@ -29,6 +29,7 @@ import { toast } from "sonner";
 import type { CrmRequest, RequestPriority, RequestStatus } from "@/types/crm";
 import {
   REQUEST_TYPE_LABELS,
+  REQUEST_TYPE_TINT,
   STATUS_LABELS,
   PRODUCT_CATEGORY_LABELS,
   useCompleteRequest,
@@ -247,7 +248,12 @@ export function RequestDetailDialog({
 
         <div className="max-h-[65vh] min-w-0 space-y-4 overflow-y-auto overflow-x-hidden break-words pr-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            <Badge variant="outline" className="text-[10px]">
+            <Badge
+              className={cn(
+                "text-[10px] border-transparent",
+                REQUEST_TYPE_TINT[request.type].chip,
+              )}
+            >
               {REQUEST_TYPE_LABELS[request.type]}
             </Badge>
             {productCategory(request) && (
@@ -633,20 +639,28 @@ export function RequestCard({
   showType?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  // Type color language (Nathan 8/12): the whole row carries its form's
+  // tint — accent bar on the left, a wash that fades by mid-card — so a
+  // flooded inbox reads at a glance. The labeled chip (mixed lists) keeps
+  // the signal legible without relying on color alone.
+  const tint = REQUEST_TYPE_TINT[request.type];
 
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="w-full rounded-lg border border-border bg-card px-3 py-2 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
+        className={cn(
+          "w-full rounded-lg border border-border border-l-[3px] bg-card px-3 py-2 text-left transition-colors hover:bg-muted/40",
+          tint.row,
+        )}
       >
         <div className="flex items-center gap-2">
           <span className="min-w-0 flex-1 truncate text-sm font-medium">
             {request.title}
           </span>
           {showType && (
-            <Badge variant="outline" className="shrink-0 text-[10px]">
+            <Badge className={cn("shrink-0 text-[10px] border-transparent", tint.chip)}>
               {REQUEST_TYPE_LABELS[request.type]}
             </Badge>
           )}

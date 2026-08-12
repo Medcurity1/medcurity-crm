@@ -15,6 +15,36 @@ export const REQUEST_TYPE_LABELS: Record<RequestType, string> = {
   crm: "CRM",
 };
 
+/**
+ * Type → color language (Nathan 8/12): as requests pile up, the LISTING
+ * itself should say what's what at a glance — product is orange, CRM is
+ * green, collateral a quiet grey. One shared map so every surface that
+ * lists requests (Nexus widget, inbox popup, widget-builder panel) speaks
+ * the same color. `row` styles the whole card (left accent bar + a soft
+ * wash that fades out by mid-card + a type-colored hover ring); `chip` is
+ * the filled type badge; `dot` is the small legend swatch.
+ */
+export const REQUEST_TYPE_TINT: Record<
+  RequestType,
+  { row: string; chip: string; dot: string }
+> = {
+  product: {
+    row: "border-l-orange-500 bg-gradient-to-r from-orange-500/[0.09] via-transparent to-transparent hover:border-orange-400/70 dark:border-l-orange-400 dark:from-orange-400/[0.08]",
+    chip: "bg-orange-100 text-orange-800 dark:bg-orange-500/20 dark:text-orange-300",
+    dot: "bg-orange-500",
+  },
+  crm: {
+    row: "border-l-emerald-500 bg-gradient-to-r from-emerald-500/[0.09] via-transparent to-transparent hover:border-emerald-400/70 dark:border-l-emerald-400 dark:from-emerald-400/[0.08]",
+    chip: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300",
+    dot: "bg-emerald-500",
+  },
+  collateral: {
+    row: "border-l-slate-400 bg-gradient-to-r from-slate-400/[0.10] via-transparent to-transparent hover:border-slate-400/70 dark:border-l-slate-500 dark:from-slate-400/[0.07]",
+    chip: "bg-slate-100 text-slate-600 dark:bg-slate-500/15 dark:text-slate-400",
+    dot: "bg-slate-400",
+  },
+};
+
 export const STATUS_LABELS: Record<RequestStatus, string> = {
   pending: "Pending",
   completed: "Completed",
