@@ -74,6 +74,7 @@ async function createJiraIssue(
   descriptionText: string,
   issueTypeName: string,
   assigneeAccountId?: string,
+  labels?: string[],
 ) {
   const auth = jiraAuth();
   const base = jiraBaseUrl();
@@ -111,6 +112,7 @@ async function createJiraIssue(
         // accountId works on both v2 and v3 create since the GDPR changes;
         // Helm's own createIssue uses the same shape.
         ...(assigneeAccountId ? { assignee: { accountId: assigneeAccountId } } : {}),
+        ...(labels && labels.length > 0 ? { labels } : {}),
       },
     }),
   });
@@ -198,6 +200,32 @@ function issueTypeFor(reqRow: any): string {
 }
 
 /**
+ * The Jira labels a BUG filed from Pulse must carry. Helm's bug-intake route
+ * stamps exactly these; this path did not, so every bug that went through
+ * review landed label-less (2026-08-12, MSD-1023 — filed with no labels at
+ * all, which meant the auto-spec writer never ran on it and it was invisible
+ * to every "how are Pulse bugs doing" query). A bug should not get a thinner
+ * ticket because a human looked at it first.
+ *
+ *  - needs-spec    triggers Helm's automatic spec writer
+ *  - pulse-bug     marks the origin, so Pulse bugs are countable in Jira
+ *  - client-facing / internal-only  carries the gate's verdict onto the ticket
+ *
+ * Enhancements are deliberately left unlabelled — they are not part of the
+ * bug pipeline and changing their routing is not this fix's business.
+ */
+// deno-lint-ignore no-explicit-any
+function jiraLabelsFor(reqRow: any): string[] {
+  const details = (reqRow.details ?? {}) as Record<string, unknown>;
+  if (details.category !== "bug") return [];
+  return [
+    "needs-spec",
+    "pulse-bug",
+    details.client_facing === true ? "client-facing" : "internal-only",
+  ];
+}
+
+/**
  * The full "put this request on the product board" routine shared by
  * approve and file_bug: create the issue (skipped when a prior partial
  * attempt already persisted a key — retries never double-file), persist
@@ -214,7 +242,13 @@ async function fileRequestToJira(svc: any, reqRow: any, requestId: string, assig
   const descText =
     `Requester: ${requesterName}\nPriority: ${reqRow.priority}\n\n${reqRow.description ?? ""}`;
 
-  const jira = await createJiraIssue(reqRow.title, descText, issueTypeFor(reqRow), assigneeId);
+  const jira = await createJiraIssue(
+    reqRow.title,
+    descText,
+    issueTypeFor(reqRow),
+    assigneeId,
+    jiraLabelsFor(reqRow),
+  );
   jiraKey = jira.key;
   jiraUrl = jira.url;
   await svc
@@ -582,6 +616,7 @@ serve(async (req) => {
       clientFacingReasoning,
       clientFacingConfidence,
       clientFacingSource,
+      clientFacingDegraded,
     } = body as {
       action?: string;
       requestId?: string;
@@ -603,6 +638,12 @@ serve(async (req) => {
       clientFacingReasoning?: string;
       clientFacingConfidence?: number;
       clientFacingSource?: string;
+      /** file_bug. True when no automatic verdict was produced at all (the
+       * check failed or timed out) and the value on the row is a person's
+       * unaided guess. Persisted so the reviewer UI and the notification email
+       * can say so — on 2026-08-12 a failed check read exactly like a
+       * confident "no" and a client-blocking bug sat in the queue. */
+      clientFacingDegraded?: boolean;
     };
 
     // ── classify_bug: pre-submit client-impact preview (MSD-957) ──
@@ -631,12 +672,19 @@ serve(async (req) => {
           },
         });
       }
+      // ONE ATTEMPT HERE, DELIBERATELY. On 2026-08-12 a single failed call to
+      // Helm (~11s, no usable response) let a client-blocking bug be recorded
+      // as not client-facing, so the call is now retried — but the retry lives
+      // in the CALLER (classifyDraftBug in src/features/requests/api.ts), not
+      // here. Retrying in both places multiplies: two attempts here inside two
+      // attempts there is four round trips and a spinner over a minute long,
+      // with the submit button disabled throughout. One layer owns resilience.
       try {
         // Helm caps itself at 15s; this is the backstop for a connection that
         // never returns at all. A person is waiting on the submit button.
         const res = await fetch(helmClassifyUrl, {
           method: "POST",
-          signal: AbortSignal.timeout(18_000),
+          signal: AbortSignal.timeout(16_000),
           headers: {
             "content-type": "application/json",
             authorization: `Bearer ${helmKey}`,
@@ -648,11 +696,27 @@ serve(async (req) => {
             requesterName: null,
           }),
         });
-        const out = await res.json();
-        if (!res.ok || !out?.ok) throw new Error(out?.error ?? `Helm returned ${res.status}`);
+        // Read the body as text first: a 502 from the Azure front door is HTML,
+        // and res.json() on it throws a parse error that names the parser
+        // rather than the failure. The 8/12 incident left exactly that kind of
+        // uninformative trace.
+        const raw = await res.text();
+        let out: { ok?: boolean; error?: string; classification?: unknown } | null = null;
+        try {
+          out = JSON.parse(raw);
+        } catch {
+          out = null;
+        }
+        if (!res.ok || !out?.ok) {
+          throw new Error(
+            out?.error ?? `Helm returned ${res.status} ${res.statusText}: ${raw.slice(0, 200)}`,
+          );
+        }
         return json({ classification: out.classification });
       } catch (e) {
-        console.error("[classify_bug] Helm classify failed", e);
+        console.error(
+          `[classify_bug] Helm classify failed: ${e instanceof Error ? e.message : String(e)}`,
+        );
         return json({
           classification: {
             clientFacing: true,
@@ -753,17 +817,39 @@ serve(async (req) => {
       if (!verdict) {
         // Held for triage. Record the determination so the card and the email
         // can explain themselves, but create nothing downstream.
+        //
+        // `client_facing_degraded` is written OUTSIDE the reasoning guard on
+        // purpose: "no automatic verdict existed" is the single most important
+        // thing a reviewer can know about a held bug, and it must survive even
+        // if the reasoning text is missing.
+        //
+        // It is corroborated rather than taken on trust. This action is callable
+        // by the submitter, so a `false` here is only believed when the rest of
+        // the payload looks like a real verdict: a genuine classification always
+        // carries reasoning and never scores exactly 0 (Helm's parser floors an
+        // unreadable confidence at 0.5, and its own fail-safes are the only
+        // things that emit 0). Absent either, we record "nobody checked" — the
+        // safe direction, and the one that shows the reviewer a warning.
+        const noRealVerdict =
+          clientFacingDegraded === true ||
+          !clientFacingReasoning ||
+          Number(clientFacingConfidence) === 0;
         await svc
           .from("requests")
           .update({
             details: {
               ...detailsIn,
               client_facing: false,
+              client_facing_degraded: noRealVerdict,
               ...(clientFacingReasoning
                 ? {
                     client_facing_reasoning: clientFacingReasoning,
                     client_facing_confidence: clientFacingConfidence ?? null,
-                    client_facing_source: clientFacingSource ?? "ai",
+                    // No AI verdict means a person chose this, whatever value
+                    // they chose — never attribute it to "ai".
+                    client_facing_source: noRealVerdict
+                      ? "submitter"
+                      : (clientFacingSource ?? "ai"),
                   }
                 : {}),
             },
@@ -836,15 +922,27 @@ serve(async (req) => {
         return json({ error: `Helm intake failed: ${(e as Error).message}` }, 502);
       }
 
+      // Did an automatic verdict exist by the time this was decided? Helm's
+      // intake re-runs the classifier, so its answer supersedes whatever the
+      // pre-submit preview managed — a preview that failed followed by an
+      // intake that succeeded is NOT degraded.
+      const helmDegraded = helm.classification?.degraded as boolean | undefined;
+      const noVerdict =
+        typeof helmDegraded === "boolean" ? helmDegraded : clientFacingDegraded === true;
+
       const nextDetails = {
         ...detailsIn,
         client_facing: true,
-        client_facing_source:
-          clientFacingSource ??
-          (typeof clientFacing === "boolean" &&
-          clientFacing !== (helm.classification?.aiVerdict as boolean | undefined)
-            ? "submitter"
-            : "ai"),
+        client_facing_degraded: noVerdict,
+        client_facing_source: noVerdict
+          ? // Nothing classified this, so a person did — regardless of which
+            // value they picked or whether it matched a fail-safe default.
+            "submitter"
+          : (clientFacingSource ??
+            (typeof clientFacing === "boolean" &&
+            clientFacing !== (helm.classification?.aiVerdict as boolean | undefined)
+              ? "submitter"
+              : "ai")),
         client_facing_reasoning:
           (helm.classification?.reasoning as string | undefined) ??
           clientFacingReasoning ??

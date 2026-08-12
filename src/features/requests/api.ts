@@ -304,38 +304,86 @@ export interface BugClassification {
   timedOut?: boolean;
 }
 
+/** The verdict-shaped value used when no real verdict could be obtained. */
+const CLASSIFY_UNAVAILABLE: BugClassification = {
+  clientFacing: true,
+  // No verdict, no warning — the not-a-bug nudge only fires on a real read.
+  looksLikeBug: true,
+  confidence: 0,
+  reasoning: "We couldn't check this automatically — please tell us.",
+  affectedAreas: [],
+  degraded: true,
+  // Treated the same as a timeout by the form: ask, don't assume.
+  timedOut: true,
+};
+
+/** Gap before the single retry. Short on purpose — someone is watching a
+ * spinner, and the failures this catches are gateway blips that clear in
+ * under a second. */
+const CLASSIFY_RETRY_DELAY_MS = 1_200;
+
+/**
+ * Only retry if the first attempt failed FAST. Retrying is worth roughly a
+ * second when the call dies on a gateway blip (the 8/12 failure took ~11s);
+ * it is not worth it when the call is grinding, because the second attempt
+ * can cost another 16s on top and the submit button is disabled the whole
+ * time. Past this, we stop and ask the submitter — which is a fine outcome,
+ * just not the first one to reach for.
+ *
+ * Worst case with this cap: 12s (slow first attempt, no retry) or
+ * ~12 + 1.2 + 16 ≈ 29s (fast fail, then a retry that grinds). The edge
+ * function deliberately does NOT retry as well — two retrying layers multiply
+ * into a minute-plus spinner.
+ */
+const CLASSIFY_RETRY_BUDGET_MS = 12_000;
+
 /**
  * Ask Helm (via the edge function, so the API key stays server-side) whether a
  * draft bug report affects clients. Read-only: files nothing, creates nothing.
  * Never rejects — a failure resolves to the fail-safe client-facing verdict.
+ *
+ * TRIES TWICE. On 2026-08-12 a single transient failure from Helm mid-submission
+ * produced no verdict at all, the form fell back to asking the submitter, and a
+ * bug that was blocking a named client was recorded as not client-facing. One
+ * attempt was never enough for a call this consequential: a retry costs about a
+ * second and turns most blips back into a real answer.
+ *
+ * A `timedOut` verdict is NOT retried — Helm already spent its full 15s budget,
+ * and a second wait that long is worse for the submitter than asking them.
  */
 export async function classifyDraftBug(draft: {
   title: string;
   description: string;
   priority: RequestPriority;
 }): Promise<BugClassification> {
-  try {
-    const data = (await invokeRequestAction({
-      action: "classify_bug",
-      draftTitle: draft.title,
-      draftDescription: draft.description,
-      draftPriority: draft.priority,
-    })) as { classification?: BugClassification };
-    if (data?.classification) return data.classification;
-  } catch {
-    /* fall through to the fail-safe below */
+  let last: BugClassification | null = null;
+  const startedAt = Date.now();
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const data = (await invokeRequestAction({
+        action: "classify_bug",
+        draftTitle: draft.title,
+        draftDescription: draft.description,
+        draftPriority: draft.priority,
+      })) as { classification?: BugClassification };
+      const c = data?.classification;
+      if (c) {
+        last = c;
+        // A real verdict (or an honest "we ran out of time") is final.
+        // `degraded` means nothing actually ran — that one is worth another go.
+        if (!c.degraded) return c;
+      }
+    } catch {
+      /* transport failure — retry, then fall through to the fail-safe */
+    }
+    if (attempt === 0) {
+      if (Date.now() - startedAt > CLASSIFY_RETRY_BUDGET_MS) break;
+      await new Promise((r) => setTimeout(r, CLASSIFY_RETRY_DELAY_MS));
+    }
   }
-  return {
-    clientFacing: true,
-    // No verdict, no warning — the not-a-bug nudge only fires on a real read.
-    looksLikeBug: true,
-    confidence: 0,
-    reasoning: "We couldn't check this automatically — please tell us.",
-    affectedAreas: [],
-    degraded: true,
-    // Treated the same as a timeout by the form: ask, don't assume.
-    timedOut: true,
-  };
+
+  return last ?? { ...CLASSIFY_UNAVAILABLE };
 }
 
 export interface CreateRequestResult {
@@ -409,17 +457,25 @@ export function useCreateRequest() {
       let bugFiled: CreateRequestResult["bugFiled"] = null;
       let held = false;
       if (input.type === "product" && input.details?.category === "bug") {
+        // Did an automatic verdict actually happen? `degraded` (nothing ran)
+        // and `timedOut` (gave up waiting) both mean no — and in that case the
+        // answer on the row came from a person, whatever value they picked.
+        // Attributing it to "ai" because it happened to match the fail-safe
+        // default would put a confident-looking verdict in the audit trail
+        // that no classifier ever produced.
+        const cls = input.classification;
+        const noVerdict = !cls || cls.degraded === true || cls.timedOut === true;
         try {
           const res = (await invokeRequestAction({
             action: "file_bug",
             requestId: data.id,
             clientFacing: input.clientFacing,
-            clientFacingReasoning: input.classification?.reasoning,
-            clientFacingConfidence: input.classification?.confidence,
+            clientFacingReasoning: cls?.reasoning,
+            clientFacingConfidence: cls?.confidence,
+            clientFacingDegraded: noVerdict,
             clientFacingSource:
               typeof input.clientFacing === "boolean" &&
-              input.classification &&
-              input.clientFacing !== input.classification.clientFacing
+              (noVerdict || (cls && input.clientFacing !== cls.clientFacing))
                 ? "submitter"
                 : "ai",
           })) as {
@@ -550,6 +606,11 @@ async function invokeRequestAction(payload: {
   clientFacingReasoning?: string;
   clientFacingConfidence?: number;
   clientFacingSource?: string;
+  /** file_bug: true when no automatic verdict was produced (the check failed
+   * or timed out) and the answer on the row is a human's unaided guess. The
+   * reviewer UI and the notification email key off this — a failed check must
+   * not read like a confident "no". */
+  clientFacingDegraded?: boolean;
   /** classify_bug: draft form fields, since there is no row to read them from. */
   draftTitle?: string;
   draftDescription?: string;

@@ -434,8 +434,9 @@ function ClientImpactConfirm({
   onChange: (v: boolean) => void;
 }) {
   // If the check ran out of time (or couldn't run), we have no verdict worth
-  // showing. Don't dress a guess up as an answer — just ask, and don't
-  // pre-select either option so the submitter has to actually decide.
+  // showing. Don't dress a guess up as an answer — ask plainly. The selection
+  // still starts on "yes" (see submit()): asking honestly and defaulting safely
+  // are not in conflict.
   const asking = !!verdict.timedOut;
   const changed = !asking && value !== null && value !== verdict.clientFacing;
   return (
@@ -446,7 +447,7 @@ function ClientImpactConfirm({
           <p className="text-sm font-medium">Is a client affected right now?</p>
           <p className="text-xs text-muted-foreground">
             {asking
-              ? verdict.reasoning
+              ? `${verdict.reasoning} We've started on "yes" because that's the safer answer when nobody has checked — change it only if you're sure.`
               : `We looked at the code and think the answer is ${
                   verdict.clientFacing ? "yes" : "no"
                 }. ${verdict.reasoning}`}
@@ -463,7 +464,11 @@ function ClientImpactConfirm({
           {
             v: false,
             label: "No, not urgent for clients",
-            hint: "Reviewed first, then queued with the dev team",
+            // When the automatic check failed, this answer is the only thing
+            // standing between the report and the review queue — say so.
+            hint: asking
+              ? "Waits for a reviewer — nothing re-checks this automatically"
+              : "Reviewed first, then queued with the dev team",
           },
         ].map((o) => (
           <button
@@ -508,8 +513,12 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
   // Client-impact gate (MSD-957). `verdict` null means we haven't asked yet;
   // once set, the form shows the confirmation step and Submit actually files.
   const [verdict, setVerdict] = useState<BugClassification | null>(null);
-  // null = we asked but nobody has answered yet (only happens when the check
-  // timed out, in which case there is no verdict to pre-fill from).
+  // Always starts on the fail-safe "yes" and no code path sets it back to null
+  // — including a failed check, which asks the question openly but still leaves
+  // the safe answer selected (2026-08-12; it used to blank the choice, and a
+  // single click on "no" is how a client-blocking bug reached the review
+  // queue). The `null` in the type and the guards that check for it are kept as
+  // a backstop, not a state anything reaches on purpose.
   const [clientFacing, setClientFacing] = useState<boolean | null>(true);
   const [checking, setChecking] = useState(false);
   // MSD-999: the not-a-bug warning. `open` shows the dialog; `bypassed` means
@@ -622,10 +631,15 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
           priority,
         });
         setVerdict(v);
-        // A timed-out check has no verdict worth pre-filling. Leave the choice
-        // empty so the submitter actually answers rather than accepting a
-        // guess they never read.
-        setClientFacing(v.timedOut ? null : v.clientFacing);
+        // A timed-out or failed check has no verdict worth presenting as an
+        // answer — the card asks plainly instead of claiming to know. But the
+        // selection still starts on "yes", because that is the fail-safe every
+        // other layer of this system uses: an unnecessary review is cheap, a
+        // missed client incident is not. On 2026-08-12 this started blank, and
+        // one click on "no" sent a bug that was blocking a named client into
+        // the triage queue. The submitter can still change it — they just have
+        // to choose the risky answer deliberately rather than by default.
+        setClientFacing(v.timedOut ? true : v.clientFacing);
       } finally {
         setChecking(false);
       }
