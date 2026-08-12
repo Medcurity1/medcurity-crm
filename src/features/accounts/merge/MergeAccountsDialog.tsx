@@ -381,7 +381,9 @@ export function MergeAccountsDialog({
           </div>
         )}
 
-        <DialogFooter className="gap-2 sm:gap-0">
+        {/* gap-2 at every width — the old `sm:gap-0` shadcn pattern glued
+            Back/Continue together on desktop (Nathan, 8/12). */}
+        <DialogFooter className="gap-2">
           {step === 1 && (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>

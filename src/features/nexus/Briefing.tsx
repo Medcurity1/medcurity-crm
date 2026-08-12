@@ -157,6 +157,18 @@ export function requestIdOf(row: DayQueueRow): string | null {
     : null;
 }
 
+/** The task's activity id, for BOTH task kinds — a campaign_task is the
+ * same activities row with an enrollment attached. rep_day_queue fills
+ * row.task_id (a.id) directly; item_key 'task:<uuid>' is the fallback for
+ * any older cached row shape. Null when unreadable. */
+export function taskIdOf(row: DayQueueRow): string | null {
+  if (row.kind !== "task" && row.kind !== "campaign_task") return null;
+  if (row.task_id) return row.task_id;
+  return row.item_key.startsWith("task:")
+    ? row.item_key.slice("task:".length)
+    : null;
+}
+
 export function primaryAction(row: DayQueueRow, isAdmin = true): { label: string; to: string } {
   switch (row.kind) {
     case "reply":
@@ -171,8 +183,16 @@ export function primaryAction(row: DayQueueRow, isAdmin = true): { label: string
       }
       return { label: "Open reply", to: "/playbook" };
     case "task":
-    case "campaign_task":
-      return { label: "Open task", to: "/activities" };
+    case "campaign_task": {
+      // Molly's 8/12 ticket: this used to dump her on the generic
+      // activities log. Land on the task itself — its page carries the
+      // account link and the manage controls.
+      const taskId = taskIdOf(row);
+      return {
+        label: "Open task",
+        to: taskId ? `/activities/${taskId}` : "/activities",
+      };
+    }
     case "renewal":
       return {
         label: "Open account",

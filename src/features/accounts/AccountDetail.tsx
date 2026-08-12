@@ -301,7 +301,9 @@ export function AccountDetail() {
       <PageHeader
         title={account.name}
         actions={
-          <div className="flex items-center gap-2">
+          // flex-wrap (Nathan 8/12): the row outgrew one line once Merge
+          // joined it — wrap to a second row instead of running off-screen.
+          <div className="flex flex-wrap items-center gap-2">
             <VerifiedBadge
               table="accounts"
               recordId={account.id}
