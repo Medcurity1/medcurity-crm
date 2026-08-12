@@ -1,10 +1,12 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useUrlState, useUrlNumberState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useQuery } from "@tanstack/react-query";
 import {
+  ArrowDown,
+  ArrowUp,
   Clock,
   Phone,
   Mail,
@@ -17,6 +19,16 @@ import {
   Check,
   Plus,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import {
+  compareTasksByDue,
+  priorityLabel,
+  priorityPillClass,
+  taskDueBucket,
+  DUE_BUCKET_DOT,
+  DUE_BUCKET_LABELS,
+} from "./taskOrder";
+import { TaskDueChip } from "./TaskDueChip";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import type { Activity, ActivityType } from "@/types/crm";
@@ -83,6 +95,8 @@ interface ListFilters {
   startDate: string;
   endDate: string;
   page: number;
+  /** Task mode only: direction for the due-date sort (Due header click). */
+  dueDir: "asc" | "desc";
   // When false (default), completed TASKS are hidden from the feed.
   // Completed calls/emails/meetings/notes still show — they're history.
   showCompletedTasks: boolean;
@@ -118,12 +132,27 @@ function useActivitiesList(filters: ListFilters) {
           { count: "estimated" }
         )
         // Hide soft-deleted activities so the list reflects deletes.
-        .is("archived_at", null)
-        // Order by the real interaction date (activity_date when set, else the
-        // logged date) so back-dated entries land in the right spot, not at the
-        // top (Summer). Stable id tiebreaker keeps paging from dup/skip on ties.
-        .order("effective_at", { ascending: false })
-        .order("id", { ascending: true });
+        .is("archived_at", null);
+
+      if (filters.type === "task") {
+        // Task mode (Molly's task-organization pass, 2026-08-12): the list
+        // was ordering tasks by effective_at like calls/emails while SHOWING
+        // a Due column — reading as "not sorted". Tasks sort by due date,
+        // undated last in BOTH directions (nullsFirst:false), id tiebreak
+        // for stable paging. Priority breaks due-date ties client-side
+        // below (the rank isn't expressible as a server order).
+        query = query
+          .order("due_at", { ascending: filters.dueDir !== "desc", nullsFirst: false })
+          .order("id", { ascending: true });
+      } else {
+        // Mixed feed: order by the real interaction date (activity_date when
+        // set, else the logged date) so back-dated entries land in the right
+        // spot, not at the top (Summer). Stable id tiebreaker keeps paging
+        // from dup/skip on ties.
+        query = query
+          .order("effective_at", { ascending: false })
+          .order("id", { ascending: true });
+      }
 
       if (filters.search) {
         query = query.ilike("subject", `%${filters.search}%`);
@@ -173,7 +202,16 @@ function useActivitiesList(filters: ListFilters) {
 
       const { data, error, count } = await query;
       if (error) throw error;
-      return { data: ((data ?? []) as unknown) as ListActivity[], count: count ?? 0 };
+      let rows = ((data ?? []) as unknown) as ListActivity[];
+      if (filters.type === "task") {
+        // Priority tiebreak within the fetched page: same-due tasks read
+        // High → Medium → Low. (Server order is due_at,id — a same-instant
+        // tie straddling a page boundary can miss the tiebreak; cosmetic.)
+        rows = [...rows].sort((a, b) =>
+          compareTasksByDue(a, b, filters.dueDir === "desc"),
+        );
+      }
+      return { data: rows, count: count ?? 0 };
     },
   });
 }
@@ -240,6 +278,9 @@ export function ActivitiesListPage() {
   // "1"/"0" in the URL so the toggle survives navigation too.
   const [showCompletedParam, setShowCompletedParam] = useUrlState("completed", "0");
   const showCompletedTasks = showCompletedParam === "1";
+  // Task-mode due sort direction — URL-backed like every other list state.
+  const [dueDirParam, setDueDirParam] = useUrlState("due_dir", "asc");
+  const dueDir: "asc" | "desc" = dueDirParam === "desc" ? "desc" : "asc";
   // Complete / reopen tasks straight from the list (Summer, 2026-07-07:
   // "lost the ability to complete tasks from the tasks tab" — the Done
   // column was display-only). Shared mutations with the task widgets.
@@ -261,6 +302,7 @@ export function ActivitiesListPage() {
       startDate,
       endDate,
       page,
+      dueDir,
       showCompletedTasks,
       scopeAccountId,
       scopeContactId,
@@ -274,6 +316,7 @@ export function ActivitiesListPage() {
       startDate,
       endDate,
       page,
+      dueDir,
       showCompletedTasks,
       scopeAccountId,
       scopeContactId,
@@ -424,17 +467,64 @@ export function ActivitiesListPage() {
                   <TableHead>Subject</TableHead>
                   <TableHead>Owner</TableHead>
                   <TableHead>Related</TableHead>
-                  {filters.type === "task" && <TableHead>Due</TableHead>}
+                  {filters.type === "task" && (
+                    <TableHead>
+                      {/* The list sorts BY this column in task mode — the
+                          header says so and flips the direction on click. */}
+                      <button
+                        type="button"
+                        title="Sort by due date"
+                        onClick={() => {
+                          setDueDirParam(dueDir === "asc" ? "desc" : "asc");
+                          resetPage();
+                        }}
+                        className="inline-flex items-center gap-1 font-medium text-foreground transition-colors hover:text-primary"
+                      >
+                        Due
+                        {dueDir === "asc" ? (
+                          <ArrowUp className="h-3 w-3" />
+                        ) : (
+                          <ArrowDown className="h-3 w-3" />
+                        )}
+                      </button>
+                    </TableHead>
+                  )}
+                  {filters.type === "task" && <TableHead>Priority</TableHead>}
                   <TableHead>Date</TableHead>
                   <TableHead className="w-20 text-center">Done</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {activities.map((a) => {
+                {activities.map((a, i) => {
                   const Icon = ACTIVITY_ICONS[a.activity_type] ?? StickyNote;
                   const link = getRecordLink(a, isAdmin);
+                  // Task mode: slip an urgency header row in whenever the
+                  // bucket changes (rows arrive due-sorted, so buckets are
+                  // contiguous). Headers are per-page and uncounted — the
+                  // full totals live on the record panels.
+                  const taskMode = filters.type === "task";
+                  const bucket = taskMode ? taskDueBucket(a.due_at) : null;
+                  const prevBucket =
+                    taskMode && i > 0 ? taskDueBucket(activities[i - 1].due_at) : null;
+                  const showBucketHeader = taskMode && (i === 0 || bucket !== prevBucket);
                   return (
-                    <TableRow key={a.id}>
+                    <Fragment key={a.id}>
+                    {showBucketHeader && bucket && (
+                      <TableRow className="bg-muted/40 hover:bg-muted/40">
+                        <TableCell colSpan={8} className="py-1.5">
+                          <span className="inline-flex items-center gap-1.5">
+                            <span
+                              className={cn("h-1.5 w-1.5 rounded-full", DUE_BUCKET_DOT[bucket])}
+                              aria-hidden
+                            />
+                            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              {DUE_BUCKET_LABELS[bucket]}
+                            </span>
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    <TableRow>
                       <TableCell>
                         <div
                           className="h-7 w-7 rounded-full bg-muted flex items-center justify-center"
@@ -480,8 +570,24 @@ export function ActivitiesListPage() {
                         )}
                       </TableCell>
                       {filters.type === "task" && (
-                        <TableCell className="text-muted-foreground text-sm">
-                          {a.due_at ? formatDate(a.due_at) : "\u2014"}
+                        <TableCell>
+                          {a.due_at ? (
+                            <TaskDueChip dueAt={a.due_at} completed={!!a.completed_at} />
+                          ) : (
+                            <span className="text-muted-foreground text-sm">&mdash;</span>
+                          )}
+                        </TableCell>
+                      )}
+                      {filters.type === "task" && (
+                        <TableCell>
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium",
+                              priorityPillClass(a.priority),
+                            )}
+                          >
+                            {priorityLabel(a.priority)}
+                          </span>
                         </TableCell>
                       )}
                       <TableCell className="text-muted-foreground text-sm">
@@ -519,6 +625,7 @@ export function ActivitiesListPage() {
                         )}
                       </TableCell>
                     </TableRow>
+                    </Fragment>
                   );
                 })}
               </TableBody>

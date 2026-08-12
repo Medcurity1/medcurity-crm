@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { CheckCircle2, Circle, Clock, Plus, ChevronDown, RotateCcw, Pencil, Trash2 } from "lucide-react";
+import { CheckCircle2, Circle, Plus, ChevronDown, RotateCcw, Pencil, Trash2 } from "lucide-react";
 import { useTasks, useCompleteActivity, useReopenActivity, useArchiveActivity } from "./api";
-import { priorityPillClass, priorityLabel } from "./taskOrder";
+import {
+  priorityPillClass,
+  priorityLabel,
+  groupTasksByBucket,
+  DUE_BUCKET_LABELS,
+  DUE_BUCKET_DOT,
+} from "./taskOrder";
+import { TaskDueChip } from "./TaskDueChip";
 import { AutomationBadge, isAutomationActivity } from "./AutomationBadge";
 import { describeRecurrence } from "./recurrence";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -11,9 +18,7 @@ import { EditTaskDialog } from "./EditTaskDialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { formatDate } from "@/lib/formatters";
 import { errorMessage } from "@/lib/errors";
-import { isToday, isPast, parseISO } from "date-fns";
 import { toast } from "sonner";
 import type { Activity } from "@/types/crm";
 
@@ -23,20 +28,6 @@ interface TasksPanelProps {
   opportunityId?: string;
   leadId?: string;
 }
-
-function getDueDateStatus(dueAt: string | null): "overdue" | "today" | "upcoming" | null {
-  if (!dueAt) return null;
-  const date = parseISO(dueAt);
-  if (isToday(date)) return "today";
-  if (isPast(date)) return "overdue";
-  return "upcoming";
-}
-
-const dueDateClasses: Record<string, string> = {
-  overdue: "text-red-600",
-  today: "text-amber-600",
-  upcoming: "text-muted-foreground",
-};
 
 function TaskItem({
   task,
@@ -54,7 +45,6 @@ function TaskItem({
   isBusy: boolean;
 }) {
   const isCompleted = !!task.completed_at;
-  const dueStatus = isCompleted ? null : getDueDateStatus(task.due_at);
 
   return (
     <div className="flex items-start gap-3 py-2 px-1 group hover:bg-muted/40 rounded transition-colors">
@@ -97,19 +87,7 @@ function TaskItem({
           {task.subject}
         </p>
         <div className="flex items-center gap-3 mt-0.5">
-          {task.due_at && (
-            <span
-              className={cn(
-                "text-xs inline-flex items-center gap-1",
-                dueStatus ? dueDateClasses[dueStatus] : "text-muted-foreground"
-              )}
-            >
-              <Clock className="h-3 w-3" />
-              {dueStatus === "overdue" && "Overdue: "}
-              {dueStatus === "today" && "Due today: "}
-              {formatDate(task.due_at)}
-            </span>
-          )}
+          <TaskDueChip dueAt={task.due_at} completed={isCompleted} />
           {task.owner?.full_name && (
             <span className="text-xs text-muted-foreground">
               {task.owner.full_name}
@@ -282,23 +260,39 @@ export function TasksPanel({
         </Button>
       </div>
 
-      {/* Open tasks */}
+      {/* Open tasks, sectioned by urgency (Molly's task-organization pass):
+          Overdue → Today → This week → Later → No due date. The canonical
+          due-then-priority sort from useTasks already ordered the rows;
+          grouping just makes that order legible at a glance. */}
       {openTasks.length === 0 ? (
         <p className="text-sm text-muted-foreground py-4">
           No open tasks. Create one to get started.
         </p>
       ) : (
-        <div className="divide-y">
-          {openTasks.map((task) => (
-            <TaskItem
-              key={task.id}
-              task={task}
-              onComplete={handleComplete}
-              onReopen={handleReopen}
-              onEdit={setEditingTask}
-              onDelete={setDeletingTask}
-              isBusy={completeMutation.isPending || reopenMutation.isPending}
-            />
+        <div className="space-y-3">
+          {groupTasksByBucket(openTasks).map(({ bucket, tasks }) => (
+            <div key={bucket}>
+              <div className="flex items-center gap-1.5 px-1 pb-1">
+                <span className={cn("h-1.5 w-1.5 rounded-full", DUE_BUCKET_DOT[bucket])} aria-hidden />
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {DUE_BUCKET_LABELS[bucket]}
+                </span>
+                <span className="text-[11px] text-muted-foreground/70">{tasks.length}</span>
+              </div>
+              <div className="divide-y">
+                {tasks.map((task) => (
+                  <TaskItem
+                    key={task.id}
+                    task={task}
+                    onComplete={handleComplete}
+                    onReopen={handleReopen}
+                    onEdit={setEditingTask}
+                    onDelete={setDeletingTask}
+                    isBusy={completeMutation.isPending || reopenMutation.isPending}
+                  />
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       )}

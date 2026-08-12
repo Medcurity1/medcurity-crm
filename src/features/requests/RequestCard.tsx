@@ -639,10 +639,10 @@ export function RequestCard({
   showType?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  // Type color language (Nathan 8/12): the whole row carries its form's
-  // tint — accent bar on the left, a wash that fades by mid-card — so a
-  // flooded inbox reads at a glance. The labeled chip (mixed lists) keeps
-  // the signal legible without relying on color alone.
+  // Type color language (Nathan 8/12): the whole row sits on a low-opacity
+  // gradient of its form's color, end to end, with a matching tinted border
+  // — so a flooded inbox reads at a glance. The labeled chip (mixed lists)
+  // keeps the signal legible without relying on color alone.
   const tint = REQUEST_TYPE_TINT[request.type];
 
   return (
@@ -651,7 +651,7 @@ export function RequestCard({
         type="button"
         onClick={() => setOpen(true)}
         className={cn(
-          "w-full rounded-lg border border-border border-l-[3px] bg-card px-3 py-2 text-left transition-colors hover:bg-muted/40",
+          "w-full rounded-lg border border-border bg-card px-3 py-2 text-left transition-colors",
           tint.row,
         )}
       >
