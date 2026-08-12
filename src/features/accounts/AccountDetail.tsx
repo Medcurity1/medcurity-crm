@@ -2,7 +2,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Pencil, Archive, ExternalLink, ChevronDown, Phone, UserRoundCog, Plus, MapPin, History, Trash2, StickyNote, GitMerge } from "lucide-react";
+import { Pencil, Archive, ExternalLink, ChevronDown, Phone, Plus, MapPin, History, Trash2, StickyNote, GitMerge } from "lucide-react";
 import { useAccount, useUpdateAccount, useArchiveAccount, useDeleteAccount, useAccountContracts, useClearCustomerStatusOverride } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
@@ -334,10 +334,8 @@ export function AccountDetail() {
               <Plus className="h-4 w-4 mr-1" />
               New Contact
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setShowChangeOwner(true)}>
-              <UserRoundCog className="h-4 w-4 mr-1" />
-              Change Owner
-            </Button>
+            {/* Change Owner moved into the Account Owner stat card's pencil
+                (Nathan 8/12) — same dialog, less header crowding. */}
             <Button variant="outline" size="sm" onClick={() => navigate(`/accounts/${id}/edit`)}>
               <Pencil className="h-4 w-4 mr-1" />
               Edit
@@ -384,7 +382,20 @@ export function AccountDetail() {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
         <Card>
           <CardHeader className="pb-1 pt-3 px-4">
-            <CardTitle className="text-xs text-muted-foreground font-medium">Account Owner</CardTitle>
+            <CardTitle className="text-xs text-muted-foreground font-medium flex items-center gap-1">
+              Account Owner
+              {/* The Change Owner entry point lives here now (Nathan 8/12):
+                  the pencil opens the same dialog the old header button did. */}
+              <button
+                type="button"
+                aria-label="Change account owner"
+                title="Change account owner"
+                onClick={() => setShowChangeOwner(true)}
+                className="rounded p-0.5 text-muted-foreground/70 hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            </CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
             <p className="text-sm font-semibold truncate">{account.owner?.full_name ?? "Unassigned"}</p>
