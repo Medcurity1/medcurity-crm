@@ -353,7 +353,7 @@ describe("checkCloseReadiness (wiring + fallback)", () => {
       contacts: { data: [emailedContact], error: null },
     });
     const res = await checkCloseReadiness(client, "acct-1", "opp-1");
-    expect(res).toEqual({ ready: true, missing: [], accountName: null });
+    expect(res).toEqual({ ready: true, missing: [], accountName: null, missingKeys: [] });
   });
 
   it("enforces all four when config is absent and blocks an incomplete account", async () => {
@@ -390,7 +390,37 @@ describe("checkCloseReadiness (wiring + fallback)", () => {
       ready: true,
       missing: [],
       accountName: "Acme Health",
+      missingKeys: [],
     });
+  });
+
+  it("missingKeys mirror the missing labels (Finish Line dialog contract)", async () => {
+    const client = mockClient({
+      required_field_config: { data: [], error: null },
+      accounts: {
+        data: {
+          name: "Gap Co", phone: null, fte_range: null,
+          billing_street: "1 St", billing_city: "Spokane", billing_state: "WA", billing_zip: "99201",
+        },
+        error: null,
+      },
+      contacts: { data: [], error: null },
+    });
+    const res = await checkCloseReadiness(client, "acct-1");
+    expect(res.ready).toBe(false);
+    expect(res.missingKeys).toEqual(["account_phone", "account_fte_range", "contact_email"]);
+    expect(res.missing).toHaveLength(3);
+  });
+
+  it("a missing account row still blocks and carries NO fixable keys (dialog must not open empty)", async () => {
+    const client = mockClient({
+      required_field_config: { data: [], error: null },
+      accounts: { data: null, error: null },
+    });
+    const res = await checkCloseReadiness(client, "acct-1");
+    expect(res.ready).toBe(false);
+    expect(res.missingKeys).toEqual([]);
+    expect(res.missing).toEqual(["Account information could not be loaded"]);
   });
 
   it("blocks when the account row cannot be loaded", async () => {

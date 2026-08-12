@@ -11,6 +11,8 @@ import { DealMergerGame } from "@/features/deal-merger/DealMergerGame";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { checkCloseReadiness, formatCloseReadinessMessage } from "@/lib/closeReadiness";
+import { FinishLineDialog, type FinishLineRequest } from "./FinishLineDialog";
+import { celebrateClosedWon } from "@/lib/confetti";
 import { useUsers } from "@/features/accounts/api";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
@@ -133,9 +135,11 @@ const INLINE_STAGES: OpportunityStage[] = [
 function InlineStage({
   o,
   onClosedLost,
+  onBlockedClose,
 }: {
   o: Opportunity;
   onClosedLost: (accountId: string | null) => void;
+  onBlockedClose: (req: FinishLineRequest) => void;
 }) {
   const update = useUpdateOpportunity();
   // Always include the opp's CURRENT stage as an option, even if it's a legacy
@@ -162,9 +166,22 @@ function InlineStage({
           // Select is controlled by o.stage, so returning without mutating
           // leaves it showing the current stage.
           if (v === "closed_won") {
-            const { ready, missing, accountName } = await checkCloseReadiness(supabase, o.account_id, o.id);
+            const { ready, missing, accountName, missingKeys } = await checkCloseReadiness(supabase, o.account_id, o.id);
             if (!ready) {
-              toast.error(formatCloseReadinessMessage(missing, accountName));
+              // Finish Line (Molly 8/12): fixable gaps open the dialog at
+              // the list level; only unfixable load failures still toast.
+              if (o.account_id && missingKeys && missingKeys.length > 0) {
+                onBlockedClose({
+                  accountId: o.account_id,
+                  accountName,
+                  missingKeys,
+                  dealName: o.name,
+                  amount: typeof o.amount === "number" ? o.amount : Number(o.amount ?? 0),
+                  opportunity: o.id,
+                });
+              } else {
+                toast.error(formatCloseReadinessMessage(missing, accountName));
+              }
               return;
             }
           }
@@ -421,6 +438,10 @@ export function OpportunitiesList() {
   // After a deal is marked Closed Lost for a current client, ask whether the
   // client is still contracted (Summer). Non-blocking; fires after the move.
   const closedLostGuard = useClosedLostGuard();
+  // Finish Line (Molly 8/12): one dialog for the whole list; whichever row's
+  // inline stage change gets blocked hands its request up here.
+  const [finishLine, setFinishLine] = useState<FinishLineRequest | null>(null);
+  const finishLineUpdate = useUpdateOpportunity();
 
   // Source filter options come from the same admin-managed picklist as the
   // form/inline pickers, plus a "No Source" bucket for unattributed deals.
@@ -605,7 +626,7 @@ export function OpportunitiesList() {
       ) : (
         "—"
       ),
-    stage: (o) => <InlineStage o={o} onClosedLost={closedLostGuard.promptIfClient} />,
+    stage: (o) => <InlineStage o={o} onClosedLost={closedLostGuard.promptIfClient} onBlockedClose={setFinishLine} />,
     lead_source: (o) => <InlineSource o={o} />,
     business_type: (o) =>
       o.business_type ? (
@@ -940,6 +961,19 @@ export function OpportunitiesList() {
         }}
       />
       {closedLostGuard.dialog}
+      <FinishLineDialog
+        request={finishLine}
+        onDismiss={() => setFinishLine(null)}
+        onComplete={async () => {
+          // Fixes are saved and the gate re-verified inside the dialog;
+          // commit the stage change directly.
+          if (!finishLine) return;
+          await finishLineUpdate.mutateAsync({ id: finishLine.opportunity as string, stage: "closed_won" });
+          toast.success(`Stage changed to ${stageLabel("closed_won")}`);
+          celebrateClosedWon();
+          setFinishLine(null);
+        }}
+      />
       {/* Deal Merger — hidden mini-game (triple-click the Opportunities nav label) */}
       <DealMergerGame />
     </div>

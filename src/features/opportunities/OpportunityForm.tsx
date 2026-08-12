@@ -49,6 +49,7 @@ import { opportunitySchema, type OpportunityFormValues } from "./schema";
 import { FTE_RANGES, employeesToFteRange } from "@/lib/formatters";
 import { celebrateClosedWon } from "@/lib/confetti";
 import { checkCloseReadiness, formatCloseReadinessMessage } from "@/lib/closeReadiness";
+import { FinishLineDialog, type FinishLineRequest } from "./FinishLineDialog";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -326,6 +327,11 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
   const { confirmIfDirty, disarm, dialog: unsavedDialog } = useUnsavedChanges(
     isDirty || (!isEditing && stagedProducts.length > 0),
   );
+
+  // Finish Line (Molly 8/12): when the close-readiness gate blocks this
+  // form's save, the dialog opens OVER the form. Every edit stays put;
+  // completing the dialog re-runs the save automatically.
+  const [finishLine, setFinishLine] = useState<FinishLineRequest | null>(null);
 
   const watchedAccountId = watch("account_id");
   const watchedStage = watch("stage");
@@ -717,7 +723,7 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       // Pass the deal's IN-FLIGHT values (not a DB fetch) — this save may
       // be the one setting the assessor, and on create the row doesn't
       // exist yet.
-      const { ready, missing, accountName } = await checkCloseReadiness(supabase, values.account_id, {
+      const inFlight = {
         services_included: values.services_included ?? false,
         // blankableNumber leaves the field loosely typed; normalize to a
         // plain number (blank -> 0 = "no service amount signal").
@@ -730,9 +736,29 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
         // service_amount above (blank/0 -> null = "no FTE signal").
         fte_range: typeof values.fte_range === "string" ? values.fte_range : null,
         fte_count: Number(values.fte_count ?? 0) > 0 ? Number(values.fte_count) : null,
-      });
+      };
+      const { ready, missing, accountName, missingKeys } = await checkCloseReadiness(
+        supabase,
+        values.account_id,
+        inFlight,
+      );
       if (!ready) {
-        toast.error(formatCloseReadinessMessage(missing, accountName));
+        // Finish Line (Molly 8/12): her exact scenario. Instead of a toast
+        // that forces her to abandon the form, open the fix-it-here dialog.
+        // The form stays mounted underneath with every edit intact; when
+        // the dialog completes, the save re-runs on its own.
+        if (missingKeys && missingKeys.length > 0) {
+          setFinishLine({
+            accountId: values.account_id,
+            accountName,
+            missingKeys,
+            dealName: values.name || "Close this deal",
+            amount: Number(values.amount ?? 0),
+            opportunity: inFlight,
+          });
+        } else {
+          toast.error(formatCloseReadinessMessage(missing, accountName));
+        }
         return;
       }
     }
@@ -2052,6 +2078,23 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
       />
 
       {followUpDialog}
+
+      <FinishLineDialog
+        request={finishLine}
+        onDismiss={() => setFinishLine(null)}
+        onComplete={async ({ assessorId }) => {
+          // The dialog fixed the ACCOUNT side and re-verified the gate. The
+          // assessor is a form field, so it comes back here (on create the
+          // deal row doesn't exist for the dialog to patch). Re-running the
+          // submit takes the normal path: the gate re-checks (now green)
+          // and the save completes with every in-flight edit intact.
+          if (assessorId) {
+            setValue("assigned_assessor_id", assessorId, { shouldDirty: true });
+          }
+          setFinishLine(null);
+          await handleSubmit(onSubmit)();
+        }}
+      />
     </div>
   );
 }

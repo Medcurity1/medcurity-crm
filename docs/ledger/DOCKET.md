@@ -29,7 +29,9 @@ Statuses: `IDEA` · `QUEUED` · `IN PROGRESS` · `BLOCKED` · `STAGING` (awaitin
 
 ## B. On staging — awaiting prod go-ahead
 
-_(none)_
+| # | Item | Detail | Verify | Checked |
+|---|---|---|---|---|
+| B32 | Finish Line dialog: fix blocked-close gaps in place (Molly's 8/12 request) | Molly's ticket: closing a deal that trips the close-readiness gate forced her to cancel her edits, hunt the account page, and retry from a fast-disappearing toast. Now ALL FOUR close surfaces (board drag, list inline stage, detail stage bar, edit form) open the Finish Line dialog when the gate blocks with fixable keys: every missing item (account phone / billing address / FTE range / contact email incl. quick-create first contact / assigned assessor) is an inline field, ZIP autofills state, live check-offs + progress track, one button saves everything to the right records, re-runs the REAL gate server-side, then completes the close (form surface re-submits itself with the assessor handed back; nothing in-flight is lost). Unfixable load failures still toast. New FinishLineDialog.tsx + fl-* design language in app.css (aurora header, checkered finish strip, gradient CTA, reduced-motion safe). Lib layer (missingKeys contract) was prepped by the 8/12 sister session; 482 tests green. | staging: block a close on an incomplete account from any surface → the Finish Line dialog opens instead of a toast; `grep -n missingKeys src/lib/closeReadiness.ts` | 2026-08-12 |
 
 ---
 

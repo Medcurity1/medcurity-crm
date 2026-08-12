@@ -68,6 +68,10 @@ export interface CloseReadinessResult {
   /** The account's display name, when it could be loaded — lets the toast
    *  say WHICH account to fix (a pipeline drag doesn't show one). */
   accountName?: string | null;
+  /** Machine-readable keys for the missing items — what the Finish Line
+   *  dialog (Molly's 8/12 request) builds its steps from. Empty when the
+   *  block is a load failure the dialog can't fix (callers toast instead). */
+  missingKeys?: CloseReadinessKey[];
 }
 
 /** Minimal shapes so the pure evaluator is trivially unit-testable. */
@@ -160,6 +164,28 @@ function contactHasEmail(c: CloseReadinessContact): boolean {
  * human-readable missing items. `checkCloseReadiness` below wires this to
  * Supabase; tests exercise this directly with mock rows.
  */
+/** Label + key pairs — the detailed form the Finish Line dialog consumes.
+ *  evaluateCloseReadiness below stays the label-only wrapper so every
+ *  existing caller and test keeps its exact shape. */
+export function evaluateCloseReadinessItems(
+  keys: CloseReadinessKey[],
+  account: CloseReadinessAccount | null,
+  contacts: CloseReadinessContact[],
+  opportunity?: CloseReadinessOpportunity | null,
+): { key: CloseReadinessKey; label: string }[] {
+  const labels = evaluateCloseReadiness(keys, account, contacts, opportunity);
+  // Map each label back to its key. Load-failure sentinels aren't in
+  // LABELS and map to nothing (the dialog can't fix those).
+  const items: { key: CloseReadinessKey; label: string }[] = [];
+  for (const label of labels) {
+    const key = (Object.keys(LABELS) as CloseReadinessKey[]).find(
+      (k) => label === LABELS[k] || (k === "contact_email" && label.startsWith("an email address on at least one of the account's contacts")),
+    );
+    if (key) items.push({ key, label });
+  }
+  return items;
+}
+
 export function evaluateCloseReadiness(
   keys: CloseReadinessKey[],
   account: CloseReadinessAccount | null,
@@ -392,8 +418,25 @@ export async function checkCloseReadiness(
     contacts = error ? [] : ((data as CloseReadinessContact[] | null) ?? []);
   }
 
-  const missing = evaluateCloseReadiness(keys, (account as CloseReadinessAccount) ?? null, contacts, opp);
-  return { ready: missing.length === 0, missing, accountName };
+  // No account row at all: block outright. This must NOT flow through the
+  // items mapping — the load-failure sentinel maps to no key, and an empty
+  // items list would read as "ready".
+  if (!account) {
+    return {
+      ready: false,
+      missing: ["Account information could not be loaded"],
+      accountName: null,
+      missingKeys: [],
+    };
+  }
+
+  const items = evaluateCloseReadinessItems(keys, account as CloseReadinessAccount, contacts, opp);
+  return {
+    ready: items.length === 0,
+    missing: items.map((i) => i.label),
+    accountName,
+    missingKeys: items.map((i) => i.key),
+  };
 }
 
 /**

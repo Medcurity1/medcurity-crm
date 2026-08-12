@@ -286,3 +286,68 @@
   .btn-ai::before { animation: none; }
   .ai-icon { animation: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   Finish Line dialog (Molly's close-the-gaps flow) — its own small design
+   language: an aurora header, a checkered finish-line strip, check-pop
+   feedback, and a gradient CTA that only glows once every gap is filled.
+   Works over both themes (the header paints its own dark surface).
+   --------------------------------------------------------------------------- */
+.fl-header {
+  background:
+    radial-gradient(120% 150% at 88% -30%, hsl(160 84% 39% / 0.5), transparent 55%),
+    radial-gradient(110% 130% at -12% 115%, hsl(272 62% 58% / 0.38), transparent 55%),
+    linear-gradient(135deg, hsl(222 55% 20%) 0%, hsl(217 80% 32%) 55%, hsl(207 85% 34%) 100%);
+}
+.fl-header::before {
+  /* slow aurora drift so the header feels alive without distracting */
+  content: "";
+  position: absolute;
+  inset: -40%;
+  background: radial-gradient(closest-side, hsl(190 90% 55% / 0.16), transparent 70%);
+  animation: fl-drift 9s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+.fl-checker {
+  background-image: repeating-conic-gradient(rgba(255, 255, 255, 0.35) 0% 25%, transparent 0% 50%);
+  background-size: 10px 10px;
+}
+.fl-pop {
+  animation: fl-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.fl-cta {
+  background: linear-gradient(90deg, hsl(217 91% 48%) 0%, hsl(190 85% 40%) 55%, hsl(160 84% 36%) 100%);
+}
+.fl-cta:disabled {
+  background: hsl(210 15% 55%);
+  opacity: 0.55;
+}
+.fl-cta:not(:disabled)::before {
+  content: "";
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(45deg, transparent 30%, rgba(255, 255, 255, 0.18) 50%, transparent 70%);
+  animation: ai-shimmer 2.6s ease-in-out infinite;
+  pointer-events: none;
+}
+.fl-cta > * {
+  position: relative;
+  z-index: 1;
+}
+@keyframes fl-pop {
+  0% { transform: scale(0.5); }
+  60% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+@keyframes fl-drift {
+  0% { transform: translate3d(-6%, -4%, 0); }
+  100% { transform: translate3d(6%, 5%, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fl-header::before { animation: none; }
+  .fl-cta:not(:disabled)::before { animation: none; }
+  .fl-pop { animation: none; }
+}
