@@ -58,11 +58,26 @@ export function compareTasksByDueThenPriority(
   a: { due_at: string | null; priority?: TaskPriority },
   b: { due_at: string | null; priority?: TaskPriority },
 ): number {
+  return compareTasksByDue(a, b, false);
+}
+
+/**
+ * Direction-aware variant for the Activities page's clickable Due header
+ * (Molly's task-organization pass, 2026-08-12). Undated tasks stay LAST in
+ * both directions (flipping them to the top would bury every real due
+ * date), and priority always breaks ties High-first — reversing the
+ * priority tiebreak with the arrow would be meaningless.
+ */
+export function compareTasksByDue(
+  a: { due_at: string | null; priority?: TaskPriority },
+  b: { due_at: string | null; priority?: TaskPriority },
+  descending = false,
+): number {
   const ad = a.due_at;
   const bd = b.due_at;
   if (ad && bd) {
     const diff = new Date(ad).getTime() - new Date(bd).getTime();
-    if (diff !== 0) return diff;
+    if (diff !== 0) return descending ? -diff : diff;
   } else if (ad && !bd) {
     return -1; // a has a due date, b doesn't → a first
   } else if (!ad && bd) {
@@ -70,4 +85,109 @@ export function compareTasksByDueThenPriority(
   }
   // Same due date (or both undated) → priority decides.
   return priorityRank(a.priority) - priorityRank(b.priority);
+}
+
+// ── Urgency buckets + due chips (Molly's task-organization pass) ──────
+// One shared vocabulary for "how soon": the section headers in the tasks
+// panels, the bucket rows on the task-filtered Activities list, and the
+// tinted due chips all read from here so they can never disagree.
+
+export type TaskDueBucket = "overdue" | "today" | "week" | "later" | "none";
+
+/** Bucket display order + labels. "week" = the next 7 calendar days. */
+export const DUE_BUCKET_ORDER: TaskDueBucket[] = [
+  "overdue",
+  "today",
+  "week",
+  "later",
+  "none",
+];
+
+export const DUE_BUCKET_LABELS: Record<TaskDueBucket, string> = {
+  overdue: "Overdue",
+  today: "Today",
+  week: "This week",
+  later: "Later",
+  none: "No due date",
+};
+
+/** Small dot color for each bucket header (matches the chip palette). */
+export const DUE_BUCKET_DOT: Record<TaskDueBucket, string> = {
+  overdue: "bg-rose-500",
+  today: "bg-amber-500",
+  week: "bg-sky-500",
+  later: "bg-slate-400",
+  none: "bg-slate-300 dark:bg-slate-600",
+};
+
+/** Calendar-day difference (due minus now), ignoring time of day. */
+function calendarDayDiff(dueAt: string, now: Date): number {
+  const due = new Date(dueAt);
+  const a = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+  const b = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((a.getTime() - b.getTime()) / 86_400_000);
+}
+
+export function taskDueBucket(
+  dueAt: string | null | undefined,
+  now: Date = new Date(),
+): TaskDueBucket {
+  if (!dueAt) return "none";
+  const days = calendarDayDiff(dueAt, now);
+  if (days < 0) return "overdue";
+  if (days === 0) return "today";
+  if (days <= 7) return "week";
+  return "later";
+}
+
+/**
+ * Chip wording: relative when it helps ("3d overdue", "Due today", "Due
+ * tomorrow", "Due Fri"), absolute when it's far enough out that a weekday
+ * name stops meaning anything ("Due Aug 29", year added when different).
+ */
+export function taskDueChipLabel(dueAt: string, now: Date = new Date()): string {
+  const days = calendarDayDiff(dueAt, now);
+  if (days < 0) return `${-days}d overdue`;
+  if (days === 0) return "Due today";
+  if (days === 1) return "Due tomorrow";
+  const due = new Date(dueAt);
+  if (days <= 6) {
+    return `Due ${due.toLocaleDateString(undefined, { weekday: "short" })}`;
+  }
+  const sameYear = due.getFullYear() === now.getFullYear();
+  return `Due ${due.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+  })}`;
+}
+
+/** Tint classes for the due chip, keyed by bucket (light + dark). */
+export const DUE_BUCKET_CHIP: Record<Exclude<TaskDueBucket, "none">, string> = {
+  overdue: "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300",
+  today: "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300",
+  week: "bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-300",
+  later: "bg-slate-100 text-slate-600 dark:bg-slate-500/15 dark:text-slate-300",
+};
+
+/**
+ * Group already-sorted open tasks into non-empty bucket sections, keeping
+ * the incoming order inside each. Callers sort first (canonical order),
+ * so sections read Overdue → Today → This week → Later → No due date.
+ */
+export function groupTasksByBucket<T extends { due_at: string | null }>(
+  tasks: T[],
+  now: Date = new Date(),
+): Array<{ bucket: TaskDueBucket; tasks: T[] }> {
+  const byBucket = new Map<TaskDueBucket, T[]>();
+  for (const t of tasks) {
+    const b = taskDueBucket(t.due_at, now);
+    const arr = byBucket.get(b);
+    if (arr) arr.push(t);
+    else byBucket.set(b, [t]);
+  }
+  return DUE_BUCKET_ORDER.filter((b) => byBucket.has(b)).map((b) => ({
+    bucket: b,
+    tasks: byBucket.get(b)!,
+  }));
 }

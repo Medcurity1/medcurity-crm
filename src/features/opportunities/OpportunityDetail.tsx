@@ -55,6 +55,7 @@ import { celebrateClosedWon } from "@/lib/confetti";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { checkCloseReadiness, formatCloseReadinessMessage } from "@/lib/closeReadiness";
+import { FinishLineDialog, type FinishLineRequest } from "./FinishLineDialog";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
 import { DetailPageLayout } from "@/components/layout/DetailPageLayout";
 import { TasksPanel } from "@/features/activities/TasksPanel";
@@ -276,6 +277,8 @@ export function OpportunityDetail() {
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [pendingRemoveProduct, setPendingRemoveProduct] = useState<{ id: string; name: string } | null>(null);
   const [pendingStage, setPendingStage] = useState<OpportunityStage | null>(null);
+  // Finish Line (Molly 8/12): fix blocked-close gaps without leaving the deal.
+  const [finishLine, setFinishLine] = useState<FinishLineRequest | null>(null);
   const [newNote, setNewNote] = useState("");
   // Per-line inline edit state for the Notes log. The notes column is a
   // single concatenated text field (`name | date | content` per line),
@@ -402,9 +405,23 @@ export function OpportunityDetail() {
   const requestStageChange = async (stage: OpportunityStage) => {
     if (stage === opp.stage) return;
     if (stage === "closed_won") {
-      const { ready, missing, accountName } = await checkCloseReadiness(supabase, opp.account_id, opp.id);
+      const { ready, missing, accountName, missingKeys } = await checkCloseReadiness(supabase, opp.account_id, opp.id);
       if (!ready) {
-        toast.error(formatCloseReadinessMessage(missing, accountName));
+        // Finish Line (Molly 8/12): fixable gaps open the fill-them-here
+        // dialog; its final button doubles as the stage confirmation, so
+        // this path skips the generic Change Stage confirm entirely.
+        if (opp.account_id && missingKeys && missingKeys.length > 0) {
+          setFinishLine({
+            accountId: opp.account_id,
+            accountName,
+            missingKeys,
+            dealName: opp.name,
+            amount: typeof opp.amount === "number" ? opp.amount : Number(opp.amount ?? 0),
+            opportunity: opp.id,
+          });
+        } else {
+          toast.error(formatCloseReadinessMessage(missing, accountName));
+        }
         return;
       }
     }
@@ -1334,6 +1351,20 @@ export function OpportunityDetail() {
       />
 
       {closedLostGuard.dialog}
+
+      <FinishLineDialog
+        request={finishLine}
+        onDismiss={() => setFinishLine(null)}
+        onComplete={async () => {
+          // The dialog saved the fixes and re-verified the gate; its final
+          // button IS the confirmation, so commit the stage change directly.
+          if (!id) return;
+          await updateMutation.mutateAsync({ id, stage: "closed_won" });
+          toast.success(`Stage changed to ${stageLabel("closed_won")}`);
+          celebrateClosedWon();
+          setFinishLine(null);
+        }}
+      />
 
       <ChangeOwnerDialog
         open={showChangeOwner}

@@ -15,6 +15,38 @@ export const REQUEST_TYPE_LABELS: Record<RequestType, string> = {
   crm: "CRM",
 };
 
+/**
+ * Type → color language (Nathan 8/12, restyled same day to his spec): as
+ * requests pile up, the LISTING itself should say what's what at a glance —
+ * product is orange, CRM is green, collateral is purple. The color sits
+ * BEHIND the whole card: a low-opacity gradient end to end (slightly
+ * stronger at the edges, lighter through the middle, so it reads glossy),
+ * a matching tinted border, and a hover that deepens both. No accent bar.
+ * One shared map so every surface that lists requests (Nexus widget, inbox
+ * popup, widget-builder panel) speaks the same color. `chip` is the filled
+ * type badge; `dot` is the small legend swatch.
+ */
+export const REQUEST_TYPE_TINT: Record<
+  RequestType,
+  { row: string; chip: string; dot: string }
+> = {
+  product: {
+    row: "border-orange-500/30 bg-gradient-to-r from-orange-500/[0.16] via-orange-500/[0.06] to-orange-500/[0.13] hover:border-orange-500/60 hover:from-orange-500/[0.22] hover:to-orange-500/[0.18] dark:border-orange-400/25 dark:from-orange-400/[0.14] dark:via-orange-400/[0.05] dark:to-orange-400/[0.11] dark:hover:border-orange-400/50",
+    chip: "bg-orange-100 text-orange-800 dark:bg-orange-500/20 dark:text-orange-300",
+    dot: "bg-orange-500",
+  },
+  crm: {
+    row: "border-emerald-500/30 bg-gradient-to-r from-emerald-500/[0.16] via-emerald-500/[0.06] to-emerald-500/[0.13] hover:border-emerald-500/60 hover:from-emerald-500/[0.22] hover:to-emerald-500/[0.18] dark:border-emerald-400/25 dark:from-emerald-400/[0.14] dark:via-emerald-400/[0.05] dark:to-emerald-400/[0.11] dark:hover:border-emerald-400/50",
+    chip: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300",
+    dot: "bg-emerald-500",
+  },
+  collateral: {
+    row: "border-violet-500/30 bg-gradient-to-r from-violet-500/[0.16] via-violet-500/[0.06] to-violet-500/[0.13] hover:border-violet-500/60 hover:from-violet-500/[0.22] hover:to-violet-500/[0.18] dark:border-violet-400/25 dark:from-violet-400/[0.14] dark:via-violet-400/[0.05] dark:to-violet-400/[0.11] dark:hover:border-violet-400/50",
+    chip: "bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-300",
+    dot: "bg-violet-500",
+  },
+};
+
 export const STATUS_LABELS: Record<RequestStatus, string> = {
   pending: "Pending",
   completed: "Completed",

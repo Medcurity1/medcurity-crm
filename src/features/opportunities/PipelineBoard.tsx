@@ -60,6 +60,7 @@ import { OPEN_STAGES, RETIRED_STAGES, formatCurrency, stageLabel } from "@/lib/f
 import { celebrateClosedWon } from "@/lib/confetti";
 import { supabase } from "@/lib/supabase";
 import { checkCloseReadiness, formatCloseReadinessMessage } from "@/lib/closeReadiness";
+import { FinishLineDialog, type FinishLineRequest } from "./FinishLineDialog";
 import { useClosedLostGuard } from "./useClosedLostGuard";
 import type {
   ActivePipelineRow,
@@ -158,6 +159,10 @@ function PipelineKanban({
   const [lossPrompt, setLossPrompt] = useState<{ id: string; name: string; accountId: string } | null>(null);
   const [lossReason, setLossReason] = useState("");
   const movingRef = useRef(false);
+  // Finish Line (Molly 8/12): a drag into Closed Won that the gate blocks
+  // opens the fix-it-here dialog instead of a dead-end toast. The card snaps
+  // back meanwhile; completing the dialog performs the move.
+  const [finishLine, setFinishLine] = useState<FinishLineRequest | null>(null);
 
   async function doMove(id: string, newStage: OpportunityStage, accountId: string | null, reason?: string) {
     // Close-readiness gate (Rachel): block a drag INTO Closed Won until the
@@ -165,9 +170,22 @@ function PipelineKanban({
     // card in its source column — there's no optimistic move to undo, so the
     // card simply snaps back on drop.
     if (newStage === "closed_won") {
-      const { ready, missing, accountName } = await checkCloseReadiness(supabase, accountId, id);
+      const { ready, missing, accountName, missingKeys } = await checkCloseReadiness(supabase, accountId, id);
       if (!ready) {
-        toast.error(formatCloseReadinessMessage(missing, accountName));
+        const row = pipeline?.find((p) => p.id === id);
+        if (accountId && missingKeys && missingKeys.length > 0) {
+          setFinishLine({
+            accountId,
+            accountName: accountName ?? row?.account_name,
+            missingKeys,
+            dealName: row?.name ?? "Close this deal",
+            amount: row?.amount ?? null,
+            opportunity: id,
+          });
+        } else {
+          // Load failure (no fixable keys) — the dialog can't help here.
+          toast.error(formatCloseReadinessMessage(missing, accountName));
+        }
         return;
       }
     }
@@ -341,6 +359,20 @@ function PipelineKanban({
       </DialogContent>
     </Dialog>
     {closedLostGuard.dialog}
+    <FinishLineDialog
+      request={finishLine}
+      onDismiss={() => setFinishLine(null)}
+      onComplete={async () => {
+        // The dialog already saved the fixes and re-verified the gate.
+        // Committing here (not re-entering doMove) avoids a redundant
+        // gate round-trip and keeps one success path.
+        if (!finishLine) return;
+        await updateMutation.mutateAsync({ id: finishLine.opportunity as string, stage: "closed_won" });
+        toast.success(`Stage changed to ${stageLabel("closed_won")}`);
+        celebrateClosedWon();
+        setFinishLine(null);
+      }}
+    />
     </>
   );
 }
