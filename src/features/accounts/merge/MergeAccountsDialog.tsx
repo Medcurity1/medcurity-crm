@@ -172,7 +172,10 @@ export function MergeAccountsDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!merge.isPending) onOpenChange(o); }}>
-      <DialogContent className="sm:max-w-3xl max-h-[90vh] flex flex-col">
+      {/* NOTE: shadcn DialogContent is a GRID — don't fight it with flex.
+          The tall step (review) constrains itself via the ScrollArea's
+          max-h below, which keeps the footer pinned under the content. */}
+      <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <GitMerge className="h-5 w-5" />
@@ -217,7 +220,7 @@ export function MergeAccountsDialog({
               </div>
             )}
             {pair && survivor && loser && (
-              <ScrollArea className="flex-1 min-h-0 pr-3 -mr-3">
+              <ScrollArea className="max-h-[62vh] overflow-y-auto pr-3 -mr-3">
                 {/* ── Which record survives ─────────────────────────── */}
                 <div className="rounded-md border p-3 mb-4 bg-muted/30">
                   <div className="text-sm font-medium mb-2">Which record should be kept?</div>
