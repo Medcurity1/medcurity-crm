@@ -795,7 +795,7 @@ function MergeHistoryPanel() {
         open={!!undoTarget}
         onOpenChange={(o) => !o && setUndoTarget(null)}
         title="Undo this merge?"
-        description="The archived accounts come back and every record that moved goes back to where it was. For merges made from the account page's Merge button, the kept account's profile fields also return to their pre-merge values (including any later edits to those fields). For older admin-tool merges, field edits are kept. Partner links removed during the merge aren't restored."
+        description="The archived accounts come back and every record that moved goes back to where it was — including partner links: ones that moved are moved back, and ones removed during the merge are re-created (skipped only if one of their accounts was hard-deleted since, or an identical link already exists). For merges made from the account page's Merge button, the kept account's profile fields also return to their pre-merge values (including any later edits to those fields). For older admin-tool merges, field edits are kept."
         confirmLabel="Undo merge"
         onConfirm={() => {
           if (undoTarget) undo(undoTarget);
