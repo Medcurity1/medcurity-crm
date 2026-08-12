@@ -24,20 +24,28 @@ function row(over: Partial<DayQueueRow>): DayQueueRow {
 }
 
 describe("Open task deep link (Molly's 8/12 ticket)", () => {
-  it("a task card opens THE task, not the activities log", () => {
-    const r = row({ kind: "task", item_key: "task:abc-123", task_id: "abc-123" });
-    expect(primaryAction(r)).toEqual({ label: "Open task", to: "/activities/abc-123" });
+  it("a task on an account opens the ACCOUNT with the task popped open", () => {
+    const r = row({ kind: "task", item_key: "task:abc-123", task_id: "abc-123", account_id: "acct-9" });
+    expect(primaryAction(r)).toEqual({
+      label: "Open task",
+      to: "/accounts/acct-9?open_task=abc-123",
+    });
   });
 
   it("campaign tasks deep-link the same way", () => {
-    const r = row({ kind: "campaign_task", item_key: "task:def-456", task_id: "def-456" });
-    expect(primaryAction(r).to).toBe("/activities/def-456");
+    const r = row({ kind: "campaign_task", item_key: "task:def-456", task_id: "def-456", account_id: "acct-9" });
+    expect(primaryAction(r).to).toBe("/accounts/acct-9?open_task=def-456");
+  });
+
+  it("a task with NO account opens the task's own page", () => {
+    const r = row({ kind: "task", item_key: "task:abc-123", task_id: "abc-123", account_id: null });
+    expect(primaryAction(r).to).toBe("/activities/abc-123");
   });
 
   it("falls back to parsing item_key when task_id is missing", () => {
-    const r = row({ kind: "task", item_key: "task:ghi-789", task_id: null });
+    const r = row({ kind: "task", item_key: "task:ghi-789", task_id: null, account_id: "acct-9" });
     expect(taskIdOf(r)).toBe("ghi-789");
-    expect(primaryAction(r).to).toBe("/activities/ghi-789");
+    expect(primaryAction(r).to).toBe("/accounts/acct-9?open_task=ghi-789");
   });
 
   it("an unreadable row still lands somewhere sane (the activities page)", () => {

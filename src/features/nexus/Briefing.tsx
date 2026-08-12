@@ -184,10 +184,19 @@ export function primaryAction(row: DayQueueRow, isAdmin = true): { label: string
       return { label: "Open reply", to: "/playbook" };
     case "task":
     case "campaign_task": {
-      // Molly's 8/12 ticket: this used to dump her on the generic
-      // activities log. Land on the task itself — its page carries the
-      // account link and the manage controls.
+      // Molly's 8/12 ticket ("open the account and task directly to
+      // manage"), Nathan's reading: land on the ACCOUNT with the task
+      // popped open on top. ?open_task= is the existing reminder
+      // deep-link — DetailPageLayout flips the side panel to Tasks and
+      // TasksPanel opens the edit dialog. Tasks without an account fall
+      // back to the task's own page; unreadable rows to the log.
       const taskId = taskIdOf(row);
+      if (taskId && row.account_id) {
+        return {
+          label: "Open task",
+          to: `/accounts/${row.account_id}?open_task=${taskId}`,
+        };
+      }
       return {
         label: "Open task",
         to: taskId ? `/activities/${taskId}` : "/activities",
