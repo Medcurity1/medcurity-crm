@@ -2,7 +2,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useRecentRecords } from "@/hooks/useRecentRecords";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Pencil, Archive, ExternalLink, ChevronDown, Phone, UserRoundCog, Plus, MapPin, History, Trash2, StickyNote } from "lucide-react";
+import { Pencil, Archive, ExternalLink, ChevronDown, Phone, UserRoundCog, Plus, MapPin, History, Trash2, StickyNote, GitMerge } from "lucide-react";
 import { useAccount, useUpdateAccount, useArchiveAccount, useDeleteAccount, useAccountContracts, useClearCustomerStatusOverride } from "./api";
 import { useCustomFieldDefinitions } from "@/hooks/useCustomFields";
 import { PageHeader } from "@/components/PageHeader";
@@ -13,6 +13,7 @@ import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SalesStatusControl } from "./SalesStatusControl";
 import { ArchiveDialog } from "@/components/ArchiveDialog";
+import { MergeAccountsDialog } from "./merge/MergeAccountsDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
 import { QueryError } from "@/components/QueryError";
 import { RecordId } from "@/components/RecordId";
@@ -166,6 +167,7 @@ export function AccountDetail() {
   const archiveMutation = useArchiveAccount();
   const deleteMutation = useDeleteAccount();
   const [showArchive, setShowArchive] = useState(false);
+  const [showMerge, setShowMerge] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [showChangeOwner, setShowChangeOwner] = useState(false);
   const { addRecent } = useRecentRecords();
@@ -338,6 +340,16 @@ export function AccountDetail() {
               <Pencil className="h-4 w-4 mr-1" />
               Edit
             </Button>
+            {/* Merge opened to all write roles 2026-08-11 (Nathan) — the
+                guided pair-merge wizard; server-guarded by merge_account_pair
+                (migration 20260812000000). Undo stays admin-only in Admin →
+                Data Cleanup. */}
+            {canWrite && (
+              <Button variant="outline" size="sm" onClick={() => setShowMerge(true)}>
+                <GitMerge className="h-4 w-4 mr-1" />
+                Merge
+              </Button>
+            )}
             {/* Archive opened to all write roles 2026-07-17 (Nathan, for
                 Summer's duplicate cleanup) — reason required, DB-enforced
                 for non-admins in migration 20260717000004. Delete stays
@@ -841,6 +853,14 @@ export function AccountDetail() {
         onArchive={handleArchive}
         pending={archiveMutation.isPending}
       />
+
+      {id && (
+        <MergeAccountsDialog
+          open={showMerge}
+          onOpenChange={setShowMerge}
+          initialAccountId={id}
+        />
+      )}
 
       <ConfirmDialog
         open={showDelete}

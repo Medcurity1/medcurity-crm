@@ -29,7 +29,9 @@ Statuses: `IDEA` · `QUEUED` · `IN PROGRESS` · `BLOCKED` · `STAGING` (awaitin
 
 ## B. On staging — awaiting prod go-ahead
 
-_(none)_
+| # | Item | Who | Detail | Verify | Checked |
+|---|---|---|---|---|---|
+| B30 | Guarded account pair-merge for non-admin users | Nathan 8/11 ("adapt the existing account merge tool so a normal user can safely merge duplicates") | Migration 20260812000000: shared `_merge_accounts_core` (EXECUTE revoked; both wrappers reuse it) + `merge_account_pair` RPC gated by has_crm_write_role() (sales/renewals/admin/super_admin; read_only + NULL rejected), exactly 2 live accounts, row locks in id order, REQUIRED updated_at concurrency snapshots, server whitelist of 38 choosable columns (unknown key = loud reject), compliance flags OR'd never choosable, single transaction, audit row carries survivor_before + field_choices + merged_via. Core now also moves 5 tables the June tool stranded (account_attachments, contact_account_links, campaign_enrollments, deal_wins, partner_contract_summaries) — admin tool inherits the fix. undo_account_merge (still admin-only) restores the new tables AND the survivor's profile fields for pair-tool merges. UI: Merge button on AccountDetail (canWrite gate, next to Archive), 3-step wizard (pick via AccountCombobox → side-by-side review of every field incl. blanks, survivor recommendation = won-deal-then-older, per-row swap, conflict highlighting → plain-language confirm w/ admin-undo note). 17 new logic tests (defaults/blank/identical/conflict/swap/null-clear/whitelist/exclusions/survivor rule). | `grep -n "merge_account_pair" supabase/migrations/20260812000000_guarded_pair_merge.sql` + Merge button renders on staging account page; awaiting promote = `git log origin/main --oneline \| grep -i "pair-merge"` empty | 2026-08-11 |
 
 ---
 
