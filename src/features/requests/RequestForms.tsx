@@ -148,11 +148,15 @@ function useImagePreviews(files: File[]): Record<number, string> {
  * straight from ⌘⇧4, no save-then-browse round trip), dragging onto the box,
  * or the file picker.
  *
- * The paste listener is on `window`, not on a focused drop zone. After taking a
- * screenshot people paste wherever their cursor happens to be — usually the
- * description box — and a paste that silently does nothing reads as "this form
- * can't take images". It only ever claims clipboard items that are actually
- * files of an image type, so pasting text anywhere is completely untouched.
+ * The copy tells people to paste into the DESCRIPTION box, because that's where
+ * their cursor already is after typing and it's a specific place rather than a
+ * vague "here". The listener is still on `window` rather than that one field,
+ * deliberately: the instruction sets the expectation, but someone who clicks
+ * elsewhere first and pastes must not hit a dead end. A paste that silently
+ * does nothing reads as "this form can't take images".
+ *
+ * It only ever claims clipboard items that are actually files of an image type,
+ * so pasting text anywhere is completely untouched.
  */
 function AttachmentPicker({
   files,
@@ -244,8 +248,9 @@ function AttachmentPicker({
           <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
           <p className="text-amber-900 dark:text-amber-200">
             <strong className="font-semibold">A screenshot makes this much faster to fix.</strong>{" "}
-            Grab one with <kbd className="rounded border border-amber-400/50 px-1 font-mono">⌘⇧4</kbd>{" "}
-            and just paste it here — no need to save the file first.
+            Grab one with <kbd className="rounded border border-amber-400/50 px-1 font-mono">⌘⇧4</kbd>,
+            then paste it into the description box above — no need to save the
+            file first.
           </p>
         </div>
       )}
@@ -325,7 +330,7 @@ function AttachmentPicker({
           Attach files
         </Button>
         <p className="text-xs text-muted-foreground">
-          …or paste a screenshot, or drag files here.
+          …or drag files here, or paste a screenshot into the description box.
         </p>
       </div>
 
@@ -1026,8 +1031,14 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
           onChange={chooseClientFacing}
         />
       )}
+      {/* Wider than the default, and the footer stacks instead of laying the
+          actions out in a row. Both labels here are whole sentences, and shadcn
+          buttons are `whitespace-nowrap shrink-0` — side by side they ran off
+          the edge of the dialog rather than wrapping. Stacked and full-width,
+          each one gets its own line, and `whitespace-normal h-auto` lets a long
+          label wrap on a narrow window instead of overflowing again. */}
       <AlertDialog open={notABugWarnOpen} onOpenChange={setNotABugWarnOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="sm:max-w-xl">
           <AlertDialogHeader>
             <AlertDialogTitle>This looks like a request, not a bug</AlertDialogTitle>
             <AlertDialogDescription asChild>
@@ -1053,8 +1064,9 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="sm:flex-col sm:items-stretch sm:space-x-0 gap-2">
             <AlertDialogAction
+              className="w-full h-auto whitespace-normal py-2.5 text-center"
               onClick={() => {
                 setClientFacing(false);
                 setNotABugWarnOpen(false);
@@ -1063,6 +1075,7 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
               Send it through review (recommended)
             </AlertDialogAction>
             <AlertDialogCancel
+              className="mt-0 w-full h-auto whitespace-normal py-2.5 text-center"
               onClick={() => {
                 setNotABugBypassed(true);
                 setClientFacing(true);
@@ -1078,7 +1091,7 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
           primary action is the one that goes back and adds an image, because
           that is the outcome worth a whole dialog. */}
       <AlertDialog open={noScreenshotWarnOpen} onOpenChange={setNoScreenshotWarnOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="sm:max-w-xl">
           <AlertDialogHeader>
             <AlertDialogTitle>Add a screenshot?</AlertDialogTitle>
             <AlertDialogDescription asChild>
@@ -1091,8 +1104,8 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
                 <p>
                   Press{" "}
                   <kbd className="rounded border px-1 font-mono text-xs">⌘⇧4</kbd>{" "}
-                  to grab one, then paste it anywhere on this form. You don&apos;t
-                  need to save it as a file first.
+                  to grab one, then paste it into the description box. You
+                  don&apos;t need to save it as a file first.
                 </p>
                 <p className="text-muted-foreground">
                   If there&apos;s nothing to capture, go ahead and submit — this
@@ -1101,8 +1114,9 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="sm:flex-col sm:items-stretch sm:space-x-0 gap-2">
             <AlertDialogAction
+              className="w-full h-auto whitespace-normal py-2.5 text-center"
               onClick={() => {
                 setNoScreenshotBypassed(true);
                 setNoScreenshotWarnOpen(false);
@@ -1111,6 +1125,7 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
               Let me add one
             </AlertDialogAction>
             <AlertDialogCancel
+              className="mt-0 w-full h-auto whitespace-normal py-2.5 text-center"
               onClick={() => {
                 // Bypass first, then submit: actuallyCreate reads the flag on
                 // the next pass through handleSubmit.
