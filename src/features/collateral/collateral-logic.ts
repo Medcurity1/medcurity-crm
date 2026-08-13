@@ -1,14 +1,14 @@
-// Collateral filtering — the pure core of Jordan's spec, unit-tested.
+// Collateral filtering: the pure core of Jordan's spec, unit-tested.
 //
 // Her hardest-to-notice requirement (item 3): chips FILTER, they never
 // group. An asset tagged with two products appears under both chips.
 // Within one chip row selections OR together; across rows they AND; the
 // search box ANDs with all of it (item 2: substring across title + every
-// tag — reps think in the words on the document, not our column values).
+// tag: reps think in the words on the document, not our column values).
 //
 // Item 4: product values sharing the "SRA — " prefix collapse into one
 // parent chip presentation-side. Tagging stays flat; the hierarchy is
-// display only, and any future "Family — Variant" product works the same
+// display only, and any future "Family: Variant" product works the same
 // way with zero code change.
 
 export interface CollateralItemLike {
@@ -90,7 +90,7 @@ function uniqueSorted(values: string[]): string[] {
 /**
  * Chips come from the values actually present (her item 3 note: adding a
  * product later is a data change, not a code change). Product values that
- * share a "Family — Variant" prefix with at least one sibling collapse
+ * share a "Family: Variant" prefix with at least one sibling collapse
  * under a parent chip; lone prefixed values stay flat.
  */
 export function buildChipGroups(items: CollateralItemLike[]): ChipGroups {
@@ -106,7 +106,7 @@ export function buildChipGroups(items: CollateralItemLike[]): ChipGroups {
   const productChips: Chip[] = [];
   const consumed = new Set<string>();
   for (const [family, members] of families) {
-    if (members.length < 2) continue; // a lone "X — Y" is not a family
+    if (members.length < 2) continue; // a lone "X: Y" is not a family
     members.forEach((v) => consumed.add(v));
     productChips.push({
       value: `family:${family}`,
@@ -194,7 +194,7 @@ export function filterItems<T extends CollateralItemLike>(
  * A rep's default segment selection, applied only when the segments they
  * saved actually exist in the data (a stale pref can't blank the tab).
  * Her item 7 note: the default must include "All" or segment-agnostic
- * assets vanish — that's the seed's job; here we just honor what's saved.
+ * assets vanish: that's the seed's job; here we just honor what's saved.
  */
 export function initialSegmentSelection(
   savedDefaults: string[] | undefined,

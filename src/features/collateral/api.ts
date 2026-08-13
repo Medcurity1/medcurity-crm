@@ -1,6 +1,6 @@
 // Collateral data hooks (Jordan's v1.1 spec, 2026-08-11).
 //
-// Pulse is a VIEWER of the SharePoint Sales Collateral library — items
+// Pulse is a VIEWER of the SharePoint Sales Collateral library: items
 // arrive only via the collateral-sync edge fn (Status = Current, verbatim
 // columns) and the tab exposes no create/edit/delete path (§3). The only
 // client writes left: the admin pin toggle, per-user default segments,
@@ -148,7 +148,7 @@ export function useTogglePinned() {
   });
 }
 
-/** Kick the SharePoint sync (a READ-side refresh — §3). Fail-soft: an
+/** Kick the SharePoint sync (a READ-side refresh: §3). Fail-soft: an
  * unconfigured sync says so instead of erroring (the Azure app
  * registration is a human step that may not have happened yet). */
 export function useSyncCollateral() {
@@ -172,7 +172,7 @@ export function useSyncCollateral() {
       if (!res?.configured) {
         toast.info(
           res?.message ??
-            "SharePoint sync isn't connected yet — the Graph app registration is pending.",
+            "SharePoint sync isn't connected yet. The Graph app registration is pending.",
         );
         return;
       }

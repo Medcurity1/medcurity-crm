@@ -1,7 +1,7 @@
-// The collateral browsing surface — Jordan's v1.1 spec. ONE home: the
+// The collateral browsing surface: Jordan's v1.1 spec. ONE home: the
 // admin-gated /collateral route (§2; the V1 record-tab mode is gone).
 // Cards read from the collateral_items mirror; chips are generated from
-// the stored values VERBATIM (§1 — no CRM-side inference), so taxonomy
+// the stored values VERBATIM (§1: no CRM-side inference), so taxonomy
 // changes in SharePoint never need code. All styling is .collat-* scoped
 // (§0/§4): ice chips that turn navy when selected, white cards with the
 // file-type glyph in an ice square, blue link actions, and the amber
@@ -27,6 +27,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { useRequestDialog } from "@/features/requests/RequestDialogProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   DropdownMenu,
@@ -65,6 +66,30 @@ const KIND_ICON: Record<FileKind, typeof FileText> = {
   file: FileIcon,
 };
 
+/** "Need something we don't have?" (Nathan 8/12): a one-line strip that
+ * opens the request popup already set to the Collateral form. Rendered at
+ * the bottom of every library state so the ask is never more than one
+ * click away, without competing with the hero's primary button. */
+function RequestCallout() {
+  const { openRequestDialog } = useRequestDialog();
+  return (
+    <div className="collat-callout">
+      <p>
+        <strong>Need something we don't have?</strong> Tell the team what
+        would help you close, and it goes straight to the collateral queue.
+      </p>
+      <button
+        type="button"
+        className="collat-btn-secondary"
+        onClick={() => openRequestDialog("collateral")}
+      >
+        Request new collateral
+        <Send className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
 // ── Chips ────────────────────────────────────────────────────────────
 
 function ChipButton({
@@ -83,7 +108,7 @@ function ChipButton({
   );
 }
 
-/** §4: the SRA parent chip — one chip with a caret expanding to the
+/** §4: the SRA parent chip: one chip with a caret expanding to the
  * variants (matched on the shared "SRA — " prefix; display-only, no
  * schema change). Clicking the chip toggles the whole family. */
 function FamilyChip({
@@ -318,7 +343,7 @@ export function CollateralLibrary() {
   const chips = useMemo(() => buildChipGroups(items ?? []), [items]);
 
   // §2/§4 defaults on load: Use = Send to Prospect (the reps' common case)
-  // and the rep's saved default segments — with no record context, this is
+  // and the rep's saved default segments: with no record context, this is
   // the only personalization they get, so it always applies. Clearable.
   const appliedDefaults = useRef(false);
   useEffect(() => {
@@ -372,24 +397,27 @@ export function CollateralLibrary() {
   }
 
   // §6 acceptance: an empty grid is the CORRECT state until files are
-  // promoted to Current in SharePoint — say so instead of apologizing.
+  // promoted to Current in SharePoint: say so instead of apologizing.
   if (!items?.length) {
     return (
-      <div className="collat-empty">
-        <span className="collat-empty-icon">
-          <FileText className="h-5 w-5" />
-        </span>
-        <h3>The library is curated in SharePoint</h3>
-        <p>
-          Files marked <strong>Current</strong> in the Sales Collateral library
-          appear here automatically. Drafts and files in review never show.
-        </p>
-        {isAdmin && (
-          <p className="collat-meta">
-            Nothing here yet means nothing is marked Current — promote a file
-            in SharePoint, then Sync.
+      <div className="space-y-3">
+        <div className="collat-empty">
+          <span className="collat-empty-icon">
+            <FileText className="h-5 w-5" />
+          </span>
+          <h3>The library is curated in SharePoint</h3>
+          <p>
+            Files marked <strong>Current</strong> in the Sales Collateral library
+            appear here automatically. Drafts and files in review never show.
           </p>
-        )}
+          {isAdmin && (
+            <p className="collat-meta">
+              Nothing here yet means nothing is marked Current. Promote a file
+              in SharePoint, then Sync.
+            </p>
+          )}
+        </div>
+        <RequestCallout />
       </div>
     );
   }
@@ -399,7 +427,7 @@ export function CollateralLibrary() {
       {/* Search: title + every tag, combines with chips. A rep typing a
           competitor name matches battlecards that carry it in the title. */}
       <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8ba0b3]" />
+        <Search className="collat-search-icon pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -433,7 +461,7 @@ export function CollateralLibrary() {
         <ChipRow label="Use" chips={chips.uses} selected={uses} onChange={setUses} />
       </div>
 
-      {/* Pinned row: navy top edge — the platform's "these matter most". */}
+      {/* Pinned row: navy top edge: the platform's "these matter most". */}
       {pinnedItems.length > 0 && (
         <div className="space-y-2">
           <p className="collat-label flex items-center gap-1.5">
@@ -480,6 +508,8 @@ export function CollateralLibrary() {
         {gridItems.length} of {(items ?? []).filter((i) => !i.pinned).length} assets
         {pinnedItems.length ? ` · ${pinnedItems.length} pinned` : ""}
       </p>
+
+      <RequestCallout />
     </div>
   );
 }

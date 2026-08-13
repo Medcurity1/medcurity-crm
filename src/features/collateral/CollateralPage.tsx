@@ -1,8 +1,8 @@
-// The Collateral page — Jordan's v1.1 spec (2026-08-11).
+// The Collateral page: Jordan's v1.1 spec (2026-08-11).
 //
 // Pulse is a VIEWER of the SharePoint Sales Collateral library: the tab
 // reads the mirror, exposes zero write paths (§3), and lives in exactly
-// one place — this admin-gated route (§2). The look is the Medcurity
+// one place: this admin-gated route (§2). The look is the Medcurity
 // platform's light language (§4), scoped entirely to .collat-* classes in
 // collateral.css; nothing shared is restyled (§0). The page header keeps
 // Pulse's placement (title top-left, actions top-right) but is composed
@@ -44,7 +44,7 @@ export function CollateralPage() {
   return (
     <div className="collat-root mx-auto max-w-6xl">
       <div className="collat-canvas space-y-4">
-        {/* Hero — the page's single warm moment (§4). */}
+        {/* Hero: the page's single warm moment (§4). */}
         <div className="collat-hero flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1>Collateral</h1>
@@ -83,7 +83,7 @@ export function CollateralPage() {
           <p className="collat-meta flex items-center gap-1.5">
             <FolderOpen className="h-3.5 w-3.5" />
             Curation lives in SharePoint: upload, tag, and set Status there.
-            Files marked Current appear here on the next sync — Pulse never
+            Files marked Current appear here on the next sync. Pulse never
             writes to the library.
           </p>
         )}

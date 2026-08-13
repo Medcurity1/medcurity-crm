@@ -1,11 +1,11 @@
-// collateral-sync — read-only mirror of the SharePoint SALES COLLATERAL
+// collateral-sync: read-only mirror of the SharePoint SALES COLLATERAL
 // library into collateral_items (Jordan's v1.1 spec, 2026-08-11).
 //
-// §1 HARD REQUIREMENT — the single allowed source. Every read goes through
+// §1 HARD REQUIREMENT: the single allowed source. Every read goes through
 // /drives/{driveId}/… for the Sales Collateral drive below. Never a
 // site-scoped search, never the site's default "Shared Documents" library.
 // Jordan's negative test case: ".../Shared Documents/Sales/Sales Resources/
-// General Collateral/Services Brochure.pdf" must NEVER appear — its drive
+// General Collateral/Services Brochure.pdf" must NEVER appear: its drive
 // is Shared Documents, not this one.
 //
 //   Site:    https://medcurityinc.sharepoint.com/sites/MedcurityInc
@@ -14,12 +14,12 @@
 // §3 READ-ONLY at the credential: the Graph app registration should hold
 // Sites.Selected (Application) with only the READ role granted on the
 // MedcurityInc site (registering the app + granting the role is a human
-// step in the Azure portal — Jordan/Nathan). This function only ever GETs.
+// step in the Azure portal: Jordan/Nathan). This function only ever GETs.
 //
 // FAIL-SOFT: until the registration exists this reports
 // { configured: false } instead of erroring.
 //   Secrets: GRAPH_TENANT_ID / GRAPH_CLIENT_ID / GRAPH_CLIENT_SECRET
-//   COLLATERAL_DRIVE_ID is optional — it DEFAULTS to the Sales Collateral
+//   COLLATERAL_DRIVE_ID is optional: it DEFAULTS to the Sales Collateral
 //   drive above and exists only for a future library move.
 //
 // Sync contract (§5):
@@ -29,12 +29,12 @@
 //     In Review / Needs Review / Archived never render, even for admins).
 //   - Upsert keyed on the drive item id (links resolve by item ID, so
 //     SharePoint renames never break copied links; webUrl refreshes here).
-//   - Map the library columns VERBATIM — no CRM-side tag inference.
+//   - Map the library columns VERBATIM: no CRM-side tag inference.
 //   - DELETE rows whose itemId no longer appears (file archived, deleted,
-//     or demoted from Current) — the grid must match the library exactly.
+//     or demoted from Current): the grid must match the library exactly.
 //
 // Auth: caller must be a signed-in ADMIN (verified via the caller's JWT
-// role claim per the repo's edge-fn conventions — never by comparing raw
+// role claim per the repo's edge-fn conventions: never by comparing raw
 // keys). Writes use the service role.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -129,7 +129,7 @@ Deno.serve(async (req) => {
       ok: true,
       configured: false,
       message:
-        "SharePoint sync isn't connected yet — the Graph app registration (Sites.Selected, read role) is pending.",
+        "SharePoint sync isn't connected yet. The Graph app registration (Sites.Selected, read role) is pending.",
     });
   }
 
@@ -155,7 +155,7 @@ Deno.serve(async (req) => {
 
     // Walk the Sales Collateral drive root (flat library), expanding each
     // list item so the tag columns come along. Drive-scoped by
-    // construction — no other library can leak in (§1).
+    // construction: no other library can leak in (§1).
     const seen = new Set<string>();
     let synced = 0;
     let skippedNotCurrent = 0;
@@ -188,7 +188,7 @@ Deno.serve(async (req) => {
             sharepoint_item_id: itemId,
             sharepoint_drive_id: driveId,
             title: (fields.Title as string) || entry.name || "Untitled",
-            // Verbatim column values — no inference (§1). Empty column =
+            // Verbatim column values: no inference (§1). Empty column =
             // no chip.
             asset_type: toValues(fields[FIELDS.assetType])[0] ?? null,
             products: toValues(fields[FIELDS.product]),
@@ -199,7 +199,7 @@ Deno.serve(async (req) => {
             last_reviewed: toDateOnly(fields[FIELDS.lastReviewed]),
             owner_name: toPersonName(fields[FIELDS.owner]),
             // webUrl resolves by SharePoint's own routing and refreshes
-            // every sync — renames never strand a copied link (item-ID rule).
+            // every sync: renames never strand a copied link (item-ID rule).
             web_url: entry.webUrl,
             source: "sync",
             archived_at: null,
@@ -216,7 +216,7 @@ Deno.serve(async (req) => {
       url = page["@odata.nextLink"] ?? "";
     }
 
-    // §5: DELETE rows whose itemId no longer appears in the fetch — the
+    // §5: DELETE rows whose itemId no longer appears in the fetch: the
     // grid must mirror the library exactly (archived, deleted, or demoted
     // from Current all disappear). This also clears any legacy manual rows.
     const { data: existing } = await admin
