@@ -418,6 +418,41 @@ export async function classifyDraftBug(draft: {
   return last ?? { ...CLASSIFY_UNAVAILABLE };
 }
 
+export interface ClarifyQuestion {
+  id: string;
+  question: string;
+}
+
+/**
+ * Ask for 2-3 follow-up questions on a draft request.
+ *
+ * Deliberately un-retried, unlike classifyDraftBug. That one is retried because
+ * a missing verdict can send a client-blocking bug to the wrong queue; this one
+ * only costs a slightly thinner ticket. It sits between a person and the submit
+ * button, so a second 12s attempt would buy a marginal improvement at the price
+ * of a spinner long enough to feel broken.
+ *
+ * Never throws — an empty list means "just submit", and every caller treats it
+ * that way.
+ */
+export async function askClarifyingQuestions(draft: {
+  title: string;
+  description: string;
+  category: string;
+}): Promise<ClarifyQuestion[]> {
+  try {
+    const data = (await invokeRequestAction({
+      action: "clarify",
+      draftTitle: draft.title,
+      draftDescription: draft.description,
+      draftCategory: draft.category,
+    })) as { questions?: ClarifyQuestion[] };
+    return (data?.questions ?? []).filter((q) => q?.id && q?.question);
+  } catch {
+    return [];
+  }
+}
+
 export interface CreateRequestResult {
   request: CrmRequest;
   /** Names of any files that failed to upload (request itself succeeded). */
@@ -626,8 +661,9 @@ export function useCompleteRequest() {
  * generic "non-2xx" string).
  */
 async function invokeRequestAction(payload: {
-  action: "approve" | "summarize" | "design_prompt" | "file_bug" | "classify_bug";
-  /** Required for every action except classify_bug, which runs before the row exists. */
+  action: "approve" | "summarize" | "design_prompt" | "file_bug" | "classify_bug" | "clarify";
+  /** Required for every action except classify_bug and clarify, both of which
+   *  run on a draft, before the row exists. */
   requestId?: string;
   note?: string | null;
   regenerate?: boolean;
@@ -647,6 +683,8 @@ async function invokeRequestAction(payload: {
   draftTitle?: string;
   draftDescription?: string;
   draftPriority?: string;
+  /** clarify: 'bug' | 'enhancement'. Only steers the question style. */
+  draftCategory?: string;
 }) {
   const { data, error } = await supabase.functions.invoke("product-request-action", {
     body: payload,
