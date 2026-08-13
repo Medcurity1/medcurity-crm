@@ -355,29 +355,6 @@
   color: var(--c-icon);
 }
 
-/* "Need something we don't have?" strip (Nathan 8/12): one quiet card
- * that opens the collateral request form. */
-.collat-callout {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  background: var(--c-card-bg);
-  border: 1px solid var(--c-card-edge);
-  border-radius: 14px;
-  padding: 0.8rem 1rem;
-  box-shadow: var(--c-shadow);
-}
-.collat-callout p {
-  color: var(--c-text-body);
-  font-size: 0.82rem;
-}
-.collat-callout strong {
-  color: var(--c-text-strong);
-  font-weight: 700;
-}
-
 /* Admin pin affordance (ghost icon button on cards). */
 .collat-iconbtn {
   display: grid;

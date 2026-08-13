@@ -27,7 +27,6 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { useRequestDialog } from "@/features/requests/RequestDialogProvider";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   DropdownMenu,
@@ -65,30 +64,6 @@ const KIND_ICON: Record<FileKind, typeof FileText> = {
   image: FileImage,
   file: FileIcon,
 };
-
-/** "Need something we don't have?" (Nathan 8/12): a one-line strip that
- * opens the request popup already set to the Collateral form. Rendered at
- * the bottom of every library state so the ask is never more than one
- * click away, without competing with the hero's primary button. */
-function RequestCallout() {
-  const { openRequestDialog } = useRequestDialog();
-  return (
-    <div className="collat-callout">
-      <p>
-        <strong>Need something we don't have?</strong> Tell the team what
-        would help you close, and it goes straight to the collateral queue.
-      </p>
-      <button
-        type="button"
-        className="collat-btn-secondary"
-        onClick={() => openRequestDialog("collateral")}
-      >
-        Request new collateral
-        <Send className="h-3.5 w-3.5" />
-      </button>
-    </div>
-  );
-}
 
 // ── Chips ────────────────────────────────────────────────────────────
 
@@ -400,24 +375,21 @@ export function CollateralLibrary() {
   // promoted to Current in SharePoint: say so instead of apologizing.
   if (!items?.length) {
     return (
-      <div className="space-y-3">
-        <div className="collat-empty">
-          <span className="collat-empty-icon">
-            <FileText className="h-5 w-5" />
-          </span>
-          <h3>The library is curated in SharePoint</h3>
-          <p>
-            Files marked <strong>Current</strong> in the Sales Collateral library
-            appear here automatically. Drafts and files in review never show.
+      <div className="collat-empty">
+        <span className="collat-empty-icon">
+          <FileText className="h-5 w-5" />
+        </span>
+        <h3>The library is curated in SharePoint</h3>
+        <p>
+          Files marked <strong>Current</strong> in the Sales Collateral library
+          appear here automatically. Drafts and files in review never show.
+        </p>
+        {isAdmin && (
+          <p className="collat-meta">
+            Nothing here yet means nothing is marked Current. Promote a file
+            in SharePoint, then Sync.
           </p>
-          {isAdmin && (
-            <p className="collat-meta">
-              Nothing here yet means nothing is marked Current. Promote a file
-              in SharePoint, then Sync.
-            </p>
-          )}
-        </div>
-        <RequestCallout />
+        )}
       </div>
     );
   }
@@ -508,8 +480,6 @@ export function CollateralLibrary() {
         {gridItems.length} of {(items ?? []).filter((i) => !i.pinned).length} assets
         {pinnedItems.length ? ` · ${pinnedItems.length} pinned` : ""}
       </p>
-
-      <RequestCallout />
     </div>
   );
 }
