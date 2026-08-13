@@ -613,6 +613,7 @@ serve(async (req) => {
       draftTitle,
       draftDescription,
       draftPriority,
+      draftCategory,
       clientFacingReasoning,
       clientFacingConfidence,
       clientFacingSource,
@@ -630,6 +631,8 @@ serve(async (req) => {
       draftTitle?: string;
       draftDescription?: string;
       draftPriority?: string;
+      /** clarify: 'bug' | 'enhancement'. Only steers the question style. */
+      draftCategory?: string;
       /** file_bug. The classifier's own output, echoed back from the form so
        * it can be persisted under the service role. The insert-sanitize
        * trigger deliberately strips these on insert (a submitter must not be
@@ -729,6 +732,95 @@ serve(async (req) => {
             timedOut: true,
           },
         });
+      }
+    }
+
+    // ── clarify: pre-submit follow-up questions ──
+    // Reads the draft and asks 2-3 things a developer would have to come back
+    // and ask anyway. Like classify_bug it runs before the row exists, takes
+    // the draft fields, and is open to any signed-in user — they're about to
+    // file it regardless.
+    //
+    // NOTE: unlike classify_bug, this does NOT proxy to Helm. Client-impact
+    // classification is grounded in the Medcurity codebase, which is why it
+    // lives over there; "what did you expect to happen instead?" needs nothing
+    // but the requester's own words. Calling Anthropic directly saves a hop on
+    // a path a person is actively waiting on, and needs no new secret —
+    // ANTHROPIC_API_KEY is already here for Meddy and ask-ai.
+    //
+    // ALWAYS 200. Questions are a bonus on top of a form that already works;
+    // if the model is slow, rate-limited, or returns something unparseable,
+    // the honest outcome is an empty list and a form that submits normally.
+    if (action === "clarify") {
+      const anthropicKey = (Deno.env.get("ANTHROPIC_API_KEY") ?? "").trim();
+      const draftT = String(draftTitle ?? "").slice(0, 300);
+      const draftD = String(draftDescription ?? "").slice(0, 6000);
+      if (!anthropicKey || draftD.trim().length < 15) return json({ questions: [] });
+
+      try {
+        const res = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          // A person is watching a spinner. Shorter than the classifier's
+          // budget because this one is optional and additive.
+          signal: AbortSignal.timeout(12_000),
+          headers: {
+            "content-type": "application/json",
+            "x-api-key": anthropicKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: "claude-sonnet-5",
+            max_tokens: 700,
+            system:
+              "You help a healthcare-compliance software team collect better internal " +
+              "requests. You will be given a draft request written by a colleague " +
+              "(not a customer). Return the 2-3 questions a developer would " +
+              "otherwise have to go back and ask before they could start work.\n\n" +
+              "Rules:\n" +
+              "- Ask ONLY about things the draft does not already answer. If the draft " +
+              "is already specific, return fewer questions, or none at all.\n" +
+              "- Be concrete and answerable in one line: 'Which page or screen?', " +
+              "'What did you expect to happen instead?', 'Does it happen every time " +
+              "or intermittently?'. Never ask for a screenshot — the form handles that.\n" +
+              "- Never ask for patient data, PHI, or anything identifying a patient.\n" +
+              "- No preamble, no restating the request, no pleasantries.\n\n" +
+              'Respond with ONLY a JSON object: {"questions":[{"id":"q1","question":"..."}]}. ' +
+              'If nothing is genuinely unclear, respond {"questions":[]}.',
+            messages: [
+              {
+                role: "user",
+                content:
+                  `Request type: ${String(draftCategory ?? "unspecified")}\n` +
+                  `Title: ${draftT}\n\nDescription:\n${draftD}`,
+              },
+            ],
+          }),
+        });
+        if (!res.ok) {
+          console.error(`[clarify] anthropic ${res.status}`);
+          return json({ questions: [] });
+        }
+        const body = (await res.json()) as { content?: Array<{ text?: string }> };
+        const text = body?.content?.map((c) => c.text ?? "").join("") ?? "";
+        // Models sometimes wrap JSON in prose or a fence despite instructions.
+        const match = text.match(/\{[\s\S]*\}/);
+        if (!match) return json({ questions: [] });
+        const parsed = JSON.parse(match[0]) as {
+          questions?: Array<{ id?: string; question?: string }>;
+        };
+        const questions = (parsed.questions ?? [])
+          .map((q, i) => ({
+            id: String(q.id ?? `q${i + 1}`).slice(0, 20),
+            question: String(q.question ?? "").trim().slice(0, 300),
+          }))
+          .filter((q) => q.question.length > 0)
+          // Hard cap regardless of what came back: this sits between a person
+          // and the submit button, and a wall of questions is a wall.
+          .slice(0, 3);
+        return json({ questions });
+      } catch (e) {
+        console.error(`[clarify] failed: ${e instanceof Error ? e.message : String(e)}`);
+        return json({ questions: [] });
       }
     }
 

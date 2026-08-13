@@ -39,6 +39,8 @@ import {
 import {
   useCreateRequest,
   classifyDraftBug,
+  askClarifyingQuestions,
+  type ClarifyQuestion,
   PRIORITY_OPTIONS,
   COLLATERAL_AUDIENCES,
   COLLATERAL_FORMATS,
@@ -108,29 +110,81 @@ function FormFooter({ children }: { children: ReactNode }) {
   );
 }
 
+/** A pasted screenshot arrives as a nameless blob (or a generic "image.png"),
+ *  so several in one request would collide and read as identical in the
+ *  attachment list. Stamp them so they sort and describe themselves. */
+function nameForPastedImage(type: string): string {
+  const ext = (type.split("/")[1] || "png").replace(/[^a-z0-9]/gi, "").slice(0, 4);
+  const t = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `screenshot-${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}-${p(t.getHours())}${p(t.getMinutes())}${p(t.getSeconds())}.${ext}`;
+}
+
+/** Thumbnails for image attachments. Object URLs are revoked when the file
+ *  list changes so a long editing session doesn't leak blobs. */
+function useImagePreviews(files: File[]): Record<number, string> {
+  const [urls, setUrls] = useState<Record<number, string>>({});
+  useEffect(() => {
+    const made: string[] = [];
+    const next: Record<number, string> = {};
+    files.forEach((f, i) => {
+      if (f.type.startsWith("image/")) {
+        const u = URL.createObjectURL(f);
+        made.push(u);
+        next[i] = u;
+      }
+    });
+    setUrls(next);
+    return () => made.forEach((u) => URL.revokeObjectURL(u));
+  }, [files]);
+  return urls;
+}
+
 /**
- * Attachment field (ports OG Nexus's uploads): up to `maxFiles` files,
- * each capped at `maxSizeMB`. Files upload when the request is submitted.
+ * Attachment field (ports OG Nexus's uploads): up to `maxFiles` files, each
+ * capped at `maxSizeMB`. Files upload when the request is submitted.
+ *
+ * Three ways in, because the old one only had the worst one: pasting (⌘V
+ * straight from ⌘⇧4, no save-then-browse round trip), dragging onto the box,
+ * or the file picker.
+ *
+ * The paste listener is on `window`, not on a focused drop zone. After taking a
+ * screenshot people paste wherever their cursor happens to be — usually the
+ * description box — and a paste that silently does nothing reads as "this form
+ * can't take images". It only ever claims clipboard items that are actually
+ * files of an image type, so pasting text anywhere is completely untouched.
  */
 function AttachmentPicker({
   files,
   onChange,
   maxFiles = 5,
   maxSizeMB,
+  urgeScreenshot = false,
 }: {
   files: File[];
   onChange: (files: File[]) => void;
   maxFiles?: number;
   maxSizeMB: number;
+  /** Show the "a screenshot makes this much faster to fix" prompt. */
+  urgeScreenshot?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const previews = useImagePreviews(files);
 
-  function addFiles(list: FileList | null) {
-    if (!list) return;
-    const next = [...files];
-    for (const f of Array.from(list)) {
+  // Held in a ref so the window paste listener never closes over a stale list.
+  const filesRef = useRef(files);
+  filesRef.current = files;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  function mergeFiles(incoming: File[]) {
+    const current = filesRef.current;
+    const next = [...current];
+    let rejectedForCount = false;
+    for (const f of incoming) {
       if (next.length >= maxFiles) {
-        toast.error(`Up to ${maxFiles} files per request.`);
+        rejectedForCount = true;
         break;
       }
       if (f.size > maxSizeMB * 1024 * 1024) {
@@ -139,13 +193,63 @@ function AttachmentPicker({
       }
       next.push(f);
     }
-    onChange(next);
+    if (rejectedForCount) toast.error(`Up to ${maxFiles} files per request.`);
+    if (next.length !== current.length) onChangeRef.current(next);
+    return next.length - current.length;
+  }
+
+  function addFiles(list: FileList | null) {
+    if (!list) return;
+    mergeFiles(Array.from(list));
     if (inputRef.current) inputRef.current.value = "";
   }
+
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const images: File[] = [];
+      for (const item of Array.from(items)) {
+        if (item.kind !== "file") continue;
+        const f = item.getAsFile();
+        if (!f || !f.type.startsWith("image/")) continue;
+        // Rename in place — see nameForPastedImage.
+        images.push(
+          new File([f], f.name && f.name !== "image.png" ? f.name : nameForPastedImage(f.type), {
+            type: f.type,
+          }),
+        );
+      }
+      if (images.length === 0) return;
+      // Only now — a paste we aren't handling must reach the field normally.
+      e.preventDefault();
+      const added = mergeFiles(images);
+      if (added > 0) {
+        toast.success(added === 1 ? "Screenshot attached" : `${added} images attached`);
+      }
+    }
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+    // maxFiles/maxSizeMB are stable for a given form; files come from the ref.
+  }, [maxFiles, maxSizeMB]);
+
+  const full = files.length >= maxFiles;
 
   return (
     <div className="space-y-2">
       <Label>Attachments</Label>
+
+      {urgeScreenshot && files.length === 0 && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-300/60 bg-amber-50 p-2.5 text-xs dark:border-amber-500/30 dark:bg-amber-500/10">
+          <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <p className="text-amber-900 dark:text-amber-200">
+            <strong className="font-semibold">A screenshot makes this much faster to fix.</strong>{" "}
+            Grab one with <kbd className="rounded border border-amber-400/50 px-1 font-mono">⌘⇧4</kbd>{" "}
+            and just paste it here — no need to save the file first.
+          </p>
+        </div>
+      )}
+
       {files.length > 0 && (
         <div className="space-y-1.5">
           {files.map((f, i) => (
@@ -153,7 +257,15 @@ function AttachmentPicker({
               key={`${f.name}-${i}`}
               className="flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm"
             >
-              <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              {previews[i] ? (
+                <img
+                  src={previews[i]}
+                  alt=""
+                  className="h-8 w-8 shrink-0 rounded border border-border object-cover"
+                />
+              ) : (
+                <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              )}
               <span className="min-w-0 flex-1 truncate">{f.name}</span>
               <span className="shrink-0 text-xs text-muted-foreground">
                 {(f.size / (1024 * 1024)).toFixed(1)} MB
@@ -170,6 +282,7 @@ function AttachmentPicker({
           ))}
         </div>
       )}
+
       <input
         ref={inputRef}
         type="file"
@@ -177,20 +290,96 @@ function AttachmentPicker({
         className="hidden"
         onChange={(e) => addFiles(e.target.files)}
       />
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="gap-2"
-        onClick={() => inputRef.current?.click()}
-        disabled={files.length >= maxFiles}
+
+      <div
+        onDragOver={(e) => {
+          if (full) return;
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          if (full) {
+            toast.error(`Up to ${maxFiles} files per request.`);
+            return;
+          }
+          addFiles(e.dataTransfer.files);
+        }}
+        className={cn(
+          "flex flex-col items-center gap-1.5 rounded-md border border-dashed px-3 py-4 text-center transition-colors",
+          dragging ? "border-primary bg-primary/5" : "border-border",
+          full && "opacity-60",
+        )}
       >
-        <Paperclip className="h-3.5 w-3.5" />
-        Attach files
-      </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="gap-2"
+          onClick={() => inputRef.current?.click()}
+          disabled={full}
+        >
+          <Paperclip className="h-3.5 w-3.5" />
+          Attach files
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          …or paste a screenshot, or drag files here.
+        </p>
+      </div>
+
       <p className="text-xs text-muted-foreground">
         Up to {maxFiles} files, {maxSizeMB} MB each. Optional.
       </p>
+    </div>
+  );
+}
+
+/**
+ * The follow-ups a developer would otherwise have to come back and ask.
+ *
+ * Every one is optional and says so. The point is to catch the detail someone
+ * would have happily given if anyone had asked — not to build a gate. A
+ * required field here would just collect "n/a" three times, which is worse than
+ * asking nothing, because it looks like an answer.
+ */
+function ClarifyingQuestions({
+  questions,
+  answers,
+  onChange,
+}: {
+  questions: ClarifyQuestion[];
+  answers: Record<string, string>;
+  onChange: (id: string, value: string) => void;
+}) {
+  if (questions.length === 0) return null;
+  return (
+    <div className="space-y-3 rounded-md border border-border bg-muted/40 p-3">
+      <div className="flex items-start gap-2">
+        <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+        <div className="space-y-0.5">
+          <p className="text-sm font-medium">A couple of quick questions</p>
+          <p className="text-xs text-muted-foreground">
+            Answering these saves a round trip later. All optional — submit
+            without them if they don&apos;t apply.
+          </p>
+        </div>
+      </div>
+      {questions.map((q) => (
+        <div key={q.id} className="space-y-1.5">
+          <Label htmlFor={`clarify-${q.id}`} className="text-sm font-normal">
+            {q.question}
+          </Label>
+          <Input
+            id={`clarify-${q.id}`}
+            maxLength={500}
+            value={answers[q.id] ?? ""}
+            onChange={(e) => onChange(q.id, e.target.value)}
+            placeholder="Optional"
+          />
+        </div>
+      ))}
     </div>
   );
 }
@@ -525,6 +714,12 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
   // the submitter saw it for THIS verdict and chose straight-to-dev anyway.
   const [notABugWarnOpen, setNotABugWarnOpen] = useState(false);
   const [notABugBypassed, setNotABugBypassed] = useState(false);
+  const [noScreenshotWarnOpen, setNoScreenshotWarnOpen] = useState(false);
+  const [noScreenshotBypassed, setNoScreenshotBypassed] = useState(false);
+  // null = not asked yet; [] = asked and nothing was unclear (or it failed,
+  // which is deliberately indistinguishable — both mean "carry on").
+  const [clarifyQs, setClarifyQs] = useState<ClarifyQuestion[] | null>(null);
+  const [clarifyAnswers, setClarifyAnswers] = useState<Record<string, string>>({});
 
   const dirty =
     !submitted &&
@@ -542,11 +737,22 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
     setChecking(false);
     setNotABugWarnOpen(false);
     setNotABugBypassed(false);
+    setNoScreenshotWarnOpen(false);
+    setNoScreenshotBypassed(false);
+    setClarifyQs(null);
+    setClarifyAnswers({});
   }
 
   // Editing the report after we've classified it invalidates the verdict —
   // otherwise you could get a judgement on one description and file another.
   // The not-a-bug bypass is scoped to a verdict, so it resets with it.
+  //
+  // Clarifying questions are deliberately NOT invalidated here. They're
+  // generated from the description, so an edit can make them stale — but the
+  // common edit is answering them by expanding the description, and yanking the
+  // questions (and the answers typed into them) out from under someone
+  // mid-sentence is far worse than a question that's since been addressed.
+  // They're optional either way.
   function invalidateVerdict() {
     if (verdict) setVerdict(null);
     if (notABugBypassed) setNotABugBypassed(false);
@@ -563,12 +769,36 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
     setClientFacing(v);
   }
 
+  /**
+   * The description as it will actually be filed: what they wrote, plus any
+   * clarifying answers appended as a Q/A block.
+   *
+   * Folded in HERE rather than written back into `description` state, because
+   * every edit to that field re-runs invalidateVerdict — writing to it would
+   * throw away the client-impact check the moment the answers landed.
+   */
+  function composedDescription(): string {
+    const base = description.trim();
+    const answered = (clarifyQs ?? [])
+      .map((q) => ({ q: q.question, a: (clarifyAnswers[q.id] ?? "").trim() }))
+      .filter((x) => x.a.length > 0);
+    if (answered.length === 0) return base;
+    return [
+      base,
+      "",
+      "---",
+      ...answered.flatMap((x) => [`**${x.q}**`, x.a, ""]),
+    ]
+      .join("\n")
+      .trim();
+  }
+
   function actuallyCreate() {
     create.mutate(
       {
         type: "product",
         title: title.trim(),
-        description: description.trim(),
+        description: composedDescription(),
         priority,
         requesterName: profile?.full_name ?? null,
         details: { category },
@@ -613,7 +843,46 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
       return;
     }
 
-    // Enhancements are unchanged — they go to the existing review queue.
+    // First click, either category: ask what a developer would have to come
+    // back and ask. Runs alongside the client-impact check rather than after
+    // it, so a bug costs ONE pause and one spinner, not two.
+    //
+    // A request that was already specific gets no questions and no extra click
+    // — the flow below only pauses when there is something on screen to look at.
+    let freshQs: ClarifyQuestion[] = clarifyQs ?? [];
+    if (clarifyQs === null) {
+      setChecking(true);
+      try {
+        const [qs, v] = await Promise.all([
+          askClarifyingQuestions({
+            title: title.trim(),
+            description: description.trim(),
+            category,
+          }),
+          category === "bug" && !verdict
+            ? classifyDraftBug({
+                title: title.trim(),
+                description: description.trim(),
+                priority,
+              })
+            : Promise.resolve(null),
+        ]);
+        freshQs = qs;
+        setClarifyQs(qs);
+        if (v) {
+          setVerdict(v);
+          // See the note below on why this starts at "yes".
+          setClientFacing(v.timedOut ? true : v.clientFacing);
+        }
+      } finally {
+        setChecking(false);
+      }
+      // Pause only if there's something to show. An enhancement with nothing
+      // unclear files on this very click, exactly as it did before.
+      if (freshQs.length > 0 || category === "bug") return;
+    }
+
+    // Enhancements are otherwise unchanged — they go to the review queue.
     if (category !== "bug") {
       actuallyCreate();
       return;
@@ -660,6 +929,15 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
       shouldWarnNotABug(verdict, true, notABugBypassed)
     ) {
       setNotABugWarnOpen(true);
+      return;
+    }
+
+    // Last stop before filing: a bug with no screenshot. Asked once and never
+    // again for this request (noScreenshotBypassed), and it is a prompt, not a
+    // gate — plenty of real bugs can't be captured in an image, and blocking
+    // those would just teach people to attach something useless.
+    if (category === "bug" && files.length === 0 && !noScreenshotBypassed) {
+      setNoScreenshotWarnOpen(true);
       return;
     }
 
@@ -720,7 +998,20 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
           }
         />
       </div>
-      <AttachmentPicker files={files} onChange={setFiles} maxSizeMB={25} />
+      <ClarifyingQuestions
+        questions={clarifyQs ?? []}
+        answers={clarifyAnswers}
+        onChange={(id, value) => setClarifyAnswers((prev) => ({ ...prev, [id]: value }))}
+      />
+      {/* Urged only on bugs: a screenshot is the single most useful thing a
+          bug report can carry, while an enhancement is usually an idea that
+          doesn't exist on screen yet. */}
+      <AttachmentPicker
+        files={files}
+        onChange={setFiles}
+        maxSizeMB={25}
+        urgeScreenshot={category === "bug"}
+      />
       <PrioritySelect
         value={priority}
         onChange={(v) => {
@@ -779,6 +1070,56 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
               }}
             >
               It&apos;s a time-sensitive bug, send it straight to dev
+            </AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      {/* Asked once per request, and never a hard gate — see handleSubmit. The
+          primary action is the one that goes back and adds an image, because
+          that is the outcome worth a whole dialog. */}
+      <AlertDialog open={noScreenshotWarnOpen} onOpenChange={setNoScreenshotWarnOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Add a screenshot?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  Bug reports with a screenshot get fixed noticeably faster — it
+                  usually answers &ldquo;which screen?&rdquo; and &ldquo;what did
+                  it actually look like?&rdquo; before anyone has to ask.
+                </p>
+                <p>
+                  Press{" "}
+                  <kbd className="rounded border px-1 font-mono text-xs">⌘⇧4</kbd>{" "}
+                  to grab one, then paste it anywhere on this form. You don&apos;t
+                  need to save it as a file first.
+                </p>
+                <p className="text-muted-foreground">
+                  If there&apos;s nothing to capture, go ahead and submit — this
+                  won&apos;t ask again.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction
+              onClick={() => {
+                setNoScreenshotBypassed(true);
+                setNoScreenshotWarnOpen(false);
+              }}
+            >
+              Let me add one
+            </AlertDialogAction>
+            <AlertDialogCancel
+              onClick={() => {
+                // Bypass first, then submit: actuallyCreate reads the flag on
+                // the next pass through handleSubmit.
+                setNoScreenshotBypassed(true);
+                setNoScreenshotWarnOpen(false);
+                actuallyCreate();
+              }}
+            >
+              Submit without one
             </AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
