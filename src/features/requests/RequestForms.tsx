@@ -1031,8 +1031,14 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
           onChange={chooseClientFacing}
         />
       )}
+      {/* Wider than the default, and the footer stacks instead of laying the
+          actions out in a row. Both labels here are whole sentences, and shadcn
+          buttons are `whitespace-nowrap shrink-0` — side by side they ran off
+          the edge of the dialog rather than wrapping. Stacked and full-width,
+          each one gets its own line, and `whitespace-normal h-auto` lets a long
+          label wrap on a narrow window instead of overflowing again. */}
       <AlertDialog open={notABugWarnOpen} onOpenChange={setNotABugWarnOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="sm:max-w-xl">
           <AlertDialogHeader>
             <AlertDialogTitle>This looks like a request, not a bug</AlertDialogTitle>
             <AlertDialogDescription asChild>
@@ -1058,8 +1064,9 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="sm:flex-col sm:items-stretch sm:space-x-0 gap-2">
             <AlertDialogAction
+              className="w-full h-auto whitespace-normal py-2.5 text-center"
               onClick={() => {
                 setClientFacing(false);
                 setNotABugWarnOpen(false);
@@ -1068,6 +1075,7 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
               Send it through review (recommended)
             </AlertDialogAction>
             <AlertDialogCancel
+              className="mt-0 w-full h-auto whitespace-normal py-2.5 text-center"
               onClick={() => {
                 setNotABugBypassed(true);
                 setClientFacing(true);
@@ -1083,7 +1091,7 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
           primary action is the one that goes back and adds an image, because
           that is the outcome worth a whole dialog. */}
       <AlertDialog open={noScreenshotWarnOpen} onOpenChange={setNoScreenshotWarnOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="sm:max-w-xl">
           <AlertDialogHeader>
             <AlertDialogTitle>Add a screenshot?</AlertDialogTitle>
             <AlertDialogDescription asChild>
@@ -1106,8 +1114,9 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="sm:flex-col sm:items-stretch sm:space-x-0 gap-2">
             <AlertDialogAction
+              className="w-full h-auto whitespace-normal py-2.5 text-center"
               onClick={() => {
                 setNoScreenshotBypassed(true);
                 setNoScreenshotWarnOpen(false);
@@ -1116,6 +1125,7 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
               Let me add one
             </AlertDialogAction>
             <AlertDialogCancel
+              className="mt-0 w-full h-auto whitespace-normal py-2.5 text-center"
               onClick={() => {
                 // Bypass first, then submit: actuallyCreate reads the flag on
                 // the next pass through handleSubmit.
