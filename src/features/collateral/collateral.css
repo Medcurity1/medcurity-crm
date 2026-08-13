@@ -1,0 +1,379 @@
+/* Collateral tab styles. Medcurity brand, ROUTE-SCOPED (Jordan v1.1 SS0/SS4).
+ *
+ * Every rule here is namespaced .collat-*; nothing redefines app-root CSS
+ * variables, the shared theme, or any component other routes consume.
+ *
+ * Light mode is the platform dashboard reference exactly (white cards,
+ * ice chips, navy text on faint blue-gray). Dark mode (Nathan 8/12) keeps
+ * the same brand language on deep navy surfaces and follows Pulse's
+ * theme toggle via the `.dark` html class; only these scoped variables
+ * flip, so the rest of Pulse is untouched either way.
+ *
+ * Color rules (SS4): color means something or it is not there. Green =
+ * healthy, amber/orange = needs attention, blue = actionable, teal = the
+ * single primary CTA, ONE warm moment on the hero. No decorative color.
+ */
+
+.collat-root {
+  --c-font: "Plus Jakarta Sans", -apple-system, system-ui, sans-serif;
+
+  /* brand constants (same both themes) */
+  --c-teal-500: #2ec4b6;
+  --c-teal-600: #21a596;
+  --c-sky-400: #68adde;
+
+  /* light theme (the platform reference) */
+  --c-text-strong: #0a1f33;
+  --c-text-body: #4a5c6e;
+  --c-text-faint: #8ba0b3;
+  --c-canvas-bg: #f5f8fb;
+  --c-canvas-edge: #e3ecf4;
+  --c-card-bg: #ffffff;
+  --c-card-edge: #e3ecf4;
+  --c-shadow: 0 1px 3px rgba(10, 31, 51, 0.08);
+  --c-shadow-lift: 0 6px 16px rgba(10, 31, 51, 0.12);
+  --c-ice: #eef6fc;
+  --c-ice-edge: #d9e8f5;
+  --c-chip-text: #0f2740;
+  --c-chip-on-bg: #0f2740;
+  --c-chip-on-text: #ffffff;
+  --c-hero-grad: linear-gradient(90deg, #fdf6ee, #fbe8d6);
+  --c-hero-edge: #f3ddc2;
+  --c-link: #1b6fc2;
+  --c-icon: #0071bc;
+  --c-border-soft: #c9d6e2;
+  --c-pin-edge: #0f2740;
+  --c-badge-prospect-bg: rgba(46, 196, 182, 0.14);
+  --c-badge-prospect-text: #0f766e;
+  --c-badge-warn-bg: #fdf1e7;
+  --c-badge-internal-text: #b45309;
+  --c-badge-due-text: #d9531e;
+
+  font-family: var(--c-font);
+  color: var(--c-text-strong);
+}
+
+/* Dark theme: same brand, deep-navy surfaces. Scoped to this tab only. */
+.dark .collat-root {
+  --c-text-strong: #e8f1f8;
+  --c-text-body: #9fb3c4;
+  --c-text-faint: #6d8296;
+  --c-canvas-bg: #0c1929;
+  --c-canvas-edge: #1d3247;
+  --c-card-bg: #122438;
+  --c-card-edge: #24405c;
+  --c-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --c-shadow-lift: 0 8px 18px rgba(0, 0, 0, 0.45);
+  --c-ice: #16324a;
+  --c-ice-edge: #2a4a68;
+  --c-chip-text: #cbe3f5;
+  --c-chip-on-bg: #eef6fc;
+  --c-chip-on-text: #0f2740;
+  --c-hero-grad: linear-gradient(90deg, #33261a, #46301e);
+  --c-hero-edge: #5a4630;
+  --c-link: #6db3e8;
+  --c-icon: #68adde;
+  --c-border-soft: #35516d;
+  --c-pin-edge: #68adde;
+  --c-badge-prospect-bg: rgba(46, 196, 182, 0.18);
+  --c-badge-prospect-text: #7fe0d6;
+  --c-badge-warn-bg: rgba(217, 83, 30, 0.16);
+  --c-badge-internal-text: #f0b062;
+  --c-badge-due-text: #f0854e;
+}
+
+/* ── Canvas ─────────────────────────────────────────────────────────── */
+.collat-canvas {
+  background: var(--c-canvas-bg);
+  border: 1px solid var(--c-canvas-edge);
+  border-radius: 18px;
+  padding: 1.25rem;
+}
+@media (min-width: 640px) {
+  .collat-canvas {
+    padding: 1.5rem;
+  }
+}
+
+/* ── Hero: the one warm moment (SS4) ────────────────────────────────── */
+.collat-hero {
+  background: var(--c-hero-grad);
+  border: 1px solid var(--c-hero-edge);
+  border-radius: 14px;
+  padding: 1.1rem 1.25rem;
+}
+.collat-hero h1 {
+  color: var(--c-text-strong);
+  font-weight: 800;
+  font-size: 1.45rem;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+.collat-hero p {
+  color: var(--c-text-body);
+  font-size: 0.85rem;
+  margin-top: 0.2rem;
+}
+
+/* ── Buttons: teal = the single primary; secondary = card + border ──── */
+.collat-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--c-teal-500);
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 0.82rem;
+  border-radius: 9999px;
+  padding: 0.45rem 1rem;
+  border: 1px solid transparent;
+  transition: background-color 0.15s ease, transform 0.15s ease;
+}
+.collat-btn-primary:hover {
+  background: var(--c-teal-600);
+  transform: translateY(-1px);
+}
+.collat-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--c-card-bg);
+  color: var(--c-text-strong);
+  font-weight: 500;
+  font-size: 0.82rem;
+  border-radius: 9999px;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--c-border-soft);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.collat-btn-secondary:hover {
+  border-color: var(--c-sky-400);
+  background: var(--c-ice);
+}
+.collat-btn-secondary:disabled {
+  opacity: 0.6;
+}
+
+/* ── Search ─────────────────────────────────────────────────────────── */
+.collat-search {
+  width: 100%;
+  background: var(--c-card-bg);
+  border: 1px solid var(--c-card-edge);
+  border-radius: 12px;
+  padding: 0.6rem 0.9rem 0.6rem 2.4rem;
+  font-size: 0.9rem;
+  font-family: var(--c-font);
+  color: var(--c-text-strong);
+  box-shadow: var(--c-shadow);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.collat-search::placeholder {
+  color: var(--c-text-faint);
+}
+.collat-search:focus {
+  outline: none;
+  border-color: var(--c-sky-400);
+  box-shadow: 0 0 0 3px rgba(104, 173, 222, 0.25);
+}
+.collat-search-icon {
+  color: var(--c-text-faint);
+}
+
+/* ── Chips: ice fill; selected flips fill and text ──────────────────── */
+.collat-label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--c-text-body);
+}
+.collat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: var(--c-ice);
+  color: var(--c-chip-text);
+  border: 1px solid var(--c-ice-edge);
+  border-radius: 9999px;
+  padding: 0.28rem 0.75rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  transition: background-color 0.13s ease, color 0.13s ease, border-color 0.13s ease;
+}
+.collat-chip:hover {
+  border-color: var(--c-sky-400);
+}
+.collat-chip[aria-pressed="true"],
+.collat-chip--on {
+  background: var(--c-chip-on-bg);
+  color: var(--c-chip-on-text);
+  border-color: var(--c-chip-on-bg);
+}
+
+/* ── Cards ──────────────────────────────────────────────────────────── */
+.collat-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--c-card-bg);
+  border: 1px solid var(--c-card-edge);
+  border-radius: 14px;
+  padding: 0.9rem;
+  box-shadow: var(--c-shadow);
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+.collat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--c-shadow-lift);
+}
+/* Pinned = the platform's "these matter most" top edge. */
+.collat-card--pinned {
+  border-top: 3px solid var(--c-pin-edge);
+}
+.collat-card h3 {
+  color: var(--c-text-strong);
+  font-weight: 700;
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+.collat-icon {
+  display: grid;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 10px;
+  background: var(--c-ice);
+  color: var(--c-icon);
+  flex-shrink: 0;
+}
+
+/* Tag chips on cards: quieter than filter chips (they inform, not act). */
+.collat-tag {
+  display: inline-flex;
+  align-items: center;
+  background: var(--c-ice);
+  color: var(--c-chip-text);
+  border-radius: 9999px;
+  padding: 0.14rem 0.55rem;
+  font-size: 0.66rem;
+  font-weight: 600;
+}
+.collat-tag--muted {
+  background: var(--c-card-bg);
+  border: 1px solid var(--c-card-edge);
+  color: var(--c-text-body);
+}
+
+/* Badges: every color carries state (SS4). */
+.collat-badge-prospect {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--c-badge-prospect-bg);
+  color: var(--c-badge-prospect-text);
+  border-radius: 9999px;
+  padding: 0.14rem 0.55rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+.collat-badge-internal {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--c-badge-warn-bg);
+  color: var(--c-badge-internal-text);
+  border-radius: 9999px;
+  padding: 0.14rem 0.55rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+.collat-badge-due {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--c-badge-warn-bg);
+  color: var(--c-badge-due-text);
+  border-radius: 9999px;
+  padding: 0.14rem 0.55rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+/* Actions: blue links with arrows, the platform's affordance (SS4). */
+.collat-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--c-link);
+  font-size: 0.78rem;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 0.2rem 0.3rem;
+  transition: color 0.13s ease;
+}
+.collat-link:hover {
+  color: var(--c-text-strong);
+  text-decoration: underline;
+}
+
+.collat-meta {
+  color: var(--c-text-body);
+  font-size: 0.7rem;
+}
+
+/* ── Sections / dividers / empty state / request callout ────────────── */
+.collat-divider {
+  border-top: 1px dashed var(--c-ice-edge);
+}
+.collat-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  background: var(--c-card-bg);
+  border: 1px dashed var(--c-border-soft);
+  border-radius: 14px;
+  padding: 2.75rem 1.5rem;
+  text-align: center;
+}
+.collat-empty h3 {
+  color: var(--c-text-strong);
+  font-weight: 700;
+  font-size: 1rem;
+}
+.collat-empty p {
+  color: var(--c-text-body);
+  font-size: 0.85rem;
+  max-width: 26rem;
+}
+.collat-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 9999px;
+  background: var(--c-ice);
+  color: var(--c-icon);
+}
+
+/* Admin pin affordance (ghost icon button on cards). */
+.collat-iconbtn {
+  display: grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 8px;
+  color: var(--c-text-faint);
+  transition: background-color 0.13s ease, color 0.13s ease;
+}
+.collat-iconbtn:hover {
+  background: var(--c-ice);
+  color: var(--c-text-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .collat-card,
+  .collat-card:hover,
+  .collat-btn-primary:hover {
+    transform: none;
+  }
+}

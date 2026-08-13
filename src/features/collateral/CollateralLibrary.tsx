@@ -1,35 +1,37 @@
-// The collateral browsing surface (Jordan's spec, items 2-9). One
-// component, two homes: the /collateral page and the Collateral tab on
-// contact + deal records (compact mode). Cards read from collateral_items;
-// chips are generated from the data so taxonomy changes never need code.
+// The collateral browsing surface: Jordan's v1.1 spec. ONE home: the
+// admin-gated /collateral route (§2; the V1 record-tab mode is gone).
+// Cards read from the collateral_items mirror; chips are generated from
+// the stored values VERBATIM (§1: no CRM-side inference), so taxonomy
+// changes in SharePoint never need code. All styling is .collat-* scoped
+// (§0/§4): ice chips that turn navy when selected, white cards with the
+// file-type glyph in an ice square, blue link actions, and the amber
+// "Review due" badge mirroring the library's Needs Review cycle.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Archive,
-  Check,
   ChevronDown,
   Copy,
   ExternalLink,
   FileText,
-  MoreHorizontal,
-  Pencil,
+  FileImage,
+  FileSpreadsheet,
+  Presentation,
+  File as FileIcon,
   Pin,
+  PinOff,
   Search,
   ShieldAlert,
-  Sparkles,
+  Clock,
+  Send,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -39,18 +41,29 @@ import {
   useMyCollateralPrefs,
   useSaveMyCollateralPrefs,
   useTogglePinned,
-  useArchiveCollateralItem,
   type CollateralItem,
 } from "./api";
 import {
   buildChipGroups,
   filterItems,
+  fileKind,
   initialSegmentSelection,
+  isReviewDue,
   type Chip,
+  type FileKind,
 } from "./collateral-logic";
 
 const SEND_TO_PROSPECT = "Send to Prospect";
 const INTERNAL_USE = "Internal Enablement";
+
+const KIND_ICON: Record<FileKind, typeof FileText> = {
+  pdf: FileText,
+  doc: FileText,
+  slides: Presentation,
+  sheet: FileSpreadsheet,
+  image: FileImage,
+  file: FileIcon,
+};
 
 // ── Chips ────────────────────────────────────────────────────────────
 
@@ -64,24 +77,15 @@ function ChipButton({
   onToggle: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-pressed={active}
-      className={cn(
-        "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-        active
-          ? "border-primary bg-primary text-primary-foreground"
-          : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground",
-      )}
-    >
+    <button type="button" onClick={onToggle} aria-pressed={active} className="collat-chip">
       {chip.label}
     </button>
   );
 }
 
-/** Item 4: a product family collapses into one chip with a variant menu.
- * Clicking the chip toggles the whole family; the chevron picks variants. */
+/** §4: the SRA parent chip: one chip with a caret expanding to the
+ * variants (matched on the shared "SRA — " prefix; display-only, no
+ * schema change). Clicking the chip toggles the whole family. */
 function FamilyChip({
   chip,
   selected,
@@ -119,20 +123,8 @@ function FamilyChip({
       : chip.label;
 
   return (
-    <div
-      className={cn(
-        "flex items-stretch overflow-hidden rounded-full border text-xs font-medium transition-colors",
-        anyActive
-          ? "border-primary bg-primary text-primary-foreground"
-          : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground",
-      )}
-    >
-      <button
-        type="button"
-        onClick={toggleParent}
-        aria-pressed={anyActive}
-        className="py-1 pl-3 pr-1.5"
-      >
+    <div className={cn("collat-chip", anyActive && "collat-chip--on")} style={{ padding: 0 }}>
+      <button type="button" onClick={toggleParent} aria-pressed={anyActive} className="py-[0.28rem] pl-3 pr-1">
         {label}
       </button>
       <DropdownMenu>
@@ -140,19 +132,13 @@ function FamilyChip({
           <button
             type="button"
             aria-label={`${chip.label} variations`}
-            className={cn(
-              "flex items-center border-l py-1 pl-1 pr-2",
-              anyActive ? "border-primary-foreground/30" : "border-border",
-            )}
+            className="flex items-center py-[0.28rem] pl-0.5 pr-2"
           >
             <ChevronDown className="h-3 w-3" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start">
-          <DropdownMenuCheckboxItem
-            checked={parentActive}
-            onCheckedChange={toggleParent}
-          >
+          <DropdownMenuCheckboxItem checked={parentActive} onCheckedChange={toggleParent}>
             All {chip.label}
           </DropdownMenuCheckboxItem>
           <DropdownMenuSeparator />
@@ -187,17 +173,10 @@ function ChipRow({
   if (!chips.length) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="w-16 shrink-0 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </span>
+      <span className="collat-label w-16 shrink-0">{label}</span>
       {chips.map((chip) =>
         chip.children?.length ? (
-          <FamilyChip
-            key={chip.value}
-            chip={chip}
-            selected={selected}
-            onChange={onChange}
-          />
+          <FamilyChip key={chip.value} chip={chip} selected={selected} onChange={onChange} />
         ) : (
           <ChipButton
             key={chip.value}
@@ -220,22 +199,14 @@ function ChipRow({
 
 // ── Card ─────────────────────────────────────────────────────────────
 
-function CollateralCard({
-  item,
-  isAdmin,
-  compact,
-  onEdit,
-}: {
-  item: CollateralItem;
-  isAdmin: boolean;
-  compact: boolean;
-  onEdit?: (item: CollateralItem) => void;
-}) {
+function CollateralCard({ item, isAdmin }: { item: CollateralItem; isAdmin: boolean }) {
   const logCopy = useLogCopyEvent();
   const togglePin = useTogglePinned();
-  const archive = useArchiveCollateralItem();
   const internalOnly =
     item.uses.includes(INTERNAL_USE) && !item.uses.includes(SEND_TO_PROSPECT);
+  const prospectReady = item.uses.includes(SEND_TO_PROSPECT);
+  const reviewDue = isReviewDue(item.last_reviewed);
+  const Icon = KIND_ICON[fileKind(item.web_url || item.title)];
 
   function copyLink() {
     navigator.clipboard
@@ -248,98 +219,78 @@ function CollateralCard({
   }
 
   return (
-    <div className="group relative flex flex-col rounded-xl border bg-card p-3.5 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md">
-      <div className="flex items-start gap-2">
-        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-sky-500/20 to-indigo-500/[0.06]">
-          <FileText className="h-3.5 w-3.5 text-sky-500" />
+    <div className={cn("collat-card group", item.pinned && "collat-card--pinned")}>
+      <div className="flex items-start gap-2.5">
+        <span className="collat-icon">
+          <Icon className="h-4 w-4" />
         </span>
-        <p className="min-w-0 flex-1 text-sm font-medium leading-snug [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden">
+        <h3 className="min-w-0 flex-1 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden">
           {item.title}
-        </p>
-        {item.pinned && (
-          <Pin className="h-3.5 w-3.5 shrink-0 fill-current text-primary" />
+        </h3>
+        {isAdmin && (
+          <button
+            type="button"
+            className={cn(
+              "collat-iconbtn shrink-0",
+              !item.pinned && "opacity-0 transition-opacity group-hover:opacity-100",
+            )}
+            title={item.pinned ? "Unpin" : "Pin to top row"}
+            onClick={() => togglePin.mutate({ id: item.id, pinned: !item.pinned })}
+          >
+            {item.pinned ? (
+              <PinOff className="h-3.5 w-3.5" />
+            ) : (
+              <Pin className="h-3.5 w-3.5" />
+            )}
+          </button>
         )}
       </div>
 
+      {/* Verbatim library values only (§1): empty column, no chip. */}
       <div className="mt-2 flex flex-wrap gap-1">
-        {item.asset_type && (
-          <Badge className="border-transparent bg-sky-500/15 text-[10px] text-sky-600 dark:text-sky-400">
-            {item.asset_type}
-          </Badge>
-        )}
-        {item.products.slice(0, compact ? 2 : 3).map((p) => (
-          <Badge
-            key={p}
-            variant="outline"
-            className="max-w-36 truncate text-[10px] text-muted-foreground"
-          >
+        {item.asset_type && <span className="collat-tag">{item.asset_type}</span>}
+        {item.products.slice(0, 3).map((p) => (
+          <span key={p} className="collat-tag--muted collat-tag max-w-36 truncate">
             {p}
-          </Badge>
+          </span>
         ))}
-        {item.products.length > (compact ? 2 : 3) && (
-          <Badge variant="outline" className="text-[10px] text-muted-foreground">
-            +{item.products.length - (compact ? 2 : 3)}
-          </Badge>
+        {item.products.length > 3 && (
+          <span className="collat-tag--muted collat-tag">+{item.products.length - 3}</span>
+        )}
+      </div>
+
+      <div className="mt-1.5 flex flex-wrap gap-1">
+        {prospectReady && (
+          <span className="collat-badge-prospect">
+            <Send className="h-2.5 w-2.5" /> Send to Prospect
+          </span>
         )}
         {internalOnly && (
-          <Badge className="gap-1 border-transparent bg-amber-500/15 text-[10px] text-amber-600 dark:text-amber-400">
-            <ShieldAlert className="h-3 w-3" /> Internal
-          </Badge>
+          <span className="collat-badge-internal">
+            <ShieldAlert className="h-2.5 w-2.5" /> Internal
+          </span>
+        )}
+        {reviewDue && (
+          <span className="collat-badge-due">
+            <Clock className="h-2.5 w-2.5" /> Review due
+          </span>
         )}
       </div>
 
-      <div className="mt-3 flex items-center gap-1.5 pt-0.5">
-        <Button size="sm" variant="outline" className="h-7 gap-1.5 px-2.5 text-xs" onClick={copyLink}>
+      <div className="mt-auto flex items-center gap-1 pt-3">
+        <button type="button" className="collat-link" onClick={copyLink}>
           <Copy className="h-3 w-3" />
           Copy Link
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
-          asChild
-        >
-          <a href={item.web_url} target="_blank" rel="noreferrer">
-            <ExternalLink className="h-3 w-3" />
-            Open
-          </a>
-        </Button>
+        </button>
+        <a className="collat-link" href={item.web_url} target="_blank" rel="noreferrer">
+          Open
+          <ExternalLink className="h-3 w-3" />
+        </a>
         <span className="flex-1" />
-        {isAdmin && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100 data-[state=open]:opacity-100"
-                aria-label="Manage asset"
-              >
-                <MoreHorizontal className="h-3.5 w-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                onClick={() => togglePin.mutate({ id: item.id, pinned: !item.pinned })}
-              >
-                <Pin className="mr-2 h-3.5 w-3.5" />
-                {item.pinned ? "Unpin" : "Pin to top row"}
-              </DropdownMenuItem>
-              {onEdit && (
-                <DropdownMenuItem onClick={() => onEdit(item)}>
-                  <Pencil className="mr-2 h-3.5 w-3.5" />
-                  Edit
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="text-destructive focus:text-destructive"
-                onClick={() => archive.mutate(item.id)}
-              >
-                <Archive className="mr-2 h-3.5 w-3.5" />
-                Archive
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+        {item.owner_name && (
+          <span className="collat-meta truncate max-w-28" title={`Owner: ${item.owner_name}`}>
+            {item.owner_name}
+          </span>
         )}
       </div>
     </div>
@@ -348,14 +299,7 @@ function CollateralCard({
 
 // ── Library ──────────────────────────────────────────────────────────
 
-export interface CollateralLibraryProps {
-  /** Record-tab mode: tighter grid, no pinned header text tweaks. */
-  compact?: boolean;
-  /** Admin add/edit dialog opener (page provides it). */
-  onEdit?: (item: CollateralItem) => void;
-}
-
-export function CollateralLibrary({ compact = false, onEdit }: CollateralLibraryProps) {
+export function CollateralLibrary() {
   const { profile } = useAuth();
   const isAdmin = ["admin", "super_admin"].includes(
     ((profile as { role?: string } | null)?.role ?? ""),
@@ -373,9 +317,9 @@ export function CollateralLibrary({ compact = false, onEdit }: CollateralLibrary
 
   const chips = useMemo(() => buildChipGroups(items ?? []), [items]);
 
-  // Item 5: default the Use chip to Send to Prospect — the fastest action
-  // is the safe one. Item 7: the rep's saved segments preselect. Applied
-  // once when data + prefs land; the rep can clear anything after.
+  // §2/§4 defaults on load: Use = Send to Prospect (the reps' common case)
+  // and the rep's saved default segments: with no record context, this is
+  // the only personalization they get, so it always applies. Clearable.
   const appliedDefaults = useRef(false);
   useEffect(() => {
     if (appliedDefaults.current || !items || savedSegments === undefined) return;
@@ -396,7 +340,7 @@ export function CollateralLibrary({ compact = false, onEdit }: CollateralLibrary
     [items, search, products, assetTypes, segments, uses, chips.products],
   );
 
-  // Item 8: the pinned row ignores chips and search entirely.
+  // Pinned row: admin-curated, unaffected by chips and search.
   const pinnedItems = useMemo(() => (items ?? []).filter((i) => i.pinned), [items]);
   const gridItems = filtered.filter((i) => !i.pinned);
 
@@ -413,9 +357,9 @@ export function CollateralLibrary({ compact = false, onEdit }: CollateralLibrary
 
   if (isLoading) {
     return (
-      <div className={cn("grid gap-3", compact ? "grid-cols-2" : "grid-cols-2 lg:grid-cols-3 xl:grid-cols-4")}>
-        {Array.from({ length: compact ? 4 : 8 }).map((_, i) => (
-          <Skeleton key={i} className="h-32 rounded-xl" />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <Skeleton key={i} className="h-36 rounded-[14px]" />
         ))}
       </div>
     );
@@ -423,40 +367,49 @@ export function CollateralLibrary({ compact = false, onEdit }: CollateralLibrary
 
   if (isError) {
     return (
-      <p className="py-4 text-sm text-muted-foreground">
-        Couldn't load collateral. It will retry automatically.
-      </p>
+      <p className="collat-meta py-4">Couldn't load collateral. It will retry automatically.</p>
     );
   }
 
+  // §6 acceptance: an empty grid is the CORRECT state until files are
+  // promoted to Current in SharePoint: say so instead of apologizing.
   if (!items?.length) {
     return (
-      <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed p-10 text-center">
-        <Sparkles className="h-6 w-6 text-muted-foreground" />
-        <p className="text-sm font-medium">No collateral yet</p>
-        <p className="max-w-sm text-sm text-muted-foreground">
-          {isAdmin
-            ? "Add assets by hand or connect the SharePoint sync, and they'll show up here as cards."
-            : "Assets are being loaded. Check back soon."}
+      <div className="collat-empty">
+        <span className="collat-empty-icon">
+          <FileText className="h-5 w-5" />
+        </span>
+        <h3>The library is curated in SharePoint</h3>
+        <p>
+          Files marked <strong>Current</strong> in the Sales Collateral library
+          appear here automatically. Drafts and files in review never show.
         </p>
+        {isAdmin && (
+          <p className="collat-meta">
+            Nothing here yet means nothing is marked Current. Promote a file
+            in SharePoint, then Sync.
+          </p>
+        )}
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      {/* Search (item 2): title + every tag, combines with chips. */}
+      {/* Search: title + every tag, combines with chips. A rep typing a
+          competitor name matches battlecards that carry it in the title. */}
       <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
+        <Search className="collat-search-icon pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
+        <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search collateral by name or tag..."
-          className="h-9 pl-9"
+          placeholder="Search by name, product, segment, or competitor…"
+          className="collat-search"
+          aria-label="Search collateral"
         />
       </div>
 
-      {/* Chip rows (item 3): filter, never group. */}
+      {/* Chip rows: filter, never group. */}
       <div className="space-y-2">
         <ChipRow label="Product" chips={chips.products} selected={products} onChange={setProducts} />
         <ChipRow label="Type" chips={chips.assetTypes} selected={assetTypes} onChange={setAssetTypes} />
@@ -466,13 +419,12 @@ export function CollateralLibrary({ compact = false, onEdit }: CollateralLibrary
           selected={segments}
           onChange={setSegments}
           trailing={
-            !compact && segmentsDiffer && segments.length > 0 ? (
+            segmentsDiffer && segments.length > 0 ? (
               <button
                 type="button"
                 onClick={() => savePrefs.mutate(segments)}
-                className="ml-1 flex items-center gap-1 text-[11px] text-primary hover:underline"
+                className="collat-link ml-1 !text-[0.7rem]"
               >
-                <Check className="h-3 w-3" />
                 Save as my default
               </button>
             ) : null
@@ -481,29 +433,29 @@ export function CollateralLibrary({ compact = false, onEdit }: CollateralLibrary
         <ChipRow label="Use" chips={chips.uses} selected={uses} onChange={setUses} />
       </div>
 
-      {/* Pinned row (item 8): admin-curated, unaffected by filters. */}
+      {/* Pinned row: navy top edge: the platform's "these matter most". */}
       {pinnedItems.length > 0 && (
         <div className="space-y-2">
-          <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="collat-label flex items-center gap-1.5">
             <Pin className="h-3 w-3" /> Pinned
           </p>
-          <div className={cn("grid gap-3", compact ? "grid-cols-2" : "grid-cols-2 lg:grid-cols-3 xl:grid-cols-4")}>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
             {pinnedItems.map((item) => (
-              <CollateralCard key={item.id} item={item} isAdmin={isAdmin} compact={compact} onEdit={onEdit} />
+              <CollateralCard key={item.id} item={item} isAdmin={isAdmin} />
             ))}
           </div>
-          <div className="border-t border-dashed" />
+          <div className="collat-divider" />
         </div>
       )}
 
       {/* The grid. */}
       {gridItems.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed p-8 text-center">
-          <p className="text-sm text-muted-foreground">Nothing matches your filters.</p>
+        <div className="collat-empty !py-8">
+          <p className="collat-meta">Nothing matches your filters.</p>
           {anyFilterActive && (
-            <Button
-              size="sm"
-              variant="outline"
+            <button
+              type="button"
+              className="collat-btn-secondary"
               onClick={() => {
                 setSearch("");
                 setProducts([]);
@@ -513,18 +465,18 @@ export function CollateralLibrary({ compact = false, onEdit }: CollateralLibrary
               }}
             >
               Clear filters
-            </Button>
+            </button>
           )}
         </div>
       ) : (
-        <div className={cn("grid gap-3", compact ? "grid-cols-2" : "grid-cols-2 lg:grid-cols-3 xl:grid-cols-4")}>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
           {gridItems.map((item) => (
-            <CollateralCard key={item.id} item={item} isAdmin={isAdmin} compact={compact} onEdit={onEdit} />
+            <CollateralCard key={item.id} item={item} isAdmin={isAdmin} />
           ))}
         </div>
       )}
 
-      <p className="text-xs text-muted-foreground">
+      <p className="collat-meta">
         {gridItems.length} of {(items ?? []).filter((i) => !i.pinned).length} assets
         {pinnedItems.length ? ` · ${pinnedItems.length} pinned` : ""}
       </p>

@@ -1,14 +1,14 @@
-// Collateral filtering — the pure core of Jordan's spec, unit-tested.
+// Collateral filtering: the pure core of Jordan's spec, unit-tested.
 //
 // Her hardest-to-notice requirement (item 3): chips FILTER, they never
 // group. An asset tagged with two products appears under both chips.
 // Within one chip row selections OR together; across rows they AND; the
 // search box ANDs with all of it (item 2: substring across title + every
-// tag — reps think in the words on the document, not our column values).
+// tag: reps think in the words on the document, not our column values).
 //
 // Item 4: product values sharing the "SRA — " prefix collapse into one
 // parent chip presentation-side. Tagging stays flat; the hierarchy is
-// display only, and any future "Family — Variant" product works the same
+// display only, and any future "Family: Variant" product works the same
 // way with zero code change.
 
 export interface CollateralItemLike {
@@ -19,6 +19,40 @@ export interface CollateralItemLike {
   segments: string[];
   uses: string[];
   pinned: boolean;
+}
+
+// ── v1.1 additions (Jordan's 2026-08-11 spec) ────────────────────────
+
+/** §4: "Review due" mirrors the library's Needs Review cycle. */
+export const REVIEW_DUE_DAYS = 180;
+
+/**
+ * An asset whose Last Reviewed is more than 180 days old gets the amber
+ * "Review due" badge. No Last Reviewed value = no badge (the library's
+ * Status gate is the authority on whether it should render at all).
+ */
+export function isReviewDue(
+  lastReviewed: string | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (!lastReviewed) return false;
+  const d = new Date(lastReviewed);
+  if (Number.isNaN(d.getTime())) return false;
+  return now.getTime() - d.getTime() > REVIEW_DUE_DAYS * 86_400_000;
+}
+
+export type FileKind = "pdf" | "doc" | "slides" | "sheet" | "image" | "file";
+
+/** File-type glyph selection from the filename/URL extension. */
+export function fileKind(nameOrUrl: string | null | undefined): FileKind {
+  const m = (nameOrUrl ?? "").toLowerCase().match(/\.([a-z0-9]+)(?:[?#].*)?$/);
+  const ext = m?.[1] ?? "";
+  if (ext === "pdf") return "pdf";
+  if (["doc", "docx", "rtf"].includes(ext)) return "doc";
+  if (["ppt", "pptx", "key"].includes(ext)) return "slides";
+  if (["xls", "xlsx", "csv"].includes(ext)) return "sheet";
+  if (["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext)) return "image";
+  return "file";
 }
 
 /** One selectable chip; family parents carry their children. */
@@ -56,7 +90,7 @@ function uniqueSorted(values: string[]): string[] {
 /**
  * Chips come from the values actually present (her item 3 note: adding a
  * product later is a data change, not a code change). Product values that
- * share a "Family — Variant" prefix with at least one sibling collapse
+ * share a "Family: Variant" prefix with at least one sibling collapse
  * under a parent chip; lone prefixed values stay flat.
  */
 export function buildChipGroups(items: CollateralItemLike[]): ChipGroups {
@@ -72,7 +106,7 @@ export function buildChipGroups(items: CollateralItemLike[]): ChipGroups {
   const productChips: Chip[] = [];
   const consumed = new Set<string>();
   for (const [family, members] of families) {
-    if (members.length < 2) continue; // a lone "X — Y" is not a family
+    if (members.length < 2) continue; // a lone "X: Y" is not a family
     members.forEach((v) => consumed.add(v));
     productChips.push({
       value: `family:${family}`,
@@ -160,7 +194,7 @@ export function filterItems<T extends CollateralItemLike>(
  * A rep's default segment selection, applied only when the segments they
  * saved actually exist in the data (a stale pref can't blank the tab).
  * Her item 7 note: the default must include "All" or segment-agnostic
- * assets vanish — that's the seed's job; here we just honor what's saved.
+ * assets vanish: that's the seed's job; here we just honor what's saved.
  */
 export function initialSegmentSelection(
   savedDefaults: string[] | undefined,

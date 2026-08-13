@@ -1,10 +1,11 @@
-// Collateral data hooks (Jordan's 2026-08-04 spec).
+// Collateral data hooks (Jordan's v1.1 spec, 2026-08-11).
 //
-// Items live in collateral_items — filled by admins by hand and/or the
-// collateral-sync edge fn mirroring the SharePoint library. Visibility is
-// a CONFIG value (collateral_settings.visible_to_roles), enforced by RLS
-// and read here so record tabs and the sidebar can show/hide without a
-// deploy when the flag opens to sales.
+// Pulse is a VIEWER of the SharePoint Sales Collateral library: items
+// arrive only via the collateral-sync edge fn (Status = Current, verbatim
+// columns) and the tab exposes no create/edit/delete path (§3). The only
+// client writes left: the admin pin toggle, per-user default segments,
+// and Copy Link usage breadcrumbs. Visibility stays a CONFIG value
+// (collateral_settings.visible_to_roles), enforced by RLS.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -18,23 +19,16 @@ export interface CollateralItem {
   products: string[];
   segments: string[];
   uses: string[];
+  stage: string | null;
+  status: string | null;
+  last_reviewed: string | null;
+  owner_name: string | null;
   web_url: string;
   sharepoint_item_id: string | null;
   pinned: boolean;
   sort_order: number;
-  source: "manual" | "sync";
   archived_at: string | null;
   synced_at: string | null;
-}
-
-export interface CollateralItemInput {
-  title: string;
-  asset_type: string | null;
-  products: string[];
-  segments: string[];
-  uses: string[];
-  web_url: string;
-  pinned: boolean;
 }
 
 const ITEMS_KEY = ["collateral", "items"] as const;
@@ -47,7 +41,7 @@ export function useCollateralItems() {
       const { data, error } = await supabase
         .from("collateral_items")
         .select(
-          "id, title, asset_type, products, segments, uses, web_url, sharepoint_item_id, pinned, sort_order, source, archived_at, synced_at",
+          "id, title, asset_type, products, segments, uses, stage, status, last_reviewed, owner_name, web_url, sharepoint_item_id, pinned, sort_order, archived_at, synced_at",
         )
         .is("archived_at", null)
         .order("pinned", { ascending: false })
@@ -133,32 +127,8 @@ export function useLogCopyEvent() {
 }
 
 // ── Admin mutations ──────────────────────────────────────────────────
-
-export function useSaveCollateralItem() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: CollateralItemInput & { id?: string }) => {
-      const { id, ...fields } = input;
-      if (id) {
-        const { error } = await supabase
-          .from("collateral_items")
-          .update(fields)
-          .eq("id", id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from("collateral_items")
-          .insert({ ...fields, source: "manual" });
-        if (error) throw error;
-      }
-    },
-    onSuccess: (_r, input) => {
-      qc.invalidateQueries({ queryKey: ITEMS_KEY });
-      toast.success(input.id ? "Asset updated" : "Asset added");
-    },
-    onError: (e) => toast.error("Couldn't save: " + (e as Error).message),
-  });
-}
+// v1.1 §3: NO create/edit/archive path exists. Pinning is Pulse-side
+// display curation (a flag on our mirror row), not a library write.
 
 export function useTogglePinned() {
   const qc = useQueryClient();
@@ -178,26 +148,9 @@ export function useTogglePinned() {
   });
 }
 
-export function useArchiveCollateralItem() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from("collateral_items")
-        .update({ archived_at: new Date().toISOString() })
-        .eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ITEMS_KEY });
-      toast.success("Asset archived");
-    },
-    onError: (e) => toast.error("Couldn't archive: " + (e as Error).message),
-  });
-}
-
-/** Kick the SharePoint sync. Fail-soft: an unconfigured sync says so
- * instead of erroring (the fn ships before the Graph app registration). */
+/** Kick the SharePoint sync (a READ-side refresh: §3). Fail-soft: an
+ * unconfigured sync says so instead of erroring (the Azure app
+ * registration is a human step that may not have happened yet). */
 export function useSyncCollateral() {
   const qc = useQueryClient();
   return useMutation({
@@ -206,18 +159,27 @@ export function useSyncCollateral() {
         body: {},
       });
       if (error) throw error;
-      return data as { ok: boolean; configured: boolean; synced?: number; archived?: number; message?: string };
+      return data as {
+        ok: boolean;
+        configured: boolean;
+        synced?: number;
+        removed?: number;
+        skippedNotCurrent?: number;
+        message?: string;
+      };
     },
     onSuccess: (res) => {
       if (!res?.configured) {
         toast.info(
           res?.message ??
-            "SharePoint sync isn't connected yet. Assets can be added manually meanwhile.",
+            "SharePoint sync isn't connected yet. The Graph app registration is pending.",
         );
         return;
       }
       qc.invalidateQueries({ queryKey: ITEMS_KEY });
-      toast.success(`Synced ${res.synced ?? 0} assets from SharePoint`);
+      const parts = [`${res.synced ?? 0} Current asset${(res.synced ?? 0) === 1 ? "" : "s"}`];
+      if (res.removed) parts.push(`${res.removed} removed`);
+      toast.success(`Library synced: ${parts.join(" · ")}`);
     },
     onError: (e) => toast.error("Sync failed: " + (e as Error).message),
   });
