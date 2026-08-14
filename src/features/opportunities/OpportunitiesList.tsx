@@ -306,7 +306,18 @@ function InlineField({
         className="group/edit -mx-1 flex w-full items-center gap-1 rounded border border-dashed border-transparent px-1 py-0.5 text-left hover:border-muted-foreground/40 hover:bg-muted/60 cursor-text"
         onClick={(e) => { e.stopPropagation(); startEdit(); }}
       >
-        <span className="min-w-0 truncate">{display}</span>
+        {/* Numbers and dates are short fixed-width values — never ellipsize
+            them ($28,500 was rendering as "$28,..." in a squeezed Amount
+            column, Summer 8/13). whitespace-nowrap makes the auto-layout
+            table give the column its content width instead. Free text
+            (Next Step) keeps truncating so it can't blow the row out. */}
+        <span
+          className={
+            kind === "text" ? "min-w-0 truncate" : "min-w-0 whitespace-nowrap"
+          }
+        >
+          {display}
+        </span>
         <Pencil className="ml-auto h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover/edit:opacity-50" />
       </button>
     );
