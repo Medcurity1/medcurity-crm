@@ -1,6 +1,29 @@
-import { useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { useUserPreferences } from "@/hooks/useUserPreferences";
 import { cn } from "@/lib/utils";
+
+/**
+ * Live CSS media-query state (re-renders on window resize / zoom changes).
+ * The initial value is read synchronously so there's no wrong-layout flash.
+ */
+function useMediaQuery(query: string): boolean {
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      const mql = window.matchMedia(query);
+      mql.addEventListener("change", onChange);
+      return () => mql.removeEventListener("change", onChange);
+    },
+    [query],
+  );
+  return useSyncExternalStore(subscribe, () =>
+    window.matchMedia(query).matches,
+  );
+}
 
 /**
  * Wraps a detail page body so we can flip between two layouts based on the
@@ -25,7 +48,9 @@ import { cn } from "@/lib/utils";
  * In side_panel mode the children render in a flex-grow column on the left
  * and the side panel is pinned to a sticky right column. In stacked mode
  * the side content is appended below the children (so we never lose
- * access to it).
+ * access to it). Side_panel mode additionally requires a 1280px+ viewport;
+ * narrower windows get the stacked rendering regardless of preference, so
+ * the panel is always reachable.
  */
 export interface DetailSidePanel {
   key: string;
@@ -47,7 +72,15 @@ export function DetailPageLayout({
   sidePanels?: DetailSidePanel[];
 }) {
   const { prefs } = useUserPreferences();
-  const useSidePanel = prefs.detailLayout === "side_panel";
+  // The pinned right column only fits at xl (1280px+). Below that,
+  // side_panel mode falls back to the STACKED layout instead of hiding the
+  // panel: the old `hidden xl:block` on the aside silently swallowed the
+  // whole Activity/Tasks panel on narrow windows and zoomed browsers, and
+  // reps read that as their correspondence history being deleted (Jordan
+  // 8/14, HRH). Media-query state (not CSS hiding) so the panel content
+  // renders exactly once either way.
+  const xlUp = useMediaQuery("(min-width: 1280px)");
+  const useSidePanel = prefs.detailLayout === "side_panel" && xlUp;
 
   // Figure out the effective side content.
   const hasMulti = !!sidePanels && sidePanels.length > 0;
@@ -76,9 +109,10 @@ export function DetailPageLayout({
       <aside
         className={cn(
           // Slightly wider so email From/To addresses + thread subjects
-          // don't truncate so aggressively. xl: only — collapses to
-          // stacked below 1280px.
-          "w-[440px] shrink-0 sticky top-20 self-start hidden xl:block"
+          // don't truncate so aggressively. Only rendered at xl+ (the
+          // media-query branch above) — below that the stacked fallback
+          // renders instead, so no `hidden` classes here.
+          "w-[440px] shrink-0 sticky top-20 self-start"
         )}
       >
         <div className="border rounded-lg p-4 bg-card max-h-[calc(100vh-6rem)] overflow-y-auto">
