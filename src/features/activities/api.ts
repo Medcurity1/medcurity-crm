@@ -18,14 +18,25 @@ interface ActivityFilters {
  * notes, 8/13). Bounded well above any real account's contact count;
  * returns [] on error so callers fall back to the plain account_id filter.
  */
+// The contact-id list rides inside the request URL (contact_id.in.(...)),
+// so it must stay bounded: ~37 chars per uuid means 300 ids ≈ 11KB, safely
+// under edge/proxy URL limits, while 846 (the biggest prod account today)
+// would blow past them and fail the WHOLE account timeline. Over-cap
+// accounts fall back to the plain account_id filter — old behavior, never
+// a broken page. (PostgREST here rejects embedded columns in a top-level
+// or=, so the OR can't be pushed server-side without a schema change.)
+const ACCOUNT_SCOPE_MAX_CONTACTS = 300;
+
 export async function contactIdsForAccount(accountId: string): Promise<string[]> {
   const { data, error } = await supabase
     .from("contacts")
     .select("id")
     .eq("account_id", accountId)
-    .limit(1000);
+    .limit(ACCOUNT_SCOPE_MAX_CONTACTS + 1);
   if (error) return [];
-  return (data ?? []).map((c: { id: string }) => c.id);
+  const ids = (data ?? []).map((c: { id: string }) => c.id);
+  if (ids.length > ACCOUNT_SCOPE_MAX_CONTACTS) return [];
+  return ids;
 }
 
 /**
