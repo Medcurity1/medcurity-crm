@@ -10,6 +10,46 @@ interface ActivityFilters {
   lead_id?: string;
 }
 
+/**
+ * Ids of an account's contacts, so account-scoped activity queries can also
+ * pick up rows logged on a contact but never stamped with the account —
+ * quick-create flows let a rep attach a contact without an account, and
+ * those rows were invisible on the account page (Molly's missing demo
+ * notes, 8/13). Bounded well above any real account's contact count;
+ * returns [] on error so callers fall back to the plain account_id filter.
+ */
+// The contact-id list rides inside the request URL (contact_id.in.(...)),
+// so it must stay bounded: ~37 chars per uuid means 300 ids ≈ 11KB, safely
+// under edge/proxy URL limits, while 846 (the biggest prod account today)
+// would blow past them and fail the WHOLE account timeline. Over-cap
+// accounts fall back to the plain account_id filter — old behavior, never
+// a broken page. (PostgREST here rejects embedded columns in a top-level
+// or=, so the OR can't be pushed server-side without a schema change.)
+const ACCOUNT_SCOPE_MAX_CONTACTS = 300;
+
+export async function contactIdsForAccount(accountId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("contacts")
+    .select("id")
+    .eq("account_id", accountId)
+    .limit(ACCOUNT_SCOPE_MAX_CONTACTS + 1);
+  if (error) return [];
+  const ids = (data ?? []).map((c: { id: string }) => c.id);
+  if (ids.length > ACCOUNT_SCOPE_MAX_CONTACTS) return [];
+  return ids;
+}
+
+/**
+ * PostgREST or() clause matching activities stamped with the account OR
+ * logged on one of its contacts. Empty string when there are no contacts
+ * (callers should then use the plain eq filter). Kept as a helper so the
+ * timeline, tasks panel, and the /activities list page stay in sync.
+ */
+export function accountScopeOrClause(accountId: string, contactIds: string[]): string {
+  if (!contactIds.length) return "";
+  return `account_id.eq.${accountId},contact_id.in.(${contactIds.join(",")})`;
+}
+
 export function useActivities(filters?: ActivityFilters) {
   return useQuery({
     queryKey: ["activities", filters],
@@ -32,7 +72,22 @@ export function useActivities(filters?: ActivityFilters) {
         .limit(50);
 
       if (filters?.account_id) {
-        query = query.eq("account_id", filters.account_id);
+        // Account scope means "everything for this account AND its people":
+        // include activities logged on the account's contacts even when the
+        // row itself never got account_id stamped (Molly 8/13). Only when
+        // account is the sole scope — combined with a contact/opp/lead
+        // filter the plain eq keeps the old AND semantics.
+        const soloAccountScope =
+          !filters.contact_id && !filters.opportunity_id && !filters.lead_id;
+        const orClause = soloAccountScope
+          ? accountScopeOrClause(
+              filters.account_id,
+              await contactIdsForAccount(filters.account_id),
+            )
+          : "";
+        query = orClause
+          ? query.or(orClause)
+          : query.eq("account_id", filters.account_id);
       }
       if (filters?.contact_id) {
         query = query.eq("contact_id", filters.contact_id);
@@ -83,9 +138,25 @@ export function useCreateActivity() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (values: CreateActivityInput) => {
+      let toInsert = values;
+      // Quick-create flows (global + Task / Log call) let a rep attach a
+      // contact without an account, leaving account_id null — those rows
+      // never surfaced on the account page (Molly 8/13). Stamp the
+      // contact's account at create time so every consumer (reports,
+      // exports, feeds) sees the association, not just the patched
+      // account-scoped queries. Best-effort: a lookup failure just
+      // inserts the values as given.
+      if (values.contact_id && !values.account_id) {
+        const { data: c } = await supabase
+          .from("contacts")
+          .select("account_id")
+          .eq("id", values.contact_id)
+          .maybeSingle();
+        if (c?.account_id) toInsert = { ...values, account_id: c.account_id };
+      }
       const { data, error } = await supabase
         .from("activities")
-        .insert(values)
+        .insert(toInsert)
         .select()
         .single();
       if (error) throw error;
@@ -279,7 +350,22 @@ export function useTasks(filters: TaskFilters) {
         .is("archived_at", null)
         .order("due_at", { ascending: true, nullsFirst: false });
 
-      if (filters.account_id) query = query.eq("account_id", filters.account_id);
+      if (filters.account_id) {
+        // Same account-or-its-contacts scope as useActivities (Molly 8/13):
+        // a task on one of the account's contacts belongs on the account's
+        // Tasks panel even if the row was created without account_id.
+        const soloAccountScope =
+          !filters.contact_id && !filters.opportunity_id && !filters.lead_id;
+        const orClause = soloAccountScope
+          ? accountScopeOrClause(
+              filters.account_id,
+              await contactIdsForAccount(filters.account_id),
+            )
+          : "";
+        query = orClause
+          ? query.or(orClause)
+          : query.eq("account_id", filters.account_id);
+      }
       if (filters.contact_id) query = query.eq("contact_id", filters.contact_id);
       if (filters.opportunity_id) query = query.eq("opportunity_id", filters.opportunity_id);
       if (filters.lead_id) query = query.eq("lead_id", filters.lead_id);

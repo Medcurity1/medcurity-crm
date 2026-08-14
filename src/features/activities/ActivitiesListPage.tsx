@@ -33,7 +33,12 @@ import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import type { Activity, ActivityType } from "@/types/crm";
 import { useUsers } from "@/features/accounts/api";
-import { useCompleteActivity, useReopenActivity } from "./api";
+import {
+  useCompleteActivity,
+  useReopenActivity,
+  accountScopeOrClause,
+  contactIdsForAccount,
+} from "./api";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { QueryError } from "@/components/QueryError";
@@ -178,7 +183,21 @@ function useActivitiesList(filters: ListFilters) {
         query = query.lt("effective_at", dateBounds.lt);
       }
       if (filters.scopeAccountId) {
-        query = query.eq("account_id", filters.scopeAccountId);
+        // Match the account timeline's scope (Molly 8/13): the account's own
+        // rows PLUS rows logged on its contacts without an account stamp.
+        // Guarded to account-only scope; separate .or() groups AND together
+        // so this composes with the completed-tasks .or() below.
+        const soloAccountScope =
+          !filters.scopeContactId && !filters.scopeOpportunityId && !filters.scopeLeadId;
+        const orClause = soloAccountScope
+          ? accountScopeOrClause(
+              filters.scopeAccountId,
+              await contactIdsForAccount(filters.scopeAccountId),
+            )
+          : "";
+        query = orClause
+          ? query.or(orClause)
+          : query.eq("account_id", filters.scopeAccountId);
       }
       if (filters.scopeContactId) {
         query = query.eq("contact_id", filters.scopeContactId);
