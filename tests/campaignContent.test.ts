@@ -34,6 +34,24 @@ describe("campaign copy authoring", () => {
     expect(protectCampaignPersonalization(safe)).toBe(safe);
   });
 
+  it("does not double-wrap friendly editor chips", () => {
+    const protectedCopy = protectCampaignPersonalization(
+      `Hi ${AUTHOR_TOKENS.firstName}, welcome to ${AUTHOR_TOKENS.organization}.`,
+    );
+    expect(protectedCopy).toBe(
+      "Hi {{#if first_name}}{{first_name}}{{else}}there{{/if}}, welcome to " +
+      "{{#if company_name}}{{company_name}}{{else}}your organization{{/if}}.",
+    );
+    expect(protectedCopy.match(/\{\{#if/g)).toHaveLength(2);
+  });
+
+  it("preserves user copy that resembles an internal block marker", () => {
+    const copy = `Keep __PULSE_LIQUID_BLOCK_0__ literal, then say hi to ${AUTHOR_TOKENS.firstName}.`;
+    const protectedCopy = protectCampaignPersonalization(copy);
+    expect(protectedCopy).toContain("__PULSE_LIQUID_BLOCK_0__ literal");
+    expect(protectedCopy.match(/\{\{#if first_name\}\}/g)).toHaveLength(1);
+  });
+
   it("preserves custom Liquid blocks without rewriting their internals", () => {
     const custom = "{{#if first_name}}Hello {{first_name}}{{else}}Good morning{{/if}}";
     expect(protectCampaignPersonalization(custom)).toBe(custom);

@@ -5,6 +5,7 @@
  */
 
 const DEFAULT_MAX_LENGTH = 1600;
+const MAX_INPUT_SCAN_LENGTH = 32_000;
 
 function decodeHtmlEntities(value: string): string {
   const named: Record<string, string> = {
@@ -46,7 +47,9 @@ export function normalizeReplyText(
   maxLength = DEFAULT_MAX_LENGTH,
 ): string | null {
   if (!input?.trim()) return null;
-  let value = input.replace(/\r\n?/g, "\n").trim();
+  // Clamp untrusted webhook input before the quote/signature regexes. The
+  // stored/displayed result is capped again below.
+  let value = input.slice(0, MAX_INPUT_SCAN_LENGTH).replace(/\r\n?/g, "\n").trim();
 
   const htmlCut = earliestIndex(value, [
     /<blockquote\b/i,

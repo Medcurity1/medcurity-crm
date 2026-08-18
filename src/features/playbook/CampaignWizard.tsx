@@ -1017,7 +1017,7 @@ export function CampaignWizard({
                       {launchResult.alreadyEnrolledDropped === 1 ? "was" : "were"} already enrolled elsewhere and skipped.
                     </p>
                   )}
-                  {!launchResult.started && <p className="text-xs text-muted-foreground">Review and start it in Smartlead when you're ready.</p>}
+                  {!launchResult.started && <p className="text-xs text-muted-foreground">Review it, then press Start from the Pulse campaign tracker when you're ready. Starting only in Smartlead would skip Pulse task scheduling.</p>}
                   <Button size="sm" onClick={() => close(false)}>Done</Button>
                 </div>
               ) : (

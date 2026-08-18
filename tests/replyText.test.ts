@@ -44,6 +44,14 @@ describe("campaign reply text normalization", () => {
     expect(normalizeServer(long, 80)).toBe(`${"a".repeat(79)}…`);
   });
 
+  it("clamps oversized webhook input before normalization", () => {
+    const oversized = "Interested. " + "<div ".repeat(80_000);
+    expect(normalizeBoth(oversized)).toEqual([
+      expect.stringMatching(/^Interested\./),
+      expect.stringMatching(/^Interested\./),
+    ]);
+  });
+
   it("does not crash on invalid numeric entities", () => {
     const raw = "Still interested &#999999999; &#xD800; &#0;";
     expect(normalizeBoth(raw)).toEqual([raw, raw]);

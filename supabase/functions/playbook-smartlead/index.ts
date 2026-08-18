@@ -325,38 +325,42 @@ function mergeTemplate(tpl: string, vars: {
   phone: string;
 }): string {
   return tpl
-    .replace(/\[\[\s*First name\s*\]\]/gi, vars.first_name)
-    .replace(/\[\[\s*Organization\s*\]\]/gi, vars.company)
-    .replace(/\[\[\s*Signature\s*\]\]/gi, vars.sender_name)
-    .replace(/\[\[\s*Work phone\s*\]\]/gi, vars.phone)
-    .replace(/\{\{\s*first_name\s*\}\}/gi, vars.first_name)
-    .replace(/\{\{\s*last_name\s*\}\}/gi, vars.last_name)
-    .replace(/\{\{\s*(?:company|company_name)\s*\}\}/gi, vars.company)
-    .replace(/\{\{\s*sender_name\s*\}\}/gi, vars.sender_name)
-    .replace(/\{\{\s*phone\s*\}\}/gi, vars.phone);
+    .replace(/\[\[\s*First name\s*\]\]/gi, () => vars.first_name)
+    .replace(/\[\[\s*Organization\s*\]\]/gi, () => vars.company)
+    .replace(/\[\[\s*Signature\s*\]\]/gi, () => vars.sender_name)
+    .replace(/\[\[\s*Work phone\s*\]\]/gi, () => vars.phone)
+    .replace(/\{\{\s*first_name\s*\}\}/gi, () => vars.first_name)
+    .replace(/\{\{\s*last_name\s*\}\}/gi, () => vars.last_name)
+    .replace(/\{\{\s*(?:company|company_name)\s*\}\}/gi, () => vars.company)
+    .replace(/\{\{\s*sender_name\s*\}\}/gi, () => vars.sender_name)
+    .replace(/\{\{\s*phone\s*\}\}/gi, () => vars.phone);
 }
 
 /** Provider-safe personalization generated at launch. Salespeople write with
  * friendly editor tokens; legacy templates may still contain raw merge fields.
  * Both routes land on the same missing-value fallbacks and automatic signature. */
 function protectCampaignPersonalization(template: string): string {
+  const source = template ?? "";
   const first = "{{#if first_name}}{{first_name}}{{else}}there{{/if}}";
   const company = "{{#if company_name}}{{company_name}}{{else}}your organization{{/if}}";
   const blocks: string[] = [];
-  return (template ?? "")
-    .replace(/\{\{#if\s+(?:first_name|company_name|company)\}\}[\s\S]*?\{\{\/if\}\}/gi, (block) => {
-      const sentinel = `__PULSE_LIQUID_BLOCK_${blocks.length}__`;
-      blocks.push(block);
-      return sentinel;
-    })
-    .replace(/\[\[\s*First name\s*\]\]/gi, first)
-    .replace(/\[\[\s*Organization\s*\]\]/gi, company)
+  let sentinelPrefix = "__PULSE_LIQUID_BLOCK_";
+  while (source.includes(sentinelPrefix)) sentinelPrefix = `_${sentinelPrefix}`;
+  const keepBlock = (block: string) => {
+    const sentinel = `${sentinelPrefix}${blocks.length}__`;
+    blocks.push(block);
+    return sentinel;
+  };
+  return source
+    .replace(/\{\{#if\s+(?:first_name|company_name|company)\}\}[\s\S]*?\{\{\/if\}\}/gi, keepBlock)
+    .replace(/\[\[\s*First name\s*\]\]/gi, () => keepBlock(first))
+    .replace(/\[\[\s*Organization\s*\]\]/gi, () => keepBlock(company))
     .replace(/\[\[\s*Signature\s*\]\]/gi, "%signature%")
     .replace(/\{\{\s*company\s*\}\}/gi, "{{company_name}}")
     .replace(/\{\{\s*sender_name\s*\}\}/gi, "%signature%")
-    .replace(/\{\{\s*first_name\s*\}\}/gi, first)
-    .replace(/\{\{\s*company_name\s*\}\}/gi, company)
-    .replace(/__PULSE_LIQUID_BLOCK_(\d+)__/g, (_match, index) => blocks[Number(index)] ?? "");
+    .replace(/\{\{\s*first_name\s*\}\}/gi, () => keepBlock(first))
+    .replace(/\{\{\s*company_name\s*\}\}/gi, () => keepBlock(company))
+    .replace(new RegExp(`${sentinelPrefix}(\\d+)__`, "g"), (_match, index) => blocks[Number(index)] ?? "");
 }
 
 /**
@@ -1585,6 +1589,9 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
   if (!p.campaign_name || !p.recipients?.length || (!usingSteps && !p.sequence?.length)) {
     throw new Error("campaign_name, a sequence (or steps), and recipients are required");
   }
+  if (p.recipients.length > 10_000) {
+    throw new Error("A campaign can include at most 10,000 recipients. Split this audience into smaller launches.");
+  }
   // Rep rollout flip point: remove/adjust this admin gate when reps get UI
   // access to Campaigns (see App.tsx's AdminGate + ContactsList.tsx's own
   // admin check — those are the gates that actually decide who can reach
@@ -2174,9 +2181,17 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
               "playbook launch: post-start task spawn failed (campaign is live; not rolling back):",
               (postErr as Error).message,
             );
+            const taskWarning =
+              "The campaign IS sending, but Pulse couldn't finish scheduling the call and LinkedIn tasks. Open the campaign tracker and press Pause, then Resume, to retry the task setup.";
+            launchWarning = launchWarning ? `${launchWarning} ALSO: ${taskWarning}` : taskWarning;
           }
         }
-      } catch { /* leave as draft */ }
+      } catch (startErr) {
+        console.error("playbook launch: Smartlead start failed; campaign remains a draft:", (startErr as Error).message);
+        const startWarning =
+          "The campaign was created, but Smartlead did not start it. Open it in the Pulse campaign tracker and press Start to retry.";
+        launchWarning = launchWarning ? `${launchWarning} ALSO: ${startWarning}` : startWarning;
+      }
     }
   } catch (err) {
     try { await smartleadFetch(`/campaigns/${campaignId}`, { method: "DELETE" }); } catch { /* best-effort */ }

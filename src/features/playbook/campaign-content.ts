@@ -89,21 +89,28 @@ export function authorTextToTemplateHtml(text: string): string {
 
 /** Convert friendly/legacy placeholders to safe Smartlead provider syntax. */
 export function protectCampaignPersonalization(template: string): string {
+  const source = template ?? "";
   const blocks: string[] = [];
-  return (template ?? "")
-    .replace(/\{\{#if\s+(?:first_name|company_name|company)\}\}[\s\S]*?\{\{\/if\}\}/gi, (block) => {
-      const sentinel = `__PULSE_LIQUID_BLOCK_${blocks.length}__`;
-      blocks.push(block);
-      return sentinel;
-    })
-    .replace(/\[\[\s*First name\s*\]\]/gi, FIRST_NAME_LIQUID)
-    .replace(/\[\[\s*Organization\s*\]\]/gi, COMPANY_LIQUID)
+  let sentinelPrefix = "__PULSE_LIQUID_BLOCK_";
+  while (source.includes(sentinelPrefix)) sentinelPrefix = `_${sentinelPrefix}`;
+  const keepBlock = (block: string) => {
+    const sentinel = `${sentinelPrefix}${blocks.length}__`;
+    blocks.push(block);
+    return sentinel;
+  };
+  return source
+    .replace(/\{\{#if\s+(?:first_name|company_name|company)\}\}[\s\S]*?\{\{\/if\}\}/gi, keepBlock)
+    // Stash generated fallback blocks too. Otherwise the later legacy-token
+    // pass sees the {{first_name}} inside a newly generated block and wraps
+    // it a second time.
+    .replace(/\[\[\s*First name\s*\]\]/gi, () => keepBlock(FIRST_NAME_LIQUID))
+    .replace(/\[\[\s*Organization\s*\]\]/gi, () => keepBlock(COMPANY_LIQUID))
     .replace(/\[\[\s*Signature\s*\]\]/gi, "%signature%")
     .replace(/\{\{\s*company\s*\}\}/gi, "{{company_name}}")
     .replace(/\{\{\s*sender_name\s*\}\}/gi, "%signature%")
-    .replace(/\{\{\s*first_name\s*\}\}/gi, FIRST_NAME_LIQUID)
-    .replace(/\{\{\s*company_name\s*\}\}/gi, COMPANY_LIQUID)
-    .replace(/__PULSE_LIQUID_BLOCK_(\d+)__/g, (_match, index) => blocks[Number(index)] ?? "");
+    .replace(/\{\{\s*first_name\s*\}\}/gi, () => keepBlock(FIRST_NAME_LIQUID))
+    .replace(/\{\{\s*company_name\s*\}\}/gi, () => keepBlock(COMPANY_LIQUID))
+    .replace(new RegExp(`${sentinelPrefix}(\\d+)__`, "g"), (_match, index) => blocks[Number(index)] ?? "");
 }
 
 export function insertAuthorToken(current: string, token: string): string {
