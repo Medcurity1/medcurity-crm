@@ -30,9 +30,15 @@ function whoBadge(s: SequenceStep): { text: string; cls: string } {
 // Turn a "{{first_name}} @ {{company}}" template into readable preview prose.
 function readable(t?: string): string {
   return (t ?? "")
+    .replace(/\[\[\s*First name\s*\]\]/gi, "the contact")
+    .replace(/\[\[\s*Organization\s*\]\]/gi, "their organization")
+    .replace(/\[\[\s*Signature\s*\]\]/gi, "your signature")
+    .replace(/\[\[\s*Work phone\s*\]\]/gi, "your work phone")
     .replace(/\{\{\s*first_name\s*\}\}/gi, "the contact")
     .replace(/\{\{\s*last_name\s*\}\}/gi, "")
-    .replace(/\{\{\s*company\s*\}\}/gi, "their company")
+    .replace(/\{\{\s*(?:company|company_name)\s*\}\}/gi, "their organization")
+    .replace(/\{\{\s*sender_name\s*\}\}/gi, "you")
+    .replace(/\{\{\s*phone\s*\}\}/gi, "your work phone")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -41,7 +47,7 @@ function subtitle(s: SequenceStep): string {
   const note = readable(s.task_note_template);
   if (note) return note;
   if (s.channel === "EMAIL_AUTO" || s.channel === "EMAIL_HYBRID") {
-    return s.content_ai_draft ? "AI drafts the copy; tweak spots are easy to edit." : (readable(s.subject_template) || "Email step.");
+    return s.content_ai_draft ? "Wording needed before this can launch." : (readable(s.subject_template) || "Email step.");
   }
   return CHANNEL[s.channel].label;
 }

@@ -424,9 +424,12 @@ export async function stopEnrollmentForReply(
       body: readableReplyBody,
       due_at: nowIso,
       priority: "high",
-      reminder_schedule: "once",
-      reminder_at: nowIso,
-      reminder_channels: ["in_app", "email"],
+      // The dedicated "Reply received" notification above is the immediate
+      // alert. The task is the durable work item; giving it its own instant
+      // bell + email created three alerts for one reply in the live QA.
+      reminder_schedule: "none",
+      reminder_at: null,
+      reminder_channels: [],
       is_campaign_generated: true,
       campaign_enrollment_id: enrollment.id,
       campaign_step_number: null,

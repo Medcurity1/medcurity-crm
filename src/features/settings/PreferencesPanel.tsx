@@ -4,11 +4,32 @@ import { Button } from "@/components/ui/button";
 import { useTheme, type ThemeMode } from "@/hooks/useTheme";
 import { useUserPreferences } from "@/hooks/useUserPreferences";
 import { QUICK_TASK_SHORTCUTS } from "@/lib/quick-task-shortcut";
-import { Sun, Moon, Monitor, Columns2, AlignLeft } from "lucide-react";
+import { Sun, Moon, Monitor, Columns2, AlignLeft, Phone, Loader2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { useAuth } from "@/features/auth/AuthProvider";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 export function PreferencesPanel() {
   const { mode, setMode, resolved } = useTheme();
   const { prefs, setPref } = useUserPreferences();
+  const { profile, updateMyProfile } = useAuth();
+  const [outreachPhone, setOutreachPhone] = useState(profile?.outreach_phone ?? "");
+  const [savingPhone, setSavingPhone] = useState(false);
+
+  useEffect(() => setOutreachPhone(profile?.outreach_phone ?? ""), [profile?.outreach_phone]);
+
+  async function saveOutreachPhone() {
+    setSavingPhone(true);
+    try {
+      await updateMyProfile({ outreach_phone: outreachPhone.trim() || null });
+      toast.success("Outreach profile saved");
+    } catch (error) {
+      toast.error("Couldn't save your outreach profile: " + (error as Error).message);
+    } finally {
+      setSavingPhone(false);
+    }
+  }
 
   const modes: Array<{ key: ThemeMode; label: string; icon: typeof Sun }> = [
     { key: "light", label: "Light", icon: Sun },
@@ -38,6 +59,30 @@ export function PreferencesPanel() {
 
   return (
     <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Outreach Profile</CardTitle>
+          <CardDescription>
+            Campaigns uses this information automatically in call notes and other assigned outreach tasks.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="outreach-phone">Work phone</Label>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Phone className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input id="outreach-phone" className="pl-9" value={outreachPhone} onChange={(e) => setOutreachPhone(e.target.value)} placeholder="509.555.0123" />
+              </div>
+              <Button onClick={saveOutreachPhone} disabled={savingPhone || outreachPhone.trim() === (profile?.outreach_phone ?? "")}>
+                {savingPhone && <Loader2 className="h-4 w-4 mr-1 animate-spin" />} Save
+              </Button>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">Your connected sending inbox supplies the email signature automatically.</p>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Appearance</CardTitle>

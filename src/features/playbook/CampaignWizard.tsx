@@ -16,7 +16,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Loader2, Sparkles, Wand2, ArrowLeft, ArrowRight, Rocket, CheckCircle2, AlertTriangle,
-  Plus, Trash2, Eye, Code2, RotateCw,
+  Plus, Trash2, Eye, PencilLine, RotateCw, UserRound, Building2, Signature,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
@@ -41,6 +41,14 @@ import { CampaignRecipients } from "./CampaignRecipients";
 import { SequenceTimeline } from "./SequenceTimeline";
 import { partitionSuppression, normalizeEmail, type SuppressionEntry } from "./suppression";
 import type { SequenceStep } from "./types";
+import {
+  AUTHOR_TOKENS,
+  authorTextToTemplateHtml,
+  campaignPreviewHtml,
+  hasUnsupportedRichEmailHtml,
+  insertAuthorToken,
+  templateToAuthorText,
+} from "./campaign-content";
 import {
   useGenerateCampaign, useSuggestCampaign, useRegenerateEmail, useEmailAccounts, useLaunchCampaign,
   useInboxHealth, useSmartleadStatus, useActiveUsers,
@@ -569,12 +577,16 @@ export function CampaignWizard({
   // every email it generates, so this rarely fires there; it's a cheap
   // last-line guard, not the primary flow (see the per-step hint below for
   // template mode, where a hand-cleared field is the real target).
-  const isEmailStepEmpty = (subject: string | undefined, bodyHtml: string | undefined) =>
-    !subject?.trim() || !plain(bodyHtml ?? "").trim();
+  const isEmailStepEmpty = (
+    subject: string | undefined,
+    bodyHtml: string | undefined,
+    requireSubject = true,
+  ) => !plain(bodyHtml ?? "").trim() || (requireSubject && !subject?.trim());
+  const firstTemplateEmailOrder = Math.min(...templateEmailSteps.map((s) => s.order));
   const incompleteTemplateEmails = templateEmailSteps.filter((s) =>
-    isEmailStepEmpty(s.subject_template, s.body_template));
+    isEmailStepEmpty(s.subject_template, s.body_template, s.order === firstTemplateEmailOrder));
   const aiEmailsIncomplete = mode === "ai" && !!campaign &&
-    campaign.sequence.some((e) => isEmailStepEmpty(e.subject, e.body_html));
+    campaign.sequence.some((e) => isEmailStepEmpty(e.subject, e.body_html, e.seq_number === 1));
 
   // Launch-confirmation summary (Step 4's Launch button opens this instead
   // of calling doLaunch() directly). Mirrors the same counts the Step 4
@@ -655,7 +667,9 @@ export function CampaignWizard({
               )}
 
               {campaign.sequence.map((email) => {
-                const isCode = codeView.has(email.seq_number);
+                const isPreview = codeView.has(email.seq_number);
+                const authorBody = templateToAuthorText(email.body_html);
+                const hasAdvancedFormatting = hasUnsupportedRichEmailHtml(email.body_html);
                 return (
                   <div key={email.seq_number} className="rounded-md border p-3 space-y-2">
                     <div className="flex items-center justify-between gap-2">
@@ -676,8 +690,8 @@ export function CampaignWizard({
                         )}
                       </div>
                       <div className="flex items-center gap-1">
-                        <Button variant="ghost" size="xs" className="h-6" onClick={() => toggleCode(email.seq_number)} title="Toggle preview / HTML">
-                          {isCode ? <><Eye className="h-3 w-3 mr-1" /> Preview</> : <><Code2 className="h-3 w-3 mr-1" /> HTML</>}
+                        <Button variant="ghost" size="xs" className="h-6" disabled={hasAdvancedFormatting} onClick={() => toggleCode(email.seq_number)}>
+                          {isPreview ? <><PencilLine className="h-3 w-3 mr-1" /> Write</> : <><Eye className="h-3 w-3 mr-1" /> Preview</>}
                         </Button>
                         <Button
                           variant="ai" size="xs" className="h-6"
@@ -694,16 +708,41 @@ export function CampaignWizard({
                         </Button>
                       </div>
                     </div>
-                    <Input value={email.subject} onChange={(e) => editEmail(email.seq_number, { subject: e.target.value })}
+                    <Input value={templateToAuthorText(email.subject)} onChange={(e) => editEmail(email.seq_number, { subject: e.target.value })}
                       placeholder={email.seq_number === 1 ? "Subject" : "Subject (blank = threaded reply)"} />
-                    {isCode ? (
-                      <Textarea rows={6} className="font-mono text-[11px]" value={email.body_html}
-                        onChange={(e) => editEmail(email.seq_number, { body_html: e.target.value })} />
-                    ) : (
-                      <div className="rounded border bg-white overflow-hidden">
-                        <iframe title={`Email ${email.seq_number}`} srcDoc={emailSrcDoc(email.body_html)} sandbox="" className="w-full min-h-[160px]" />
+                    {hasAdvancedFormatting ? (
+                      <>
+                        <p className="rounded-md bg-amber-500/10 px-2.5 py-2 text-xs text-amber-700 dark:text-amber-300">
+                          This email has advanced layout or embedded images. Pulse is preserving it exactly; rebuild it as clean copy in the template editor before changing the body.
+                        </p>
+                        <div className="rounded border bg-white overflow-hidden">
+                          <iframe title={`Email ${email.seq_number}`} srcDoc={emailSrcDoc(email.body_html)} sandbox="" className="w-full min-h-[160px]" />
+                        </div>
+                      </>
+                    ) : <>
+                    {!isPreview && (
+                      <div className="flex flex-wrap gap-1">
+                        {[
+                          [AUTHOR_TOKENS.firstName, "First name", UserRound],
+                          [AUTHOR_TOKENS.organization, "Organization", Building2],
+                          [AUTHOR_TOKENS.signature, "Signature", Signature],
+                        ].map(([token, label, Icon]) => (
+                          <Button key={String(token)} type="button" variant="outline" size="xs" onClick={() => editEmail(email.seq_number, { body_html: authorTextToTemplateHtml(insertAuthorToken(authorBody, String(token))) })}>
+                            <Icon className="h-3 w-3 mr-1" /> {String(label)}
+                          </Button>
+                        ))}
                       </div>
                     )}
+                    {isPreview ? (
+                      <div className="rounded border bg-white overflow-hidden">
+                        <iframe title={`Email ${email.seq_number}`} srcDoc={emailSrcDoc(campaignPreviewHtml(email.body_html, { firstName: recipients[0]?.first_name, organization: recipients[0]?.company_name }))} sandbox="" className="w-full min-h-[160px]" />
+                      </div>
+                    ) : (
+                      <Textarea rows={7} value={authorBody}
+                        placeholder="Write the email exactly as it should read. Pulse handles personalization and formatting."
+                        onChange={(e) => editEmail(email.seq_number, { body_html: authorTextToTemplateHtml(e.target.value) })} />
+                    )}
+                    </>}
                     <p className="text-[11px] text-muted-foreground truncate">Preview: {plain(email.body_html).slice(0, 100) || "—"}</p>
                   </div>
                 );
@@ -776,29 +815,56 @@ export function CampaignWizard({
                 <div className="space-y-2">
                   <p className="text-xs font-medium text-muted-foreground">Automated emails — edit for this launch only, the saved template is untouched</p>
                   {templateEmailSteps.map((s) => {
-                    const isCode = codeView.has(s.order);
-                    const incomplete = isEmailStepEmpty(s.subject_template, s.body_template);
+                    const isPreview = codeView.has(s.order);
+                    const authorBody = templateToAuthorText(s.body_template ?? "");
+                    const hasAdvancedFormatting = hasUnsupportedRichEmailHtml(s.body_template ?? "");
+                    const incomplete = isEmailStepEmpty(s.subject_template, s.body_template, s.order === firstTemplateEmailOrder);
                     return (
                       <div key={s.order} className={cn("rounded-md border p-3 space-y-2", incomplete && "border-amber-400/60")}>
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-xs font-semibold">Day {s.day_offset} email</span>
-                          <Button variant="ghost" size="xs" className="h-6" onClick={() => toggleCode(s.order)} title="Toggle preview / HTML">
-                            {isCode ? <><Eye className="h-3 w-3 mr-1" /> Preview</> : <><Code2 className="h-3 w-3 mr-1" /> HTML</>}
+                          <Button variant="ghost" size="xs" className="h-6" disabled={hasAdvancedFormatting} onClick={() => toggleCode(s.order)}>
+                            {isPreview ? <><PencilLine className="h-3 w-3 mr-1" /> Write</> : <><Eye className="h-3 w-3 mr-1" /> Preview</>}
                           </Button>
                         </div>
                         <Input
-                          value={s.subject_template ?? ""}
+                          value={templateToAuthorText(s.subject_template ?? "")}
                           placeholder="Subject"
                           onChange={(e) => patchTemplateStep(s.order, { subject_template: e.target.value })}
                         />
-                        {isCode ? (
-                          <Textarea rows={6} className="font-mono text-[11px]" value={s.body_template ?? ""}
-                            onChange={(e) => patchTemplateStep(s.order, { body_template: e.target.value })} />
-                        ) : (
-                          <div className="rounded border bg-white overflow-hidden">
-                            <iframe title={`Day ${s.day_offset} email`} srcDoc={emailSrcDoc(s.body_template ?? "")} sandbox="" className="w-full min-h-[160px]" />
+                        {hasAdvancedFormatting ? (
+                          <>
+                            <p className="rounded-md bg-amber-500/10 px-2.5 py-2 text-xs text-amber-700 dark:text-amber-300">
+                              This email has advanced layout or embedded images. Pulse is preserving it exactly; rebuild it as clean copy in the template editor before changing the body.
+                            </p>
+                            <div className="rounded border bg-white overflow-hidden">
+                              <iframe title={`Day ${s.day_offset} email`} srcDoc={emailSrcDoc(s.body_template ?? "")} sandbox="" className="w-full min-h-[160px]" />
+                            </div>
+                          </>
+                        ) : <>
+                        {!isPreview && (
+                          <div className="flex flex-wrap gap-1">
+                            {[
+                              [AUTHOR_TOKENS.firstName, "First name", UserRound],
+                              [AUTHOR_TOKENS.organization, "Organization", Building2],
+                              [AUTHOR_TOKENS.signature, "Signature", Signature],
+                            ].map(([token, label, Icon]) => (
+                              <Button key={String(token)} type="button" variant="outline" size="xs" onClick={() => patchTemplateStep(s.order, { body_template: authorTextToTemplateHtml(insertAuthorToken(authorBody, String(token))), content_ai_draft: false })}>
+                                <Icon className="h-3 w-3 mr-1" /> {String(label)}
+                              </Button>
+                            ))}
                           </div>
                         )}
+                        {isPreview ? (
+                          <div className="rounded border bg-white overflow-hidden">
+                            <iframe title={`Day ${s.day_offset} email`} srcDoc={emailSrcDoc(campaignPreviewHtml(s.body_template ?? "", { firstName: recipients[0]?.first_name, organization: recipients[0]?.company_name }))} sandbox="" className="w-full min-h-[160px]" />
+                          </div>
+                        ) : (
+                          <Textarea rows={7} value={authorBody}
+                            placeholder="Write the email exactly as it should read. Pulse handles personalization and formatting."
+                            onChange={(e) => patchTemplateStep(s.order, { body_template: authorTextToTemplateHtml(e.target.value), content_ai_draft: false })} />
+                        )}
+                        </>}
                         {incomplete && (
                           <p className="text-[11px] text-amber-600">This email still needs wording.</p>
                         )}

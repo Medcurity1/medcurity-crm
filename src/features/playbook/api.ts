@@ -507,11 +507,11 @@ export function useActiveUsers() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("user_profiles")
-        .select("id, full_name")
+        .select("id, full_name, outreach_phone")
         .eq("is_active", true)
         .order("full_name");
       if (error) throw error;
-      return (data ?? []) as { id: string; full_name: string | null }[];
+      return (data ?? []) as { id: string; full_name: string | null; outreach_phone: string | null }[];
     },
   });
 }

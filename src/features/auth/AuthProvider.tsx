@@ -24,6 +24,7 @@ interface AuthContextValue {
   profileError: boolean;
   signOut: () => Promise<void>;
   markOnboarded: () => Promise<void>;
+  updateMyProfile: (values: Partial<Pick<UserProfile, "outreach_phone">>) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -222,6 +223,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
   }, [session]);
 
+  const updateMyProfile = useCallback(async (
+    values: Partial<Pick<UserProfile, "outreach_phone">>,
+  ) => {
+    if (!session?.user?.id) return;
+    const { data, error } = await supabase
+      .from("user_profiles")
+      .update(values)
+      .eq("id", session.user.id)
+      .select("*")
+      .single();
+    if (error) throw error;
+    setProfile(data as UserProfile);
+  }, [session]);
+
   // Memoize so useAuth consumers (AppLayout, every list, Sidebar, AdminGate)
   // don't re-render on an unrelated parent render — only when auth state
   // actually changes. signOut/markOnboarded are stable via useCallback.
@@ -234,8 +249,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       profileError,
       signOut,
       markOnboarded,
+      updateMyProfile,
     }),
-    [session, profile, loading, profileError, signOut, markOnboarded]
+    [session, profile, loading, profileError, signOut, markOnboarded, updateMyProfile]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

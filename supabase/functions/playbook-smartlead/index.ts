@@ -317,11 +317,46 @@ function todayISODate(): string {
  *  read-only PREVIEW version (which substitutes generic phrases like "the
  *  contact" for a template gallery card), this substitutes the real
  *  recipient's data since it's building an actual task. */
-function mergeTemplate(tpl: string, vars: { first_name: string; last_name: string; company: string }): string {
+function mergeTemplate(tpl: string, vars: {
+  first_name: string;
+  last_name: string;
+  company: string;
+  sender_name: string;
+  phone: string;
+}): string {
   return tpl
+    .replace(/\[\[\s*First name\s*\]\]/gi, vars.first_name)
+    .replace(/\[\[\s*Organization\s*\]\]/gi, vars.company)
+    .replace(/\[\[\s*Signature\s*\]\]/gi, vars.sender_name)
+    .replace(/\[\[\s*Work phone\s*\]\]/gi, vars.phone)
     .replace(/\{\{\s*first_name\s*\}\}/gi, vars.first_name)
     .replace(/\{\{\s*last_name\s*\}\}/gi, vars.last_name)
-    .replace(/\{\{\s*company\s*\}\}/gi, vars.company);
+    .replace(/\{\{\s*(?:company|company_name)\s*\}\}/gi, vars.company)
+    .replace(/\{\{\s*sender_name\s*\}\}/gi, vars.sender_name)
+    .replace(/\{\{\s*phone\s*\}\}/gi, vars.phone);
+}
+
+/** Provider-safe personalization generated at launch. Salespeople write with
+ * friendly editor tokens; legacy templates may still contain raw merge fields.
+ * Both routes land on the same missing-value fallbacks and automatic signature. */
+function protectCampaignPersonalization(template: string): string {
+  const first = "{{#if first_name}}{{first_name}}{{else}}there{{/if}}";
+  const company = "{{#if company_name}}{{company_name}}{{else}}your organization{{/if}}";
+  const blocks: string[] = [];
+  return (template ?? "")
+    .replace(/\{\{#if\s+(?:first_name|company_name|company)\}\}[\s\S]*?\{\{\/if\}\}/gi, (block) => {
+      const sentinel = `__PULSE_LIQUID_BLOCK_${blocks.length}__`;
+      blocks.push(block);
+      return sentinel;
+    })
+    .replace(/\[\[\s*First name\s*\]\]/gi, first)
+    .replace(/\[\[\s*Organization\s*\]\]/gi, company)
+    .replace(/\[\[\s*Signature\s*\]\]/gi, "%signature%")
+    .replace(/\{\{\s*company\s*\}\}/gi, "{{company_name}}")
+    .replace(/\{\{\s*sender_name\s*\}\}/gi, "%signature%")
+    .replace(/\{\{\s*first_name\s*\}\}/gi, first)
+    .replace(/\{\{\s*company_name\s*\}\}/gi, company)
+    .replace(/__PULSE_LIQUID_BLOCK_(\d+)__/g, (_match, index) => blocks[Number(index)] ?? "");
 }
 
 /**
@@ -759,6 +794,27 @@ async function spawnCampaignTasks(campaignId: string): Promise<{ tasksCreated: n
   }
   if (!enrollments?.length) return { tasksCreated: 0 };
 
+  const taskOwnerIds = Array.from(new Set(enrollments.map((e) =>
+    (e.owner_user_id as string | null) ?? (campaign.owner_user_id as string | null),
+  ).filter((id): id is string => !!id)));
+  const ownerProfiles = new Map<string, { full_name: string; outreach_phone: string }>();
+  if (taskOwnerIds.length) {
+    const { data: profiles, error: profileErr } = await svc
+      .from("user_profiles")
+      .select("id, full_name, outreach_phone")
+      .in("id", taskOwnerIds);
+    if (profileErr) {
+      console.error("spawnCampaignTasks: couldn't load outreach profiles:", profileErr.message);
+    } else {
+      for (const profile of profiles ?? []) {
+        ownerProfiles.set(profile.id as string, {
+          full_name: (profile.full_name as string | null) || "Your campaign owner",
+          outreach_phone: (profile.outreach_phone as string | null) || "[add your work phone in My Settings]",
+        });
+      }
+    }
+  }
+
   // Pre-check: which (enrollment, step) pairs already have a spawned task —
   // covers a retry after a previous partial failure without duplicating.
   const enrollmentIds = enrollments.map((e) => e.id as string);
@@ -784,13 +840,17 @@ async function spawnCampaignTasks(campaignId: string): Promise<{ tasksCreated: n
   // Build one row-group per enrollment (only the steps it's still missing).
   const rowsByEnrollment = new Map<string, Record<string, unknown>[]>();
   for (const e of enrollments) {
+    const taskOwnerId = (e.owner_user_id as string | null) ?? (campaign.owner_user_id as string | null);
+    const ownerProfile = taskOwnerId ? ownerProfiles.get(taskOwnerId) : undefined;
     const vars = {
       // A blank first name reads as "Call " (trailing space, no name at
       // all) in a spawned task title — fall back to the email address so
       // the task is always identifiable ("Call jane@clinic.org").
       first_name: (e.first_name as string) || (e.email as string) || "",
       last_name: (e.last_name as string) || "",
-      company: (e.company as string) || "",
+      company: (e.company as string) || "their organization",
+      sender_name: ownerProfile?.full_name || "Your campaign owner",
+      phone: ownerProfile?.outreach_phone || "[add your work phone in My Settings]",
     };
     const rows: Record<string, unknown>[] = [];
     for (const step of nonEmailSteps) {
@@ -803,7 +863,7 @@ async function spawnCampaignTasks(campaignId: string): Promise<{ tasksCreated: n
         // Owner routing (outside-review group 2): the person's own owner
         // does their calls/LinkedIn touches; the campaign owner only covers
         // enrollments without one (CSV/paste people, unowned contacts).
-        owner_user_id: (e.owner_user_id as string | null) ?? campaign.owner_user_id,
+        owner_user_id: taskOwnerId,
         subject: mergeTemplate(step.manual_task_title_template || defaultTaskTitle(step.channel), vars),
         body: note || null,
         due_at: dueAt,
@@ -1540,12 +1600,31 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
   // Smartlead's flat email sequence FROM it and ignore p.sequence entirely.
   // AI-wizard launch (no p.steps): p.sequence drives Smartlead directly and
   // sequenceToSteps() backfills campaigns.steps for the tracker.
-  const steps: CampaignStep[] = usingSteps
+  const rawSteps: CampaignStep[] = usingSteps
     ? p.steps!
     : (sequenceToSteps(p.sequence!) as unknown as CampaignStep[]);
+  const steps: CampaignStep[] = rawSteps.map((step) => step.channel === "EMAIL_AUTO"
+    ? {
+        ...step,
+        content_ai_draft: false,
+        subject_template: protectCampaignPersonalization(step.subject_template || ""),
+        body_template: protectCampaignPersonalization(step.body_template || ""),
+      }
+    : step);
+  const firstEmailOrder = Math.min(...steps.filter((step) => step.channel === "EMAIL_AUTO").map((step) => step.order));
+  const incompleteEmails = steps.filter((step) => step.channel === "EMAIL_AUTO" && (
+    step.content_ai_draft === true ||
+    (step.order === firstEmailOrder && !String(step.subject_template ?? "").trim()) ||
+    !String(step.body_template ?? "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").trim()
+  ));
+  if (incompleteEmails.length) {
+    throw new Error(
+      `${incompleteEmails.length === 1 ? "One automated email is" : `${incompleteEmails.length} automated emails are`} missing visible wording. Finish the copy in Pulse before launching.`,
+    );
+  }
   const emailSequence: Array<Record<string, unknown>> = usingSteps
     ? (emailStepsToSmartleadSequence(steps) as unknown as Array<Record<string, unknown>>)
-    : p.sequence!;
+    : (emailStepsToSmartleadSequence(steps) as unknown as Array<Record<string, unknown>>);
 
   // The launch date every enrollment's throttle math anchors to — "payload
   // date or today" per the S3 spec, resolved ONCE and reused below for both

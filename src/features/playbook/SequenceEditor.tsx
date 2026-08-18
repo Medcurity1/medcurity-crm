@@ -14,7 +14,9 @@ import {
   ArrowUp,
   ArrowDown,
   Loader2,
-  Sparkles,
+  UserRound,
+  Building2,
+  Signature,
 } from "lucide-react";
 import {
   Dialog,
@@ -28,12 +30,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import { useSaveTemplate } from "./api";
 import type { CampaignTemplate, SequenceChannel, SequenceStep } from "./types";
+import {
+  AUTHOR_TOKENS,
+  authorTextToTemplateHtml,
+  insertAuthorToken,
+  hasUnsupportedRichEmailHtml,
+  templateToAuthorText,
+} from "./campaign-content";
 
 const CHANNELS: {
   value: SequenceChannel;
@@ -58,7 +66,7 @@ function freshStep(dayOffset: number): SequenceStep {
     automation: "AUTO",
     send_window_start: "10:00",
     send_window_end: "11:00",
-    content_ai_draft: true,
+    content_ai_draft: false,
     pause_on_reply: true,
     stop_on_unsubscribe: true,
     subject_template: "",
@@ -129,6 +137,15 @@ export function SequenceEditor({
       toast.error("Give the sequence a name.");
       return;
     }
+    const firstEmailIndex = steps.findIndex((s) => s.channel === "EMAIL_AUTO");
+    const incomplete = steps.filter((s, index) => s.channel === "EMAIL_AUTO" && (
+      !templateToAuthorText(s.body_template ?? "").trim() ||
+      (index === firstEmailIndex && !s.subject_template?.trim())
+    ));
+    if (incomplete.length) {
+      toast.error(`${incomplete.length === 1 ? "One automated email needs" : `${incomplete.length} automated emails need`} a subject and message.`);
+      return;
+    }
     save.mutate(
       {
         id: initial?.id,
@@ -154,6 +171,15 @@ export function SequenceEditor({
   const handleSaveAndLaunch = () => {
     if (!name.trim()) {
       toast.error("Give the sequence a name.");
+      return;
+    }
+    const firstEmailIndex = steps.findIndex((s) => s.channel === "EMAIL_AUTO");
+    const incomplete = steps.filter((s, index) => s.channel === "EMAIL_AUTO" && (
+      !templateToAuthorText(s.body_template ?? "").trim() ||
+      (index === firstEmailIndex && !s.subject_template?.trim())
+    ));
+    if (incomplete.length) {
+      toast.error(`${incomplete.length === 1 ? "One automated email needs" : `${incomplete.length} automated emails need`} a subject and message.`);
       return;
     }
     save.mutate(
@@ -225,6 +251,7 @@ export function SequenceEditor({
             {steps.map((s, i) => {
               const def = channelDef(s.channel);
               const Icon = def.icon;
+              const hasAdvancedFormatting = def.isEmail && hasUnsupportedRichEmailHtml(s.body_template ?? "");
               return (
                 <div key={i} className="rounded-lg border p-3 space-y-3">
                   <div className="flex items-center gap-2">
@@ -286,29 +313,45 @@ export function SequenceEditor({
                   {/* Email content */}
                   {def.isEmail && (
                     <div className="space-y-2">
-                      <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-                        <Checkbox
-                          checked={!!s.content_ai_draft}
-                          onCheckedChange={(v) => patchStep(i, { content_ai_draft: !!v })}
-                        />
-                        <Sparkles className="h-3.5 w-3.5" /> Let AI draft this email when the campaign runs
-                      </label>
-                      {!s.content_ai_draft && (
-                        <>
-                          <Input
-                            placeholder="Subject"
-                            value={s.subject_template ?? ""}
-                            onChange={(e) => patchStep(i, { subject_template: e.target.value })}
-                            className="h-8"
-                          />
-                          <Textarea
-                            placeholder="Email body — use {{first_name}}, {{company}} for merge fields"
-                            value={s.body_template ?? ""}
-                            onChange={(e) => patchStep(i, { body_template: e.target.value })}
-                            rows={3}
-                          />
-                        </>
+                      {s.content_ai_draft && (
+                        <p className="rounded-md bg-amber-500/10 px-2.5 py-2 text-xs text-amber-700 dark:text-amber-300">
+                          This older template was marked “AI writes later,” but no email should launch unseen. Add the wording here to make it ready.
+                        </p>
                       )}
+                      <Input
+                        placeholder="Subject"
+                        value={templateToAuthorText(s.subject_template ?? "")}
+                        onChange={(e) => patchStep(i, { subject_template: e.target.value, content_ai_draft: false })}
+                        className="h-8"
+                      />
+                      {hasAdvancedFormatting ? (
+                        <>
+                          <p className="rounded-md bg-amber-500/10 px-2.5 py-2 text-xs text-amber-700 dark:text-amber-300">
+                            This email uses advanced layout or embedded images. Pulse is preserving the body exactly so links and artwork are not lost; create a clean-copy step to replace it.
+                          </p>
+                          <div className="rounded border bg-white overflow-hidden">
+                            <iframe title={`Step ${i + 1} email`} srcDoc={s.body_template ?? ""} sandbox="" className="w-full min-h-[160px]" />
+                          </div>
+                        </>
+                      ) : <>
+                      <div className="flex flex-wrap gap-1">
+                        <Button type="button" variant="outline" size="xs" onClick={() => patchStep(i, { body_template: authorTextToTemplateHtml(insertAuthorToken(templateToAuthorText(s.body_template ?? ""), AUTHOR_TOKENS.firstName)), content_ai_draft: false })}>
+                          <UserRound className="h-3 w-3 mr-1" /> First name
+                        </Button>
+                        <Button type="button" variant="outline" size="xs" onClick={() => patchStep(i, { body_template: authorTextToTemplateHtml(insertAuthorToken(templateToAuthorText(s.body_template ?? ""), AUTHOR_TOKENS.organization)), content_ai_draft: false })}>
+                          <Building2 className="h-3 w-3 mr-1" /> Organization
+                        </Button>
+                        <Button type="button" variant="outline" size="xs" onClick={() => patchStep(i, { body_template: authorTextToTemplateHtml(insertAuthorToken(templateToAuthorText(s.body_template ?? ""), AUTHOR_TOKENS.signature)), content_ai_draft: false })}>
+                          <Signature className="h-3 w-3 mr-1" /> Signature
+                        </Button>
+                      </div>
+                      <Textarea
+                        placeholder="Write the email exactly as it should read. Pulse handles names, spacing, and the sender signature."
+                        value={templateToAuthorText(s.body_template ?? "")}
+                        onChange={(e) => patchStep(i, { body_template: authorTextToTemplateHtml(e.target.value), content_ai_draft: false })}
+                        rows={6}
+                      />
+                      </>}
                     </div>
                   )}
 
@@ -318,18 +361,18 @@ export function SequenceEditor({
                       <Input
                         placeholder={
                           s.channel === "CALL"
-                            ? "Task title — e.g. Call {{first_name}} @ {{company}}"
+                            ? "Task title — e.g. Call [[First name]] at [[Organization]]"
                             : s.channel === "LINKEDIN"
-                              ? "Task title — e.g. LinkedIn connect: {{first_name}}"
-                              : "Task title — e.g. Review & send to {{first_name}}"
+                              ? "Task title — e.g. LinkedIn connect: [[First name]]"
+                              : "Task title — e.g. Review & send to [[First name]]"
                         }
-                        value={s.manual_task_title_template ?? ""}
+                        value={templateToAuthorText(s.manual_task_title_template ?? "")}
                         onChange={(e) => patchStep(i, { manual_task_title_template: e.target.value })}
                         className="h-8"
                       />
                       <Textarea
                         placeholder="Note for the rep (optional)"
-                        value={s.task_note_template ?? ""}
+                        value={templateToAuthorText(s.task_note_template ?? "")}
                         onChange={(e) => patchStep(i, { task_note_template: e.target.value })}
                         rows={2}
                       />
