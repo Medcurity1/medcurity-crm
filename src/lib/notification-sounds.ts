@@ -11,6 +11,7 @@
 //             run in background tabs (the Audio element covers those).
 
 import { canonicalSound, DEFAULT_SOUND } from "./notification-sound-choice";
+import { createHtmlAudioSession } from "./notification-html-audio";
 
 // ── Background-tab fallback WAV (22050Hz mono 16-bit) ────────────────
 // Generated at load; there are no audio files in the repo. A backgrounded
@@ -85,11 +86,18 @@ document.addEventListener("click", _unlockAudio, { once: false });
 document.addEventListener("keydown", _unlockAudio, { once: false });
 document.addEventListener("touchstart", _unlockAudio, { once: false });
 
+const htmlAudio = createHtmlAudioSession();
+
 function _playNotifAudio(): Promise<boolean> {
   try {
+    const started = htmlAudio.beginPlay();
     const sound = notifAudio.cloneNode() as HTMLAudioElement;
     sound.volume = 0.5;
-    return sound.play().then(() => true).catch(() => false);
+    if (!htmlAudio.adoptClone(sound, started)) return Promise.resolve(false);
+    return sound
+      .play()
+      .then(() => htmlAudio.isCurrent(started))
+      .catch(() => false);
   } catch {
     return Promise.resolve(false);
   }
@@ -129,6 +137,7 @@ function getAudioCtx(): AudioContext {
 }
 
 export function stopActiveSound() {
+  htmlAudio.stop();
   if (activeSoundTimer) {
     clearTimeout(activeSoundTimer);
     activeSoundTimer = null;
@@ -330,7 +339,9 @@ export function playScheduled(soundType: string, durationType: string, onFinish?
     } else {
       // AudioContext suspended (background tab): fall back to the WAV
       // chime via HTML5 Audio, queueing if even that can't play yet.
+      const started = htmlAudio.beginPlay();
       void _playNotifAudio().then((audioPlayed) => {
+        if (!htmlAudio.isCurrent(started)) return;
         if (!audioPlayed && document.hidden) {
           _soundQueue.push({ soundType, durationType });
         }
@@ -339,10 +350,10 @@ export function playScheduled(soundType: string, durationType: string, onFinish?
       if (totalMs > 0) {
         const cycleMs = getSoundCycleMs(soundType);
         for (let elapsed = cycleMs; elapsed < totalMs; elapsed += cycleMs) {
-          setTimeout(() => { void _playNotifAudio(); }, elapsed);
+          htmlAudio.schedule(() => { void _playNotifAudio(); }, elapsed);
         }
       }
-      if (onFinish) setTimeout(() => onFinish(), Math.max(totalMs, 500));
+      if (onFinish) htmlAudio.schedule(() => onFinish(), Math.max(totalMs, 500));
     }
   } catch {
     // audio unavailable — silent no-op

@@ -174,7 +174,7 @@ describe("per-type defaults", () => {
     expect(toasts).toMatch(/urgent, true/);
     expect(engine).toContain("notifAudio.volume = 0");
     expect(engine).toContain("stopActiveSound();");
-    expect(engine).toContain("sound.play().then(() => true).catch(() => false)");
+    expect(engine).toContain("htmlAudio.adoptClone(sound, started)");
   });
 
   it("includes follow-up due in the type tables so the picker can name it", () => {
