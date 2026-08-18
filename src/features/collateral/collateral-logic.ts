@@ -204,6 +204,25 @@ export function buildChipGroups(items: CollateralItemLike[]): ChipGroups {
   };
 }
 
+/** Toggle one family variant. If the parent ("all") is selected, expand
+ *  to every child except the one the user turned off. */
+export function toggleFamilyChild(
+  selected: string[],
+  familyValue: string,
+  childValue: string,
+  childValues: string[],
+): string[] {
+  const parentActive = selected.includes(familyValue);
+  const withoutFamily = selected.filter((v) => v !== familyValue && !childValues.includes(v));
+  if (parentActive) {
+    return [...withoutFamily, ...childValues.filter((v) => v !== childValue)];
+  }
+  const current = selected.filter((v) => v !== familyValue);
+  return current.includes(childValue)
+    ? current.filter((v) => v !== childValue)
+    : [...current, childValue];
+}
+
 /** Expand any selected family parents into their member values. */
 export function expandProductSelection(
   selected: string[],
@@ -388,10 +407,10 @@ export function primaryUse(uses: string[]): string | null {
  * For image file types the actual artwork IS the identifying information
  * (ten HIPAA seals differ only in shape and colour). The mirror stores no
  * thumbnail data and the sync must not change, so the card renders the
- * item's own SharePoint web_url in an <img>: it resolves through the
- * rep's existing SharePoint session — exactly the auth the Open link
- * already relies on — and the card falls back to the file-type glyph if
- * the browser can't load it. Documents keep the icon treatment.
+ * item's own SharePoint web_url in an <img>. Cross-site cookies may still
+ * block the image; the card falls back to the file-type glyph. Live
+ * staging must confirm whether seals actually render for a signed-in
+ * SharePoint session. Documents keep the icon treatment.
  */
 export function thumbnailUrl(item: {
   web_url: string;

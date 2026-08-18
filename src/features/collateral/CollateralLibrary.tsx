@@ -78,6 +78,7 @@ import {
   SORT_OPTIONS,
   sortItems,
   thumbnailUrl,
+  toggleFamilyChild,
   usePillKind,
   type Chip,
   type CollateralSort,
@@ -149,12 +150,7 @@ function FamilyChip({
   }
 
   function toggleChild(value: string) {
-    // Picking a variant replaces the whole-family selection with variants.
-    let next = selected.filter((v) => v !== chip.value);
-    next = next.includes(value)
-      ? next.filter((v) => v !== value)
-      : [...next, value];
-    onChange(next);
+    onChange(toggleFamilyChild(selected, chip.value, value, children.map((c) => c.value)));
   }
 
   const label = parentActive
@@ -330,7 +326,6 @@ function CollateralCard({
             src={thumb}
             alt=""
             loading="lazy"
-            referrerPolicy="no-referrer"
             onError={() => setThumbFailed(true)}
           />
         </div>
@@ -357,6 +352,7 @@ function CollateralCard({
               !item.pinned && "opacity-0 transition-opacity group-hover:opacity-100",
             )}
             title={item.pinned ? "Unpin" : "Pin to top row"}
+            aria-label={item.pinned ? "Unpin" : "Pin to top row"}
             onClick={() => togglePin.mutate({ id: item.id, pinned: !item.pinned })}
           >
             {item.pinned ? (
@@ -570,7 +566,7 @@ export function CollateralLibrary() {
         </span>
         <h3>No collateral matches yet</h3>
         <p>
-          Ask an admin to add what you need using <strong>Request collateral</strong>.
+          Request what you need with the <strong>Request collateral</strong> button above.
         </p>
       </div>
     );
@@ -643,6 +639,7 @@ export function CollateralLibrary() {
             <button
               type="button"
               aria-pressed={density === "comfortable"}
+              aria-label="Comfortable view"
               title="Comfortable view"
               onClick={() => pickDensity("comfortable")}
             >
@@ -651,6 +648,7 @@ export function CollateralLibrary() {
             <button
               type="button"
               aria-pressed={density === "condensed"}
+              aria-label="Condensed view"
               title="Condensed view"
               onClick={() => pickDensity("condensed")}
             >
@@ -663,7 +661,7 @@ export function CollateralLibrary() {
       {pinnedItems.length > 0 && (
         <div className="space-y-2">
           <p className="collat-label flex items-center gap-1.5">
-            <Pin className="h-3 w-3" /> Pinned
+            <Pin className="h-3 w-3" /> Pinned{anyFilterActive ? " (always shown)" : ""}
           </p>
           <div className={gridClass}>
             {pinnedItems.map((item) => (
