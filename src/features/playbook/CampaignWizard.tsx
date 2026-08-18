@@ -80,6 +80,20 @@ function parseSuggestions(text: string): string[] {
     .filter((l) => l.length > 8);
 }
 
+function ReadinessRow({ ready, label, detail }: { ready: boolean; label: string; detail: string }) {
+  return (
+    <div className="flex items-start gap-2 py-1.5">
+      {ready
+        ? <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0 text-emerald-600" />
+        : <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-amber-600" />}
+      <div className="min-w-0">
+        <p className="text-xs font-medium">{label}</p>
+        <p className="text-[11px] text-muted-foreground">{detail}</p>
+      </div>
+    </div>
+  );
+}
+
 /** Plain-English send-ramp estimate for the template-mode Launch step —
  *  deliberately a small, LOCAL approximation rather than importing the real
  *  server-side module (supabase/functions/_shared/campaign-scheduling.ts is
@@ -245,12 +259,12 @@ export function CampaignWizard({
   const { data: tags } = useTags();
   const { data: inboxes } = useEmailAccounts();
   const { data: activeUsers } = useActiveUsers();
-  const { data: sl } = useSmartleadStatus();
-  // Only a confirmed `false` disables Launch — undefined (still loading) and
-  // true both leave it enabled, so the gate never flashes on while the
-  // status query is in flight. Backstop for every path that reaches this
-  // wizard (AI mode, templates, right-click quick-start).
-  const smartleadDisabled = sl?.configured === false;
+  const { data: sl, isLoading: smartleadLoading, isError: smartleadError } = useSmartleadStatus();
+  // Launch is allowed only after the integration query positively confirms
+  // the connection. Loading and error states stay unready instead of being
+  // mistaken for a healthy connection.
+  const smartleadReady = sl?.configured === true;
+  const smartleadDisabled = !smartleadReady;
   // Lazy — only fires once the wizard has actually reached the cadence/inbox
   // step (Campaigns overhaul Phase 5's "Sending inboxes" note below).
   const { data: inboxHealth } = useInboxHealth(step === 4);
@@ -535,6 +549,18 @@ export function CampaignWizard({
   }
 
   function doLaunch() {
+    if (smartleadDisabled) {
+      toast.error("Reconnect Smartlead before launching this campaign.");
+      return;
+    }
+    if (!senderReady || !selectedInbox) {
+      toast.error("Choose an available sending inbox before launching.");
+      return;
+    }
+    if (!copyReady || !audienceReady) {
+      toast.error("Finish every launch-readiness check before launching.");
+      return;
+    }
     const shared = {
       recipients: sendableRecipients,
       email_account_id: inboxId ? Number(inboxId) : undefined,
@@ -609,6 +635,11 @@ export function CampaignWizard({
   // repeated here as a belt-and-suspenders check right before the launch
   // actually fires, not a replacement for it.
   const confirmEmailsIncomplete = mode === "template" && incompleteTemplateEmails.length > 0;
+  const copyReady = mode === "ai"
+    ? !!campaign && campaign.sequence.length > 0 && !aiEmailsIncomplete
+    : templateEmailSteps.length > 0 && !confirmEmailsIncomplete;
+  const audienceReady = !recipientChecksPending && !recipientChecksFailed && sendableRecipients.length > 0;
+  const senderReady = !!selectedInbox && inboxHeadroom !== 0;
 
   return (
     <>
@@ -1063,23 +1094,62 @@ export function CampaignWizard({
                   {rampProjection && (
                     <p className="text-[11px] text-muted-foreground">{rampProjection}</p>
                   )}
-                  <div className={cn("rounded-md p-2 text-xs", autoStart ? "bg-amber-50 text-amber-700" : "bg-muted/40 text-muted-foreground")}>
-                    {mode === "ai" ? (campaign?.sequence.length ?? 0) : templateEmailSteps.length} emails
-                    {mode === "template" && templateTaskSteps.length > 0 ? ` · ${templateTaskSteps.length} task step${templateTaskSteps.length === 1 ? "" : "s"}` : ""}
-                    {" "}· {sendableRecipients.length} recipients
-                    {suppressionPartition.dropped.length > 0 ? ` (${suppressionPartition.dropped.length} on the Do-Not-Email list excluded)` : ""}
-                    {enrollmentPartition.dropped.length > 0 ? ` (${enrollmentPartition.dropped.length} already enrolled elsewhere excluded)` : ""}
-                    {autoStart ? " · will START sending" : " · will be saved as a DRAFT"}
+                  <div className="rounded-lg border overflow-hidden">
+                    <div className="px-3 py-2 border-b bg-muted/25">
+                      <p className="text-xs font-semibold">Launch readiness</p>
+                      <p className="text-[11px] text-muted-foreground">Every required check must be green before Pulse can launch.</p>
+                    </div>
+                    <div className="px-3 py-1 divide-y">
+                      <ReadinessRow
+                        ready={copyReady}
+                        label="Sequence copy"
+                        detail={copyReady
+                          ? `${confirmEmailCount} automatic email${confirmEmailCount === 1 ? "" : "s"} ready${confirmTouchCount > 0 ? ` + ${confirmTouchCount} assigned task${confirmTouchCount === 1 ? "" : "s"}` : ""}.`
+                          : "One or more automatic emails still need complete wording."}
+                      />
+                      <ReadinessRow
+                        ready={audienceReady}
+                        label="Audience safety"
+                        detail={recipientChecksPending
+                          ? "Checking Do-Not-Email status and other active campaigns…"
+                          : recipientChecksFailed
+                            ? "Safety checks did not finish. Go back and retry them."
+                            : `${sendableRecipients.length} eligible ${sendableRecipients.length === 1 ? "person" : "people"}${suppressionPartition.dropped.length + enrollmentPartition.dropped.length > 0 ? `; ${suppressionPartition.dropped.length + enrollmentPartition.dropped.length} safely excluded` : ""}.`}
+                      />
+                      <ReadinessRow
+                        ready={smartleadReady}
+                        label="Smartlead connection"
+                        detail={smartleadReady
+                          ? "Smartlead is connected and ready for launch."
+                          : smartleadLoading
+                            ? "Checking the Smartlead connection…"
+                            : smartleadError
+                              ? "Pulse could not verify Smartlead. Retry after the connection check recovers."
+                              : "Reconnect Smartlead before Pulse can create or start this campaign."}
+                      />
+                      <ReadinessRow
+                        ready={senderReady}
+                        label="Sending inbox"
+                        detail={!selectedInbox
+                          ? "Choose the exact inbox that should send this campaign."
+                          : inboxHeadroom === 0
+                            ? `${confirmInboxLabel} is already at its daily limit.`
+                            : `${confirmInboxLabel} selected${inboxHeadroom != null ? `; room for about ${inboxHeadroom} more per day` : "; Smartlead will enforce its delivery limits"}.`}
+                      />
+                    </div>
+                    <div className={cn("px-3 py-2 text-[11px] border-t", autoStart ? "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300" : "bg-muted/25 text-muted-foreground")}>
+                      {autoStart ? "Launch will start sending immediately." : "Launch will create a draft; nothing sends until it is started."}
+                    </div>
                   </div>
                   {aiEmailsIncomplete && (
                     <p className="text-xs text-amber-600">One or more emails still need wording — go back to Step 2 to finish them.</p>
                   )}
-                  {smartleadDisabled && (
+                  {sl?.configured === false && (
                     <p className="text-xs text-muted-foreground">Connect Smartlead to launch campaigns.</p>
                   )}
                   <div className="flex justify-between pt-2">
                     <Button variant="ghost" onClick={() => setStep(hasLockedRecipients ? 2 : 3)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
-                    <Button onClick={() => setConfirmOpen(true)} disabled={launch.isPending || aiEmailsIncomplete || recipientChecksPending || recipientChecksFailed || smartleadDisabled || inboxHeadroom === 0}>
+                    <Button onClick={() => setConfirmOpen(true)} disabled={launch.isPending || !copyReady || !audienceReady || !senderReady || smartleadDisabled}>
                       {launch.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Launching…</> : <><Rocket className="h-4 w-4 mr-1" /> {autoStart ? "Launch & start" : "Create draft"}</>}
                     </Button>
                   </div>
@@ -1116,7 +1186,7 @@ export function CampaignWizard({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction disabled={confirmEmailsIncomplete || launch.isPending} onClick={doLaunch}>
+            <AlertDialogAction disabled={smartleadDisabled || !copyReady || !audienceReady || !senderReady || launch.isPending} onClick={doLaunch}>
               Launch to {sendableRecipients.length} {sendableRecipients.length === 1 ? "person" : "people"}
             </AlertDialogAction>
           </AlertDialogFooter>
