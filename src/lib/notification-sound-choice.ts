@@ -58,12 +58,17 @@ export const SOUND_ALIASES: Record<string, string> = {
   bounce: "bloom",
 };
 
+/** Used when no sound is named at all: an unknown notification type, a
+ * bare preview call, or an unrecognised saved value. Lantern is the
+ * gentlest of the six that still reads as a deliberate alert. */
+export const DEFAULT_SOUND = "lantern";
+
 /** Resolve any sound name — current, retired, or unknown — to one of
  * the six the engine can actually play. */
 export function canonicalSound(soundType: string | undefined | null): string {
-  if (!soundType) return "lantern";
+  if (!soundType) return DEFAULT_SOUND;
   if (KEPT_SOUNDS.has(soundType)) return soundType;
-  return SOUND_ALIASES[soundType] || "lantern";
+  return SOUND_ALIASES[soundType] || DEFAULT_SOUND;
 }
 
 /** Runtime fallback sound per type when the user never chose one.
@@ -106,5 +111,5 @@ export function resolveNotifSound(typeKey: string, savedSound: string | undefine
     const alias = SOUND_ALIASES[savedSound];
     if (alias) return alias;
   }
-  return NOTIF_TYPE_FALLBACK_SOUNDS[typeKey] || "lantern";
+  return NOTIF_TYPE_FALLBACK_SOUNDS[typeKey] || DEFAULT_SOUND;
 }
