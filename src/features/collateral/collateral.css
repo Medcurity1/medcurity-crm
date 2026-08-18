@@ -48,6 +48,10 @@
   --c-badge-warn-bg: #fdf1e7;
   --c-badge-internal-text: #b45309;
   --c-badge-due-text: #d9531e;
+  /* v1.2 change 13: Send to Customer = navy (neither "safe to send cold"
+     teal nor "keep inside" amber). */
+  --c-badge-customer-bg: rgba(15, 39, 64, 0.09);
+  --c-badge-customer-text: #0f2740;
 
   font-family: var(--c-font);
   color: var(--c-text-strong);
@@ -80,6 +84,8 @@
   --c-badge-warn-bg: rgba(217, 83, 30, 0.16);
   --c-badge-internal-text: #f0b062;
   --c-badge-due-text: #f0854e;
+  --c-badge-customer-bg: rgba(104, 173, 222, 0.18);
+  --c-badge-customer-text: #9ecbf0;
 }
 
 /* ── Canvas ─────────────────────────────────────────────────────────── */
@@ -263,6 +269,25 @@
   color: var(--c-text-body);
 }
 
+/* v1.2 change 14: image assets render their own artwork as the card
+   thumbnail (seals differ only in shape and colour). Contained, never
+   cropped — the artwork IS the identifying information. */
+.collat-thumb {
+  height: 6.25rem;
+  border-radius: 10px;
+  background: var(--c-ice);
+  border: 1px solid var(--c-ice-edge);
+  margin-bottom: 0.65rem;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.collat-thumb img {
+  max-width: 90%;
+  max-height: 90%;
+  object-fit: contain;
+}
+
 /* Badges: every color carries state (SS4). */
 .collat-badge-prospect {
   display: inline-flex;
@@ -292,6 +317,32 @@
   gap: 0.25rem;
   background: var(--c-badge-warn-bg);
   color: var(--c-badge-due-text);
+  border-radius: 9999px;
+  padding: 0.14rem 0.55rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+/* v1.2 change 13: Send to Customer (navy) + the neutral default any
+   future unknown Use value falls back to — a value must never render
+   as empty space. */
+.collat-badge-customer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--c-badge-customer-bg);
+  color: var(--c-badge-customer-text);
+  border-radius: 9999px;
+  padding: 0.14rem 0.55rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+.collat-badge-generic {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--c-ice);
+  border: 1px solid var(--c-ice-edge);
+  color: var(--c-chip-text);
   border-radius: 9999px;
   padding: 0.14rem 0.55rem;
   font-size: 0.66rem;
@@ -370,10 +421,177 @@
   color: var(--c-text-strong);
 }
 
+/* ── v1.2 change 9: condensed density ───────────────────────────────── */
+.collat-card--dense {
+  padding: 0.65rem 0.7rem;
+  border-radius: 12px;
+}
+.collat-card--dense h3 {
+  font-size: 0.8rem;
+}
+
+/* ── v1.2 change 5: sort control ────────────────────────────────────── */
+.collat-select-wrap {
+  position: relative;
+}
+.collat-select {
+  appearance: none;
+  background: var(--c-card-bg);
+  border: 1px solid var(--c-border-soft);
+  border-radius: 9999px;
+  padding: 0.38rem 2rem 0.38rem 0.9rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-family: var(--c-font);
+  color: var(--c-text-strong);
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.collat-select:hover {
+  border-color: var(--c-sky-400);
+}
+.collat-select:focus {
+  outline: none;
+  border-color: var(--c-sky-400);
+  box-shadow: 0 0 0 3px rgba(104, 173, 222, 0.25);
+}
+.collat-select-caret {
+  position: absolute;
+  right: 0.7rem;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--c-text-faint);
+}
+
+/* v1.2 change 9: the density toggle beside the sort control. */
+.collat-density {
+  display: inline-flex;
+  background: var(--c-card-bg);
+  border: 1px solid var(--c-border-soft);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+.collat-density button {
+  display: grid;
+  place-items: center;
+  width: 2.1rem;
+  height: 1.9rem;
+  color: var(--c-text-faint);
+  transition: background-color 0.13s ease, color 0.13s ease;
+}
+.collat-density button:not([aria-pressed="true"]):hover {
+  background: var(--c-ice);
+  color: var(--c-text-strong);
+}
+.collat-density button[aria-pressed="true"] {
+  background: var(--c-chip-on-bg);
+  color: var(--c-chip-on-text);
+}
+
+/* ── v1.2 change 8: launch banner ───────────────────────────────────── */
+.collat-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: var(--c-card-bg);
+  border: 1px solid var(--c-ice-edge);
+  border-radius: 14px;
+  padding: 0.65rem 0.9rem;
+  box-shadow: var(--c-shadow);
+}
+.collat-banner p {
+  flex: 1;
+  min-width: 0;
+  color: var(--c-text-body);
+  font-size: 0.85rem;
+}
+.collat-banner p strong {
+  color: var(--c-text-strong);
+  font-weight: 700;
+}
+/* Same gradient family as the sidebar's LAUNCHED pill, so the entry and
+   the announcement read as one moment. Route-scoped copy, not shared CSS. */
+.collat-banner-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+  background: linear-gradient(90deg, #38bdf8, #3b82f6, #6366f1);
+  color: #ffffff;
+  border-radius: 9999px;
+  padding: 0.24rem 0.65rem;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.collat-banner > button {
+  display: grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  flex-shrink: 0;
+  border-radius: 8px;
+  color: var(--c-text-faint);
+  transition: background-color 0.13s ease, color 0.13s ease;
+}
+.collat-banner > button:hover {
+  background: var(--c-ice);
+  color: var(--c-text-strong);
+}
+
+/* ── v1.2 change 6: Copy Link toast, bottom-centre ──────────────────── */
+.collat-toast {
+  position: fixed;
+  bottom: 1.4rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: var(--c-chip-on-bg);
+  color: var(--c-chip-on-text);
+  border-radius: 9999px;
+  padding: 0.55rem 0.6rem 0.55rem 1rem;
+  font-family: var(--c-font);
+  font-size: 0.82rem;
+  font-weight: 600;
+  box-shadow: var(--c-shadow-lift);
+  animation: collat-toast-in 0.18s ease-out;
+}
+.collat-toast button {
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 9999px;
+  opacity: 0.75;
+  transition: opacity 0.13s ease, background-color 0.13s ease;
+}
+.collat-toast button:hover {
+  opacity: 1;
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+@keyframes collat-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .collat-card,
   .collat-card:hover,
   .collat-btn-primary:hover {
     transform: none;
+  }
+  .collat-toast {
+    animation: none;
   }
 }

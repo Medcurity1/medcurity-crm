@@ -111,6 +111,12 @@ const navItems: NavItem[] = [
   { to: "/products", icon: Package, label: "Products" },
   { to: "/renewals", icon: RefreshCw, label: "Renewals" },
   { to: "/reports", icon: BarChart3, label: "Reports" },
+  // Collateral opened to every user (Jordan's v1.2 spec change 7,
+  // 2026-08-18): the tab is read-only and shows only admin-promoted
+  // Current assets, so the admin gate defeated its purpose — reps are the
+  // intended audience. ADMIN badge dropped; LAUNCHED pill announces the
+  // new destination (v1.2 change 8), same pattern as Nexus above.
+  { to: "/collateral", icon: FolderOpen, label: "Collateral", badge: { label: "Launched", className: LAUNCHED_BADGE } },
   // Forecasting + Analytics moved into /reports as tabs (2026-04-17).
   // "New" badge retired 2026-07-02 (Nathan).
   // Requests tab removed 2026-08-04 (Nathan): it's now the Submit Request
@@ -130,10 +136,7 @@ const adminItems: NavItem[] = [
   // "Playbook"). AI ideas + Smartlead cold email + newsletters. Route stays
   // /playbook for stable deep-links. Admin-only (for now).
   { to: "/playbook", icon: Megaphone, label: "Campaigns", badge: { label: "Admin", className: ADMIN_BADGE } },
-  // Collateral (Jordan 8/4): the SharePoint sales-collateral library as a
-  // card grid. Admin-only while Jordan verifies tagging quality; flipping
-  // to sales = collateral_settings config + move this into navItems.
-  { to: "/collateral", icon: FolderOpen, label: "Collateral", badge: { label: "Admin", className: ADMIN_BADGE } },
+  // Collateral moved into navItems 2026-08-18 (Jordan's v1.2 change 7).
   // Imports = the admin-only landing pen for raw lists (renamed from
   // "Leads" 2026-07-20 after the prod lead cleanup; reps don't see it —
   // admins clean + promote to Contacts or archive).
