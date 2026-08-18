@@ -1,0 +1,70 @@
+name: Collateral SharePoint Sync (hourly)
+
+# Mirrors SharePoint files whose Status is Current into Pulse. Manual sync in
+# the CRM remains available to admins; this is the production safety net.
+# The target is derived from the existing production sync-emails URL, so no
+# new GitHub secret is needed.
+
+on:
+  schedule:
+    # Offset from the top of the hour to avoid the busiest Actions window.
+    - cron: "17 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: collateral-sharepoint-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Sync Current SharePoint collateral into Pulse
+        env:
+          SUPABASE_SYNC_URL: ${{ secrets.SUPABASE_SYNC_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_SYNC_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "::error::SUPABASE_SYNC_URL and SUPABASE_SERVICE_ROLE_KEY repository secrets must be set."
+            exit 1
+          fi
+          KEY="$(printf '%s' "${SUPABASE_SERVICE_ROLE_KEY}" | tr -d '[:space:]')"
+          BASE_URL="$(printf '%s' "${SUPABASE_SYNC_URL}" | tr -d '[:space:]')"
+          COLLATERAL_URL="${BASE_URL/sync-emails/collateral-sync}"
+          RESPONSE="$(curl -fsS --max-time 240 \
+            -X POST \
+            -H "Authorization: Bearer ${KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            "${COLLATERAL_URL}")"
+          printf '%s\n' "${RESPONSE}"
+          printf '%s' "${RESPONSE}" | jq -e '.ok == true and .configured == true' >/dev/null
+
+      - name: Open alert issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          existing="$(gh issue list --state open --search 'Collateral SharePoint sync is failing in:title' --json number -q '.[0].number' 2>/dev/null || true)"
+          if [ -z "$existing" ]; then
+            gh issue create \
+              --title "🔴 Collateral SharePoint sync is failing" \
+              --body "The hourly SharePoint collateral sync failed. Latest run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. This issue closes automatically after recovery." >/dev/null || true
+          fi
+
+      - name: Close alert issue on recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          for n in $(gh issue list --state open --search 'Collateral SharePoint sync is failing in:title' --json number -q '.[].number' 2>/dev/null || true); do
+            gh issue close "$n" --comment "✅ Collateral sync recovered (run ${{ github.run_id }})." >/dev/null 2>&1 || true
+          done

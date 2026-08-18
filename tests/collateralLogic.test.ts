@@ -246,4 +246,10 @@ describe("collateral-sync source guard (spec §1: single allowed source)", () =>
   it("deletes rows that leave the library (mirror, not archive)", () => {
     expect(source).toContain(".delete()");
   });
+
+  it("allows only admins or a gateway-verified service-role scheduler", () => {
+    expect(source).toContain('payload?.role === "service_role"');
+    expect(source).toContain('admin.auth.getUser(jwt)');
+    expect(source).toContain('["admin", "super_admin"]');
+  });
 });
