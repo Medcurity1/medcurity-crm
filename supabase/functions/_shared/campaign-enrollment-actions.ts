@@ -411,7 +411,7 @@ export async function stopEnrollmentForReply(
       user_id: notifyUserId,
       type: "engagement",
       title: "Reply received",
-      message: `${who} replied in ${campaign.name} — their sequence stopped`,
+      message: `${who} replied. Their sequence is stopped.`,
       link,
     });
     if (notifErr) console.error("campaign-enrollment-actions: reply notification insert failed:", notifErr.message);
@@ -420,7 +420,7 @@ export async function stopEnrollmentForReply(
     const { error: taskErr } = await svc.from("activities").insert({
       activity_type: "task",
       owner_user_id: notifyUserId,
-      subject: `Reply from ${who} — ${campaign.name}`,
+      subject: `Follow up with ${who}`,
       body: readableReplyBody,
       due_at: nowIso,
       priority: "high",

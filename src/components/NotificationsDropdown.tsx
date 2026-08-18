@@ -30,6 +30,7 @@ import {
   useClearAllNotifications,
 } from "@/features/notifications/notifications-api";
 import type { Notification } from "@/types/crm";
+import { notificationForDisplay } from "@/features/notifications/notification-display";
 
 const typeIcon: Record<Notification["type"], ComponentType<{ className?: string }>> = {
   task_due: CheckSquare,
@@ -164,6 +165,7 @@ export function NotificationsDropdown() {
             <ul className="divide-y divide-border">
               {notifications.map((n) => {
                 const Icon = typeIcon[n.type] ?? Info;
+                const display = notificationForDisplay(n);
                 return (
                   <li
                     key={n.id}
@@ -178,15 +180,15 @@ export function NotificationsDropdown() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
                         <p className={`text-sm ${!n.is_read ? "font-semibold" : "font-medium"}`}>
-                          {n.title}
+                          {display.title}
                         </p>
                         {!n.is_read && (
                           <span className="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-blue-500" />
                         )}
                       </div>
-                      {n.message && (
+                      {display.message && (
                         <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
-                          {n.message}
+                          {display.message}
                         </p>
                       )}
                       <p className="mt-1 text-[11px] text-muted-foreground">
