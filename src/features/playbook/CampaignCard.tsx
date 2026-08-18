@@ -63,6 +63,7 @@ export function CampaignStatusControls({
   className?: string;
 }) {
   const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
+  const [startConfirmOpen, setStartConfirmOpen] = useState(false);
   const busy = setStatus.isPending && setStatus.variables?.id === c.id;
   const busyAction = busy ? setStatus.variables?.action : null;
   const { data: sl } = useSmartleadStatus();
@@ -83,10 +84,10 @@ export function CampaignStatusControls({
           }
           if (action === "start") {
             const tasks = r.tasks_created ?? 0;
-            toast.success(`Campaign started${tasks ? ` — ${pluralize(tasks, "call/LinkedIn task")} scheduled.` : "."}`);
+            toast.success(`Campaign started${tasks ? `. ${pluralize(tasks, "call/LinkedIn task")} scheduled.` : "."}`);
           } else if (action === "stop") {
             const cancelled = r.tasks_cancelled ?? 0;
-            toast.success(`Campaign stopped${cancelled ? ` — ${pluralize(cancelled, "task")} cancelled.` : "."}`);
+            toast.success(`Campaign stopped${cancelled ? `. ${pluralize(cancelled, "task")} cancelled.` : "."}`);
           } else if (action === "pause") {
             toast.success("Campaign paused.");
           } else {
@@ -104,7 +105,7 @@ export function CampaignStatusControls({
           size="sm" className="h-7 text-xs"
           disabled={busy || smartleadDisabled}
           title={smartleadDisabled ? "Connect Smartlead to start" : undefined}
-          onClick={() => runStatus("start")}
+          onClick={() => setStartConfirmOpen(true)}
         >
           {busyAction === "start" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><Play className="h-3.5 w-3.5 mr-1" /> Start</>}
         </Button>
@@ -146,12 +147,31 @@ export function CampaignStatusControls({
         </>
       )}
 
+      <AlertDialog open={startConfirmOpen} onOpenChange={setStartConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Start this campaign?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Sending begins from Pulse. Start here, not only in Smartlead, so call and LinkedIn tasks get scheduled.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { setStartConfirmOpen(false); runStatus("start"); }}
+            >
+              Start campaign
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <AlertDialog open={stopConfirmOpen} onOpenChange={setStopConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Stop this campaign?</AlertDialogTitle>
             <AlertDialogDescription>
-              This halts remaining emails and cancels scheduled call/LinkedIn tasks for "{c.name}" — it can't be resumed.
+              This halts remaining emails and cancels scheduled call/LinkedIn tasks for "{c.name}". It can't be resumed.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -205,7 +225,15 @@ export function CampaignCard({
   return (
     <Card
       className={onOpenDetail ? "py-0 cursor-pointer hover:border-primary/40 transition-colors" : "py-0"}
+      role={onOpenDetail ? "button" : undefined}
+      tabIndex={onOpenDetail ? 0 : undefined}
       onClick={onOpenDetail ? () => onOpenDetail(c) : undefined}
+      onKeyDown={onOpenDetail ? (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpenDetail(c);
+        }
+      } : undefined}
     >
       <CardContent className="px-4 py-3 space-y-2">
         <div className="flex items-start justify-between gap-3">
@@ -284,6 +312,7 @@ export function CampaignCard({
               <button
                 type="button"
                 title="Delete campaign"
+                aria-label="Delete campaign"
                 className="p-1 text-muted-foreground hover:text-destructive"
                 onClick={() => setConfirmOpen(true)}
               >

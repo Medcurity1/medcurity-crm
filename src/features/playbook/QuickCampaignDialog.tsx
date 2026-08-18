@@ -90,7 +90,7 @@ export function QuickCampaignDialog({
     const label = withEmail.length === 1
       ? contactLabel(withEmail[0])
       : `${withEmail.length} people`;
-    openWizard("template", { template_id: t.id, name: `${t.name} — ${label}`, steps: t.steps });
+    openWizard("template", { template_id: t.id, name: `${t.name}: ${label}`, steps: t.steps });
   }
 
   function pickCustom() {
@@ -119,7 +119,7 @@ export function QuickCampaignDialog({
 
           {smartleadDisabled ? (
             <div className="py-8 text-center text-sm text-muted-foreground">
-              Campaigns aren't connected yet — ask an admin to finish Smartlead setup.
+              Campaigns aren't connected yet. Ask an admin to finish Smartlead setup.
             </div>
           ) : withEmail.length === 0 ? (
             <EmptyState

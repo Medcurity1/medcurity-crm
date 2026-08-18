@@ -234,8 +234,9 @@ export function CampaignRecipients({
     // The cap is its own count (adversarial review) — a list blowing past
     // 10,000 is not "dupes/invalid" and must not be reported as such.
     let msg = `${added} added${skipped ? `, ${skipped} skipped (dupes/invalid)` : ""}.`;
-    if (capped) msg += ` ${capped} not added — the 10,000-recipient limit was reached.`;
-    toast.success(msg);
+    if (capped) msg += ` ${capped} not added. The 10,000-recipient limit was reached.`;
+    if (added === 0 && !capped) toast.info(msg);
+    else toast.success(msg);
   }
 
   async function loadTag(tagId: string) {
@@ -265,7 +266,7 @@ export function CampaignRecipients({
         // subset into a campaign (adversarial review). At this team's
         // sending rates an audience this size is a mistake, not a plan.
         toast.error(
-          `That list has ${recs.length.toLocaleString()} people — too many for one campaign. ` +
+          `That list has ${recs.length.toLocaleString()} people, too many for one campaign. ` +
           `Narrow the list (or split it) to under ${LIST_AUDIENCE_CEILING.toLocaleString()} and try again.`,
         );
       } else {
@@ -362,7 +363,7 @@ export function CampaignRecipients({
         <div className="space-y-1">
           <Label className="text-xs">From a saved list</Label>
           {listsError ? (
-            <p className="text-xs text-amber-600">Couldn't load your saved lists — reopen this step to retry.</p>
+            <p className="text-xs text-amber-600">Couldn't load your saved lists. Reopen this step to retry.</p>
           ) : (
             <>
               <div className="flex items-center gap-2">
@@ -371,7 +372,7 @@ export function CampaignRecipients({
                   <SelectContent>
                     {(lists ?? []).map((l) => (
                       <SelectItem key={l.id} value={l.id}>
-                        {l.name}{l.is_dynamic ? " (smart — resolved when you pick it)" : ""}
+                        {l.name}{l.is_dynamic ? " (smart, resolved when you pick it)" : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -560,7 +561,7 @@ export function CampaignRecipients({
                       </span>
                       <span className={checked ? "shrink-0 text-[10px] font-medium text-emerald-600" : "shrink-0 text-[10px] font-medium text-muted-foreground"}>
                         {locked
-                          ? (reasonCodes.includes("optout_unsubscribed") ? "Unsubscribed — can't include" : "Opted out — can't include")
+                          ? (reasonCodes.includes("optout_unsubscribed") ? "Unsubscribed, can't include" : "Opted out, can't include")
                           : checked ? "Included anyway" : "Excluded"}
                       </span>
                     </label>
@@ -570,7 +571,7 @@ export function CampaignRecipients({
             )}
             <p className="px-2 py-1.5 text-[11px] text-muted-foreground border-t">
               Checked people are added to the campaign anyway. Everyone else here is left out of the send.
-              People who unsubscribed or opted out can't be included — that choice is theirs.
+              People who unsubscribed or opted out can't be included. That choice is theirs.
             </p>
           </div>
         )}
@@ -614,7 +615,7 @@ export function CampaignRecipients({
               </div>
             )}
             <p className="px-2 py-1.5 text-[11px] text-muted-foreground border-t">
-              Checked people are enrolled in this campaign too. Everyone else here is left out — they'll keep getting the campaign they're already in.
+              Checked people are enrolled in this campaign too. Everyone else here is left out; they'll keep getting the campaign they're already in.
             </p>
           </div>
         )}

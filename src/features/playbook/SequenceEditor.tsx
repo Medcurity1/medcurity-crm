@@ -51,10 +51,10 @@ const CHANNELS: {
   isEmail: boolean;
   isTask: boolean;
 }[] = [
-  { value: "EMAIL_AUTO", label: "Email — sends automatically", automation: "AUTO", icon: Mail, isEmail: true, isTask: false },
-  { value: "EMAIL_HYBRID", label: "Email — you review & send", automation: "HYBRID", icon: MailCheck, isEmail: true, isTask: true },
-  { value: "CALL", label: "Call — becomes your task", automation: "MANUAL", icon: Phone, isEmail: false, isTask: true },
-  { value: "LINKEDIN", label: "LinkedIn — becomes your task", automation: "MANUAL", icon: Users, isEmail: false, isTask: true },
+  { value: "EMAIL_AUTO", label: "Email: sends automatically", automation: "AUTO", icon: Mail, isEmail: true, isTask: false },
+  { value: "EMAIL_HYBRID", label: "Email: you review and send", automation: "HYBRID", icon: MailCheck, isEmail: true, isTask: true },
+  { value: "CALL", label: "Call: becomes your task", automation: "MANUAL", icon: Phone, isEmail: false, isTask: true },
+  { value: "LINKEDIN", label: "LinkedIn: becomes your task", automation: "MANUAL", icon: Users, isEmail: false, isTask: true },
 ];
 const channelDef = (c: SequenceChannel) => CHANNELS.find((x) => x.value === c) ?? CHANNELS[0];
 
@@ -233,7 +233,7 @@ export function SequenceEditor({
                 id="seq-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. SMB outbound — 6 touch"
+                placeholder="e.g. SMB outbound, 6 touch"
               />
             </div>
             <div className="space-y-1">
@@ -371,10 +371,10 @@ export function SequenceEditor({
                       <Input
                         placeholder={
                           s.channel === "CALL"
-                            ? "Task title — e.g. Call [[First name]] at [[Organization]]"
+                            ? "Task title, e.g. Call [[First name]] at [[Organization]]"
                             : s.channel === "LINKEDIN"
-                              ? "Task title — e.g. LinkedIn connect: [[First name]]"
-                              : "Task title — e.g. Review & send to [[First name]]"
+                              ? "Task title, e.g. LinkedIn connect: [[First name]]"
+                              : "Task title, e.g. Review & send to [[First name]]"
                         }
                         value={templateToAuthorText(s.manual_task_title_template ?? "")}
                         onChange={(e) => patchStep(i, { manual_task_title_template: e.target.value })}

@@ -183,7 +183,7 @@ export function TemplatesSection() {
               </div>
               <div>
                 <h4 className="font-semibold text-sm">Custom sequence</h4>
-                <p className="text-xs text-muted-foreground mt-0.5">Build your own from scratch — same builder, empty canvas.</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Build your own from scratch. Same builder, empty canvas.</p>
               </div>
             </CardContent>
           </Card>

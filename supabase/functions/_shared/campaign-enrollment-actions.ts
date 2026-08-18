@@ -405,7 +405,12 @@ export async function stopEnrollmentForReply(
   const notifyUserId = enrollment.owner_user_id ?? campaign.owner_user_id;
   if (notifyUserId) {
     const who = displayName(enrollment, fallbackEmail);
-    const link = `/playbook?campaign=${campaign.id}`;
+    // /playbook is admin-gated; contact owners who get this bell must land
+    // on the person they need to follow up with. Campaigns tab is still
+    // reachable for admins from the sidebar.
+    const link = enrollment.contact_id
+      ? `/contacts/${enrollment.contact_id}`
+      : `/playbook?campaign=${campaign.id}`;
 
     const { error: notifErr } = await svc.from("notifications").insert({
       user_id: notifyUserId,

@@ -24,7 +24,7 @@ function warmupBadge(w: InboxHealthEntry["warmup"]): { label: string; className:
   }
   if (w.spam_rate != null && w.spam_rate >= 5) {
     return {
-      label: `Spam risk — ${w.spam_rate}% landing in spam`,
+      label: `Spam risk: ${w.spam_rate}% landing in spam`,
       className: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
     };
   }
@@ -93,7 +93,7 @@ export function InboxHealthDialog({
                   {headroom != null ? (
                     <p className="text-[11px] text-muted-foreground">Room for ~{headroom} more people/day</p>
                   ) : ib.total_leads_per_day > 0 ? (
-                    <p className="text-[11px] text-muted-foreground">Daily limit unknown — can't estimate remaining room.</p>
+                    <p className="text-[11px] text-muted-foreground">Daily limit unknown. Can't estimate remaining room.</p>
                   ) : null}
                 </div>
               );

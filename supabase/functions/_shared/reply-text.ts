@@ -42,6 +42,22 @@ function earliestIndex(value: string, patterns: RegExp[]): number {
   return earliest;
 }
 
+/** Index of a quoted-thread "From:" header, or -1. */
+export function emailHeaderFromIndex(value: string): number {
+  const re = /^From:\s+.+$/gim;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(value))) {
+    const line = match[0];
+    const next = value.slice(match.index + line.length).replace(/^\n/, "").split("\n")[0] ?? "";
+    const looksLikeHeader =
+      /@/.test(line) ||
+      /<(?:mailto:)?[^>]+@[^>]+>/i.test(line) ||
+      /^(?:Sent|Date|To|Subject|Cc|From)\s*:/i.test(next.trim());
+    if (looksLikeHeader) return match.index;
+  }
+  return -1;
+}
+
 export function normalizeReplyText(
   input: string | null | undefined,
   maxLength = DEFAULT_MAX_LENGTH,
@@ -75,12 +91,13 @@ export function normalizeReplyText(
 
   const textCut = earliestIndex(value, [
     /^-{2,}\s*Original Message\s*-{2,}$/im,
-    /^From:\s+.+$/im,
     /^On\s+.+\s+wrote:\s*$/im,
     /^_{5,}$/m,
     /^--\s*$/m,
   ]);
-  if (textCut > 0) value = value.slice(0, textCut).trim();
+  const fromCut = emailHeaderFromIndex(value);
+  const cut = [textCut, fromCut].filter((n) => n > 0).sort((a, b) => a - b)[0] ?? -1;
+  if (cut > 0) value = value.slice(0, cut).trim();
 
   if (!value) return null;
   const safeLimit = Math.max(80, maxLength);

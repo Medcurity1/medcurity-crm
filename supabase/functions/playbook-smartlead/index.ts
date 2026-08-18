@@ -3745,25 +3745,59 @@ Deno.serve(async (req) => {
       // RLS: admin can SELECT, nothing else for `authenticated`), so a
       // client-side "mark handled" has to go through this action rather than
       // a direct table update.
-      const eventId = body.event_id as string;
-      if (!eventId) throw new Error("event_id is required");
+      const eventId = typeof body.event_id === "string" ? body.event_id : "";
       const handledBy = await callerUserId(auth);
-      const { data: row, error: findErr } = await svc
-        .from("campaign_events")
-        .select("id, payload")
-        .eq("id", eventId)
-        .single();
-      if (findErr || !row) throw new Error("Reply not found: " + (findErr?.message ?? eventId));
+      const enrollmentId = typeof body.enrollment_id === "string" ? body.enrollment_id : null;
       const handledStamp = { at: new Date().toISOString(), by: handledBy };
-      const nextPayload = {
-        ...((row.payload as Record<string, unknown> | null) ?? {}),
-        handled: handledStamp,
-      };
-      const { error: updErr } = await svc
-        .from("campaign_events")
-        .update({ payload: nextPayload, handled_at: handledStamp.at })
-        .eq("id", eventId);
-      if (updErr) throw new Error("Couldn't mark this reply handled: " + updErr.message);
+
+      async function stampEvent(id: string, payload: Record<string, unknown> | null) {
+        const nextPayload = { ...(payload ?? {}), handled: handledStamp };
+        const { error: updErr } = await svc
+          .from("campaign_events")
+          .update({ payload: nextPayload, handled_at: handledStamp.at })
+          .eq("id", id);
+        if (updErr) throw new Error("Couldn't mark this reply handled: " + updErr.message);
+      }
+
+      let targetEnrollmentId: string | null = enrollmentId;
+      if (eventId) {
+        const { data: row, error: findErr } = await svc
+          .from("campaign_events")
+          .select("id, payload, enrollment_id")
+          .eq("id", eventId)
+          .single();
+        if (findErr || !row) throw new Error("Reply not found: " + (findErr?.message ?? eventId));
+        await stampEvent(row.id, (row.payload as Record<string, unknown> | null) ?? null);
+        targetEnrollmentId = (row.enrollment_id as string | null) ?? targetEnrollmentId;
+      } else if (enrollmentId) {
+        const { data: rows, error: listErr } = await svc
+          .from("campaign_events")
+          .select("id, payload")
+          .eq("enrollment_id", enrollmentId)
+          .in("event_type", ["EMAIL_REPLY", "EMAIL_REPLIED"])
+          .is("handled_at", null)
+          .limit(20);
+        if (listErr) throw new Error("Couldn't load replies to mark handled: " + listErr.message);
+        for (const row of rows ?? []) {
+          await stampEvent(row.id, (row.payload as Record<string, unknown> | null) ?? null);
+        }
+      } else {
+        throw new Error("event_id is required");
+      }
+
+      // Completing the follow-up task is the same action as marking the
+      // feed row handled: one reply, one queue.
+      if (targetEnrollmentId) {
+        const { error: taskErr } = await svc
+          .from("activities")
+          .update({ completed_at: handledStamp.at })
+          .eq("campaign_enrollment_id", targetEnrollmentId)
+          .eq("activity_type", "task")
+          .is("campaign_step_number", null)
+          .is("completed_at", null)
+          .is("archived_at", null);
+        if (taskErr) console.error("mark-reply-handled: follow-up complete failed:", taskErr.message);
+      }
       return json({ success: true });
     }
     if (action === "lead-statuses") {

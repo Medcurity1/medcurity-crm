@@ -17,6 +17,29 @@ describe("known Campaigns build gaps", () => {
     expect(wizard).toMatch(/subject_template: insertAuthorToken[\s\S]*AUTHOR_TOKENS\.organization/);
   });
 
+  it("sends reply follow-up bells to the contact, not the admin-only Campaigns tab", () => {
+    const actions = read("supabase/functions/_shared/campaign-enrollment-actions.ts");
+    expect(actions).toMatch(/\/contacts\/\$\{enrollment\.contact_id\}/);
+    expect(actions).not.toMatch(/link = `\/playbook\?campaign=\$\{campaign\.id\}`/);
+  });
+
+  it("opens a campaign from the ?campaign= deep link and does not tell operators to start in Smartlead", () => {
+    const tab = read("src/features/playbook/CampaignsTab.tsx");
+    const wizard = read("src/features/playbook/CampaignWizard.tsx");
+    expect(tab).toMatch(/searchParams\.get\("campaign"\)/);
+    expect(tab).toMatch(/setDetailOpen\(true\)/);
+    expect(wizard).not.toMatch(/start in Smartlead later/i);
+    expect(wizard).toMatch(/Press Start on the campaign card/);
+  });
+
+  it("marks the follow-up task complete when a reply is marked handled", () => {
+    const edge = read("supabase/functions/playbook-smartlead/index.ts");
+    expect(edge).toMatch(/action === "mark-reply-handled"/);
+    expect(edge).toMatch(/enrollment_id/);
+    expect(edge).toMatch(/completed_at: handledStamp\.at/);
+    expect(edge).toMatch(/campaign_step_number/);
+  });
+
   it("pauses the Smartlead lead before recording an automatic meeting pause in Pulse", () => {
     const edge = read("supabase/functions/playbook-smartlead/index.ts");
     const remotePause = edge.indexOf("await smartleadSetLeadPauseState(info.smartlead_campaign_id, leadId, true)");

@@ -35,5 +35,10 @@ describe("activity presentation", () => {
     expect(tasksWidget).toContain("activityTitleForDisplay(task.subject)");
     expect(activitiesList).toContain("activityTitleForDisplay(a.subject)");
     expect(detail).toContain('"Mark complete"');
+    const editDialog = readFileSync(path.join(root, "src/features/activities/EditTaskDialog.tsx"), "utf8");
+    expect(editDialog).toContain("activityTitleForDisplay(task.subject)");
+    expect(editDialog).toContain("activityBodyForDisplay");
+    const touches = readFileSync(path.join(root, "src/features/nexus/widgets/CampaignTouchesWidget.tsx"), "utf8");
+    expect(touches).toContain("activityTitleForDisplay(task.subject)");
   });
 });

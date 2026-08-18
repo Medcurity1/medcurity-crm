@@ -109,10 +109,10 @@ export function suggestionApplyDisabledReason(
 ): string | null {
   if (!template) return "The template this was suggested for no longer exists.";
   if (suggestion.kind === "audience" || suggestion.kind === "general") {
-    return "This kind of suggestion has no single field to apply automatically — edit the template manually.";
+    return "This kind of suggestion has no single field to apply automatically. Edit the template manually.";
   }
   if (!applySuggestionToTemplate(template, suggestion)) {
-    return "This suggestion needs a manual edit — it doesn't map cleanly onto a template field.";
+    return "This suggestion needs a manual edit. It doesn't map cleanly onto a template field.";
   }
   return null;
 }

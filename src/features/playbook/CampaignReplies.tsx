@@ -60,7 +60,7 @@ function ReplyRow({
   handled: HandledInfo | null;
   onMarkHandled: () => void;
   marking: boolean;
-  onLogCall: () => void;
+  onLogCall: (outcome: "Call - Spoke" | "Call - Left VM" | "Call - No answer") => void;
   loggingCall: boolean;
   callLogged: boolean;
 }) {
@@ -112,15 +112,20 @@ function ReplyRow({
           callLogged ? (
             <span className="text-xs text-muted-foreground">Call logged</span>
           ) : (
-            <button
-              type="button"
-              className="text-xs text-primary hover:underline disabled:opacity-50"
-              disabled={loggingCall}
-              onClick={onLogCall}
-              title="Records a call on the contact's timeline"
-            >
-              {loggingCall ? "Logging…" : "Log a call"}
-            </button>
+            <span className="inline-flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">Log:</span>
+              {(["Call - Spoke", "Call - Left VM", "Call - No answer"] as const).map((outcome) => (
+                <button
+                  key={outcome}
+                  type="button"
+                  className="text-xs text-primary hover:underline disabled:opacity-50"
+                  disabled={loggingCall}
+                  onClick={() => onLogCall(outcome)}
+                >
+                  {loggingCall ? "Logging…" : outcome.replace("Call - ", "")}
+                </button>
+              ))}
+            </span>
           )
         )}
         {row.enrollment?.account_id && (
@@ -170,7 +175,7 @@ export function CampaignReplies() {
   const [calledRowIds, setCalledRowIds] = useState<Set<string>>(new Set());
   const [loggingRowId, setLoggingRowId] = useState<string | null>(null);
 
-  function logCallFor(row: CampaignReplyRow) {
+  function logCallFor(row: CampaignReplyRow, outcome: "Call - Spoke" | "Call - Left VM" | "Call - No answer") {
     if (!row.enrollment?.contact_id || calledRowIds.has(row.id) || loggingRowId) return;
     setLoggingRowId(row.id);
     logCall.mutate(
@@ -179,6 +184,7 @@ export function CampaignReplies() {
         account_id: row.enrollment.account_id ?? null,
         owner_user_id: profile?.id ?? null,
         campaignName: row.campaign?.name ?? null,
+        outcome,
       },
       {
         onSuccess: () => setCalledRowIds((prev) => new Set(prev).add(row.id)),
@@ -201,6 +207,7 @@ export function CampaignReplies() {
       <button
         type="button"
         className="flex w-full items-center justify-between gap-2 text-left"
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
         <h3 className="text-sm font-semibold">
@@ -233,7 +240,7 @@ export function CampaignReplies() {
                     handled={null}
                     marking={markHandled.isPending && markHandled.variables === row.id}
                     onMarkHandled={() => markHandled.mutate(row.id)}
-                    onLogCall={() => logCallFor(row)}
+                    onLogCall={(outcome) => logCallFor(row, outcome)}
                     loggingCall={loggingRowId === row.id}
                     callLogged={calledRowIds.has(row.id)}
                   />
@@ -241,13 +248,14 @@ export function CampaignReplies() {
               </div>
             )}
             {!active.length && (
-              <p className="text-xs text-muted-foreground">Everything's handled — nice work.</p>
+              <p className="text-xs text-muted-foreground">Everything's handled. Nice work.</p>
             )}
             {handled.length > 0 && (
               <div className="space-y-2">
                 <button
                   type="button"
                   className="text-xs text-muted-foreground hover:text-foreground"
+                  aria-expanded={handledOpen}
                   onClick={() => setHandledOpen((v) => !v)}
                 >
                   {handledOpen ? "Hide" : "Show"} handled ({handled.length})
@@ -261,7 +269,7 @@ export function CampaignReplies() {
                         handled={handledInfo(row)}
                         marking={false}
                         onMarkHandled={() => {}}
-                        onLogCall={() => logCallFor(row)}
+                        onLogCall={(outcome) => logCallFor(row, outcome)}
                         loggingCall={loggingRowId === row.id}
                         callLogged={calledRowIds.has(row.id)}
                       />

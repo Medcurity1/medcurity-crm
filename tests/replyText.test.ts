@@ -32,6 +32,19 @@ describe("campaign reply text normalization", () => {
     expect(normalizeBoth(raw)).toEqual(["No thanks.", "No thanks."]);
   });
 
+  it("keeps a real reply that mentions From: without an email header", () => {
+    const raw = "Thanks.\n\nFrom: our compliance team, please call me tomorrow.";
+    expect(normalizeBoth(raw)).toEqual([
+      "Thanks.\n\nFrom: our compliance team, please call me tomorrow.",
+      "Thanks.\n\nFrom: our compliance team, please call me tomorrow.",
+    ]);
+  });
+
+  it("still cuts a quoted From: header that looks like email metadata", () => {
+    const raw = "Interested.\n\nFrom: Summer Hume <summer@medcurity.com>\nSent: Tuesday\nOld copy";
+    expect(normalizeBoth(raw)).toEqual(["Interested.", "Interested."]);
+  });
+
   it("preserves ordinary text and returns null for empty markup", () => {
     expect(normalizeBoth("  A normal reply  ")).toEqual(["A normal reply", "A normal reply"]);
     expect(normalizeBoth("<html><head><style>x</style></head><body><img src='x'></body></html>"))

@@ -102,7 +102,7 @@ export function campaignAttentionFlags(
       flags.push({
         kind: "nothing_sent",
         severity: "amber",
-        label: `Started ${anchorDays} days ago — nothing sent yet`,
+        label: `Started ${anchorDays} days ago, nothing sent yet`,
       });
     }
   }
@@ -134,7 +134,7 @@ export function campaignAttentionFlags(
         flags.push({
           kind: "stale_numbers",
           severity: "amber",
-          label: `Numbers ${days === 1 ? "a day" : `${days} days`} old — press Sync`,
+          label: `Numbers ${days === 1 ? "a day" : `${days} days`} old. Press Sync`,
         });
       }
     }

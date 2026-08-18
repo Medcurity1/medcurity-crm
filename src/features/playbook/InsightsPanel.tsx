@@ -220,7 +220,7 @@ export function InsightsPanel({
     // steps keep the preset's step order numbers, so the order-matched
     // apply maps cleanly onto the copy.
     const isPreset = template.is_preset;
-    const copyName = `${template.name} — AI improved ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+    const copyName = `${template.name} (AI improved ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })})`;
     const existingCopy = isPreset
       ? (templates ?? []).find((t) => !t.is_preset && t.name === copyName)
       : undefined;
@@ -257,7 +257,7 @@ export function InsightsPanel({
       toast.success(
         isPreset
           ? useExistingCopy
-            ? `Added to your copy "${copyName}" — the shared preset itself is never edited.`
+            ? `Added to your copy "${copyName}". The shared preset itself is never edited.`
             : `"${template.name}" is a shared preset, so this was saved as a new template: "${insertName}".`
           : `Applied to ${template.name}.`,
       );
@@ -286,7 +286,7 @@ export function InsightsPanel({
           <SheetDescription>
             What the AI noticed in your campaigns, with suggested changes to
             the templates they came from. Applying a suggestion only edits
-            the template — campaigns already running are never touched.
+            the template. Campaigns already running are never touched.
           </SheetDescription>
         </SheetHeader>
 

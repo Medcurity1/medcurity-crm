@@ -26,7 +26,7 @@ export function PlaybookPage() {
     <div>
       <PageHeader
         title="Campaigns"
-        description="Your outreach command center — AI campaign ideas, cold email, and newsletters."
+        description="Campaigns, ideas, and newsletters."
         actions={
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => setInsightsOpen(true)}>
@@ -49,7 +49,7 @@ export function PlaybookPage() {
       <Tabs defaultValue="campaigns">
         <TabsList>
           <TabsTrigger value="campaigns">Campaigns</TabsTrigger>
-          <TabsTrigger value="ideas">Playbook</TabsTrigger>
+          <TabsTrigger value="ideas">Ideas</TabsTrigger>
           <TabsTrigger value="newsletters">Newsletters</TabsTrigger>
         </TabsList>
         <TabsContent value="campaigns">

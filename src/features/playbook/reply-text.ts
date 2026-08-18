@@ -49,6 +49,22 @@ function earliestIndex(value: string, patterns: RegExp[]): number {
   return earliest;
 }
 
+/** Index of a quoted-thread "From:" header, or -1. */
+export function emailHeaderFromIndex(value: string): number {
+  const re = /^From:\s+.+$/gim;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(value))) {
+    const line = match[0];
+    const next = value.slice(match.index + line.length).replace(/^\n/, "").split("\n")[0] ?? "";
+    const looksLikeHeader =
+      /@/.test(line) ||
+      /<(?:mailto:)?[^>]+@[^>]+>/i.test(line) ||
+      /^(?:Sent|Date|To|Subject|Cc|From)\s*:/i.test(next.trim());
+    if (looksLikeHeader) return match.index;
+  }
+  return -1;
+}
+
 /** Readable, new-message-only reply text. Null means no useful body. */
 export function normalizeReplyText(
   input: string | null | undefined,
@@ -86,14 +102,18 @@ export function normalizeReplyText(
     .trim();
 
   // Plain-text clients quote threads without helpful HTML wrappers.
+  // "From:" only counts as a quoted header when it looks like one
+  // (address, or the next line is Sent/Date/To/Subject). A real reply
+  // that starts "From: our compliance team, please call" must stay.
   const textCut = earliestIndex(value, [
     /^-{2,}\s*Original Message\s*-{2,}$/im,
-    /^From:\s+.+$/im,
     /^On\s+.+\s+wrote:\s*$/im,
     /^_{5,}$/m,
     /^--\s*$/m,
   ]);
-  if (textCut > 0) value = value.slice(0, textCut).trim();
+  const fromCut = emailHeaderFromIndex(value);
+  const cut = [textCut, fromCut].filter((n) => n > 0).sort((a, b) => a - b)[0] ?? -1;
+  if (cut > 0) value = value.slice(0, cut).trim();
 
   if (!value) return null;
   const safeLimit = Math.max(80, maxLength);

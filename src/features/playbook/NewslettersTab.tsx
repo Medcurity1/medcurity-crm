@@ -142,7 +142,7 @@ export function NewslettersTab() {
           <DialogHeader>
             <DialogTitle>New {composeType ? TYPE_FULL[composeType] : "newsletter"} draft</DialogTitle>
             <DialogDescription>
-              Add anything specific you want included — known events, webinar dates, news to cover, links, or notes
+              Add anything specific you want included: known events, webinar dates, news to cover, links, or notes
               about graphics you'll add later. Leave it blank for a strong general edition.
             </DialogDescription>
           </DialogHeader>

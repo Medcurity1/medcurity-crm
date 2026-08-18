@@ -9,7 +9,7 @@ import type { SequenceStep, SequenceChannel } from "./types";
 
 const CHANNEL: Record<SequenceChannel, { icon: typeof Mail; label: string; badge: string; line: string }> = {
   EMAIL_AUTO:   { icon: Mail,      label: "Automated email",        badge: "bg-blue-500/15 text-blue-600 dark:text-blue-400",     line: "bg-blue-500/30" },
-  EMAIL_HYBRID: { icon: MailCheck, label: "Email — you review & send", badge: "bg-violet-500/15 text-violet-600 dark:text-violet-400", line: "bg-violet-500/30" },
+  EMAIL_HYBRID: { icon: MailCheck, label: "Email: you review and send", badge: "bg-violet-500/15 text-violet-600 dark:text-violet-400", line: "bg-violet-500/30" },
   CALL:         { icon: Phone,     label: "Call",                   badge: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400", line: "bg-emerald-500/30" },
   LINKEDIN:     { icon: Users,     label: "LinkedIn",               badge: "bg-sky-500/15 text-sky-600 dark:text-sky-400",       line: "bg-sky-500/30" },
 };

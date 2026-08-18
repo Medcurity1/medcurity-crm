@@ -326,8 +326,12 @@ export function ActivityForm({
         {
           id: activity.id,
           activity_type: values.activity_type,
-          subject: values.subject,
-          body: values.body || null,
+          subject: isCampaignReplyTask(activity) && values.subject === activityTitleForDisplay(activity.subject)
+            ? activity.subject
+            : values.subject,
+          body: isCampaignReplyTask(activity) && (values.body || "") === (activityBodyForDisplay(activity.body) ?? "")
+            ? activity.body
+            : values.body || null,
           activity_date: activityDateIso,
           due_at: dueAtIso,
           contact_id: resolvedContactId,
@@ -467,7 +471,7 @@ export function ActivityForm({
                   return (
                     <option key={c.id} value={c.id}>
                       {name}
-                      {c.title ? ` — ${c.title}` : ""}
+                      {c.title ? ` (${c.title})` : ""}
                     </option>
                   );
                 })}
@@ -598,7 +602,7 @@ export function ActivityForm({
               (separate from when the task is due). */}
           <div className="space-y-1">
             <Label htmlFor="activity_date" className="text-xs text-muted-foreground">
-              Activity Date {selectedType === "task" && "(when logged — optional)"}
+              Activity Date {selectedType === "task" && "(when logged, optional)"}
             </Label>
             <Input
               id="activity_date"

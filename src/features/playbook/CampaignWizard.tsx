@@ -451,7 +451,7 @@ export function CampaignWizard({
       // The autosave already ran, so an accidental Escape / outside-click no
       // longer loses anything — just say so, quietly, once.
       if (hasMeaningfulContent && draftIdRef.current) {
-        toast.info("Draft saved — pick up where you left off next time.");
+        toast.info("Draft saved. Pick up where you left off next time.");
       }
       reset();
     }
@@ -536,7 +536,9 @@ export function CampaignWizard({
       deleteCampaignDraft(draftBanner.id).catch(() => {});
       setDraftBanner(null);
     }
-    let msg = `Campaign launched — ${enrolled} ${enrolled === 1 ? "person" : "people"} enrolled, ${tasksCreated} task${tasksCreated === 1 ? "" : "s"} scheduled.`;
+    let msg = r.auto_started
+      ? `Campaign started. ${enrolled} ${enrolled === 1 ? "person" : "people"} enrolled, ${tasksCreated} task${tasksCreated === 1 ? "" : "s"} scheduled.`
+      : `Draft saved in Pulse. ${enrolled} ${enrolled === 1 ? "person" : "people"} enrolled. Press Start on the campaign card when you are ready.`;
     const notes: string[] = [];
     if (suppressionDropped > 0) notes.push(`${suppressionDropped} on the Do-Not-Email list skipped`);
     if (alreadyEnrolledDropped > 0) notes.push(`${alreadyEnrolledDropped} already enrolled elsewhere skipped`);
@@ -630,7 +632,7 @@ export function CampaignWizard({
   const confirmTouchCount = mode === "template" ? templateTaskSteps.length : 0;
   const confirmInboxLabel = selectedInbox
     ? (selectedInbox.from_email ?? selectedInbox.from_name ?? `Inbox ${selectedInbox.id}`)
-    : "No sending inbox picked — Smartlead's default will be used";
+    : "No sending inbox picked";
   // Same gate the template-mode Step 2 Continue button already enforces —
   // repeated here as a belt-and-suspenders check right before the launch
   // actually fires, not a replacement for it.
@@ -646,13 +648,13 @@ export function CampaignWizard({
       <Dialog open={open} onOpenChange={close}>
         <DialogContent className="sm:max-w-3xl max-h-[88vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{mode === "template" ? "Launch sequence" : "New Campaign"} — Step {displayStep} of {displayTotal}</DialogTitle>
+            <DialogTitle>{mode === "template" ? "Launch sequence" : "New Campaign"}: Step {displayStep} of {displayTotal}</DialogTitle>
             <DialogDescription>
               {mode === "ai" && step === 1 && "Describe the campaign you want. The AI writes the email sequence."}
               {mode === "ai" && step === 2 && "Review and edit the sequence. Rewrite any email, regenerate, or ask for suggestions."}
-              {mode === "template" && step === 2 && "Review the automated emails — edit them for this launch only. Calls, LinkedIn, and review-and-send steps become your tasks automatically."}
-              {step === 3 && "Choose who gets it — a contact tag, a CSV upload, or pasted emails."}
-              {step === 4 && "Set the cadence, pick the inbox, and launch. Leave 'start now' off to review the draft in Smartlead first."}
+              {mode === "template" && step === 2 && "Review the automated emails. Edits apply to this launch only. Calls, LinkedIn, and review-and-send steps become your tasks automatically."}
+              {step === 3 && "Choose who gets it: a contact tag, a CSV upload, or pasted emails."}
+              {step === 4 && "Set the cadence, pick the inbox, and launch. Leave start off to save a Pulse draft; press Start on the campaign card when you are ready."}
             </DialogDescription>
           </DialogHeader>
 
@@ -661,7 +663,7 @@ export function CampaignWizard({
               emails), same screen the "Step 1 of N" title already implies. */}
           {draftBanner && displayStep === 1 && (
             <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs">
-              <span>You have an unfinished campaign from {formatRelativeDate(draftBanner.updatedAt)} — Resume it?</span>
+              <span>You have an unfinished campaign from {formatRelativeDate(draftBanner.updatedAt)}. Resume it?</span>
               <div className="flex items-center gap-1 shrink-0">
                 <Button size="xs" variant="outline" className="h-6" onClick={resumeDraft}>Resume</Button>
                 <Button size="xs" variant="ghost" className="h-6 text-muted-foreground" onClick={discardDraft}>Discard</Button>
@@ -669,7 +671,7 @@ export function CampaignWizard({
             </div>
           )}
 
-          {hasLockedRecipients && step < 4 && (
+          {hasLockedRecipients && !launchResult && (
             <CampaignRecipients
               compact
               recipients={recipients} setRecipients={setRecipients} tags={tags ?? []}
@@ -704,7 +706,7 @@ export function CampaignWizard({
           {/* Step 2 — Preview / Edit (AI mode) */}
           {mode === "ai" && step === 2 && campaign && (
             <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <div className="space-y-1">
                   <Label className="text-xs">Campaign name</Label>
                   <Input value={campaign.campaign_name} onChange={(e) => setCampaign({ ...campaign, campaign_name: e.target.value })} />
@@ -806,7 +808,7 @@ export function CampaignWizard({
                         onChange={(e) => editEmail(email.seq_number, { body_html: authorTextToTemplateHtml(e.target.value) })} />
                     )}
                     </>}
-                    <p className="text-[11px] text-muted-foreground truncate">Preview: {plain(email.body_html).slice(0, 100) || "—"}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">Preview: {plain(email.body_html).slice(0, 100) || "None"}</p>
                   </div>
                 );
               })}
@@ -879,7 +881,7 @@ export function CampaignWizard({
 
               {templateEmailSteps.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground">Automated emails — edit for this launch only, the saved template is untouched</p>
+                  <p className="text-xs font-medium text-muted-foreground">Automated emails: edit for this launch only. The saved template is untouched.</p>
                   {templateEmailSteps.map((s) => {
                     const isPreview = codeView.has(s.order);
                     const authorBody = templateToAuthorText(s.body_template ?? "");
@@ -952,7 +954,7 @@ export function CampaignWizard({
 
               {templateTaskSteps.length > 0 && (
                 <div className="space-y-1">
-                  <p className="text-xs font-medium text-muted-foreground">Calls, LinkedIn & review-and-send steps — become your tasks, right on schedule</p>
+                  <p className="text-xs font-medium text-muted-foreground">Calls, LinkedIn, and review-and-send steps become your tasks on schedule.</p>
                   <SequenceTimeline
                     steps={templateTaskSteps}
                     previewContext={{
@@ -1042,7 +1044,7 @@ export function CampaignWizard({
                 </div>
               ) : (
                 <>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <div className="space-y-1">
                       <Label className="text-xs">New leads per day</Label>
                       <Input type="number" min={1} max={500} value={leadsPerDay} onChange={(e) => setLeadsPerDay(Math.max(1, Math.min(500, Number(e.target.value) || 25)))} />
@@ -1063,7 +1065,7 @@ export function CampaignWizard({
                       </SelectContent>
                     </Select>
                     <p className="text-[11px] text-muted-foreground">
-                      Call and LinkedIn tasks, and reply alerts, go to each person's own account owner — the campaign owner covers people without one.
+                      Call and LinkedIn tasks, and reply alerts, go to each person's own account owner. The campaign owner covers people without one.
                     </p>
                   </div>
 
@@ -1080,7 +1082,7 @@ export function CampaignWizard({
                         {selectedInboxHealth.campaigns.length > 0 && (
                           <>
                             This inbox is also sending for {selectedInboxHealth.campaigns.length} other campaign{selectedInboxHealth.campaigns.length === 1 ? "" : "s"}{" "}
-                            ({selectedInboxHealth.total_leads_per_day} people/day) — new sends share its daily capacity.{" "}
+                            ({selectedInboxHealth.total_leads_per_day} people/day). New sends share its daily capacity.{" "}
                           </>
                         )}
                         {inboxHeadroom != null && (
@@ -1090,27 +1092,23 @@ export function CampaignWizard({
                     )}
                     {inboxHeadroom === 0 ? (
                       <p className="text-xs text-amber-600">
-                        This inbox is already at its daily limit — pick a different inbox to launch. (The server refuses a launch on a full inbox.)
+                        This inbox is already at its daily limit. Pick a different inbox to launch. (The server refuses a launch on a full inbox.)
                       </p>
                     ) : inboxHeadroom != null && leadsPerDay > inboxHeadroom ? (
                       <p className="text-xs text-amber-600">
-                        That's more than this inbox has room for — the launch will be capped at {inboxHeadroom} new {inboxHeadroom === 1 ? "person" : "people"}/day.
+                        That's more than this inbox has room for. The launch will be capped at {inboxHeadroom} new {inboxHeadroom === 1 ? "person" : "people"}/day.
                       </p>
                     ) : null}
                   </div>
                   <label className="flex items-center gap-2 text-sm cursor-pointer">
                     <input type="checkbox" checked={autoStart} onChange={(e) => setAutoStart(e.target.checked)} />
-                    {mode === "template" ? "Start sending when I hit Launch" : "Start sending immediately (leave off to review the draft in Smartlead first)"}
+                    {mode === "template" ? "Start sending when I hit Launch" : "Start sending immediately (leave off to save a Pulse draft)"}
                   </label>
                   {mode === "template" && (
                     <p className="text-[11px] text-muted-foreground -mt-2 ml-6">
-                      Off = saved as a draft you review and start in Smartlead later.
+                      Off = saved as a Pulse draft. Press Start on the campaign card when you are ready. Starting only in Smartlead would skip Pulse tasks.
                     </p>
                   )}
-                  <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-not-allowed">
-                    <input type="checkbox" checked={adaptive} disabled onChange={(e) => setAdaptive(e.target.checked)} />
-                    Adaptive monitoring — AI tweaks unsent emails based on performance <span className="text-[11px] italic">(coming soon)</span>
-                  </label>
                   {rampProjection && (
                     <p className="text-[11px] text-muted-foreground">{rampProjection}</p>
                   )}
@@ -1162,7 +1160,7 @@ export function CampaignWizard({
                     </div>
                   </div>
                   {aiEmailsIncomplete && (
-                    <p className="text-xs text-amber-600">One or more emails still need wording — go back to Step 2 to finish them.</p>
+                    <p className="text-xs text-amber-600">One or more emails still need wording. Go back to Step 2 to finish them.</p>
                   )}
                   {sl?.configured === false && (
                     <p className="text-xs text-muted-foreground">Connect Smartlead to launch campaigns.</p>
@@ -1196,10 +1194,10 @@ export function CampaignWizard({
                   {confirmEmailCount} automatic email{confirmEmailCount === 1 ? "" : "s"}
                   {confirmTouchCount > 0 ? ` + ${confirmTouchCount} call/LinkedIn touch${confirmTouchCount === 1 ? "" : "es"}` : ""} per person
                 </p>
-                <p>{autoStart ? "Sending starts immediately after launch." : "Launches as a DRAFT — nothing sends until you press Start."}</p>
+                <p>{autoStart ? "Sending starts immediately after launch." : "Saves as a Pulse draft. Nothing sends until you press Start on the campaign card."}</p>
                 <p>{effectiveLeadsPerDay} new {effectiveLeadsPerDay === 1 ? "person" : "people"}/day</p>
                 {confirmEmailsIncomplete && (
-                  <p className="text-amber-600">Some emails are missing wording — fix them before launching</p>
+                  <p className="text-amber-600">Some emails are missing wording. Fix them before launching.</p>
                 )}
               </div>
             </AlertDialogDescription>
@@ -1207,7 +1205,9 @@ export function CampaignWizard({
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction disabled={smartleadDisabled || !copyReady || !audienceReady || !senderReady || launch.isPending} onClick={doLaunch}>
-              Launch to {sendableRecipients.length} {sendableRecipients.length === 1 ? "person" : "people"}
+              {autoStart
+                ? `Launch to ${sendableRecipients.length} ${sendableRecipients.length === 1 ? "person" : "people"}`
+                : `Save draft for ${sendableRecipients.length} ${sendableRecipients.length === 1 ? "person" : "people"}`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
