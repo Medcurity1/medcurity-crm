@@ -62,13 +62,13 @@ export function useCollateralItems() {
 // drives RLS on collateral_items — the v1.2 migration widens it to all
 // roles; narrowing it back is a config UPDATE, not a code change.
 
-/** v1.2: the per-user prefs row grew two columns (density + launch-banner
- * dismissal) alongside the v1.1 default segments. One row per user; a
- * missing row means every default. */
+/** v1.2: the per-user prefs row grew a density column alongside the v1.1
+ * default segments. One row per user; a missing row means every default.
+ * (Launch-banner dismissal is NOT here: the announcement rides the
+ * app-wide AnnouncementBanner and its own dismissal store, Nathan 8/18.) */
 export interface CollateralPrefs {
   default_segments: string[];
   density: CollateralDensity;
-  launch_banner_dismissed_at: string | null;
 }
 
 export type CollateralDensity = "comfortable" | "condensed";
@@ -76,7 +76,6 @@ export type CollateralDensity = "comfortable" | "condensed";
 const DEFAULT_PREFS: CollateralPrefs = {
   default_segments: [],
   density: "comfortable",
-  launch_banner_dismissed_at: null,
 };
 
 export function useMyCollateralPrefs() {
@@ -100,8 +99,6 @@ export function useMyCollateralPrefs() {
       return {
         default_segments: (row.default_segments ?? []) as string[],
         density: row.density === "condensed" ? "condensed" : "comfortable",
-        launch_banner_dismissed_at:
-          (row.launch_banner_dismissed_at as string | null) ?? null,
       };
     },
   });
@@ -150,16 +147,6 @@ export function useSaveMyCollateralPrefs() {
 /** v1.2 change 9: the density toggle persists per user. */
 export function useSaveMyDensity() {
   return usePrefUpsert();
-}
-
-/** v1.2 change 8: dismissing the launch banner is permanent per user. */
-export function useDismissLaunchBanner() {
-  const upsert = usePrefUpsert();
-  return {
-    ...upsert,
-    dismiss: () =>
-      upsert.mutate({ launch_banner_dismissed_at: new Date().toISOString() }),
-  };
 }
 
 /** Item 10: fire-and-forget usage breadcrumb per Copy Link click. */

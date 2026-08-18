@@ -95,17 +95,28 @@ const KIND_ICON: Record<FileKind, typeof FileText> = {
 
 // ── Chips ────────────────────────────────────────────────────────────
 
+/** Per-row tint classes (Nathan 8/18): a slight gradient per filter row
+ * so Product / Type / Segment / Use scan apart at a glance. */
+type ChipTint = "product" | "type" | "segment" | "use";
+
 function ChipButton({
   chip,
   active,
   onToggle,
+  tint,
 }: {
   chip: Chip;
   active: boolean;
   onToggle: () => void;
+  tint: ChipTint;
 }) {
   return (
-    <button type="button" onClick={onToggle} aria-pressed={active} className="collat-chip">
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={active}
+      className={cn("collat-chip", `collat-chip--${tint}`)}
+    >
       {chip.label}
     </button>
   );
@@ -118,10 +129,12 @@ function FamilyChip({
   chip,
   selected,
   onChange,
+  tint,
 }: {
   chip: Chip;
   selected: string[];
   onChange: (next: string[]) => void;
+  tint: ChipTint;
 }) {
   const children = chip.children ?? [];
   const parentActive = selected.includes(chip.value);
@@ -151,7 +164,10 @@ function FamilyChip({
       : chip.label;
 
   return (
-    <div className={cn("collat-chip", anyActive && "collat-chip--on")} style={{ padding: 0 }}>
+    <div
+      className={cn("collat-chip", `collat-chip--${tint}`, anyActive && "collat-chip--on")}
+      style={{ padding: 0 }}
+    >
       <button type="button" onClick={toggleParent} aria-pressed={anyActive} className="py-[0.28rem] pl-3 pr-1">
         {label}
       </button>
@@ -190,12 +206,14 @@ function ChipRow({
   chips,
   selected,
   onChange,
+  tint,
   trailing,
 }: {
   label: string;
   chips: Chip[];
   selected: string[];
   onChange: (next: string[]) => void;
+  tint: ChipTint;
   trailing?: React.ReactNode;
 }) {
   // v1.2 change 2: a row backed by fewer than two distinct values across
@@ -207,12 +225,13 @@ function ChipRow({
       <span className="collat-label w-16 shrink-0">{label}</span>
       {chips.map((chip) =>
         chip.children?.length ? (
-          <FamilyChip key={chip.value} chip={chip} selected={selected} onChange={onChange} />
+          <FamilyChip key={chip.value} chip={chip} selected={selected} onChange={onChange} tint={tint} />
         ) : (
           <ChipButton
             key={chip.value}
             chip={chip}
             active={selected.includes(chip.value)}
+            tint={tint}
             onToggle={() =>
               onChange(
                 selected.includes(chip.value)
@@ -575,10 +594,11 @@ export function CollateralLibrary() {
       {/* Chip rows: filter, never group. Rows with one distinct value
           across the synced set hide themselves (change 2). */}
       <div className="space-y-2">
-        <ChipRow label="Product" chips={chips.products} selected={products} onChange={setProducts} />
-        <ChipRow label="Type" chips={chips.assetTypes} selected={assetTypes} onChange={setAssetTypes} />
+        <ChipRow label="Product" tint="product" chips={chips.products} selected={products} onChange={setProducts} />
+        <ChipRow label="Type" tint="type" chips={chips.assetTypes} selected={assetTypes} onChange={setAssetTypes} />
         <ChipRow
           label="Segment"
+          tint="segment"
           chips={chips.segments}
           selected={segments}
           onChange={pickSegments}
@@ -594,7 +614,7 @@ export function CollateralLibrary() {
             ) : null
           }
         />
-        <ChipRow label="Use" chips={chips.uses} selected={uses} onChange={setUses} />
+        <ChipRow label="Use" tint="use" chips={chips.uses} selected={uses} onChange={setUses} />
       </div>
 
       {/* Results toolbar (changes 5 + 9): sort + density. Always rendered

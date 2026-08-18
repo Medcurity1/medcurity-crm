@@ -12,12 +12,11 @@
 // header keeps Pulse's placement (title top-left, actions top-right) but
 // is composed locally so the shared PageHeader component stays untouched.
 
-import { useEffect, useState } from "react";
-import { ArrowRight, RefreshCw, Sparkles, X } from "lucide-react";
+import { useEffect } from "react";
+import { ArrowRight, RefreshCw } from "lucide-react";
 import { useRequestDialog } from "@/features/requests/RequestDialogProvider";
 import { CollateralLibrary } from "./CollateralLibrary";
-import { useDismissLaunchBanner, useMyCollateralPrefs, useSyncCollateral } from "./api";
-import { launchBannerActive } from "./collateral-logic";
+import { useSyncCollateral } from "./api";
 import { useAuth } from "@/features/auth/AuthProvider";
 import "./collateral.css";
 
@@ -37,42 +36,10 @@ function useJakartaFont() {
   }, []);
 }
 
-/** v1.2 change 8: a dismissible launch announcement for the tab's new
- * general audience. Dismissal persists per user; the banner also retires
- * on its own ~30 days after the release (launchBannerActive). */
-function LaunchBanner() {
-  const { data: prefs } = useMyCollateralPrefs();
-  const dismiss = useDismissLaunchBanner();
-  const [hidden, setHidden] = useState(false);
-
-  // Wait for the pref row before showing anything: no flash-then-vanish
-  // for users who already dismissed it.
-  if (hidden || !prefs || prefs.launch_banner_dismissed_at || !launchBannerActive()) {
-    return null;
-  }
-
-  return (
-    <div className="collat-banner" role="status">
-      <span className="collat-banner-pill">
-        <Sparkles className="h-3 w-3" /> New
-      </span>
-      <p>
-        <strong>Collateral.</strong> Every current sales asset in one place.
-        Search it, copy a link, paste it into your email.
-      </p>
-      <button
-        type="button"
-        aria-label="Dismiss announcement"
-        onClick={() => {
-          setHidden(true);
-          dismiss.dismiss();
-        }}
-      >
-        <X className="h-3.5 w-3.5" />
-      </button>
-    </div>
-  );
-}
+// v1.2 change 8 note: the launch announcement lives in the app-wide
+// AnnouncementBanner (Nathan 8/18: the standard all-tabs launch banner,
+// one-click dismiss, never returns), not on this page. It links here and
+// self-retires ~30 days after release via launchBannerActive.
 
 export function CollateralPage() {
   const { profile } = useAuth();
@@ -86,8 +53,6 @@ export function CollateralPage() {
   return (
     <div className="collat-root mx-auto max-w-6xl">
       <div className="collat-canvas space-y-4">
-        <LaunchBanner />
-
         {/* Hero: the page's single warm moment (§4). */}
         <div className="collat-hero flex flex-wrap items-center justify-between gap-3">
           <div>

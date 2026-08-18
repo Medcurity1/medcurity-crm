@@ -139,6 +139,19 @@
   background: var(--c-teal-600);
   transform: translateY(-1px);
 }
+/* Dark mode (Nathan 8/18): a dark button with teal as the TEXT color —
+   the solid teal block reads too loud on the navy canvas. Light mode
+   keeps the teal fill exactly as Jordan reviewed it. */
+.dark .collat-btn-primary {
+  background: #10293e;
+  color: var(--c-teal-500);
+  border-color: rgba(46, 196, 182, 0.35);
+}
+.dark .collat-btn-primary:hover {
+  background: #16324a;
+  color: #7fe0d6;
+  border-color: rgba(46, 196, 182, 0.6);
+}
 .collat-btn-secondary {
   display: inline-flex;
   align-items: center;
@@ -208,6 +221,26 @@
 }
 .collat-chip:hover {
   border-color: var(--c-sky-400);
+}
+/* Per-row tints (Nathan 8/18): each filter row carries its own slight
+   low-opacity gradient — Product sky, Type violet, Segment teal, Use
+   peach — so the rows scan apart at a glance. Selected chips still flip
+   to the solid navy state (those rules come after and win). */
+.collat-chip--product {
+  background: linear-gradient(115deg, rgba(104, 173, 222, 0.2), rgba(27, 111, 194, 0.07)), var(--c-ice);
+  border-color: rgba(104, 173, 222, 0.38);
+}
+.collat-chip--type {
+  background: linear-gradient(115deg, rgba(139, 92, 246, 0.17), rgba(99, 102, 241, 0.06)), var(--c-ice);
+  border-color: rgba(139, 92, 246, 0.32);
+}
+.collat-chip--segment {
+  background: linear-gradient(115deg, rgba(46, 196, 182, 0.18), rgba(16, 185, 129, 0.06)), var(--c-ice);
+  border-color: rgba(46, 196, 182, 0.34);
+}
+.collat-chip--use {
+  background: linear-gradient(115deg, rgba(244, 162, 89, 0.2), rgba(217, 83, 30, 0.07)), var(--c-ice);
+  border-color: rgba(244, 162, 89, 0.38);
 }
 .collat-chip[aria-pressed="true"],
 .collat-chip--on {
@@ -489,57 +522,8 @@
   color: var(--c-chip-on-text);
 }
 
-/* ── v1.2 change 8: launch banner ───────────────────────────────────── */
-.collat-banner {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  background: var(--c-card-bg);
-  border: 1px solid var(--c-ice-edge);
-  border-radius: 14px;
-  padding: 0.65rem 0.9rem;
-  box-shadow: var(--c-shadow);
-}
-.collat-banner p {
-  flex: 1;
-  min-width: 0;
-  color: var(--c-text-body);
-  font-size: 0.85rem;
-}
-.collat-banner p strong {
-  color: var(--c-text-strong);
-  font-weight: 700;
-}
-/* Same gradient family as the sidebar's LAUNCHED pill, so the entry and
-   the announcement read as one moment. Route-scoped copy, not shared CSS. */
-.collat-banner-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  flex-shrink: 0;
-  background: linear-gradient(90deg, #38bdf8, #3b82f6, #6366f1);
-  color: #ffffff;
-  border-radius: 9999px;
-  padding: 0.24rem 0.65rem;
-  font-size: 0.66rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.collat-banner > button {
-  display: grid;
-  place-items: center;
-  width: 1.7rem;
-  height: 1.7rem;
-  flex-shrink: 0;
-  border-radius: 8px;
-  color: var(--c-text-faint);
-  transition: background-color 0.13s ease, color 0.13s ease;
-}
-.collat-banner > button:hover {
-  background: var(--c-ice);
-  color: var(--c-text-strong);
-}
+/* v1.2 change 8: the launch banner is the app-wide AnnouncementBanner
+   (Nathan 8/18) — no route-local banner styles needed. */
 
 /* ── v1.2 change 6: Copy Link toast, bottom-centre ──────────────────── */
 .collat-toast {
