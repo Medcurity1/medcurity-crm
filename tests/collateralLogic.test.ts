@@ -533,14 +533,15 @@ describe("v1.2 source guards (role gating, title source, scope)", () => {
     expect(app).toContain('<Route path="playbook" element={<AdminGate><PlaybookPage /></AdminGate>} />');
   });
 
-  it("sidebar: Collateral sits in navItems with the LAUNCHED pill, no ADMIN badge", () => {
+  it("sidebar: Collateral sits in navItems with the red New tag, no ADMIN badge", () => {
     const sidebar = read("src", "components", "layout", "Sidebar.tsx");
     const collateralLines = sidebar
       .split("\n")
       .filter((l) => l.includes('"/collateral"') && !l.trim().startsWith("//"));
     expect(collateralLines).toHaveLength(1);
-    expect(collateralLines[0]).toContain('label: "Launched"');
-    expect(collateralLines[0]).toContain("LAUNCHED_BADGE");
+    // Nathan 8/18: the New tag, not the Launched pill, for this launch.
+    expect(collateralLines[0]).toContain('label: "New"');
+    expect(collateralLines[0]).toContain("NEW_BADGE");
     expect(collateralLines[0]).not.toContain("ADMIN_BADGE");
     // The entry must appear in navItems (before the adminItems array), and
     // the admin group must keep its own entries intact.
