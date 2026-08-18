@@ -29,6 +29,7 @@ import {
 import { useAuth } from "@/features/auth/AuthProvider";
 import { formatPhone } from "@/components/PhoneInput";
 import { cn } from "@/lib/utils";
+import { downloadCsv } from "@/lib/csv";
 import type { LeadList } from "@/types/crm";
 import {
   useLeadLists,
@@ -254,20 +255,11 @@ function copyEmails(rows: WorkRow[]) {
 }
 
 function exportCsv(listName: string, rows: WorkRow[]) {
-  const esc = (v: string | null) => `"${(v ?? "").replace(/"/g, '""')}"`;
-  const lines = [
-    ["First name", "Last name", "Account", "Email", "Phone"].join(","),
-    ...rows.map((r) =>
-      [esc(r.firstName), esc(r.lastName), esc(r.account), esc(r.email), esc(r.phone)].join(","),
-    ),
+  const table = [
+    ["First name", "Last name", "Account", "Email", "Phone"],
+    ...rows.map((r) => [r.firstName, r.lastName, r.account, r.email, r.phone]),
   ];
-  // BOM so Excel opens it as UTF-8
-  const blob = new Blob(["\uFEFF" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `${listName.replace(/[^\w-]+/g, "_") || "list"}.csv`;
-  a.click();
-  URL.revokeObjectURL(a.href);
+  downloadCsv(`${listName.replace(/[^\w-]+/g, "_") || "list"}.csv`, table);
   toast.success(`Exported ${rows.length} ${rows.length === 1 ? "row" : "rows"}`);
 }
 

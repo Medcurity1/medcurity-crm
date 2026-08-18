@@ -153,6 +153,8 @@ import {
   SheetTitle,
   SheetFooter,
 } from "@/components/ui/sheet";
+import { downloadCsv } from "@/lib/csv";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 
 // ---------------------------------------------------------------------------
 // Relation lookup types
@@ -265,39 +267,17 @@ function formatCellValue(value: unknown, colDef: ColumnDef | undefined): string 
   }
 }
 
-function escapeCsvField(value: string): string {
-  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
-    return `"${value.replace(/"/g, '""')}"`;
-  }
-  return value;
-}
-
 function exportToCSV(
   columns: ColumnDef[],
   data: Record<string, unknown>[],
   entityName: string
 ) {
-  const header = columns.map((col) => escapeCsvField(col.label)).join(",");
+  const header = columns.map((col) => col.label);
   const rows = data.map((row) =>
-    columns
-      .map((col) => {
-        const raw = row[col.key];
-        const formatted = formatCellValue(raw, col);
-        return escapeCsvField(formatted);
-      })
-      .join(",")
+    columns.map((col) => formatCellValue(row[col.key], col))
   );
-  const csv = [header, ...rows].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `report-${entityName}-${timestamp}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  downloadCsv(`report-${entityName}-${timestamp}.csv`, [header, ...rows]);
 }
 
 /** Export the report to an XLSX (Excel) file. */
@@ -1728,8 +1708,18 @@ function SaveReportDialog({
     }
   }, [open, defaultName, defaultFolder, defaultIsShared]);
 
+  // Guard against a stray outside-click/Esc discarding a name/folder/share
+  // pick — compare against the seeded defaults so an untouched open/close
+  // never trips it.
+  const dirty =
+    name !== defaultName ||
+    isShared !== defaultIsShared ||
+    folder !== (defaultFolder ?? "");
+  const discard = useDialogDiscardGuard(dirty, () => onOpenChange(false));
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "Save Report" : "Update Report"}</DialogTitle>
@@ -1812,7 +1802,7 @@ function SaveReportDialog({
           </label>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={discard.requestClose}>
             Cancel
           </Button>
           <Button
@@ -1825,6 +1815,8 @@ function SaveReportDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }
 

@@ -58,8 +58,6 @@ const ProductDetail = lazy(() => import("@/features/products/ProductDetail").the
 const RenewalsQueue = lazy(() => import("@/features/renewals/RenewalsQueue").then(m => ({ default: m.RenewalsQueue })));
 const ReportsHub = lazy(() => import("@/features/reports/ReportsHub").then(m => ({ default: m.ReportsHub })));
 const TeamDashboardTv = lazy(() => import("@/features/reports/TeamDashboardTv").then(m => ({ default: m.TeamDashboardTv })));
-// ForecastPage is now only reached via /reports?tab=forecasting and
-// lazy-loaded inside ReportsHub.
 const ActivitiesListPage = lazy(() => import("@/features/activities/ActivitiesListPage").then(m => ({ default: m.ActivitiesListPage })));
 const ActivityDetail = lazy(() => import("@/features/activities/ActivityDetail").then(m => ({ default: m.ActivityDetail })));
 const ArrBaseDataset = lazy(() => import("@/features/reports/standard/ArrBaseDataset").then(m => ({ default: m.ArrBaseDataset })));
@@ -75,8 +73,6 @@ const MqlContacts = lazy(() => import("@/features/reports/standard/MqlContacts")
 const DoNotEmail = lazy(() => import("@/features/reports/standard/DoNotEmail").then(m => ({ default: m.DoNotEmail })));
 const DashboardMetrics = lazy(() => import("@/features/reports/standard/DashboardMetrics").then(m => ({ default: m.DashboardMetrics })));
 const ReportsDiagnostic = lazy(() => import("@/features/reports/standard/ReportsDiagnostic").then(m => ({ default: m.ReportsDiagnostic })));
-// WinLossAnalysis is now only reached via /reports?tab=analytics and
-// lazy-loaded inside ReportsHub.
 const PartnersPage = lazy(() => import("@/features/partners/PartnersPage").then(m => ({ default: m.PartnersPage })));
 const PlaybookPage = lazy(() => import("@/features/playbook/PlaybookPage").then(m => ({ default: m.PlaybookPage })));
 const ArchiveManager = lazy(() => import("@/features/archive/ArchiveManager").then(m => ({ default: m.ArchiveManager })));

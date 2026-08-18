@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Download, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
+import { downloadCsv } from "@/lib/csv";
 
 /**
  * Per-entity CSV export. One click pulls every row of every table
@@ -62,41 +63,30 @@ const EXPORT_TARGETS: ExportTarget[] = [
 
 const PAGE_SIZE = 1000;
 
-function escapeCsvField(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  let s: string;
-  if (typeof value === "object") {
-    // JSONB / arrays → JSON-encode so the column round-trips
+/** JSON-encode objects/arrays (JSONB columns) so they round-trip;
+ * everything else passes through for the shared CSV engine
+ * (`@/lib/csv`) to stringify/escape. */
+function cellValue(value: unknown): unknown {
+  if (value !== null && typeof value === "object") {
     try {
-      s = JSON.stringify(value);
+      return JSON.stringify(value);
     } catch {
-      s = String(value);
+      return String(value);
     }
-  } else {
-    s = String(value);
   }
-  if (s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\r")) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
+  return value;
 }
 
-function rowsToCsv(rows: Record<string, unknown>[]): string {
-  if (rows.length === 0) return "";
-  // Union of every key seen across rows so the CSV doesn't drop
-  // sparsely-populated columns (e.g. custom_fields, optional FK
-  // ids that are null on most rows but present on some).
+/** Union of every key seen across rows, sorted, so the CSV doesn't
+ * drop sparsely-populated columns (e.g. custom_fields, optional FK
+ * ids that are null on most rows but present on some). */
+function rowsToTable(rows: Record<string, unknown>[]): unknown[][] {
   const headerSet = new Set<string>();
   for (const r of rows) {
     for (const k of Object.keys(r)) headerSet.add(k);
   }
   const headers = Array.from(headerSet).sort();
-  const lines: string[] = [];
-  lines.push(headers.map(escapeCsvField).join(","));
-  for (const r of rows) {
-    lines.push(headers.map((h) => escapeCsvField(r[h])).join(","));
-  }
-  return lines.join("\n");
+  return [headers, ...rows.map((r) => headers.map((h) => cellValue(r[h])))];
 }
 
 function todayStamp(): string {
@@ -107,21 +97,6 @@ function todayStamp(): string {
   const hh = String(d.getHours()).padStart(2, "0");
   const mi = String(d.getMinutes()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}_${hh}${mi}`;
-}
-
-function downloadCsv(filename: string, csv: string) {
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  // Defer revoke a tick so the download actually starts before the
-  // blob URL goes away (Safari has been finicky about immediate
-  // revoke).
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 async function fetchAllRows(table: string): Promise<Record<string, unknown>[]> {
@@ -170,10 +145,9 @@ export function DataExport() {
       // Still write an empty file with a single column so the user
       // sees the table was exported (just empty), rather than
       // getting silent no-download surprise.
-      const csv = "id\n";
-      downloadCsv(filename, csv);
+      downloadCsv(filename, [["id"]]);
     } else {
-      downloadCsv(filename, rowsToCsv(rows));
+      downloadCsv(filename, rowsToTable(rows));
     }
     return rows.length;
   }
