@@ -30,4 +30,23 @@ describe("campaign task previews", () => {
     expect(readableTaskPreview("Call {{first_name}}", { recipientEmail: "office@example.com" }))
       .toBe("Call office@example.com");
   });
+
+  it("renders Smartlead fallback blocks as readable preview text", () => {
+    expect(readableTaskPreview(
+      "Where the SRA lives at {{#if company_name}}{{company_name}}{{else}}your organization{{/if}}",
+    )).toBe("Where the SRA lives at your organization");
+    expect(readableTaskPreview(
+      "Thanks for connecting, {{#if first_name}}{{first_name}}{{else}}there{{/if}}. Happy to help.",
+    )).toBe("Thanks for connecting. Happy to help.");
+  });
+
+  it("preserves the prose in custom Smartlead conditional branches", () => {
+    const greeting = "{{#if first_name}}Hi {{first_name}},{{else}}Hi there,{{/if}} welcome.";
+    expect(readableTaskPreview(greeting)).toBe("Hi there, welcome.");
+    expect(readableTaskPreview(greeting, { firstName: "Nathan" })).toBe("Hi Nathan, welcome.");
+
+    const organization = "{{#if company_name}}At {{company_name}}{{else}}For your organization{{/if}}, this helps.";
+    expect(readableTaskPreview(organization)).toBe("For your organization, this helps.");
+    expect(readableTaskPreview(organization, { organization: "Medcurity" })).toBe("At Medcurity, this helps.");
+  });
 });

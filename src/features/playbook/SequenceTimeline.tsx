@@ -44,7 +44,11 @@ export function readableTaskPreview(t?: string, context: SequencePreviewContext 
   const organization = context.organization?.trim() || "your organization";
   const senderName = context.senderName?.trim() || "the assigned rep";
   const phone = context.phone?.trim() || "the rep's saved work phone";
+  const hasFirstName = !!context.firstName?.trim();
+  const hasOrganization = !!context.organization?.trim();
   return (t ?? "")
+    .replace(/\{\{#if\s+first_name\}\}([\s\S]*?)\{\{else\}\}([\s\S]*?)\{\{\/if\}\}/gi, (_block, present, fallback) => hasFirstName ? present : fallback)
+    .replace(/\{\{#if\s+(?:company|company_name)\}\}([\s\S]*?)\{\{else\}\}([\s\S]*?)\{\{\/if\}\}/gi, (_block, present, fallback) => hasOrganization ? present : fallback)
     .replace(/\[\[\s*First name\s*\]\]/gi, firstName)
     .replace(/\[\[\s*Organization\s*\]\]/gi, organization)
     .replace(/\[\[\s*Signature\s*\]\]/gi, senderName)
@@ -54,6 +58,7 @@ export function readableTaskPreview(t?: string, context: SequencePreviewContext 
     .replace(/\{\{\s*(?:company|company_name)\s*\}\}/gi, organization)
     .replace(/\{\{\s*sender_name\s*\}\}/gi, senderName)
     .replace(/\{\{\s*phone\s*\}\}/gi, phone)
+    .replace(/\bThanks for connecting, there([.!?])/gi, "Thanks for connecting$1")
     .replace(/\s+/g, " ")
     .trim();
 }
