@@ -62,6 +62,10 @@ export function useOpportunities(filters?: OppFilters) {
             : "*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)",
           { count: "estimated" },
         )
+        // Explicit archived filter (see accounts/api.ts note — 20260817104000
+        // makes owner-archived rows SELECT-visible for the Archive page; the
+        // view path carries archived_at via o.*).
+        .is("archived_at", null)
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       // Sort: support sorting by columns on embedded relations
@@ -307,7 +311,9 @@ export function useOpportunitiesTotals(filters?: Omit<OppFilters, "page" | "page
       let from = 0;
       const pageSize = 1000;
       while (all.length < 100_000) {
-        let q = supabase.from("opportunities").select("amount");
+        let q = supabase.from("opportunities").select("amount")
+          // Keep the totals in lockstep with the list's archived filter.
+          .is("archived_at", null);
         if (filters?.search) {
           const safe = filters.search.replace(/[(),]/g, " ");
           const orParts = [`name.ilike.%${safe}%`];

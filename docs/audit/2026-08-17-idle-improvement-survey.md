@@ -4,7 +4,7 @@ Nathan's ask (8/17): "find 10 different topics you could work on... not just goi
 
 Method: five parallel read-only sweep agents over the live codebase (UX polish, performance, backend/DB health, code health, workflow gaps). Every finding below carries file evidence gathered 2026-08-17; re-verify the specific lines when work on a topic starts. Docket row: **A17** (awaiting Nathan's picks). Cross-checked against the DOCKET — none of the 10 topics duplicates an open row; adjacent rows are noted inline.
 
-**PICKED: (none yet — record Nathan's picks here, then open D-rows per pick)**
+**PICKED: ALL TEN (Nathan, 8/17).** Constraints he attached: **T6** — search must ALSO get an evolved, upgraded, beautiful look matching the new-CRM design language ("the entire experience of searching is just super upgraded"). **T7** — do NOT build new tag/list infrastructure for accounts; only surface options for structures that already exist, plus cleanup. **T8** — wants explicit "are you sure you want to leave, this erases anything you've written" confirmations. **T9** — extra care: sync/cron functions have required troubleshooting before; improve without destabilizing. **T10** — double-check nothing overrides past user requests (the regression comments in OpportunityForm encode required behaviors). Process: everything builds on STAGING only; Nathan reviews before any prod promote; one topic at a time; subagents do heavy lifting, planning/review stays with the main session.
 
 ---
 

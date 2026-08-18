@@ -15,35 +15,60 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatDate } from "@/lib/formatters";
+import { activityLabel, formatDate } from "@/lib/formatters";
+import type { ActivityType } from "@/types/crm";
 import { toast } from "sonner";
-import { Navigate } from "react-router-dom";
 
 type ArchivedRecord = {
   id: string;
   name?: string;
   first_name?: string;
   last_name?: string;
+  // Activities identify by subject and carry their own type/date columns.
+  subject?: string;
+  activity_type?: ActivityType;
+  activity_date?: string | null;
+  created_at?: string;
+  account?: { name: string } | null;
   archived_at: string;
   archive_reason: string | null;
 };
 
-function useArchivedRecords(table: string) {
+// Activities need the parent account name for the Related column; the
+// other tables are self-describing.
+const SELECT_FOR: Record<string, string> = {
+  activities: "*, account:accounts!account_id(id, name)",
+};
+
+function useArchivedRecords(table: string, scopeUserId: string | null) {
   return useQuery({
-    queryKey: ["archived", table],
+    queryKey: ["archived", table, scopeUserId ?? "all"],
     queryFn: async () => {
       let query = supabase
         .from(table)
-        .select("*")
+        .select(SELECT_FOR[table] ?? "*")
         .not("archived_at", "is", null);
       // For imports (the leads table), hide promoted tombstones — a
       // converted import lives on as its contact and shouldn't be
       // "restored" from here. This tab is for avoided / manually-archived
       // imports an admin might want back.
       if (table === "leads") query = query.neq("status", "converted");
+      // Non-admins see only what they own or archived themselves. RLS
+      // enforces exactly this slice server-side (20260817104000); asking
+      // for it explicitly keeps the query honest rather than relying on
+      // rows being silently filtered out.
+      if (scopeUserId) {
+        query = query.or(
+          `owner_user_id.eq.${scopeUserId},archived_by.eq.${scopeUserId}`,
+        );
+      }
       const { data, error } = await query.order("archived_at", { ascending: false });
       if (error) throw error;
-      return data as ArchivedRecord[];
+      // as unknown as: the select string is now a variable (activities need
+      // an embedded account), and supabase-js can only infer a row shape
+      // from a string literal — a non-literal degrades to
+      // GenericStringError[], which a direct `as` rejects.
+      return data as unknown as ArchivedRecord[];
     },
   });
 }
@@ -71,13 +96,17 @@ function useRestoreRecord() {
 
 function getDisplayName(record: ArchivedRecord): string {
   if (record.name) return record.name;
+  if (record.subject) return record.subject;
   if (record.first_name && record.last_name) return `${record.first_name} ${record.last_name}`;
   return record.id;
 }
 
-function ArchivedTable({ table }: { table: string }) {
-  const { data: records, isLoading } = useArchivedRecords(table);
+function ArchivedTable({ table, scopeUserId }: { table: string; scopeUserId: string | null }) {
+  const { data: records, isLoading } = useArchivedRecords(table, scopeUserId);
   const restoreMutation = useRestoreRecord();
+  // Activities get two extra columns (type + when it happened) — a bare
+  // subject isn't enough to tell two archived tasks apart.
+  const isActivities = table === "activities";
 
   if (isLoading) {
     return (
@@ -94,7 +123,11 @@ function ArchivedTable({ table }: { table: string }) {
       <EmptyState
         icon={Archive}
         title="No archived records"
-        description={`No archived ${table} found`}
+        description={
+          scopeUserId
+            ? `No archived ${table} you own or archived yourself`
+            : `No archived ${table} found`
+        }
       />
     );
   }
@@ -104,7 +137,10 @@ function ArchivedTable({ table }: { table: string }) {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Name</TableHead>
+            <TableHead>{isActivities ? "Subject" : "Name"}</TableHead>
+            {isActivities && <TableHead>Type</TableHead>}
+            {isActivities && <TableHead>Date</TableHead>}
+            {isActivities && <TableHead>Related Account</TableHead>}
             <TableHead>Archived Date</TableHead>
             <TableHead>Reason</TableHead>
             <TableHead></TableHead>
@@ -114,6 +150,23 @@ function ArchivedTable({ table }: { table: string }) {
           {records.map((record) => (
             <TableRow key={record.id}>
               <TableCell className="font-medium">{getDisplayName(record)}</TableCell>
+              {isActivities && (
+                <TableCell className="text-muted-foreground">
+                  {record.activity_type ? activityLabel(record.activity_type) : "—"}
+                </TableCell>
+              )}
+              {isActivities && (
+                <TableCell className="text-muted-foreground">
+                  {/* Same fallback the Activities list uses: the real
+                      interaction date when set, else the logged date. */}
+                  {formatDate(record.activity_date ?? record.created_at ?? record.archived_at)}
+                </TableCell>
+              )}
+              {isActivities && (
+                <TableCell className="text-muted-foreground">
+                  {record.account?.name ?? "—"}
+                </TableCell>
+              )}
               <TableCell className="text-muted-foreground">
                 {formatDate(record.archived_at)}
               </TableCell>
@@ -141,16 +194,22 @@ function ArchivedTable({ table }: { table: string }) {
 
 export function ArchiveManager() {
   const { profile } = useAuth();
-
-  if (profile?.role !== "admin" && profile?.role !== "super_admin") {
-    return <Navigate to="/accounts" replace />;
-  }
+  const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
+  // Everyone can archive; before 20260817104000 only admins could undo it,
+  // so a rep's own mistake needed someone else. Non-admins now get the
+  // page scoped to the rows RLS and restore_record() actually let them
+  // touch: the ones they own or archived themselves.
+  const scopeUserId = isAdmin ? null : profile?.id ?? null;
 
   return (
     <div>
       <PageHeader
-        title="Archive Manager"
-        description="Restore previously archived records (admin only)"
+        title={isAdmin ? "Archive Manager" : "Your Archived Records"}
+        description={
+          isAdmin
+            ? "Restore previously archived records (all users)"
+            : "Restore records you own or archived yourself"
+        }
       />
 
       <Tabs defaultValue="accounts">
@@ -158,20 +217,29 @@ export function ArchiveManager() {
           <TabsTrigger value="accounts">Accounts</TabsTrigger>
           <TabsTrigger value="contacts">Contacts</TabsTrigger>
           <TabsTrigger value="opportunities">Opportunities</TabsTrigger>
-          <TabsTrigger value="leads">Imports</TabsTrigger>
+          <TabsTrigger value="activities">Activities</TabsTrigger>
+          {/* Imports stay admin-only: leads are frozen and have no
+              rep-facing surface, and restore_record() rejects them for
+              non-admins. */}
+          {isAdmin && <TabsTrigger value="leads">Imports</TabsTrigger>}
         </TabsList>
         <TabsContent value="accounts" className="mt-4">
-          <ArchivedTable table="accounts" />
+          <ArchivedTable table="accounts" scopeUserId={scopeUserId} />
         </TabsContent>
         <TabsContent value="contacts" className="mt-4">
-          <ArchivedTable table="contacts" />
+          <ArchivedTable table="contacts" scopeUserId={scopeUserId} />
         </TabsContent>
         <TabsContent value="opportunities" className="mt-4">
-          <ArchivedTable table="opportunities" />
+          <ArchivedTable table="opportunities" scopeUserId={scopeUserId} />
         </TabsContent>
-        <TabsContent value="leads" className="mt-4">
-          <ArchivedTable table="leads" />
+        <TabsContent value="activities" className="mt-4">
+          <ArchivedTable table="activities" scopeUserId={scopeUserId} />
         </TabsContent>
+        {isAdmin && (
+          <TabsContent value="leads" className="mt-4">
+            <ArchivedTable table="leads" scopeUserId={null} />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

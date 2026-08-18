@@ -67,6 +67,11 @@ export function useAccounts(filters?: AccountFilters) {
       let query = supabase
         .from("accounts")
         .select("*, owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
+        // Explicit archived filter: RLS used to hide archived rows from
+        // non-admins as a side effect, but 20260817104000 lets owners see
+        // their own archived rows (for the Archive page) — without this,
+        // an archived account would reappear in its owner's list.
+        .is("archived_at", null)
         .order(sortCol, { ascending: sortAsc, nullsFirst: false })
         // Stable tiebreaker so offset paging is deterministic — without a
         // unique final sort key, rows tied on sortCol can repeat at page

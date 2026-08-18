@@ -5,6 +5,7 @@ import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Target, Plus, Search, X, Pencil, Check } from "lucide-react";
 import { useOpportunities, useOpportunitiesTotals, useArchiveOpportunity, useBulkUpdateOwner, useBulkDeleteOpportunities, useUpdateOpportunity } from "./api";
+import { useBulkUndo, capturePriorOwners } from "@/features/archive/bulk-undo";
 import { useClosedLostGuard } from "./useClosedLostGuard";
 import { AutoRenewalBadge, isAutoRenewal } from "./AutoRenewalBadge";
 import { DealMergerGame } from "@/features/deal-merger/DealMergerGame";
@@ -502,6 +503,7 @@ export function OpportunitiesList() {
   const archiveMutation = useArchiveOpportunity();
   const bulkOwnerMutation = useBulkUpdateOwner();
   const bulkDeleteMutation = useBulkDeleteOpportunities();
+  const undo = useBulkUndo("opportunities", "opportunity(ies)");
 
   const opps = result?.data;
   const totalCount = result?.count ?? 0;
@@ -546,11 +548,10 @@ export function OpportunitiesList() {
 
   const handleBulkArchive = async () => {
     const ids = Array.from(selectedIds);
-    const count = ids.length;
     try {
       await Promise.all(ids.map((id) => archiveMutation.mutateAsync({ id })));
       setSelectedIds(new Set());
-      toast.success(`${count} opportunity(ies) archived.`);
+      undo.archived(ids);
     } catch (e) {
       // Keep the selection so the user can retry; surface why it failed.
       toast.error("Archive failed: " + (e as Error).message);
@@ -575,11 +576,14 @@ export function OpportunitiesList() {
   };
 
   const handleBulkAssignOwner = async (userId: string) => {
-    const count = selectedIds.size;
+    const ids = Array.from(selectedIds);
+    // Capture prior owners BEFORE the write — that's the only record of
+    // them once the update lands.
+    const prior = capturePriorOwners(ids, opps);
     try {
-      await bulkOwnerMutation.mutateAsync({ ids: Array.from(selectedIds), owner_user_id: userId });
+      await bulkOwnerMutation.mutateAsync({ ids, owner_user_id: userId });
       setSelectedIds(new Set());
-      toast.success(`${count} opportunity(ies) reassigned.`);
+      undo.reassigned(ids.length, prior);
     } catch (e) {
       // Keep the selection so the user can retry; surface why it failed.
       toast.error("Reassign failed: " + (e as Error).message);
