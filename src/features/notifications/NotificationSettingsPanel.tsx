@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { previewSound } from "@/lib/notification-sounds";
+import { previewSound, resolveNotifSound } from "@/lib/notification-sounds";
 import { staffAction } from "@/features/meddy/api";
 import { QueryError } from "@/components/QueryError";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -25,19 +25,20 @@ import {
   type NotifTypeDef,
 } from "./prefs-api";
 
-// Nathan's keepers from the 2026-06-12 audition (cut: Ding, Twinkle,
-// Echo, and the 4 Nexus originals). The engine still knows the retired
-// recipes so old saved prefs keep playing; the picker only offers these.
+// The six sounds Nathan chose on 2026-08-18. Each one replaced a
+// specific older sound (marimba→lantern, bubble→bloom, drop→quill,
+// horn→felt, doorbell→beacon, glass→musicbox; knock retired), so a
+// preference saved against an old name still resolves — see
+// SOUND_ALIASES in lib/notification-sounds.ts. Order runs quietest to
+// most attention-getting.
 const SOUND_OPTIONS = [
-  { value: "bubble", label: "Bubble" },
-  { value: "marimba", label: "Marimba" },
-  { value: "doorbell", label: "Doorbell" },
-  { value: "glass", label: "Glass" },
-  { value: "drop", label: "Drop" },
-  { value: "knock", label: "Knock" },
-  { value: "horn", label: "Horn" },
+  { value: "felt", label: "Felt" },
+  { value: "quill", label: "Quill" },
+  { value: "lantern", label: "Lantern" },
+  { value: "bloom", label: "Bloom" },
+  { value: "musicbox", label: "Music Box" },
+  { value: "beacon", label: "Beacon" },
 ];
-const SOUND_VALUES = new Set(SOUND_OPTIONS.map((o) => o.value));
 
 // Value 10 repeats for 15s (the engine's "long" cycle) — label says so.
 const DURATION_OPTIONS = [
@@ -213,10 +214,12 @@ function NotifRow({ def, prefs }: { def: NotifTypeDef; prefs: Record<string, unk
 
   const bannerOn = prefs[def.key] !== false;
   const soundOn = prefs[`sound_${def.key}`] !== false;
-  // Saved prefs pointing at retired sounds fall back to the row default
-  // so the select never shows a blank value.
-  const rawSoundType = (prefs[`soundtype_${def.key}`] as string) || def.defSound;
-  const soundType = SOUND_VALUES.has(rawSoundType) ? rawSoundType : def.defSound;
+  // Resolve through the SAME function the delivery engine uses, so the
+  // sound named in this dropdown is always the sound that actually
+  // plays. A pref saved against a retired name (e.g. "glass") resolves
+  // to the sound that replaced it rather than silently reverting to the
+  // row default.
+  const soundType = resolveNotifSound(def.key, prefs[`soundtype_${def.key}`] as string | undefined);
   const duration = Number(prefs[`duration_${def.key}`] ?? def.defDuration);
 
   function setPref(patch: Record<string, unknown>) {

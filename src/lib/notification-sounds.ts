@@ -10,10 +10,18 @@
 //   Fallback: AudioContext oscillators — richer per-type sounds, may not
 //             run in background tabs (the Audio element covers those).
 
-// ── Base64 chime WAV (two-tone 880→1100 Hz, 0.5s, 22050Hz mono 16-bit) ─
+import { canonicalSound } from "./notification-sound-choice";
+
+// ── Background-tab fallback WAV (22050Hz mono 16-bit) ────────────────
+// Generated at load; there are no audio files in the repo. A backgrounded
+// tab suspends the AudioContext, so the oscillator recipes can't run and
+// this single sound stands in for whichever one the user chose.
+// 2026-08-18: was the old two-tone 880→1100 Hz chime; rebuilt as a warm
+// F4+C5 pair with a soft attack so a notification that arrives while
+// you're in another tab belongs to the same family as the new sounds.
 const _notifWavB64 = (function () {
   const sr = 22050,
-    dur = 0.5,
+    dur = 1.0,
     samples = Math.floor(sr * dur);
   const buf = new ArrayBuffer(44 + samples * 2);
   const view = new DataView(buf);
@@ -35,9 +43,14 @@ const _notifWavB64 = (function () {
   view.setUint32(40, samples * 2, true);
   for (let i = 0; i < samples; i++) {
     const t = i / sr;
-    const freq = t < 0.25 ? 880 : 1100;
-    const env = Math.min(1, (dur - t) * 8) * Math.min(1, t * 40) * 0.4;
-    const val = Math.sin(2 * Math.PI * freq * t) * env;
+    // Two notes a fifth apart, the second entering slightly later, each
+    // with a quiet octave partial — the shape the new sounds share.
+    const attack = Math.min(1, t / 0.045); // ~45ms fade-in, no click
+    const decay = Math.exp(-t * 3.1);
+    const lower = Math.sin(2 * Math.PI * 349.2 * t) + 0.18 * Math.sin(2 * Math.PI * 698.4 * t);
+    const upperOn = t >= 0.03 ? Math.min(1, (t - 0.03) / 0.05) : 0;
+    const upper = upperOn * Math.sin(2 * Math.PI * 523.3 * t);
+    const val = (lower * 0.26 + upper * 0.18) * attack * decay;
     view.setInt16(44 + i * 2, Math.max(-32768, Math.min(32767, val * 32767)), true);
   }
   const bytes = new Uint8Array(buf);
@@ -130,118 +143,143 @@ export function stopActiveSound() {
   }
 }
 
+/** Peak-level cap for one voice. The recipes below stack a fundamental
+ * with two or three quiet partials; without this a dense chord could
+ * clip on a laptop speaker. */
+const MAX_VOICE_GAIN = 0.4;
+
 function playSoundOnce(ctx: AudioContext, soundType: string, offsetTime?: number) {
   const t = offsetTime || ctx.currentTime;
-  function tone(start: number, freq: number, dur: number, vol?: number, type?: OscillatorType) {
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.type = type || "sine";
-    osc.frequency.setValueAtTime(freq, start);
-    gain.gain.setValueAtTime(vol || 0.3, start);
-    gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
-    osc.start(start);
-    osc.stop(start + dur + 0.05);
-    activeOscillators.push(osc);
+
+  /** One voice. Unlike the old `tone()` this fades in over `attack`
+   * rather than snapping to full volume, optionally runs through a
+   * lowpass, and can stack inharmonic partials — the three things that
+   * make a sound read as "struck instrument" instead of "beep".
+   * (2026-08-18: replaces the seven bare-oscillator recipes.) */
+  function voice(
+    start: number,
+    freq: number,
+    dur: number,
+    vol: number,
+    opts?: {
+      wave?: OscillatorType;
+      attack?: number;
+      lowpass?: number;
+      /** [frequency ratio, gain as a fraction of `vol`, decay seconds] */
+      partials?: Array<[number, number, number]>;
+    },
+  ) {
+    const o = opts || {};
+    const attack = o.attack || 0;
+    const emit = (f: number, d: number, v: number) => {
+      const peak = Math.min(Math.max(v, 0.0005), MAX_VOICE_GAIN);
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      if (o.lowpass) {
+        const filt = ctx.createBiquadFilter();
+        filt.type = "lowpass";
+        filt.frequency.setValueAtTime(o.lowpass, start);
+        gain.connect(filt);
+        filt.connect(ctx.destination);
+      } else {
+        gain.connect(ctx.destination);
+      }
+      osc.type = o.wave || "sine";
+      osc.frequency.setValueAtTime(f, start);
+      if (attack > 0.002) {
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(peak, start + attack);
+      } else {
+        gain.gain.setValueAtTime(peak, start);
+      }
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + attack + d);
+      osc.start(start);
+      osc.stop(start + attack + d + 0.05);
+      activeOscillators.push(osc);
+    };
+    emit(freq, dur, vol);
+    (o.partials || []).forEach(([ratio, gainFrac, pDur]) => {
+      emit(freq * ratio, pDur, vol * gainFrac * 4);
+    });
   }
-  if (soundType === "bell") {
-    tone(t, 1200, 0.4, 0.25, "sine");
-    tone(t + 0.5, 1200, 0.4, 0.25, "sine");
-    tone(t + 1.0, 1200, 0.4, 0.25, "sine");
-  } else if (soundType === "urgent") {
-    tone(t, 1400, 0.15, 0.35, "square");
-    tone(t + 0.2, 1400, 0.15, 0.35, "square");
-    tone(t + 0.4, 1400, 0.15, 0.35, "square");
-  } else if (soundType === "soft") {
-    tone(t, 440, 0.8, 0.15, "sine");
-  } else if (soundType === "melody") {
-    tone(t, 523, 0.18, 0.3, "sine");
-    tone(t + 0.22, 659, 0.18, 0.3, "sine");
-    tone(t + 0.44, 784, 0.18, 0.3, "sine");
-    tone(t + 0.66, 1047, 0.3, 0.3, "sine");
-  } else if (soundType === "pulse") {
-    tone(t, 600, 0.15, 0.25, "sine");
-    tone(t + 0.25, 600, 0.15, 0.25, "sine");
-  } else if (soundType === "ringbell") {
-    tone(t, 800, 1.2, 0.3, "sine");
-    tone(t, 1600, 0.8, 0.1, "sine");
-    // ── 2026-06-12 candidates (Nathan auditioning a new top 5) ────────
-  } else if (soundType === "bubble") {
-    // quick rising blip, playful
-    tone(t, 520, 0.08, 0.25, "sine");
-    tone(t + 0.07, 780, 0.1, 0.28, "sine");
-    tone(t + 0.16, 1040, 0.16, 0.22, "sine");
-  } else if (soundType === "marimba") {
-    // two warm wooden notes
-    tone(t, 440, 0.25, 0.32, "triangle");
-    tone(t + 0.18, 660, 0.35, 0.26, "triangle");
-  } else if (soundType === "ding") {
-    // single clean strike with a shimmering overtone
-    tone(t, 1000, 0.7, 0.28, "sine");
-    tone(t, 2000, 0.35, 0.08, "sine");
-  } else if (soundType === "doorbell") {
-    // classic ding-dong
-    tone(t, 880, 0.45, 0.3, "sine");
-    tone(t + 0.4, 660, 0.6, 0.28, "sine");
-  } else if (soundType === "glass") {
-    // high glassy shimmer
-    tone(t, 1480, 0.5, 0.18, "sine");
-    tone(t, 2220, 0.4, 0.08, "sine");
-    tone(t + 0.06, 1976, 0.45, 0.1, "sine");
-  } else if (soundType === "drop") {
-    // gentle descending water drop
-    tone(t, 880, 0.12, 0.25, "sine");
-    tone(t + 0.12, 660, 0.12, 0.25, "sine");
-    tone(t + 0.24, 440, 0.25, 0.25, "sine");
-  } else if (soundType === "knock") {
-    // two low knocks, subtle and unintrusive
-    tone(t, 180, 0.09, 0.42, "triangle");
-    tone(t + 0.16, 180, 0.09, 0.42, "triangle");
-  } else if (soundType === "twinkle") {
-    // fast sparkly up-arpeggio
-    tone(t, 1319, 0.12, 0.2, "sine");
-    tone(t + 0.09, 1568, 0.12, 0.2, "sine");
-    tone(t + 0.18, 1976, 0.2, 0.2, "sine");
-  } else if (soundType === "horn") {
-    // soft two-note swell, calm and full
-    tone(t, 523, 0.5, 0.18, "triangle");
-    tone(t, 784, 0.5, 0.14, "triangle");
-  } else if (soundType === "echo") {
-    // one ping and its quieter echo
-    tone(t, 990, 0.25, 0.3, "sine");
-    tone(t + 0.35, 990, 0.25, 0.12, "sine");
-  } else {
-    // chime default
-    tone(t, 880, 0.6, 0.3, "sine");
-    tone(t + 0.7, 1100, 0.6, 0.3, "sine");
+
+  switch (canonicalSound(soundType)) {
+    // ── Lantern — task reminders (was Marimba) ──────────────────────
+    // Four notes of an open chord rolled out one at a time.
+    case "lantern":
+      voice(t, 349.2, 0.9, 0.17, { wave: "triangle", attack: 0.02, partials: [[2, 0.05, 0.6]] });
+      voice(t + 0.13, 440, 0.9, 0.14, { wave: "triangle", attack: 0.02, partials: [[2, 0.04, 0.6]] });
+      voice(t + 0.26, 523.3, 0.9, 0.12, { wave: "triangle", attack: 0.02, partials: [[2, 0.04, 0.6]] });
+      voice(t + 0.39, 659.3, 1.1, 0.11, { wave: "triangle", attack: 0.02, partials: [[2, 0.03, 0.6]] });
+      break;
+
+    // ── Bloom — new website chat (was Bubble) ───────────────────────
+    // A chord that opens one note at a time, then holds.
+    case "bloom":
+      voice(t, 392, 1.2, 0.15, { attack: 0.05, lowpass: 2000, partials: [[2, 0.05, 0.8]] });
+      voice(t + 0.14, 523.3, 1.1, 0.13, { attack: 0.05, lowpass: 2200, partials: [[2, 0.04, 0.7]] });
+      voice(t + 0.28, 659.3, 1.0, 0.12, { attack: 0.05, lowpass: 2400, partials: [[2, 0.04, 0.6]] });
+      break;
+
+    // ── Quill — records assigned / contact form (was Drop) ──────────
+    // Two soft notes stepping down. Asks rather than demands.
+    case "quill":
+      voice(t, 880, 0.42, 0.15, { attack: 0.02, lowpass: 2600, partials: [[2, 0.05, 0.3]] });
+      voice(t + 0.2, 659.3, 0.62, 0.14, { attack: 0.02, lowpass: 2400, partials: [[2, 0.04, 0.4]] });
+      break;
+
+    // ── Felt — renewal reminders / task handoffs (was Horn) ─────────
+    // A muffled piano chord with the soft pedal down.
+    case "felt":
+      voice(t, 349.2, 1.3, 0.19, { attack: 0.045, lowpass: 1500, partials: [[2, 0.07, 0.9], [3, 0.03, 0.6]] });
+      voice(t + 0.03, 523.3, 1.2, 0.13, { attack: 0.05, lowpass: 1600, partials: [[2, 0.05, 0.8]] });
+      break;
+
+    // ── Beacon — someone needs a human (was Doorbell) ───────────────
+    // Two firm notes, twice over. The one alert that must carry.
+    case "beacon":
+      voice(t, 659.3, 0.2, 0.22, { wave: "triangle", attack: 0.008, partials: [[2, 0.06, 0.15]] });
+      voice(t + 0.14, 987.8, 0.28, 0.2, { wave: "triangle", attack: 0.008, partials: [[2, 0.05, 0.2]] });
+      voice(t + 0.46, 659.3, 0.2, 0.2, { wave: "triangle", attack: 0.008, partials: [[2, 0.06, 0.15]] });
+      voice(t + 0.6, 987.8, 0.4, 0.19, { wave: "triangle", attack: 0.008, partials: [[2, 0.05, 0.25]] });
+      break;
+
+    // ── Music Box — buying intent / high fives (was Glass) ──────────
+    // Three high notes with a wind-up sparkle, with body under them.
+    case "musicbox":
+      voice(t, 1046.5, 0.55, 0.14, { attack: 0.003, partials: [[2.9, 0.05, 0.35], [5.2, 0.02, 0.2]] });
+      voice(t + 0.15, 1318.5, 0.55, 0.13, { attack: 0.003, partials: [[2.9, 0.04, 0.35]] });
+      voice(t + 0.3, 1568, 0.85, 0.12, { attack: 0.003, partials: [[2.9, 0.04, 0.45]] });
+      break;
+
+    // Unreachable in practice — canonicalSound() maps every legacy and
+    // unknown name onto one of the six above. Kept so a future sound id
+    // added in one place and forgotten in another still makes a noise.
+    default:
+      voice(t, 523.3, 0.9, 0.16, { attack: 0.03, lowpass: 2000, partials: [[2, 0.05, 0.6]] });
+      break;
   }
 }
 
+/** Gap between repeats when a notification is set to Medium / Long /
+ * Persistent. Each value leaves a beat of silence after the sound's own
+ * tail so a repeat never overlaps the one before it. */
 function getSoundCycleMs(st: string): number {
   return (
     (
       {
-        bell: 1500,
-        urgent: 700,
-        soft: 1200,
-        melody: 1200,
-        pulse: 600,
-        ringbell: 1500,
-        bubble: 900,
-        marimba: 1300,
-        ding: 1200,
-        doorbell: 1600,
-        glass: 1100,
-        drop: 1000,
-        knock: 800,
-        twinkle: 900,
-        horn: 1200,
-        echo: 1300,
+        felt: 1700,
+        quill: 1300,
+        lantern: 1900,
+        musicbox: 1600,
+        bloom: 1800,
+        beacon: 1400,
       } as Record<string, number>
-    )[st] || 1500
+    )[canonicalSound(st)] || 1500
   );
 }
+
 function getSoundDurationMs(dt: string): number {
   return ({ medium: 5000, long: 15000, persistent: 30000 } as Record<string, number>)[dt] || 0;
 }
@@ -313,47 +351,15 @@ export function previewSound(soundType?: string, durationType?: string, onFinish
   playScheduled(soundType || "chime", durationType || "short", onFinish);
 }
 
-/** Runtime fallback sound per type when the user never chose one
- * (Nexus MEDDY_NOTIF_SOUNDS, index.html:11309-11317). */
-export const NOTIF_TYPE_FALLBACK_SOUNDS: Record<string, string> = {
-  meddy_new_chat: "bubble",
-  meddy_human_requested: "doorbell",
-  meddy_buying_intent: "glass",
-  meddy_missed_chat: "knock",
-  meddy_contact_received: "drop",
-  task_due: "marimba",
-  renewal_upcoming: "horn",
-  // Platform (Meddy Support) escalations — same doorbell urgency as website.
-  support_human_requested: "doorbell",
-  support_new_chat: "bubble",
-  // A teammate high-fived your closed deal — happy little clink.
-  deal_high_five: "glass",
-  // Hand-offs (survey T5). "drop" = something just landed in your lap;
-  // "knock" = someone handing you work. Deliberately NOT marimba, so a
-  // task someone gave you never sounds like your own task coming due.
-  record_assigned: "drop",
-  task_assigned: "knock",
-};
-
-/** Saved seconds value → repeat-duration bucket (Nexus index.html:12239). */
-export function durationTypeFromSeconds(durVal: number): string {
-  return durVal >= 30 ? "persistent" : durVal >= 10 ? "long" : durVal >= 5 ? "medium" : "short";
-}
-
-/** The audition keepers (2026-06-12). Saved prefs pointing at retired
- * sounds resolve to the per-type fallback so the engine plays the same
- * thing the settings picker displays. */
-export const KEPT_SOUNDS = new Set([
-  "bubble",
-  "marimba",
-  "doorbell",
-  "glass",
-  "drop",
-  "knock",
-  "horn",
-]);
-
-export function resolveNotifSound(typeKey: string, savedSound: string | undefined): string {
-  if (savedSound && KEPT_SOUNDS.has(savedSound)) return savedSound;
-  return NOTIF_TYPE_FALLBACK_SOUNDS[typeKey] || "marimba";
-}
+// ── Which sound plays for which notification ──────────────────────────
+// The decision layer lives in notification-sound-choice.ts (no browser
+// APIs, unit-tested). Re-exported here so every existing import of
+// "@/lib/notification-sounds" keeps working unchanged.
+export {
+  KEPT_SOUNDS,
+  SOUND_ALIASES,
+  canonicalSound,
+  NOTIF_TYPE_FALLBACK_SOUNDS,
+  durationTypeFromSeconds,
+  resolveNotifSound,
+} from "./notification-sound-choice";
