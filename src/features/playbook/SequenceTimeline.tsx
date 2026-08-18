@@ -27,32 +27,47 @@ function whoBadge(s: SequenceStep): { text: string; cls: string } {
   return { text: "Your task", cls: "border-emerald-500/30 text-emerald-600 dark:text-emerald-400" };
 }
 
+export interface SequencePreviewContext {
+  firstName?: string | null;
+  recipientEmail?: string | null;
+  organization?: string | null;
+  senderName?: string | null;
+  phone?: string | null;
+}
+
 // Turn a "{{first_name}} @ {{company}}" template into readable preview prose.
-function readable(t?: string): string {
+// The launch wizard supplies the real selected person + rep when available;
+// gallery previews use natural fallback copy instead of leaking raw tokens or
+// awkward stand-ins such as "Hi the contact" / "this is you".
+export function readableTaskPreview(t?: string, context: SequencePreviewContext = {}): string {
+  const firstName = context.firstName?.trim() || context.recipientEmail?.trim() || "there";
+  const organization = context.organization?.trim() || "your organization";
+  const senderName = context.senderName?.trim() || "the assigned rep";
+  const phone = context.phone?.trim() || "the rep's saved work phone";
   return (t ?? "")
-    .replace(/\[\[\s*First name\s*\]\]/gi, "the contact")
-    .replace(/\[\[\s*Organization\s*\]\]/gi, "their organization")
-    .replace(/\[\[\s*Signature\s*\]\]/gi, "your signature")
-    .replace(/\[\[\s*Work phone\s*\]\]/gi, "your work phone")
-    .replace(/\{\{\s*first_name\s*\}\}/gi, "the contact")
+    .replace(/\[\[\s*First name\s*\]\]/gi, firstName)
+    .replace(/\[\[\s*Organization\s*\]\]/gi, organization)
+    .replace(/\[\[\s*Signature\s*\]\]/gi, senderName)
+    .replace(/\[\[\s*Work phone\s*\]\]/gi, phone)
+    .replace(/\{\{\s*first_name\s*\}\}/gi, firstName)
     .replace(/\{\{\s*last_name\s*\}\}/gi, "")
-    .replace(/\{\{\s*(?:company|company_name)\s*\}\}/gi, "their organization")
-    .replace(/\{\{\s*sender_name\s*\}\}/gi, "you")
-    .replace(/\{\{\s*phone\s*\}\}/gi, "your work phone")
+    .replace(/\{\{\s*(?:company|company_name)\s*\}\}/gi, organization)
+    .replace(/\{\{\s*sender_name\s*\}\}/gi, senderName)
+    .replace(/\{\{\s*phone\s*\}\}/gi, phone)
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function subtitle(s: SequenceStep): string {
-  const note = readable(s.task_note_template);
+function subtitle(s: SequenceStep, context: SequencePreviewContext): string {
+  const note = readableTaskPreview(s.task_note_template, context);
   if (note) return note;
   if (s.channel === "EMAIL_AUTO" || s.channel === "EMAIL_HYBRID") {
-    return s.content_ai_draft ? "Wording needed before this can launch." : (readable(s.subject_template) || "Email step.");
+    return s.content_ai_draft ? "Wording needed before this can launch." : (readableTaskPreview(s.subject_template, context) || "Email step.");
   }
   return CHANNEL[s.channel].label;
 }
 
-export function SequenceTimeline({ steps }: { steps: SequenceStep[] }) {
+export function SequenceTimeline({ steps, previewContext = {} }: { steps: SequenceStep[]; previewContext?: SequencePreviewContext }) {
   const ordered = [...steps].sort((a, b) => a.order - b.order);
   return (
     <div className="relative">
@@ -79,7 +94,7 @@ export function SequenceTimeline({ steps }: { steps: SequenceStep[] }) {
                 <Badge variant="outline" className={cn("text-[10px] font-medium", who.cls)}>{who.text}</Badge>
               </div>
               <p className="font-medium text-sm mt-0.5">{cfg.label}</p>
-              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{subtitle(s)}</p>
+              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{subtitle(s, previewContext)}</p>
             </div>
           </div>
         );

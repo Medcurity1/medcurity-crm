@@ -14,7 +14,6 @@ import { Layers, Clock, Wand2 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
-import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/EmptyState";
 import { QueryError } from "@/components/QueryError";
@@ -58,6 +57,7 @@ export function QuickCampaignDialog({
   const smartleadDisabled = sl?.configured === false;
   const [launchOpen, setLaunchOpen] = useState(false);
   const [launchNonce, setLaunchNonce] = useState(0);
+  const [launchMode, setLaunchMode] = useState<"ai" | "template">("template");
   const [launchSeed, setLaunchSeed] = useState<{ template_id: string | null; name: string; steps: CampaignTemplate["steps"] } | null>(null);
   const [launchRecipients, setLaunchRecipients] = useState<Recipient[]>([]);
 
@@ -67,8 +67,8 @@ export function QuickCampaignDialog({
   const withEmail = contacts.filter((c) => !!c.email?.trim());
   const missingEmail = contacts.length - withEmail.length;
 
-  function pickTemplate(t: CampaignTemplate) {
-    const recipients: Recipient[] = withEmail.map((c) => ({
+  function seededRecipients(): Recipient[] {
+    return withEmail.map((c) => ({
       email: (c.email as string).trim(),
       first_name: c.first_name ?? "",
       last_name: c.last_name ?? "",
@@ -76,19 +76,30 @@ export function QuickCampaignDialog({
       contact_id: c.id,
       account_id: c.account_id ?? undefined,
     }));
+  }
+
+  function openWizard(nextMode: "ai" | "template", seed: typeof launchSeed) {
+    setLaunchRecipients(seededRecipients());
+    setLaunchMode(nextMode);
+    setLaunchSeed(seed);
+    setLaunchNonce((n) => n + 1);
+    setLaunchOpen(true);
+  }
+
+  function pickTemplate(t: CampaignTemplate) {
     const label = withEmail.length === 1
       ? contactLabel(withEmail[0])
       : `${withEmail.length} people`;
-    setLaunchRecipients(recipients);
-    setLaunchSeed({ template_id: t.id, name: `${t.name} — ${label}`, steps: t.steps });
-    setLaunchNonce((n) => n + 1);
-    onOpenChange(false);
-    setLaunchOpen(true);
+    openWizard("template", { template_id: t.id, name: `${t.name} — ${label}`, steps: t.steps });
+  }
+
+  function pickCustom() {
+    openWizard("ai", null);
   }
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog open={open && !launchOpen} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Start a campaign</DialogTitle>
@@ -120,31 +131,48 @@ export function QuickCampaignDialog({
                   : "None of the selected contacts have an email on file."
               }
             />
-          ) : isLoading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)}
-            </div>
-          ) : isError ? (
-            <QueryError
-              message="Couldn't load sequence templates."
-              onRetry={() => refetch()}
-              isRetrying={isFetching}
-            />
-          ) : !templates?.length ? (
-            <EmptyState icon={Wand2} title="No sequence templates yet" description="Build one from Playbook → Campaigns first." />
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {templates.map((t) => {
+              <button
+                type="button"
+                className="rounded-xl border bg-card text-card-foreground shadow-sm text-left cursor-pointer border-primary/25 bg-primary/[0.03] hover:shadow-md hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-all overflow-hidden"
+                onClick={pickCustom}
+              >
+                <div className="h-1 w-full bg-gradient-to-r from-violet-500 to-fuchsia-500" />
+                <div className="p-3 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <div className="h-6 w-6 rounded-md flex items-center justify-center shrink-0 bg-violet-500/15 text-violet-600 dark:text-violet-400">
+                      <Wand2 className="h-3.5 w-3.5" />
+                    </div>
+                    <h4 className="font-semibold text-sm">Custom campaign</h4>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    Describe the outreach you want. Pulse drafts it for {withEmail.length === 1 ? contactLabel(withEmail[0]) : "this group"}.
+                  </p>
+                </div>
+              </button>
+              {isLoading ? (
+                Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)
+              ) : isError ? (
+                <div className="sm:col-span-2">
+                  <QueryError
+                    message="Couldn't load saved sequence templates. You can still start a custom campaign."
+                    onRetry={() => refetch()}
+                    isRetrying={isFetching}
+                  />
+                </div>
+              ) : (templates ?? []).map((t) => {
                 const cat = CATEGORY[t.category] ?? CATEGORY.custom;
                 const Icon = cat.icon;
                 return (
-                  <Card
+                  <button
+                    type="button"
                     key={t.id}
-                    className="py-0 cursor-pointer hover:shadow-md hover:border-primary/30 transition-all overflow-hidden"
+                    className="rounded-xl border bg-card text-card-foreground shadow-sm text-left cursor-pointer hover:shadow-md hover:border-primary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-all overflow-hidden"
                     onClick={() => pickTemplate(t)}
                   >
                     <div className={cn("h-1 w-full bg-gradient-to-r", cat.accent)} />
-                    <CardContent className="p-3 space-y-1.5">
+                    <div className="p-3 space-y-1.5">
                       <div className="flex items-center gap-2">
                         <div className={cn("h-6 w-6 rounded-md flex items-center justify-center shrink-0", cat.chip)}>
                           <Icon className="h-3.5 w-3.5" />
@@ -158,8 +186,8 @@ export function QuickCampaignDialog({
                           <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{t.duration_days ?? "—"}d</span>
                         </span>
                       </div>
-                    </CardContent>
-                  </Card>
+                    </div>
+                  </button>
                 );
               })}
             </div>
@@ -172,8 +200,11 @@ export function QuickCampaignDialog({
       <CampaignWizard
         key={launchNonce}
         open={launchOpen}
-        onOpenChange={setLaunchOpen}
-        mode="template"
+        onOpenChange={(nextOpen) => {
+          setLaunchOpen(nextOpen);
+          if (!nextOpen) onOpenChange(false);
+        }}
+        mode={launchMode}
         templateSeed={launchSeed ?? { template_id: null, name: "", steps: [] }}
         initialRecipients={launchRecipients}
       />

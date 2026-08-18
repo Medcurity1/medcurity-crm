@@ -196,6 +196,9 @@ export function CampaignWizard({
   const [suppressionOverrides, setSuppressionOverrides] = useState<string[]>([]);
   const [activeEnrollments, setActiveEnrollments] = useState<ActiveEnrollmentEntry[]>([]);
   const [enrollmentOverrides, setEnrollmentOverrides] = useState<string[]>([]);
+  const hasLockedRecipients = (initialRecipients?.length ?? 0) > 0;
+  const [recipientChecksPending, setRecipientChecksPending] = useState(hasLockedRecipients);
+  const [recipientChecksFailed, setRecipientChecksFailed] = useState(false);
   const [inboxId, setInboxId] = useState("");
   // Campaign owner (defaults to whoever opened the wizard) — call/LinkedIn
   // tasks and reply alerts still go to each person's own account owner; this
@@ -421,6 +424,8 @@ export function CampaignWizard({
     setRecipients(initialRecipients ?? []); setInboxId(""); setOwnerId(profile?.id ?? "");
     setSuppression([]); setSuppressionOverrides([]);
     setActiveEnrollments([]); setEnrollmentOverrides([]);
+    setRecipientChecksPending(hasLockedRecipients);
+    setRecipientChecksFailed(false);
     setAutoStart(mode === "template"); setAdaptive(false); setLeadsPerDay(25); setMinGap(15); setLaunchResult(null);
     setTemplateName(templateSeed?.name ?? "");
     setTemplateSteps(templateSeed?.steps ? templateSeed.steps.map((s) => ({ ...s })) : []);
@@ -567,8 +572,12 @@ export function CampaignWizard({
   }
 
   const canGenerate = description.trim().length >= 20;
-  const displayTotal = mode === "template" ? 3 : 4;
-  const displayStep = mode === "template" ? Math.max(1, step - 1) : step;
+  const displayTotal = mode === "template"
+    ? (hasLockedRecipients ? 2 : 3)
+    : (hasLockedRecipients ? 3 : 4);
+  const displayStep = mode === "template"
+    ? (hasLockedRecipients && step === 4 ? 2 : Math.max(1, step - 1))
+    : (hasLockedRecipients && step === 4 ? 3 : step);
   const templateEmailSteps = templateSteps.filter((s) => s.channel === "EMAIL_AUTO");
   const templateTaskSteps = templateSteps.filter((s) => s.channel !== "EMAIL_AUTO");
   // Every automated email needs real wording before it can go out — block
@@ -627,6 +636,19 @@ export function CampaignWizard({
                 <Button size="xs" variant="ghost" className="h-6 text-muted-foreground" onClick={discardDraft}>Discard</Button>
               </div>
             </div>
+          )}
+
+          {hasLockedRecipients && step < 4 && (
+            <CampaignRecipients
+              compact
+              recipients={recipients} setRecipients={setRecipients} tags={tags ?? []}
+              suppression={suppression} setSuppression={setSuppression}
+              suppressionOverrides={suppressionOverrides} setSuppressionOverrides={setSuppressionOverrides}
+              activeEnrollments={activeEnrollments} setActiveEnrollments={setActiveEnrollments}
+              enrollmentOverrides={enrollmentOverrides} setEnrollmentOverrides={setEnrollmentOverrides}
+              onChecksPendingChange={setRecipientChecksPending}
+              onChecksFailedChange={setRecipientChecksFailed}
+            />
           )}
 
           {/* Step 1 — Describe (AI mode only) */}
@@ -796,8 +818,11 @@ export function CampaignWizard({
 
               <div className="flex justify-between pt-2">
                 <Button variant="ghost" onClick={() => setStep(1)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
-                <Button onClick={() => setStep(3)} disabled={!campaign.sequence.some((e) => e.subject && e.body_html)}>
-                  Recipients <ArrowRight className="h-4 w-4 ml-1" />
+                <Button
+                  onClick={() => setStep(hasLockedRecipients ? 4 : 3)}
+                  disabled={aiEmailsIncomplete || recipientChecksPending || recipientChecksFailed || (hasLockedRecipients && sendableRecipients.length === 0)}
+                >
+                  {hasLockedRecipients ? "Launch settings" : "Recipients"} <ArrowRight className="h-4 w-4 ml-1" />
                 </Button>
               </div>
             </div>
@@ -877,7 +902,14 @@ export function CampaignWizard({
               {templateTaskSteps.length > 0 && (
                 <div className="space-y-1">
                   <p className="text-xs font-medium text-muted-foreground">Calls, LinkedIn & review-and-send steps — become your tasks, right on schedule</p>
-                  <SequenceTimeline steps={templateTaskSteps} />
+                  <SequenceTimeline
+                    steps={templateTaskSteps}
+                    previewContext={{
+                      firstName: recipients[0]?.first_name,
+                      recipientEmail: recipients[0]?.email,
+                      organization: recipients[0]?.company_name,
+                    }}
+                  />
                 </div>
               )}
 
@@ -890,8 +922,11 @@ export function CampaignWizard({
               )}
               <div className="flex justify-between pt-2">
                 <Button variant="ghost" onClick={() => close(false)}>Cancel</Button>
-                <Button onClick={() => setStep(3)} disabled={!templateName.trim() || incompleteTemplateEmails.length > 0}>
-                  Recipients <ArrowRight className="h-4 w-4 ml-1" />
+                <Button
+                  onClick={() => setStep(hasLockedRecipients ? 4 : 3)}
+                  disabled={!templateName.trim() || incompleteTemplateEmails.length > 0 || recipientChecksPending || recipientChecksFailed || (hasLockedRecipients && sendableRecipients.length === 0)}
+                >
+                  {hasLockedRecipients ? "Launch settings" : "Recipients"} <ArrowRight className="h-4 w-4 ml-1" />
                 </Button>
               </div>
             </div>
@@ -906,6 +941,8 @@ export function CampaignWizard({
                 suppressionOverrides={suppressionOverrides} setSuppressionOverrides={setSuppressionOverrides}
                 activeEnrollments={activeEnrollments} setActiveEnrollments={setActiveEnrollments}
                 enrollmentOverrides={enrollmentOverrides} setEnrollmentOverrides={setEnrollmentOverrides}
+                onChecksPendingChange={setRecipientChecksPending}
+                onChecksFailedChange={setRecipientChecksFailed}
               />
               {recipients.length > 0 && sendableRecipients.length === 0 && (
                 <p className="text-xs text-amber-600">
@@ -918,7 +955,7 @@ export function CampaignWizard({
               )}
               <div className="flex justify-between pt-2">
                 <Button variant="ghost" onClick={() => setStep(2)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
-                <Button onClick={() => setStep(4)} disabled={sendableRecipients.length === 0}>Launch step <ArrowRight className="h-4 w-4 ml-1" /></Button>
+                <Button onClick={() => setStep(4)} disabled={recipientChecksPending || recipientChecksFailed || sendableRecipients.length === 0}>Launch step <ArrowRight className="h-4 w-4 ml-1" /></Button>
               </div>
             </div>
           )}
@@ -1041,8 +1078,8 @@ export function CampaignWizard({
                     <p className="text-xs text-muted-foreground">Connect Smartlead to launch campaigns.</p>
                   )}
                   <div className="flex justify-between pt-2">
-                    <Button variant="ghost" onClick={() => setStep(3)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
-                    <Button onClick={() => setConfirmOpen(true)} disabled={launch.isPending || aiEmailsIncomplete || smartleadDisabled || inboxHeadroom === 0}>
+                    <Button variant="ghost" onClick={() => setStep(hasLockedRecipients ? 2 : 3)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
+                    <Button onClick={() => setConfirmOpen(true)} disabled={launch.isPending || aiEmailsIncomplete || recipientChecksPending || recipientChecksFailed || smartleadDisabled || inboxHeadroom === 0}>
                       {launch.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Launching…</> : <><Rocket className="h-4 w-4 mr-1" /> {autoStart ? "Launch & start" : "Create draft"}</>}
                     </Button>
                   </div>
