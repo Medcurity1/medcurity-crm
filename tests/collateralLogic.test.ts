@@ -493,6 +493,26 @@ describe("launch banner retirement (change 8: deterministic ~30-day window)", ()
     expect(launchBannerActive(new Date(Date.UTC(2026, 8, 18)))).toBe(false);
     expect(launchBannerActive(new Date(Date.UTC(2026, 11, 1)))).toBe(false);
   });
+
+  it("drives the app-wide AnnouncementBanner (Nathan 8/18: all-tabs launch pattern)", () => {
+    const banner = readFileSync(
+      path.resolve(__dirname, "..", "src", "components", "AnnouncementBanner.tsx"),
+      "utf8",
+    );
+    expect(banner).toContain('id: "collateral-launch-2026-08"');
+    expect(banner).toContain('ctaRoute: "/collateral"');
+    // The self-retirement gate: the announcement disappears on its own.
+    expect(banner).toContain("launchBannerActive()");
+    // One announcement at a time: the Nexus banner era ended with this.
+    expect(banner).not.toContain('id: "nexus-launch-2026-08"');
+    // The old page-local banner is gone from the Collateral feature.
+    const page = readFileSync(
+      path.resolve(__dirname, "..", "src", "features", "collateral", "CollateralPage.tsx"),
+      "utf8",
+    );
+    expect(page).not.toContain("collat-banner");
+    expect(page).not.toContain("LaunchBanner");
+  });
 });
 
 describe("v1.2 source guards (role gating, title source, scope)", () => {
@@ -561,10 +581,20 @@ describe("v1.2 source guards (role gating, title source, scope)", () => {
   it("per-user persistence flows through collateral_user_prefs (no new store)", () => {
     const api = read("src", "features", "collateral", "api.ts");
     expect(api).toContain('"collateral_user_prefs"');
-    for (const field of ["default_segments", "density", "launch_banner_dismissed_at"]) {
+    for (const field of ["default_segments", "density"]) {
       expect(api).toContain(field);
     }
     expect(api).not.toContain("localStorage");
+    // Banner dismissal deliberately does NOT live here (app-wide
+    // AnnouncementBanner localStorage pattern instead, Nathan 8/18); the
+    // follow-up migration drops the unused column.
+    expect(api).not.toContain("launch_banner_dismissed_at");
+    const drop = read(
+      "supabase",
+      "migrations",
+      "20260818230000_collateral_banner_to_announcement.sql",
+    );
+    expect(drop).toContain("drop column if exists launch_banner_dismissed_at");
   });
 
   it("chips build from the full synced set, not the filtered subset", () => {

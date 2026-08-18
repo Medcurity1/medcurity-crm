@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { X, Sparkles, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { launchBannerActive } from "@/features/collateral/collateral-logic";
 
 interface Announcement {
   /** Bump this whenever you want a brand-new banner everyone sees once. */
@@ -23,8 +24,8 @@ interface Announcement {
  * that announcement.
  */
 // Requests launch banner retired 2026-06-12 (Nathan). Meddy launch banner
-// (meddy-launch-2026-06) ran 2026-06-16 → 2026-07-02. Banner is OFF for
-// now (Nathan 2026-07-02: hold until Joe's platform side is ready).
+// (meddy-launch-2026-06) ran 2026-06-16 → 2026-07-02. Banner held
+// 2026-07-02 → 2026-08-04 (Nathan: until Joe's platform side was ready).
 //
 // BACK POCKET — the Platform-stream announcement, ready to flip on by
 // assigning it to ACTIVE_ANNOUNCEMENT when Joe's integration goes live:
@@ -36,15 +37,26 @@ interface Announcement {
 //     ctaLabel: "See Platform stream",
 //     ctaRoute: "/support",
 //   }
-// Nexus launch (Nathan 2026-08-04): staged with the swap batch.
-export const ACTIVE_ANNOUNCEMENT: Announcement | null = {
-  id: "nexus-launch-2026-08",
-  title: "Nexus is your new home page",
+// Nexus launch (nexus-launch-2026-08) ran 2026-08-04 → 2026-08-18,
+// superseded by the Collateral launch below (one announcement at a time).
+//
+// Collateral launch (Jordan's v1.2 change 8, reshaped by Nathan 8/18 to
+// the standard all-tabs banner): copy is Jordan's suggested launch text.
+// Unlike past banners this one RETIRES ITSELF ~30 days after the v1.2
+// release via launchBannerActive (spec: the announcement must not outstay
+// the launch); flip to another announcement or null any time before that.
+const COLLATERAL_LAUNCH: Announcement = {
+  id: "collateral-launch-2026-08",
+  title: "New: Collateral",
   message:
-    "Your briefing, your metrics, and your widgets in one place. Home is still in the sidebar if you need it, and requests now live behind the Submit Request button up top.",
-  ctaLabel: "Take a look",
-  ctaRoute: "/nexus",
+    "Every current sales asset in one place. Search it, copy a link, paste it into your email.",
+  ctaLabel: "Open Collateral",
+  ctaRoute: "/collateral",
 };
+
+export const ACTIVE_ANNOUNCEMENT: Announcement | null = launchBannerActive()
+  ? COLLATERAL_LAUNCH
+  : null;
 
 function storageKey(id: string) {
   return `announcement-dismissed:${id}`;
@@ -76,9 +88,12 @@ export function AnnouncementBanner() {
 
   return (
     <div className="px-4 pt-4 sm:px-6">
-      <div className="relative mx-auto flex max-w-[1800px] items-center gap-3 overflow-hidden rounded-xl border border-orange-500/30 bg-gradient-to-r from-orange-500/15 via-amber-400/10 to-primary/10 px-4 py-3 shadow-sm backdrop-blur">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-orange-500/20 ring-1 ring-orange-500/30">
-          <Sparkles className="h-5 w-5 text-orange-500" />
+      {/* Launch-gradient accent (Nathan 8/18): same sky→indigo family as
+          the sidebar's LAUNCHED pill, so the banner and the badge read as
+          one launch moment. (The orange era belonged to Nexus.) */}
+      <div className="relative mx-auto flex max-w-[1800px] items-center gap-3 overflow-hidden rounded-xl border border-sky-500/30 bg-gradient-to-r from-sky-500/15 via-blue-500/10 to-indigo-500/10 px-4 py-3 shadow-sm backdrop-blur">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/20 ring-1 ring-sky-500/30">
+          <Sparkles className="h-5 w-5 text-sky-500" />
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold">{title}</p>
@@ -86,7 +101,7 @@ export function AnnouncementBanner() {
         </div>
         <Button
           size="sm"
-          className="shrink-0 gap-1.5 bg-orange-500 text-white hover:bg-orange-600"
+          className="shrink-0 gap-1.5 bg-gradient-to-r from-sky-400 via-blue-500 to-indigo-500 text-white shadow-sm shadow-blue-500/30 hover:opacity-90"
           onClick={() => {
             dismiss();
             navigate(ctaRoute);
