@@ -111,11 +111,6 @@ const navItems: NavItem[] = [
   { to: "/products", icon: Package, label: "Products" },
   { to: "/renewals", icon: RefreshCw, label: "Renewals" },
   { to: "/reports", icon: BarChart3, label: "Reports" },
-  // Archive moved out of adminItems 2026-08-17: reps can archive records
-  // (bulk archive included), so they need their own way back. The page
-  // scopes non-admins to what they own or archived themselves; admins
-  // still see everything, plus the Imports tab.
-  { to: "/archive", icon: Archive, label: "Archive" },
   // Forecasting + Analytics moved into /reports as tabs (2026-04-17).
   // "New" badge retired 2026-07-02 (Nathan).
   // Requests tab removed 2026-08-04 (Nathan): it's now the Submit Request
@@ -143,6 +138,10 @@ const adminItems: NavItem[] = [
   // "Leads" 2026-07-20 after the prod lead cleanup; reps don't see it —
   // admins clean + promote to Contacts or archive).
   { to: "/imports", icon: Inbox, label: "Imports", badge: { label: "Admin", className: ADMIN_BADGE } },
+  // Archive back in adminItems (Nathan, 2026-08-17, same-day reversal of
+  // the self-serve experiment): recovery is an admin task here, and rep
+  // sidebars stay reserved for daily-use tabs.
+  { to: "/archive", icon: Archive, label: "Archive", badge: { label: "Admin", className: ADMIN_BADGE } },
   { to: "/admin", icon: Settings, label: "Admin Settings", badge: { label: "Admin", className: ADMIN_BADGE } },
 ];
 

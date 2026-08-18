@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Navigate } from "react-router-dom";
 import { Archive, RotateCcw } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
@@ -41,9 +42,9 @@ const SELECT_FOR: Record<string, string> = {
   activities: "*, account:accounts!account_id(id, name)",
 };
 
-function useArchivedRecords(table: string, scopeUserId: string | null) {
+function useArchivedRecords(table: string) {
   return useQuery({
-    queryKey: ["archived", table, scopeUserId ?? "all"],
+    queryKey: ["archived", table],
     queryFn: async () => {
       let query = supabase
         .from(table)
@@ -54,15 +55,6 @@ function useArchivedRecords(table: string, scopeUserId: string | null) {
       // "restored" from here. This tab is for avoided / manually-archived
       // imports an admin might want back.
       if (table === "leads") query = query.neq("status", "converted");
-      // Non-admins see only what they own or archived themselves. RLS
-      // enforces exactly this slice server-side (20260817104000); asking
-      // for it explicitly keeps the query honest rather than relying on
-      // rows being silently filtered out.
-      if (scopeUserId) {
-        query = query.or(
-          `owner_user_id.eq.${scopeUserId},archived_by.eq.${scopeUserId}`,
-        );
-      }
       const { data, error } = await query.order("archived_at", { ascending: false });
       if (error) throw error;
       // as unknown as: the select string is now a variable (activities need
@@ -102,8 +94,8 @@ function getDisplayName(record: ArchivedRecord): string {
   return record.id;
 }
 
-function ArchivedTable({ table, scopeUserId }: { table: string; scopeUserId: string | null }) {
-  const { data: records, isLoading, isError, isFetching, refetch } = useArchivedRecords(table, scopeUserId);
+function ArchivedTable({ table }: { table: string }) {
+  const { data: records, isLoading, isError, isFetching, refetch } = useArchivedRecords(table);
   const restoreMutation = useRestoreRecord();
   // Activities get two extra columns (type + when it happened) — a bare
   // subject isn't enough to tell two archived tasks apart.
@@ -134,11 +126,7 @@ function ArchivedTable({ table, scopeUserId }: { table: string; scopeUserId: str
       <EmptyState
         icon={Archive}
         title="No archived records"
-        description={
-          scopeUserId
-            ? `No archived ${table} you own or archived yourself`
-            : `No archived ${table} found`
-        }
+        description={`No archived ${table} found`}
       />
     );
   }
@@ -206,21 +194,20 @@ function ArchivedTable({ table, scopeUserId }: { table: string; scopeUserId: str
 export function ArchiveManager() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
-  // Everyone can archive; before 20260817104000 only admins could undo it,
-  // so a rep's own mistake needed someone else. Non-admins now get the
-  // page scoped to the rows RLS and restore_record() actually let them
-  // touch: the ones they own or archived themselves.
-  const scopeUserId = isAdmin ? null : profile?.id ?? null;
+  // Admin-only again (Nathan, 2026-08-17): the brief self-serve-restore
+  // experiment (20260817104000) was reversed the same day — no rep has
+  // ever needed this page, and the sidebar stays reserved for tabs a
+  // salesperson uses daily. Recovery requests route through an admin;
+  // 20260817160000 restored the matching database posture.
+  if (!isAdmin) {
+    return <Navigate to="/accounts" replace />;
+  }
 
   return (
     <div>
       <PageHeader
-        title={isAdmin ? "Archive Manager" : "Your Archived Records"}
-        description={
-          isAdmin
-            ? "Restore previously archived records (all users)"
-            : "Restore records you own or archived yourself"
-        }
+        title="Archive Manager"
+        description="Restore previously archived records (all users)"
       />
 
       <Tabs defaultValue="accounts">
@@ -228,27 +215,27 @@ export function ArchiveManager() {
           <TabsTrigger value="accounts">Accounts</TabsTrigger>
           <TabsTrigger value="contacts">Contacts</TabsTrigger>
           <TabsTrigger value="opportunities">Opportunities</TabsTrigger>
+          {/* Activities stays (added 2026-08-17): archived notes/logged
+              emails were unrecoverable before it, despite delete-confirm
+              copy promising "an admin can restore it" here. */}
           <TabsTrigger value="activities">Activities</TabsTrigger>
-          {/* Imports stay admin-only: leads are frozen and have no
-              rep-facing surface, and restore_record() rejects them for
-              non-admins. */}
           {isAdmin && <TabsTrigger value="leads">Imports</TabsTrigger>}
         </TabsList>
         <TabsContent value="accounts" className="mt-4">
-          <ArchivedTable table="accounts" scopeUserId={scopeUserId} />
+          <ArchivedTable table="accounts" />
         </TabsContent>
         <TabsContent value="contacts" className="mt-4">
-          <ArchivedTable table="contacts" scopeUserId={scopeUserId} />
+          <ArchivedTable table="contacts" />
         </TabsContent>
         <TabsContent value="opportunities" className="mt-4">
-          <ArchivedTable table="opportunities" scopeUserId={scopeUserId} />
+          <ArchivedTable table="opportunities" />
         </TabsContent>
         <TabsContent value="activities" className="mt-4">
-          <ArchivedTable table="activities" scopeUserId={scopeUserId} />
+          <ArchivedTable table="activities" />
         </TabsContent>
         {isAdmin && (
           <TabsContent value="leads" className="mt-4">
-            <ArchivedTable table="leads" scopeUserId={null} />
+            <ArchivedTable table="leads" />
           </TabsContent>
         )}
       </Tabs>
