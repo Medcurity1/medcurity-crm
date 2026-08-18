@@ -9,7 +9,12 @@
 
 begin;
 
-create or replace view public.v_cold_call_contacts
+-- DROP + CREATE, not CREATE OR REPLACE: adding phone_ext mid-list is a
+-- column-order change, which or-replace rejects (42P16 — it can only
+-- APPEND columns). Drop resets grants, so the grant/revoke below are
+-- load-bearing, not belt-and-braces.
+drop view if exists public.v_cold_call_contacts;
+create view public.v_cold_call_contacts
 with (security_invoker = true) as
 select
   c.id,
