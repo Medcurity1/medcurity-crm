@@ -262,8 +262,16 @@ export function useOpportunities(filters?: OppFilters) {
  * dashboard KPI like "My Open Pipeline" can be cross-checked against
  * the same filtered list view.
  *
- * Pages past PostgREST's 1000-row cap so the sum is honest on large
- * filtered sets (e.g. all closed_won across 5 years > 1000 rows).
+ * ONE aggregate round trip (`opportunity_amount_stats`, migration
+ * 20260817130000). This used to walk the ENTIRE filtered result set
+ * 1,000 rows at a time, SERIALLY, up to 100,000 rows — on every filter
+ * change and every search keystroke, because the query key carries the
+ * whole filter object and the list calls this unconditionally. A rep
+ * typing six characters into search kicked off six full-table walks.
+ *
+ * The RPC applies `archived_at is null` itself, matching the list's own
+ * explicit archived filter, and is SECURITY INVOKER so the caller's RLS
+ * still scopes the sum exactly as the paged version did.
  */
 export function useOpportunitiesTotals(filters?: Omit<OppFilters, "page" | "pageSize" | "sortColumn" | "sortDirection">) {
   return useQuery({
@@ -306,86 +314,61 @@ export function useOpportunitiesTotals(filters?: Omit<OppFilters, "page" | "page
         singleOwnerId = filters.ownerId;
       }
 
-      // Page past the 1000-row cap so the sum is exact on large sets.
-      const all: number[] = [];
-      let from = 0;
-      const pageSize = 1000;
-      while (all.length < 100_000) {
-        let q = supabase.from("opportunities").select("amount")
-          // Keep the totals in lockstep with the list's archived filter.
-          .is("archived_at", null);
-        if (filters?.search) {
-          const safe = filters.search.replace(/[(),]/g, " ");
-          const orParts = [`name.ilike.%${safe}%`];
-          if (acctIds && acctIds.length > 0) {
-            orParts.push(`account_id.in.(${acctIds.join(",")})`);
-          }
-          q = q.or(orParts.join(","));
-        }
-        if (filters?.stage) {
-          if (Array.isArray(filters.stage)) {
-            if (filters.stage.length > 0) q = q.in("stage", filters.stage);
-          } else if (filters.stage === "open") {
-            q = q.not("stage", "in", "(closed_won,closed_lost)");
-          } else {
-            q = q.eq("stage", filters.stage);
-          }
-        }
-        if (filters?.team) {
-          if (Array.isArray(filters.team)) {
-            if (filters.team.length > 0) q = q.in("team", filters.team);
-          } else {
-            q = q.eq("team", filters.team);
-          }
-        }
-        if (filters?.kind) {
-          if (Array.isArray(filters.kind)) {
-            if (filters.kind.length > 0) q = q.in("kind", filters.kind);
-          } else {
-            q = q.eq("kind", filters.kind);
-          }
-        }
-        if (filters?.business_type) {
-          if (Array.isArray(filters.business_type)) {
-            if (filters.business_type.length > 0)
-              q = q.in("business_type", filters.business_type);
-          } else {
-            q = q.eq("business_type", filters.business_type);
-          }
-        }
-        if (filters?.lead_source && filters.lead_source.length > 0) {
-          // Mirrors useOpportunities so the totals strip matches the list.
-          const vals = filters.lead_source.filter((v) => v !== "__none__");
-          const wantNone = filters.lead_source.includes("__none__");
-          if (wantNone && vals.length > 0) {
-            q = q.or(`lead_source.in.(${vals.join(",")}),lead_source.is.null`);
-          } else if (wantNone) {
-            q = q.is("lead_source", null);
-          } else {
-            q = q.in("lead_source", vals);
-          }
-        }
-        if (filters?.account_id) q = q.eq("account_id", filters.account_id);
-        if (resolvedOwnerIds) q = q.in("owner_user_id", resolvedOwnerIds);
-        else if (singleOwnerId) q = q.eq("owner_user_id", singleOwnerId);
-        if (filters?.verified === "true") q = q.eq("verified", true);
-        else if (filters?.verified === "false") q = q.eq("verified", false);
-        if (filters?.closeAfter) q = q.gte("close_date", filters.closeAfter);
-        if (filters?.closeBefore) q = q.lte("close_date", filters.closeBefore);
-        if (filters?.startAfter) q = q.gte("contract_start_date", filters.startAfter);
-        if (filters?.startBefore) q = q.lte("contract_start_date", filters.startBefore);
-        if (filters?.expectedAfter) q = q.gte("expected_close_date", filters.expectedAfter);
-        if (filters?.expectedBefore) q = q.lte("expected_close_date", filters.expectedBefore);
+      // Multi-selects: an EMPTY array means "no filter" on the list, so it
+      // must stay null here too (an empty `in` would match nothing).
+      const multi = (v: string | string[] | undefined): string[] | null => {
+        if (!v) return null;
+        if (Array.isArray(v)) return v.length > 0 ? v : null;
+        return [v];
+      };
 
-        const { data, error } = await q.range(from, from + pageSize - 1);
-        if (error) throw error;
-        const rows = (data ?? []) as { amount: number | string | null }[];
-        for (const r of rows) all.push(Number(r.amount ?? 0));
-        if (rows.length < pageSize) break;
-        from += pageSize;
-      }
-      const sum = all.reduce((s, n) => s + n, 0);
-      return { count: all.length, sum };
+      // lead_source carries the "__none__" sentinel for unattributed deals,
+      // exactly as useOpportunities builds it.
+      const leadSourceVals = (filters?.lead_source ?? []).filter(
+        (v) => v !== "__none__",
+      );
+      const wantNoLeadSource = (filters?.lead_source ?? []).includes("__none__");
+
+      // `stage` has a meta-value: "open" = anything not closed.
+      const stageIsOpenMeta = filters?.stage === "open";
+
+      const { data, error } = await supabase.rpc("opportunity_amount_stats", {
+        p_owner_user_id: resolvedOwnerIds ? null : singleOwnerId,
+        p_owner_user_ids: resolvedOwnerIds,
+        p_open_only: stageIsOpenMeta,
+        p_stages: stageIsOpenMeta ? null : multi(filters?.stage),
+        p_kinds: multi(filters?.kind),
+        p_teams: multi(filters?.team),
+        p_business_types: multi(filters?.business_type),
+        p_lead_sources: leadSourceVals.length > 0 ? leadSourceVals : null,
+        p_include_null_lead_source: wantNoLeadSource,
+        p_account_id: filters?.account_id ?? null,
+        p_verified:
+          filters?.verified === "true"
+            ? true
+            : filters?.verified === "false"
+              ? false
+              : null,
+        p_close_date_from: filters?.closeAfter ?? null,
+        p_close_date_to: filters?.closeBefore ?? null,
+        p_contract_start_from: filters?.startAfter ?? null,
+        p_contract_start_to: filters?.startBefore ?? null,
+        p_expected_close_from: filters?.expectedAfter ?? null,
+        p_expected_close_to: filters?.expectedBefore ?? null,
+        // Same sanitized term the list ILIKEs on, and the same ≤200 account
+        // ids resolved above — so the strip can never disagree with the
+        // table above it.
+        p_search_name: filters?.search
+          ? filters.search.replace(/[(),]/g, " ")
+          : null,
+        p_search_account_ids: acctIds && acctIds.length > 0 ? acctIds : null,
+      });
+      if (error) throw error;
+      const row = (Array.isArray(data) ? data[0] : null) as {
+        total: number | string | null;
+        row_count: number | string | null;
+      } | null;
+      return { count: Number(row?.row_count ?? 0), sum: Number(row?.total ?? 0) };
     },
   });
 }

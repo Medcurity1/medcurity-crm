@@ -33,28 +33,75 @@ export function BuiltinReportWidget({ kind }: { kind: DashboardBuiltinWidget }) 
   }
 }
 
+/**
+ * Local calendar date as YYYY-MM-DD. `close_date` / `churn_date` are DATE
+ * columns; bounding them with `toISOString()` (a UTC instant) shifts the
+ * window by a day for any browser east of UTC — the trap kpi-registry.ts
+ * documents on its "Team Closed Won This Month" KPI.
+ */
+function localISODate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Aggregate RPCs from migration 20260817130000.
+ *
+ * Every widget below used to pull an UNBOUNDED row set and reduce it in
+ * the browser. PostgREST caps each response at 1000 rows, so once a
+ * widget's underlying set passed 1000 — all-time closed-won already has —
+ * the totals were quietly short with nothing on screen to say so.
+ * ArrByProduct was the worst: it selected the entire opportunity_products
+ * table with no filter at all and discarded non-closed-won rows client
+ * side. The RPCs are SECURITY INVOKER, so caller RLS still applies.
+ */
+async function rpcRows<T>(
+  fn: string,
+  args: Record<string, unknown>,
+): Promise<T[]> {
+  const { data, error } = await supabase.rpc(fn, args);
+  if (error) throw error;
+  return (Array.isArray(data) ? data : []) as T[];
+}
+
+interface GroupedStatRow {
+  group_key: string | null;
+  total: number | string | null;
+  row_count: number | string | null;
+}
+
+interface ProductArrRow {
+  product_id: string | null;
+  product_name: string | null;
+  total: number | string | null;
+  row_count: number | string | null;
+}
+
+interface ChurnStatRow {
+  total: number | string | null;
+  row_count: number | string | null;
+}
+
 function PipelineByStage() {
   const { data, isLoading } = useQuery({
     queryKey: ["widget", "pipeline_by_stage"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("opportunities")
-        .select("stage, amount")
-        .is("archived_at", null)
-        .not("stage", "in", '("closed_won","closed_lost")');
-      if (error) throw error;
-      const byStage = new Map<string, { count: number; arr: number }>();
-      for (const r of data ?? []) {
-        const s = r.stage as string;
-        const agg = byStage.get(s) ?? { count: 0, arr: 0 };
-        agg.count += 1;
-        agg.arr += Number(r.amount ?? 0);
-        byStage.set(s, agg);
-      }
-      return Array.from(byStage.entries()).map(([stage, v]) => ({
-        stage,
-        ...v,
-      }));
+      const rows = await rpcRows<GroupedStatRow>(
+        "opportunity_amount_stats_grouped",
+        { p_group_by: "stage", p_open_only: true },
+      );
+      // Biggest stage first. The client-side Map version rendered in
+      // whatever order the (truncated) rows happened to arrive in, which
+      // could reshuffle between refetches.
+      return rows
+        .map((r) => ({
+          stage: r.group_key ?? "",
+          count: Number(r.row_count ?? 0),
+          arr: Number(r.total ?? 0),
+        }))
+        .sort((a, b) => b.arr - a.arr);
     },
     staleTime: 60 * 1000,
   });
@@ -87,28 +134,26 @@ function ClosedWonByOwnerQtr() {
     queryKey: ["widget", "closed_won_by_owner_qtr"],
     queryFn: async () => {
       const today = new Date();
-      const qStart = new Date(
-        today.getFullYear(),
-        Math.floor(today.getMonth() / 3) * 3,
-        1
-      ).toISOString();
-      const { data, error } = await supabase
-        .from("opportunities")
-        .select("amount, owner:user_profiles!owner_user_id(full_name)")
-        .eq("stage", "closed_won")
-        .is("archived_at", null)
-        .gte("close_date", qStart);
-      if (error) throw error;
-      const byOwner = new Map<string, { count: number; arr: number }>();
-      for (const r of data ?? []) {
-        const name = (r.owner as { full_name?: string | null } | null)?.full_name ?? "Unassigned";
-        const agg = byOwner.get(name) ?? { count: 0, arr: 0 };
-        agg.count += 1;
-        agg.arr += Number(r.amount ?? 0);
-        byOwner.set(name, agg);
-      }
-      return Array.from(byOwner.entries())
-        .map(([owner, v]) => ({ owner, ...v }))
+      const qStart = localISODate(
+        new Date(today.getFullYear(), Math.floor(today.getMonth() / 3) * 3, 1)
+      );
+      const rows = await rpcRows<GroupedStatRow>(
+        "opportunity_amount_stats_grouped",
+        {
+          p_group_by: "owner",
+          p_stages: ["closed_won"],
+          p_close_date_from: qStart,
+        },
+      );
+      // group_key is user_profiles.full_name, so unowned deals and
+      // owners with no name collapse into one null group — exactly what
+      // the client-side `full_name ?? "Unassigned"` Map key produced.
+      return rows
+        .map((r) => ({
+          owner: r.group_key ?? "Unassigned",
+          count: Number(r.row_count ?? 0),
+          arr: Number(r.total ?? 0),
+        }))
         .sort((a, b) => b.arr - a.arr);
     },
     staleTime: 60 * 1000,
@@ -143,48 +188,49 @@ function ProductGrowthYoY() {
     queryKey: ["widget", "product_growth_yoy"],
     queryFn: async () => {
       const now = new Date();
-      const thisYearStart = new Date(now.getFullYear(), 0, 1).toISOString();
-      const lastYearStart = new Date(now.getFullYear() - 1, 0, 1).toISOString();
-      const { data, error } = await supabase
-        .from("opportunity_products")
-        .select(
-          "arr_amount, created_at, product:products!product_id(id, name), opportunity:opportunities!opportunity_id(stage, close_date)"
-        )
-        .gte("created_at", lastYearStart);
-      if (error) throw error;
-      // Supabase PostgREST returns joined rows as arrays when the
-      // relationship cardinality can't be statically proven. Cast through
-      // unknown and normalize to a single object since product_id and
-      // opportunity_id are both many-to-one.
-      const rows = (data ?? []).map((r) => {
-        const row = r as unknown as {
-          arr_amount: number | string;
-          product?: { id: string; name: string } | { id: string; name: string }[] | null;
-          opportunity?: { stage: string; close_date: string | null } | { stage: string; close_date: string | null }[] | null;
-        };
-        return {
-          arr_amount: row.arr_amount,
-          product: Array.isArray(row.product) ? row.product[0] ?? null : row.product ?? null,
-          opportunity: Array.isArray(row.opportunity)
-            ? row.opportunity[0] ?? null
-            : row.opportunity ?? null,
-        };
-      });
+      const thisYearStart = localISODate(new Date(now.getFullYear(), 0, 1));
+      const lastYearStart = localISODate(new Date(now.getFullYear() - 1, 0, 1));
+      // The LINE ITEM is filtered by its own created_at (a timestamptz) while
+      // the BUCKETS are the deal's close_date — an odd shape, but it is what
+      // this widget has always done, so it is reproduced exactly rather than
+      // quietly redefined.
+      const lineCreatedFrom = new Date(now.getFullYear() - 1, 0, 1).toISOString();
+      const common = {
+        p_stages: ["closed_won"],
+        p_line_created_from: lineCreatedFrom,
+        p_require_close_date: true,
+      };
+      // Two windows, one round trip each, aggregated in Postgres. The old
+      // single query pulled every line item since last year and bucketed in
+      // JS by comparing a DATE string against an ISO TIMESTAMP string — a
+      // lexicographic compare that pushed deals closing exactly on Jan 1
+      // into the PRIOR year. Postgres compares dates as dates.
+      const [thisYearRows, lastYearRows] = await Promise.all([
+        rpcRows<ProductArrRow>("opportunity_product_arr", {
+          ...common,
+          p_close_date_from: thisYearStart,
+        }),
+        rpcRows<ProductArrRow>("opportunity_product_arr", {
+          ...common,
+          p_close_date_from: lastYearStart,
+          p_close_date_before: thisYearStart,
+        }),
+      ]);
       const perProduct = new Map<
         string,
         { name: string; thisYear: number; lastYear: number }
       >();
-      for (const r of rows) {
-        const opp = r.opportunity;
-        if (!opp || opp.stage !== "closed_won" || !opp.close_date) continue;
-        const pid = r.product?.id ?? "__unknown__";
-        const name = r.product?.name ?? "(unknown)";
-        const amt = Number(r.arr_amount ?? 0);
-        const entry = perProduct.get(pid) ?? { name, thisYear: 0, lastYear: 0 };
-        if (opp.close_date >= thisYearStart) entry.thisYear += amt;
-        else if (opp.close_date >= lastYearStart) entry.lastYear += amt;
-        perProduct.set(pid, entry);
-      }
+      const absorb = (rows: ProductArrRow[], bucket: "thisYear" | "lastYear") => {
+        for (const r of rows) {
+          const pid = r.product_id ?? "__unknown__";
+          const name = r.product_name ?? "(unknown)";
+          const entry = perProduct.get(pid) ?? { name, thisYear: 0, lastYear: 0 };
+          entry[bucket] += Number(r.total ?? 0);
+          perProduct.set(pid, entry);
+        }
+      };
+      absorb(thisYearRows, "thisYear");
+      absorb(lastYearRows, "lastYear");
       return Array.from(perProduct.values())
         .map((r) => ({
           ...r,
@@ -241,34 +287,30 @@ function ChurnMetrics() {
     queryKey: ["widget", "churn_metrics"],
     queryFn: async () => {
       const now = new Date();
-      const qStart = new Date(
-        now.getFullYear(),
-        Math.floor(now.getMonth() / 3) * 3,
-        1
-      ).toISOString();
-      const yStart = new Date(now.getFullYear(), 0, 1).toISOString();
-      const lyStart = new Date(now.getFullYear() - 1, 0, 1).toISOString();
-      const { data: accounts, error } = await supabase
-        .from("accounts")
-        .select("churn_amount, churn_date, acv")
-        .not("churn_date", "is", null);
-      if (error) throw error;
-      const rows = accounts ?? [];
-      const qChurnCount = rows.filter((r) => (r.churn_date as string) >= qStart).length;
-      const qChurnAmt = rows
-        .filter((r) => (r.churn_date as string) >= qStart)
-        .reduce((s, r) => s + Number(r.churn_amount ?? 0), 0);
-      const ytdChurnAmt = rows
-        .filter((r) => (r.churn_date as string) >= yStart)
-        .reduce((s, r) => s + Number(r.churn_amount ?? 0), 0);
-      const lastYtdChurnAmt = rows
-        .filter(
-          (r) =>
-            (r.churn_date as string) >= lyStart &&
-            (r.churn_date as string) < yStart
-        )
-        .reduce((s, r) => s + Number(r.churn_amount ?? 0), 0);
-      return { qChurnCount, qChurnAmt, ytdChurnAmt, lastYtdChurnAmt };
+      const qStart = localISODate(
+        new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1)
+      );
+      const yStart = localISODate(new Date(now.getFullYear(), 0, 1));
+      const lyStart = localISODate(new Date(now.getFullYear() - 1, 0, 1));
+      // Three windows, summed in Postgres. Previously this pulled every
+      // churned account to the browser (capped at 1000) and filtered the
+      // three windows in JS by comparing a DATE string against an ISO
+      // TIMESTAMP string — wrong at every window boundary as well as
+      // truncated. No archived filter, matching the query it replaces.
+      const [q, ytd, lastYtd] = await Promise.all([
+        rpcRows<ChurnStatRow>("account_churn_stats", { p_churn_from: qStart }),
+        rpcRows<ChurnStatRow>("account_churn_stats", { p_churn_from: yStart }),
+        rpcRows<ChurnStatRow>("account_churn_stats", {
+          p_churn_from: lyStart,
+          p_churn_before: yStart,
+        }),
+      ]);
+      return {
+        qChurnCount: Number(q[0]?.row_count ?? 0),
+        qChurnAmt: Number(q[0]?.total ?? 0),
+        ytdChurnAmt: Number(ytd[0]?.total ?? 0),
+        lastYtdChurnAmt: Number(lastYtd[0]?.total ?? 0),
+      };
     },
     staleTime: 5 * 60 * 1000,
   });
@@ -296,24 +338,19 @@ function ArrByProduct() {
   const { data, isLoading } = useQuery({
     queryKey: ["widget", "arr_by_product"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("opportunity_products")
-        .select(
-          "arr_amount, product:products!product_id(name), opportunity:opportunities!opportunity_id(stage)"
-        );
-      if (error) throw error;
+      // Was: select EVERY opportunity_products row (no filter whatsoever),
+      // then throw away the non-closed-won ones in the browser — so this
+      // widget silently reported ARR for at most the first 1000 line items
+      // that happened to come back.
+      const rows = await rpcRows<ProductArrRow>("opportunity_product_arr", {
+        p_stages: ["closed_won"],
+      });
+      // Still keyed by product NAME (not id), so two products sharing a
+      // name merge into one row exactly as before.
       const m = new Map<string, number>();
-      for (const raw of (data ?? [])) {
-        const r = raw as unknown as {
-          arr_amount: number | string;
-          product?: { name: string } | { name: string }[] | null;
-          opportunity?: { stage: string } | { stage: string }[] | null;
-        };
-        const opp = Array.isArray(r.opportunity) ? r.opportunity[0] : r.opportunity;
-        if (opp?.stage !== "closed_won") continue;
-        const product = Array.isArray(r.product) ? r.product[0] : r.product;
-        const name = product?.name ?? "(unknown)";
-        m.set(name, (m.get(name) ?? 0) + Number(r.arr_amount ?? 0));
+      for (const r of rows) {
+        const name = r.product_name ?? "(unknown)";
+        m.set(name, (m.get(name) ?? 0) + Number(r.total ?? 0));
       }
       return Array.from(m.entries())
         .map(([name, arr]) => ({ name, arr }))

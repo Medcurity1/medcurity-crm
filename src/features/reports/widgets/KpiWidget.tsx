@@ -56,58 +56,79 @@ interface MetricResult {
   deltaLabel?: string;
 }
 
+/**
+ * Local calendar date as YYYY-MM-DD.
+ *
+ * `close_date`, `contract_end_date` and `churn_date` are DATE columns.
+ * Comparing them against `toISOString()` (a UTC instant) is what the
+ * dashboard used to do, and it silently shifts the window by a day for any
+ * browser east of UTC — the same trap kpi-registry.ts documents at its
+ * "Team Closed Won This Month" KPI. Bound DATE columns with local dates.
+ */
+function localISODate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Server-side SUM(amount) + COUNT(*) over opportunities
+ * (migration 20260817130000).
+ *
+ * These tiles used to `select("amount")` with no range and reduce the rows
+ * in the browser. PostgREST caps every response at 1000 rows, so any tile
+ * whose underlying set passed 1000 — all-time closed-won is already well
+ * past it — displayed a number that was quietly too small, with nothing on
+ * screen to say so. The RPC is SECURITY INVOKER, so caller RLS still
+ * applies and each user aggregates exactly the rows they could see before.
+ */
+async function oppStats(
+  args: Record<string, unknown>,
+): Promise<{ total: number; count: number }> {
+  const { data, error } = await supabase.rpc("opportunity_amount_stats", args);
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : null;
+  return { total: Number(row?.total ?? 0), count: Number(row?.row_count ?? 0) };
+}
+
+/** Server-side SUM(churn_amount) + COUNT over accounts (same migration). */
+async function churnStats(
+  args: Record<string, unknown>,
+): Promise<{ total: number; count: number }> {
+  const { data, error } = await supabase.rpc("account_churn_stats", args);
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : null;
+  return { total: Number(row?.total ?? 0), count: Number(row?.row_count ?? 0) };
+}
+
 async function fetchMetric(metric: DashboardKpiMetric): Promise<MetricResult> {
   const today = new Date();
-  const startOfQuarter = new Date(
-    today.getFullYear(),
-    Math.floor(today.getMonth() / 3) * 3,
-    1
-  ).toISOString();
-  const startOfYear = new Date(today.getFullYear(), 0, 1).toISOString();
+  const startOfQuarter = localISODate(
+    new Date(today.getFullYear(), Math.floor(today.getMonth() / 3) * 3, 1)
+  );
+  const startOfYear = localISODate(new Date(today.getFullYear(), 0, 1));
   const sevenDaysAgo = new Date(
     today.getTime() - 7 * 24 * 60 * 60 * 1000
   ).toISOString();
 
   switch (metric) {
     case "pipeline_arr": {
-      const { data, error } = await supabase
-        .from("opportunities")
-        .select("amount")
-        .is("archived_at", null)
-        .not("stage", "in", '("closed_won","closed_lost")');
-      if (error) throw error;
-      const total = (data ?? []).reduce(
-        (s, r) => s + Number(r.amount ?? 0),
-        0
-      );
+      const { total } = await oppStats({ p_open_only: true });
       return { value: total };
     }
     case "closed_won_qtd": {
-      const { data, error } = await supabase
-        .from("opportunities")
-        .select("amount, close_date")
-        .eq("stage", "closed_won")
-        .is("archived_at", null)
-        .gte("close_date", startOfQuarter);
-      if (error) throw error;
-      const total = (data ?? []).reduce(
-        (s, r) => s + Number(r.amount ?? 0),
-        0
-      );
+      const { total } = await oppStats({
+        p_stage: "closed_won",
+        p_close_date_from: startOfQuarter,
+      });
       return { value: total };
     }
     case "closed_won_ytd": {
-      const { data, error } = await supabase
-        .from("opportunities")
-        .select("amount, close_date")
-        .eq("stage", "closed_won")
-        .is("archived_at", null)
-        .gte("close_date", startOfYear);
-      if (error) throw error;
-      const total = (data ?? []).reduce(
-        (s, r) => s + Number(r.amount ?? 0),
-        0
-      );
+      const { total } = await oppStats({
+        p_stage: "closed_won",
+        p_close_date_from: startOfYear,
+      });
       return { value: total };
     }
     case "renewals_next_30":
@@ -119,26 +140,17 @@ async function fetchMetric(metric: DashboardKpiMetric): Promise<MetricResult> {
           : metric === "renewals_next_60"
             ? 60
             : 90;
-      const end = new Date(
-        Date.now() + days * 24 * 60 * 60 * 1000
-      ).toISOString();
-      const { data, error } = await supabase
-        .from("opportunities")
-        .select("amount, contract_end_date")
-        .eq("stage", "closed_won")
-        .is("archived_at", null)
-        .not("contract_end_date", "is", null)
-        .gte("contract_end_date", new Date().toISOString())
-        .lte("contract_end_date", end);
-      if (error) throw error;
-      const total = (data ?? []).reduce(
-        (s, r) => s + Number(r.amount ?? 0),
-        0
+      const end = localISODate(
+        new Date(today.getTime() + days * 24 * 60 * 60 * 1000)
       );
-      return {
-        value: total,
-        deltaLabel: `${data?.length ?? 0} opps`,
-      };
+      // contract_end_date is NOT NULL-filtered explicitly: a >= bound on a
+      // DATE column already excludes nulls.
+      const { total, count } = await oppStats({
+        p_stage: "closed_won",
+        p_contract_end_from: localISODate(today),
+        p_contract_end_to: end,
+      });
+      return { value: total, deltaLabel: `${count} opps` };
     }
     case "new_leads_week": {
       // Key kept for saved widgets; counts new pen/website arrivals since
@@ -185,17 +197,10 @@ async function fetchMetric(metric: DashboardKpiMetric): Promise<MetricResult> {
       return { value: count ?? 0 };
     }
     case "churn_qtd": {
-      const { data, error } = await supabase
-        .from("accounts")
-        .select("churn_amount, churn_date")
-        .not("churn_date", "is", null)
-        .gte("churn_date", startOfQuarter);
-      if (error) throw error;
-      const total = (data ?? []).reduce(
-        (s, r) => s + Number(r.churn_amount ?? 0),
-        0
-      );
-      return { value: total, deltaLabel: `${data?.length ?? 0} accounts` };
+      const { total, count } = await churnStats({
+        p_churn_from: startOfQuarter,
+      });
+      return { value: total, deltaLabel: `${count} accounts` };
     }
   }
 }

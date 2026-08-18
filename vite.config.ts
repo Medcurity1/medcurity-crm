@@ -57,19 +57,52 @@ export default defineConfig({
         // Split heavy, rarely-changing libraries into their own cached chunks
         // so they (a) don't bloat the main/app bundle and (b) stay cached across
         // app deploys. recharts/exceljs/xlsx only load with the routes that use
-        // them; react/query/dnd are shared app-wide. clsx and react-dom/client
-        // are pinned to vendor-react on purpose (object entries are processed
-        // in order, so listing vendor-react first claims them) so they don't
-        // leak into vendor-charts (imported only by the lazy chart route
-        // chunks, not by App — leaking clsx into it would make every clsx
-        // importer pull recharts eagerly) or the cache-busted entry chunk.
-        manualChunks: {
-          "vendor-react": ["react", "react-dom", "react-dom/client", "clsx", "react-router-dom"],
-          "vendor-query": ["@tanstack/react-query"],
-          "vendor-charts": ["recharts"],
-          "vendor-xlsx": ["xlsx"],
-          "vendor-exceljs": ["exceljs"],
-          "vendor-dnd": ["@dnd-kit/core", "@dnd-kit/sortable", "@dnd-kit/utilities"],
+        // them; react/query/dnd/supabase are shared app-wide. clsx and
+        // react-dom are claimed by vendor-react on purpose (the checks below
+        // run in order, first match wins) so they don't leak into
+        // vendor-charts (imported only by the lazy chart route chunks, not by
+        // App — leaking clsx into it would make every clsx importer pull
+        // recharts eagerly) or the cache-busted entry chunk.
+        //
+        // WHY A FUNCTION AND NOT THE OBJECT MAP THIS USED TO BE: the object
+        // form resolves each listed specifier with no importer, so it only
+        // works for packages with a legacy main/module field. Every
+        // @supabase/* package is exports-map-only, so `"vendor-supabase":
+        // ["@supabase/supabase-js"]` resolved to nothing, was silently
+        // skipped (no warning), and the SDK stayed in App — measured: App
+        // byte-identical at 578.3KB either way. Matching on the resolved
+        // node_modules path sidesteps resolution entirely. The port was
+        // verified chunk-by-chunk against the previous object map: xlsx
+        // and dnd came out byte-identical, charts identical in size, react
+        // +0.8KB, exceljs +0.5KB, query −0.7KB — pure bookkeeping.
+        //
+        // vendor-supabase is the point of the change: ~190KB of SDK that
+        // never changes between our deploys used to live inside the
+        // cache-busted App chunk, so every deploy renamed it and forced
+        // every client to re-download the lot. App: 578.3KB → 388.4KB.
+        //
+        // NOT pinned: radix-ui / cmdk / sonner. `radix-ui` is a barrel over
+        // ~30 separate @radix-ui/react-* directories, so pinning it means
+        // enumerating and re-enumerating them as components are added — a
+        // maintenance trap for a much smaller win.
+        manualChunks(id) {
+          if (!id.includes("node_modules/")) return undefined;
+          const inPkg = (name: string) => id.includes(`node_modules/${name}/`);
+          if (
+            inPkg("react") ||
+            inPkg("react-dom") ||
+            inPkg("clsx") ||
+            inPkg("react-router-dom")
+          ) {
+            return "vendor-react";
+          }
+          if (inPkg("@tanstack/react-query")) return "vendor-query";
+          if (id.includes("node_modules/@supabase/")) return "vendor-supabase";
+          if (inPkg("recharts")) return "vendor-charts";
+          if (inPkg("xlsx")) return "vendor-xlsx";
+          if (inPkg("exceljs")) return "vendor-exceljs";
+          if (id.includes("node_modules/@dnd-kit/")) return "vendor-dnd";
+          return undefined;
         },
       },
     },

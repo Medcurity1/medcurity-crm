@@ -394,24 +394,48 @@ function localYMD(offsetDays: number): string {
  * effective_at over non-archived activities. Chunked + ordered-desc so
  * each id's newest activity is seen first; bounded per chunk (a widget
  * preview doesn't need forensic precision on ancient records).
+ *
+ * The chunks now run in PARALLEL instead of one after another — up to
+ * CALLED_BY_ID_CAP (250) ids meant ten sequential round trips before a
+ * widget could render. Output is byte-for-byte identical: chunks are
+ * still folded in their original order and the `!map.has(id)` guard still
+ * keeps the first (newest) hit per id.
+ *
+ * NOT swapped onto v_contact_last_activity / v_opportunity_last_activity,
+ * despite those being a single query: those views count only "real
+ * interactions" (call/email/meeting/webinar/conference + COMPLETED
+ * tasks), while this helper is deliberately type-agnostic — a logged note
+ * or an open task counts as activity here. The report builder exposes the
+ * two as SEPARATE columns ("Last Activity" via this, "Last Touch" via
+ * fetchLastTouchMap below), and `last_activity` is also a report FILTER
+ * ("not touched in N days"), so collapsing them would silently change
+ * saved widgets' results. 20260708190000's own header notes the
+ * report-engine path is type-agnostic on purpose.
  */
 export async function fetchLastActivityMap(
   idColumn: "contact_id" | "opportunity_id",
   ids: string[],
 ): Promise<Map<string, string>> {
   const map = new Map<string, string>();
+  if (!ids.length) return map;
   const CHUNK = 25;
-  for (let i = 0; i < ids.length; i += CHUNK) {
-    const chunk = ids.slice(i, i + CHUNK);
-    const { data, error } = await supabase
-      .from("activities")
-      .select(`${idColumn}, effective_at`)
-      .in(idColumn, chunk)
-      .is("archived_at", null)
-      .order("effective_at", { ascending: false })
-      .limit(1000);
-    if (error) throw error;
-    for (const row of (data ?? []) as unknown as Array<Record<string, string | null>>) {
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK));
+  const pages = await Promise.all(
+    chunks.map(async (chunk) => {
+      const { data, error } = await supabase
+        .from("activities")
+        .select(`${idColumn}, effective_at`)
+        .in(idColumn, chunk)
+        .is("archived_at", null)
+        .order("effective_at", { ascending: false })
+        .limit(1000);
+      if (error) throw error;
+      return (data ?? []) as unknown as Array<Record<string, string | null>>;
+    }),
+  );
+  for (const page of pages) {
+    for (const row of page) {
       const id = row[idColumn];
       const at = row.effective_at;
       if (id && at && !map.has(id)) map.set(id, at);

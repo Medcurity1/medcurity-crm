@@ -76,6 +76,30 @@ async function sumOppAmounts(
   return Number(data ?? 0);
 }
 
+/**
+ * SUM + COUNT + AVG over opportunities, server-side
+ * (migration 20260817130000 — the generalized sibling of
+ * `sum_opportunity_amounts` above).
+ *
+ * Needed wherever a KPI wants a COUNT or an AVERAGE alongside the sum:
+ * an average taken over a row set PostgREST truncated at 1000 is wrong
+ * even when the truncation is small, so it has to be computed in SQL.
+ * SECURITY INVOKER, so caller RLS applies exactly as before.
+ */
+async function oppStats(
+  supabase: SupabaseClient,
+  args: Record<string, unknown>,
+): Promise<{ total: number; count: number; avg: number }> {
+  const { data, error } = await supabase.rpc("opportunity_amount_stats", args);
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : null;
+  return {
+    total: Number(row?.total ?? 0),
+    count: Number(row?.row_count ?? 0),
+    avg: Number(row?.avg_amount ?? 0),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -136,53 +160,39 @@ function localISODate(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-// ---------------------------------------------------------------------------
-// Shared renewal_queue fetch (dedupe)
-// ---------------------------------------------------------------------------
-//
-// Three renewal KPIs — renewals_30, renewals_60, arr_at_risk — each derive
-// their number from the SAME `renewal_queue` view. Rendered together on the
-// admin home they used to execute that (computed) view 3× concurrently. This
-// memoizes ONE fetch of BOTH columns and shares the in-flight / last-result
-// promise for a short TTL, so the three concurrent callers (and the 60s
-// React Query remounts) collapse onto a single round-trip.
-//
-// Correctness: the row SET returned by `select … from renewal_queue` (no
-// filters, no limit, no order) depends only on the view's contents and the
-// server row cap — never on which columns are projected. So selecting both
-// columns at once returns exactly the same rows the single-column queries
-// did; each KPI then applies its unchanged predicate/aggregation to the same
-// per-row `days_until_renewal` / `current_arr` values and yields an identical
-// number.
-interface RenewalQueueRow {
-  days_until_renewal: number | null;
-  current_arr: number | null;
-}
+// (The 45s memoized fetchRenewalQueue that renewals_30 / renewals_60 /
+// arr_at_risk shared is gone: all three now hit renewal_queue_arr_stats —
+// one aggregate row over the wire each instead of the whole view, which
+// PostgREST silently capped at 1,000 rows anyway.)
 
-let _rqCache: { at: number; p: Promise<RenewalQueueRow[]> } | null = null;
-
-function fetchRenewalQueue(
+/**
+ * Server-side SUM(current_arr) + COUNT over renewal_queue
+ * (migration 20260817131000).
+ *
+ * `arr_at_risk` used to reduce fetchRenewalQueue()'s rows in the browser.
+ * That fetch has no .range() paging, so PostgREST capped it at 1,000 rows
+ * and the tile summed an arbitrary subset once the queue grew past that —
+ * the view has no ORDER BY, so it wasn't even a stable subset run to run.
+ *
+ * Omitting both bounds sums the WHOLE view, which is exactly what that KPI
+ * did (its 0-120 day window lives inside renewal_queue itself). The bounds
+ * serve renewals_30 / renewals_60, whose counts had the same 1,000-row
+ * exposure and now read row_count from this RPC with (0, 30) / (0, 60).
+ *
+ * SECURITY INVOKER, and renewal_queue is a security_invoker view, so the
+ * caller's RLS still scopes the sum exactly as the client-side version.
+ */
+async function renewalQueueArrStats(
   supabase: SupabaseClient,
-): Promise<RenewalQueueRow[]> {
-  const now = Date.now();
-  if (_rqCache && now - _rqCache.at < 45_000) return _rqCache.p;
-  // Async IIFE so `p` is a real Promise, not the query builder's PromiseLike
-  // (the strict CI tsconfig rejects assigning a PromiseLike to Promise).
-  const p = (async () => {
-    const { data, error } = await supabase
-      .from("renewal_queue")
-      .select("days_until_renewal, current_arr");
-    if (error) throw error;
-    return (data ?? []) as RenewalQueueRow[];
-  })();
-  _rqCache = { at: now, p };
-  // A failed fetch must not poison the TTL window — drop it so the next
-  // caller (e.g. React Query's retry) actually refetches instead of being
-  // handed the same rejection for 45s.
-  p.catch(() => {
-    if (_rqCache?.p === p) _rqCache = null;
+  args: { daysUntilFrom?: number | null; daysUntilTo?: number | null } = {},
+): Promise<{ total: number; count: number }> {
+  const { data, error } = await supabase.rpc("renewal_queue_arr_stats", {
+    p_days_until_from: args.daysUntilFrom ?? null,
+    p_days_until_to: args.daysUntilTo ?? null,
   });
-  return p;
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : null;
+  return { total: Number(row?.total ?? 0), count: Number(row?.row_count ?? 0) };
 }
 
 // ---------------------------------------------------------------------------
@@ -384,16 +394,16 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     icon: BarChart3,
     format: "currency",
     query: async (supabase, userId) => {
-      const { data, error } = await supabase
-        .from("opportunities")
-        .select("amount")
-        .eq("owner_user_id", userId)
-        .eq("stage", "closed_won")
-        .is("archived_at", null);
-      if (error) throw error;
-      if (!data?.length) return 0;
-      const total = data.reduce((sum, o) => sum + Number(o.amount), 0);
-      return Math.round(total / data.length);
+      // Averaged in SQL. The client version paged nothing — it took
+      // whatever ≤1000 closed-won rows PostgREST returned and divided by
+      // that truncated length, so a rep past 1000 wins saw an average of
+      // an arbitrary subset. The RPC's avg is sum/count(*), the same
+      // maths (null amounts stay in the denominator).
+      const { avg } = await oppStats(supabase, {
+        p_owner_user_id: userId,
+        p_stage: "closed_won",
+      });
+      return Math.round(avg);
     },
   },
 
@@ -412,17 +422,15 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     // filters on the actual /renewals tab.
     link: "/renewals?preset=30&fresh=1",
     query: async (supabase) => {
-      const rows = await fetchRenewalQueue(supabase);
-      // Forward-looking only: matches the page's preset=30 window
-      // (today → today+30). Earlier this also included past-due
-      // (negative days_until_renewal), which made the count exceed
-      // what the renewals page showed.
-      return rows.filter(
-        (r) =>
-          r.days_until_renewal !== null &&
-          r.days_until_renewal >= 0 &&
-          r.days_until_renewal <= 30,
-      ).length;
+      // Counted in SQL (same RPC as arr_at_risk): fetchRenewalQueue has no
+      // paging, so past 1,000 queue rows the client filter counted an
+      // arbitrary subset. The 0-30 window matches the page's preset=30
+      // (forward-looking only — past-due excluded, per the earlier fix).
+      const { count } = await renewalQueueArrStats(supabase, {
+        daysUntilFrom: 0,
+        daysUntilTo: 30,
+      });
+      return count;
     },
   },
   {
@@ -433,13 +441,12 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     format: "number",
     link: "/renewals?preset=60&fresh=1",
     query: async (supabase) => {
-      const rows = await fetchRenewalQueue(supabase);
-      return rows.filter(
-        (r) =>
-          r.days_until_renewal !== null &&
-          r.days_until_renewal >= 0 &&
-          r.days_until_renewal <= 60,
-      ).length;
+      // Counted in SQL — see renewals_30's note.
+      const { count } = await renewalQueueArrStats(supabase, {
+        daysUntilFrom: 0,
+        daysUntilTo: 60,
+      });
+      return count;
     },
   },
   {
@@ -450,8 +457,17 @@ export const KPI_REGISTRY: KpiDefinition[] = [
     format: "currency",
     link: "/renewals?fresh=1",
     query: async (supabase) => {
-      const rows = await fetchRenewalQueue(supabase);
-      return rows.reduce((sum, r) => sum + Number(r.current_arr), 0);
+      // Summed in SQL (migration 20260817131000). This used to reduce
+      // fetchRenewalQueue()'s rows in the browser — but that fetch has no
+      // .range() paging, so PostgREST capped it at 1,000 rows and the tile
+      // reported the ARR of an arbitrary subset (renewal_queue has no
+      // ORDER BY, so not even a stable one) once the queue passed 1,000.
+      //
+      // No arguments: this KPI applies no filter of its own, so the RPC
+      // sums the whole view — the 0-120 day window already lives inside
+      // renewal_queue. Same number, one row over the wire.
+      const { total } = await renewalQueueArrStats(supabase);
+      return total;
     },
   },
   {
@@ -544,16 +560,15 @@ export const KPI_REGISTRY: KpiDefinition[] = [
       `/opportunities?stage=closed_won&closed_after=${localISODate(getMonthStart(new Date()))}`,
     query: async (supabase) => {
       const monthStart = getMonthStart(new Date());
-      const { data, error } = await supabase
-        .from("opportunities")
-        .select("amount")
-        .eq("stage", "closed_won")
-        .is("archived_at", null)
-        // close_date is a DATE — use the local month-start date (see the quarter
-        // KPI note); toISOString() drops deals closed on the 1st for US zones.
-        .gte("close_date", localISODate(monthStart));
-      if (error) throw error;
-      return data?.reduce((sum, o) => sum + Number(o.amount), 0) ?? 0;
+      // Summed in SQL — the client reduce silently truncated at PostgREST's
+      // 1000-row cap. close_date is a DATE, so the bound stays the LOCAL
+      // month-start date (see the quarter KPI note); toISOString() drops
+      // deals closed on the 1st for US zones.
+      const { total } = await oppStats(supabase, {
+        p_stage: "closed_won",
+        p_close_date_from: localISODate(monthStart),
+      });
+      return total;
     },
   },
   {
