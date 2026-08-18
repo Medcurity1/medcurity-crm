@@ -4,6 +4,7 @@ import {
   expandProductSelection,
   filterItems,
   initialSegmentSelection,
+  toggleFamilyChild,
   type CollateralItemLike,
 } from "@/features/collateral/collateral-logic";
 
@@ -155,6 +156,22 @@ describe("expandProductSelection", () => {
       "SRA — Self-Serve",
       "Vendor Risk Management",
     ]);
+  });
+});
+
+describe("toggleFamilyChild", () => {
+  const children = ["SRA — Full Service", "SRA — Self-Serve", "SRA — Business Associate"];
+
+  it("unchecking one variant from All leaves the other variants selected", () => {
+    expect(toggleFamilyChild(["family:SRA"], "family:SRA", "SRA — Self-Serve", children).sort()).toEqual([
+      "SRA — Business Associate",
+      "SRA — Full Service",
+    ]);
+  });
+
+  it("toggles a single variant when the parent is not selected", () => {
+    expect(toggleFamilyChild(["SRA — Full Service"], "family:SRA", "SRA — Full Service", children)).toEqual([]);
+    expect(toggleFamilyChild([], "family:SRA", "SRA — Full Service", children)).toEqual(["SRA — Full Service"]);
   });
 });
 

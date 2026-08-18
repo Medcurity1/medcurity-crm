@@ -97,7 +97,7 @@ export function AnnouncementBanner() {
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold">{title}</p>
-          <p className="truncate text-sm text-muted-foreground">{message}</p>
+          <p className="text-sm text-muted-foreground sm:truncate">{message}</p>
         </div>
         <Button
           size="sm"
