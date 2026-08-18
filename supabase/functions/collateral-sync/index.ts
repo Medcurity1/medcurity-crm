@@ -33,9 +33,10 @@
 //   - DELETE rows whose itemId no longer appears (file archived, deleted,
 //     or demoted from Current): the grid must match the library exactly.
 //
-// Auth: caller must be a signed-in ADMIN (verified via the caller's JWT
-// role claim per the repo's edge-fn conventions: never by comparing raw
-// keys). Writes use the service role.
+// Auth: interactive callers must be signed-in admins. The hourly GitHub
+// scheduler calls with a gateway-verified service_role JWT. Never compare
+// raw keys: key rotation can leave the scheduler and injected function
+// secret on different valid service-role keys. Writes use the service role.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -64,6 +65,25 @@ function json(body: unknown, status = 200): Response {
       "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     },
   });
+}
+
+/**
+ * Scheduled invocations carry a service_role JWT. The function deploys with
+ * JWT verification ON, so the gateway has verified the signature before this
+ * claim is trusted. Do not deploy collateral-sync with --no-verify-jwt.
+ */
+export function isServiceRole(authHeader: string | null): boolean {
+  if (!authHeader) return false;
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  if (!match) return false;
+  try {
+    const payload = JSON.parse(
+      atob(match[1].trim().split(".")[1].replace(/-/g, "+").replace(/_/g, "/")),
+    );
+    return payload?.role === "service_role";
+  } catch {
+    return false;
+  }
 }
 
 /** Multi-choice SharePoint fields arrive as string OR string[]; normalize. */
@@ -104,19 +124,21 @@ Deno.serve(async (req) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const admin = createClient(supabaseUrl, serviceKey);
 
-  // ── Caller must be an admin (JWT is already verified by the platform;
-  //    we check the app role it maps to). ──
+  // ── Interactive callers must be admins. The hourly scheduler uses the
+  //    gateway-verified service_role claim instead of a user session. ──
   const authHeader = req.headers.get("Authorization") ?? "";
-  const jwt = authHeader.replace(/^Bearer\s+/i, "");
-  const { data: userData, error: userErr } = await admin.auth.getUser(jwt);
-  if (userErr || !userData?.user) return json({ ok: false, error: "not signed in" }, 401);
-  const { data: prof } = await admin
-    .from("user_profiles")
-    .select("role")
-    .eq("id", userData.user.id)
-    .maybeSingle();
-  if (!prof || !["admin", "super_admin"].includes(prof.role ?? "")) {
-    return json({ ok: false, error: "admin only" }, 403);
+  if (!isServiceRole(authHeader)) {
+    const jwt = authHeader.replace(/^Bearer\s+/i, "");
+    const { data: userData, error: userErr } = await admin.auth.getUser(jwt);
+    if (userErr || !userData?.user) return json({ ok: false, error: "not signed in" }, 401);
+    const { data: prof } = await admin
+      .from("user_profiles")
+      .select("role")
+      .eq("id", userData.user.id)
+      .maybeSingle();
+    if (!prof || !["admin", "super_admin"].includes(prof.role ?? "")) {
+      return json({ ok: false, error: "admin only" }, 403);
+    }
   }
 
   // ── Config gate (the Azure app registration is a human step) ──
@@ -149,6 +171,13 @@ Deno.serve(async (req) => {
       },
     );
     if (!tokenRes.ok) {
+      const tokenError = await tokenRes.json().catch(() => ({}));
+      console.error(
+        "collateral-sync Graph auth failed",
+        tokenRes.status,
+        tokenError?.error ?? "unknown_error",
+        tokenError?.error_description ?? "",
+      );
       return json({ ok: false, error: `Graph auth failed (${tokenRes.status})` }, 502);
     }
     const { access_token } = await tokenRes.json();
@@ -167,6 +196,13 @@ Deno.serve(async (req) => {
         headers: { Authorization: `Bearer ${access_token}` },
       });
       if (!res.ok) {
+        const graphError = await res.json().catch(() => ({}));
+        console.error(
+          "collateral-sync Graph read failed",
+          res.status,
+          graphError?.error?.code ?? "unknown_error",
+          graphError?.error?.message ?? "",
+        );
         return json({ ok: false, error: `Graph read failed (${res.status})` }, 502);
       }
       const page = await res.json();
