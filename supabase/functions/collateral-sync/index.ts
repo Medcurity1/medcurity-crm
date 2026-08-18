@@ -223,7 +223,13 @@ Deno.serve(async (req) => {
           {
             sharepoint_item_id: itemId,
             sharepoint_drive_id: driveId,
-            title: (fields.Title as string) || entry.name || "Untitled",
+            // v1.2 change 12: the FILENAME is the only title source. Never
+            // the list item's Title column — SharePoint auto-fills it from
+            // embedded document properties, which carry generator-tool junk
+            // ("PptxGenJS Presentation"). Filenames are the one title
+            // Jordan controls and can correct in SharePoint. The client
+            // strips the extension for display and tooltips the full name.
+            title: (entry.name as string) || "Untitled",
             // Verbatim column values: no inference (§1). Empty column =
             // no chip.
             asset_type: toValues(fields[FIELDS.assetType])[0] ?? null,

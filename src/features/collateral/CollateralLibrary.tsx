@@ -1,11 +1,25 @@
-// The collateral browsing surface: Jordan's v1.1 spec. ONE home: the
-// admin-gated /collateral route (§2; the V1 record-tab mode is gone).
-// Cards read from the collateral_items mirror; chips are generated from
-// the stored values VERBATIM (§1: no CRM-side inference), so taxonomy
-// changes in SharePoint never need code. All styling is .collat-* scoped
-// (§0/§4): ice chips that turn navy when selected, white cards with the
-// file-type glyph in an ice square, blue link actions, and the amber
-// "Review due" badge mirroring the library's Needs Review cycle.
+// The collateral browsing surface: Jordan's v1.1 spec + v1.2 design
+// tweaks (2026-08-11 docx). ONE home: the /collateral route — open to
+// every signed-in user since v1.2 change 7 (the tab is read-only and
+// shows only admin-promoted Current assets). Cards read from the
+// collateral_items mirror; chips are generated from the stored values
+// VERBATIM (§1: no CRM-side inference), so taxonomy changes in
+// SharePoint never need code. All styling is .collat-* scoped (§0).
+//
+// v1.2 highlights carried by this file:
+//   1/12  titles = extension-stripped FILENAME, 3-line clamp, full
+//         filename tooltip
+//   2     filter rows with fewer than two distinct values (across the
+//         synced set) don't render — and a hidden row's selection is inert
+//   3     freshness meta line + amber "Review due" / "Not reviewed"
+//   4     NO default Use filter on load (supersedes v1.1 §4.8)
+//   5     sort control (Recently reviewed default)
+//   6     Copy Link toast: bottom-centre, ~3s auto-dismiss, closable
+//   9     condensed density toggle, persisted per user
+//   10    rep-appropriate empty state, no curation copy
+//   11    tokenized order-independent search
+//   13    one generically-driven Use pill per card
+//   14    image assets render their own artwork as the thumbnail
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -17,14 +31,18 @@ import {
   FileSpreadsheet,
   Presentation,
   File as FileIcon,
+  LayoutGrid,
   Pin,
   PinOff,
+  Rows3,
   Search,
   ShieldAlert,
   Clock,
   Send,
+  Tag,
+  UserCheck,
+  X,
 } from "lucide-react";
-import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -40,21 +58,31 @@ import {
   useLogCopyEvent,
   useMyCollateralPrefs,
   useSaveMyCollateralPrefs,
+  useSaveMyDensity,
   useTogglePinned,
+  type CollateralDensity,
   type CollateralItem,
 } from "./api";
 import {
+  activeRowSelection,
   buildChipGroups,
+  DEFAULT_SORT,
+  displayTitle,
+  distinctChipValueCount,
   filterItems,
   fileKind,
+  formatReviewDate,
   initialSegmentSelection,
-  isReviewDue,
+  primaryUse,
+  reviewState,
+  SORT_OPTIONS,
+  sortItems,
+  thumbnailUrl,
+  usePillKind,
   type Chip,
+  type CollateralSort,
   type FileKind,
 } from "./collateral-logic";
-
-const SEND_TO_PROSPECT = "Send to Prospect";
-const INTERNAL_USE = "Internal Enablement";
 
 const KIND_ICON: Record<FileKind, typeof FileText> = {
   pdf: FileText,
@@ -170,7 +198,10 @@ function ChipRow({
   onChange: (next: string[]) => void;
   trailing?: React.ReactNode;
 }) {
-  if (!chips.length) return null;
+  // v1.2 change 2: a row backed by fewer than two distinct values across
+  // the SYNCED SET cannot filter anything — hide it entirely. It comes
+  // back on its own once the library carries a second value.
+  if (distinctChipValueCount(chips) < 2) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       <span className="collat-label w-16 shrink-0">{label}</span>
@@ -197,35 +228,107 @@ function ChipRow({
   );
 }
 
+// ── Pills ────────────────────────────────────────────────────────────
+
+/** v1.2 change 13: the pill is driven from the value, never a hard-coded
+ * list. Known values keep their colors; anything new renders with the
+ * neutral default style instead of disappearing. */
+function UsePill({ value }: { value: string }) {
+  const kind = usePillKind(value);
+  const Icon =
+    kind === "prospect" ? Send
+    : kind === "customer" ? UserCheck
+    : kind === "internal" ? ShieldAlert
+    : Tag;
+  const className =
+    kind === "prospect" ? "collat-badge-prospect"
+    : kind === "customer" ? "collat-badge-customer"
+    : kind === "internal" ? "collat-badge-internal"
+    : "collat-badge-generic";
+  // "Internal Enablement" keeps its v1.1 shorthand; everything else
+  // renders the library's value verbatim.
+  const label = kind === "internal" ? "Internal" : value;
+  return (
+    <span className={className}>
+      <Icon className="h-2.5 w-2.5" /> {label}
+    </span>
+  );
+}
+
 // ── Card ─────────────────────────────────────────────────────────────
 
-function CollateralCard({ item, isAdmin }: { item: CollateralItem; isAdmin: boolean }) {
+function CollateralCard({
+  item,
+  isAdmin,
+  dense,
+  onNotify,
+}: {
+  item: CollateralItem;
+  isAdmin: boolean;
+  dense: boolean;
+  onNotify: (message: string) => void;
+}) {
   const logCopy = useLogCopyEvent();
   const togglePin = useTogglePinned();
-  const internalOnly =
-    item.uses.includes(INTERNAL_USE) && !item.uses.includes(SEND_TO_PROSPECT);
-  const prospectReady = item.uses.includes(SEND_TO_PROSPECT);
-  const reviewDue = isReviewDue(item.last_reviewed);
-  const Icon = KIND_ICON[fileKind(item.web_url || item.title)];
+  const review = reviewState(item.last_reviewed);
+  const use = primaryUse(item.uses);
+  // Title first: since v1.2 the title IS the SharePoint filename, while
+  // web_url for Office files is a Doc.aspx viewer link whose "extension"
+  // parses as aspx.
+  const Icon = KIND_ICON[fileKind(item.title || item.web_url)];
+
+  // v1.2 change 14: image assets show their own artwork. The <img> loads
+  // the stored SharePoint web_url through the rep's existing SharePoint
+  // session (the same auth the Open link uses); if the browser can't
+  // fetch it, the card falls back to the file-type glyph. A failure is
+  // forgotten when the URL changes (sync refresh) so it can retry.
+  const thumb = dense ? null : thumbnailUrl(item);
+  const [thumbFailed, setThumbFailed] = useState(false);
+  useEffect(() => setThumbFailed(false), [item.web_url]);
+  const showThumb = !!thumb && !thumbFailed;
 
   function copyLink() {
     navigator.clipboard
       .writeText(item.web_url)
       .then(() => {
-        toast.success("Link copied. Paste it into your email.");
+        onNotify("Link copied. Paste it into your email.");
         logCopy.mutate(item.id);
       })
-      .catch(() => toast.error("Couldn't copy the link."));
+      .catch(() => onNotify("Couldn't copy the link."));
   }
 
   return (
-    <div className={cn("collat-card group", item.pinned && "collat-card--pinned")}>
+    <div
+      className={cn(
+        "collat-card group",
+        item.pinned && "collat-card--pinned",
+        dense && "collat-card--dense",
+      )}
+    >
+      {showThumb && (
+        <div className="collat-thumb">
+          <img
+            src={thumb}
+            alt=""
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => setThumbFailed(true)}
+          />
+        </div>
+      )}
       <div className="flex items-start gap-2.5">
-        <span className="collat-icon">
-          <Icon className="h-4 w-4" />
-        </span>
-        <h3 className="min-w-0 flex-1 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden">
-          {item.title}
+        {!showThumb && (
+          <span className="collat-icon">
+            <Icon className="h-4 w-4" />
+          </span>
+        )}
+        {/* v1.2 changes 1 + 12: extension-stripped filename, three lines
+            before truncating, full filename on hover. */}
+        <h3
+          title={item.title}
+          className="min-w-0 flex-1 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3] overflow-hidden"
+        >
+          {displayTitle(item.title)}
         </h3>
         {isAdmin && (
           <button
@@ -246,38 +349,47 @@ function CollateralCard({ item, isAdmin }: { item: CollateralItem; isAdmin: bool
         )}
       </div>
 
-      {/* Verbatim library values only (§1): empty column, no chip. */}
-      <div className="mt-2 flex flex-wrap gap-1">
-        {item.asset_type && <span className="collat-tag">{item.asset_type}</span>}
-        {item.products.slice(0, 3).map((p) => (
-          <span key={p} className="collat-tag--muted collat-tag max-w-36 truncate">
-            {p}
-          </span>
-        ))}
-        {item.products.length > 3 && (
-          <span className="collat-tag--muted collat-tag">+{item.products.length - 3}</span>
-        )}
-      </div>
+      {/* Verbatim library values only (§1): empty column, no chip. Hidden
+          in condensed view — that's a titles-only scanning layout. */}
+      {!dense && (item.asset_type || item.products.length > 0) && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {item.asset_type && <span className="collat-tag">{item.asset_type}</span>}
+          {item.products.slice(0, 3).map((p) => (
+            <span key={p} className="collat-tag--muted collat-tag max-w-36 truncate">
+              {p}
+            </span>
+          ))}
+          {item.products.length > 3 && (
+            <span className="collat-tag--muted collat-tag">+{item.products.length - 3}</span>
+          )}
+        </div>
+      )}
 
-      <div className="mt-1.5 flex flex-wrap gap-1">
-        {prospectReady && (
-          <span className="collat-badge-prospect">
-            <Send className="h-2.5 w-2.5" /> Send to Prospect
-          </span>
-        )}
-        {internalOnly && (
-          <span className="collat-badge-internal">
-            <ShieldAlert className="h-2.5 w-2.5" /> Internal
-          </span>
-        )}
-        {reviewDue && (
-          <span className="collat-badge-due">
-            <Clock className="h-2.5 w-2.5" /> Review due
-          </span>
-        )}
-      </div>
+      {/* Use pill (comfortable only) + review warning. The amber warning
+          survives condensed view on purpose: it's a warning, not a tag —
+          hiding it would let a rep send stale material unflagged. */}
+      {((!dense && use) || review !== "reviewed") && (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {!dense && use && <UsePill value={use} />}
+          {review === "due" && (
+            <span className="collat-badge-due">
+              <Clock className="h-2.5 w-2.5" /> Review due
+            </span>
+          )}
+          {review === "never" && (
+            <span className="collat-badge-due">
+              <Clock className="h-2.5 w-2.5" /> Not reviewed
+            </span>
+          )}
+        </div>
+      )}
 
-      <div className="mt-auto flex items-center gap-1 pt-3">
+      {/* v1.2 change 3: freshness on the card. */}
+      {!dense && review !== "never" && item.last_reviewed && (
+        <p className="collat-meta mt-1.5">Reviewed {formatReviewDate(item.last_reviewed)}</p>
+      )}
+
+      <div className={cn("mt-auto flex items-center gap-1", dense ? "pt-2" : "pt-3")}>
         <button type="button" className="collat-link" onClick={copyLink}>
           <Copy className="h-3 w-3" />
           Copy Link
@@ -287,7 +399,7 @@ function CollateralCard({ item, isAdmin }: { item: CollateralItem; isAdmin: bool
           <ExternalLink className="h-3 w-3" />
         </a>
         <span className="flex-1" />
-        {item.owner_name && (
+        {!dense && item.owner_name && (
           <span className="collat-meta truncate max-w-28" title={`Owner: ${item.owner_name}`}>
             {item.owner_name}
           </span>
@@ -306,43 +418,96 @@ export function CollateralLibrary() {
   );
 
   const { data: items, isLoading, isError } = useCollateralItems();
-  const { data: savedSegments } = useMyCollateralPrefs();
+  const { data: prefs } = useMyCollateralPrefs();
   const savePrefs = useSaveMyCollateralPrefs();
+  const saveDensity = useSaveMyDensity();
 
   const [search, setSearch] = useState("");
   const [products, setProducts] = useState<string[]>([]);
   const [assetTypes, setAssetTypes] = useState<string[]>([]);
   const [segments, setSegments] = useState<string[]>([]);
   const [uses, setUses] = useState<string[]>([]);
+  const [sort, setSort] = useState<CollateralSort>(DEFAULT_SORT);
+  const [density, setDensity] = useState<CollateralDensity>("comfortable");
+  // Choices made before the saved prefs resolve must win over them: the
+  // adoption effect below skips anything the user already touched.
+  const densityTouched = useRef(false);
+  const segmentsTouched = useRef(false);
 
   const chips = useMemo(() => buildChipGroups(items ?? []), [items]);
 
-  // §2/§4 defaults on load: Use = Send to Prospect (the reps' common case)
-  // and the rep's saved default segments: with no record context, this is
-  // the only personalization they get, so it always applies. Clearable.
+  // Defaults on load. v1.2 change 4 REMOVED the v1.1 "Use = Send to
+  // Prospect" default: a fresh load shows every Current asset. The
+  // per-user saved segment preference is unaffected and still applies.
   const appliedDefaults = useRef(false);
   useEffect(() => {
-    if (appliedDefaults.current || !items || savedSegments === undefined) return;
+    if (appliedDefaults.current || !items || !prefs) return;
     appliedDefaults.current = true;
-    if (chips.uses.some((c) => c.value === SEND_TO_PROSPECT)) {
-      setUses([SEND_TO_PROSPECT]);
+    if (!segmentsTouched.current) {
+      setSegments(initialSegmentSelection(prefs.default_segments, chips.segments));
     }
-    setSegments(initialSegmentSelection(savedSegments, chips.segments));
-  }, [items, savedSegments, chips]);
+    // v1.2 change 9: density persists per user.
+    if (!densityTouched.current) setDensity(prefs.density);
+  }, [items, prefs, chips]);
 
+  function pickSegments(next: string[]) {
+    segmentsTouched.current = true;
+    setSegments(next);
+  }
+
+  function pickDensity(next: CollateralDensity) {
+    densityTouched.current = true;
+    setDensity(next);
+    saveDensity.mutate({ density: next });
+  }
+
+  // v1.2 change 6: the Copy Link confirmation lives at bottom-centre,
+  // clear of the search field, auto-dismisses after ~3s, and can be
+  // closed by hand. Route-scoped on purpose — the global toaster (used by
+  // every other page) stays exactly as it is.
+  const [copyToast, setCopyToast] = useState<string | null>(null);
+  const copyToastTimer = useRef<number | null>(null);
+  function showCopyToast(message: string) {
+    setCopyToast(message);
+    if (copyToastTimer.current) window.clearTimeout(copyToastTimer.current);
+    copyToastTimer.current = window.setTimeout(() => setCopyToast(null), 3000);
+  }
+  function closeCopyToast() {
+    if (copyToastTimer.current) window.clearTimeout(copyToastTimer.current);
+    setCopyToast(null);
+  }
+  useEffect(
+    () => () => {
+      if (copyToastTimer.current) window.clearTimeout(copyToastTimer.current);
+    },
+    [],
+  );
+
+  // Change 2's flip side: a row that doesn't render must not filter.
+  // Selections held by hidden rows (a saved segment default on a
+  // single-value set, or a set that shrank on re-sync) are inert.
   const filtered = useMemo(
     () =>
       filterItems(
         items ?? [],
-        { search, products, assetTypes, segments, uses },
+        {
+          search,
+          products: activeRowSelection(chips.products, products),
+          assetTypes: activeRowSelection(chips.assetTypes, assetTypes),
+          segments: activeRowSelection(chips.segments, segments),
+          uses: activeRowSelection(chips.uses, uses),
+        },
         chips.products,
       ),
-    [items, search, products, assetTypes, segments, uses, chips.products],
+    [items, search, products, assetTypes, segments, uses, chips],
   );
 
-  // Pinned row: admin-curated, unaffected by chips and search.
+  // Pinned row: admin-curated, unaffected by chips, search, and sort.
   const pinnedItems = useMemo(() => (items ?? []).filter((i) => i.pinned), [items]);
-  const gridItems = filtered.filter((i) => !i.pinned);
+  const gridItems = useMemo(
+    () => sortItems(filtered.filter((i) => !i.pinned), sort),
+    [filtered, sort],
+  );
 
   const anyFilterActive =
     !!search.trim() ||
@@ -353,7 +518,11 @@ export function CollateralLibrary() {
 
   const segmentsDiffer =
     JSON.stringify([...segments].sort()) !==
-    JSON.stringify([...(savedSegments ?? [])].sort());
+    JSON.stringify([...(prefs?.default_segments ?? [])].sort());
+
+  const gridClass = density === "condensed"
+    ? "grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6"
+    : "grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4";
 
   if (isLoading) {
     return (
@@ -371,33 +540,27 @@ export function CollateralLibrary() {
     );
   }
 
-  // §6 acceptance: an empty grid is the CORRECT state until files are
-  // promoted to Current in SharePoint: say so instead of apologizing.
+  // v1.2 change 10: rep-appropriate empty state — no SharePoint process
+  // copy anywhere on the page (acceptance check: unqualified, so admins
+  // get the same copy; the Sync button and docs carry the curation story).
   if (!items?.length) {
     return (
       <div className="collat-empty">
         <span className="collat-empty-icon">
           <FileText className="h-5 w-5" />
         </span>
-        <h3>The library is curated in SharePoint</h3>
+        <h3>No collateral matches yet</h3>
         <p>
-          Files marked <strong>Current</strong> in the Sales Collateral library
-          appear here automatically. Drafts and files in review never show.
+          Ask an admin to add what you need using <strong>Request collateral</strong>.
         </p>
-        {isAdmin && (
-          <p className="collat-meta">
-            Nothing here yet means nothing is marked Current. Promote a file
-            in SharePoint, then Sync.
-          </p>
-        )}
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      {/* Search: title + every tag, combines with chips. A rep typing a
-          competitor name matches battlecards that carry it in the title. */}
+      {/* Search: title + every tag, combines with chips. v1.2 change 11:
+          word tokens, any order, partial match. */}
       <div className="relative">
         <Search className="collat-search-icon pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
         <input
@@ -409,7 +572,8 @@ export function CollateralLibrary() {
         />
       </div>
 
-      {/* Chip rows: filter, never group. */}
+      {/* Chip rows: filter, never group. Rows with one distinct value
+          across the synced set hide themselves (change 2). */}
       <div className="space-y-2">
         <ChipRow label="Product" chips={chips.products} selected={products} onChange={setProducts} />
         <ChipRow label="Type" chips={chips.assetTypes} selected={assetTypes} onChange={setAssetTypes} />
@@ -417,7 +581,7 @@ export function CollateralLibrary() {
           label="Segment"
           chips={chips.segments}
           selected={segments}
-          onChange={setSegments}
+          onChange={pickSegments}
           trailing={
             segmentsDiffer && segments.length > 0 ? (
               <button
@@ -433,15 +597,63 @@ export function CollateralLibrary() {
         <ChipRow label="Use" chips={chips.uses} selected={uses} onChange={setUses} />
       </div>
 
+      {/* Results toolbar (changes 5 + 9): sort + density. Always rendered
+          while the library has assets — hiding it on a zero-match filter
+          would strand a rep in condensed view with no way back. */}
+      <div className="flex flex-wrap items-center justify-end gap-2">
+          <label className="collat-label" htmlFor="collat-sort">
+            Sort
+          </label>
+          <div className="collat-select-wrap">
+            <select
+              id="collat-sort"
+              className="collat-select"
+              value={sort}
+              onChange={(e) => setSort(e.target.value as CollateralSort)}
+            >
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="collat-select-caret h-3.5 w-3.5" />
+          </div>
+          <div className="collat-density" role="group" aria-label="Card density">
+            <button
+              type="button"
+              aria-pressed={density === "comfortable"}
+              title="Comfortable view"
+              onClick={() => pickDensity("comfortable")}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              aria-pressed={density === "condensed"}
+              title="Condensed view"
+              onClick={() => pickDensity("condensed")}
+            >
+              <Rows3 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+
       {/* Pinned row: navy top edge: the platform's "these matter most". */}
       {pinnedItems.length > 0 && (
         <div className="space-y-2">
           <p className="collat-label flex items-center gap-1.5">
             <Pin className="h-3 w-3" /> Pinned
           </p>
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
+          <div className={gridClass}>
             {pinnedItems.map((item) => (
-              <CollateralCard key={item.id} item={item} isAdmin={isAdmin} />
+              <CollateralCard
+                key={item.id}
+                item={item}
+                isAdmin={isAdmin}
+                dense={density === "condensed"}
+                onNotify={showCopyToast}
+              />
             ))}
           </div>
           <div className="collat-divider" />
@@ -460,7 +672,7 @@ export function CollateralLibrary() {
                 setSearch("");
                 setProducts([]);
                 setAssetTypes([]);
-                setSegments([]);
+                pickSegments([]);
                 setUses([]);
               }}
             >
@@ -469,9 +681,15 @@ export function CollateralLibrary() {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
+        <div className={gridClass}>
           {gridItems.map((item) => (
-            <CollateralCard key={item.id} item={item} isAdmin={isAdmin} />
+            <CollateralCard
+              key={item.id}
+              item={item}
+              isAdmin={isAdmin}
+              dense={density === "condensed"}
+              onNotify={showCopyToast}
+            />
           ))}
         </div>
       )}
@@ -480,6 +698,16 @@ export function CollateralLibrary() {
         {gridItems.length} of {(items ?? []).filter((i) => !i.pinned).length} assets
         {pinnedItems.length ? ` · ${pinnedItems.length} pinned` : ""}
       </p>
+
+      {/* v1.2 change 6: the Copy Link confirmation. */}
+      {copyToast && (
+        <div className="collat-toast" role="status">
+          <span>{copyToast}</span>
+          <button type="button" aria-label="Dismiss notification" onClick={closeCopyToast}>
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

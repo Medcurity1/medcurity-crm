@@ -29,6 +29,9 @@ export interface CollateralItem {
   sort_order: number;
   archived_at: string | null;
   synced_at: string | null;
+  /** v1.2: when the asset first appeared in the mirror as Current —
+   * the "Recently added" sort key. */
+  created_at: string | null;
 }
 
 const ITEMS_KEY = ["collateral", "items"] as const;
@@ -41,7 +44,7 @@ export function useCollateralItems() {
       const { data, error } = await supabase
         .from("collateral_items")
         .select(
-          "id, title, asset_type, products, segments, uses, stage, status, last_reviewed, owner_name, web_url, sharepoint_item_id, pinned, sort_order, archived_at, synced_at",
+          "id, title, asset_type, products, segments, uses, stage, status, last_reviewed, owner_name, web_url, sharepoint_item_id, pinned, sort_order, archived_at, synced_at, created_at",
         )
         .is("archived_at", null)
         .order("pinned", { ascending: false })
@@ -53,44 +56,75 @@ export function useCollateralItems() {
   });
 }
 
-/** Role flag: which roles can see collateral at all. Readable by everyone
- * signed in so tabs know whether to render; RLS enforces the real gate. */
-export function useCollateralVisibility() {
-  const { profile } = useAuth();
-  const role = (profile as { role?: string } | null)?.role ?? null;
-  const query = useQuery({
-    queryKey: ["collateral", "settings"],
-    staleTime: 5 * 60_000,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("collateral_settings")
-        .select("visible_to_roles")
-        .eq("id", 1)
-        .maybeSingle();
-      if (error) throw error;
-      return (data?.visible_to_roles ?? []) as string[];
-    },
-  });
-  return {
-    ...query,
-    visible: !!role && (query.data ?? []).includes(role),
-  };
+// v1.2 change 7 removed the UI's role gating entirely (the tab renders
+// for every signed-in user), so the old useCollateralVisibility hook is
+// gone. collateral_settings.visible_to_roles still exists and still
+// drives RLS on collateral_items — the v1.2 migration widens it to all
+// roles; narrowing it back is a config UPDATE, not a code change.
+
+/** v1.2: the per-user prefs row grew two columns (density + launch-banner
+ * dismissal) alongside the v1.1 default segments. One row per user; a
+ * missing row means every default. */
+export interface CollateralPrefs {
+  default_segments: string[];
+  density: CollateralDensity;
+  launch_banner_dismissed_at: string | null;
 }
+
+export type CollateralDensity = "comfortable" | "condensed";
+
+const DEFAULT_PREFS: CollateralPrefs = {
+  default_segments: [],
+  density: "comfortable",
+  launch_banner_dismissed_at: null,
+};
 
 export function useMyCollateralPrefs() {
   const { user } = useAuth();
   return useQuery({
     queryKey: ["collateral", "prefs", user?.id],
     enabled: !!user?.id,
-    queryFn: async () => {
+    queryFn: async (): Promise<CollateralPrefs> => {
+      // select("*") on purpose: naming the v1.2 columns would turn a
+      // frontend-before-migration skew into a 400 that silently kills
+      // saved segments, density, AND the banner. With * the row arrives
+      // with whatever columns exist and the defaults below fill the rest.
       const { data, error } = await supabase
         .from("collateral_user_prefs")
-        .select("default_segments")
+        .select("*")
         .eq("user_id", user!.id)
         .maybeSingle();
       if (error) throw error;
-      return (data?.default_segments ?? []) as string[];
+      if (!data) return DEFAULT_PREFS;
+      const row = data as Partial<Record<keyof CollateralPrefs, unknown>>;
+      return {
+        default_segments: (row.default_segments ?? []) as string[],
+        density: row.density === "condensed" ? "condensed" : "comfortable",
+        launch_banner_dismissed_at:
+          (row.launch_banner_dismissed_at as string | null) ?? null,
+      };
     },
+  });
+}
+
+/** Partial upsert per pref: untouched columns keep their values (or their
+ * defaults on first insert), so saving density can't clobber segments. */
+function usePrefUpsert() {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (patch: Partial<CollateralPrefs>) => {
+      const { error } = await supabase.from("collateral_user_prefs").upsert({
+        user_id: user!.id,
+        ...patch,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["collateral", "prefs"] });
+    },
+    onError: (e) =>
+      toast.error("Couldn't save your preference: " + (e as Error).message),
   });
 }
 
@@ -111,6 +145,21 @@ export function useSaveMyCollateralPrefs() {
     },
     onError: (e) => toast.error("Couldn't save your default: " + (e as Error).message),
   });
+}
+
+/** v1.2 change 9: the density toggle persists per user. */
+export function useSaveMyDensity() {
+  return usePrefUpsert();
+}
+
+/** v1.2 change 8: dismissing the launch banner is permanent per user. */
+export function useDismissLaunchBanner() {
+  const upsert = usePrefUpsert();
+  return {
+    ...upsert,
+    dismiss: () =>
+      upsert.mutate({ launch_banner_dismissed_at: new Date().toISOString() }),
+  };
 }
 
 /** Item 10: fire-and-forget usage breadcrumb per Copy Link click. */

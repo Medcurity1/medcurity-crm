@@ -177,11 +177,13 @@ export default function App() {
                   <Route path="imports/:id/edit" element={<LegacyImportEditRedirect />} />
                   <Route path="leads/*" element={<LeadsPathRedirect />} />
                   <Route path="playbook" element={<AdminGate><PlaybookPage /></AdminGate>} />
-                  {/* Collateral (Jordan 8/4): admin-only at launch; the RLS
-                      role flag (collateral_settings) governs data access, so
-                      opening to sales later = config change + move this out
-                      of AdminGate + sidebar shuffle. */}
-                  <Route path="collateral" element={<AdminGate><CollateralPage /></AdminGate>} />
+                  {/* Collateral open to every signed-in user (Jordan's v1.2
+                      change 7, 2026-08-18): read-only tab, only admin-promoted
+                      Current assets. Data access follows the RLS role flag
+                      (collateral_settings.visible_to_roles, widened by the
+                      v1.2 migration); Sync SharePoint stays admin-only inside
+                      the page and at the edge function. */}
+                  <Route path="collateral" element={<CollateralPage />} />
                   <Route path="partners" element={<PartnersPage />} />
                   <Route path="contacts" element={<ContactsList />} />
                   {/* Lists moved into the Reports hub (Nathan 2026-07-20). */}
