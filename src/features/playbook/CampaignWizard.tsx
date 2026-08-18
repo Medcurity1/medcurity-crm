@@ -763,6 +763,15 @@ export function CampaignWizard({
                     </div>
                     <Input value={templateToAuthorText(email.subject)} onChange={(e) => editEmail(email.seq_number, { subject: e.target.value })}
                       placeholder={email.seq_number === 1 ? "Subject" : "Subject (blank = threaded reply)"} />
+                    <div className="flex flex-wrap items-center gap-1">
+                      <span className="mr-1 text-[11px] text-muted-foreground">Add to subject</span>
+                      <Button type="button" variant="outline" size="xs" onClick={() => editEmail(email.seq_number, { subject: insertAuthorToken(templateToAuthorText(email.subject), AUTHOR_TOKENS.firstName) })}>
+                        <UserRound className="h-3 w-3 mr-1" /> First name
+                      </Button>
+                      <Button type="button" variant="outline" size="xs" onClick={() => editEmail(email.seq_number, { subject: insertAuthorToken(templateToAuthorText(email.subject), AUTHOR_TOKENS.organization) })}>
+                        <Building2 className="h-3 w-3 mr-1" /> Organization
+                      </Button>
+                    </div>
                     {hasAdvancedFormatting ? (
                       <>
                         <p className="rounded-md bg-amber-500/10 px-2.5 py-2 text-xs text-amber-700 dark:text-amber-300">
@@ -774,7 +783,8 @@ export function CampaignWizard({
                       </>
                     ) : <>
                     {!isPreview && (
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span className="mr-1 text-[11px] text-muted-foreground">Personalize email</span>
                         {[
                           [AUTHOR_TOKENS.firstName, "First name", UserRound],
                           [AUTHOR_TOKENS.organization, "Organization", Building2],
@@ -888,6 +898,15 @@ export function CampaignWizard({
                           placeholder="Subject"
                           onChange={(e) => patchTemplateStep(s.order, { subject_template: e.target.value })}
                         />
+                        <div className="flex flex-wrap items-center gap-1">
+                          <span className="mr-1 text-[11px] text-muted-foreground">Add to subject</span>
+                          <Button type="button" variant="outline" size="xs" onClick={() => patchTemplateStep(s.order, { subject_template: insertAuthorToken(templateToAuthorText(s.subject_template ?? ""), AUTHOR_TOKENS.firstName), content_ai_draft: false })}>
+                            <UserRound className="h-3 w-3 mr-1" /> First name
+                          </Button>
+                          <Button type="button" variant="outline" size="xs" onClick={() => patchTemplateStep(s.order, { subject_template: insertAuthorToken(templateToAuthorText(s.subject_template ?? ""), AUTHOR_TOKENS.organization), content_ai_draft: false })}>
+                            <Building2 className="h-3 w-3 mr-1" /> Organization
+                          </Button>
+                        </div>
                         {hasAdvancedFormatting ? (
                           <>
                             <p className="rounded-md bg-amber-500/10 px-2.5 py-2 text-xs text-amber-700 dark:text-amber-300">
@@ -899,7 +918,8 @@ export function CampaignWizard({
                           </>
                         ) : <>
                         {!isPreview && (
-                          <div className="flex flex-wrap gap-1">
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="mr-1 text-[11px] text-muted-foreground">Personalize email</span>
                             {[
                               [AUTHOR_TOKENS.firstName, "First name", UserRound],
                               [AUTHOR_TOKENS.organization, "Organization", Building2],

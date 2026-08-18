@@ -1401,14 +1401,11 @@ async function resolveSmartleadLeadId(smartleadCampaignId: number, email: string
 }
 
 /**
- * Best-effort pause/resume of ONE lead within a Smartlead campaign — the
+ * Pause/resume ONE lead within a Smartlead campaign — the
  * per-person analog of setCampaignStatus's campaign-wide POST
- * /campaigns/{id}/status. Endpoint shape unverified beyond "matches the
- * /campaigns/{id}/leads/{lead_id}/<verb> pattern Smartlead's own docs
- * describe for pause/resume-by-lead" — same unverified-but-best-guess
- * posture as registerCampaignWebhook. Throws on failure (raw Smartlead error
- * message) so the caller can fold it into a plain-English `warning` — this
- * must NEVER be swallowed silently on the stop path per the spec.
+ * /campaigns/{id}/status. Smartlead's official v1 API documents these
+ * campaign-scoped pause/resume endpoints. Throws on failure so callers never
+ * mark Pulse paused while Smartlead is still able to send.
  */
 async function smartleadSetLeadPauseState(smartleadCampaignId: number, leadId: number, pause: boolean): Promise<void> {
   const verb = pause ? "pause" : "resume";
@@ -3029,7 +3026,7 @@ async function dailySweep(): Promise<DailySweepReport> {
     const candidates = await fetchAllRows<Record<string, unknown>>((from, to) =>
       svc
         .from("campaign_enrollments")
-        .select("id, campaign_id, contact_id, account_id, first_name, last_name, email, owner_user_id, status, paused_reason, enrolled_at, meeting_pause_dismissed_at")
+        .select("id, campaign_id, contact_id, account_id, first_name, last_name, email, owner_user_id, status, paused_reason, enrolled_at, meeting_pause_dismissed_at, smartlead_lead_id")
         .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`)
         .or("contact_id.not.is.null,account_id.not.is.null")
         .order("id", { ascending: true })
@@ -3043,6 +3040,7 @@ async function dailySweep(): Promise<DailySweepReport> {
       owner_user_id: string | null;
       status: string; paused_reason: string | null; enrolled_at: string;
       meeting_pause_dismissed_at: string | null;
+      smartlead_lead_id: number | null;
     }[];
 
     if (eligible.length) {
@@ -3089,13 +3087,13 @@ async function dailySweep(): Promise<DailySweepReport> {
 
       // Batch campaign owner/name lookups once rather than per-pause.
       const campaignIds = Array.from(new Set(eligible.map((e) => e.campaign_id)));
-      const campaignInfo = new Map<string, { owner_user_id: string | null; name: string }>();
+      const campaignInfo = new Map<string, { owner_user_id: string | null; name: string; smartlead_campaign_id: number | null }>();
       for (let i = 0; i < campaignIds.length; i += LOOKUP_BATCH) {
         const batch = campaignIds.slice(i, i + LOOKUP_BATCH);
-        const { data: campRows, error: campErr } = await svc.from("campaigns").select("id, owner_user_id, name").in("id", batch);
+        const { data: campRows, error: campErr } = await svc.from("campaigns").select("id, owner_user_id, name, smartlead_campaign_id").in("id", batch);
         if (campErr) { console.error("daily-sweep: campaign lookup for meeting-pause failed:", campErr.message); continue; }
-        for (const c of (campRows ?? []) as { id: string; owner_user_id: string | null; name: string }[]) {
-          campaignInfo.set(c.id, { owner_user_id: c.owner_user_id, name: c.name });
+        for (const c of (campRows ?? []) as { id: string; owner_user_id: string | null; name: string; smartlead_campaign_id: number | null }[]) {
+          campaignInfo.set(c.id, { owner_user_id: c.owner_user_id, name: c.name, smartlead_campaign_id: c.smartlead_campaign_id });
         }
       }
 
@@ -3117,6 +3115,44 @@ async function dailySweep(): Promise<DailySweepReport> {
         });
         if (!hasQualifyingOpp) continue;
 
+        // Stop the actual sender before changing Pulse. A Pulse-only pause is
+        // dangerously misleading because Smartlead would keep emailing.
+        const info = campaignInfo.get(e.campaign_id);
+        if (!info?.smartlead_campaign_id) {
+          const message = `meeting-pause skipped for enrollment ${e.id}: campaign has no Smartlead id`;
+          console.error(`daily-sweep: ${message}`);
+          report.errors.push(message);
+          continue;
+        }
+        let leadId = e.smartlead_lead_id;
+        if (!leadId && e.email) {
+          try {
+            leadId = await resolveSmartleadLeadId(info.smartlead_campaign_id, e.email);
+            if (leadId) {
+              await svc.from("campaign_enrollments").update({ smartlead_lead_id: leadId }).eq("id", e.id);
+            }
+          } catch (err) {
+            const message = `meeting-pause could not resolve Smartlead lead for enrollment ${e.id}: ${(err as Error).message}`;
+            console.error(`daily-sweep: ${message}`);
+            report.errors.push(message);
+            continue;
+          }
+        }
+        if (!leadId) {
+          const message = `meeting-pause skipped for enrollment ${e.id}: Smartlead lead was not found`;
+          console.error(`daily-sweep: ${message}`);
+          report.errors.push(message);
+          continue;
+        }
+        try {
+          await smartleadSetLeadPauseState(info.smartlead_campaign_id, leadId, true);
+        } catch (err) {
+          const message = `meeting-pause failed in Smartlead for enrollment ${e.id}: ${(err as Error).message}`;
+          console.error(`daily-sweep: ${message}`);
+          report.errors.push(message);
+          continue;
+        }
+
         const { error: updErr } = await svc
           .from("campaign_enrollments")
           .update({ status: "paused", paused_reason: "meeting_booked" })
@@ -3128,7 +3164,6 @@ async function dailySweep(): Promise<DailySweepReport> {
         report.tasks_cancelled += await archivePendingTasksForEnrollment(svc, e.id, "Opportunity opened");
         report.meetings_paused++;
 
-        const info = campaignInfo.get(e.campaign_id);
         // Owner routing (group 2): notify the person's own owner; the
         // campaign owner is the fallback.
         const pauseNotifyUserId = e.owner_user_id ?? info?.owner_user_id ?? null;
