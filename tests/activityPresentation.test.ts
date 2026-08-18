@@ -28,10 +28,12 @@ describe("activity presentation", () => {
     const root = path.resolve(__dirname, "..");
     const nexus = readFileSync(path.join(root, "src/features/nexus/Briefing.tsx"), "utf8");
     const tasksWidget = readFileSync(path.join(root, "src/features/nexus/widgets/TasksWidget.tsx"), "utf8");
+    const activitiesList = readFileSync(path.join(root, "src/features/activities/ActivitiesListPage.tsx"), "utf8");
     const detail = readFileSync(path.join(root, "src/features/activities/ActivityDetail.tsx"), "utf8");
     expect(nexus).toContain("<CheckCircle2");
     expect(nexus).toContain("> Done");
     expect(tasksWidget).toContain("activityTitleForDisplay(task.subject)");
+    expect(activitiesList).toContain("activityTitleForDisplay(a.subject)");
     expect(detail).toContain('"Mark complete"');
   });
 });

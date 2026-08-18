@@ -8,6 +8,7 @@ import { QueryError } from "@/components/QueryError";
 import { formatRelativeDate } from "@/lib/formatters";
 import { dedupeEmailActivityRows } from "./activityFeedDedupe";
 import { AutomationBadge, isAutomationActivity } from "@/features/activities/AutomationBadge";
+import { activityTitleForDisplay } from "@/features/activities/activity-display";
 import type { ActivityType } from "@/types/crm";
 
 const FEED_LIMIT = 15;
@@ -178,7 +179,7 @@ export function TeamActivityFeed() {
                     </p>
                     {a.subject && (
                       <p className="text-xs text-muted-foreground truncate">
-                        {a.subject}
+                        {activityTitleForDisplay(a.subject)}
                       </p>
                     )}
                     <p className="text-xs text-muted-foreground mt-0.5">

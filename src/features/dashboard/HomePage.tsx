@@ -43,6 +43,7 @@ import {
   priorityLabel,
 } from "@/features/activities/taskOrder";
 import { describeRecurrence } from "@/features/activities/recurrence";
+import { activityTitleForDisplay } from "@/features/activities/activity-display";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -327,7 +328,7 @@ function RecentActivitySection() {
                     <span className="text-muted-foreground">
                       [{activityLabel(a.activity_type)}]
                     </span>{" "}
-                    {a.subject}
+                    {activityTitleForDisplay(a.subject)}
                   </p>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     {a.account?.name ? `${a.account.name} · ` : ""}
@@ -561,7 +562,7 @@ function MyTasksSection({ userId }: { userId: string }) {
                         aria-label={`${priorityLabel(task.priority)} priority`}
                       />
                       <span className="text-sm font-medium truncate">
-                        {task.subject}
+                        {activityTitleForDisplay(task.subject)}
                       </span>
                       {dueLabel && (
                         <span
@@ -630,7 +631,7 @@ function MyTasksSection({ userId }: { userId: string }) {
                       <CheckCircle2 className="h-4 w-4 text-green-600" />
                     </button>
                     <span className="flex-1 text-sm truncate line-through">
-                      {task.subject}
+                      {activityTitleForDisplay(task.subject)}
                     </span>
                     <span className="text-xs text-muted-foreground shrink-0">
                       Completed
