@@ -67,6 +67,29 @@ This is the simplifying insight: we build **one great builder + a launch path**,
 "template gallery / enrollment / quick-enroll" surfaces are all thin entry points into it. Design
 the builder once, beautifully; everything else is how you open it.
 
+### Operator contract (Nathan, live QA 2026-08-18)
+
+The builder is for salespeople and internal operators, not campaign engineers. A user should never
+need to write conditional syntax, know Smartlead's merge rules, or manually reason through safety
+rails. They provide ordinary email/task copy, select people (before or during setup), choose a
+sender and schedule, preview the result, and start.
+
+Pulse owns the complexity underneath:
+
+- natural first-name/company fallbacks, including the surrounding grammar and punctuation;
+- Do-Not-Email/unsubscribe/bounce suppression and a clear explanation of every excluded person;
+- prevention of duplicate or conflicting active enrollments across campaigns;
+- sender connection, mailbox capacity, sending limits, schedule, stop-on-reply, and tracking checks;
+- preview-as-recipient for both complete and missing contact data;
+- a plain-English final review: who will receive what, from whom, when, and what Pulse will do on a
+  reply, bounce, unsubscribe, or missing field;
+- launch disabled until every required check is green, with fixes offered in place instead of raw
+  errors or template tokens.
+
+Visual quality is part of correctness. The flow should feel calm, obvious, and finished at every
+entry point: contact, list, template, or blank campaign. Advanced settings may exist, but the safe
+default path must require no Smartlead knowledge and no code-like content.
+
 ## 3. Information architecture
 
 The rename is **done** (shipped to staging): sidebar **Campaigns** (Megaphone icon, route stays

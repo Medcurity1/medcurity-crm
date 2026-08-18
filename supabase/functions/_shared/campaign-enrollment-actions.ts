@@ -7,6 +7,8 @@
 // same task-archive reason string, same bell notification + follow-up task
 // shape for a reply, same campaign_events row, same contact-timeline
 // activity for a reply. One implementation, two callers.
+
+import { normalizeReplyText } from "./reply-text.ts";
 //
 // S9 addition: previously only the real-time webhook (campaign-webhooks/
 // index.ts) logged a campaign_events row — the daily sweep's reconcile
@@ -357,6 +359,7 @@ export async function stopEnrollmentForReply(
   fallbackEmail: string | null,
   eventMeta?: { occurredAt?: string | null; source?: string },
 ): Promise<{ updated: boolean; tasksCancelled: number }> {
+  const readableReplyBody = normalizeReplyText(replyBody);
   // Atomic transition guard: the live webhook and the daily sweep can both
   // observe the same reply and call this concurrently. A plain read-then-act
   // check against the caller's (possibly stale) `enrollment.status` snapshot
@@ -391,7 +394,7 @@ export async function stopEnrollmentForReply(
     payload: eventMeta?.source ? { source: eventMeta.source, reply_body: replyBody } : {},
   });
 
-  await logReplyActivity(svc, enrollment, campaign, replyBody);
+  await logReplyActivity(svc, enrollment, campaign, readableReplyBody);
 
   const tasksCancelled = await archivePendingTasksForEnrollment(svc, enrollment.id, "Contact replied");
 
@@ -418,7 +421,7 @@ export async function stopEnrollmentForReply(
       activity_type: "task",
       owner_user_id: notifyUserId,
       subject: `Reply from ${who} — ${campaign.name}`,
-      body: replyBody ? replyBody.slice(0, 2000) : null,
+      body: readableReplyBody,
       due_at: nowIso,
       priority: "high",
       reminder_schedule: "once",
