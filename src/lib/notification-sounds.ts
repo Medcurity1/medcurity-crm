@@ -10,7 +10,7 @@
 //   Fallback: AudioContext oscillators — richer per-type sounds, may not
 //             run in background tabs (the Audio element covers those).
 
-import { canonicalSound } from "./notification-sound-choice";
+import { canonicalSound, DEFAULT_SOUND } from "./notification-sound-choice";
 
 // ── Background-tab fallback WAV (22050Hz mono 16-bit) ────────────────
 // Generated at load; there are no audio files in the repo. A backgrounded
@@ -344,11 +344,11 @@ export function playScheduled(soundType: string, durationType: string, onFinish?
 }
 
 export function playNotifSoundByType(type?: string) {
-  playScheduled(type || "chime", "short");
+  playScheduled(type || DEFAULT_SOUND, "short");
 }
 export function previewSound(soundType?: string, durationType?: string, onFinish?: () => void) {
   stopActiveSound();
-  playScheduled(soundType || "chime", durationType || "short", onFinish);
+  playScheduled(soundType || DEFAULT_SOUND, durationType || "short", onFinish);
 }
 
 // ── Which sound plays for which notification ──────────────────────────
@@ -357,6 +357,7 @@ export function previewSound(soundType?: string, durationType?: string, onFinish
 // "@/lib/notification-sounds" keeps working unchanged.
 export {
   KEPT_SOUNDS,
+  DEFAULT_SOUND,
   SOUND_ALIASES,
   canonicalSound,
   NOTIF_TYPE_FALLBACK_SOUNDS,
