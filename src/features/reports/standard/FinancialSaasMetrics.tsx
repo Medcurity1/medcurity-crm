@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import {
   Select,
   SelectContent,
@@ -124,7 +125,7 @@ export function FinancialSaasMetrics() {
     [preset, customStart, customEnd],
   );
 
-  const { data: quarters, isLoading, error } = useQuery({
+  const { data: quarters, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["report", "financial-saas-metrics", window.start, window.end],
     queryFn: () => fetchQuarterlyMetrics(window.start, window.end),
   });
@@ -244,14 +245,14 @@ export function FinancialSaasMetrics() {
         }
       />
 
-      {error && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          Error: {(error as Error).message}
-        </div>
-      )}
-
       {isLoading ? (
         <Skeleton className="h-64 w-full" />
+      ) : isError ? (
+        <QueryError
+          message="Couldn't load financial metrics."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
       ) : !quarters || quarters.length === 0 ? (
         <Card>
           <CardContent className="p-6 text-sm text-muted-foreground text-center">

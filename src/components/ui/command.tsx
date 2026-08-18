@@ -32,6 +32,7 @@ function CommandDialog({
   description = "Search for a command to run...",
   children,
   className,
+  commandClassName,
   showCloseButton = true,
   open,
   onOpenChange,
@@ -43,6 +44,15 @@ function CommandDialog({
     title?: string
     description?: string
     className?: string
+    /**
+     * Classes for the INNER Command element. `className` targets the dialog
+     * shell (width, padding), so it can't reach the cmdk defaults set below —
+     * and those defaults out-specify anything a consumer puts on an
+     * individual CommandItem (`.x [cmdk-item] svg` beats `.y svg`). Global
+     * search uses this to opt out of the 20px item icon and the py-3 row so
+     * its 24px gradient chips fit; without it those rules are unreachable.
+     */
+    commandClassName?: string
     showCloseButton?: boolean
   }) {
   // Dialog props (open / onOpenChange / modal / defaultOpen) are forwarded
@@ -64,7 +74,8 @@ function CommandDialog({
           {...commandProps}
           className={cn(
             "**:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5",
-            (commandProps as { className?: string }).className
+            (commandProps as { className?: string }).className,
+            commandClassName
           )}
         >
           {children}

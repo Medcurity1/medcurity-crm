@@ -1,6 +1,8 @@
 import { useMemo, useState, useEffect } from "react";
 import { Plus, Trash2, Pencil, Check, X, GripVertical } from "lucide-react";
 import { toast } from "sonner";
+import { QueryError } from "@/components/QueryError";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   DndContext,
   closestCenter,
@@ -74,7 +76,7 @@ const FIELDS: { key: string; label: string; entity: string; help?: string }[] = 
 ];
 
 export function PicklistsManager() {
-  const { data: byField, isLoading } = usePicklistOptions();
+  const { data: byField, isLoading, isError, isFetching, refetch } = usePicklistOptions();
   const [activeKey, setActiveKey] = useState<string>(FIELDS[0].key);
   const create = useCreatePicklistOption();
   const update = useUpdatePicklistOption();
@@ -280,7 +282,17 @@ export function PicklistsManager() {
         )}
 
         {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <div className="space-y-2">
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+          </div>
+        ) : isError ? (
+          <QueryError
+            message="Couldn't load picklist options."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : localOrder.length === 0 ? (
           <p className="text-sm text-muted-foreground py-6 text-center border rounded-lg">
             No options yet — add the first one below.

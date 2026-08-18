@@ -30,6 +30,7 @@ import {
   isRepeat,
   type ReminderUI,
 } from "./reminder";
+import { AssignToField } from "./AssignToField";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { errorMessage } from "@/lib/errors";
 import { toast } from "sonner";
@@ -40,6 +41,7 @@ import {
   formatParsedDate,
   removeRanges,
 } from "./parse-task-text";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 
 interface QuickTaskDialogProps {
   open: boolean;
@@ -68,6 +70,11 @@ export function QuickTaskDialog({
   // Priority is required with a Medium default (V2-A1). 'normal' is the
   // Medium tier — see taskOrder.ts.
   const [priority, setPriority] = useState<"high" | "normal" | "low">("normal");
+  // Who the task is for (survey T5). Empty string means "untouched", which
+  // resolves to me below — deriving rather than seeding in an effect keeps
+  // it correct when auth resolves after the dialog mounts, and keeps the
+  // dirty check honest (explicitly re-picking yourself isn't a change).
+  const [ownerId, setOwnerId] = useState<string>("");
   // Optional record attachment, only used in standalone mode (Activities
   // tab) where no record context was passed in via props.
   const [attach, setAttach] = useState<TaskRecordSelection>(EMPTY_TASK_RECORD);
@@ -109,12 +116,16 @@ export function QuickTaskDialog({
   const isStandalone =
     !accountId && !contactId && !opportunityId && !leadId;
 
+  // "" (untouched) means me.
+  const effectiveOwnerId = ownerId || user?.id || null;
+
   function reset() {
     setSubject("");
     setDueAt("");
     setNotes("");
     setReminder(EMPTY_REMINDER);
     setPriority("normal");
+    setOwnerId("");
     setAttach(EMPTY_TASK_RECORD);
     setRecur(EMPTY_RECURRENCE);
     setDueManual(false);
@@ -163,8 +174,10 @@ export function QuickTaskDialog({
         lead_id: leadId ?? null,
         // owner_user_id MUST be set — the task-reminders function sends
         // reminders to this user, the home-page "My Tasks" widget filters
-        // by it, and most task queries RLS-gate on it.
-        owner_user_id: user?.id ?? null,
+        // by it, and most task queries RLS-gate on it. Survey T5: it's now
+        // the person the rep picked (defaulting to themselves), and the DB
+        // trigger bells them when it isn't the creator.
+        owner_user_id: effectiveOwnerId,
         reminder_schedule: reminderFields.reminder_schedule,
         reminder_at: reminderFields.reminder_at,
         reminder_channels: reminderFields.reminder_channels,
@@ -197,19 +210,20 @@ export function QuickTaskDialog({
     reminder !== EMPTY_REMINDER ||
     recur.mode !== "none" ||
     priority !== "normal" ||
+    // Handing the task to someone else is real work worth confirming;
+    // re-picking yourself is not a change, so it stays clean.
+    (!!ownerId && ownerId !== user?.id) ||
     attach !== EMPTY_TASK_RECORD;
+  // Migrated to the shared guard (2026-08-17) — see EditTaskDialog.tsx for
+  // why: it also covers the dialog's own X button, and shows an actual
+  // confirm instead of silently swallowing the dismissal. onClose is
+  // handleClose(false) so the existing reset-on-discard behavior is kept.
+  const discard = useDialogDiscardGuard(dirty, () => handleClose(false));
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent
-        className="sm:max-w-md"
-        onInteractOutside={(e) => {
-          if (dirty) e.preventDefault();
-        }}
-        onEscapeKeyDown={(e) => {
-          if (dirty) e.preventDefault();
-        }}
-      >
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Add Task</DialogTitle>
           <DialogDescription>
@@ -277,6 +291,12 @@ export function QuickTaskDialog({
             </p>
           </div>
 
+          <AssignToField
+            id="task-owner"
+            value={effectiveOwnerId ?? ""}
+            onChange={setOwnerId}
+          />
+
           <div className="space-y-2">
             <Label htmlFor="task-priority">Priority *</Label>
             <select
@@ -322,7 +342,7 @@ export function QuickTaskDialog({
             <Button
               type="button"
               variant="outline"
-              onClick={() => handleClose(false)}
+              onClick={discard.requestClose}
             >
               Cancel
             </Button>
@@ -339,5 +359,7 @@ export function QuickTaskDialog({
         </form>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }

@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
+import { downloadCsv } from "@/lib/csv";
 import {
   createImportRun,
   recordImportChanges,
@@ -1919,33 +1920,19 @@ function validateRow(
    CSV export for error report
    ================================================================ */
 
-function escapeCsvField(value: string): string {
-  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
-    return `"${value.replace(/"/g, '""')}"`;
-  }
-  return value;
-}
-
 function downloadErrorReport(failedRows: FailedRow[]) {
   if (failedRows.length === 0) return;
 
   const csvHeaders = Object.keys(failedRows[0].csvData);
-  const header = [...csvHeaders.map(escapeCsvField), "Error"].join(",");
-  const rows = failedRows.map((fr) => {
-    const values = csvHeaders.map((h) => escapeCsvField(fr.csvData[h] ?? ""));
-    return [...values, escapeCsvField(fr.error)].join(",");
-  });
-  const csv = [header, ...rows].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
+  const table = [
+    [...csvHeaders, "Error"],
+    ...failedRows.map((fr) => [
+      ...csvHeaders.map((h) => fr.csvData[h] ?? ""),
+      fr.error,
+    ]),
+  ];
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `import-errors-${timestamp}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  downloadCsv(`import-errors-${timestamp}.csv`, table);
 }
 
 /* ================================================================

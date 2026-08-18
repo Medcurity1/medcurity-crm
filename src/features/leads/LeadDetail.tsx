@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { CustomFieldsDisplay } from "@/components/CustomFieldsDisplay";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { RecordId } from "@/components/RecordId";
-import { formatPhone } from "@/components/PhoneInput";
+import { QueryError } from "@/components/QueryError";
 import { ConvertLeadDialog } from "./ConvertLeadDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +24,7 @@ import {
   qualificationLabel,
   formatDate,
   formatDateTime,
+  formatPhoneWithExt,
 } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -92,7 +93,7 @@ export function LeadDetail() {
   const [searchParams] = useSearchParams();
   const { user, profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
-  const { data: lead, isLoading } = useLead(id);
+  const { data: lead, isLoading, isError, error, refetch } = useLead(id);
   // Anyone admin OR who owns / created this lead can archive it. This
   // unblocks reps from cleaning up their own test/duplicate leads
   // without needing admin help.
@@ -149,6 +150,14 @@ export function LeadDetail() {
         <Skeleton className="h-48 w-full" />
       </div>
     );
+  }
+
+  // A real PGRST116 (single() found zero rows) means it's genuinely gone;
+  // anything else (network blip, RLS, etc.) is a failed load, not a
+  // missing record — those must not look the same to the rep.
+  const notFound = (error as { code?: string } | null)?.code === "PGRST116";
+  if (isError && !notFound) {
+    return <QueryError message="Something went wrong loading this import." onRetry={() => refetch()} />;
   }
 
   if (!lead) {
@@ -336,7 +345,7 @@ export function LeadDetail() {
           <CardContent className="px-4 pb-3">
             <p className="text-sm font-semibold inline-flex items-center gap-1">
               <Phone className="h-3 w-3 text-muted-foreground" />
-              {lead.phone ? formatPhone(lead.phone) : "\u2014"}
+              {lead.phone ? formatPhoneWithExt(lead.phone, lead.phone_ext) : "\u2014"}
             </p>
           </CardContent>
         </Card>

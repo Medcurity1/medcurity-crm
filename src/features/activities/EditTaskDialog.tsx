@@ -27,13 +27,17 @@ import {
   reminderFromActivity,
   type ReminderUI,
 } from "./reminder";
+import { AssignToField } from "./AssignToField";
 import { errorMessage } from "@/lib/errors";
 import { toast } from "sonner";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import type { Activity } from "@/types/crm";
 
 /**
  * View + edit an existing task. Kept narrow on purpose:
- *   - subject / body / due_at / reminder fields
+ *   - subject / body / due_at / priority / recurrence / reminder fields
+ *   - owner (survey T5) — reassigning here is how a task gets handed
+ *     over; the activities trigger in 20260817140000 bells the new owner
  *   - NOT: activity_type, account/contact/opportunity links (use
  *     ReattributeActivityDialog for relinking, no UI for changing type)
  *
@@ -60,6 +64,10 @@ export function EditTaskDialog({
   const [reminder, setReminder] = useState<ReminderUI>(EMPTY_REMINDER);
   const [priority, setPriority] = useState<"high" | "normal" | "low">("normal");
   const [recur, setRecur] = useState<RecurrenceUI>(EMPTY_RECURRENCE);
+  // Task owner (survey T5). "" only ever means a legacy row that never had
+  // one — the picker offers "Unassigned" solely in that case, so nobody can
+  // un-own a task that already has an owner.
+  const [ownerId, setOwnerId] = useState<string>("");
 
   // Re-hydrate from the task when it changes.
   useEffect(() => {
@@ -74,6 +82,7 @@ export function EditTaskDialog({
     // default tier), which is how they already sort/render elsewhere.
     setPriority(task.priority ?? "normal");
     setRecur(recurrenceToUI(task));
+    setOwnerId(task.owner_user_id ?? "");
   }, [task]);
 
   async function handleSave(e: React.FormEvent) {
@@ -104,6 +113,9 @@ export function EditTaskDialog({
         reminder_at: reminderFields.reminder_at,
         reminder_channels: reminderFields.reminder_channels,
         priority,
+        // Changing this is what fires the task_assigned bell on the new
+        // owner (DB trigger, 20260817140000) — nothing to send from here.
+        owner_user_id: ownerId || null,
         recur_freq: recurFields.recur_freq,
         recur_interval: recurFields.recur_interval,
         recur_weekday: recurFields.recur_weekday,
@@ -124,19 +136,21 @@ export function EditTaskDialog({
     (subject !== (task.subject ?? "") ||
       body !== (task.body ?? "") ||
       dueAt !== (task.due_at ? toLocalInput(task.due_at) : "") ||
-      priority !== (task.priority ?? "normal"));
+      priority !== (task.priority ?? "normal") ||
+      // A hand-off is the most consequential edit in this dialog — it
+      // must count as unsaved work, not get silently dropped on an
+      // outside click (survey T5).
+      ownerId !== (task.owner_user_id ?? ""));
+  // Migrated to the shared guard (2026-08-17): the onInteractOutside/
+  // onEscapeKeyDown pair this used to use silently blocked the dismissal
+  // with no explanation, and neither one covered the dialog's own X
+  // button (a separate Radix code path) — this does, and adds the confirm.
+  const discard = useDialogDiscardGuard(dirty, () => onOpenChange(false));
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="sm:max-w-md"
-        onInteractOutside={(e) => {
-          if (dirty) e.preventDefault();
-        }}
-        onEscapeKeyDown={(e) => {
-          if (dirty) e.preventDefault();
-        }}
-      >
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Edit Task</DialogTitle>
           <DialogDescription>
@@ -166,6 +180,13 @@ export function EditTaskDialog({
               onChange={(e) => setDueAt(e.target.value)}
             />
           </div>
+
+          <AssignToField
+            id="edit-owner"
+            value={ownerId}
+            onChange={setOwnerId}
+            allowUnassigned={!task?.owner_user_id}
+          />
 
           <div className="space-y-2">
             <Label htmlFor="edit-priority">Priority</Label>
@@ -198,7 +219,7 @@ export function EditTaskDialog({
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={discard.requestClose}>
               Cancel
             </Button>
             <Button type="submit" disabled={update.isPending}>
@@ -208,6 +229,8 @@ export function EditTaskDialog({
         </form>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }
 

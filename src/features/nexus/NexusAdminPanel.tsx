@@ -29,6 +29,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { QueryError } from "@/components/QueryError";
 import { useAllUsers } from "@/features/admin/admin-api";
 import {
   useDefaultWidgets,
@@ -202,7 +203,13 @@ function UserNexusEditor({
   userId: string;
   userName: string;
 }) {
-  const { data: state, isLoading: stateLoading } = useNexusUserState(userId);
+  const {
+    data: state,
+    isLoading: stateLoading,
+    isError: stateError,
+    isFetching: stateFetching,
+    refetch: refetchState,
+  } = useNexusUserState(userId);
   const { data: widgets } = useNexusWidgets(userId);
   const initialize = useInitializeUserNexus();
   const reset = useResetUserNexus();
@@ -227,6 +234,17 @@ function UserNexusEditor({
       <p className="text-sm text-muted-foreground py-4">
         Checking {userName}'s Nexus page…
       </p>
+    );
+  }
+
+  if (stateError) {
+    return (
+      <QueryError
+        compact
+        message={`Couldn't check ${userName}'s Nexus page.`}
+        onRetry={() => refetchState()}
+        isRetrying={stateFetching}
+      />
     );
   }
 

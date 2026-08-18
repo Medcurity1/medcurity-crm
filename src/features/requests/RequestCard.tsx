@@ -25,6 +25,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { formatDate } from "@/lib/formatters";
 import { toast } from "sonner";
 import type { CrmRequest, RequestPriority, RequestStatus } from "@/types/crm";
 import {
@@ -41,6 +42,7 @@ import {
   useRequestAttachments,
   downloadAttachment,
 } from "./api";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 
 const PRIORITY_BADGE: Record<RequestPriority, string> = {
   high: "bg-red-500 text-white",
@@ -56,13 +58,10 @@ const STATUS_BADGE: Record<RequestStatus, string> = {
   cancelled: "bg-slate-100 text-slate-700 dark:bg-slate-500/20 dark:text-slate-300",
 };
 
-function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
+// Thin alias: this used to reimplement formatDate via toLocaleDateString
+// with an explicit month/day/year shape that (undefined locale) drifted
+// from the app's fixed "MMM d, yyyy" style on a non-US browser locale.
+const fmtDate = formatDate;
 
 function fmtSize(bytes: number | null): string {
   if (bytes == null) return "";
@@ -189,6 +188,10 @@ export function RequestDetailDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
   const notesDirty = notesDraft.trim() !== (request.working_notes ?? "").trim();
+  // Guard against a stray outside-click/Esc/X discarding an unsaved notes
+  // edit. The decisive action buttons (Mark complete/Approve/Deny) stay
+  // unguarded on purpose — they're deliberate choices, not accidental exits.
+  const discard = useDialogDiscardGuard(notesDirty, () => onOpenChange(false));
   const [summary, setSummary] = useState<string | null>(request.ai_summary);
   const [designPrompt, setDesignPrompt] = useState<string | null>(
     request.design_prompt,
@@ -235,7 +238,8 @@ export function RequestDetailDialog({
   const fields = detailFields(request);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       {/* Scrolling lives on an inner wrapper, NOT on DialogContent: the
           dialog is centered with a CSS transform, and a transformed
           scroll container clips its right edge at non-100% page zoom. */}
@@ -617,13 +621,15 @@ export function RequestDetailDialog({
             </Button>
           )}
           {!isPending && (
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
+            <Button variant="outline" onClick={discard.requestClose}>
               Close
             </Button>
           )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }
 

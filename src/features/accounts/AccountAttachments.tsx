@@ -14,6 +14,8 @@ import {
 import { Paperclip, Upload, Download, Trash2, FileText, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDate } from "@/lib/formatters";
+import { QueryError } from "@/components/QueryError";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/features/auth/AuthProvider";
 import {
   useAccountAttachments,
@@ -33,7 +35,7 @@ function formatBytes(n: number | null): string {
 }
 
 export function AccountAttachments({ accountId }: { accountId: string }) {
-  const { data: attachments, isLoading } = useAccountAttachments(accountId);
+  const { data: attachments, isLoading, isError, isFetching, refetch } = useAccountAttachments(accountId);
   const upload = useUploadAccountAttachments(accountId);
   const del = useDeleteAccountAttachment(accountId);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -102,7 +104,17 @@ export function AccountAttachments({ accountId }: { accountId: string }) {
       </CardHeader>
       <CardContent>
         {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <div className="space-y-2">
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+          </div>
+        ) : isError ? (
+          <QueryError
+            compact
+            message="Couldn't load documents."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : !attachments || attachments.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No documents yet. Upload proposals, signed agreements, or partner materials (up to {MAX_MB} MB each).

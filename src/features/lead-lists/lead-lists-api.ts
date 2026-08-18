@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/features/auth/AuthProvider";
 import type { LeadList, LeadListMember } from "@/types/crm";
 import { buildPersonSearchClause } from "@/lib/search-clause";
+import { formatDate } from "@/lib/formatters";
 
 // (Smart-list filter machinery removed 2026-07-20 with the lead type —
 // lists are static contact lists; filter_config is inert history.)
@@ -114,7 +115,7 @@ export function useLeadListMembers(listId: string | undefined) {
       const { data, error } = await supabase
         .from("lead_list_members")
         .select(
-          "*, contact:contacts(id, first_name, last_name, email, phone, account:accounts(name))",
+          "*, contact:contacts(id, first_name, last_name, email, phone, phone_ext, account:accounts(name))",
         )
         .eq("list_id", listId)
         .order("added_at", { ascending: false });
@@ -216,6 +217,7 @@ export interface SmartMemberRow {
   last_name: string;
   email: string | null;
   phone: string | null;
+  phone_ext: string | null;
   account: { name: string } | null;
 }
 
@@ -473,7 +475,7 @@ export function useSmartListMembers(list: LeadList | null) {
         fetchListExclusionIds(list!.id),
         buildSmartQuery(
           rules,
-          "id, first_name, last_name, email, phone, account:accounts!account_id(name)",
+          "id, first_name, last_name, email, phone, phone_ext, account:accounts!account_id(name)",
         )
           .order("last_name", { ascending: true, nullsFirst: false })
           .limit(SMART_FETCH_CAP),
@@ -482,7 +484,7 @@ export function useSmartListMembers(list: LeadList | null) {
         // list can carry the odd extra person.
         supabase
           .from("lead_list_members")
-          .select("contact:contacts(id, first_name, last_name, email, phone, account:accounts!account_id(name))")
+          .select("contact:contacts(id, first_name, last_name, email, phone, phone_ext, account:accounts!account_id(name))")
           .eq("list_id", list!.id)
           .not("contact_id", "is", null),
       ]);
@@ -542,7 +544,7 @@ export function useFreezeSmartList() {
       if (!ids.length) throw new Error("No contacts match this smart list right now.");
       const { data: auth } = await supabase.auth.getUser();
       const frozen = await createList.mutateAsync({
-        name: `${list.name} (frozen ${new Date().toLocaleDateString()})`,
+        name: `${list.name} (frozen ${formatDate(new Date().toISOString())})`,
         description: `Snapshot of smart list "${list.name}"`,
         owner_user_id: auth.user!.id,
         is_dynamic: false,

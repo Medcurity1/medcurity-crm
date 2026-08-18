@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { formatCurrencyDetailed, employeesToFteRange } from "@/lib/formatters";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 
 /** Fetch fresh FTE-relevant fields for an account when picker opens.
  *  Used by the picker to avoid stale opp.account snapshots. */
@@ -455,8 +456,14 @@ export function MultiProductPicker(props: Props) {
 
   const selectedPriceBook = activePriceBooks.find((pb) => pb.id === priceBookId);
 
+  // Guard against a stray outside-click/Esc discarding staged products
+  // (quantities/discounts included) before they're added.
+  const dirty = picked.length > 0;
+  const discard = useDialogDiscardGuard(dirty, () => onOpenChange(false));
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent className="sm:max-w-4xl max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
         <DialogHeader className="px-6 pt-6 pb-2">
           <DialogTitle>Add Products</DialogTitle>
@@ -685,7 +692,7 @@ export function MultiProductPicker(props: Props) {
         )}
 
         <DialogFooter className="px-6 pb-6 pt-3 border-t">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={discard.requestClose}>
             Cancel
           </Button>
           <Button onClick={handleAdd} disabled={picked.length === 0 || bulkMutation.isPending}>
@@ -701,5 +708,7 @@ export function MultiProductPicker(props: Props) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }

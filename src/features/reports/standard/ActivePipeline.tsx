@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import {
   Table,
   TableBody,
@@ -44,7 +45,7 @@ interface PipelineRow {
 }
 
 export function ActivePipeline() {
-  const { data: rows, isLoading } = useQuery({
+  const { data: rows, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["report", "active-pipeline-v2"],
     queryFn: async () => {
       // Batch-fetch + client join. Embedded PostgREST joins were
@@ -192,6 +193,12 @@ export function ActivePipeline() {
             <div className="p-4">
               <Skeleton className="h-64 w-full" />
             </div>
+          ) : isError ? (
+            <QueryError
+              message="Couldn't load the pipeline."
+              onRetry={() => refetch()}
+              isRetrying={isFetching}
+            />
           ) : !rows?.length ? (
             <p className="p-6 text-sm text-muted-foreground text-center">
               No open opportunities.

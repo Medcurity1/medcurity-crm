@@ -22,8 +22,10 @@ import {
 } from "./api";
 import { DeleteProductDialog } from "./DeleteProductDialog";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
+import { QueryError } from "@/components/QueryError";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -123,10 +125,14 @@ export function ProductsPage() {
 function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
   const [showInactive, setShowInactive] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  const { data: products, isLoading } = useProducts({
+  const { data: products, isLoading, isError, isFetching, refetch } = useProducts({
     includeInactive: showInactive,
     includeArchived: isAdmin && showArchived,
   });
+  // Toggles default OFF (hiding inactive/archived), so a zero-length
+  // result while they're off doesn't mean "no products exist" — it may
+  // just mean everything that exists is currently filtered out.
+  const hasActiveFilters = !showInactive || (isAdmin && !showArchived);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -247,13 +253,23 @@ function ProductsTab({ isAdmin }: { isAdmin: boolean }) {
         )}
       </div>
 
-      {!products?.length ? (
+      {isError ? (
+        <QueryError
+          message="Couldn't load products."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
+      ) : !products?.length ? (
         <EmptyState
           icon={Package}
           title="No products found"
-          description="Add your first product to get started"
+          description={
+            hasActiveFilters
+              ? "No matches — try adjusting your filters"
+              : "Add your first product to get started"
+          }
           action={
-            isAdmin
+            isAdmin && !hasActiveFilters
               ? { label: "Add Product", onClick: openNew }
               : undefined
           }
@@ -432,7 +448,7 @@ function ManageFamiliesDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
-  const { data: families, isLoading } = useProductFamilies();
+  const { data: families, isLoading, isError, isFetching, refetch } = useProductFamilies();
   const createFam = useCreateProductFamily();
   const deleteFam = useDeleteProductFamily();
   const [newName, setNewName] = useState("");
@@ -463,8 +479,14 @@ function ManageFamiliesDialog({
     }
   }
 
+  // Each add already commits on click, so the only thing a stray
+  // outside-click/Esc could discard is a half-typed name still in the box.
+  const dirty = newName.trim() !== "";
+  const discard = useDialogDiscardGuard(dirty, () => onOpenChange(false));
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Manage Product Families</DialogTitle>
@@ -494,6 +516,13 @@ function ManageFamiliesDialog({
 
           {isLoading ? (
             <Skeleton className="h-24 w-full" />
+          ) : isError ? (
+            <QueryError
+              compact
+              message="Couldn't load families."
+              onRetry={() => refetch()}
+              isRetrying={isFetching}
+            />
           ) : !families?.length ? (
             <p className="text-sm text-muted-foreground py-2">No families yet.</p>
           ) : (
@@ -517,12 +546,14 @@ function ManageFamiliesDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={discard.requestClose}>
             Done
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }
 
@@ -531,7 +562,7 @@ function ManageFamiliesDialog({
    ────────────────────────────────────────────── */
 
 function ProductDetailPanel({ product }: { product: Product }) {
-  const { data: entries, isLoading } = useEntriesForProduct(product.id);
+  const { data: entries, isLoading, isError, isFetching, refetch } = useEntriesForProduct(product.id);
 
   return (
     <div className="space-y-3">
@@ -579,6 +610,13 @@ function ProductDetailPanel({ product }: { product: Product }) {
         <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">Used in Price Books</p>
         {isLoading ? (
           <Skeleton className="h-12 w-full" />
+        ) : isError ? (
+          <QueryError
+            compact
+            message="Couldn't load price book entries."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : !entries?.length ? (
           <p className="text-sm text-muted-foreground">Not in any price book yet.</p>
         ) : (
@@ -703,8 +741,31 @@ function ProductDialog({
     }
   }
 
+  // Guard against a stray outside-click/Esc discarding a filled-in product —
+  // compare against the seeded values (product prop when editing, blank
+  // defaults when creating) so opening/closing untouched never trips it.
+  const dirty = product
+    ? name !== product.name ||
+      code !== product.code ||
+      family !== (product.product_family ?? "") ||
+      pricingModel !== (product.pricing_model ?? "per_fte") ||
+      hasFlatPrice !== (product.has_flat_price ?? false) ||
+      defaultArr !== (product.default_arr != null ? String(product.default_arr) : "") ||
+      description !== (product.description ?? "") ||
+      isActive !== product.is_active
+    : name !== "" ||
+      code !== "" ||
+      family !== "" ||
+      pricingModel !== "per_fte" ||
+      hasFlatPrice !== false ||
+      defaultArr !== "" ||
+      description !== "" ||
+      isActive !== true;
+  const discard = useDialogDiscardGuard(dirty, () => onOpenChange(false));
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit Product" : "Add Product"}</DialogTitle>
@@ -809,13 +870,15 @@ function ProductDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="outline" onClick={discard.requestClose}>Cancel</Button>
           <Button onClick={handleSave} disabled={createMutation.isPending || updateMutation.isPending}>
             {(createMutation.isPending || updateMutation.isPending) ? "Saving..." : isEditing ? "Save Changes" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }
 
@@ -830,7 +893,7 @@ function PriceBooksTab({
   isAdmin: boolean;
   initialExpandId?: string | null;
 }) {
-  const { data: priceBooks, isLoading } = usePriceBooks();
+  const { data: priceBooks, isLoading, isError, isFetching, refetch } = usePriceBooks();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingPb, setEditingPb] = useState<PriceBook | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PriceBook | null>(null);
@@ -895,7 +958,13 @@ function PriceBooksTab({
         )}
       </div>
 
-      {!priceBooks?.length ? (
+      {isError ? (
+        <QueryError
+          message="Couldn't load price books."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
+      ) : !priceBooks?.length ? (
         <EmptyState
           icon={Package}
           title="No price books yet"
@@ -949,7 +1018,7 @@ function DeletePriceBookDialog({
   onConfirm: (cascade: boolean) => void;
   isPending: boolean;
 }) {
-  const { data: entryCount, isLoading } = usePriceBookEntryCount(priceBook?.id);
+  const { data: entryCount, isLoading, isError, isFetching, refetch } = usePriceBookEntryCount(priceBook?.id);
   const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
@@ -971,6 +1040,16 @@ function DeletePriceBookDialog({
 
         {isLoading ? (
           <Skeleton className="h-12 w-full" />
+        ) : isError ? (
+          // Don't guess: a failed count must never render as "safe to
+          // delete" (see below) — that would be a false-negative that
+          // could destroy pricing data.
+          <QueryError
+            compact
+            message="Couldn't check for existing pricing entries."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : hasEntries ? (
           <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-900 p-3 text-sm">
             <p className="font-medium text-amber-900 dark:text-amber-200">
@@ -991,7 +1070,7 @@ function DeletePriceBookDialog({
           <Button variant="outline" onClick={onClose} disabled={isPending}>
             Cancel
           </Button>
-          {!hasEntries && (
+          {!hasEntries && !isError && (
             <Button
               variant="destructive"
               onClick={() => onConfirm(false)}
@@ -1121,8 +1200,20 @@ function PriceBookEntriesSection({
   // Default fte_range for new entries: book's own fte_range, else null.
   const defaultFteRange = priceBook.fte_range ?? null;
 
-  const { data: entries, isLoading: entriesLoading } = usePriceBookEntries(priceBookId);
-  const { data: products, isLoading: productsLoading } = useProducts();
+  const {
+    data: entries,
+    isLoading: entriesLoading,
+    isError: entriesError,
+    isFetching: entriesFetching,
+    refetch: refetchEntries,
+  } = usePriceBookEntries(priceBookId);
+  const {
+    data: products,
+    isLoading: productsLoading,
+    isError: productsError,
+    isFetching: productsFetching,
+    refetch: refetchProducts,
+  } = useProducts();
   const setPrice = useSetPriceBookEntryPrice();
 
   const [showInactive, setShowInactive] = useState(false);
@@ -1131,6 +1222,19 @@ function PriceBookEntriesSection({
 
   if (entriesLoading || productsLoading) {
     return <Skeleton className="h-20 w-full" />;
+  }
+
+  if (entriesError || productsError) {
+    return (
+      <QueryError
+        message="Couldn't load pricing for this book."
+        onRetry={() => {
+          refetchEntries();
+          refetchProducts();
+        }}
+        isRetrying={entriesFetching || productsFetching}
+      />
+    );
   }
 
   // Build a map of product_id -> entry (only counting entries that match
@@ -1491,8 +1595,23 @@ function PriceBookDialog({
     }
   }
 
+  // Same seeded-vs-blank comparison as ProductDialog above.
+  const dirty = priceBook
+    ? name !== priceBook.name ||
+      description !== (priceBook.description ?? "") ||
+      effectiveDate !== (priceBook.effective_date ?? "") ||
+      isDefault !== priceBook.is_default ||
+      isActive !== priceBook.is_active
+    : name !== "" ||
+      description !== "" ||
+      effectiveDate !== "" ||
+      isDefault !== false ||
+      isActive !== true;
+  const discard = useDialogDiscardGuard(dirty, () => onOpenChange(false));
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit Price Book" : "Add Price Book"}</DialogTitle>
@@ -1530,13 +1649,15 @@ function PriceBookDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="outline" onClick={discard.requestClose}>Cancel</Button>
           <Button onClick={handleSave} disabled={createMutation.isPending || updateMutation.isPending}>
             {(createMutation.isPending || updateMutation.isPending) ? "Saving..." : isEditing ? "Save Changes" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }
 

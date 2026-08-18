@@ -952,7 +952,11 @@ export interface Notification {
     | "meddy_buying_intent"
     | "meddy_missed_chat"
     | "meddy_contact_received"
-    | "follow_up_due";
+    | "follow_up_due"
+    // Hand-offs (survey T5). Produced entirely by DB triggers on
+    // owner_user_id — see 20260817140000_assignment_notifications.sql.
+    | "record_assigned"
+    | "task_assigned";
   title: string;
   message: string | null;
   link: string | null;

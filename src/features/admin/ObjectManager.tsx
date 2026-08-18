@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import {
   Select,
   SelectContent,
@@ -62,7 +63,7 @@ const ENTITY_LABELS: Record<string, string> = {
 };
 
 export function ObjectManager() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["object-manager-fields"],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -180,6 +181,12 @@ export function ObjectManager() {
 
         {isLoading ? (
           <Skeleton className="h-96 w-full" />
+        ) : isError ? (
+          <QueryError
+            message="Couldn't load the schema inventory."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : (
           <div className="border rounded-lg overflow-x-auto">
             <Table>

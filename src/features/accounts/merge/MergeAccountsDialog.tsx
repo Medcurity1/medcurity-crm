@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AccountCombobox } from "@/components/AccountCombobox";
 import { cn } from "@/lib/utils";
+import { formatDate } from "@/lib/formatters";
 import {
   buildDefaultPicks, buildFieldChoices, buildFieldRows, conflictCount,
   isBlankValue, MERGE_FIELD_GROUPS,
@@ -54,7 +55,7 @@ function fmtValue(row: MergeFieldRow, side: MergeSide, ownerNames: Record<MergeS
 function SideStats({ acct }: { acct: MergeSideAccount }) {
   return (
     <div className="text-xs text-muted-foreground space-y-0.5">
-      <div>#{acct.account_number ?? "—"} · created {acct.created_at ? new Date(acct.created_at).toLocaleDateString() : "unknown"}</div>
+      <div>#{acct.account_number ?? "—"} · created {acct.created_at ? formatDate(acct.created_at) : "unknown"}</div>
       <div>
         {acct.opportunity_count} deal{acct.opportunity_count === 1 ? "" : "s"}
         {acct.has_closed_won ? " (has a won deal)" : ""} · {acct.contact_count} contact{acct.contact_count === 1 ? "" : "s"}

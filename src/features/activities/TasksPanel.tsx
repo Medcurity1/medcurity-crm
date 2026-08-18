@@ -13,6 +13,7 @@ import { TaskDueChip } from "./TaskDueChip";
 import { AutomationBadge, isAutomationActivity } from "./AutomationBadge";
 import { describeRecurrence } from "./recurrence";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { QueryError } from "@/components/QueryError";
 import { QuickTaskDialog } from "./QuickTaskDialog";
 import { EditTaskDialog } from "./EditTaskDialog";
 import { Button } from "@/components/ui/button";
@@ -176,7 +177,7 @@ export function TasksPanel({
   const reopenMutation = useReopenActivity();
   const archiveMutation = useArchiveActivity();
 
-  const { data, isLoading } = useTasks({
+  const { data, isLoading, isError, isFetching, refetch } = useTasks({
     account_id: accountId,
     contact_id: contactId,
     opportunity_id: opportunityId,
@@ -241,6 +242,16 @@ export function TasksPanel({
           </div>
         ))}
       </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <QueryError
+        message="Couldn't load tasks."
+        onRetry={() => refetch()}
+        isRetrying={isFetching}
+      />
     );
   }
 

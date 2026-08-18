@@ -21,6 +21,7 @@ import {
   reminderFromActivity,
   type ReminderUI,
 } from "./reminder";
+import { AssignToField } from "./AssignToField";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { supabase } from "@/lib/supabase";
 import {
@@ -34,6 +35,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import type { ActivityType, Activity } from "@/types/crm";
 
 interface ActivityFormProps {
@@ -170,6 +172,7 @@ export function ActivityForm({
       activity_date: todayLocalISO(),
       due_at: "",
       contact_id: contactId ?? null,
+      owner_user_id: user?.id ?? "",
       priority: "normal",
       reminder_schedule: "none",
       reminder_at: "",
@@ -231,6 +234,7 @@ export function ActivityForm({
             : todayLocalISO(),
         due_at: dueLocal,
         contact_id: activity.contact_id ?? null,
+        owner_user_id: activity.owner_user_id ?? "",
         priority: activity.priority ?? "normal",
         reminder_schedule:
           (activity.reminder_schedule as ActivityFormValues["reminder_schedule"]) ??
@@ -249,6 +253,7 @@ export function ActivityForm({
         activity_date: todayLocalISO(),
         due_at: "",
         contact_id: contactId ?? null,
+        owner_user_id: user?.id ?? "",
         priority: "normal",
         reminder_schedule: "none",
         reminder_at: "",
@@ -257,7 +262,7 @@ export function ActivityForm({
       setRecur(EMPTY_RECURRENCE);
       setReminder(EMPTY_REMINDER);
     }
-  }, [open, activity, form, contactId]);
+  }, [open, activity, form, contactId, user?.id]);
 
   function onSubmit(values: ActivityFormValues) {
     const isTask = values.activity_type === "task";
@@ -280,6 +285,12 @@ export function ActivityForm({
     const taskPriority: "high" | "normal" | "low" | null = isTask
       ? values.priority ?? "normal"
       : null;
+    // Only a TASK can be handed to a teammate (survey T5). A logged
+    // call/email/meeting is a record of what *you* did, so it always
+    // stays owned by whoever recorded it — the picker is hidden for
+    // those types and the value below never leaves the creator.
+    const ownerUserId: string | null =
+      (isTask ? values.owner_user_id || user?.id : user?.id) ?? null;
 
     // Activity date applies to every type. If the user picked today (or
     // didn't touch the field), stamp it with the actual current time so
@@ -317,6 +328,10 @@ export function ActivityForm({
           activity_date: activityDateIso,
           due_at: dueAtIso,
           contact_id: resolvedContactId,
+          // Only send the owner when this is a task — an edit to a
+          // logged call must not silently re-own it, and the DB trigger
+          // only bells on an actual change anyway.
+          ...(isTask ? { owner_user_id: ownerUserId } : {}),
           priority: taskPriority,
           recur_freq: recurFields.recur_freq,
           recur_interval: recurFields.recur_interval,
@@ -351,7 +366,7 @@ export function ActivityForm({
         contact_id: resolvedContactId ?? undefined,
         opportunity_id: opportunityId,
         lead_id: leadId,
-        owner_user_id: user?.id,
+        owner_user_id: ownerUserId,
         priority: taskPriority,
         recur_freq: recurFields.recur_freq,
         recur_interval: recurFields.recur_interval,
@@ -376,20 +391,15 @@ export function ActivityForm({
   }
 
   const selectedType = form.watch("activity_type");
+  // Migrated to the shared guard (2026-08-17) — see EditTaskDialog.tsx for
+  // why: it also covers the dialog's own X button, and shows an actual
+  // confirm instead of silently swallowing the dismissal.
+  const discard = useDialogDiscardGuard(form.formState.isDirty, () => onOpenChange(false));
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="sm:max-w-md"
-        // Don't let a stray outside-click / Esc silently discard a
-        // filled-in activity — only the explicit Cancel/X should close.
-        onInteractOutside={(e) => {
-          if (form.formState.isDirty) e.preventDefault();
-        }}
-        onEscapeKeyDown={(e) => {
-          if (form.formState.isDirty) e.preventDefault();
-        }}
-      >
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit Activity" : "Log Activity"}</DialogTitle>
         </DialogHeader>
@@ -532,6 +542,19 @@ export function ActivityForm({
             </div>
           )}
 
+          {/* Assign to — tasks only (survey T5). Defaults to me; picking
+              a teammate hands the task over and bells them. */}
+          {selectedType === "task" && (
+            <AssignToField
+              id="activity-owner"
+              value={form.watch("owner_user_id") ?? ""}
+              onChange={(next) =>
+                form.setValue("owner_user_id", next, { shouldDirty: true })
+              }
+              allowUnassigned={isEditing && !activity?.owner_user_id}
+            />
+          )}
+
           {/* Priority — tasks only. Medium by default (V2-A1). */}
           {selectedType === "task" && (
             <div className="space-y-2">
@@ -591,7 +614,7 @@ export function ActivityForm({
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={discard.requestClose}
             >
               Cancel
             </Button>
@@ -609,5 +632,7 @@ export function ActivityForm({
         </form>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }

@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { useTrainingNotes, useAddTrainingNote, useDeleteTrainingNote } from "./api";
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -40,7 +41,7 @@ export function TrainingPanel({
   open: boolean;
   onOpenChange: (o: boolean) => void;
 }) {
-  const { data: notes, isLoading } = useTrainingNotes();
+  const { data: notes, isLoading, isError, isFetching, refetch } = useTrainingNotes();
   const addNote = useAddTrainingNote();
   const deleteNote = useDeleteTrainingNote();
   const [draft, setDraft] = useState("");
@@ -91,6 +92,13 @@ export function TrainingPanel({
               Array.from({ length: 4 }).map((_, i) => (
                 <Skeleton key={i} className="h-14 w-full" />
               ))
+            ) : isError ? (
+              <QueryError
+                compact
+                message="Couldn't load training notes."
+                onRetry={() => refetch()}
+                isRetrying={isFetching}
+              />
             ) : !notes?.length ? (
               <p className="text-sm text-muted-foreground">No training notes yet.</p>
             ) : (

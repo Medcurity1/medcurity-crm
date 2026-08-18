@@ -138,6 +138,9 @@ const adminItems: NavItem[] = [
   // "Leads" 2026-07-20 after the prod lead cleanup; reps don't see it —
   // admins clean + promote to Contacts or archive).
   { to: "/imports", icon: Inbox, label: "Imports", badge: { label: "Admin", className: ADMIN_BADGE } },
+  // Archive back in adminItems (Nathan, 2026-08-17, same-day reversal of
+  // the self-serve experiment): recovery is an admin task here, and rep
+  // sidebars stay reserved for daily-use tabs.
   { to: "/archive", icon: Archive, label: "Archive", badge: { label: "Admin", className: ADMIN_BADGE } },
   { to: "/admin", icon: Settings, label: "Admin Settings", badge: { label: "Admin", className: ADMIN_BADGE } },
 ];

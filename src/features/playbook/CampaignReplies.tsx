@@ -16,7 +16,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { cn } from "@/lib/utils";
 import { formatName, formatRelativeDate, formatDateTime } from "@/lib/formatters";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { LoadError } from "./LoadError";
+import { QueryError } from "@/components/QueryError";
 import { useCampaignReplies, useMarkReplyHandled, useLogReplyCall, type CampaignReplyRow } from "./api";
 import { extractReplyBody, isPositiveReplyCategory, replySubject, mailtoRecipient } from "./reply-extract";
 
@@ -215,7 +215,7 @@ export function CampaignReplies() {
             {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
           </div>
         ) : isError ? (
-          <LoadError what="replies" onRetry={() => refetch()} />
+          <QueryError message="Couldn't load replies." onRetry={() => refetch()} />
         ) : !replies?.length ? (
           <EmptyState
             icon={MessageSquareText}

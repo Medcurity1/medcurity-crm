@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { AddToListDialog } from "@/features/lead-lists/AddToListDialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import {
   Select,
   SelectContent,
@@ -52,7 +53,7 @@ export function MqlContacts() {
   const [range, setRange] = useState<DateRangeKey>("current_quarter");
   const { start, end } = resolveRange(range);
 
-  const { data: rows, isLoading, error } = useQuery({
+  const { data: rows, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["report", "mql-contacts-v2", start, end],
     queryFn: async (): Promise<MqlContactRow[]> => {
       type ContactRaw = {
@@ -186,12 +187,6 @@ export function MqlContacts() {
         }
       />
 
-      {error && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          Error: {(error as Error).message}
-        </div>
-      )}
-
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <Kpi label="MQL Contacts" value={total.toLocaleString()} />
         <Kpi label="Range" value={DATE_RANGE_OPTIONS.find((o) => o.value === range)?.label ?? ""} />
@@ -221,6 +216,17 @@ export function MqlContacts() {
                   <TableRow>
                     <TableCell colSpan={9} className="p-4">
                       <Skeleton className="h-48 w-full" />
+                    </TableCell>
+                  </TableRow>
+                ) : isError ? (
+                  <TableRow>
+                    <TableCell colSpan={9} className="p-4">
+                      <QueryError
+                        compact
+                        message="Couldn't load this report."
+                        onRetry={() => refetch()}
+                        isRetrying={isFetching}
+                      />
                     </TableCell>
                   </TableRow>
                 ) : !rows?.length ? (

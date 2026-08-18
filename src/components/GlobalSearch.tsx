@@ -1,105 +1,227 @@
-import { useEffect, useState, useCallback } from "react";
+// Global search v2 — the Cmd+K palette (docs/search/global-search-v2.md).
+//
+// Two things changed from v1, and they're independent:
+//
+// 1. WHAT IT FINDS. v1 fired three parallel PostgREST queries and matched
+//    name-only on accounts and deals, so you could not find an account by its
+//    city, a deal by the company it belongs to, or an email by a phrase in its
+//    BODY. All of that now comes from one `global_search_v2` RPC
+//    (supabase/migrations/20260817120000_global_search_v2.sql) — one round
+//    trip, ranked and capped server-side, SECURITY INVOKER so a user still
+//    only finds rows their RLS lets them open.
+//
+// 2. HOW IT LOOKS. Rows carry the Nexus icon-chip (src/lib/entity-visuals.tsx)
+//    instead of a bare grey glyph, groups get an eyebrow header with a count
+//    and a "See all" into the pre-filtered list, matches are highlighted, and
+//    a footer bar states the keyboard model.
+//
+// Kept from v1 on purpose: the cmdk CommandDialog (its keyboard + a11y model
+// is right), shouldFilter={false} (results arrive server-filtered — letting
+// cmdk re-filter them made the palette look stuck), the recents list backed by
+// useRecentRecords, and the debounce.
+
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { Building2, Users, Target, Search, Inbox } from "lucide-react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { Search } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
-  CommandGroup,
   CommandInput,
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
-import { formatCurrency, customerStatusLabel } from "@/lib/formatters";
-import { buildPersonSearchClause } from "@/lib/search-clause";
+import {
+  activityLabel,
+  customerStatusLabel,
+  formatCurrency,
+  formatDate,
+  stageLabel,
+} from "@/lib/formatters";
+import {
+  ENTITY_CHIP_CLASS,
+  ENTITY_VISUALS,
+  activityIcon,
+  type SearchEntity,
+} from "@/lib/entity-visuals";
 import { useRecentRecords, type RecentRecord } from "@/hooks/useRecentRecords";
-import type {
-  Account,
-  Contact,
-  Opportunity,
-  OpportunityStage,
-} from "@/types/crm";
+import type { ActivityType, CustomerStatus, OpportunityStage } from "@/types/crm";
 
-type AccountResult = Pick<Account, "id" | "name" | "customer_status">;
-type ContactResult = Pick<Contact, "id" | "first_name" | "last_name" | "email">;
-type OpportunityResult = Pick<Opportunity, "id" | "name" | "stage" | "amount">;
-
-// Snappier search: results start after a single character and with a shorter
-// debounce, so typing "M" to find Mary feels instant instead of laggy.
-const DEBOUNCE_MS = 150;
+// 200ms: long enough that a fast typist sends one query instead of six, short
+// enough to feel live. Results still start at a single character.
+const DEBOUNCE_MS = 200;
 const MIN_SEARCH_LENGTH = 1;
-// Per-entity cap shown in the dropdown after re-ranking.
-const RESULTS_PER_ENTITY = 10;
-// Fetch a wider net from the DB so we can re-rank prefix matches
-// above substring matches. With the old limit=5 and no order, an
-// arbitrary 5 substring matches could come back and bury the
-// actual prefix match (e.g. "entre" returned "Endoscopic Surgical
-// Centre of Maryland" before "Entre Technology Services").
-const FETCH_LIMIT = 40;
+const RESULTS_PER_GROUP = 8;
+// Must match the `limit 50` in the RPC's per-group CTEs: the server counts no
+// further than this, so a total that reaches it is displayed as "50+".
+const TOTAL_CAP = 50;
 
-/**
- * Re-rank server results so prefix matches on the displayed label
- * float to the top, then case-insensitive alphabetical. The DB
- * uses plain ilike '%q%' which doesn't distinguish prefix from
- * mid-string matches; this is the cheapest fix that doesn't
- * require a pg_trgm/ts_vector migration.
- */
-function rankResults<T>(rows: T[] | undefined, query: string, labelOf: (row: T) => string): T[] {
-  if (!rows) return [];
-  const q = query.toLowerCase();
-  return [...rows].sort((a, b) => {
-    const la = labelOf(a).toLowerCase();
-    const lb = labelOf(b).toLowerCase();
-    const aPrefix = la.startsWith(q) ? 0 : 1;
-    const bPrefix = lb.startsWith(q) ? 0 : 1;
-    if (aPrefix !== bPrefix) return aPrefix - bPrefix;
-    return la.localeCompare(lb);
-  });
+// ── Shape returned by global_search_v2 ────────────────────────────────
+// Values are RAW (enum tokens, status keys) and formatted here by the same
+// helpers the rest of the app uses, so the SQL never has to know what a stage
+// is called this quarter.
+
+type SearchGroupKey = "accounts" | "contacts" | "opportunities" | "activities";
+
+interface SearchRow {
+  id: string;
+  label: string;
+  sublabel: string | null;
+  meta: string | null;
+  /** opportunities only */
+  amount?: number | null;
+  /** activities only — effective_at (coalesce(activity_date, created_at)) */
+  occurred_at?: string | null;
+  /** activities only — the record the activity hangs off, if any */
+  related_entity?: SearchEntity | null;
+  related_id?: string | null;
 }
 
-const stageLabels: Record<OpportunityStage, string> = {
-  details_analysis: "Details Analysis",
-  demo: "Demo",
-  proposal_and_price_quote: "Proposal and Price Quote",
-  proposal_conversation: "Proposal Conversation",
-  closed_won: "Closed Won",
-  closed_lost: "Closed Lost",
-  // Legacy labels — kept for history rows only
-  lead: "Lead",
-  qualified: "Qualified",
-  proposal: "Proposal",
-  verbal_commit: "Verbal Commit",
+interface SearchGroupResult {
+  rows: SearchRow[];
+  total: number;
+}
+
+type SearchResponse = Record<SearchGroupKey, SearchGroupResult>;
+
+const EMPTY_GROUP: SearchGroupResult = { rows: [], total: 0 };
+const EMPTY_RESPONSE: SearchResponse = {
+  accounts: EMPTY_GROUP,
+  contacts: EMPTY_GROUP,
+  opportunities: EMPTY_GROUP,
+  activities: EMPTY_GROUP,
 };
 
-// Icon + route per recent-record entity (see useRecentRecords) for the
-// "Recent" group shown before the user types anything.
-const recentIcons: Record<RecentRecord["entity"], typeof Building2> = {
-  account: Building2,
-  contact: Users,
-  opportunity: Target,
-  lead: Inbox,
-};
+const GROUPS: { key: SearchGroupKey; entity: SearchEntity }[] = [
+  { key: "accounts", entity: "account" },
+  { key: "contacts", entity: "contact" },
+  { key: "opportunities", entity: "opportunity" },
+  { key: "activities", entity: "activity" },
+];
 
-const recentPaths: Record<RecentRecord["entity"], string> = {
-  account: "/accounts",
-  contact: "/contacts",
-  opportunity: "/opportunities",
-  lead: "/imports",
-};
+type Scope = "all" | SearchGroupKey;
+
+const SCOPES: { value: Scope; label: string }[] = [
+  { value: "all", label: "All" },
+  ...GROUPS.map((g) => ({
+    value: g.key as Scope,
+    label: ENTITY_VISUALS[g.entity].plural,
+  })),
+];
+
+// ── Presentation helpers ─────────────────────────────────────────────
+
+/**
+ * Wrap the first case-insensitive occurrence of the query so the user can see
+ * WHY a row matched — which matters most for activity rows, where the hit is
+ * often a phrase buried in an email body.
+ */
+function highlightMatch(text: string, query: string): ReactNode {
+  const q = query.trim();
+  if (!text || !q) return text;
+  const idx = text.toLowerCase().indexOf(q.toLowerCase());
+  if (idx < 0) return text;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="rounded-sm bg-primary/15 px-0.5 text-inherit">
+        {text.slice(idx, idx + q.length)}
+      </mark>
+      {text.slice(idx + q.length)}
+    </>
+  );
+}
+
+/** The right-hand column: status, title, stage + money, or type + date. */
+function rowMeta(key: SearchGroupKey, row: SearchRow): string | null {
+  switch (key) {
+    case "accounts":
+      return customerStatusLabel(row.meta as CustomerStatus | null);
+    case "contacts":
+      return row.meta;
+    case "opportunities": {
+      const stage = row.meta
+        ? (stageLabel(row.meta as OpportunityStage) ?? row.meta)
+        : null;
+      const amount =
+        typeof row.amount === "number" ? formatCurrency(row.amount) : null;
+      return [stage, amount].filter(Boolean).join(" · ") || null;
+    }
+    case "activities": {
+      const type = row.meta
+        ? (activityLabel(row.meta as ActivityType) ?? row.meta)
+        : null;
+      const when = row.occurred_at ? formatDate(row.occurred_at) : null;
+      return [type, when].filter(Boolean).join(" · ") || null;
+    }
+  }
+}
+
+/**
+ * Where a row goes. Activities have no detail page of their own worth landing
+ * on, so they open the RECORD they belong to (opportunity > contact > account,
+ * decided server-side) whose timeline shows the item. An activity attached to
+ * nothing falls back to the Activities list.
+ */
+function rowTarget(
+  key: SearchGroupKey,
+  entity: SearchEntity,
+  row: SearchRow,
+  query: string,
+): string {
+  if (key !== "activities") return `${ENTITY_VISUALS[entity].route}/${row.id}`;
+  if (row.related_entity && row.related_id && ENTITY_VISUALS[row.related_entity]) {
+    return `${ENTITY_VISUALS[row.related_entity].route}/${row.related_id}`;
+  }
+  return `/activities?q=${encodeURIComponent(query)}`;
+}
+
+/** "8" when everything is shown, else "8 of 23" / "8 of 50+" at the cap. */
+function countLabel(shown: number, total: number): string {
+  if (total <= shown) return String(shown);
+  return `${shown} of ${total >= TOTAL_CAP ? `${TOTAL_CAP}+` : total}`;
+}
+
+/**
+ * cmdk's root keydown handler claims Enter unconditionally — it preventDefaults
+ * and clicks the highlighted RESULT no matter what's focused. Without this, a
+ * user who tabs to a scope chip or a "See all" link and hits Enter gets sent to
+ * whichever row happened to be highlighted. Stopping the key here lets the
+ * button activate natively; arrow keys still fall through to cmdk, so the list
+ * keeps responding to Up/Down from anywhere in the dialog.
+ */
+function stopActivationKeys(e: ReactKeyboardEvent<HTMLButtonElement>) {
+  if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+}
+
+// ── Component ────────────────────────────────────────────────────────
 
 export function GlobalSearch() {
   const [open, setOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [scope, setScope] = useState<Scope>("all");
   const navigate = useNavigate();
   const { records: allRecents, refresh: refreshRecents } = useRecentRecords();
-  // The lead type is retired — stale "lead" recents (from before the
-  // cutover) stay hidden for everyone.
-  const recentRecords = allRecents.filter((r) => r.entity !== "lead");
 
-  // This palette instance lives in the top bar for the whole session, so
-  // its recents snapshot goes stale — re-read storage every time it opens.
+  // The lead type is retired — stale "lead" recents (from before the cutover)
+  // stay hidden for everyone.
+  const recentRecords = allRecents.filter(
+    (r): r is RecentRecord & { entity: SearchEntity } => r.entity !== "lead",
+  );
+
+  // This palette instance lives in the top bar for the whole session, so its
+  // recents snapshot goes stale — re-read storage every time it opens.
   useEffect(() => {
     if (open) refreshRecents();
   }, [open, refreshRecents]);
@@ -116,114 +238,70 @@ export function GlobalSearch() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Debounce input
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedQuery(inputValue);
-    }, DEBOUNCE_MS);
+    const timer = setTimeout(() => setDebouncedQuery(inputValue), DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [inputValue]);
 
-  // Reset input on close
   const handleOpenChange = useCallback((value: boolean) => {
     setOpen(value);
     if (!value) {
       setInputValue("");
       setDebouncedQuery("");
+      setScope("all");
     }
   }, []);
 
-  const searchEnabled = debouncedQuery.length >= MIN_SEARCH_LENGTH;
-  const searchPattern = `%${debouncedQuery}%`;
+  const trimmedQuery = debouncedQuery.trim();
+  const searchEnabled = trimmedQuery.length >= MIN_SEARCH_LENGTH;
 
-  const { data: accounts, isFetching: accountsFetching, isError: accountsError } = useQuery({
-    queryKey: ["global-search", "accounts", debouncedQuery],
+  const { data, isFetching, isError } = useQuery({
+    queryKey: ["global-search-v2", trimmedQuery],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("accounts")
-        .select("id, name, customer_status")
-        .is("archived_at", null)
-        .ilike("name", searchPattern)
-        .limit(FETCH_LIMIT);
+      const { data: rpcData, error } = await supabase.rpc("global_search_v2", {
+        q: trimmedQuery,
+        per_group: RESULTS_PER_GROUP,
+      });
       if (error) throw error;
-      return data as AccountResult[];
+      return (rpcData ?? EMPTY_RESPONSE) as SearchResponse;
     },
     enabled: searchEnabled,
+    // Hold the previous results on screen while the next query is in flight,
+    // so the list doesn't blank out between keystrokes.
+    placeholderData: keepPreviousData,
   });
 
-  const { data: contacts, isFetching: contactsFetching, isError: contactsError } = useQuery({
-    queryKey: ["global-search", "contacts", debouncedQuery],
-    queryFn: async () => {
-      const orClause = buildPersonSearchClause(debouncedQuery, [
-        "first_name",
-        "last_name",
-        "email",
-        "email2",
-        "email3",
-      ]);
-      let q = supabase
-        .from("contacts")
-        .select("id, first_name, last_name, email")
-        .is("archived_at", null)
-        // Pending imports are pen-only until promoted.
-        .is("import_status", null);
-      if (orClause) q = q.or(orClause);
-      const { data, error } = await q.limit(FETCH_LIMIT);
-      if (error) throw error;
-      return data as ContactResult[];
-    },
-    enabled: searchEnabled,
-  });
+  const result = data ?? EMPTY_RESPONSE;
 
-  const { data: opportunities, isFetching: opportunitiesFetching, isError: opportunitiesError } = useQuery({
-    queryKey: ["global-search", "opportunities", debouncedQuery],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("opportunities")
-        .select("id, name, stage, amount")
-        .is("archived_at", null)
-        .ilike("name", searchPattern)
-        .limit(FETCH_LIMIT);
-      if (error) throw error;
-      return data as OpportunityResult[];
-    },
-    enabled: searchEnabled,
-  });
+  const visibleGroups = useMemo(
+    () => GROUPS.filter((g) => scope === "all" || scope === g.key),
+    [scope],
+  );
 
-  // (The leads search group is gone — the lead type is retired. Pending
-  // imports are searched from the Imports tab; promoted ones are contacts.)
+  const hasResults = GROUPS.some((g) => (result[g.key]?.rows.length ?? 0) > 0);
+  const hasVisibleResults = visibleGroups.some(
+    (g) => (result[g.key]?.rows.length ?? 0) > 0,
+  );
+
+  const totalAcross = visibleGroups.reduce(
+    (sum, g) => sum + (result[g.key]?.total ?? 0),
+    0,
+  );
+  const totalCapped = visibleGroups.some(
+    (g) => (result[g.key]?.total ?? 0) >= TOTAL_CAP,
+  );
+
+  // Distinguish "still searching" and "search failed" from "genuinely empty",
+  // so the palette never flashes a false "No matches" mid-keystroke or hides a
+  // real error as an empty CRM.
+  const showSkeletons = searchEnabled && isFetching && !hasResults;
+  const showEmpty =
+    searchEnabled && !isFetching && !isError && !hasVisibleResults;
 
   function handleSelect(path: string) {
     handleOpenChange(false);
     navigate(path);
   }
-
-  // Re-rank: prefix matches first, then alphabetical. Capped at
-  // RESULTS_PER_ENTITY per group after ranking.
-  const rankedAccounts = rankResults(accounts, debouncedQuery, (r) => r.name).slice(
-    0,
-    RESULTS_PER_ENTITY,
-  );
-  const rankedContacts = rankResults(
-    contacts,
-    debouncedQuery,
-    (r) => `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(),
-  ).slice(0, RESULTS_PER_ENTITY);
-  const rankedOpportunities = rankResults(opportunities, debouncedQuery, (r) => r.name).slice(
-    0,
-    RESULTS_PER_ENTITY,
-  );
-  const hasResults =
-    rankedAccounts.length > 0 ||
-    rankedContacts.length > 0 ||
-    rankedOpportunities.length > 0;
-
-  // Distinguish "still searching" and "search failed" from "genuinely empty"
-  // so the palette never flashes a false "No results" mid-keystroke or hides
-  // a real error as an empty CRM.
-  const anyFetching =
-    searchEnabled && (accountsFetching || contactsFetching || opportunitiesFetching);
-  const anyError = accountsError || contactsError || opportunitiesError;
 
   return (
     <>
@@ -244,119 +322,245 @@ export function GlobalSearch() {
         open={open}
         onOpenChange={handleOpenChange}
         title="Global Search"
-        description="Search across accounts, contacts, and opportunities"
-        // cmdk filters items client-side by default (fuzzy-matching the `value`
-        // attr against the typed query). Our results come back already
-        // server-filtered via Supabase ilike, so cmdk's filter just hides most
-        // of them and can make the input appear "stuck" — results look empty
-        // no matter what you type. Disable it so everything we render shows.
+        description="Search accounts, contacts, deals, emails and notes"
+        className="sm:max-w-2xl"
+        // The cmdk defaults baked into CommandDialog force 20px item icons and
+        // py-3 rows, and they out-specify anything set on an individual
+        // CommandItem. Opt out so the 24px gradient chips fit their rows.
+        commandClassName="[&_[cmdk-item]]:py-2 [&_[cmdk-item]_svg]:h-3.5 [&_[cmdk-item]_svg]:w-3.5"
+        // Results arrive server-filtered; cmdk's own fuzzy filter would hide
+        // most of them and make the input look stuck.
         shouldFilter={false}
       >
         <CommandInput
-          placeholder="Search accounts, contacts, opportunities..."
+          placeholder="Search accounts, contacts, deals, emails, notes…"
           value={inputValue}
           onValueChange={setInputValue}
         />
-        <CommandList>
-          {searchEnabled && !hasResults && anyFetching && (
-            <div className="py-6 text-center text-sm text-muted-foreground">Searching…</div>
+
+        {/* Scope chips. Client-side only — the RPC always returns all four
+            groups, so switching scope is instant and costs no round trip.
+            They're plain buttons, so Tab cycles them for free and ↑↓/Enter
+            stay with cmdk. Hidden before a search, where they'd be inert. */}
+        {searchEnabled && (
+          <div className="flex flex-wrap items-center gap-1.5 border-b px-3 py-2">
+            {SCOPES.map((s) => {
+              const active = scope === s.value;
+              const count =
+                s.value === "all" ? null : (result[s.value]?.total ?? 0);
+              return (
+                <button
+                  key={s.value}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setScope(s.value)}
+                  onKeyDown={stopActivationKeys}
+                  className={cn(
+                    "rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors",
+                    active
+                      ? "border-primary/30 bg-primary/10 text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {s.label}
+                  {count ? (
+                    <span className="ml-1 tabular-nums opacity-70">
+                      {count >= TOTAL_CAP ? `${TOTAL_CAP}+` : count}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <CommandList className="max-h-[420px]">
+          {showSkeletons && (
+            <div className="space-y-1 p-2" aria-label="Searching">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-9 rounded-lg" />
+              ))}
+            </div>
           )}
-          {searchEnabled && !hasResults && !anyFetching && anyError && (
+
+          {searchEnabled && isError && !hasResults && (
             <div className="py-6 text-center text-sm text-destructive">
               Search failed — try again.
             </div>
           )}
-          {searchEnabled && !hasResults && !anyFetching && !anyError && (
-            <CommandEmpty>No results found.</CommandEmpty>
+
+          {showEmpty && (
+            <CommandEmpty>
+              No matches for &ldquo;{trimmedQuery}&rdquo; — try fewer words.
+            </CommandEmpty>
           )}
 
-          {/* Before the user types: recently-viewed records (from
-              useRecentRecords localStorage), or a hint when there are none. */}
+          {/* Before the user types: recently-viewed records. */}
           {!searchEnabled && recentRecords.length > 0 && (
-            <CommandGroup heading="Recent">
+            <>
+              <div
+                role="presentation"
+                className="px-3 pt-3 pb-1 text-xs uppercase tracking-wide text-muted-foreground"
+              >
+                Recent
+              </div>
               {recentRecords.map((record) => {
-                const Icon = recentIcons[record.entity];
+                const visual = ENTITY_VISUALS[record.entity];
+                const Icon = visual.Icon;
                 return (
                   <CommandItem
                     key={`${record.entity}-${record.id}`}
-                    value={`recent-${record.entity}-${record.name}-${record.id}`}
-                    onSelect={() => handleSelect(`${recentPaths[record.entity]}/${record.id}`)}
+                    value={`recent-${record.entity}-${record.id}`}
+                    onSelect={() =>
+                      handleSelect(`${visual.route}/${record.id}`)
+                    }
+                    className="rounded-lg px-2 py-2"
                   >
-                    <Icon className="h-4 w-4 text-muted-foreground" />
-                    <span className="flex-1 truncate">{record.name}</span>
+                    <span className={cn(ENTITY_CHIP_CLASS, visual.badge)}>
+                      <Icon className={cn("h-3.5 w-3.5", visual.iconColor)} />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                      {record.name}
+                    </span>
                   </CommandItem>
                 );
               })}
-            </CommandGroup>
+              <p className="px-3 pt-2 pb-3 text-[11px] text-muted-foreground">
+                Tip: search emails and notes by any phrase, accounts by city,
+                deals by company.
+              </p>
+            </>
           )}
 
           {!searchEnabled && recentRecords.length === 0 && (
-            <div className="py-6 text-center text-sm text-muted-foreground">
+            <div className="px-3 py-6 text-center text-sm text-muted-foreground">
               Start typing to search…
+              <p className="mt-1 text-[11px]">
+                Tip: search emails and notes by any phrase, accounts by city,
+                deals by company.
+              </p>
             </div>
           )}
 
-          {rankedAccounts.length > 0 && (
-            <CommandGroup heading="Accounts">
-              {rankedAccounts.map((account) => (
-                <CommandItem
-                  key={account.id}
-                  value={`account-${account.name}-${account.id}`}
-                  onSelect={() => handleSelect(`/accounts/${account.id}`)}
-                >
-                  <Building2 className="h-4 w-4 text-muted-foreground" />
-                  <span className="flex-1 truncate">{account.name}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {customerStatusLabel(account.customer_status)}
-                  </span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          )}
+          {searchEnabled &&
+            visibleGroups.map(({ key, entity }) => {
+              const group = result[key];
+              if (!group || group.rows.length === 0) return null;
+              const visual = ENTITY_VISUALS[entity];
 
-          {rankedContacts.length > 0 && (
-            <CommandGroup heading="Contacts">
-              {rankedContacts.map((contact) => (
-                <CommandItem
-                  key={contact.id}
-                  value={`contact-${contact.first_name} ${contact.last_name}-${contact.id}`}
-                  onSelect={() => handleSelect(`/contacts/${contact.id}`)}
-                >
-                  <Users className="h-4 w-4 text-muted-foreground" />
-                  <span className="flex-1 truncate">
-                    {contact.first_name} {contact.last_name}
-                  </span>
-                  {contact.email && (
-                    <span className="text-xs text-muted-foreground truncate max-w-[180px]">
-                      {contact.email}
+              return (
+                <div key={key} role="presentation">
+                  {/* Group header. Deliberately NOT cmdk's `heading` prop:
+                      cmdk marks that node aria-hidden, and a focusable "See
+                      all" inside an aria-hidden container is both an a11y
+                      violation and unreachable by keyboard. */}
+                  <div
+                    role="presentation"
+                    className="flex items-center justify-between gap-2 px-3 pt-3 pb-1"
+                  >
+                    <span className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+                      {visual.plural}
+                      <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums normal-case">
+                        {countLabel(group.rows.length, group.total)}
+                      </span>
                     </span>
-                  )}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          )}
+                    {/* All four lists already read ?q= (useDebouncedUrlState),
+                        so these land pre-filtered with no wiring needed. One
+                        asymmetry to know about: ActivitiesListPage filters on
+                        `subject` only, so a body-only match shows here but not
+                        on its See-all page. Widening that list's filter to
+                        body is a separate change to that file. */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleSelect(
+                          `${visual.route}?q=${encodeURIComponent(trimmedQuery)}`,
+                        )
+                      }
+                      onKeyDown={stopActivationKeys}
+                      className="text-xs text-primary underline underline-offset-4 hover:text-primary/80"
+                    >
+                      See all &rarr;
+                    </button>
+                  </div>
 
-          {rankedOpportunities.length > 0 && (
-            <CommandGroup heading="Opportunities">
-              {rankedOpportunities.map((opp) => (
-                <CommandItem
-                  key={opp.id}
-                  value={`opportunity-${opp.name}-${opp.id}`}
-                  onSelect={() =>
-                    handleSelect(`/opportunities/${opp.id}`)
-                  }
-                >
-                  <Target className="h-4 w-4 text-muted-foreground" />
-                  <span className="flex-1 truncate">{opp.name}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {stageLabels[opp.stage]} &middot; {formatCurrency(opp.amount)}
-                  </span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          )}
-
+                  {group.rows.map((row) => {
+                    const Icon =
+                      key === "activities"
+                        ? activityIcon(row.meta)
+                        : visual.Icon;
+                    const meta = rowMeta(key, row);
+                    return (
+                      <CommandItem
+                        key={row.id}
+                        value={`${key}-${row.id}`}
+                        onSelect={() =>
+                          handleSelect(
+                            rowTarget(key, entity, row, trimmedQuery),
+                          )
+                        }
+                        className="rounded-lg px-2 py-2"
+                      >
+                        <span className={cn(ENTITY_CHIP_CLASS, visual.badge)}>
+                          <Icon className={cn("h-3.5 w-3.5", visual.iconColor)} />
+                        </span>
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span className="truncate text-sm font-medium">
+                            {highlightMatch(row.label, trimmedQuery)}
+                          </span>
+                          {row.sublabel && (
+                            <span className="truncate text-xs text-muted-foreground">
+                              {highlightMatch(row.sublabel, trimmedQuery)}
+                            </span>
+                          )}
+                        </span>
+                        {meta && (
+                          <span
+                            className={cn(
+                              "shrink-0 text-xs text-muted-foreground",
+                              key === "opportunities" && "tabular-nums",
+                            )}
+                          >
+                            {meta}
+                          </span>
+                        )}
+                      </CommandItem>
+                    );
+                  })}
+                </div>
+              );
+            })}
         </CommandList>
+
+        {/* Footer hint bar: states the keyboard model and the result count. */}
+        <div className="flex items-center justify-between border-t px-3 py-2">
+          <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+            <span className="flex items-center gap-1">
+              <kbd className="rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
+                &uarr;&darr;
+              </kbd>
+              navigate
+            </span>
+            <span className="flex items-center gap-1">
+              <kbd className="rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
+                &crarr;
+              </kbd>
+              open
+            </span>
+            <span className="flex items-center gap-1">
+              <kbd className="rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
+                esc
+              </kbd>
+              close
+            </span>
+          </div>
+          {searchEnabled && hasVisibleResults && (
+            <span className="text-[11px] text-muted-foreground tabular-nums">
+              {totalAcross}
+              {totalCapped ? "+" : ""} result{totalAcross === 1 ? "" : "s"}
+            </span>
+          )}
+        </div>
       </CommandDialog>
     </>
   );

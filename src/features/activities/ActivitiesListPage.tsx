@@ -160,7 +160,11 @@ function useActivitiesList(filters: ListFilters) {
       }
 
       if (filters.search) {
-        query = query.ilike("subject", `%${filters.search}%`);
+        // Subject AND body, so a body-only hit from global search's
+        // "See all" actually appears here. Strip PostgREST or() metachars
+        // the same way the opportunities list search does.
+        const safe = filters.search.replace(/[(),]/g, " ");
+        query = query.or(`subject.ilike.%${safe}%,body.ilike.%${safe}%`);
       }
       if (filters.type !== "all") {
         query = query.eq("activity_type", filters.type);

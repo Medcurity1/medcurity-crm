@@ -47,7 +47,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { formatCurrency, customerStatusLabel } from "@/lib/formatters";
+import { formatCurrency, customerStatusLabel, formatDate } from "@/lib/formatters";
 import type { CustomerStatus } from "@/types/crm";
 import { AccountCombobox } from "@/components/AccountCombobox";
 import {
@@ -843,13 +843,10 @@ function EmptyState({
   );
 }
 
-function fmtDate(iso: string) {
-  try {
-    return new Date(iso).toLocaleDateString();
-  } catch {
-    return iso;
-  }
-}
+// Thin alias so the 4 call sites below stay untouched — formatDate
+// already returns "—" for null/invalid input instead of throwing, so
+// the try/catch this used to need is gone too.
+const fmtDate = formatDate;
 
 function fmtDateTime(iso: string) {
   try {

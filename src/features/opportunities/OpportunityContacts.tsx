@@ -7,6 +7,8 @@ import { supabase } from "@/lib/supabase";
 import type { Contact } from "@/types/crm";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/EmptyState";
+import { QueryError } from "@/components/QueryError";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -48,7 +50,7 @@ export function OpportunityContacts({
   const qc = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
 
-  const { data: rows, isLoading } = useQuery<OppContactRow[]>({
+  const { data: rows, isLoading, isError, isFetching, refetch } = useQuery<OppContactRow[]>({
     queryKey: ["opportunity-contacts", opportunityId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -138,7 +140,11 @@ export function OpportunityContacts({
 
   if (isLoading)
     return (
-      <div className="text-sm text-muted-foreground">Loading contacts...</div>
+      <div className="space-y-2">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-10 w-full" />
+        ))}
+      </div>
     );
 
   return (
@@ -169,7 +175,13 @@ export function OpportunityContacts({
         />
       )}
 
-      {!rows?.length ? (
+      {isError ? (
+        <QueryError
+          message="Couldn't load contacts."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
+      ) : !rows?.length ? (
         <EmptyState
           icon={Users}
           title="No contacts on this opportunity"

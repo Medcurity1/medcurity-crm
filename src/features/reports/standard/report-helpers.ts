@@ -2,36 +2,11 @@
 
 /**
  * Download a 2-D table (header row + data rows) as a CSV file.
- * - Raw numbers are written unquoted so Excel/Sheets treats them as
- *   numeric (e.g. Account Number = 3345, not "3345").
- * - Strings are quoted and CSV-escaped.
+ * Re-exported from the app-wide CSV engine (`@/lib/csv`) so the 11
+ * standard reports that import `downloadCsv` from here don't need to
+ * change their import path.
  */
-export function downloadCsv(filename: string, rows: unknown[][]) {
-  const csv = rows
-    .map((row) =>
-      row
-        .map((cell) => {
-          if (cell === null || cell === undefined) return "";
-          if (typeof cell === "number" && Number.isFinite(cell)) {
-            // Bare numeric — no quotes.
-            return String(cell);
-          }
-          const s = String(cell);
-          return `"${s.replace(/"/g, '""')}"`;
-        })
-        .join(","),
-    )
-    .join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
+export { downloadCsv } from "@/lib/csv";
 
 /** yyyy-mm-dd string for filenames. */
 export function todayStamp(): string {

@@ -1,8 +1,10 @@
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
-import type { Opportunity, ActivePipelineRow, OpportunityStageHistory, OpportunityProduct } from "@/types/crm";
+import type { Opportunity, OpportunityStage, ActivePipelineRow, OpportunityStageHistory, OpportunityProduct } from "@/types/crm";
+import { fetchAllPages, hydrateInChunks } from "@/features/list-export/csv-export";
+import { capturePriorValues, type PriorValue } from "@/features/archive/bulk-undo";
 
-interface OppFilters {
+export interface OppFilters {
   search?: string;
   stage?: string | string[];
   team?: string | string[];
@@ -62,6 +64,10 @@ export function useOpportunities(filters?: OppFilters) {
             : "*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)",
           { count: "estimated" },
         )
+        // Explicit archived filter (see accounts/api.ts note — 20260817104000
+        // makes owner-archived rows SELECT-visible for the Archive page; the
+        // view path carries archived_at via o.*).
+        .is("archived_at", null)
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       // Sort: support sorting by columns on embedded relations
@@ -258,8 +264,16 @@ export function useOpportunities(filters?: OppFilters) {
  * dashboard KPI like "My Open Pipeline" can be cross-checked against
  * the same filtered list view.
  *
- * Pages past PostgREST's 1000-row cap so the sum is honest on large
- * filtered sets (e.g. all closed_won across 5 years > 1000 rows).
+ * ONE aggregate round trip (`opportunity_amount_stats`, migration
+ * 20260817130000). This used to walk the ENTIRE filtered result set
+ * 1,000 rows at a time, SERIALLY, up to 100,000 rows — on every filter
+ * change and every search keystroke, because the query key carries the
+ * whole filter object and the list calls this unconditionally. A rep
+ * typing six characters into search kicked off six full-table walks.
+ *
+ * The RPC applies `archived_at is null` itself, matching the list's own
+ * explicit archived filter, and is SECURITY INVOKER so the caller's RLS
+ * still scopes the sum exactly as the paged version did.
  */
 export function useOpportunitiesTotals(filters?: Omit<OppFilters, "page" | "pageSize" | "sortColumn" | "sortDirection">) {
   return useQuery({
@@ -302,86 +316,265 @@ export function useOpportunitiesTotals(filters?: Omit<OppFilters, "page" | "page
         singleOwnerId = filters.ownerId;
       }
 
-      // Page past the 1000-row cap so the sum is exact on large sets.
-      const all: number[] = [];
-      let from = 0;
-      const pageSize = 1000;
-      while (all.length < 100_000) {
-        let q = supabase.from("opportunities").select("amount");
-        if (filters?.search) {
-          const safe = filters.search.replace(/[(),]/g, " ");
-          const orParts = [`name.ilike.%${safe}%`];
-          if (acctIds && acctIds.length > 0) {
-            orParts.push(`account_id.in.(${acctIds.join(",")})`);
-          }
-          q = q.or(orParts.join(","));
-        }
-        if (filters?.stage) {
-          if (Array.isArray(filters.stage)) {
-            if (filters.stage.length > 0) q = q.in("stage", filters.stage);
-          } else if (filters.stage === "open") {
-            q = q.not("stage", "in", "(closed_won,closed_lost)");
-          } else {
-            q = q.eq("stage", filters.stage);
-          }
-        }
-        if (filters?.team) {
-          if (Array.isArray(filters.team)) {
-            if (filters.team.length > 0) q = q.in("team", filters.team);
-          } else {
-            q = q.eq("team", filters.team);
-          }
-        }
-        if (filters?.kind) {
-          if (Array.isArray(filters.kind)) {
-            if (filters.kind.length > 0) q = q.in("kind", filters.kind);
-          } else {
-            q = q.eq("kind", filters.kind);
-          }
-        }
-        if (filters?.business_type) {
-          if (Array.isArray(filters.business_type)) {
-            if (filters.business_type.length > 0)
-              q = q.in("business_type", filters.business_type);
-          } else {
-            q = q.eq("business_type", filters.business_type);
-          }
-        }
-        if (filters?.lead_source && filters.lead_source.length > 0) {
-          // Mirrors useOpportunities so the totals strip matches the list.
-          const vals = filters.lead_source.filter((v) => v !== "__none__");
-          const wantNone = filters.lead_source.includes("__none__");
-          if (wantNone && vals.length > 0) {
-            q = q.or(`lead_source.in.(${vals.join(",")}),lead_source.is.null`);
-          } else if (wantNone) {
-            q = q.is("lead_source", null);
-          } else {
-            q = q.in("lead_source", vals);
-          }
-        }
-        if (filters?.account_id) q = q.eq("account_id", filters.account_id);
-        if (resolvedOwnerIds) q = q.in("owner_user_id", resolvedOwnerIds);
-        else if (singleOwnerId) q = q.eq("owner_user_id", singleOwnerId);
-        if (filters?.verified === "true") q = q.eq("verified", true);
-        else if (filters?.verified === "false") q = q.eq("verified", false);
-        if (filters?.closeAfter) q = q.gte("close_date", filters.closeAfter);
-        if (filters?.closeBefore) q = q.lte("close_date", filters.closeBefore);
-        if (filters?.startAfter) q = q.gte("contract_start_date", filters.startAfter);
-        if (filters?.startBefore) q = q.lte("contract_start_date", filters.startBefore);
-        if (filters?.expectedAfter) q = q.gte("expected_close_date", filters.expectedAfter);
-        if (filters?.expectedBefore) q = q.lte("expected_close_date", filters.expectedBefore);
+      // Multi-selects: an EMPTY array means "no filter" on the list, so it
+      // must stay null here too (an empty `in` would match nothing).
+      const multi = (v: string | string[] | undefined): string[] | null => {
+        if (!v) return null;
+        if (Array.isArray(v)) return v.length > 0 ? v : null;
+        return [v];
+      };
 
-        const { data, error } = await q.range(from, from + pageSize - 1);
-        if (error) throw error;
-        const rows = (data ?? []) as { amount: number | string | null }[];
-        for (const r of rows) all.push(Number(r.amount ?? 0));
-        if (rows.length < pageSize) break;
-        from += pageSize;
-      }
-      const sum = all.reduce((s, n) => s + n, 0);
-      return { count: all.length, sum };
+      // lead_source carries the "__none__" sentinel for unattributed deals,
+      // exactly as useOpportunities builds it.
+      const leadSourceVals = (filters?.lead_source ?? []).filter(
+        (v) => v !== "__none__",
+      );
+      const wantNoLeadSource = (filters?.lead_source ?? []).includes("__none__");
+
+      // `stage` has a meta-value: "open" = anything not closed.
+      const stageIsOpenMeta = filters?.stage === "open";
+
+      const { data, error } = await supabase.rpc("opportunity_amount_stats", {
+        p_owner_user_id: resolvedOwnerIds ? null : singleOwnerId,
+        p_owner_user_ids: resolvedOwnerIds,
+        p_open_only: stageIsOpenMeta,
+        p_stages: stageIsOpenMeta ? null : multi(filters?.stage),
+        p_kinds: multi(filters?.kind),
+        p_teams: multi(filters?.team),
+        p_business_types: multi(filters?.business_type),
+        p_lead_sources: leadSourceVals.length > 0 ? leadSourceVals : null,
+        p_include_null_lead_source: wantNoLeadSource,
+        p_account_id: filters?.account_id ?? null,
+        p_verified:
+          filters?.verified === "true"
+            ? true
+            : filters?.verified === "false"
+              ? false
+              : null,
+        p_close_date_from: filters?.closeAfter ?? null,
+        p_close_date_to: filters?.closeBefore ?? null,
+        p_contract_start_from: filters?.startAfter ?? null,
+        p_contract_start_to: filters?.startBefore ?? null,
+        p_expected_close_from: filters?.expectedAfter ?? null,
+        p_expected_close_to: filters?.expectedBefore ?? null,
+        // Same sanitized term the list ILIKEs on, and the same ≤200 account
+        // ids resolved above — so the strip can never disagree with the
+        // table above it.
+        p_search_name: filters?.search
+          ? filters.search.replace(/[(),]/g, " ")
+          : null,
+        p_search_account_ids: acctIds && acctIds.length > 0 ? acctIds : null,
+      });
+      if (error) throw error;
+      const row = (Array.isArray(data) ? data[0] : null) as {
+        total: number | string | null;
+        row_count: number | string | null;
+      } | null;
+      return { count: Number(row?.row_count ?? 0), sum: Number(row?.total ?? 0) };
     },
   });
+}
+
+/**
+ * Every opportunity matching the list's CURRENT filters, unpaginated —
+ * the row source for the Opportunities list "Export CSV" button.
+ *
+ * ⚠ KEEP IN SYNC with `useOpportunities` above. The list query and
+ * `useOpportunitiesTotals` are off-limits to this change (both were just
+ * rewritten elsewhere), so the filter chain is mirrored here rather than
+ * extracted and shared. Anything added to the list's filters has to be
+ * added here too, or the file will disagree with the screen.
+ *
+ * The "sort by Last Touch" branch mirrors the list's view path
+ * (`v_opportunities_with_activity`, no embeds, names merged by id)
+ * because the export must come out in the order the user is looking at.
+ */
+export async function fetchOpportunitiesForExport(
+  filters: Omit<OppFilters, "page" | "pageSize"> | undefined,
+  opts?: {
+    lastActivity?: boolean;
+    /** Export only these rows (a list selection). Applied after the
+     *  filtered fetch so the file keeps the list's sort order. */
+    selectedIds?: string[];
+  },
+): Promise<{ rows: Opportunity[]; truncated: boolean }> {
+  const enrich = opts;
+  const sortCol = filters?.sortColumn ?? "created_at";
+  const sortAsc = (filters?.sortDirection ?? (filters?.sortColumn ? "asc" : "desc")) === "asc";
+  const sortByLastTouch = sortCol === "last_touch";
+
+  // Resolved once, outside the page loop.
+  let acctIds: string[] = [];
+  if (filters?.search) {
+    const { data: matchedAccounts } = await supabase
+      .from("accounts")
+      .select("id")
+      .ilike("name", `%${filters.search}%`)
+      .limit(200);
+    acctIds = (matchedAccounts ?? []).map((a) => a.id as string);
+  }
+  const me = filters?.ownerId
+    ? (await supabase.auth.getUser()).data.user?.id ?? null
+    : null;
+
+  const { rows: allRows, truncated } = await fetchAllPages<Opportunity>(async (from, to) => {
+    let query = supabase
+      .from(sortByLastTouch ? "v_opportunities_with_activity" : "opportunities")
+      .select(
+        sortByLastTouch
+          ? "*"
+          : "*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)",
+      )
+      .is("archived_at", null)
+      .range(from, to);
+
+    if (sortByLastTouch) {
+      query = query.order("effective_last_touch", { ascending: sortAsc });
+    } else if (sortCol.startsWith("account.")) {
+      query = query.order(`account(${sortCol.slice("account.".length)})`, {
+        ascending: sortAsc,
+        nullsFirst: false,
+      });
+    } else if (sortCol.startsWith("owner.")) {
+      query = query.order(`owner(${sortCol.slice("owner.".length)})`, {
+        ascending: sortAsc,
+        nullsFirst: false,
+      });
+    } else {
+      query = query.order(sortCol, { ascending: sortAsc, nullsFirst: false });
+    }
+    query = query.order("id", { ascending: true });
+
+    if (filters?.search) {
+      const safe = filters.search.replace(/[(),]/g, " ");
+      const orParts = [`name.ilike.%${safe}%`];
+      if (acctIds.length > 0) orParts.push(`account_id.in.(${acctIds.join(",")})`);
+      query = query.or(orParts.join(","));
+    }
+    if (filters?.stage) {
+      if (Array.isArray(filters.stage)) {
+        if (filters.stage.length > 0) query = query.in("stage", filters.stage);
+      } else if (filters.stage === "open") {
+        query = query.not("stage", "in", "(closed_won,closed_lost)");
+      } else {
+        query = query.eq("stage", filters.stage);
+      }
+    }
+    if (filters?.team) {
+      if (Array.isArray(filters.team)) {
+        if (filters.team.length > 0) query = query.in("team", filters.team);
+      } else {
+        query = query.eq("team", filters.team);
+      }
+    }
+    if (filters?.kind) {
+      if (Array.isArray(filters.kind)) {
+        if (filters.kind.length > 0) query = query.in("kind", filters.kind);
+      } else {
+        query = query.eq("kind", filters.kind);
+      }
+    }
+    if (filters?.business_type) {
+      if (Array.isArray(filters.business_type)) {
+        if (filters.business_type.length > 0)
+          query = query.in("business_type", filters.business_type);
+      } else {
+        query = query.eq("business_type", filters.business_type);
+      }
+    }
+    if (filters?.lead_source && filters.lead_source.length > 0) {
+      const vals = filters.lead_source.filter((v) => v !== "__none__");
+      const wantNone = filters.lead_source.includes("__none__");
+      if (wantNone && vals.length > 0) {
+        query = query.or(`lead_source.in.(${vals.join(",")}),lead_source.is.null`);
+      } else if (wantNone) {
+        query = query.is("lead_source", null);
+      } else {
+        query = query.in("lead_source", vals);
+      }
+    }
+    if (filters?.account_id) query = query.eq("account_id", filters.account_id);
+    if (Array.isArray(filters?.ownerId)) {
+      const ids = filters!.ownerId;
+      if (ids.includes("mine")) {
+        if (me) {
+          const resolved = Array.from(new Set(ids.map((v) => (v === "mine" ? me : v))));
+          if (resolved.length > 0) query = query.in("owner_user_id", resolved);
+        } else if (ids.length > 1) {
+          const noMine = ids.filter((v) => v !== "mine");
+          if (noMine.length > 0) query = query.in("owner_user_id", noMine);
+        }
+      } else if (ids.length > 0) {
+        query = query.in("owner_user_id", ids);
+      }
+    } else if (filters?.ownerId && filters.ownerId !== "mine") {
+      query = query.eq("owner_user_id", filters.ownerId);
+    } else if (filters?.ownerId === "mine" && me) {
+      query = query.eq("owner_user_id", me);
+    }
+    if (filters?.verified === "true") query = query.eq("verified", true);
+    else if (filters?.verified === "false") query = query.eq("verified", false);
+    if (filters?.closeAfter) query = query.gte("close_date", filters.closeAfter);
+    if (filters?.closeBefore) query = query.lte("close_date", filters.closeBefore);
+    if (filters?.expectedAfter) query = query.gte("expected_close_date", filters.expectedAfter);
+    if (filters?.expectedBefore) query = query.lte("expected_close_date", filters.expectedBefore);
+    if (filters?.startAfter) query = query.gte("contract_start_date", filters.startAfter);
+    if (filters?.startBefore) query = query.lte("contract_start_date", filters.startBefore);
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []) as unknown as Opportunity[];
+  });
+
+  const selected = opts?.selectedIds ? new Set(opts.selectedIds) : null;
+  const rows = selected ? allRows.filter((o) => selected.has(o.id)) : allRows;
+
+  // Last Touch for the whole exported set (the list does this per page).
+  if (rows.length > 0 && enrich?.lastActivity && !sortByLastTouch) {
+    const la = await hydrateInChunks(
+      rows.map((o) => o.id),
+      async (batch) => {
+        const { data } = await supabase
+          .from("v_opportunity_last_activity")
+          .select("opportunity_id, last_activity_at")
+          .in("opportunity_id", batch);
+        return (data ?? []) as { opportunity_id: string; last_activity_at: string | null }[];
+      },
+    );
+    const lastByOpp = new Map<string, string>();
+    for (const r of la) {
+      if (r.last_activity_at) lastByOpp.set(r.opportunity_id, r.last_activity_at);
+    }
+    for (const o of rows) o.last_activity_at = lastByOpp.get(o.id) ?? null;
+  }
+
+  // View path can't embed account/owner — merge their names in by id, or
+  // the Account and Owner columns export blank when sorting by Last Touch.
+  if (sortByLastTouch && rows.length > 0) {
+    const oppAcctIds = [...new Set(rows.map((o) => o.account_id).filter((v): v is string => !!v))];
+    const ownerIds = [...new Set(rows.map((o) => o.owner_user_id).filter((v): v is string => !!v))];
+    const [accts, owners] = await Promise.all([
+      hydrateInChunks(oppAcctIds, async (batch) => {
+        const { data } = await supabase.from("accounts").select("id, name").in("id", batch);
+        return (data ?? []) as { id: string; name: string }[];
+      }),
+      hydrateInChunks(ownerIds, async (batch) => {
+        const { data } = await supabase
+          .from("user_profiles")
+          .select("id, full_name")
+          .in("id", batch);
+        return (data ?? []) as { id: string; full_name: string }[];
+      }),
+    ]);
+    const acctMap = new Map(accts.map((a) => [a.id, a]));
+    const ownerMap = new Map(owners.map((u) => [u.id, u]));
+    for (const o of rows) {
+      o.account = (o.account_id ? acctMap.get(o.account_id) : undefined) as Opportunity["account"];
+      o.owner = (o.owner_user_id ? ownerMap.get(o.owner_user_id) : undefined) as Opportunity["owner"];
+    }
+  }
+
+  return { rows, truncated };
 }
 
 export function useOpportunity(id: string | undefined) {
@@ -503,6 +696,164 @@ export function useBulkUpdateOwner() {
           `Reassigned ${updated} of ${uniqueIds.length}. ${uniqueIds.length - updated} could not be updated (permission denied or no longer exist).`
         );
       }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["pipeline"] });
+      qc.invalidateQueries({ queryKey: ["renewal_queue"] });
+    },
+  });
+}
+
+// ── Bulk field edits (list BulkActionBar) ────────────────────────────
+
+/** Stages a deal can be bulk-moved INTO. */
+export const BULK_EDITABLE_STAGES: OpportunityStage[] = [
+  "details_analysis",
+  "demo",
+  "proposal_and_price_quote",
+  "proposal_conversation",
+  "verbal_commit",
+];
+
+const CLOSED_STAGES = new Set<string>(["closed_won", "closed_lost"]);
+
+export interface BulkFieldResult {
+  /** Rows actually written. */
+  updated: number;
+  /** Selected rows left alone because they're already Closed Won/Lost. */
+  skippedClosed: number;
+  /** Selected ids the server didn't return at all (deleted, or RLS). */
+  missing: number;
+  /** Pre-change values of the rows that WERE written, for Undo. */
+  prior: PriorValue[];
+}
+
+/**
+ * Read the selected deals, split them into "still open" vs "already
+ * closed", and capture the pre-change value of `field` for the open ones.
+ *
+ * Reads from the server rather than from the list's current page: a
+ * selection survives paging, so the page can't be trusted to hold every
+ * selected row — and both bulk edits need the stage of rows the page may
+ * no longer have.
+ */
+async function readOpenSelection(
+  ids: string[],
+  field: "stage" | "expected_close_date",
+): Promise<{ prior: PriorValue[]; skippedClosed: number; missing: number }> {
+  const uniqueIds = Array.from(new Set(ids));
+  const rows = await hydrateInChunks(uniqueIds, async (batch) => {
+    const { data, error } = await supabase
+      .from("opportunities")
+      .select(field === "stage" ? "id, stage" : "id, stage, expected_close_date")
+      .in("id", batch);
+    if (error) throw error;
+    return (data ?? []) as unknown as {
+      id: string;
+      stage: string;
+      expected_close_date?: string | null;
+    }[];
+  });
+  const open = rows.filter((r) => !CLOSED_STAGES.has(r.stage));
+  return {
+    prior: capturePriorValues(open, field),
+    skippedClosed: rows.length - open.length,
+    missing: uniqueIds.length - rows.length,
+  };
+}
+
+/** Chunked UPDATE + affected-row verify, mirroring `useBulkUpdateOwner`. */
+async function bulkWriteField(
+  ids: string[],
+  patch: Record<string, unknown>,
+): Promise<number> {
+  const CHUNK = 100;
+  let updated = 0;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const batch = ids.slice(i, i + CHUNK);
+    const { data, error } = await supabase
+      .from("opportunities")
+      .update(patch)
+      .in("id", batch)
+      .select("id");
+    if (error) throw error;
+    updated += (data ?? []).length;
+  }
+  if (updated < ids.length) {
+    throw new Error(
+      `Updated ${updated} of ${ids.length}. ${ids.length - updated} could not be updated (permission denied or no longer exist).`,
+    );
+  }
+  return updated;
+}
+
+/**
+ * Move many deals to one NON-CLOSING stage.
+ *
+ * Closing a deal is deliberately not offered here: the single-record
+ * path runs a required-fields gate (`checkCloseReadiness` →
+ * `FinishLineDialog` / `useClosedLostGuard`) that a bulk UPDATE would
+ * bypass wholesale. Deals that are ALREADY closed are skipped rather
+ * than silently reopened.
+ */
+export function useBulkUpdateStage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      ids,
+      stage,
+    }: {
+      ids: string[];
+      stage: OpportunityStage;
+    }): Promise<BulkFieldResult> => {
+      if (CLOSED_STAGES.has(stage)) {
+        throw new Error("Closing stages can't be set in bulk — close deals individually.");
+      }
+      const { prior, skippedClosed, missing } = await readOpenSelection(ids, "stage");
+      // Rows already on the target stage would be a no-op write; dropping
+      // them keeps the affected-row verify honest and the Undo minimal.
+      const changing = prior.filter((p) => p.value !== stage);
+      const toWrite = changing.map((p) => p.id);
+      const written = toWrite.length > 0 ? await bulkWriteField(toWrite, { stage }) : 0;
+      return { updated: written, skippedClosed, missing, prior: changing };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["pipeline"] });
+      qc.invalidateQueries({ queryKey: ["renewal_queue"] });
+    },
+  });
+}
+
+/**
+ * Push the forecast close date on many OPEN deals at once.
+ *
+ * Only `expected_close_date` (the forecast) is touched, and only on open
+ * deals — on a closed deal that field is a frozen historical forecast and
+ * `close_date` is the real landing date, so rewriting it would corrupt
+ * win-rate/forecast-accuracy reporting.
+ */
+export function useBulkUpdateExpectedCloseDate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      ids,
+      expected_close_date,
+    }: {
+      ids: string[];
+      /** ISO "YYYY-MM-DD" from an <input type="date">. */
+      expected_close_date: string;
+    }): Promise<BulkFieldResult> => {
+      const { prior, skippedClosed, missing } = await readOpenSelection(
+        ids,
+        "expected_close_date",
+      );
+      const changing = prior.filter((p) => p.value !== expected_close_date);
+      const toWrite = changing.map((p) => p.id);
+      const written =
+        toWrite.length > 0 ? await bulkWriteField(toWrite, { expected_close_date }) : 0;
+      return { updated: written, skippedClosed, missing, prior: changing };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["opportunities"] });

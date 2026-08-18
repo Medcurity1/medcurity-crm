@@ -13,6 +13,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
@@ -43,7 +44,7 @@ export const CATEGORY: Record<string, { icon: typeof Rocket; accent: string; chi
 };
 
 export function TemplatesSection() {
-  const { data: templates, isLoading } = useCampaignTemplates();
+  const { data: templates, isLoading, isError, isFetching, refetch } = useCampaignTemplates();
   const { data: scoreboard } = useTemplateScoreboard();
   const { data: sl } = useSmartleadStatus();
   // Only a confirmed `false` disables — undefined (still loading) and true
@@ -118,6 +119,12 @@ export function TemplatesSection() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-36 w-full" />)}
         </div>
+      ) : isError ? (
+        <QueryError
+          message="Couldn't load templates."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {(templates ?? []).map((t) => {

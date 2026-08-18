@@ -15,6 +15,7 @@ import { Loader2, Archive, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { parseCsv } from "@/features/playbook/csv";
 import { useBulkArchiveFromList, type BulkArchiveResult } from "./api";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -181,14 +182,19 @@ export function BulkArchiveFromFile({
     }
   }
 
+  // Guard against a stray outside-click/Esc discarding an uploaded/parsed
+  // file — reset() used to run unconditionally on every close.
+  const dirty = parsed !== null;
+  const discard = useDialogDiscardGuard(dirty, () => {
+    reset();
+    onOpenChange(false);
+  });
+
   return (
     <>
       <Dialog
         open={open}
-        onOpenChange={(o) => {
-          if (!o) reset();
-          onOpenChange(o);
-        }}
+        onOpenChange={discard.guardedOnOpenChange}
       >
         <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
@@ -314,6 +320,7 @@ export function BulkArchiveFromFile({
         destructive
         onConfirm={runArchive}
       />
+      {discard.dialog}
     </>
   );
 }

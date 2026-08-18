@@ -32,6 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { toast } from "sonner";
 import { parseUsAddress } from "@/lib/parseUsAddress";
 import { DuplicateWarning } from "@/components/DuplicateWarning";
@@ -88,20 +89,25 @@ function FormSection({
 export function ContactForm() {
   const { id } = useParams<{ id: string }>();
   const isEditing = !!id;
-  const { data: contact, isLoading: loadingContact } = useContact(id);
+  const { data: contact, isLoading: loadingContact, isError, error, refetch } = useContact(id);
   // Still gate on the accounts list even though the AccountCombobox
   // fetches it itself (same cache) — mounting with the list ready means
   // the combobox trigger can resolve the selected account name on first
   // render instead of flashing "Loading…".
   const { data: accounts } = useAccountsList();
 
-  if ((isEditing && (loadingContact || !contact)) || !accounts) {
+  if ((isEditing && (loadingContact || (!contact && !isError))) || !accounts) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-10 w-48" />
         <Skeleton className="h-64 w-full" />
       </div>
     );
+  }
+
+  const notFound = (error as { code?: string } | null)?.code === "PGRST116";
+  if (isEditing && isError && !notFound) {
+    return <QueryError message="Something went wrong loading this contact." onRetry={() => refetch()} />;
   }
 
   return <ContactFormInner key={id ?? "new"} contact={contact} />;

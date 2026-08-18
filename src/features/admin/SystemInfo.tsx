@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { env } from "@/lib/env";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Server,
   Database,
@@ -230,7 +231,11 @@ export function SystemInfo() {
         </CardHeader>
         <CardContent>
           {scheduledJobs.isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading job status...</p>
+            <div className="space-y-1.5">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-9 w-full" />
+              ))}
+            </div>
           ) : scheduledJobs.error ? (
             <p className="text-sm text-destructive">
               Failed to load scheduled job status.
@@ -286,7 +291,11 @@ export function SystemInfo() {
         </CardHeader>
         <CardContent>
           {tableCounts.isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading counts...</p>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} className="h-9 w-full" />
+              ))}
+            </div>
           ) : tableCounts.error ? (
             <p className="text-sm text-destructive">
               Failed to load table counts.

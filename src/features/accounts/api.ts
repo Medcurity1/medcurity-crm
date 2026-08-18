@@ -2,8 +2,9 @@ import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tansta
 import { supabase } from "@/lib/supabase";
 import type { Account, AccountContract } from "@/types/crm";
 import { buildPersonSearchClause } from "@/lib/search-clause";
+import { fetchAllPages, hydrateInChunks } from "@/features/list-export/csv-export";
 
-interface AccountFilters {
+export interface AccountFilters {
   search?: string;
   /** Automatic customer status: client | prospect | former_client. */
   customerStatus?: string | string[];
@@ -67,6 +68,11 @@ export function useAccounts(filters?: AccountFilters) {
       let query = supabase
         .from("accounts")
         .select("*, owner:user_profiles!owner_user_id(id, full_name)", { count: "estimated" })
+        // Explicit archived filter: RLS used to hide archived rows from
+        // non-admins as a side effect, but 20260817104000 lets owners see
+        // their own archived rows (for the Archive page) — without this,
+        // an archived account would reappear in its owner's list.
+        .is("archived_at", null)
         .order(sortCol, { ascending: sortAsc, nullsFirst: false })
         // Stable tiebreaker so offset paging is deterministic — without a
         // unique final sort key, rows tied on sortCol can repeat at page
@@ -244,6 +250,201 @@ export function useAccounts(filters?: AccountFilters) {
       return { data: rows, count: count ?? 0 };
     },
   });
+}
+
+/**
+ * Every account matching the list's CURRENT filters, unpaginated — the
+ * row source for the Accounts list "Export CSV" button.
+ *
+ * ⚠ KEEP IN SYNC with `useAccounts` above. This deliberately re-applies
+ * the same filter chain instead of sharing one, because `useAccounts`'
+ * query is off-limits to this change (it is being edited concurrently).
+ * Any filter added to `useAccounts` must be added here too or the export
+ * will quietly include rows the list is hiding. The `sortColumn` guard,
+ * the `archived_at is null` scope and the `id` tiebreaker are all
+ * duplicated for exactly that reason — the export must be the same set
+ * in the same order, just longer.
+ */
+export async function fetchAccountsForExport(
+  filters: Omit<AccountFilters, "page" | "pageSize"> | undefined,
+  opts?: {
+    lastActivity?: boolean;
+    primaryContact?: boolean;
+    /** Export only these rows (a list selection). Applied AFTER the
+     *  filtered fetch so the file keeps the list's sort order, and
+     *  BEFORE the derived-column hydration so a 5-row selection costs 5
+     *  rows of lookups, not the whole filtered set's worth. */
+    selectedIds?: string[];
+  },
+): Promise<{ rows: Account[]; truncated: boolean }> {
+  const enrich = opts;
+  const requestedSort = filters?.sortColumn ?? "name";
+  const sortCol = SORTABLE_ACCOUNT_COLUMNS.has(requestedSort) ? requestedSort : "name";
+  const sortAsc = (filters?.sortDirection ?? "asc") === "asc";
+
+  // Search resolves matching contacts' account ids first (same two-step
+  // the list does) — hoisted out of the page loop so it runs once, not
+  // once per 1,000 rows.
+  let contactAccountIds: string[] = [];
+  if (filters?.search) {
+    const contactClause = buildPersonSearchClause(filters.search, [
+      "first_name",
+      "last_name",
+      "email",
+    ]);
+    if (contactClause) {
+      const { data: matchedContacts } = await supabase
+        .from("contacts")
+        .select("account_id")
+        .is("archived_at", null)
+        .not("account_id", "is", null)
+        .or(contactClause)
+        .limit(500);
+      contactAccountIds = Array.from(
+        new Set(
+          (matchedContacts ?? [])
+            .map((c) => c.account_id as string | null)
+            .filter((v): v is string => !!v),
+        ),
+      );
+    }
+  }
+  // "mine" → the signed-in user's id, resolved once for the same reason.
+  const me = filters?.ownerId
+    ? (await supabase.auth.getUser()).data.user?.id ?? null
+    : null;
+
+  const { rows: allRows, truncated } = await fetchAllPages<Account>(async (from, to) => {
+    let query = supabase
+      .from("accounts")
+      .select("*, owner:user_profiles!owner_user_id(id, full_name)")
+      .is("archived_at", null)
+      .order(sortCol, { ascending: sortAsc, nullsFirst: false })
+      .order("id", { ascending: true })
+      .range(from, to);
+
+    if (filters?.search) {
+      const safe = filters.search.replace(/[(),%]/g, " ");
+      const orParts = [`name.ilike.%${safe}%`, `industry.ilike.%${safe}%`];
+      if (contactAccountIds.length > 0) {
+        orParts.push(`id.in.(${contactAccountIds.slice(0, 150).join(",")})`);
+      }
+      query = query.or(orParts.join(","));
+    }
+    if (filters?.customerStatus) {
+      if (Array.isArray(filters.customerStatus)) {
+        if (filters.customerStatus.length > 0)
+          query = query.in("customer_status", filters.customerStatus);
+      } else {
+        query = query.eq("customer_status", filters.customerStatus);
+      }
+    }
+    if (filters?.salesActive === "true") query = query.eq("sales_active", true);
+    else if (filters?.salesActive === "false") query = query.eq("sales_active", false);
+    if (filters?.salesStatus && filters.salesStatus.length > 0) {
+      query = query.in("sales_status", filters.salesStatus);
+    }
+    if (filters?.followUp) {
+      const localIso = (d: Date) =>
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const today = new Date();
+      query = query.not("next_follow_up_date", "is", null);
+      if (filters.followUp === "due") {
+        const plus7 = new Date(today);
+        plus7.setDate(plus7.getDate() + 7);
+        query = query.lte("next_follow_up_date", localIso(plus7));
+      } else {
+        query = query.lt("next_follow_up_date", localIso(today));
+      }
+    }
+    if (Array.isArray(filters?.ownerId)) {
+      const ids = filters!.ownerId;
+      if (ids.includes("mine")) {
+        if (me) {
+          const resolved = Array.from(new Set(ids.map((v) => (v === "mine" ? me : v))));
+          if (resolved.length > 0) query = query.in("owner_user_id", resolved);
+        } else if (ids.length > 1) {
+          const noMine = ids.filter((v) => v !== "mine");
+          if (noMine.length > 0) query = query.in("owner_user_id", noMine);
+        }
+      } else if (ids.length > 0) {
+        query = query.in("owner_user_id", ids);
+      }
+    } else if (filters?.ownerId && filters.ownerId !== "mine") {
+      query = query.eq("owner_user_id", filters.ownerId);
+    } else if (filters?.ownerId === "mine" && me) {
+      query = query.eq("owner_user_id", me);
+    }
+    if (filters?.industryCategory) {
+      if (Array.isArray(filters.industryCategory)) {
+        if (filters.industryCategory.length > 0)
+          query = query.in("industry_category", filters.industryCategory);
+      } else {
+        query = query.eq("industry_category", filters.industryCategory);
+      }
+    }
+    if (filters?.billingState && filters.billingState.length > 0) {
+      query = query.in("billing_state", filters.billingState);
+    }
+    if (filters?.verified === "true") query = query.eq("verified", true);
+    else if (filters?.verified === "false") query = query.eq("verified", false);
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []) as Account[];
+  });
+
+  const selected = opts?.selectedIds ? new Set(opts.selectedIds) : null;
+  const rows = selected ? allRows.filter((a) => selected.has(a.id)) : allRows;
+
+  // Derived columns the list hydrates per page — done here in id batches
+  // so "Last Touch" / "Primary Contact" aren't blank in the file when the
+  // user has those columns on. Best-effort exactly as the list is: a
+  // missing view must leave the column empty, not fail the export.
+  const ids = rows.map((a) => a.id);
+  if (ids.length > 0 && enrich?.lastActivity) {
+    const la = await hydrateInChunks(ids, async (batch) => {
+      const { data } = await supabase
+        .from("v_account_last_activity")
+        .select("account_id, last_activity_at")
+        .in("account_id", batch);
+      return (data ?? []) as { account_id: string; last_activity_at: string | null }[];
+    });
+    const lastByAccount = new Map<string, string>();
+    for (const r of la) {
+      if (r.last_activity_at) lastByAccount.set(r.account_id, r.last_activity_at);
+    }
+    for (const a of rows) a.last_activity_at = lastByAccount.get(a.id) ?? null;
+  }
+  if (ids.length > 0 && enrich?.primaryContact) {
+    const pc = await hydrateInChunks(ids, async (batch) => {
+      const { data } = await supabase
+        .from("contacts")
+        .select("id, first_name, last_name, account_id")
+        .in("account_id", batch)
+        .eq("is_primary", true)
+        .is("archived_at", null);
+      return (data ?? []) as {
+        id: string;
+        first_name: string;
+        last_name: string;
+        account_id: string | null;
+      }[];
+    });
+    const primaryByAccount = new Map<string, { id: string; first_name: string; last_name: string }>();
+    for (const c of pc) {
+      if (c.account_id) {
+        primaryByAccount.set(c.account_id, {
+          id: c.id,
+          first_name: c.first_name,
+          last_name: c.last_name,
+        });
+      }
+    }
+    for (const a of rows) a.primary_contact = primaryByAccount.get(a.id) ?? null;
+  }
+
+  return { rows, truncated };
 }
 
 /**

@@ -15,6 +15,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import { cn } from "@/lib/utils";
 import {
   useNewsletter,
@@ -42,7 +44,7 @@ function CharCount({ value, soft, hard }: { value: string; soft: number; hard: n
 }
 
 export function NewsletterEditor({ id, open, onOpenChange }: Props) {
-  const { data: nl, isLoading } = useNewsletter(open ? id : null);
+  const { data: nl, isLoading, isError, isFetching, refetch } = useNewsletter(open ? id : null);
   const revise = useReviseNewsletter();
   const save = useSaveNewsletterHtml();
   const push = usePushNewsletterToMailchimp();
@@ -74,6 +76,9 @@ export function NewsletterEditor({ id, open, onOpenChange }: Props) {
   }, [nl?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const dirty = !!nl && (subject !== (nl.subject ?? "") || preview !== (nl.preview_text ?? "") || html !== (nl.html_content ?? ""));
+  // Full-screen editor with no explicit Cancel — the X button, outside
+  // click, and Escape are the only ways out, so all three need the guard.
+  const discard = useDialogDiscardGuard(dirty, () => onOpenChange(false));
   const alreadyPushed = nl?.status === "mailchimp_draft" || !!nl?.mailchimp_campaign_id;
   const type = (nl?.newsletter_type ?? "report") as NewsletterType;
 
@@ -119,7 +124,8 @@ export function NewsletterEditor({ id, open, onOpenChange }: Props) {
   const uploading = replacePlaceholder.isPending || insertImage.isPending;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent className="w-[96vw] sm:max-w-[1400px] h-[92vh] flex flex-col overflow-hidden p-4 sm:p-6">
         <DialogHeader className="shrink-0">
           <DialogTitle>Newsletter draft</DialogTitle>
@@ -131,8 +137,14 @@ export function NewsletterEditor({ id, open, onOpenChange }: Props) {
 
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFileChosen} />
 
-        {isLoading || !nl ? (
+        {isLoading ? (
           <div className="space-y-2"><Skeleton className="h-8 w-1/2" /><Skeleton className="flex-1 min-h-[400px] w-full" /></div>
+        ) : isError || !nl ? (
+          <QueryError
+            message="Couldn't load this newsletter draft."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-[1.7fr_1fr] gap-4 flex-1 min-h-0">
             {/* LEFT — preview / HTML */}
@@ -304,5 +316,7 @@ export function NewsletterEditor({ id, open, onOpenChange }: Props) {
         )}
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }

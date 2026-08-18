@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { toast } from "sonner";
 import { parseUsAddress } from "@/lib/parseUsAddress";
 import { DuplicateWarning } from "@/components/DuplicateWarning";
@@ -94,16 +95,24 @@ interface UserProfile { id: string; full_name: string | null; is_active: boolean
 export function AccountForm() {
   const { id } = useParams<{ id: string }>();
   const isEditing = !!id;
-  const { data: account, isLoading: loadingAccount } = useAccount(id);
+  const { data: account, isLoading: loadingAccount, isError, error, refetch } = useAccount(id);
   const { data: users } = useUsers(true);
 
-  if (isEditing && (loadingAccount || !account || !users)) {
+  if (isEditing && (loadingAccount || (!account && !isError) || !users)) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-10 w-48" />
         <Skeleton className="h-64 w-full" />
       </div>
     );
+  }
+
+  // A real PGRST116 (single() found zero rows) falls through to the form
+  // in "not found" shape below; any other error must not hang here
+  // forever with no way to recover but a full page reload.
+  const notFound = (error as { code?: string } | null)?.code === "PGRST116";
+  if (isEditing && isError && !notFound) {
+    return <QueryError message="Something went wrong loading this account." onRetry={() => refetch()} />;
   }
 
   return <AccountFormInner key={id ?? "new"} account={account} users={users ?? []} />;

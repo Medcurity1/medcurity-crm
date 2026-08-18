@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { AddPartnerDialog } from "./AddPartnerDialog";
+import { Skeleton } from "@/components/ui/skeleton";
 
 /**
  * Bi-directional partner tab on an Account detail page.
@@ -93,7 +94,13 @@ export function AccountPartners({
   });
 
   if (isLoading) {
-    return <div className="text-sm text-muted-foreground">Loading partnerships…</div>;
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-10 w-full" />
+        ))}
+      </div>
+    );
   }
 
   // A failed fetch must NOT look like "no partners" — that misleads the

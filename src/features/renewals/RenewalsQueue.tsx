@@ -53,6 +53,7 @@ import {
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { formatCurrency, formatDate } from "@/lib/formatters";
+import { downloadCsv } from "@/lib/csv";
 
 /**
  * Renewals view, Salesforce "Open Renewal Opportunities" report style.
@@ -536,14 +537,7 @@ function SortableHeader<T extends string>({
   );
 }
 
-function csvEscape(v: unknown): string {
-  if (v === null || v === undefined) return "";
-  const s = String(v);
-  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
-
-function downloadCsv(filename: string, rows: RenewalRow[], tab: "upcoming" | "closed-won") {
+function downloadRenewalsCsv(filename: string, rows: RenewalRow[], tab: "upcoming" | "closed-won") {
   const header = [
     "Owner",
     "Account",
@@ -556,34 +550,22 @@ function downloadCsv(filename: string, rows: RenewalRow[], tab: "upcoming" | "cl
     "Lead Source",
     "Description",
   ];
-  const lines = [header.map(csvEscape).join(",")];
-  for (const r of rows) {
-    lines.push(
-      [
-        r.owner_name ?? "",
-        r.account_name,
-        r.name,
-        tab === "upcoming" ? (r.contract_end_date ?? "") : r.close_date,
-        tab === "upcoming" ? r.close_date : (r.contract_end_date ?? ""),
-        r.expected_close_date ?? "",
-        r.next_step ?? "",
-        r.amount,
-        r.lead_source ?? "",
-        r.description ?? "",
-      ]
-        .map(csvEscape)
-        .join(","),
-    );
-  }
-  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  const table = [
+    header,
+    ...rows.map((r) => [
+      r.owner_name ?? "",
+      r.account_name,
+      r.name,
+      tab === "upcoming" ? (r.contract_end_date ?? "") : r.close_date,
+      tab === "upcoming" ? r.close_date : (r.contract_end_date ?? ""),
+      r.expected_close_date ?? "",
+      r.next_step ?? "",
+      r.amount,
+      r.lead_source ?? "",
+      r.description ?? "",
+    ]),
+  ];
+  downloadCsv(filename, table);
 }
 
 type DatePreset = "all" | "30" | "60" | "90" | "120" | "this-quarter" | "this-year" | "custom";
@@ -1271,7 +1253,7 @@ export function RenewalsQueue() {
               variant="outline"
               size="sm"
               onClick={() =>
-                downloadCsv(
+                downloadRenewalsCsv(
                   `renewals-upcoming-${isoDate(today)}.csv`,
                   upcomingFiltered ?? [],
                   "upcoming",
@@ -1573,7 +1555,7 @@ export function RenewalsQueue() {
               variant="outline"
               size="sm"
               onClick={() =>
-                downloadCsv(
+                downloadRenewalsCsv(
                   `renewals-closed-won-${isoDate(today)}.csv`,
                   closedWonFiltered ?? [],
                   "closed-won",

@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { useInboxHealth, type InboxHealthEntry } from "./api";
 
 /** Plain-English badge for an inbox's warmup state. Deliberately reads as
@@ -39,7 +40,7 @@ export function InboxHealthDialog({
   open: boolean;
   onOpenChange: (o: boolean) => void;
 }) {
-  const { data: inboxes, isLoading } = useInboxHealth(open);
+  const { data: inboxes, isLoading, isError, isFetching, refetch } = useInboxHealth(open);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -55,6 +56,12 @@ export function InboxHealthDialog({
           <div className="space-y-2">
             {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}
           </div>
+        ) : isError ? (
+          <QueryError
+            message="Couldn't load inbox health."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : !inboxes?.length ? (
           <p className="text-sm text-muted-foreground">No sending inboxes found in Smartlead.</p>
         ) : (

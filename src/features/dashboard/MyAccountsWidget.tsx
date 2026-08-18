@@ -4,6 +4,7 @@ import { Building2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
   Table,
@@ -24,7 +25,7 @@ interface MyAccountRow {
 }
 
 export function MyAccountsWidget({ userId }: { userId: string }) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["dashboard", "my-accounts", userId],
     enabled: !!userId,
     queryFn: async () => {
@@ -55,6 +56,13 @@ export function MyAccountsWidget({ userId }: { userId: string }) {
               <Skeleton key={i} className="h-9 w-full" />
             ))}
           </div>
+        ) : isError ? (
+          <QueryError
+            compact
+            message="Couldn't load your accounts."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : !data?.length ? (
           <p className="text-sm text-muted-foreground">
             No accounts assigned to you yet.

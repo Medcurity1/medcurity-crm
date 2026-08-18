@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { formatCurrency } from "@/lib/formatters";
 
 /**
@@ -44,7 +45,7 @@ interface DashboardMetricsRow {
 }
 
 export function DashboardMetrics() {
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["report", "dashboard-metrics"],
     queryFn: async (): Promise<DashboardMetricsRow | null> => {
       const { data, error } = await supabase
@@ -76,14 +77,14 @@ export function DashboardMetrics() {
         }
       />
 
-      {error && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          Error: {(error as Error).message}
-        </div>
-      )}
-
       {isLoading ? (
         <Skeleton className="h-96 w-full" />
+      ) : isError ? (
+        <QueryError
+          message="Couldn't load dashboard metrics."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
       ) : !data ? (
         <Card>
           <CardContent className="p-6 text-sm text-muted-foreground text-center">

@@ -22,10 +22,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { ChevronDown, ChevronRight, Search, Download, X } from "lucide-react";
 import { formatRelativeDate } from "@/lib/formatters";
 import { format, parseISO, subDays, subHours } from "date-fns";
 import { toast } from "sonner";
+import { downloadCsv } from "@/lib/csv";
 
 const PAGE_SIZE = 25;
 
@@ -614,7 +616,7 @@ export function AuditLogViewer() {
     );
   }
 
-  const { data, isLoading } = useAuditLogs({
+  const { data, isLoading, isError, isFetching, refetch } = useAuditLogs({
     entity,
     action,
     dateRange,
@@ -702,29 +704,11 @@ export function AuditLogViewer() {
       const stamp = format(new Date(), "yyyyMMdd_HHmm");
       if (fmt === "csv") {
         const header = Object.keys(flat[0]);
-        const csvRows = [
-          header.join(","),
-          ...flat.map((row) =>
-            header
-              .map((h) => {
-                const v = String(row[h as keyof typeof row] ?? "");
-                const escaped = v.replace(/"/g, '""');
-                return /[",\n]/.test(escaped) ? `"${escaped}"` : escaped;
-              })
-              .join(",")
-          ),
+        const table = [
+          header,
+          ...flat.map((row) => header.map((h) => row[h as keyof typeof row] ?? "")),
         ];
-        const blob = new Blob([csvRows.join("\n")], {
-          type: "text/csv;charset=utf-8;",
-        });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `audit_log_${stamp}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        downloadCsv(`audit_log_${stamp}.csv`, table);
       } else {
         // Load xlsx (~95KB) only when the user actually exports to Excel.
         const XLSX = await import("xlsx");
@@ -959,6 +943,12 @@ export function AuditLogViewer() {
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
+      ) : isError ? (
+        <QueryError
+          message="Couldn't load audit log entries."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
       ) : logs.length === 0 ? (
         <p className="text-sm text-muted-foreground py-8 text-center">
           No audit log entries found for the selected filters.

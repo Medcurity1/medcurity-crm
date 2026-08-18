@@ -12,6 +12,8 @@ import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { previewSound } from "@/lib/notification-sounds";
 import { staffAction } from "@/features/meddy/api";
+import { QueryError } from "@/components/QueryError";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   CRM_NOTIF_TYPES,
   EMAIL_OPT_INS,
@@ -48,11 +50,30 @@ const DURATION_OPTIONS = [
 export function NotificationSettingsPanel() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
-  const { data, isLoading } = useNotifPrefs();
+  const { data, isLoading, isError, isFetching, refetch } = useNotifPrefs();
   const prefs = data?.prefs ?? {};
 
   if (isLoading) {
-    return <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>;
+    return (
+      <div className="max-w-3xl space-y-3 py-4">
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-24 w-full" />
+      </div>
+    );
+  }
+
+  if (isError) {
+    // Never render toggles from an empty {} on a failed fetch — every
+    // switch would default to "off" and look like the saved prefs were
+    // wiped, and flipping one here would save that blank state as real.
+    return (
+      <QueryError
+        message="Couldn't load your notification settings."
+        onRetry={() => refetch()}
+        isRetrying={isFetching}
+      />
+    );
   }
 
   const meddyTypes = MEDDY_NOTIF_TYPES.filter((t) => !t.adminOnly || isAdmin);

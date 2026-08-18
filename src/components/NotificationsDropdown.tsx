@@ -6,6 +6,7 @@ import {
   CheckCheck,
   CheckSquare,
   Calendar,
+  ClipboardList,
   TrendingUp,
   AtSign,
   Loader2,
@@ -13,6 +14,7 @@ import {
   Info,
   PhoneCall,
   Trash2,
+  UserPlus,
   X,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -42,6 +44,8 @@ const typeIcon: Record<Notification["type"], ComponentType<{ className?: string 
   meddy_missed_chat: Bot,
   meddy_contact_received: Bot,
   follow_up_due: PhoneCall,
+  record_assigned: UserPlus,
+  task_assigned: ClipboardList,
 };
 
 const typeColor: Record<Notification["type"], string> = {
@@ -58,6 +62,10 @@ const typeColor: Record<Notification["type"], string> = {
   meddy_missed_chat: "text-red-500 dark:text-red-400",
   meddy_contact_received: "text-green-600 dark:text-green-400",
   follow_up_due: "text-teal-600 dark:text-teal-400",
+  // Hand-offs (survey T5) — one hue for both so "someone gave me
+  // something" reads as a single family in the bell list.
+  record_assigned: "text-fuchsia-600 dark:text-fuchsia-400",
+  task_assigned: "text-fuchsia-600 dark:text-fuchsia-400",
 };
 
 export function NotificationsDropdown() {

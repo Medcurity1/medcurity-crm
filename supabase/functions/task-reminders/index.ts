@@ -243,12 +243,63 @@ function escapeHtml(s: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Run accounting (task_reminder_runs — survey T9, 2026-08-17)
+//
+// Before this, per-task failures went to console.error and the function
+// returned 200 {ok:true} regardless; pg_cron records only that the HTTP
+// call was queued, so reminder delivery could stop forever with every
+// monitor green. Each run now writes a task_reminder_runs row the
+// watchdog's freshness block reads. Logging is fail-soft throughout: a
+// logging error must never break the reminders themselves.
+// ---------------------------------------------------------------------------
+
+interface RunStats {
+  considered: number;
+  claimed: number;
+  already_claimed: number;
+  claim_failures: number;
+  in_app_sent: number;
+  in_app_failed: number;
+  emails_sent: number;
+  emails_failed: number;
+  emails_skipped_403: number;
+  emails_skipped_no_connection: number;
+  emails_skipped_pref_off: number;
+  task_errors: number;
+  errors: string[];
+}
+
+function newRunStats(): RunStats {
+  return {
+    considered: 0,
+    claimed: 0,
+    already_claimed: 0,
+    claim_failures: 0,
+    in_app_sent: 0,
+    in_app_failed: 0,
+    emails_sent: 0,
+    emails_failed: 0,
+    emails_skipped_403: 0,
+    emails_skipped_no_connection: 0,
+    emails_skipped_pref_off: 0,
+    task_errors: 0,
+    errors: [],
+  };
+}
+
+function recordError(stats: RunStats, msg: string) {
+  // Cap the stored list; counters still tell the full story.
+  if (stats.errors.length < 5) stats.errors.push(msg.slice(0, 300));
+}
+
+// ---------------------------------------------------------------------------
 // Process one due reminder
 // ---------------------------------------------------------------------------
 
 async function processReminder(
   supabase: SupabaseClient,
-  task: ActivityRow
+  task: ActivityRow,
+  stats: RunStats
 ): Promise<void> {
   if (!task.owner_user_id) return;
 
@@ -280,12 +331,16 @@ async function processReminder(
     console.error(
       `task-reminders: claim/advance failed for task ${task.id}: ${claimErr.message}`,
     );
+    stats.claim_failures++;
+    recordError(stats, `claim ${task.id}: ${claimErr.message}`);
     return;
   }
   if (!claimed || claimed.length === 0) {
     // Another cron run already claimed this reminder, or it was completed.
+    stats.already_claimed++;
     return;
   }
+  stats.claimed++;
 
   // Link points at the record the task is attached to, with an open_task
   // query param so the frontend can pop the EditTaskDialog on arrival.
@@ -312,13 +367,24 @@ async function processReminder(
   const wantEmail = task.reminder_channels.includes("email");
 
   if (wantInApp) {
-    await supabase.from("notifications").insert({
+    // The insert error was previously dropped on the floor — a failing
+    // bell insert (RLS drift, column rename) was invisible anywhere.
+    const { error: bellErr } = await supabase.from("notifications").insert({
       user_id: task.owner_user_id,
       type: "task_due",
       title: `Reminder: ${task.subject}`,
       message: task.body ?? null,
       link,
     });
+    if (bellErr) {
+      console.error(
+        `task-reminders: bell insert failed for task ${task.id}: ${bellErr.message}`,
+      );
+      stats.in_app_failed++;
+      recordError(stats, `bell ${task.id}: ${bellErr.message}`);
+    } else {
+      stats.in_app_sent++;
+    }
   }
 
   // Respect the per-user "individual task reminders" switch (default on):
@@ -367,17 +433,34 @@ async function processReminder(
           );
           result = await sendEmailReminder(fresh, conn.email_address, task, fullLink);
         }
-        if (!result.ok) {
+        if (result.ok) {
+          stats.emails_sent++;
+        } else if (result.status === 403) {
+          // Mail.Send not granted on this connection — a known, expected
+          // configuration state, not a delivery failure.
+          stats.emails_skipped_403++;
+          console.warn(
+            `task-reminders: email skipped (403 Mail.Send) for task ${task.id}`
+          );
+        } else {
+          stats.emails_failed++;
+          recordError(stats, `email ${task.id}: ${result.error ?? "unknown"}`);
           console.warn(
             `task-reminders: email failed for task ${task.id}: ${result.error}`
           );
         }
       } catch (e) {
+        stats.emails_failed++;
+        recordError(stats, `email ${task.id}: ${(e as Error).message}`);
         console.warn(
           `task-reminders: token refresh/email failed for task ${task.id}: ${(e as Error).message}`
         );
       }
+    } else {
+      stats.emails_skipped_no_connection++;
     }
+  } else if (wantEmail && perTaskEmailOff) {
+    stats.emails_skipped_pref_off++;
   }
 
   // (Schedule already advanced atomically at the top via the claim.)
@@ -393,6 +476,41 @@ serve(async () => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     { auth: { persistSession: false } }
   );
+
+  // Open the run row FIRST so a crash/timeout mid-run leaves a
+  // started-but-never-finished row the watchdog can flag. Fail-soft: if
+  // the insert fails (table not yet migrated, transient), run anyway.
+  let runId: string | null = null;
+  try {
+    const { data: run } = await supabase
+      .from("task_reminder_runs")
+      .insert({})
+      .select("id")
+      .single();
+    runId = run?.id ?? null;
+  } catch (_) { /* logging must never block reminders */ }
+
+  const stats = newRunStats();
+
+  const finishRun = async (ok: boolean, topError: string | null) => {
+    if (!runId) return;
+    try {
+      await supabase
+        .from("task_reminder_runs")
+        .update({
+          finished_at: new Date().toISOString(),
+          ok,
+          report: stats,
+          error: topError ?? (stats.errors.length ? stats.errors.join("; ").slice(0, 500) : null),
+        })
+        .eq("id", runId);
+      // Retention: ~288 rows/day at the 5-min cadence; prune >30 days.
+      await supabase
+        .from("task_reminder_runs")
+        .delete()
+        .lt("started_at", new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString());
+    } catch (_) { /* fail-soft */ }
+  };
 
   const { data: due, error } = await supabase
     .from("activities")
@@ -412,23 +530,37 @@ serve(async () => {
 
   if (error) {
     console.error("task-reminders fetch failed:", error.message);
+    await finishRun(false, `fetch failed: ${error.message}`);
     return new Response(JSON.stringify({ ok: false, error: error.message }), {
       status: 500,
     });
   }
 
+  stats.considered = due?.length ?? 0;
+
   let processed = 0;
   for (const task of (due ?? []) as ActivityRow[]) {
     try {
-      await processReminder(supabase, task);
+      await processReminder(supabase, task, stats);
       processed++;
     } catch (e) {
       console.error(`task-reminders: task ${task.id} failed:`, e);
+      stats.task_errors++;
+      recordError(stats, `task ${task.id}: ${(e as Error)?.message ?? String(e)}`);
     }
   }
 
+  // ok mirrors campaign_sweep_runs semantics: finished with zero failures.
+  // Expected skips (no connection, pref off, 403 permission) don't count.
+  const runOk =
+    stats.claim_failures === 0 &&
+    stats.in_app_failed === 0 &&
+    stats.emails_failed === 0 &&
+    stats.task_errors === 0;
+  await finishRun(runOk, null);
+
   return new Response(
-    JSON.stringify({ ok: true, processed, considered: due?.length ?? 0 }),
+    JSON.stringify({ ok: true, processed, considered: due?.length ?? 0, run_ok: runOk }),
     { headers: { "Content-Type": "application/json" } }
   );
 });

@@ -5,6 +5,8 @@ import { supabase } from "@/lib/supabase";
 import type { Opportunity } from "@/types/crm";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/EmptyState";
+import { QueryError } from "@/components/QueryError";
+import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
   Table,
@@ -18,7 +20,7 @@ import { stageLabel, formatCurrency, formatDate } from "@/lib/formatters";
 
 export function AccountOpportunities({ accountId }: { accountId: string }) {
   const navigate = useNavigate();
-  const { data: opps, isLoading } = useQuery({
+  const { data: opps, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["opportunities", { account_id: accountId }],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -31,7 +33,14 @@ export function AccountOpportunities({ accountId }: { accountId: string }) {
     },
   });
 
-  if (isLoading) return <div className="text-sm text-muted-foreground">Loading opportunities...</div>;
+  if (isLoading)
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-10 w-full" />
+        ))}
+      </div>
+    );
 
   return (
     <div>
@@ -46,7 +55,13 @@ export function AccountOpportunities({ accountId }: { accountId: string }) {
         </Button>
       </div>
 
-      {!opps?.length ? (
+      {isError ? (
+        <QueryError
+          message="Couldn't load opportunities."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
+      ) : !opps?.length ? (
         <EmptyState
           icon={Target}
           title="No opportunities"

@@ -42,6 +42,7 @@ import {
 import { toast } from "sonner";
 import { CreateAutomationDialog } from "./CreateAutomationDialog";
 import { RenewalAutomationCard } from "./RenewalAutomationCard";
+import { QueryError } from "@/components/QueryError";
 import {
   useAutomationRules,
   useCreateAutomationRule,
@@ -167,9 +168,13 @@ function RuleCard({ rule }: { rule: AutomationRule }) {
   const [showLog, setShowLog] = useState(false);
   const updateRule = useUpdateAutomationRule();
   const deleteRule = useDeleteAutomationRule();
-  const { data: logEntries, isLoading: loadingLog } = useAutomationLog(
-    showLog ? rule.id : undefined
-  );
+  const {
+    data: logEntries,
+    isLoading: loadingLog,
+    isError: logError,
+    isFetching: logFetching,
+    refetch: refetchLog,
+  } = useAutomationLog(showLog ? rule.id : undefined);
 
   function handleToggleActive(checked: boolean) {
     updateRule.mutate(
@@ -268,6 +273,13 @@ function RuleCard({ rule }: { rule: AutomationRule }) {
               <div className="flex items-center justify-center py-6">
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               </div>
+            ) : logError ? (
+              <QueryError
+                compact
+                message="Couldn't load the execution log."
+                onRetry={() => refetchLog()}
+                isRetrying={logFetching}
+              />
             ) : logEntries && logEntries.length > 0 ? (
               <Table>
                 <TableHeader>
@@ -327,7 +339,7 @@ export function AutomationsManager() {
   const [selectedTemplate, setSelectedTemplate] = useState<
     Partial<CreateAutomationInput> | undefined
   >();
-  const { data: rules, isLoading } = useAutomationRules();
+  const { data: rules, isLoading, isError, isFetching, refetch } = useAutomationRules();
   const createRule = useCreateAutomationRule();
 
   function handleOpenCreate(template?: AutomationTemplate) {
@@ -370,6 +382,12 @@ export function AutomationsManager() {
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
+        ) : isError ? (
+          <QueryError
+            message="Couldn't load automation rules."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : rules && rules.length > 0 ? (
           <div className="space-y-4">
             {rules.map((rule) => (

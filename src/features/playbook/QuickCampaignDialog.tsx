@@ -17,6 +17,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/EmptyState";
+import { QueryError } from "@/components/QueryError";
 import { cn } from "@/lib/utils";
 import { formatName } from "@/lib/formatters";
 import { useCampaignTemplates, useSmartleadStatus, type Recipient } from "./api";
@@ -49,7 +50,7 @@ export function QuickCampaignDialog({
   onOpenChange: (o: boolean) => void;
   contacts: QuickCampaignContact[];
 }) {
-  const { data: templates, isLoading } = useCampaignTemplates();
+  const { data: templates, isLoading, isError, isFetching, refetch } = useCampaignTemplates();
   const { data: sl } = useSmartleadStatus();
   // Only a confirmed `false` disables — undefined (still loading) and true
   // both leave the picker enabled, so the gate never flashes on while the
@@ -123,6 +124,12 @@ export function QuickCampaignDialog({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)}
             </div>
+          ) : isError ? (
+            <QueryError
+              message="Couldn't load sequence templates."
+              onRetry={() => refetch()}
+              isRetrying={isFetching}
+            />
           ) : !templates?.length ? (
             <EmptyState icon={Wand2} title="No sequence templates yet" description="Build one from Playbook → Campaigns first." />
           ) : (

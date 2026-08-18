@@ -115,6 +115,120 @@ describe("anon grants on report/diagnostic views", () => {
     });
   }
 
+  // ── Full-inventory guard (survey T9, 2026-08-17) ──────────────────────
+  //
+  // The list above is the 2026-07-10 incident set; this block guards ALL
+  // views. Two rules, derived from how Supabase grants actually behave:
+  //
+  //  * A view whose latest CREATE predates the default-privileges door
+  //    (migration 20260817103000) was born with an automatic anon SELECT
+  //    grant, so it must show an explicit anon revoke somewhere in the
+  //    history (grants survive CREATE OR REPLACE, so a revoke at any
+  //    point covers later or-replaces) — or be dropped.
+  //  * A view created after the door is born without the grant, so it
+  //    only fails if some migration explicitly GRANTs anon afterwards
+  //    without a following revoke.
+  //
+  // Statement-level parsing handles the comma-list form
+  // ("revoke select on public.a, public.b from anon") that a naive
+  // one-view regex misses — that exact form protects v_mql_leads_qtd and
+  // v_mql_dedup (20260616000001).
+  const DOOR_MIGRATION = "20260817103000";
+
+  type ViewHistory = {
+    lastCreate: string;
+    droppedAfterCreate: boolean;
+    lastAnonEvent: "grant" | "revoke" | null;
+    lastAnonEventFile: string;
+    everRevoked: boolean;
+  };
+
+  function allViewHistories(): Map<string, ViewHistory> {
+    const hist = new Map<string, ViewHistory>();
+    const nameRe = /(?:public\.)?([a-z_][a-z0-9_]*)/g;
+    for (const file of files) {
+      const sql = contents.get(file)!;
+      // creates
+      for (const m of sql.matchAll(
+        /create\s+(?:or\s+replace\s+)?(?:materialized\s+)?view\s+(?:if\s+not\s+exists\s+)?(?:public\.)?([a-z_][a-z0-9_]*)/g,
+      )) {
+        const prev = hist.get(m[1]);
+        hist.set(m[1], {
+          lastCreate: file,
+          droppedAfterCreate: false,
+          lastAnonEvent: prev?.lastAnonEvent ?? null,
+          lastAnonEventFile: prev?.lastAnonEventFile ?? "",
+          everRevoked: prev?.everRevoked ?? false,
+        });
+      }
+      // drops
+      for (const m of sql.matchAll(
+        /drop\s+(?:materialized\s+)?view\s+(?:if\s+exists\s+)?(?:public\.)?([a-z_][a-z0-9_]*)/g,
+      )) {
+        const v = hist.get(m[1]);
+        if (v) v.droppedAfterCreate = true;
+      }
+      // clause-level grant/revoke mentioning anon (comma lists included;
+      // matches anywhere in a statement, so revokes nested inside DO
+      // blocks — e.g. 20260727120000's guarded re-revoke — count too)
+      for (const m of sql.matchAll(
+        /\b(grant|revoke)\s+[^;]*?\bon\s+([^;]*?)\s+(to|from)\s+([^;]*)/g,
+      )) {
+        const [, verb, onPart, dir, rolePart] = m;
+        if (!/\banon\b/.test(rolePart)) continue;
+        const isGrant = verb === "grant" && dir === "to";
+        const isRevoke = verb === "revoke" && dir === "from";
+        if (!isGrant && !isRevoke) continue;
+        for (const nm of onPart.matchAll(nameRe)) {
+          const v = hist.get(nm[1]);
+          if (!v) continue;
+          v.lastAnonEvent = isGrant ? "grant" : "revoke";
+          v.lastAnonEventFile = file;
+          if (isRevoke) v.everRevoked = true;
+        }
+      }
+      // dynamic guarded revoke over an array of quoted names
+      if (
+        sql.includes("revoke select on public.%i from anon") ||
+        sql.includes("revoke all on public.%i from anon")
+      ) {
+        for (const nm of sql.matchAll(/'([a-z_][a-z0-9_]*)'/g)) {
+          const v = hist.get(nm[1]);
+          if (!v) continue;
+          v.lastAnonEvent = "revoke";
+          v.lastAnonEventFile = file;
+          v.everRevoked = true;
+        }
+      }
+    }
+    return hist;
+  }
+
+  it("every live view is unreadable by anon (revoked, or born after the default-privileges door)", () => {
+    const hist = allViewHistories();
+    const offenders: string[] = [];
+    for (const [name, v] of hist) {
+      if (v.droppedAfterCreate) continue;
+      if (v.lastAnonEvent === "grant") {
+        offenders.push(
+          `${name}: last anon event is a GRANT (${v.lastAnonEventFile})`,
+        );
+        continue;
+      }
+      const bornBeforeDoor = v.lastCreate.slice(0, 14) < DOOR_MIGRATION;
+      if (bornBeforeDoor && !v.everRevoked) {
+        offenders.push(
+          `${name}: created ${v.lastCreate} (pre-door, auto-granted to anon) with no revoke anywhere in history`,
+        );
+      }
+    }
+    expect(
+      offenders,
+      `anon-readable view candidates — add "revoke all on public.<view> from anon" ` +
+        `to a migration for each:\n  ${offenders.join("\n  ")}`,
+    ).toEqual([]);
+  });
+
   for (const view of INVOKER_VIEWS) {
     it(`${view}: ends with security_invoker = on (caller RLS applies)`, () => {
       let lastState: "on" | "off" | null = null;

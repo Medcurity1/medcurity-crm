@@ -17,6 +17,7 @@ import {
   useCreateLeadList,
   useBulkAddContactsToList,
 } from "./lead-lists-api";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 
 /**
  * Add one or more CONTACTS to a static lead list — pick an existing list
@@ -103,8 +104,14 @@ export function AddToListDialog({
     await addTo(listId);
   }
 
+  // Guard against a stray outside-click/Esc discarding a half-typed new
+  // list name.
+  const dirty = newName.trim() !== "";
+  const discard = useDialogDiscardGuard(dirty, () => onOpenChange(false));
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>
@@ -169,5 +176,7 @@ export function AddToListDialog({
         </div>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }

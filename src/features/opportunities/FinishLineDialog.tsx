@@ -43,6 +43,7 @@ import {
 import { FTE_RANGES, formatCurrency } from "@/lib/formatters";
 import { US_STATES } from "@/lib/us-states";
 import { looksLikeUsZip, zipToState } from "@/lib/us-zip";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 
 /**
  * The Finish Line dialog (Molly, 2026-08-12).
@@ -104,7 +105,7 @@ export function FinishLineDialog({ request, onDismiss, onComplete }: FinishLineD
   // ----- data ---------------------------------------------------------
   const { data: account } = useAccount(open ? accountId : undefined);
   const needsEmail = !!request?.missingKeys.includes("contact_email");
-  const { data: contacts, isLoading: contactsLoading } = useQuery({
+  const { data: contacts, isLoading: contactsLoading, isError: contactsError } = useQuery({
     queryKey: ["finish-line-contacts", accountId],
     enabled: open && needsEmail && !!accountId,
     queryFn: async () => {
@@ -158,6 +159,21 @@ export function FinishLineDialog({ request, onDismiss, onComplete }: FinishLineD
   // should start half-typed, not blank).
   const seededAccount = useRef<string | null>(null);
   const seededContacts = useRef<string | null>(null);
+  // Discard-guard baseline: what the fields looked like right after
+  // seeding, before any edit. The seed effects below write here alongside
+  // their setState calls, so `dirty` (below) can tell "this field still
+  // shows what the account already had" apart from "Molly typed this."
+  const baselineRef = useRef({
+    phone: "",
+    street: "",
+    city: "",
+    stateCode: "",
+    zip: "",
+    fteRange: "",
+    contactMode: "existing" as "existing" | "new",
+    contactId: null as string | null,
+    contactEmail: "",
+  });
   useEffect(() => {
     if (!request) return;
     setActiveKeys(request.missingKeys);
@@ -177,17 +193,37 @@ export function FinishLineDialog({ request, onDismiss, onComplete }: FinishLineD
     setDone(false);
     seededAccount.current = null;
     seededContacts.current = null;
+    baselineRef.current = {
+      phone: "",
+      street: "",
+      city: "",
+      stateCode: "",
+      zip: "",
+      fteRange: "",
+      contactMode: "existing",
+      contactId: null,
+      contactEmail: "",
+    };
   }, [request]);
 
   useEffect(() => {
     if (!open || !account || !accountId || seededAccount.current === accountId) return;
     seededAccount.current = accountId;
-    setPhone((account.phone as string | null) ?? "");
-    setStreet((account.billing_street as string | null) ?? "");
-    setCity((account.billing_city as string | null) ?? "");
-    setStateCode((account.billing_state as string | null) ?? "");
-    setZip((account.billing_zip as string | null) ?? "");
-    setFteRange((account.fte_range as string | null) ?? "");
+    const seeded = {
+      phone: (account.phone as string | null) ?? "",
+      street: (account.billing_street as string | null) ?? "",
+      city: (account.billing_city as string | null) ?? "",
+      stateCode: (account.billing_state as string | null) ?? "",
+      zip: (account.billing_zip as string | null) ?? "",
+      fteRange: (account.fte_range as string | null) ?? "",
+    };
+    setPhone(seeded.phone);
+    setStreet(seeded.street);
+    setCity(seeded.city);
+    setStateCode(seeded.stateCode);
+    setZip(seeded.zip);
+    setFteRange(seeded.fteRange);
+    baselineRef.current = { ...baselineRef.current, ...seeded };
   }, [open, account, accountId]);
 
   useEffect(() => {
@@ -195,14 +231,42 @@ export function FinishLineDialog({ request, onDismiss, onComplete }: FinishLineD
     seededContacts.current = accountId ?? null;
     if (contacts.length === 0) {
       setContactMode("new");
+      baselineRef.current = { ...baselineRef.current, contactMode: "new" };
     } else {
       // The gate only fires this section when NO contact has an email, so
       // preselecting the primary (or first) is who Molly would fix anyway.
       const primary = contacts.find((c) => c.is_primary) ?? contacts[0];
       setContactId(primary.id);
       setContactEmail(primary.email ?? "");
+      baselineRef.current = {
+        ...baselineRef.current,
+        contactId: primary.id,
+        contactEmail: primary.email ?? "",
+      };
     }
   }, [open, needsEmail, contacts, accountId]);
+
+  // Guard against a stray outside-click/Esc wiping everything Molly just
+  // typed — compare live field state to the seeded baseline above (NOT to
+  // blank), so a dialog that opened pre-filled from the account's existing
+  // data doesn't falsely read as dirty. newFirst/newLast/assessorId are
+  // never seeded, so their baseline is always blank/null.
+  const dirty =
+    phone !== baselineRef.current.phone ||
+    street !== baselineRef.current.street ||
+    city !== baselineRef.current.city ||
+    stateCode !== baselineRef.current.stateCode ||
+    zip !== baselineRef.current.zip ||
+    fteRange !== baselineRef.current.fteRange ||
+    contactMode !== baselineRef.current.contactMode ||
+    contactId !== baselineRef.current.contactId ||
+    contactEmail !== baselineRef.current.contactEmail ||
+    newFirst !== "" ||
+    newLast !== "" ||
+    assessorId !== null;
+  const discard = useDialogDiscardGuard(dirty, () => {
+    if (!busy) onDismiss();
+  });
 
   // ----- per-section readiness (client mirror of the gate) ------------
   const needs = (k: CloseReadinessKey) => activeKeys.includes(k);
@@ -319,10 +383,11 @@ export function FinishLineDialog({ request, onDismiss, onComplete }: FinishLineD
 
   const total = sections.length;
   return (
+    <>
     <Dialog
       open={open}
       onOpenChange={(o) => {
-        if (!o && !busy) onDismiss();
+        if (!o && !busy) discard.requestClose();
       }}
     >
       <DialogContent
@@ -354,7 +419,7 @@ export function FinishLineDialog({ request, onDismiss, onComplete }: FinishLineD
               {!busy && (
                 <button
                   type="button"
-                  onClick={onDismiss}
+                  onClick={discard.requestClose}
                   className="rounded-md p-1 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
                   aria-label="Close"
                 >
@@ -516,9 +581,11 @@ export function FinishLineDialog({ request, onDismiss, onComplete }: FinishLineD
               icon={<Mail className="h-4 w-4" aria-hidden />}
               title="A contact with an email"
               hint={
-                contacts && contacts.length === 0
-                  ? `${accountLabel} has no contacts yet, so this also creates its first one.`
-                  : "Every client needs at least one reachable contact. Saves to the contact you pick."
+                contactsError
+                  ? "Couldn't check this account's contacts — close and reopen this to try again."
+                  : contacts && contacts.length === 0
+                    ? `${accountLabel} has no contacts yet, so this also creates its first one.`
+                    : "Every client needs at least one reachable contact. Saves to the contact you pick."
               }
             >
               {contactsLoading ? (
@@ -631,7 +698,7 @@ export function FinishLineDialog({ request, onDismiss, onComplete }: FinishLineD
 
         {/* ---------- footer ---------- */}
         <div className="flex items-center gap-3 border-t bg-muted/40 px-5 py-4">
-          <Button type="button" variant="ghost" onClick={onDismiss} disabled={busy}>
+          <Button type="button" variant="ghost" onClick={discard.requestClose} disabled={busy}>
             Not now
           </Button>
           <div className="flex-1" />
@@ -664,6 +731,8 @@ export function FinishLineDialog({ request, onDismiss, onComplete }: FinishLineD
         </div>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }
 

@@ -115,6 +115,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge, badgeVariants } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -153,6 +154,8 @@ import {
   SheetTitle,
   SheetFooter,
 } from "@/components/ui/sheet";
+import { downloadCsv } from "@/lib/csv";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 
 // ---------------------------------------------------------------------------
 // Relation lookup types
@@ -265,39 +268,17 @@ function formatCellValue(value: unknown, colDef: ColumnDef | undefined): string 
   }
 }
 
-function escapeCsvField(value: string): string {
-  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
-    return `"${value.replace(/"/g, '""')}"`;
-  }
-  return value;
-}
-
 function exportToCSV(
   columns: ColumnDef[],
   data: Record<string, unknown>[],
   entityName: string
 ) {
-  const header = columns.map((col) => escapeCsvField(col.label)).join(",");
+  const header = columns.map((col) => col.label);
   const rows = data.map((row) =>
-    columns
-      .map((col) => {
-        const raw = row[col.key];
-        const formatted = formatCellValue(raw, col);
-        return escapeCsvField(formatted);
-      })
-      .join(",")
+    columns.map((col) => formatCellValue(row[col.key], col))
   );
-  const csv = [header, ...rows].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `report-${entityName}-${timestamp}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  downloadCsv(`report-${entityName}-${timestamp}.csv`, [header, ...rows]);
 }
 
 /** Export the report to an XLSX (Excel) file. */
@@ -1214,12 +1195,18 @@ function ResultsTable({
   columns,
   data,
   isLoading,
+  isError,
+  isFetching,
+  onRetry,
   count,
 }: {
   entityKey: string;
   columns: string[];
   data: Record<string, unknown>[];
   isLoading: boolean;
+  isError?: boolean;
+  isFetching?: boolean;
+  onRetry?: () => void;
   count: number;
 }) {
   const entity = getEntityDef(entityKey);
@@ -1267,6 +1254,18 @@ function ResultsTable({
         {Array.from({ length: 5 }).map((_, i) => (
           <Skeleton key={i} className="h-10 w-full" />
         ))}
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="mt-6">
+        <QueryError
+          message="Couldn't run this report."
+          onRetry={onRetry ?? (() => {})}
+          isRetrying={isFetching}
+        />
       </div>
     );
   }
@@ -1728,8 +1727,18 @@ function SaveReportDialog({
     }
   }, [open, defaultName, defaultFolder, defaultIsShared]);
 
+  // Guard against a stray outside-click/Esc discarding a name/folder/share
+  // pick — compare against the seeded defaults so an untouched open/close
+  // never trips it.
+  const dirty =
+    name !== defaultName ||
+    isShared !== defaultIsShared ||
+    folder !== (defaultFolder ?? "");
+  const discard = useDialogDiscardGuard(dirty, () => onOpenChange(false));
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "Save Report" : "Update Report"}</DialogTitle>
@@ -1812,7 +1821,7 @@ function SaveReportDialog({
           </label>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={discard.requestClose}>
             Cancel
           </Button>
           <Button
@@ -1825,6 +1834,8 @@ function SaveReportDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }
 
@@ -1875,6 +1886,8 @@ function SidebarReportEntry({ report, isActive, isOwned, onLoad, onDelete }: Sid
 
 function ReportsSidebar({
   savedReports,
+  savedReportsError,
+  onRetrySavedReports,
   activeReportId,
   userId,
   onLoadReport,
@@ -1882,6 +1895,8 @@ function ReportsSidebar({
   onNewReport,
 }: {
   savedReports: SavedReport[];
+  savedReportsError?: boolean;
+  onRetrySavedReports?: () => void;
   activeReportId: string | null;
   userId: string | undefined;
   onLoadReport: (report: SavedReport) => void;
@@ -2010,10 +2025,20 @@ function ReportsSidebar({
         )}
 
         {/* Empty state */}
-        {savedReports.length === 0 && (
-          <div className="text-center py-8 text-sm text-muted-foreground px-3">
-            No saved reports yet. Build a report and save it to see it here.
+        {savedReportsError ? (
+          <div className="px-3 py-4">
+            <QueryError
+              compact
+              message="Couldn't load saved reports."
+              onRetry={onRetrySavedReports ?? (() => {})}
+            />
           </div>
+        ) : (
+          savedReports.length === 0 && (
+            <div className="text-center py-8 text-sm text-muted-foreground px-3">
+              No saved reports yet. Build a report and save it to see it here.
+            </div>
+          )
         )}
       </ScrollArea>
     </div>
@@ -2075,7 +2100,7 @@ export function ReportBuilder({ mode = "full" }: { mode?: "full" | "people" } = 
   const [saveMode, setSaveMode] = useState<"create" | "update">("create");
 
   // Queries
-  const { data: savedReports } = useSavedReports();
+  const { data: savedReports, isError: savedReportsError, refetch: refetchSavedReports } = useSavedReports();
   const { data: existingFolders } = useSavedReportFolders();
   const createReport = useCreateReport();
   const updateReport = useUpdateReport();
@@ -2248,7 +2273,9 @@ export function ReportBuilder({ mode = "full" }: { mode?: "full" | "people" } = 
   const {
     data: results,
     isLoading: resultsLoading,
+    isError: resultsError,
     isFetching: resultsFetching,
+    refetch: refetchResults,
   } = useRunReport(queryConfig, hasRun);
 
   // Exports must include EVERY row, not the 1,000-row display cap. Fetch
@@ -2433,6 +2460,8 @@ export function ReportBuilder({ mode = "full" }: { mode?: "full" | "people" } = 
         {/* Left sidebar */}
         <ReportsSidebar
           savedReports={savedReports ?? []}
+          savedReportsError={savedReportsError}
+          onRetrySavedReports={() => refetchSavedReports()}
           activeReportId={activeReportId}
           userId={user?.id}
           onLoadReport={handleLoadReport}
@@ -2569,6 +2598,9 @@ export function ReportBuilder({ mode = "full" }: { mode?: "full" | "people" } = 
                           columns={config.columns}
                           data={results?.data ?? []}
                           isLoading={resultsLoading}
+                          isError={resultsError}
+                          isFetching={resultsFetching}
+                          onRetry={() => refetchResults()}
                           count={results?.count ?? 0}
                         />
                       </div>

@@ -35,6 +35,7 @@ import {
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
 import { formatDate, customerStatusLabel } from "@/lib/formatters";
+import { QueryError } from "@/components/QueryError";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useAccountsForPicker,
@@ -95,10 +96,17 @@ function PreviewStatusBadge({ status }: { status: RenewalPreviewRow["status"] })
 
 export function RenewalAutomationCard() {
   const { data: config, isLoading: loadingConfig } = useRenewalAutomationConfig();
-  const { data: runs, isLoading: loadingRuns } = useRenewalAutomationRuns(10);
+  const {
+    data: runs,
+    isLoading: loadingRuns,
+    isError: runsError,
+    isFetching: runsFetching,
+    refetch: refetchRuns,
+  } = useRenewalAutomationRuns(10);
   const {
     data: preview,
     isLoading: loadingPreview,
+    isError: previewError,
     isFetching: fetchingPreview,
     refetch: refetchPreview,
   } = useRenewalPreview();
@@ -436,6 +444,13 @@ export function RenewalAutomationCard() {
             <div className="flex items-center justify-center py-6">
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             </div>
+          ) : previewError ? (
+            <QueryError
+              compact
+              message="Couldn't load the renewal preview."
+              onRetry={() => refetchPreview()}
+              isRetrying={fetchingPreview}
+            />
           ) : preview && preview.length > 0 ? (
             <>
               <div className="flex items-center gap-4 text-xs text-muted-foreground mb-2">
@@ -560,6 +575,13 @@ export function RenewalAutomationCard() {
             <div className="flex items-center justify-center py-6">
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             </div>
+          ) : runsError ? (
+            <QueryError
+              compact
+              message="Couldn't load recent runs."
+              onRetry={() => refetchRuns()}
+              isRetrying={runsFetching}
+            />
           ) : runs && runs.length > 0 ? (
             <div className="rounded-md border">
               <Table>

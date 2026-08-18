@@ -5,6 +5,7 @@ import {
   ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, ClipboardCopy, ClipboardPaste, Download, ListChecks, Megaphone, Plus, Pencil, RotateCcw, Trash2, X, Search, UserPlus2, Snowflake, Sparkles,
 } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
+import { QueryError } from "@/components/QueryError";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,8 +28,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { formatPhone } from "@/components/PhoneInput";
 import { cn } from "@/lib/utils";
+import { downloadCsv } from "@/lib/csv";
 import type { LeadList } from "@/types/crm";
 import {
   useLeadLists,
@@ -67,7 +68,7 @@ import { QuickCampaignDialog } from "@/features/playbook/QuickCampaignDialog";
 import { useTags } from "@/features/tags/api";
 import { useUsers } from "@/features/accounts/api";
 import { US_STATES } from "@/lib/us-states";
-import { customerStatusLabel } from "@/lib/formatters";
+import { customerStatusLabel, formatPhoneWithExt } from "@/lib/formatters";
 import type { CustomerStatus } from "@/types/crm";
 
 /**
@@ -79,7 +80,7 @@ import type { CustomerStatus } from "@/types/crm";
  */
 
 export function ListsPage() {
-  const { data: lists, isLoading } = useLeadLists();
+  const { data: lists, isLoading, isError, isFetching, refetch } = useLeadLists();
   const { data: counts } = useLeadListMemberCount();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // ?list=<id> deep link (the Nexus List widget's "Open list" footer).
@@ -153,6 +154,12 @@ export function ListsPage() {
             <Skeleton key={i} className="h-32 rounded-xl" />
           ))}
         </div>
+      ) : isError ? (
+        <QueryError
+          message="Couldn't load lists."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
       ) : !lists?.length ? (
         <EmptyState
           icon={ListChecks}
@@ -254,20 +261,11 @@ function copyEmails(rows: WorkRow[]) {
 }
 
 function exportCsv(listName: string, rows: WorkRow[]) {
-  const esc = (v: string | null) => `"${(v ?? "").replace(/"/g, '""')}"`;
-  const lines = [
-    ["First name", "Last name", "Account", "Email", "Phone"].join(","),
-    ...rows.map((r) =>
-      [esc(r.firstName), esc(r.lastName), esc(r.account), esc(r.email), esc(r.phone)].join(","),
-    ),
+  const table = [
+    ["First name", "Last name", "Account", "Email", "Phone"],
+    ...rows.map((r) => [r.firstName, r.lastName, r.account, r.email, r.phone]),
   ];
-  // BOM so Excel opens it as UTF-8
-  const blob = new Blob(["\uFEFF" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `${listName.replace(/[^\w-]+/g, "_") || "list"}.csv`;
-  a.click();
-  URL.revokeObjectURL(a.href);
+  downloadCsv(`${listName.replace(/[^\w-]+/g, "_") || "list"}.csv`, table);
   toast.success(`Exported ${rows.length} ${rows.length === 1 ? "row" : "rows"}`);
 }
 
@@ -305,6 +303,7 @@ interface WorkRow {
   lastName: string | null;
   email: string | null;
   phone: string | null;
+  phoneExt: string | null;
   account: string | null;
 }
 
@@ -354,6 +353,7 @@ function ListWorkspace({
         lastName: r.last_name,
         email: r.email,
         phone: r.phone,
+        phoneExt: r.phone_ext,
         account: r.account?.name ?? null,
       }));
     }
@@ -366,6 +366,7 @@ function ListWorkspace({
         lastName: m.contact!.last_name,
         email: m.contact!.email,
         phone: m.contact!.phone,
+        phoneExt: m.contact!.phone_ext,
         account: (m.contact as { account?: { name?: string } | null })?.account?.name ?? null,
       }));
   }, [list.is_dynamic, staticMembers.data, smartMembers.data]);
@@ -769,7 +770,7 @@ function ListWorkspace({
                       <TableCell className="text-sm">{row.account ?? "\u2014"}</TableCell>
                       <TableCell className="text-sm">{row.email ?? "\u2014"}</TableCell>
                       <TableCell className="text-sm">
-                        {row.phone ? formatPhone(row.phone) : "\u2014"}
+                        {row.phone ? formatPhoneWithExt(row.phone, row.phoneExt) : "\u2014"}
                       </TableCell>
                       <TableCell>
                         <Button

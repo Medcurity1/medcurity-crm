@@ -2,8 +2,9 @@ import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tansta
 import { supabase } from "@/lib/supabase";
 import type { Contact } from "@/types/crm";
 import { buildPersonSearchClause } from "@/lib/search-clause";
+import { fetchAllPages, hydrateInChunks } from "@/features/list-export/csv-export";
 
-interface ContactFilters {
+export interface ContactFilters {
   search?: string;
   account_id?: string;
   ownerId?: string | "mine" | string[];
@@ -145,6 +146,151 @@ export function useContacts(filters?: ContactFilters) {
       return { data: data as unknown as Contact[], count: count ?? 0 };
     },
   });
+}
+
+/**
+ * Every contact matching the list's CURRENT filters, unpaginated — the
+ * row source for the Contacts list "Export CSV" button.
+ *
+ * ⚠ KEEP IN SYNC with `useContacts` above (same reasoning as
+ * `fetchAccountsForExport`: the list query is off-limits to this change,
+ * so the filter chain is mirrored rather than shared). Note in particular
+ * the `import_status is null` scope and the `archived` tri-state — the
+ * export has to honor the archive filter the list is currently showing,
+ * not silently dump archived rows into the file.
+ */
+export async function fetchContactsForExport(
+  filters: Omit<ContactFilters, "page" | "pageSize"> | undefined,
+  opts?: {
+    /** Export only these rows (a list selection). Applied after the
+     *  filtered fetch so the file keeps the list's sort order. */
+    selectedIds?: string[];
+  },
+): Promise<{ rows: Contact[]; truncated: boolean }> {
+  const sortCol = filters?.sortColumn ?? "last_name";
+  const sortAsc = (filters?.sortDirection ?? "asc") === "asc";
+  const hasTagFilter = !!(filters?.tagIds && filters.tagIds.length > 0);
+  const tagJoin = hasTagFilter ? ", contact_tags!inner(tag_id)" : "";
+
+  // Resolved once, outside the page loop.
+  let acctIds: string[] = [];
+  if (filters?.search) {
+    const { data: matchedAccounts } = await supabase
+      .from("accounts")
+      .select("id")
+      .ilike("name", `%${filters.search.replace(/[(),%]/g, " ")}%`)
+      .limit(200);
+    acctIds = (matchedAccounts ?? []).map((a) => a.id as string);
+  }
+  const me = filters?.ownerId
+    ? (await supabase.auth.getUser()).data.user?.id ?? null
+    : null;
+
+  const { rows: allRows, truncated } = await fetchAllPages<Contact>(async (from, to) => {
+    let query = supabase
+      .from("contacts")
+      .select(
+        "*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)" +
+          tagJoin,
+      )
+      .is("import_status", null)
+      .range(from, to);
+
+    if (sortCol.startsWith("account.")) {
+      const innerCol = sortCol.slice("account.".length);
+      query = query.order(`account(${innerCol})`, { ascending: sortAsc, nullsFirst: false });
+    } else {
+      query = query.order(sortCol, { ascending: sortAsc, nullsFirst: false });
+    }
+    query = query.order("id", { ascending: true });
+
+    if (filters?.archived === "active") {
+      query = query.is("archived_at", null);
+    } else if (filters?.archived === "archived") {
+      query = query.not("archived_at", "is", null);
+    }
+
+    if (filters?.search) {
+      const baseClause = buildPersonSearchClause(filters.search, [
+        "first_name",
+        "last_name",
+        "email",
+        "email2",
+        "email3",
+        "title",
+      ]);
+      const parts: string[] = [];
+      if (baseClause) parts.push(baseClause);
+      if (acctIds.length > 0) parts.push(`account_id.in.(${acctIds.join(",")})`);
+      if (parts.length > 0) query = query.or(parts.join(","));
+    }
+    if (filters?.account_id) query = query.eq("account_id", filters.account_id);
+    if (hasTagFilter) query = query.in("contact_tags.tag_id", filters!.tagIds!);
+    if (Array.isArray(filters?.ownerId)) {
+      const ids = filters!.ownerId;
+      if (ids.includes("mine")) {
+        if (me) {
+          const resolved = Array.from(new Set(ids.map((v) => (v === "mine" ? me : v))));
+          if (resolved.length > 0) query = query.in("owner_user_id", resolved);
+        } else if (ids.length > 1) {
+          const noMine = ids.filter((v) => v !== "mine");
+          if (noMine.length > 0) query = query.in("owner_user_id", noMine);
+        }
+      } else if (ids.length > 0) {
+        query = query.in("owner_user_id", ids);
+      }
+    } else if (filters?.ownerId && filters.ownerId !== "mine") {
+      query = query.eq("owner_user_id", filters.ownerId);
+    } else if (filters?.ownerId === "mine" && me) {
+      query = query.eq("owner_user_id", me);
+    }
+    if (filters?.verified === "true") query = query.eq("verified", true);
+    else if (filters?.verified === "false") query = query.eq("verified", false);
+    if (filters?.mailingState && filters.mailingState.length > 0) {
+      query = query.in("mailing_state", filters.mailingState);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return data as unknown as Contact[];
+  });
+
+  const selected = opts?.selectedIds ? new Set(opts.selectedIds) : null;
+  return {
+    rows: selected ? allRows.filter((c) => selected.has(c.id)) : allRows,
+    truncated,
+  };
+}
+
+/**
+ * Tag names per contact id, for the Tags column in an export. The list
+ * gets these from `useContactTagsMap` one page at a time; an export
+ * needs them for the whole result, so the ids go out in `.in(...)`-sized
+ * batches (see `hydrateInChunks`).
+ */
+export async function fetchContactTagNames(
+  contactIds: string[],
+): Promise<Map<string, string[]>> {
+  const byContact = new Map<string, string[]>();
+  if (contactIds.length === 0) return byContact;
+  const rows = await hydrateInChunks(contactIds, async (batch) => {
+    const { data } = await supabase
+      .from("contact_tags")
+      .select("contact_id, tag:tags!tag_id(name)")
+      .in("contact_id", batch);
+    return (data ?? []) as unknown as {
+      contact_id: string;
+      tag: { name: string } | null;
+    }[];
+  });
+  for (const r of rows) {
+    if (!r.tag?.name) continue;
+    const list = byContact.get(r.contact_id);
+    if (list) list.push(r.tag.name);
+    else byContact.set(r.contact_id, [r.tag.name]);
+  }
+  for (const list of byContact.values()) list.sort((a, b) => a.localeCompare(b));
+  return byContact;
 }
 
 export function useContact(id: string | undefined) {

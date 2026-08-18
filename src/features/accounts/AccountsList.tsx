@@ -4,7 +4,19 @@ import { useUrlState, useUrlNumberState, useUrlArrayState, useUrlSortState } fro
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Building2, Plus, Search, Target } from "lucide-react";
-import { useAccounts, useArchiveAccount, useBulkUpdateOwner, useBulkDeleteAccounts, useUsers, useStatesInUse } from "./api";
+import { useAccounts, useArchiveAccount, useBulkUpdateOwner, useBulkDeleteAccounts, useUsers, useStatesInUse, fetchAccountsForExport } from "./api";
+import { useBulkUndo, capturePriorOwners } from "@/features/archive/bulk-undo";
+import { ExportCsvButton } from "@/features/list-export/ExportCsvButton";
+import {
+  buildExportTable,
+  csvDate,
+  csvText,
+  exportFilename,
+  EXPORT_ROW_CEILING,
+  EXPORT_TRUNCATED_MESSAGE,
+  type ExportValueMap,
+} from "@/features/list-export/csv-export";
+import { downloadCsv } from "@/lib/csv";
 import { stateLabel } from "@/lib/us-states";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
@@ -70,6 +82,40 @@ const ACCOUNTS_COLUMNS: ColumnDescriptor[] = [
   { key: "notes", label: "Notes" },
 ];
 
+// CSV value per column, keyed to ACCOUNTS_COLUMNS. One entry per data
+// column so "Export CSV" emits exactly the columns the user has visible,
+// in their order, with the same wording the table shows.
+//
+// Two deliberate departures from the cell renderers: an em dash becomes
+// an EMPTY cell (a spreadsheet shouldn't contain "—"), and Last Touch
+// exports the absolute date rather than the relative phrasing the badge
+// uses — "3 days ago" can't be sorted or filtered in Excel, and it stops
+// being true the moment the file is saved.
+const ACCOUNT_EXPORT_VALUES: ExportValueMap<Account> = {
+  name: (a) => csvText(a.name),
+  primary_contact: (a) =>
+    a.primary_contact
+      ? formatName(a.primary_contact.first_name, a.primary_contact.last_name)
+      : null,
+  phone: (a) =>
+    a.phone
+      ? formatPhone(`${a.phone}${a.phone_extension ? ` x${a.phone_extension}` : ""}`)
+      : null,
+  customer_status: (a) => customerStatusLabel(a.customer_status),
+  sales: (a) =>
+    a.sales_active
+      ? a.sales_status
+        ? salesStatusLabel(a.sales_status)
+        : "Active"
+      : "Inactive",
+  next_follow_up: (a) => csvDate(a.next_follow_up_date, formatDate),
+  owner: (a) => a.owner?.full_name ?? "Unassigned",
+  state: (a) => (a.billing_state ? stateLabel(a.billing_state) : null),
+  industry: (a) => csvText(a.industry),
+  last_touch: (a) => csvDate(a.last_activity_at, formatDate),
+  notes: (a) => csvText(a.notes),
+};
+
 // Industry filter options derived from the shared label map so the filter
 // can't drift from the source of truth in formatters.ts (the previous
 // hardcoded copy had already diverged).
@@ -108,29 +154,42 @@ export function AccountsList() {
   const [sort, setSortState] = useUrlSortState("sort");
   const cols = useColumnPrefs("accounts", ACCOUNTS_COLUMNS);
 
-  const { data: result, isLoading, isError, isFetching, refetch } = useAccounts({
+  // The filter set, hoisted out of the useAccounts() call so "Export CSV"
+  // can re-run EXACTLY what the list is showing. Anything added here is
+  // automatically in the export; a second, drifting copy would not be.
+  const listFilters = {
     search: search || undefined,
     customerStatus: customerStatusFilter.length > 0 ? customerStatusFilter : undefined,
     salesActive:
-      salesFilter === "active" ? "true" : salesFilter === "inactive" ? "false" : undefined,
+      salesFilter === "active"
+        ? ("true" as const)
+        : salesFilter === "inactive"
+        ? ("false" as const)
+        : undefined,
     salesStatus: subStatusFilter.length > 0 ? subStatusFilter : undefined,
     followUp:
-      followUpFilter === "due" || followUpFilter === "overdue" ? followUpFilter : undefined,
+      followUpFilter === "due" || followUpFilter === "overdue"
+        ? (followUpFilter as "due" | "overdue")
+        : undefined,
     ownerId: ownerFilter.length > 0 ? ownerFilter : undefined,
     industryCategory: industryFilter.length > 0 ? industryFilter : undefined,
     billingState: stateFilter.length > 0 ? stateFilter : undefined,
     verified:
       verifiedFilter === "verified"
-        ? "true"
+        ? ("true" as const)
         : verifiedFilter === "unverified"
-        ? "false"
+        ? ("false" as const)
         : undefined,
-    page,
-    pageSize,
     sortColumn: sort.column,
     // No sort in the URL → leave direction undefined so the API's
     // default (name ASC) applies instead of the hook's "desc".
     sortDirection: sort.column ? sort.direction : undefined,
+  };
+
+  const { data: result, isLoading, isError, isFetching, refetch } = useAccounts({
+    ...listFilters,
+    page,
+    pageSize,
   });
   const { data: users } = useUsers();
   const { data: statesInUse } = useStatesInUse("accounts");
@@ -141,6 +200,7 @@ export function AccountsList() {
   const archiveMutation = useArchiveAccount();
   const bulkOwnerMutation = useBulkUpdateOwner();
   const bulkDeleteMutation = useBulkDeleteAccounts();
+  const undo = useBulkUndo("accounts", "account(s)");
 
   const accounts = result?.data;
   const totalCount = result?.count ?? 0;
@@ -217,11 +277,10 @@ export function AccountsList() {
 
   const handleBulkArchive = async () => {
     const ids = Array.from(selectedIds);
-    const count = ids.length;
     try {
       await Promise.all(ids.map((id) => archiveMutation.mutateAsync({ id })));
       setSelectedIds(new Set());
-      toast.success(`${count} account(s) archived.`);
+      undo.archived(ids);
     } catch (e) {
       // Keep the selection so the user can retry; surface why it failed.
       toast.error("Archive failed: " + (e as Error).message);
@@ -246,15 +305,51 @@ export function AccountsList() {
   };
 
   const handleBulkAssignOwner = async (userId: string) => {
-    const count = selectedIds.size;
+    const ids = Array.from(selectedIds);
+    // Capture prior owners BEFORE the write — that's the only record of
+    // them once the update lands.
+    const prior = capturePriorOwners(ids, accounts);
     try {
-      await bulkOwnerMutation.mutateAsync({ ids: Array.from(selectedIds), owner_user_id: userId });
+      await bulkOwnerMutation.mutateAsync({ ids, owner_user_id: userId });
       setSelectedIds(new Set());
-      toast.success(`${count} account(s) reassigned.`);
+      undo.reassigned(ids.length, prior);
     } catch (e) {
       // Keep the selection so the user can retry; surface why it failed
       // (e.g. some rows hit RLS / no longer exist) instead of failing silently.
       toast.error("Reassign failed: " + (e as Error).message);
+    }
+  };
+
+  /**
+   * Download the current view as CSV: the same filters and sort the list
+   * is running, the same columns the user has visible, without the page
+   * limit. A selection narrows it to just those rows.
+   */
+  const handleExport = async () => {
+    const selection = selectedIds.size > 0 ? Array.from(selectedIds) : undefined;
+    const { rows, truncated } = await fetchAccountsForExport(listFilters, {
+      // Only pay for the derived-column lookups the file will actually use.
+      lastActivity: cols.isVisible("last_touch"),
+      primaryContact: cols.isVisible("primary_contact"),
+      selectedIds: selection,
+    });
+    if (rows.length === 0) {
+      toast.info("Nothing to export — no accounts match the current filters.");
+      return;
+    }
+    downloadCsv(
+      exportFilename("accounts"),
+      buildExportTable(cols.visibleColumns, ACCOUNT_EXPORT_VALUES, rows),
+    );
+    if (selection && rows.length < selection.length) {
+      // Only reachable if part of the selection sat past the row ceiling.
+      toast.warning(
+        `Exported ${rows.length} of ${selection.length} selected — the rest are past the ${EXPORT_ROW_CEILING.toLocaleString()}-row export limit.`,
+      );
+    } else if (truncated && !selection) {
+      toast.warning(EXPORT_TRUNCATED_MESSAGE);
+    } else {
+      toast.success(`Exported ${rows.length.toLocaleString()} account(s).`);
     }
   };
 
@@ -517,6 +612,11 @@ export function AccountsList() {
 
         <SavedViews entity="accounts" />
         <ColumnPicker columns={ACCOUNTS_COLUMNS} prefs={cols} />
+        <ExportCsvButton
+          onExport={handleExport}
+          selectedCount={selectedIds.size}
+          disabled={isLoading || isError}
+        />
       </div>
 
       {isLoading ? (

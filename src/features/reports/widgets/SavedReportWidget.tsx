@@ -12,6 +12,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import {
   Table,
   TableBody,
@@ -52,11 +53,21 @@ export function SavedReportWidget({
   groupBy?: string;
   valueColumn?: string;
 }) {
-  const { data: report, isLoading: reportLoading } = useSavedReport(reportId);
-  const { data: results, isLoading: runLoading } = useRunReport(
-    report?.config ?? null,
-    !!report
-  );
+  const {
+    data: report,
+    isLoading: reportLoading,
+    isError: reportError,
+    error: reportErrorObj,
+    isFetching: reportFetching,
+    refetch: refetchReport,
+  } = useSavedReport(reportId);
+  const {
+    data: results,
+    isLoading: runLoading,
+    isError: runError,
+    isFetching: runFetching,
+    refetch: refetchRun,
+  } = useRunReport(report?.config ?? null, !!report);
 
   const entity = report ? getEntityDef(report.config.entity) : null;
   const columns = report?.config.columns ?? [];
@@ -85,11 +96,37 @@ export function SavedReportWidget({
     return <Skeleton className="h-32 w-full" />;
   }
 
+  // Only a real PGRST116 (single() found zero rows) means the report was
+  // actually deleted; any other error is a failed load that must not
+  // read as "gone".
+  const reportNotFound = (reportErrorObj as { code?: string } | null)?.code === "PGRST116";
+  if (reportError && !reportNotFound) {
+    return (
+      <QueryError
+        compact
+        message="Couldn't load this report."
+        onRetry={() => refetchReport()}
+        isRetrying={reportFetching}
+      />
+    );
+  }
+
   if (!report) {
     return (
       <p className="text-xs text-muted-foreground py-4">
         Report no longer exists.
       </p>
+    );
+  }
+
+  if (runError) {
+    return (
+      <QueryError
+        compact
+        message="Couldn't run this report."
+        onRetry={() => refetchRun()}
+        isRetrying={runFetching}
+      />
     );
   }
 

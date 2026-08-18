@@ -25,6 +25,7 @@ import {
   useDeleteSavedView,
   type SavedViewEntity,
 } from "./saved-views-api";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 
 // Pagination is transient — it's not part of what makes a "view".
 const EXCLUDED = new Set(["page"]);
@@ -81,6 +82,13 @@ export function SavedViews({ entity }: { entity: SavedViewEntity }) {
     );
   }
 
+  // Guard against a stray outside-click/Esc discarding a half-typed view
+  // name. The footer's Cancel is a Radix DialogClose (not a plain onClick),
+  // which calls the Dialog's onOpenChange directly — wrapping that prop
+  // below is enough to cover it too, same as X/Escape/outside-click.
+  const dirty = name.trim() !== "";
+  const discard = useDialogDiscardGuard(dirty, () => setSaveOpen(false));
+
   return (
     <>
       <DropdownMenu>
@@ -136,7 +144,7 @@ export function SavedViews({ entity }: { entity: SavedViewEntity }) {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Dialog open={saveOpen} onOpenChange={setSaveOpen}>
+      <Dialog open={saveOpen} onOpenChange={discard.guardedOnOpenChange}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Save this view</DialogTitle>
@@ -163,6 +171,7 @@ export function SavedViews({ entity }: { entity: SavedViewEntity }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {discard.dialog}
     </>
   );
 }

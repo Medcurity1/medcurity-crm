@@ -4,6 +4,7 @@ import { Phone, Mail, Calendar, StickyNote, CheckSquare, MonitorPlay, Presentati
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { formatRelativeDate } from "@/lib/formatters";
 import { dedupeEmailActivityRows } from "./activityFeedDedupe";
 import { AutomationBadge, isAutomationActivity } from "@/features/activities/AutomationBadge";
@@ -86,7 +87,7 @@ function relatedLabel(a: TeamActivity): { text: string; href: string } | null {
 }
 
 export function TeamActivityFeed() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["dashboard", "team-activity-feed"],
     queryFn: async () => {
       const { data: rows, error } = await supabase
@@ -130,6 +131,13 @@ export function TeamActivityFeed() {
               </div>
             ))}
           </div>
+        ) : isError ? (
+          <QueryError
+            compact
+            message="Couldn't load the team activity feed."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : !data?.length ? (
           <p className="text-sm text-muted-foreground">No recent team activity.</p>
         ) : (

@@ -328,6 +328,11 @@ export const NOTIF_TYPE_FALLBACK_SOUNDS: Record<string, string> = {
   support_new_chat: "bubble",
   // A teammate high-fived your closed deal — happy little clink.
   deal_high_five: "glass",
+  // Hand-offs (survey T5). "drop" = something just landed in your lap;
+  // "knock" = someone handing you work. Deliberately NOT marimba, so a
+  // task someone gave you never sounds like your own task coming due.
+  record_assigned: "drop",
+  task_assigned: "knock",
 };
 
 /** Saved seconds value → repeat-duration bucket (Nexus index.html:12239). */

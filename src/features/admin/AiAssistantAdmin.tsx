@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/table";
 import { ShieldCheck, Sparkles } from "lucide-react";
 import { formatRelativeDate } from "@/lib/formatters";
+import { QueryError } from "@/components/QueryError";
 import {
   AI_CAPABILITIES,
   useAiSettings,
@@ -142,9 +143,9 @@ const RATE_LIMIT_MIN = 1;
 const RATE_LIMIT_MAX = 1000;
 
 export function AiAssistantAdmin() {
-  const { data: settings, isLoading } = useAiSettings();
+  const { data: settings, isLoading, isError, isFetching, refetch } = useAiSettings();
   const update = useUpdateAiSettings();
-  const { data: recent, isLoading: loadingRecent } = useRecentAiQueries(20);
+  const { data: recent, isLoading: loadingRecent, isError: recentError, isFetching: recentFetching, refetch: refetchRecent } = useRecentAiQueries(20);
 
   const [rateLimit, setRateLimit] = useState<string>("");
 
@@ -191,6 +192,16 @@ export function AiAssistantAdmin() {
         <Skeleton className="h-40 w-full" />
         <Skeleton className="h-64 w-full" />
       </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <QueryError
+        message="Couldn't load Ask AI settings."
+        onRetry={() => refetch()}
+        isRetrying={isFetching}
+      />
     );
   }
 
@@ -330,6 +341,15 @@ export function AiAssistantAdmin() {
               <Skeleton className="h-8 w-full" />
               <Skeleton className="h-8 w-full" />
               <Skeleton className="h-8 w-full" />
+            </div>
+          ) : recentError ? (
+            <div className="p-6">
+              <QueryError
+                compact
+                message="Couldn't load recent questions."
+                onRetry={() => refetchRecent()}
+                isRetrying={recentFetching}
+              />
             </div>
           ) : recent && recent.length > 0 ? (
             <div className="overflow-x-auto">

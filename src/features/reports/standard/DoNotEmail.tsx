@@ -15,6 +15,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -29,6 +30,7 @@ import {
 import { downloadCsv, todayStamp } from "./report-helpers";
 import { fetchUsersById, fetchAllRows } from "./report-fetchers";
 import { PreviewNote, PREVIEW_LIMIT } from "./PreviewNote";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 
 // Same basic shape-check as CampaignRecipients.tsx's EMAIL_RE — good enough
 // to catch a typo before a round trip; the edge function normalizes and
@@ -120,7 +122,12 @@ export function DoNotEmail() {
     setOptoutNote("");
   }
 
-  const { data, isLoading, error } = useQuery({
+  // Guard against a stray outside-click/Esc discarding a half-typed
+  // opt-out.
+  const optoutDirty = optoutEmail.trim() !== "" || optoutNote.trim() !== "";
+  const optoutDiscard = useDialogDiscardGuard(optoutDirty, closeOptoutDialog);
+
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["report", "do-not-email", category],
     queryFn: async () => {
       const rows = await fetchAllRows<SuppRow>(
@@ -196,12 +203,6 @@ export function DoNotEmail() {
         }
       />
 
-      {error && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          Error: {(error as Error).message}
-        </div>
-      )}
-
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <Kpi label="Rows" value={isLoading ? "…" : rows.length.toLocaleString()} icon />
         <Kpi label="Unique emails to suppress" value={isLoading ? "…" : distinctEmails.toLocaleString()} />
@@ -233,6 +234,8 @@ export function DoNotEmail() {
               <TableBody>
                 {isLoading ? (
                   <TableRow><TableCell colSpan={7} className="p-4"><Skeleton className="h-48 w-full" /></TableCell></TableRow>
+                ) : isError ? (
+                  <TableRow><TableCell colSpan={7} className="p-4"><QueryError compact message="Couldn't load this report." onRetry={() => refetch()} isRetrying={isFetching} /></TableCell></TableRow>
                 ) : !rows.length ? (
                   <TableRow><TableCell colSpan={7} className="p-6 text-sm text-muted-foreground text-center">Nothing to suppress in this category.</TableCell></TableRow>
                 ) : (
@@ -282,7 +285,7 @@ export function DoNotEmail() {
         </CardContent>
       </Card>
 
-      <Dialog open={optoutOpen} onOpenChange={(o) => { if (!o) closeOptoutDialog(); else setOptoutOpen(true); }}>
+      <Dialog open={optoutOpen} onOpenChange={optoutDiscard.guardedOnOpenChange}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Opt out an email</DialogTitle>
@@ -316,7 +319,7 @@ export function DoNotEmail() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={closeOptoutDialog}>Cancel</Button>
+            <Button variant="outline" onClick={optoutDiscard.requestClose}>Cancel</Button>
             <Button
               disabled={!optoutEmailValid || addOptout.isPending}
               onClick={() =>
@@ -331,6 +334,7 @@ export function DoNotEmail() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {optoutDiscard.dialog}
     </div>
   );
 }

@@ -46,6 +46,7 @@ import { useRequiredFields } from "@/hooks/useRequiredFields";
 import { getMissingRequiredFields, formatFieldLabel } from "@/lib/requiredFields";
 import { RequiredIndicator } from "@/components/RequiredIndicator";
 import { opportunitySchema, type OpportunityFormValues } from "./schema";
+import { computeAmount, backSolveSubtotal } from "./deal-math";
 import { FTE_RANGES, employeesToFteRange } from "@/lib/formatters";
 import { celebrateClosedWon } from "@/lib/confetti";
 import { checkCloseReadiness, formatCloseReadinessMessage } from "@/lib/closeReadiness";
@@ -65,6 +66,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import {
   Table,
   TableBody,
@@ -105,17 +107,22 @@ function FormSection({ title, children }: { title: string; children: React.React
 export function OpportunityForm() {
   const { id } = useParams<{ id: string }>();
   const isEditing = !!id;
-  const { data: opp, isLoading: loadingOpp } = useOpportunity(id);
+  const { data: opp, isLoading: loadingOpp, isError, error, refetch } = useOpportunity(id);
   const { data: users } = useUsers(true);
 
   // Wait for data before mounting the form so defaultValues are correct
-  if (isEditing && (loadingOpp || !opp || !users)) {
+  if (isEditing && (loadingOpp || (!opp && !isError) || !users)) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-10 w-48" />
         <Skeleton className="h-64 w-full" />
       </div>
     );
+  }
+
+  const notFound = (error as { code?: string } | null)?.code === "PGRST116";
+  if (isEditing && isError && !notFound) {
+    return <QueryError message="Something went wrong loading this opportunity." onRetry={() => refetch()} />;
   }
 
   // key={id} forces React to remount a fresh form instance per opportunity
@@ -491,70 +498,47 @@ function OpportunityFormInner({ opp, users }: { opp: Opportunity | undefined; us
     Number(watch("service_amount") ?? 0) > 0 ||
     lineItemsHaveService;
 
+  // The arithmetic (and every guard protecting it) lives in ./deal-math.ts
+  // so it can be unit-tested — see tests/dealMath.test.ts, which pins the
+  // three production regressions this code has caused and the deliberate
+  // 100 vs 99.99 clamp asymmetry between the two directions. These effects
+  // stay thin: read watch() values → call the pure fn → apply the writes.
   useEffect(() => {
-    if (!productsLoaded) return; // wait until we know if opp has products
-    if (hasProducts) return; // DB trigger owns amount when products exist
-    // Only recompute when the USER edited subtotal or discount. On initial
-    // mount, lastEditedRef.current is null because reset() populated the
-    // form from DB values — we must NOT recompute then, or SF-imported
-    // opps with subtotal=0, discount=0, amount=12000 get silently zeroed.
-    // (Issue: discount on SF data was informational, not multiplicative.)
-    if (
-      lastEditedRef.current !== "subtotal" &&
-      lastEditedRef.current !== "discount"
-    ) {
-      return;
+    const { subtotal: nextSubtotal, amount: nextAmount } = computeAmount({
+      productsLoaded,
+      hasProducts,
+      lastEdited: lastEditedRef.current,
+      subtotal: watchedSubtotal,
+      discount: watchedDiscount,
+      amount: watchedAmount,
+      discountType: watchedDiscountType,
+    });
+    if (nextSubtotal !== null) {
+      setValue("subtotal", nextSubtotal, { shouldDirty: true });
     }
-    // Base off subtotal, but fall back to the current amount when subtotal is
-    // unset (amount-only / SF-imported opps) so editing the discount can't
-    // divide into 0 and silently zero out the deal. No usable base -> bail.
-    const base = Number(watchedSubtotal) || Number(watchedAmount) || 0;
-    if (base <= 0) return;
-    // Honor discount_type: a flat-$ ('amount') discount subtracts dollars; a
-    // percent discount scales. Treating an amount-type discount as a percent
-    // (the old behavior) corrupted the deal amount. Floor at 0.
-    const dtype = watchedDiscountType === "amount" ? "amount" : "percent";
-    let next: number;
-    if (dtype === "amount") {
-      const discAmt = Math.max(0, Number(watchedDiscount) || 0);
-      next = Math.round(Math.max(0, base - discAmt) * 100) / 100;
-    } else {
-      const discPct = Math.max(0, Math.min(100, Number(watchedDiscount) || 0));
-      next = Math.round(base * (1 - discPct / 100) * 100) / 100;
-    }
-    // Persist the gross base into subtotal when it wasn't set, so the displayed
-    // subtotal is populated and a second discount edit re-derives from the
-    // original value instead of compounding off the discounted amount.
-    if (!(Number(watchedSubtotal) > 0)) {
-      setValue("subtotal", Math.round(base * 100) / 100, { shouldDirty: true });
-    }
-    if (next !== Number(watchedAmount)) {
-      setValue("amount", next, { shouldDirty: true });
+    if (nextAmount !== null) {
+      setValue("amount", nextAmount, { shouldDirty: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchedSubtotal, watchedDiscount, watchedDiscountType, hasProducts, productsLoaded]);
 
   useEffect(() => {
-    if (!productsLoaded) return;
-    if (hasProducts) return;
-    if (lastEditedRef.current !== "amount") return;
-    // User typed in Amount directly → back-solve Subtotal, honoring discount_type.
-    const amt = Number(watchedAmount) || 0;
-    let nextSub: number;
-    if (watchedDiscountType === "amount") {
-      // amount = subtotal - discAmt  =>  subtotal = amount + discAmt
-      nextSub = Math.round((amt + Math.max(0, Number(watchedDiscount) || 0)) * 100) / 100;
-    } else {
-      const discPct = Math.max(0, Math.min(99.99, Number(watchedDiscount) || 0));
-      const factor = 1 - discPct / 100;
-      if (factor <= 0) return;
-      nextSub = Math.round((amt / factor) * 100) / 100;
-    }
-    if (nextSub !== Number(watchedSubtotal)) {
-      setValue("subtotal", nextSub, { shouldDirty: true });
+    const { subtotal: nextSubtotal, clearLastEdited } = backSolveSubtotal({
+      productsLoaded,
+      hasProducts,
+      lastEdited: lastEditedRef.current,
+      subtotal: watchedSubtotal,
+      discount: watchedDiscount,
+      amount: watchedAmount,
+      discountType: watchedDiscountType,
+    });
+    if (nextSubtotal !== null) {
+      setValue("subtotal", nextSubtotal, { shouldDirty: true });
     }
     // Reset the flag so the next subtotal/discount edit re-triggers.
-    lastEditedRef.current = null;
+    if (clearLastEdited) {
+      lastEditedRef.current = null;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchedAmount, hasProducts, productsLoaded]);
 

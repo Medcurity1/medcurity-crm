@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useReattributeActivity } from "./api";
 import { errorMessage } from "@/lib/errors";
 import type { Activity } from "@/types/crm";
@@ -145,7 +146,7 @@ export function ReattributeActivityDialog({
             </SelectContent>
           </Select>
           {isLoading && (
-            <p className="text-xs text-muted-foreground">Loading opportunities...</p>
+            <Skeleton className="h-4 w-40" />
           )}
           {!isLoading && !activity.account_id && (
             <p className="text-xs text-destructive">

@@ -33,20 +33,37 @@ async function refreshOutlookToken(
   const clientId = Deno.env.get("MICROSOFT_CLIENT_ID")!;
   const clientSecret = Deno.env.get("MICROSOFT_CLIENT_SECRET")!;
 
-  const res = await fetch(
-    "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: refreshToken,
-        grant_type: "refresh_token",
-        // No scope param — inherit all originally-consented scopes.
-      }),
-    },
-  );
+  // 20s abort: six functions (several cron-driven) route through this
+  // helper, and a hung token endpoint would otherwise eat the whole edge
+  // invocation budget with no record. Short tier per repo convention.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20_000);
+  let res: Response;
+  try {
+    res = await fetch(
+      "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          refresh_token: refreshToken,
+          grant_type: "refresh_token",
+          // No scope param — inherit all originally-consented scopes.
+        }),
+        signal: controller.signal,
+      },
+    );
+  } catch (e) {
+    throw new Error(
+      controller.signal.aborted
+        ? "Outlook token refresh timed out after 20s"
+        : `Outlook token refresh fetch failed: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");

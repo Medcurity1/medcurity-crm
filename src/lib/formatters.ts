@@ -1,4 +1,5 @@
 import { format, formatDistanceToNow, parseISO, differenceInDays, isValid, addDays } from "date-fns";
+import { formatPhone } from "@/components/PhoneInput";
 import type { OpportunityStage, CustomerStatus, SalesStatus, RenewalType, ActivityType, OpportunityKind, OpportunityBusinessType, OpportunityTeam, LeadStatus, LeadSource, PaymentFrequency, LeadQualification, IndustryCategory, ProjectSegment } from "@/types/crm";
 
 export function formatCurrency(amount: number): string {
@@ -114,6 +115,27 @@ export function defaultFollowUpDate(): string {
 
 export function formatName(firstName: string, lastName: string): string {
   return `${firstName} ${lastName}`;
+}
+
+/**
+ * Phone + extension display. Several entities (Contact, Lead) store the
+ * extension in a separate `phone_ext` column, but a rep can also type an
+ * extension straight into the phone field itself ("(208) 555-1234 x567").
+ * If the phone string already carries an inline extension, that wins and
+ * `ext` is dropped rather than appended — formatPhone keeps only the
+ * FIRST extension it finds, so blindly appending a second one would
+ * silently swallow it instead of surfacing the data conflict.
+ *
+ * Promoted from a local helper in ContactDetail.tsx (the only screen
+ * that rendered phone_ext at all) so every list/detail view that shows
+ * a phone number can show its extension too, instead of dropping it.
+ */
+export function formatPhoneWithExt(
+  phone: string | null | undefined,
+  ext: string | null | undefined,
+): string {
+  if (!phone) return "";
+  return formatPhone(/(?:x|ext)/i.test(phone) ? phone : `${phone}${ext ? ` x${ext}` : ""}`);
 }
 
 const stageLabels: Record<OpportunityStage, string> = {
