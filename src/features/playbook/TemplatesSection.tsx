@@ -153,7 +153,9 @@ export function TemplatesSection() {
                     <SequenceMiniPreview steps={t.steps} />
                     <span className="text-[11px] text-muted-foreground inline-flex items-center gap-2 shrink-0">
                       <span className="inline-flex items-center gap-1"><Layers className="h-3 w-3" />{t.step_count ?? t.steps.length}</span>
-                      <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{t.duration_days ?? "—"}d</span>
+                      {t.duration_days != null && (
+                        <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{t.duration_days}d</span>
+                      )}
                     </span>
                   </div>
                   {/* Lifetime scoreboard (Campaigns overhaul Phase 3, S9) —
@@ -201,7 +203,9 @@ export function TemplatesSection() {
               </DialogHeader>
               <div className="flex items-center gap-3 text-xs text-muted-foreground -mt-1 mb-1">
                 <span className="inline-flex items-center gap-1"><Layers className="h-3.5 w-3.5" />{preview.step_count ?? preview.steps.length} touches</span>
-                <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" />{preview.duration_days ?? "—"} days</span>
+                {preview.duration_days != null && (
+                  <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" />{preview.duration_days} days</span>
+                )}
               </div>
               {preview.domain_rules?.start_anchor === "nearest_monday" && (
                 <p className="text-[11px] text-muted-foreground -mt-0.5 mb-1">

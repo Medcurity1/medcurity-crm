@@ -183,7 +183,9 @@ export function QuickCampaignDialog({
                         <SequenceMiniPreview steps={t.steps} />
                         <span className="text-[11px] text-muted-foreground inline-flex items-center gap-2 shrink-0">
                           <span className="inline-flex items-center gap-1"><Layers className="h-3 w-3" />{t.step_count ?? t.steps.length}</span>
-                          <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{t.duration_days ?? "—"}d</span>
+                          {t.duration_days != null && (
+                            <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{t.duration_days}d</span>
+                          )}
                         </span>
                       </div>
                     </div>

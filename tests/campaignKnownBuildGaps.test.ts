@@ -5,6 +5,15 @@ import path from "path";
 const read = (relative: string) => readFileSync(path.resolve(__dirname, "..", relative), "utf8");
 
 describe("known Campaigns build gaps", () => {
+  it("does not show an em dash when a template has no duration", () => {
+    const picker = read("src/features/playbook/QuickCampaignDialog.tsx");
+    const gallery = read("src/features/playbook/TemplatesSection.tsx");
+    expect(picker).not.toMatch(/duration_days \?\? ["']—["']/);
+    expect(gallery).not.toMatch(/duration_days \?\? ["']—["']/);
+    expect(picker).toMatch(/duration_days != null/);
+    expect(gallery).toMatch(/duration_days != null/);
+  });
+
   it("offers friendly first-name and organization controls for subjects in every builder", () => {
     const editor = read("src/features/playbook/SequenceEditor.tsx");
     const wizard = read("src/features/playbook/CampaignWizard.tsx");
