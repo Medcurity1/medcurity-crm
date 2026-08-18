@@ -21,6 +21,7 @@ import {
   reminderFromActivity,
   type ReminderUI,
 } from "./reminder";
+import { AssignToField } from "./AssignToField";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { supabase } from "@/lib/supabase";
 import {
@@ -171,6 +172,7 @@ export function ActivityForm({
       activity_date: todayLocalISO(),
       due_at: "",
       contact_id: contactId ?? null,
+      owner_user_id: user?.id ?? "",
       priority: "normal",
       reminder_schedule: "none",
       reminder_at: "",
@@ -232,6 +234,7 @@ export function ActivityForm({
             : todayLocalISO(),
         due_at: dueLocal,
         contact_id: activity.contact_id ?? null,
+        owner_user_id: activity.owner_user_id ?? "",
         priority: activity.priority ?? "normal",
         reminder_schedule:
           (activity.reminder_schedule as ActivityFormValues["reminder_schedule"]) ??
@@ -250,6 +253,7 @@ export function ActivityForm({
         activity_date: todayLocalISO(),
         due_at: "",
         contact_id: contactId ?? null,
+        owner_user_id: user?.id ?? "",
         priority: "normal",
         reminder_schedule: "none",
         reminder_at: "",
@@ -258,7 +262,7 @@ export function ActivityForm({
       setRecur(EMPTY_RECURRENCE);
       setReminder(EMPTY_REMINDER);
     }
-  }, [open, activity, form, contactId]);
+  }, [open, activity, form, contactId, user?.id]);
 
   function onSubmit(values: ActivityFormValues) {
     const isTask = values.activity_type === "task";
@@ -281,6 +285,12 @@ export function ActivityForm({
     const taskPriority: "high" | "normal" | "low" | null = isTask
       ? values.priority ?? "normal"
       : null;
+    // Only a TASK can be handed to a teammate (survey T5). A logged
+    // call/email/meeting is a record of what *you* did, so it always
+    // stays owned by whoever recorded it — the picker is hidden for
+    // those types and the value below never leaves the creator.
+    const ownerUserId: string | null =
+      (isTask ? values.owner_user_id || user?.id : user?.id) ?? null;
 
     // Activity date applies to every type. If the user picked today (or
     // didn't touch the field), stamp it with the actual current time so
@@ -318,6 +328,10 @@ export function ActivityForm({
           activity_date: activityDateIso,
           due_at: dueAtIso,
           contact_id: resolvedContactId,
+          // Only send the owner when this is a task — an edit to a
+          // logged call must not silently re-own it, and the DB trigger
+          // only bells on an actual change anyway.
+          ...(isTask ? { owner_user_id: ownerUserId } : {}),
           priority: taskPriority,
           recur_freq: recurFields.recur_freq,
           recur_interval: recurFields.recur_interval,
@@ -352,7 +366,7 @@ export function ActivityForm({
         contact_id: resolvedContactId ?? undefined,
         opportunity_id: opportunityId,
         lead_id: leadId,
-        owner_user_id: user?.id,
+        owner_user_id: ownerUserId,
         priority: taskPriority,
         recur_freq: recurFields.recur_freq,
         recur_interval: recurFields.recur_interval,
@@ -526,6 +540,19 @@ export function ActivityForm({
                 calendar item.
               </p>
             </div>
+          )}
+
+          {/* Assign to — tasks only (survey T5). Defaults to me; picking
+              a teammate hands the task over and bells them. */}
+          {selectedType === "task" && (
+            <AssignToField
+              id="activity-owner"
+              value={form.watch("owner_user_id") ?? ""}
+              onChange={(next) =>
+                form.setValue("owner_user_id", next, { shouldDirty: true })
+              }
+              allowUnassigned={isEditing && !activity?.owner_user_id}
+            />
           )}
 
           {/* Priority — tasks only. Medium by default (V2-A1). */}

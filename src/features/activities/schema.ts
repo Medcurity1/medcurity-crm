@@ -27,6 +27,15 @@ export const activityFormSchema = z.object({
    * too, so a rep doesn't have to remember to also log it there.
    */
   contact_id: z.string().nullable().optional(),
+  /**
+   * Who the task belongs to (survey T5). Only surfaced for
+   * activity_type = 'task' and defaulted to the current user, so a
+   * call/email/meeting keeps logging under whoever recorded it. Lives in
+   * the form (rather than component state) so react-hook-form's
+   * `isDirty` — which the dialog's discard guard reads — counts a
+   * hand-off as unsaved work.
+   */
+  owner_user_id: z.string().optional(),
   // Only surfaced for activity_type = 'task'. 'normal' is the Medium tier
   // (the default); the enum has no 'medium' member by design (see taskOrder.ts).
   priority: z.enum(["high", "normal", "low"]).optional(),

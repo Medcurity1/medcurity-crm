@@ -3,9 +3,19 @@ import { Link, useNavigate } from "react-router-dom";
 import { useUrlNumberState, useUrlArrayState, useUrlState, useUrlSortState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Users, Plus, Search, UploadCloud, ListChecks, Megaphone } from "lucide-react";
-import { useContacts, useArchiveContact, useBulkUpdateOwner, useBulkDeleteContacts } from "./api";
+import { Users, Plus, Search, UploadCloud, ListChecks, Megaphone, Tag } from "lucide-react";
+import { useContacts, useArchiveContact, useBulkUpdateOwner, useBulkDeleteContacts, fetchContactsForExport, fetchContactTagNames } from "./api";
 import { useBulkUndo, capturePriorOwners } from "@/features/archive/bulk-undo";
+import { ExportCsvButton } from "@/features/list-export/ExportCsvButton";
+import {
+  buildExportTable,
+  csvText,
+  exportFilename,
+  EXPORT_ROW_CEILING,
+  EXPORT_TRUNCATED_MESSAGE,
+  type ExportValueMap,
+} from "@/features/list-export/csv-export";
+import { downloadCsv } from "@/lib/csv";
 import { toast } from "sonner";
 import { useUsers, useStatesInUse } from "@/features/accounts/api";
 import { stateLabel } from "@/lib/us-states";
@@ -71,6 +81,34 @@ const CONTACTS_COLUMNS: ColumnDescriptor[] = [
   { key: "primary", label: "Primary" },
 ];
 
+/**
+ * CSV value per column, keyed to CONTACTS_COLUMNS, so "Export CSV"
+ * emits exactly the columns the user has visible in their order.
+ *
+ * Built as a factory because the Tags column isn't a field on the
+ * contact row — it comes from the contact_tags join, fetched for the
+ * exported set and handed in here. Blank cells stay genuinely empty
+ * rather than carrying the table's em dash.
+ */
+function contactExportValues(tagNames: Map<string, string[]>): ExportValueMap<Contact> {
+  return {
+    name: (c) => formatName(c.first_name, c.last_name),
+    account: (c) => csvText(c.account?.name),
+    title: (c) => csvText(c.title),
+    email: (c) => csvText(c.email),
+    phone: (c) => (c.phone ? formatPhone(c.phone) : null),
+    state: (c) => (c.mailing_state ? stateLabel(c.mailing_state) : null),
+    notes: (c) => csvText(c.notes),
+    // Semicolons, not commas: a comma would force the whole cell to be
+    // quoted and reads as a column break to anyone eyeballing the file.
+    tags: (c) => {
+      const list = tagNames.get(c.id);
+      return list && list.length > 0 ? list.join("; ") : null;
+    },
+    primary: (c) => (c.is_primary ? "Primary" : null),
+  };
+}
+
 export function ContactsList() {
   const navigate = useNavigate();
   const { profile } = useAuth();
@@ -103,29 +141,37 @@ export function ContactsList() {
   const [sort, setSortState] = useUrlSortState("sort");
   const cols = useColumnPrefs("contacts", CONTACTS_COLUMNS);
 
-  const { data: result, isLoading, isError, isFetching, refetch } = useContacts({
+  // The filter set, hoisted out of the useContacts() call so "Export CSV"
+  // re-runs EXACTLY what the list is showing — including the archived
+  // tri-state, so an export never leaks archived contacts into a file the
+  // user believes is their active list.
+  const listFilters = {
     search: search || undefined,
     ownerId: ownerFilter.length > 0 ? ownerFilter : undefined,
     verified:
       verifiedFilter === "verified"
-        ? "true"
+        ? ("true" as const)
         : verifiedFilter === "unverified"
-        ? "false"
+        ? ("false" as const)
         : undefined,
     archived:
       statusFilter === "archived"
-        ? "archived"
+        ? ("archived" as const)
         : statusFilter === "all"
-        ? "all"
-        : "active",
+        ? ("all" as const)
+        : ("active" as const),
     tagIds: tagFilter.length > 0 ? tagFilter : undefined,
     mailingState: stateFilter.length > 0 ? stateFilter : undefined,
-    page,
-    pageSize,
     sortColumn: sort.column,
     // No sort in the URL → leave direction undefined so the API's
     // default (last_name ASC) applies instead of the hook's "desc".
     sortDirection: sort.column ? sort.direction : undefined,
+  };
+
+  const { data: result, isLoading, isError, isFetching, refetch } = useContacts({
+    ...listFilters,
+    page,
+    pageSize,
   });
   const { data: users } = useUsers();
   const { data: statesInUse } = useStatesInUse("contacts");
@@ -228,6 +274,40 @@ export function ContactsList() {
       // Keep the selection so the user can retry; surface why it failed
       // instead of failing silently with the selection wiped.
       toast.error("Reassign failed: " + (e as Error).message);
+    }
+  };
+
+  /**
+   * Download the current view as CSV: same filters and sort as the list,
+   * same visible columns, no page limit. A selection narrows it to just
+   * those rows.
+   */
+  const handleExport = async () => {
+    const selection = selectedIds.size > 0 ? Array.from(selectedIds) : undefined;
+    const { rows, truncated } = await fetchContactsForExport(listFilters, {
+      selectedIds: selection,
+    });
+    if (rows.length === 0) {
+      toast.info("Nothing to export — no contacts match the current filters.");
+      return;
+    }
+    // Tags aren't on the contact row; fetch them only when the column is
+    // actually visible, and only for the rows being exported.
+    const tagNames = cols.isVisible("tags")
+      ? await fetchContactTagNames(rows.map((c) => c.id))
+      : new Map<string, string[]>();
+    downloadCsv(
+      exportFilename("contacts"),
+      buildExportTable(cols.visibleColumns, contactExportValues(tagNames), rows),
+    );
+    if (selection && rows.length < selection.length) {
+      toast.warning(
+        `Exported ${rows.length} of ${selection.length} selected — the rest are past the ${EXPORT_ROW_CEILING.toLocaleString()}-row export limit.`,
+      );
+    } else if (truncated && !selection) {
+      toast.warning(EXPORT_TRUNCATED_MESSAGE);
+    } else {
+      toast.success(`Exported ${rows.length.toLocaleString()} contact(s).`);
     }
   };
 
@@ -429,6 +509,11 @@ export function ContactsList() {
 
         <SavedViews entity="contacts" />
         <ColumnPicker columns={CONTACTS_COLUMNS} prefs={cols} />
+        <ExportCsvButton
+          onExport={handleExport}
+          selectedCount={selectedIds.size}
+          disabled={isLoading || isError}
+        />
       </div>
 
       {isLoading ? (
@@ -566,8 +651,14 @@ export function ContactsList() {
         onAssignOwner={handleBulkAssignOwner}
         users={users}
       >
+        {/* Bulk-bar actions follow the pattern ImportsPen already set:
+            outline/sm, a leading icon at h-4 w-4 mr-1, and any popover
+            anchored align="start" (these buttons sit at the LEFT of the
+            bar, so an end-anchored menu drifted away from its trigger).
+            ListChecks is the same icon the row context menu uses for
+            "Add to list…", so the two entry points read as one action. */}
         <TagPicker
-          align="end"
+          align="start"
           onPick={async (tag) => {
             const ids = Array.from(selectedIds);
             await applyTagMut.mutateAsync({ contactIds: ids, tagId: tag.id });
@@ -576,11 +667,13 @@ export function ContactsList() {
           }}
           trigger={
             <Button variant="outline" size="sm">
+              <Tag className="h-4 w-4 mr-1" />
               Add tag…
             </Button>
           }
         />
         <Button variant="outline" size="sm" onClick={() => setAddToListOpen(true)}>
+          <ListChecks className="h-4 w-4 mr-1" />
           Add to list…
         </Button>
       </BulkActionBar>

@@ -112,6 +112,23 @@ export const CRM_NOTIF_TYPES: NotifTypeDef[] = [
     defSound: "glass",
     defDuration: 5,
   },
+  // Hand-offs (survey T5). These keys are read straight out of the DB
+  // triggers' off-switch check (coalesce(prefs->>'<key>', true)) in
+  // 20260817140000_assignment_notifications.sql — keep them in sync.
+  {
+    key: "record_assigned",
+    label: "Records assigned to me",
+    desc: "When someone makes you the owner of an account, contact, or opportunity",
+    defSound: "drop",
+    defDuration: 5,
+  },
+  {
+    key: "task_assigned",
+    label: "Tasks assigned to me",
+    desc: "When someone creates or hands you a task",
+    defSound: "knock",
+    defDuration: 5,
+  },
 ];
 
 export const EMAIL_OPT_INS: Array<{ key: string; label: string; desc: string }> = [

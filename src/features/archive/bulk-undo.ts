@@ -59,6 +59,116 @@ export function groupByPriorOwner(prior: PriorOwner[]): Map<string | null, strin
   return byOwner;
 }
 
+// ── Generic single-field undo ────────────────────────────────────────
+// The owner helpers above are the original, owner-specific pair. These
+// are the same idea widened to any one column, added for the bulk Stage
+// and bulk Close Date changes on the opportunities list. Deliberately
+// alongside (not a refactor of) `capturePriorOwners` /
+// `groupByPriorOwner`, so nothing that already ships changes behavior.
+
+/** One row's pre-change value of the field being bulk-edited. */
+export type PriorValue = { id: string; value: string | null };
+
+/**
+ * Pre-change values for `ids`, from rows READ BACK OFF THE SERVER rather
+ * than from the page the list happens to be showing.
+ *
+ * `capturePriorOwners` reads the list's own rows and gives up (returns
+ * null) when the selection outran the current page — correct there,
+ * because the owner is already on screen. A bulk stage / close-date
+ * change has to hit the server first anyway (to find out which selected
+ * deals are still open), so it can capture from that same read and
+ * always offer a complete Undo.
+ */
+export function capturePriorValues(
+  rows: { id: string; [key: string]: unknown }[],
+  field: string,
+): PriorValue[] {
+  return rows.map((r) => {
+    const v = r[field];
+    return { id: r.id, value: v == null ? null : String(v) };
+  });
+}
+
+/** Ids grouped by the value they must be written back to — one UPDATE
+ *  per distinct prior value instead of one per row. */
+export function groupByPriorValue(prior: PriorValue[]): Map<string | null, string[]> {
+  const byValue = new Map<string | null, string[]>();
+  for (const { id, value } of prior) {
+    const ids = byValue.get(value);
+    if (ids) ids.push(id);
+    else byValue.set(value, [id]);
+  }
+  return byValue;
+}
+
+async function restorePriorValues(
+  entity: UndoEntity,
+  field: string,
+  prior: PriorValue[],
+) {
+  let updated = 0;
+  for (const [value, ids] of groupByPriorValue(prior)) {
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const batch = ids.slice(i, i + CHUNK);
+      const { data, error } = await supabase
+        .from(entity)
+        .update({ [field]: value })
+        .in("id", batch)
+        .select("id");
+      if (error) throw error;
+      updated += (data ?? []).length;
+    }
+  }
+  // Same affected-row verify as the forward write: a per-row RLS denial
+  // doesn't throw, PostgREST just doesn't match the row.
+  if (updated < prior.length) {
+    throw new Error(
+      `Reverted ${updated} of ${prior.length}. ${prior.length - updated} could not be updated (permission denied or no longer exist).`,
+    );
+  }
+}
+
+/**
+ * Success toast + Undo for a bulk change to ONE column (opportunities
+ * list: Stage, Close Date). Separate hook rather than another method on
+ * `useBulkUndo` so the existing archive/owner toasts are untouched.
+ *
+ * `prior` carries each row's own pre-change value, so Undo restores the
+ * mixed set the selection actually had — not one blanket value.
+ */
+export function useBulkFieldUndo(entity: UndoEntity, noun: string) {
+  const qc = useQueryClient();
+
+  const invalidate = () => {
+    for (const key of INVALIDATE_KEYS[entity]) qc.invalidateQueries({ queryKey: key });
+  };
+
+  return {
+    /** @param message already-composed success text (counts, skips, target value). */
+    changed(field: string, message: string, prior: PriorValue[]) {
+      toast.success(message, {
+        duration: prior.length > 0 ? UNDO_DURATION : undefined,
+        action:
+          prior.length > 0
+            ? {
+                label: "Undo",
+                onClick: async () => {
+                  try {
+                    await restorePriorValues(entity, field, prior);
+                    invalidate();
+                    toast.success(`Reverted ${prior.length} ${noun}`);
+                  } catch (e) {
+                    toast.error("Failed to undo: " + (e as Error).message);
+                  }
+                },
+              }
+            : undefined,
+      });
+    },
+  };
+}
+
 async function restoreArchived(entity: UndoEntity, ids: string[]) {
   // Same RPC the Archive Manager restores with — it nulls archived_at,
   // archived_by and archive_reason, the exact three columns

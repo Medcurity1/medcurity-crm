@@ -3,9 +3,42 @@ import { Link, useNavigate } from "react-router-dom";
 import { useUrlState, useUrlNumberState, useUrlArrayState, useUrlSortState } from "@/hooks/useUrlState";
 import { useDebouncedUrlState } from "@/hooks/useDebouncedUrlState";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { Target, Plus, Search, X, Pencil, Check } from "lucide-react";
-import { useOpportunities, useOpportunitiesTotals, useArchiveOpportunity, useBulkUpdateOwner, useBulkDeleteOpportunities, useUpdateOpportunity } from "./api";
-import { useBulkUndo, capturePriorOwners } from "@/features/archive/bulk-undo";
+import { Target, Plus, Search, X, Pencil, Check, ArrowRightLeft, CalendarDays } from "lucide-react";
+import {
+  useOpportunities,
+  useOpportunitiesTotals,
+  useArchiveOpportunity,
+  useBulkUpdateOwner,
+  useBulkDeleteOpportunities,
+  useUpdateOpportunity,
+  useBulkUpdateStage,
+  useBulkUpdateExpectedCloseDate,
+  fetchOpportunitiesForExport,
+  BULK_EDITABLE_STAGES,
+  type BulkFieldResult,
+} from "./api";
+import { useBulkUndo, useBulkFieldUndo, capturePriorOwners } from "@/features/archive/bulk-undo";
+import { ExportCsvButton } from "@/features/list-export/ExportCsvButton";
+import {
+  buildExportTable,
+  csvDate,
+  csvNumber,
+  csvText,
+  exportFilename,
+  EXPORT_ROW_CEILING,
+  EXPORT_TRUNCATED_MESSAGE,
+  type ExportValueMap,
+} from "@/features/list-export/csv-export";
+import { downloadCsv } from "@/lib/csv";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useClosedLostGuard } from "./useClosedLostGuard";
 import { AutoRenewalBadge, isAutoRenewal } from "./AutoRenewalBadge";
 import { DealMergerGame } from "@/features/deal-merger/DealMergerGame";
@@ -78,6 +111,50 @@ const OPPORTUNITIES_COLUMNS: ColumnDescriptor[] = [
   // v_opportunities_with_activity view) — ascending surfaces the stalest first.
   { key: "last_touch", label: "Last Touch", sortKey: "last_touch" },
 ];
+
+// CSV value per column, keyed to OPPORTUNITIES_COLUMNS, so "Export CSV"
+// emits exactly the columns the user has visible in their order.
+//
+// Money goes out as a bare number (never "$28,500") so Excel can SUM the
+// Amount column, and Last Touch goes out as the actual date rather than
+// the badge's "12 days" — a relative age is unsortable in a spreadsheet
+// and stops being true the moment the file is saved.
+const OPPORTUNITY_EXPORT_VALUES: ExportValueMap<Opportunity> = {
+  name: (o) => csvText(o.name),
+  account: (o) => csvText(o.account?.name),
+  stage: (o) => stageLabel(o.stage),
+  business_type: (o) => (o.business_type ? businessTypeLabel(o.business_type) : null),
+  lead_source: (o) => (o.lead_source ? leadSourceLabel(o.lead_source) : null),
+  amount: (o) => csvNumber(o.amount),
+  // Mirrors the cell's double duty: closed deals show the actual landing
+  // date, open deals the forecast.
+  expected_close: (o) =>
+    o.stage === "closed_won" || o.stage === "closed_lost"
+      ? csvDate(o.close_date ?? o.expected_close_date, formatDate)
+      : csvDate(o.expected_close_date, formatDate),
+  owner: (o) => o.owner?.full_name ?? "Unassigned",
+  next_step: (o) => csvText(o.next_step),
+  // Same fallback the badge uses: no logged activity => age since created.
+  last_touch: (o) => csvDate(o.last_activity_at ?? o.created_at, formatDate),
+};
+
+/**
+ * Toast text for a bulk field edit. Skips are part of the result, not an
+ * error — a rep who selected a page containing closed deals needs to see
+ * that those were left alone, not silently discover it later.
+ */
+function bulkResultMessage(head: string, res: BulkFieldResult): string {
+  const parts = [head];
+  if (res.skippedClosed > 0) {
+    parts.push(
+      `${res.skippedClosed} already closed — skipped (close deals individually).`,
+    );
+  }
+  if (res.missing > 0) {
+    parts.push(`${res.missing} unavailable (no permission, or no longer exist).`);
+  }
+  return parts.join(" ");
+}
 
 // Days since an ISO timestamp (floored, never negative).
 function daysSinceTouch(iso: string): number {
@@ -445,6 +522,13 @@ export function OpportunitiesList() {
   // Bulk delete is confirmed via the app ConfirmDialog (not window.confirm)
   // so it matches the destructive-action pattern everywhere else.
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  // Bulk stage change: the picked target stage, held while its confirm
+  // dialog is open (null = no pending change).
+  const [pendingStage, setPendingStage] = useState<OpportunityStage | null>(null);
+  // Bulk close-date push: the date in the popover's picker, and whether
+  // the popover is open.
+  const [bulkCloseDate, setBulkCloseDate] = useState("");
+  const [closeDateOpen, setCloseDateOpen] = useState(false);
   const [sort, setSortState] = useUrlSortState("sort");
   const cols = useColumnPrefs("opportunities", OPPORTUNITIES_COLUMNS);
   // After a deal is marked Closed Lost for a current client, ask whether the
@@ -503,7 +587,10 @@ export function OpportunitiesList() {
   const archiveMutation = useArchiveOpportunity();
   const bulkOwnerMutation = useBulkUpdateOwner();
   const bulkDeleteMutation = useBulkDeleteOpportunities();
+  const bulkStageMutation = useBulkUpdateStage();
+  const bulkCloseDateMutation = useBulkUpdateExpectedCloseDate();
   const undo = useBulkUndo("opportunities", "opportunity(ies)");
+  const fieldUndo = useBulkFieldUndo("opportunities", "opportunity(ies)");
 
   const opps = result?.data;
   const totalCount = result?.count ?? 0;
@@ -587,6 +674,101 @@ export function OpportunitiesList() {
     } catch (e) {
       // Keep the selection so the user can retry; surface why it failed.
       toast.error("Reassign failed: " + (e as Error).message);
+    }
+  };
+
+  /**
+   * Move the selection to a non-closing stage. Deals already Closed
+   * Won/Lost are skipped server-side (see `useBulkUpdateStage`) — the
+   * single-record close flow runs a required-field gate that a bulk
+   * UPDATE would bypass, so closing stays a one-at-a-time action and
+   * bulk-reopening a closed deal is not something to do by accident.
+   */
+  const doBulkStage = async (stage: OpportunityStage) => {
+    const ids = Array.from(selectedIds);
+    try {
+      const res = await bulkStageMutation.mutateAsync({ ids, stage });
+      setSelectedIds(new Set());
+      if (res.updated === 0 && res.skippedClosed === 0 && res.missing === 0) {
+        toast.info(`Already on ${stageLabel(stage)} — nothing to change.`);
+        return;
+      }
+      fieldUndo.changed(
+        "stage",
+        bulkResultMessage(
+          `${res.updated} opportunity(ies) moved to ${stageLabel(stage)}.`,
+          res,
+        ),
+        res.prior,
+      );
+    } catch (e) {
+      // Keep the selection so the user can retry; surface why it failed.
+      toast.error("Stage change failed: " + (e as Error).message);
+    }
+  };
+
+  /**
+   * Push the forecast close date on the selection. Only OPEN deals are
+   * touched: on a closed deal `expected_close_date` is a frozen
+   * historical forecast that forecast-accuracy reporting reads.
+   */
+  const doBulkCloseDate = async () => {
+    if (!bulkCloseDate) return;
+    const ids = Array.from(selectedIds);
+    setCloseDateOpen(false);
+    try {
+      const res = await bulkCloseDateMutation.mutateAsync({
+        ids,
+        expected_close_date: bulkCloseDate,
+      });
+      setSelectedIds(new Set());
+      if (res.updated === 0 && res.skippedClosed === 0 && res.missing === 0) {
+        toast.info("Already on that close date — nothing to change.");
+        return;
+      }
+      fieldUndo.changed(
+        "expected_close_date",
+        bulkResultMessage(
+          `Close date set to ${formatDate(bulkCloseDate)} on ${res.updated} opportunity(ies).`,
+          res,
+        ),
+        res.prior,
+      );
+    } catch (e) {
+      toast.error("Close date change failed: " + (e as Error).message);
+    }
+  };
+
+  /**
+   * Download the current view as CSV: same filters and sort as the list,
+   * same visible columns, no page limit. A selection narrows it to just
+   * those rows.
+   */
+  const handleExport = async () => {
+    const selection = selectedIds.size > 0 ? Array.from(selectedIds) : undefined;
+    const { rows, truncated } = await fetchOpportunitiesForExport(
+      { ...totalsFilters, sortColumn: sort.column, sortDirection: sort.direction },
+      {
+        lastActivity: cols.isVisible("last_touch"),
+        selectedIds: selection,
+      },
+    );
+    if (rows.length === 0) {
+      toast.info("Nothing to export — no opportunities match the current filters.");
+      return;
+    }
+    downloadCsv(
+      exportFilename("opportunities"),
+      buildExportTable(cols.visibleColumns, OPPORTUNITY_EXPORT_VALUES, rows),
+    );
+    if (selection && rows.length < selection.length) {
+      toast.warning(
+        `Exported ${rows.length} of ${selection.length} selected — the rest are past the ${EXPORT_ROW_CEILING.toLocaleString()}-row export limit.`,
+      );
+    } else if (truncated && !selection) {
+      toast.warning(EXPORT_TRUNCATED_MESSAGE);
+    } else {
+      toast.success(`Exported ${rows.length.toLocaleString()} opportunity(ies).`);
     }
   };
 
@@ -776,6 +958,11 @@ export function OpportunitiesList() {
 
         <SavedViews entity="opportunities" />
         <ColumnPicker columns={OPPORTUNITIES_COLUMNS} prefs={cols} />
+        <ExportCsvButton
+          onExport={handleExport}
+          selectedCount={selectedIds.size}
+          disabled={isLoading || isError}
+        />
       </div>
 
       {isLoading ? (
@@ -961,6 +1148,81 @@ export function OpportunitiesList() {
         onDelete={isAdmin ? handleBulkDelete : undefined}
         onAssignOwner={handleBulkAssignOwner}
         users={users}
+      >
+        {/* Same bulk-bar pattern as ContactsList / ImportsPen: outline/sm,
+            leading icon at h-4 w-4 mr-1, popovers anchored align="start". */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm">
+              <ArrowRightLeft className="h-4 w-4 mr-1" />
+              Change stage…
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuLabel>Move to stage</DropdownMenuLabel>
+            {BULK_EDITABLE_STAGES.map((s) => (
+              <DropdownMenuItem key={s} onSelect={() => setPendingStage(s)}>
+                {stageLabel(s)}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            {/* Closed Won / Closed Lost are deliberately absent: closing a
+                deal one at a time runs a required-fields check that a bulk
+                update would skip straight past. */}
+            <DropdownMenuLabel className="max-w-[15rem] whitespace-normal text-xs font-normal text-muted-foreground">
+              Close deals individually — closing runs required-field checks
+            </DropdownMenuLabel>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <Popover open={closeDateOpen} onOpenChange={setCloseDateOpen}>
+          <PopoverTrigger asChild>
+            <Button variant="outline" size="sm">
+              <CalendarDays className="h-4 w-4 mr-1" />
+              Set close date…
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-64 space-y-3">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">New expected close date</p>
+              <p className="text-xs text-muted-foreground">
+                Applies to open deals only. Deals already Closed Won/Lost keep
+                their dates.
+              </p>
+            </div>
+            <Input
+              type="date"
+              value={bulkCloseDate}
+              onChange={(e) => setBulkCloseDate(e.target.value)}
+              className="h-8"
+            />
+            <Button
+              size="sm"
+              className="w-full"
+              disabled={!bulkCloseDate || bulkCloseDateMutation.isPending}
+              onClick={() => void doBulkCloseDate()}
+            >
+              Apply to {selectedIds.size} deal{selectedIds.size === 1 ? "" : "s"}
+            </Button>
+          </PopoverContent>
+        </Popover>
+      </BulkActionBar>
+
+      <ConfirmDialog
+        open={pendingStage !== null}
+        onOpenChange={(o) => !o && setPendingStage(null)}
+        title="Change stage?"
+        description={
+          pendingStage
+            ? `Move ${selectedIds.size} opportunity(ies) to ${stageLabel(pendingStage)}? Deals that are already Closed Won or Closed Lost are skipped.`
+            : ""
+        }
+        confirmLabel="Change stage"
+        onConfirm={() => {
+          const stage = pendingStage;
+          setPendingStage(null);
+          if (stage) void doBulkStage(stage);
+        }}
       />
 
       <ConfirmDialog

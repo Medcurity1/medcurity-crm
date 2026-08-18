@@ -1,8 +1,10 @@
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
-import type { Opportunity, ActivePipelineRow, OpportunityStageHistory, OpportunityProduct } from "@/types/crm";
+import type { Opportunity, OpportunityStage, ActivePipelineRow, OpportunityStageHistory, OpportunityProduct } from "@/types/crm";
+import { fetchAllPages, hydrateInChunks } from "@/features/list-export/csv-export";
+import { capturePriorValues, type PriorValue } from "@/features/archive/bulk-undo";
 
-interface OppFilters {
+export interface OppFilters {
   search?: string;
   stage?: string | string[];
   team?: string | string[];
@@ -373,6 +375,208 @@ export function useOpportunitiesTotals(filters?: Omit<OppFilters, "page" | "page
   });
 }
 
+/**
+ * Every opportunity matching the list's CURRENT filters, unpaginated —
+ * the row source for the Opportunities list "Export CSV" button.
+ *
+ * ⚠ KEEP IN SYNC with `useOpportunities` above. The list query and
+ * `useOpportunitiesTotals` are off-limits to this change (both were just
+ * rewritten elsewhere), so the filter chain is mirrored here rather than
+ * extracted and shared. Anything added to the list's filters has to be
+ * added here too, or the file will disagree with the screen.
+ *
+ * The "sort by Last Touch" branch mirrors the list's view path
+ * (`v_opportunities_with_activity`, no embeds, names merged by id)
+ * because the export must come out in the order the user is looking at.
+ */
+export async function fetchOpportunitiesForExport(
+  filters: Omit<OppFilters, "page" | "pageSize"> | undefined,
+  opts?: {
+    lastActivity?: boolean;
+    /** Export only these rows (a list selection). Applied after the
+     *  filtered fetch so the file keeps the list's sort order. */
+    selectedIds?: string[];
+  },
+): Promise<{ rows: Opportunity[]; truncated: boolean }> {
+  const enrich = opts;
+  const sortCol = filters?.sortColumn ?? "created_at";
+  const sortAsc = (filters?.sortDirection ?? (filters?.sortColumn ? "asc" : "desc")) === "asc";
+  const sortByLastTouch = sortCol === "last_touch";
+
+  // Resolved once, outside the page loop.
+  let acctIds: string[] = [];
+  if (filters?.search) {
+    const { data: matchedAccounts } = await supabase
+      .from("accounts")
+      .select("id")
+      .ilike("name", `%${filters.search}%`)
+      .limit(200);
+    acctIds = (matchedAccounts ?? []).map((a) => a.id as string);
+  }
+  const me = filters?.ownerId
+    ? (await supabase.auth.getUser()).data.user?.id ?? null
+    : null;
+
+  const { rows: allRows, truncated } = await fetchAllPages<Opportunity>(async (from, to) => {
+    let query = supabase
+      .from(sortByLastTouch ? "v_opportunities_with_activity" : "opportunities")
+      .select(
+        sortByLastTouch
+          ? "*"
+          : "*, account:accounts!account_id(id, name), owner:user_profiles!owner_user_id(id, full_name)",
+      )
+      .is("archived_at", null)
+      .range(from, to);
+
+    if (sortByLastTouch) {
+      query = query.order("effective_last_touch", { ascending: sortAsc });
+    } else if (sortCol.startsWith("account.")) {
+      query = query.order(`account(${sortCol.slice("account.".length)})`, {
+        ascending: sortAsc,
+        nullsFirst: false,
+      });
+    } else if (sortCol.startsWith("owner.")) {
+      query = query.order(`owner(${sortCol.slice("owner.".length)})`, {
+        ascending: sortAsc,
+        nullsFirst: false,
+      });
+    } else {
+      query = query.order(sortCol, { ascending: sortAsc, nullsFirst: false });
+    }
+    query = query.order("id", { ascending: true });
+
+    if (filters?.search) {
+      const safe = filters.search.replace(/[(),]/g, " ");
+      const orParts = [`name.ilike.%${safe}%`];
+      if (acctIds.length > 0) orParts.push(`account_id.in.(${acctIds.join(",")})`);
+      query = query.or(orParts.join(","));
+    }
+    if (filters?.stage) {
+      if (Array.isArray(filters.stage)) {
+        if (filters.stage.length > 0) query = query.in("stage", filters.stage);
+      } else if (filters.stage === "open") {
+        query = query.not("stage", "in", "(closed_won,closed_lost)");
+      } else {
+        query = query.eq("stage", filters.stage);
+      }
+    }
+    if (filters?.team) {
+      if (Array.isArray(filters.team)) {
+        if (filters.team.length > 0) query = query.in("team", filters.team);
+      } else {
+        query = query.eq("team", filters.team);
+      }
+    }
+    if (filters?.kind) {
+      if (Array.isArray(filters.kind)) {
+        if (filters.kind.length > 0) query = query.in("kind", filters.kind);
+      } else {
+        query = query.eq("kind", filters.kind);
+      }
+    }
+    if (filters?.business_type) {
+      if (Array.isArray(filters.business_type)) {
+        if (filters.business_type.length > 0)
+          query = query.in("business_type", filters.business_type);
+      } else {
+        query = query.eq("business_type", filters.business_type);
+      }
+    }
+    if (filters?.lead_source && filters.lead_source.length > 0) {
+      const vals = filters.lead_source.filter((v) => v !== "__none__");
+      const wantNone = filters.lead_source.includes("__none__");
+      if (wantNone && vals.length > 0) {
+        query = query.or(`lead_source.in.(${vals.join(",")}),lead_source.is.null`);
+      } else if (wantNone) {
+        query = query.is("lead_source", null);
+      } else {
+        query = query.in("lead_source", vals);
+      }
+    }
+    if (filters?.account_id) query = query.eq("account_id", filters.account_id);
+    if (Array.isArray(filters?.ownerId)) {
+      const ids = filters!.ownerId;
+      if (ids.includes("mine")) {
+        if (me) {
+          const resolved = Array.from(new Set(ids.map((v) => (v === "mine" ? me : v))));
+          if (resolved.length > 0) query = query.in("owner_user_id", resolved);
+        } else if (ids.length > 1) {
+          const noMine = ids.filter((v) => v !== "mine");
+          if (noMine.length > 0) query = query.in("owner_user_id", noMine);
+        }
+      } else if (ids.length > 0) {
+        query = query.in("owner_user_id", ids);
+      }
+    } else if (filters?.ownerId && filters.ownerId !== "mine") {
+      query = query.eq("owner_user_id", filters.ownerId);
+    } else if (filters?.ownerId === "mine" && me) {
+      query = query.eq("owner_user_id", me);
+    }
+    if (filters?.verified === "true") query = query.eq("verified", true);
+    else if (filters?.verified === "false") query = query.eq("verified", false);
+    if (filters?.closeAfter) query = query.gte("close_date", filters.closeAfter);
+    if (filters?.closeBefore) query = query.lte("close_date", filters.closeBefore);
+    if (filters?.expectedAfter) query = query.gte("expected_close_date", filters.expectedAfter);
+    if (filters?.expectedBefore) query = query.lte("expected_close_date", filters.expectedBefore);
+    if (filters?.startAfter) query = query.gte("contract_start_date", filters.startAfter);
+    if (filters?.startBefore) query = query.lte("contract_start_date", filters.startBefore);
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []) as unknown as Opportunity[];
+  });
+
+  const selected = opts?.selectedIds ? new Set(opts.selectedIds) : null;
+  const rows = selected ? allRows.filter((o) => selected.has(o.id)) : allRows;
+
+  // Last Touch for the whole exported set (the list does this per page).
+  if (rows.length > 0 && enrich?.lastActivity && !sortByLastTouch) {
+    const la = await hydrateInChunks(
+      rows.map((o) => o.id),
+      async (batch) => {
+        const { data } = await supabase
+          .from("v_opportunity_last_activity")
+          .select("opportunity_id, last_activity_at")
+          .in("opportunity_id", batch);
+        return (data ?? []) as { opportunity_id: string; last_activity_at: string | null }[];
+      },
+    );
+    const lastByOpp = new Map<string, string>();
+    for (const r of la) {
+      if (r.last_activity_at) lastByOpp.set(r.opportunity_id, r.last_activity_at);
+    }
+    for (const o of rows) o.last_activity_at = lastByOpp.get(o.id) ?? null;
+  }
+
+  // View path can't embed account/owner — merge their names in by id, or
+  // the Account and Owner columns export blank when sorting by Last Touch.
+  if (sortByLastTouch && rows.length > 0) {
+    const oppAcctIds = [...new Set(rows.map((o) => o.account_id).filter((v): v is string => !!v))];
+    const ownerIds = [...new Set(rows.map((o) => o.owner_user_id).filter((v): v is string => !!v))];
+    const [accts, owners] = await Promise.all([
+      hydrateInChunks(oppAcctIds, async (batch) => {
+        const { data } = await supabase.from("accounts").select("id, name").in("id", batch);
+        return (data ?? []) as { id: string; name: string }[];
+      }),
+      hydrateInChunks(ownerIds, async (batch) => {
+        const { data } = await supabase
+          .from("user_profiles")
+          .select("id, full_name")
+          .in("id", batch);
+        return (data ?? []) as { id: string; full_name: string }[];
+      }),
+    ]);
+    const acctMap = new Map(accts.map((a) => [a.id, a]));
+    const ownerMap = new Map(owners.map((u) => [u.id, u]));
+    for (const o of rows) {
+      o.account = (o.account_id ? acctMap.get(o.account_id) : undefined) as Opportunity["account"];
+      o.owner = (o.owner_user_id ? ownerMap.get(o.owner_user_id) : undefined) as Opportunity["owner"];
+    }
+  }
+
+  return { rows, truncated };
+}
+
 export function useOpportunity(id: string | undefined) {
   return useQuery({
     queryKey: ["opportunities", id],
@@ -492,6 +696,164 @@ export function useBulkUpdateOwner() {
           `Reassigned ${updated} of ${uniqueIds.length}. ${uniqueIds.length - updated} could not be updated (permission denied or no longer exist).`
         );
       }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["pipeline"] });
+      qc.invalidateQueries({ queryKey: ["renewal_queue"] });
+    },
+  });
+}
+
+// ── Bulk field edits (list BulkActionBar) ────────────────────────────
+
+/** Stages a deal can be bulk-moved INTO. */
+export const BULK_EDITABLE_STAGES: OpportunityStage[] = [
+  "details_analysis",
+  "demo",
+  "proposal_and_price_quote",
+  "proposal_conversation",
+  "verbal_commit",
+];
+
+const CLOSED_STAGES = new Set<string>(["closed_won", "closed_lost"]);
+
+export interface BulkFieldResult {
+  /** Rows actually written. */
+  updated: number;
+  /** Selected rows left alone because they're already Closed Won/Lost. */
+  skippedClosed: number;
+  /** Selected ids the server didn't return at all (deleted, or RLS). */
+  missing: number;
+  /** Pre-change values of the rows that WERE written, for Undo. */
+  prior: PriorValue[];
+}
+
+/**
+ * Read the selected deals, split them into "still open" vs "already
+ * closed", and capture the pre-change value of `field` for the open ones.
+ *
+ * Reads from the server rather than from the list's current page: a
+ * selection survives paging, so the page can't be trusted to hold every
+ * selected row — and both bulk edits need the stage of rows the page may
+ * no longer have.
+ */
+async function readOpenSelection(
+  ids: string[],
+  field: "stage" | "expected_close_date",
+): Promise<{ prior: PriorValue[]; skippedClosed: number; missing: number }> {
+  const uniqueIds = Array.from(new Set(ids));
+  const rows = await hydrateInChunks(uniqueIds, async (batch) => {
+    const { data, error } = await supabase
+      .from("opportunities")
+      .select(field === "stage" ? "id, stage" : "id, stage, expected_close_date")
+      .in("id", batch);
+    if (error) throw error;
+    return (data ?? []) as unknown as {
+      id: string;
+      stage: string;
+      expected_close_date?: string | null;
+    }[];
+  });
+  const open = rows.filter((r) => !CLOSED_STAGES.has(r.stage));
+  return {
+    prior: capturePriorValues(open, field),
+    skippedClosed: rows.length - open.length,
+    missing: uniqueIds.length - rows.length,
+  };
+}
+
+/** Chunked UPDATE + affected-row verify, mirroring `useBulkUpdateOwner`. */
+async function bulkWriteField(
+  ids: string[],
+  patch: Record<string, unknown>,
+): Promise<number> {
+  const CHUNK = 100;
+  let updated = 0;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const batch = ids.slice(i, i + CHUNK);
+    const { data, error } = await supabase
+      .from("opportunities")
+      .update(patch)
+      .in("id", batch)
+      .select("id");
+    if (error) throw error;
+    updated += (data ?? []).length;
+  }
+  if (updated < ids.length) {
+    throw new Error(
+      `Updated ${updated} of ${ids.length}. ${ids.length - updated} could not be updated (permission denied or no longer exist).`,
+    );
+  }
+  return updated;
+}
+
+/**
+ * Move many deals to one NON-CLOSING stage.
+ *
+ * Closing a deal is deliberately not offered here: the single-record
+ * path runs a required-fields gate (`checkCloseReadiness` →
+ * `FinishLineDialog` / `useClosedLostGuard`) that a bulk UPDATE would
+ * bypass wholesale. Deals that are ALREADY closed are skipped rather
+ * than silently reopened.
+ */
+export function useBulkUpdateStage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      ids,
+      stage,
+    }: {
+      ids: string[];
+      stage: OpportunityStage;
+    }): Promise<BulkFieldResult> => {
+      if (CLOSED_STAGES.has(stage)) {
+        throw new Error("Closing stages can't be set in bulk — close deals individually.");
+      }
+      const { prior, skippedClosed, missing } = await readOpenSelection(ids, "stage");
+      // Rows already on the target stage would be a no-op write; dropping
+      // them keeps the affected-row verify honest and the Undo minimal.
+      const changing = prior.filter((p) => p.value !== stage);
+      const toWrite = changing.map((p) => p.id);
+      const written = toWrite.length > 0 ? await bulkWriteField(toWrite, { stage }) : 0;
+      return { updated: written, skippedClosed, missing, prior: changing };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["pipeline"] });
+      qc.invalidateQueries({ queryKey: ["renewal_queue"] });
+    },
+  });
+}
+
+/**
+ * Push the forecast close date on many OPEN deals at once.
+ *
+ * Only `expected_close_date` (the forecast) is touched, and only on open
+ * deals — on a closed deal that field is a frozen historical forecast and
+ * `close_date` is the real landing date, so rewriting it would corrupt
+ * win-rate/forecast-accuracy reporting.
+ */
+export function useBulkUpdateExpectedCloseDate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      ids,
+      expected_close_date,
+    }: {
+      ids: string[];
+      /** ISO "YYYY-MM-DD" from an <input type="date">. */
+      expected_close_date: string;
+    }): Promise<BulkFieldResult> => {
+      const { prior, skippedClosed, missing } = await readOpenSelection(
+        ids,
+        "expected_close_date",
+      );
+      const changing = prior.filter((p) => p.value !== expected_close_date);
+      const toWrite = changing.map((p) => p.id);
+      const written =
+        toWrite.length > 0 ? await bulkWriteField(toWrite, { expected_close_date }) : 0;
+      return { updated: written, skippedClosed, missing, prior: changing };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["opportunities"] });

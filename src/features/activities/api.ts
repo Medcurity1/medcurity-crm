@@ -277,6 +277,10 @@ export function useUpdateActivity() {
       // sometimes log an interaction before they remember which contact
       // it was with; editing should let them fix it.
       contact_id?: string | null;
+      // Hand a task to a teammate (survey T5). The DB trigger on
+      // activities.owner_user_id (20260817140000) bells the new owner —
+      // there is nothing to wire up here beyond letting the column through.
+      owner_user_id?: string | null;
       reminder_schedule?: "none" | "once" | "daily" | "weekdays" | "weekly";
       reminder_at?: string | null;
       reminder_channels?: Array<"in_app" | "email">;
