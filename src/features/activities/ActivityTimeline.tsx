@@ -33,6 +33,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
 import { formatRelativeDate, formatDate, activityLabel } from "@/lib/formatters";
 import type { ActivityType, Activity } from "@/types/crm";
+import { activityBodyForDisplay, activityTitleForDisplay, isCampaignReplyTask } from "./activity-display";
 
 interface ActivityTimelineProps {
   accountId?: string;
@@ -535,6 +536,10 @@ function ActivityEntry({
   // wants related-record linking back.
   void getActivityLink;
   const isEmail = activity.activity_type === "email";
+  const displayTitle = activityTitleForDisplay(activity.subject);
+  const displayBody = isCampaignReplyTask(activity)
+    ? activityBodyForDisplay(activity.body)
+    : activity.body;
   const [expanded, setExpanded] = useState(false);
   const [showReattribute, setShowReattribute] = useState(false);
 
@@ -577,7 +582,7 @@ function ActivityEntry({
             className="font-medium text-sm truncate text-blue-600 hover:underline min-w-0 flex-1"
             title="Open full view"
           >
-            {activity.subject}
+            {displayTitle}
           </Link>
           {isCompleted && (
             <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
@@ -619,9 +624,9 @@ function ActivityEntry({
         {/* Collapsed preview: 2 lines with word-break so long
             unbroken strings (URLs, no-space paragraphs) don't
             escape the card horizontally. */}
-        {activity.body && !expanded && (
+        {displayBody && !expanded && (
           <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5 break-words">
-            {activity.body}
+            {displayBody}
           </p>
         )}
         <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
@@ -672,10 +677,10 @@ function ActivityEntry({
             </div>
           </>
         )}
-        {expanded && !isEmail && activity.body && (
+        {expanded && !isEmail && displayBody && (
           <div className="mt-2 rounded-md border bg-muted/30 p-3 text-sm">
             <pre className="whitespace-pre-wrap break-words font-sans text-foreground">
-              {activity.body}
+              {displayBody}
             </pre>
           </div>
         )}

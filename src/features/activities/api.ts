@@ -165,6 +165,8 @@ export function useCreateActivity() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["activities"] });
       qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["nexus", "day-queue"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
     },
   });
 }
@@ -185,6 +187,8 @@ export function useCompleteActivity() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["activities"] });
       qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["nexus", "day-queue"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
     },
   });
 }
@@ -250,6 +254,7 @@ export function useReopenActivity() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["activities"] });
       qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["nexus", "day-queue"] });
       qc.invalidateQueries({ queryKey: ["dashboard", "my-tasks"] });
     },
   });
