@@ -21,6 +21,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Upload, X, Loader2, ShieldAlert, Users2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -92,6 +93,7 @@ export function CampaignRecipients({
   const [suppressionError, setSuppressionError] = useState(false);
   const [enrollmentError, setEnrollmentError] = useState(false);
   const [safetyCheckNonce, setSafetyCheckNonce] = useState(0);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [csv, setCsv] = useState<{ header: string[]; rows: string[][]; mapping: RecipientField[] } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const suppressionReqId = useRef(0);
@@ -302,11 +304,11 @@ export function CampaignRecipients({
     setPasted("");
   }
 
-  function clearAll() {
-    if (!confirm("Clear all recipients?")) return;
+  function confirmClearAll() {
     setRecipients([]);
     setSuppressionOverrides([]);
     setEnrollmentOverrides([]);
+    setClearConfirmOpen(false);
   }
 
   const hasEmailMapped = csv?.mapping.includes("email");
@@ -440,7 +442,7 @@ export function CampaignRecipients({
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium">{recipients.length} recipients</p>
           {!compact && recipients.length > 0 && (
-            <Button size="xs" variant="ghost" className="text-destructive" onClick={clearAll}>Clear all</Button>
+            <Button size="xs" variant="ghost" className="text-destructive" onClick={() => setClearConfirmOpen(true)}>Clear all</Button>
           )}
         </div>
 
@@ -617,6 +619,15 @@ export function CampaignRecipients({
           </div>
         )}
       </div>
+      <ConfirmDialog
+        open={clearConfirmOpen}
+        onOpenChange={setClearConfirmOpen}
+        title="Clear this audience?"
+        description={`Remove all ${recipients.length} selected ${recipients.length === 1 ? "person" : "people"} from this campaign setup?`}
+        confirmLabel="Clear audience"
+        onConfirm={confirmClearAll}
+        destructive
+      />
     </div>
   );
 }

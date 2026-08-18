@@ -30,6 +30,7 @@ import {
 import { NewsletterEditor } from "./NewsletterEditor";
 import { StyleGuideDialog } from "./StyleGuideDialog";
 import { QueryError } from "@/components/QueryError";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import { formatDate } from "@/lib/formatters";
 import type { Newsletter, NewsletterType } from "./types";
@@ -65,6 +66,7 @@ export function NewslettersTab() {
   const [composeType, setComposeType] = useState<NewsletterType | null>(null);
   const [notes, setNotes] = useState("");
   const [styleType, setStyleType] = useState<NewsletterType | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Newsletter | null>(null);
   const busy = ingest.isPending || syncM.isPending;
 
   const shown = (newsletters ?? []).filter((n) => filter === "all" || n.newsletter_type === filter);
@@ -194,12 +196,22 @@ export function NewslettersTab() {
           description="Ingest your past Mailchimp sends to build the style reference, then create an AI draft."
         />
       ) : (
-        shown.map((n) => <NewsletterRow key={n.id} n={n} onEdit={() => setEditorId(n.id)} onDelete={() => {
-          if (confirm(`Delete "${n.subject || "this draft"}"?`)) del.mutate(n.id);
-        }} />)
+        shown.map((n) => <NewsletterRow key={n.id} n={n} onEdit={() => setEditorId(n.id)} onDelete={() => setDeleteTarget(n)} />)
       )}
 
       <NewsletterEditor id={editorId} open={!!editorId} onOpenChange={(v) => !v && setEditorId(null)} />
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title="Delete this newsletter draft?"
+        description={`Delete "${deleteTarget?.subject || "this draft"}" from Pulse? This can't be undone.`}
+        confirmLabel="Delete draft"
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          del.mutate(deleteTarget.id, { onSettled: () => setDeleteTarget(null) });
+        }}
+        destructive
+      />
     </div>
   );
 }
