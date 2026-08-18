@@ -11,6 +11,7 @@ import {
   resolveNotifSound,
 } from "@/lib/notification-sounds";
 import { celebrateHighFive } from "@/lib/confetti";
+import { notificationForDisplay } from "@/features/notifications/notification-display";
 
 /**
  * The notification delivery engine — banners, sounds, and OS
@@ -60,10 +61,10 @@ function rememberSeen(set: Set<string>, id: string) {
   }
 }
 
-function showOsNotification(title: string, body: string, tag: string, urgent: boolean) {
+function showOsNotification(title: string, body: string, tag: string, urgent: boolean, silent = true) {
   try {
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-    new Notification(title, { body, tag, requireInteraction: urgent, silent: false });
+    new Notification(title, { body, tag, requireInteraction: urgent, silent });
   } catch {
     // some browsers require a service worker — in-app toast still covers it
   }
@@ -110,13 +111,13 @@ export function useNotificationToasts() {
       if (n.type === "deal_high_five") {
         celebrateHighFive();
         const hfPrefs = prefsRef.current;
-        if (!hfPrefs || hfPrefs["sound_deal_high_five"] !== false) {
+        if (hfPrefs && hfPrefs["sound_deal_high_five"] !== false) {
           playScheduled(
             resolveNotifSound(
               "deal_high_five",
-              hfPrefs?.["soundtype_deal_high_five"] as string | undefined,
+              hfPrefs["soundtype_deal_high_five"] as string | undefined,
             ),
-            "short", // one short play — never the looping/long alert
+            "short",
           );
         }
         toast("🎉 " + (n.message ?? n.title ?? "You got a high-five!"), {
@@ -137,6 +138,11 @@ export function useNotificationToasts() {
       if (!prefs) return; // prefs not loaded — badge only, don't default to enabled
 
       const key = n.type ?? "system";
+      const display = notificationForDisplay({
+        type: (n.type ?? "system") as Parameters<typeof notificationForDisplay>[0]["type"],
+        title: n.title,
+        message: n.message,
+      });
       const bannerOn = prefs[key] !== false;
       const soundOn = prefs[`sound_${key}`] !== false;
       const urgent = URGENT_TYPES.has(key);
@@ -146,25 +152,21 @@ export function useNotificationToasts() {
           : n.conversation_id && key.startsWith("support_")
             ? `/support?conversation=${n.conversation_id}`
             : n.link;
+      const durVal = Number(prefs[`duration_${key}`] ?? DEFAULT_DURATIONS[key] ?? 5);
+      const resolvedSound = resolveNotifSound(key, prefs[`soundtype_${key}`] as string | undefined);
 
+      if (soundOn) {
+        playScheduled(resolvedSound, durationTypeFromSeconds(durVal));
+      }
       if (document.hidden) {
         if (bannerOn || soundOn) {
-          showOsNotification(n.title, n.message ?? "", `pulse-${n.id}`, urgent);
+          showOsNotification(display.title, display.message ?? "", `pulse-${n.id}`, urgent, true);
         }
         return;
       }
-      const durVal = Number(prefs[`duration_${key}`] ?? DEFAULT_DURATIONS[key] ?? 5);
-      if (soundOn) {
-        // resolveNotifSound retires old saved sound names the same way the
-        // settings picker does, so what plays always matches what's shown.
-        playScheduled(
-          resolveNotifSound(key, prefs[`soundtype_${key}`] as string | undefined),
-          durationTypeFromSeconds(durVal),
-        );
-      }
       if (bannerOn) {
-        toast(n.title, {
-          description: n.message ?? undefined,
+        toast(display.title, {
+          description: display.message ?? undefined,
           duration: (durVal > 0 ? durVal : 2) * 1000,
           action: link
             ? {
@@ -175,7 +177,7 @@ export function useNotificationToasts() {
               }
             : undefined,
         });
-        showOsNotification(n.title, n.message ?? "", `pulse-${n.id}`, urgent);
+        showOsNotification(display.title, display.message ?? "", `pulse-${n.id}`, urgent, true);
       }
     }
 
@@ -293,23 +295,24 @@ export function useNotificationToasts() {
             else rememberIrrelevant(m.conversation_id);
           }
           if (!isMember || cancelled) return;
+          if (prefs["sound_meddy_new_chat"] !== false) {
+            playScheduled(
+              resolveNotifSound(
+                "meddy_new_chat",
+                prefs["soundtype_meddy_new_chat"] as string | undefined,
+              ),
+              "short",
+            );
+          }
           if (document.hidden) {
             showOsNotification(
               "New message from visitor",
               m.content.slice(0, 120),
               `pulse-meddy-msg-${m.conversation_id}`,
               false,
+              true,
             );
           } else {
-            if (prefs["sound_meddy_new_chat"] !== false) {
-              playScheduled(
-                resolveNotifSound(
-                  "meddy_new_chat",
-                  prefs["soundtype_meddy_new_chat"] as string | undefined,
-                ),
-                "short",
-              );
-            }
             toast("New visitor message", {
               description: m.content.slice(0, 120),
               duration: 3000,
