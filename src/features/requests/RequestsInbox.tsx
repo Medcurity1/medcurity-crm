@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EmptyState } from "@/components/EmptyState";
+import { QueryError } from "@/components/QueryError";
 import type { RequestType, RequestStatus } from "@/types/crm";
 import { useRequests } from "./api";
 import { RequestCard } from "./RequestCard";
@@ -23,7 +24,7 @@ export function RequestsInbox() {
   const [status, setStatus] = useState<RequestStatus | "all">("all");
   const [windowDays, setWindowDays] = useState<string>("60");
 
-  const { data, isLoading } = useRequests({
+  const { data, isLoading, isError, isFetching, refetch } = useRequests({
     type: type === "all" ? undefined : type,
     status: status === "all" ? undefined : status,
     sinceDays: windowDays === "all" ? undefined : Number(windowDays),
@@ -75,6 +76,12 @@ export function RequestsInbox() {
             <Skeleton key={i} className="h-28 w-full" />
           ))}
         </div>
+      ) : isError ? (
+        <QueryError
+          message="Couldn't load requests."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
       ) : !data || data.length === 0 ? (
         <EmptyState
           icon={Inbox}

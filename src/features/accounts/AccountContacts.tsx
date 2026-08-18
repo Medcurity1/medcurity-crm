@@ -13,6 +13,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EmptyState } from "@/components/EmptyState";
+import { QueryError } from "@/components/QueryError";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -22,8 +24,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { formatName } from "@/lib/formatters";
-import { formatPhone } from "@/components/PhoneInput";
+import { formatName, formatPhoneWithExt } from "@/lib/formatters";
 import { ContactFlagBadges } from "@/features/contacts/ContactFlagBadges";
 
 /**
@@ -39,7 +40,7 @@ export function AccountContacts({ accountId }: { accountId: string }) {
   const unsetPrimary = useUnsetPrimaryContact();
   const archiveContact = useArchiveContact();
   const [archiveTarget, setArchiveTarget] = useState<Contact | null>(null);
-  const { data: contacts, isLoading } = useQuery({
+  const { data: contacts, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["account-contacts", accountId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -56,7 +57,13 @@ export function AccountContacts({ accountId }: { accountId: string }) {
   });
 
   if (isLoading)
-    return <div className="text-sm text-muted-foreground">Loading contacts...</div>;
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-10 w-full" />
+        ))}
+      </div>
+    );
 
   return (
     <div>
@@ -71,7 +78,13 @@ export function AccountContacts({ accountId }: { accountId: string }) {
         </Button>
       </div>
 
-      {!contacts?.length ? (
+      {isError ? (
+        <QueryError
+          message="Couldn't load contacts."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
+      ) : !contacts?.length ? (
         <EmptyState
           icon={Users}
           title="No contacts"
@@ -124,7 +137,7 @@ export function AccountContacts({ accountId }: { accountId: string }) {
                         href={`tel:${c.phone.split(/x|ext/i)[0].replace(/[^\d+]/g, "")}`}
                         className="hover:underline"
                       >
-                        {formatPhone(c.phone)}
+                        {formatPhoneWithExt(c.phone, c.phone_ext)}
                       </a>
                     ) : (
                       "—"

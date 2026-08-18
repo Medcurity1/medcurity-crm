@@ -16,6 +16,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import {
   Select,
   SelectContent,
@@ -108,7 +109,7 @@ export function LostCustomersAccount() {
   const [quarterFilter, setQuarterFilter] = useState<string>("all");
   const todayIso = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["report", "lost-customers-account", todayIso],
     queryFn: async (): Promise<{
       lost: LostAccountRow[];
@@ -341,13 +342,13 @@ export function LostCustomersAccount() {
         }
       />
 
-      {error && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          Error: {(error as Error).message}
-        </div>
-      )}
-
-      {view === "current" ? (
+      {isError ? (
+        <QueryError
+          message="Couldn't load this report."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
+      ) : view === "current" ? (
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <Kpi label="Lost Accounts" value={summary.count.toLocaleString()} />

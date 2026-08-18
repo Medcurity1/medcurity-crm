@@ -25,6 +25,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { formatDate } from "@/lib/formatters";
 import { toast } from "sonner";
 import type { CrmRequest, RequestPriority, RequestStatus } from "@/types/crm";
 import {
@@ -57,13 +58,10 @@ const STATUS_BADGE: Record<RequestStatus, string> = {
   cancelled: "bg-slate-100 text-slate-700 dark:bg-slate-500/20 dark:text-slate-300",
 };
 
-function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
+// Thin alias: this used to reimplement formatDate via toLocaleDateString
+// with an explicit month/day/year shape that (undefined locale) drifted
+// from the app's fixed "MMM d, yyyy" style on a non-US browser locale.
+const fmtDate = formatDate;
 
 function fmtSize(bytes: number | null): string {
   if (bytes == null) return "";

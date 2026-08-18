@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import {
   Table,
   TableBody,
@@ -53,7 +54,7 @@ function formatTimestamp(s: string): string {
 }
 
 export function ClientErrorsViewer() {
-  const { data, isLoading, error } = useClientErrors();
+  const { data, isLoading, isError, isFetching, refetch } = useClientErrors();
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   if (isLoading) {
@@ -66,11 +67,13 @@ export function ClientErrorsViewer() {
     );
   }
 
-  if (error) {
+  if (isError) {
     return (
-      <p className="text-sm text-destructive py-4">
-        Failed to load client errors: {(error as Error).message}
-      </p>
+      <QueryError
+        message="Couldn't load client errors."
+        onRetry={() => refetch()}
+        isRetrying={isFetching}
+      />
     );
   }
 

@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -64,7 +65,7 @@ export function ProductDetail() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
 
-  const { data: product, isLoading } = useProduct(id);
+  const { data: product, isLoading, isError, error, refetch } = useProduct(id);
   const { data: families } = useProductFamilies();
   const updateMutation = useUpdateProduct();
   const deleteMutation = useDeleteProduct();
@@ -74,11 +75,27 @@ export function ProductDetail() {
   const [editOpen, setEditOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  if (isLoading || !product) {
+  if (isLoading) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-12 w-72" />
         <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+
+  const notFound = (error as { code?: string } | null)?.code === "PGRST116";
+  if (isError && !notFound) {
+    return <QueryError message="Something went wrong loading this product." onRetry={() => refetch()} />;
+  }
+
+  if (!product) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+        <p className="text-sm text-muted-foreground">Product not found. It may have been deleted.</p>
+        <Link to="/products" className="text-sm text-primary hover:underline">
+          Back to Products
+        </Link>
       </div>
     );
   }
@@ -579,8 +596,20 @@ const FTE_TIERS = [
 ];
 
 function ProductPricingMatrix({ productId }: { productId: string }) {
-  const { data: priceBooks, isLoading: booksLoading } = usePriceBooks();
-  const { data: entries, isLoading: entriesLoading } = useEntriesForProduct(productId);
+  const {
+    data: priceBooks,
+    isLoading: booksLoading,
+    isError: booksError,
+    isFetching: booksFetching,
+    refetch: refetchBooks,
+  } = usePriceBooks();
+  const {
+    data: entries,
+    isLoading: entriesLoading,
+    isError: entriesError,
+    isFetching: entriesFetching,
+    refetch: refetchEntries,
+  } = useEntriesForProduct(productId);
   const setPriceMutation = useSetPriceBookEntryPrice();
 
   // Local edit buffer so each cell can be typed in without firing a
@@ -650,6 +679,23 @@ function ProductPricingMatrix({ productId }: { productId: string }) {
       <div className="space-y-2">
         <Label>Pricing by Price Book and FTE Tier</Label>
         <Skeleton className="h-48 w-full" />
+      </div>
+    );
+  }
+
+  if (booksError || entriesError) {
+    return (
+      <div className="space-y-2">
+        <Label>Pricing by Price Book and FTE Tier</Label>
+        <QueryError
+          compact
+          message="Couldn't load pricing."
+          onRetry={() => {
+            if (booksError) refetchBooks();
+            if (entriesError) refetchEntries();
+          }}
+          isRetrying={booksFetching || entriesFetching}
+        />
       </div>
     );
   }
@@ -732,7 +778,7 @@ function ProductPricingMatrix({ productId }: { productId: string }) {
    ────────────────────────────────────────────── */
 
 function ProductOpportunitiesCard({ productId }: { productId: string }) {
-  const { data: refs, isLoading } = useProductReferences(productId);
+  const { data: refs, isLoading, isError, isFetching, refetch } = useProductReferences(productId);
   const opportunities = refs?.opportunities ?? [];
 
   // Dedupe: a product can appear on the same opp via multiple line
@@ -784,6 +830,13 @@ function ProductOpportunitiesCard({ productId }: { productId: string }) {
       <CardContent>
         {isLoading ? (
           <Skeleton className="h-12 w-full" />
+        ) : isError ? (
+          <QueryError
+            compact
+            message="Couldn't load opportunities."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : !oppRows.length ? (
           <p className="text-sm text-muted-foreground py-2">
             Not on any opportunity yet.

@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/table";
 import { Mail, Loader2, Unlink, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import { QueryError } from "@/components/QueryError";
 import {
   EmailSyncConfig,
   type EmailSyncConfigState,
@@ -242,7 +243,7 @@ function DisconnectedProviderCard({
 export function EmailIntegrationSettings() {
   const [searchParams, setSearchParams] = useSearchParams();
   const qc = useQueryClient();
-  const { data: connections, isLoading } = useMyEmailConnections();
+  const { data: connections, isLoading, isError, isFetching, refetch } = useMyEmailConnections();
   const { data: runs } = useMyEmailSyncRuns(10);
 
   // Surface the OAuth callback result (success / error query-string) as a
@@ -296,6 +297,12 @@ export function EmailIntegrationSettings() {
             <div className="flex items-center justify-center py-10">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
+          ) : isError ? (
+            <QueryError
+              message="Couldn't load your email connections."
+              onRetry={() => refetch()}
+              isRetrying={isFetching}
+            />
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {outlookConn ? (

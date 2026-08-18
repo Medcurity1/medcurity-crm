@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { QueryError } from "@/components/QueryError";
+import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelativeDate } from "@/lib/formatters";
 import {
   useMeddyConversations,
@@ -35,7 +37,7 @@ type Props = {
 };
 
 export function ConversationSidebar({ selectedId, onSelect, onBack, unreadIds }: Props) {
-  const { data: lists, isLoading } = useMeddyConversations();
+  const { data: lists, isLoading, isError, isFetching, refetch } = useMeddyConversations();
   const [search, setSearch] = useState("");
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     active: true,
@@ -123,7 +125,20 @@ export function ConversationSidebar({ selectedId, onSelect, onBack, unreadIds }:
 
       <div className="flex-1 overflow-y-auto pb-2">
         {isLoading ? (
-          <p className="px-4 py-6 text-center text-xs text-muted-foreground">Loading…</p>
+          <div className="space-y-1.5 p-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-12 w-full" />
+            ))}
+          </div>
+        ) : isError ? (
+          <div className="px-3 py-4">
+            <QueryError
+              compact
+              message="Couldn't load conversations."
+              onRetry={() => refetch()}
+              isRetrying={isFetching}
+            />
+          </div>
         ) : (
           sections.map((section) => (
             <div key={section.key}>

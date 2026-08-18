@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { QueryError } from "@/components/QueryError";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { formatDate, formatDateTime } from "@/lib/formatters";
 import { MessageBubble } from "./ChatView";
@@ -42,7 +44,7 @@ export function HistoryView() {
   const [leadsOpen, setLeadsOpen] = useState(false);
 
   const { data: stats } = useMeddyStats();
-  const { data: rows = [], isLoading } = useMeddyHistory(filter, search);
+  const { data: rows = [], isLoading, isError, isFetching, refetch } = useMeddyHistory(filter, search);
   const { data: savedIds = new Set<string>() } = useSavedIds();
   const { data: leads = [] } = useMeddyHistory("contact", "");
 
@@ -127,7 +129,18 @@ export function HistoryView() {
       {/* Rows */}
       <div className="space-y-1">
         {isLoading ? (
-          <p className="py-6 text-center text-xs text-muted-foreground">Loading…</p>
+          <div className="space-y-1.5 py-1">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} className="h-10 w-full" />
+            ))}
+          </div>
+        ) : isError ? (
+          <QueryError
+            compact
+            message="Couldn't load conversation history."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : rows.length === 0 ? (
           <p className="py-6 text-center text-xs text-muted-foreground">
             No conversation history yet.
@@ -307,7 +320,11 @@ function HistoryDetail({ conversation: c }: { conversation: MeddyConversation })
         </div>
       )}
       {isLoading ? (
-        <p className="py-2 text-center text-xs text-muted-foreground">Loading transcript…</p>
+        <div className="space-y-2 py-1">
+          <Skeleton className="h-8 w-3/4" />
+          <Skeleton className="h-8 w-2/3 ml-auto" />
+          <Skeleton className="h-8 w-3/5" />
+        </div>
       ) : (
         <div className="space-y-2">
           {messages.map((m) => (

@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   Table,
@@ -26,7 +27,7 @@ import { tagColorClass } from "./TagChips";
 import { useTags, useTagUsageCounts, useUpdateTag, useDeleteTag } from "./api";
 
 export function TagManager() {
-  const { data: tags, isLoading } = useTags();
+  const { data: tags, isLoading, isError, isFetching, refetch } = useTags();
   const { data: counts } = useTagUsageCounts();
   const updateTag = useUpdateTag();
   const deleteTag = useDeleteTag();
@@ -74,6 +75,12 @@ export function TagManager() {
           <Skeleton className="h-8 w-full" />
           <Skeleton className="h-8 w-full" />
         </div>
+      ) : isError ? (
+        <QueryError
+          message="Couldn't load tags."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
       ) : !tags?.length ? (
         <p className="text-sm text-muted-foreground">
           No tags yet — create one from the Contacts list ("Add tag").

@@ -38,6 +38,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { ActivityForm } from "./ActivityForm";
 import { activityLabel, formatDate, formatRelativeDate } from "@/lib/formatters";
 
@@ -57,7 +58,7 @@ export function ActivityDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const archiveMutation = useArchiveActivity();
 
-  const { data: activity, isLoading } = useQuery({
+  const { data: activity, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["activities", id],
     queryFn: async () => {
       if (!id) throw new Error("Missing activity id");
@@ -87,11 +88,27 @@ export function ActivityDetail() {
     return parseEmailChain(activity.body);
   }, [activity]);
 
-  if (isLoading || !activity) {
+  if (isLoading) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-8 w-64" />
         <Skeleton className="h-48 w-full" />
+      </div>
+    );
+  }
+
+  const notFound = (error as { code?: string } | null)?.code === "PGRST116";
+  if (isError && !notFound) {
+    return <QueryError message="Something went wrong loading this activity." onRetry={() => refetch()} />;
+  }
+
+  if (!activity) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+        <p className="text-sm text-muted-foreground">Activity not found. It may have been deleted.</p>
+        <Link to="/activities" className="text-sm text-primary hover:underline">
+          Back to Activities
+        </Link>
       </div>
     );
   }

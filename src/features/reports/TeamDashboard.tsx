@@ -40,6 +40,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -51,7 +52,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { formatCurrency } from "@/lib/formatters";
+import { formatCurrency, formatDate } from "@/lib/formatters";
 import {
   STATUS_BG,
   type Goals,
@@ -970,8 +971,18 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
 
   const { data: m, isLoading, error } = useDashboardMetrics();
   const { data: arrFin } = useArrFinancial();
-  const { data: services } = useClickUpServices();
-  const { data: lost } = useLostCustomers();
+  const {
+    data: services,
+    isError: servicesError,
+    isFetching: servicesFetching,
+    refetch: refetchServices,
+  } = useClickUpServices();
+  const {
+    data: lost,
+    isError: lostError,
+    isFetching: lostFetching,
+    refetch: refetchLost,
+  } = useLostCustomers();
   const { data: arrTrend } = useArrTrend();
   const { data: newCustomerRows } = useNewCustomersRows(
     m?.fiscal_quarter_start ?? "",
@@ -1877,7 +1888,16 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
         </h3>
         <Card>
           <CardContent className="p-0">
-            {!lost || lost.length === 0 ? (
+            {lostError ? (
+              <div className="p-4">
+                <QueryError
+                  compact
+                  message="Couldn't load lost customers."
+                  onRetry={() => refetchLost()}
+                  isRetrying={lostFetching}
+                />
+              </div>
+            ) : !lost || lost.length === 0 ? (
               <div className="p-4 text-sm text-muted-foreground text-center">
                 No lost customers yet this quarter.
               </div>
@@ -1916,7 +1936,7 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
                           </Link>
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">
-                          {new Date(r.close_date).toLocaleDateString()}
+                          {formatDate(r.close_date)}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums">
                           {formatCurrency(num(r.amount))}
@@ -1937,7 +1957,13 @@ export function TeamDashboard({ tvMode = false }: { tvMode?: boolean } = {}) {
         tone="bg-gradient-to-br from-amber-50 to-amber-100/50 dark:from-amber-950/40 dark:to-amber-900/20"
         accent="bg-amber-500"
       >
-        <ServicesPanel services={services ?? null} isOwner={isOwner} />
+        <ServicesPanel
+          services={services ?? null}
+          isOwner={isOwner}
+          fetchError={servicesError}
+          isFetching={servicesFetching}
+          onRetryFetch={() => refetchServices()}
+        />
       </SectionWrap>
 
       {/* ----- Development (manual milestones) ----- */}
@@ -2852,9 +2878,18 @@ function KpiCard({
 function ServicesPanel({
   services,
   isOwner,
+  fetchError,
+  isFetching,
+  onRetryFetch,
 }: {
   services: ClickUpServicesSnapshot | null;
   isOwner: boolean;
+  /** Only set by the live dashboard's own query — the historical
+   *  SnapshotDetailView passes already-resolved snapshot data, so these
+   *  stay undefined there and this component behaves exactly as before. */
+  fetchError?: boolean;
+  isFetching?: boolean;
+  onRetryFetch?: () => void;
 }) {
   const refresh = useRefreshClickUpServices();
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -2867,6 +2902,16 @@ function ServicesPanel({
       },
     });
   };
+
+  if (fetchError) {
+    return (
+      <QueryError
+        message="Couldn't load the Services snapshot."
+        onRetry={onRetryFetch ?? (() => {})}
+        isRetrying={isFetching}
+      />
+    );
+  }
 
   if (!services) {
     return (
@@ -4326,7 +4371,7 @@ function SnapshotDetailView({
                         <td className="px-3 py-2">{r.account_name}</td>
                         <td className="px-3 py-2">{r.opportunity_name}</td>
                         <td className="px-3 py-2 whitespace-nowrap">
-                          {new Date(r.close_date).toLocaleDateString()}
+                          {formatDate(r.close_date)}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums">
                           {formatCurrency(Number(r.amount) || 0)}

@@ -23,7 +23,6 @@ import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { QueryError } from "@/components/QueryError";
 import { Pagination } from "@/components/Pagination";
-import { formatPhone } from "@/components/PhoneInput";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SortableHeader, type SortState } from "@/components/SortableHeader";
@@ -54,7 +53,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { formatName } from "@/lib/formatters";
+import { formatName, formatPhoneWithExt } from "@/lib/formatters";
 import { ContactFlagBadges } from "./ContactFlagBadges";
 import { useTags, useApplyTag, useContactTagsMap } from "@/features/tags/api";
 import { TagChips } from "@/features/tags/TagChips";
@@ -96,7 +95,7 @@ function contactExportValues(tagNames: Map<string, string[]>): ExportValueMap<Co
     account: (c) => csvText(c.account?.name),
     title: (c) => csvText(c.title),
     email: (c) => csvText(c.email),
-    phone: (c) => (c.phone ? formatPhone(c.phone) : null),
+    phone: (c) => (c.phone ? formatPhoneWithExt(c.phone, c.phone_ext) : null),
     state: (c) => (c.mailing_state ? stateLabel(c.mailing_state) : null),
     notes: (c) => csvText(c.notes),
     // Semicolons, not commas: a comma would force the whole cell to be
@@ -369,7 +368,7 @@ export function ContactsList() {
       </span>
     ),
     phone: (c) => (
-      <span className="text-muted-foreground">{c.phone ? formatPhone(c.phone) : "—"}</span>
+      <span className="text-muted-foreground">{c.phone ? formatPhoneWithExt(c.phone, c.phone_ext) : "—"}</span>
     ),
     state: (c) => (
       <span className="text-muted-foreground">

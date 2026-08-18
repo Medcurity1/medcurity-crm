@@ -25,7 +25,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CollapsibleTabs } from "@/components/CollapsibleTabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatName, formatDateTime } from "@/lib/formatters";
+import { formatName, formatDateTime, formatPhoneWithExt } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { ActivityTimeline } from "@/features/activities/ActivityTimeline";
@@ -109,14 +109,6 @@ function CopyButton({ value }: { value: string }) {
 }
 
 /* ---------- Main component ---------- */
-
-/** Phone + phone_ext display. If the phone already carries an inline
- * extension ("(208) 555-1234 x567"), don't append the phone_ext column —
- * formatPhone keeps only the FIRST extension and would silently drop the
- * appended one, hiding a data conflict. Inline extension wins. */
-function contactPhoneDisplay(phone: string, ext: string | null | undefined): string {
-  return formatPhone(/(?:x|ext)/i.test(phone) ? phone : `${phone}${ext ? ` x${ext}` : ""}`);
-}
 
 export function ContactDetail() {
   const { id } = useParams<{ id: string }>();
@@ -371,10 +363,10 @@ export function ContactDetail() {
             <p className="text-sm font-semibold inline-flex items-center gap-1.5">
               <Phone className="h-3 w-3 text-muted-foreground" />
               {contact.phone
-                ? contactPhoneDisplay(contact.phone, contact.phone_ext)
+                ? formatPhoneWithExt(contact.phone, contact.phone_ext)
                 : "\u2014"}
               {contact.phone && (
-                <CopyButton value={contactPhoneDisplay(contact.phone, contact.phone_ext)} />
+                <CopyButton value={formatPhoneWithExt(contact.phone, contact.phone_ext)} />
               )}
             </p>
             {contact.mobile_phone && (

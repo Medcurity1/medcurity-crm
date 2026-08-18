@@ -15,6 +15,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { ArrowLeft, Loader2, RotateCcw } from "lucide-react";
+import { QueryError } from "@/components/QueryError";
 import {
   useImportRun,
   useImportRunChanges,
@@ -110,8 +111,20 @@ export function ImportRunDetail() {
   const navigate = useNavigate();
   const { profile, loading: authLoading } = useAuth();
 
-  const { data: run, isLoading: runLoading } = useImportRun(runId);
-  const { data: changes, isLoading: changesLoading } = useImportRunChanges(runId);
+  const {
+    data: run,
+    isLoading: runLoading,
+    isError: runError,
+    isFetching: runFetching,
+    refetch: refetchRun,
+  } = useImportRun(runId);
+  const {
+    data: changes,
+    isLoading: changesLoading,
+    isError: changesError,
+    isFetching: changesFetching,
+    refetch: refetchChanges,
+  } = useImportRunChanges(runId);
   const revertMutation = useRevertImportRun();
 
   const [filter, setFilter] = useState<"all" | "reverted" | "skipped" | "pending">("all");
@@ -153,6 +166,21 @@ export function ImportRunDetail() {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground py-8">
         <Loader2 className="h-4 w-4 animate-spin" /> Loading run…
+      </div>
+    );
+  }
+
+  if (runError) {
+    return (
+      <div className="space-y-4">
+        <Button variant="ghost" size="sm" onClick={() => navigate("/admin/imports")}>
+          <ArrowLeft className="h-4 w-4 mr-1.5" /> Back to Recent Imports
+        </Button>
+        <QueryError
+          message="Couldn't load this import run."
+          onRetry={() => refetchRun()}
+          isRetrying={runFetching}
+        />
       </div>
     );
   }
@@ -400,6 +428,13 @@ export function ImportRunDetail() {
             <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
               <Loader2 className="h-4 w-4 animate-spin" /> Loading changes…
             </div>
+          ) : changesError ? (
+            <QueryError
+              compact
+              message="Couldn't load the changes for this run."
+              onRetry={() => refetchChanges()}
+              isRetrying={changesFetching}
+            />
           ) : filteredChanges.length === 0 ? (
             <div className="text-sm text-muted-foreground py-8 text-center">
               No changes match this filter.

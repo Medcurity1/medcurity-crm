@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import { useNewsletterStyle, useUpdateNewsletterStyle, useGenerateStyle } from "./api";
 import type { NewsletterType } from "./types";
@@ -22,7 +23,7 @@ export function StyleGuideDialog({
   open: boolean;
   onOpenChange: (o: boolean) => void;
 }) {
-  const { data: style, isLoading } = useNewsletterStyle(open ? type : null);
+  const { data: style, isLoading, isError, isFetching, refetch } = useNewsletterStyle(open ? type : null);
   const save = useUpdateNewsletterStyle();
   const gen = useGenerateStyle();
   const [text, setText] = useState("");
@@ -51,6 +52,15 @@ export function StyleGuideDialog({
 
         {isLoading ? (
           <Skeleton className="h-64 w-full" />
+        ) : isError ? (
+          // Don't fall through to the empty Textarea below on a failed
+          // fetch — saving from there would silently overwrite whatever
+          // style guide actually exists with a blank one.
+          <QueryError
+            message="Couldn't load the style guide."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : (
           <Textarea
             className="flex-1 min-h-[340px] font-mono text-xs"

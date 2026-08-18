@@ -15,6 +15,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -126,7 +127,7 @@ export function DoNotEmail() {
   const optoutDirty = optoutEmail.trim() !== "" || optoutNote.trim() !== "";
   const optoutDiscard = useDialogDiscardGuard(optoutDirty, closeOptoutDialog);
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["report", "do-not-email", category],
     queryFn: async () => {
       const rows = await fetchAllRows<SuppRow>(
@@ -202,12 +203,6 @@ export function DoNotEmail() {
         }
       />
 
-      {error && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          Error: {(error as Error).message}
-        </div>
-      )}
-
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <Kpi label="Rows" value={isLoading ? "…" : rows.length.toLocaleString()} icon />
         <Kpi label="Unique emails to suppress" value={isLoading ? "…" : distinctEmails.toLocaleString()} />
@@ -239,6 +234,8 @@ export function DoNotEmail() {
               <TableBody>
                 {isLoading ? (
                   <TableRow><TableCell colSpan={7} className="p-4"><Skeleton className="h-48 w-full" /></TableCell></TableRow>
+                ) : isError ? (
+                  <TableRow><TableCell colSpan={7} className="p-4"><QueryError compact message="Couldn't load this report." onRetry={() => refetch()} isRetrying={isFetching} /></TableCell></TableRow>
                 ) : !rows.length ? (
                   <TableRow><TableCell colSpan={7} className="p-6 text-sm text-muted-foreground text-center">Nothing to suppress in this category.</TableCell></TableRow>
                 ) : (

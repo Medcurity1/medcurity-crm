@@ -66,6 +66,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import {
   Table,
   TableBody,
@@ -106,17 +107,22 @@ function FormSection({ title, children }: { title: string; children: React.React
 export function OpportunityForm() {
   const { id } = useParams<{ id: string }>();
   const isEditing = !!id;
-  const { data: opp, isLoading: loadingOpp } = useOpportunity(id);
+  const { data: opp, isLoading: loadingOpp, isError, error, refetch } = useOpportunity(id);
   const { data: users } = useUsers(true);
 
   // Wait for data before mounting the form so defaultValues are correct
-  if (isEditing && (loadingOpp || !opp || !users)) {
+  if (isEditing && (loadingOpp || (!opp && !isError) || !users)) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-10 w-48" />
         <Skeleton className="h-64 w-full" />
       </div>
     );
+  }
+
+  const notFound = (error as { code?: string } | null)?.code === "PGRST116";
+  if (isEditing && isError && !notFound) {
+    return <QueryError message="Something went wrong loading this opportunity." onRetry={() => refetch()} />;
   }
 
   // key={id} forces React to remount a fresh form instance per opportunity

@@ -115,6 +115,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge, badgeVariants } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -1194,12 +1195,18 @@ function ResultsTable({
   columns,
   data,
   isLoading,
+  isError,
+  isFetching,
+  onRetry,
   count,
 }: {
   entityKey: string;
   columns: string[];
   data: Record<string, unknown>[];
   isLoading: boolean;
+  isError?: boolean;
+  isFetching?: boolean;
+  onRetry?: () => void;
   count: number;
 }) {
   const entity = getEntityDef(entityKey);
@@ -1247,6 +1254,18 @@ function ResultsTable({
         {Array.from({ length: 5 }).map((_, i) => (
           <Skeleton key={i} className="h-10 w-full" />
         ))}
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="mt-6">
+        <QueryError
+          message="Couldn't run this report."
+          onRetry={onRetry ?? (() => {})}
+          isRetrying={isFetching}
+        />
       </div>
     );
   }
@@ -1867,6 +1886,8 @@ function SidebarReportEntry({ report, isActive, isOwned, onLoad, onDelete }: Sid
 
 function ReportsSidebar({
   savedReports,
+  savedReportsError,
+  onRetrySavedReports,
   activeReportId,
   userId,
   onLoadReport,
@@ -1874,6 +1895,8 @@ function ReportsSidebar({
   onNewReport,
 }: {
   savedReports: SavedReport[];
+  savedReportsError?: boolean;
+  onRetrySavedReports?: () => void;
   activeReportId: string | null;
   userId: string | undefined;
   onLoadReport: (report: SavedReport) => void;
@@ -2002,10 +2025,20 @@ function ReportsSidebar({
         )}
 
         {/* Empty state */}
-        {savedReports.length === 0 && (
-          <div className="text-center py-8 text-sm text-muted-foreground px-3">
-            No saved reports yet. Build a report and save it to see it here.
+        {savedReportsError ? (
+          <div className="px-3 py-4">
+            <QueryError
+              compact
+              message="Couldn't load saved reports."
+              onRetry={onRetrySavedReports ?? (() => {})}
+            />
           </div>
+        ) : (
+          savedReports.length === 0 && (
+            <div className="text-center py-8 text-sm text-muted-foreground px-3">
+              No saved reports yet. Build a report and save it to see it here.
+            </div>
+          )
         )}
       </ScrollArea>
     </div>
@@ -2067,7 +2100,7 @@ export function ReportBuilder({ mode = "full" }: { mode?: "full" | "people" } = 
   const [saveMode, setSaveMode] = useState<"create" | "update">("create");
 
   // Queries
-  const { data: savedReports } = useSavedReports();
+  const { data: savedReports, isError: savedReportsError, refetch: refetchSavedReports } = useSavedReports();
   const { data: existingFolders } = useSavedReportFolders();
   const createReport = useCreateReport();
   const updateReport = useUpdateReport();
@@ -2240,7 +2273,9 @@ export function ReportBuilder({ mode = "full" }: { mode?: "full" | "people" } = 
   const {
     data: results,
     isLoading: resultsLoading,
+    isError: resultsError,
     isFetching: resultsFetching,
+    refetch: refetchResults,
   } = useRunReport(queryConfig, hasRun);
 
   // Exports must include EVERY row, not the 1,000-row display cap. Fetch
@@ -2425,6 +2460,8 @@ export function ReportBuilder({ mode = "full" }: { mode?: "full" | "people" } = 
         {/* Left sidebar */}
         <ReportsSidebar
           savedReports={savedReports ?? []}
+          savedReportsError={savedReportsError}
+          onRetrySavedReports={() => refetchSavedReports()}
           activeReportId={activeReportId}
           userId={user?.id}
           onLoadReport={handleLoadReport}
@@ -2561,6 +2598,9 @@ export function ReportBuilder({ mode = "full" }: { mode?: "full" | "people" } = 
                           columns={config.columns}
                           data={results?.data ?? []}
                           isLoading={resultsLoading}
+                          isError={resultsError}
+                          isFetching={resultsFetching}
+                          onRetry={() => refetchResults()}
                           count={results?.count ?? 0}
                         />
                       </div>

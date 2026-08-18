@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, FileSpreadsheet, Loader2 } from "lucide-react";
 import { useImportRuns, type ImportRunStatus } from "./importRunsApi";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { QueryError } from "@/components/QueryError";
 import { useEffect } from "react";
 
 /**
@@ -33,7 +34,7 @@ function formatDate(iso: string) {
 export function ImportRunsList() {
   const navigate = useNavigate();
   const { profile, loading: authLoading } = useAuth();
-  const { data: runs, isLoading, error } = useImportRuns();
+  const { data: runs, isLoading, isError, isFetching, refetch } = useImportRuns();
 
   useEffect(() => {
     if (!authLoading && profile?.role !== "admin" && profile?.role !== "super_admin") {
@@ -73,10 +74,12 @@ export function ImportRunsList() {
             <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
               <Loader2 className="h-4 w-4 animate-spin" /> Loading…
             </div>
-          ) : error ? (
-            <div className="text-sm text-destructive py-4">
-              Failed to load: {(error as Error).message}
-            </div>
+          ) : isError ? (
+            <QueryError
+              message="Couldn't load import runs."
+              onRetry={() => refetch()}
+              isRetrying={isFetching}
+            />
           ) : !runs || runs.length === 0 ? (
             <div className="text-sm text-muted-foreground py-8 text-center">
               No import runs yet. Run an import on the Data Import tab and come back here

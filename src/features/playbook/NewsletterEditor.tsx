@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import { cn } from "@/lib/utils";
 import {
@@ -43,7 +44,7 @@ function CharCount({ value, soft, hard }: { value: string; soft: number; hard: n
 }
 
 export function NewsletterEditor({ id, open, onOpenChange }: Props) {
-  const { data: nl, isLoading } = useNewsletter(open ? id : null);
+  const { data: nl, isLoading, isError, isFetching, refetch } = useNewsletter(open ? id : null);
   const revise = useReviseNewsletter();
   const save = useSaveNewsletterHtml();
   const push = usePushNewsletterToMailchimp();
@@ -136,8 +137,14 @@ export function NewsletterEditor({ id, open, onOpenChange }: Props) {
 
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFileChosen} />
 
-        {isLoading || !nl ? (
+        {isLoading ? (
           <div className="space-y-2"><Skeleton className="h-8 w-1/2" /><Skeleton className="flex-1 min-h-[400px] w-full" /></div>
+        ) : isError || !nl ? (
+          <QueryError
+            message="Couldn't load this newsletter draft."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-[1.7fr_1fr] gap-4 flex-1 min-h-0">
             {/* LEFT — preview / HTML */}

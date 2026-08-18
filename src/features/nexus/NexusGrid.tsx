@@ -39,6 +39,7 @@ import {
 } from "@dnd-kit/sortable";
 import { LayoutDashboard, Plus } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { useAuth } from "@/features/auth/AuthProvider";
 import {
   useDefaultWidgets,
@@ -193,6 +194,9 @@ export function NexusGrid({
   }, [isDefault, userQuery.data, defaultQuery.data, user?.id]);
 
   const isLoading = isDefault ? defaultQuery.isLoading : userQuery.isLoading;
+  const isError = isDefault ? defaultQuery.isError : userQuery.isError;
+  const isFetching = isDefault ? defaultQuery.isFetching : userQuery.isFetching;
+  const refetch = isDefault ? defaultQuery.refetch : userQuery.refetch;
   const removeWidget = isDefault ? removeDefaults : removeUser;
 
   // Pinned widgets render above the divider (FeaturedWidgets), so the
@@ -297,6 +301,20 @@ export function NexusGrid({
           <Skeleton key={i} className="h-64 w-full rounded-xl" />
         ))}
       </div>
+    );
+  }
+
+  if (isError) {
+    // A failed widget fetch must never fall through to "Nothing here
+    // yet" below — that reads as "your whole page config is gone"
+    // instead of "this didn't load", on a page that's now the default
+    // landing page.
+    return (
+      <QueryError
+        message="Couldn't load this page's widgets."
+        onRetry={() => refetch()}
+        isRetrying={isFetching}
+      />
     );
   }
 

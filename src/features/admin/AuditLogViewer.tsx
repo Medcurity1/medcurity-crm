@@ -22,6 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { ChevronDown, ChevronRight, Search, Download, X } from "lucide-react";
 import { formatRelativeDate } from "@/lib/formatters";
 import { format, parseISO, subDays, subHours } from "date-fns";
@@ -615,7 +616,7 @@ export function AuditLogViewer() {
     );
   }
 
-  const { data, isLoading } = useAuditLogs({
+  const { data, isLoading, isError, isFetching, refetch } = useAuditLogs({
     entity,
     action,
     dateRange,
@@ -942,6 +943,12 @@ export function AuditLogViewer() {
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
+      ) : isError ? (
+        <QueryError
+          message="Couldn't load audit log entries."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
       ) : logs.length === 0 ? (
         <p className="text-sm text-muted-foreground py-8 text-center">
           No audit log entries found for the selected filters.

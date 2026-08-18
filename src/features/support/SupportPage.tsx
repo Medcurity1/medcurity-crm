@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { LifeBuoy, Hand } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { formatRelativeDate } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { MeddyHeader, MEDDY_PANE_CLASS } from "@/features/meddy/MeddyShell";
@@ -17,7 +18,7 @@ import { displayName, isWaiting, lastPreview, messageCount, type SupportConversa
 export function SupportPage() {
   const [params, setParams] = useSearchParams();
   const selectedId = params.get("conversation");
-  const { data: conversations, isLoading } = useSupportConversations();
+  const { data: conversations, isLoading, isError, isFetching, refetch } = useSupportConversations();
   // Unread dots: a customer message in a conversation you're NOT looking
   // at marks its card until you open it (mirrors the website sidebar).
   const [unreadIds, setUnreadIds] = useState<Set<string>>(new Set());
@@ -84,6 +85,15 @@ export function SupportPage() {
               {Array.from({ length: 5 }).map((_, i) => (
                 <Skeleton key={i} className="h-16 w-full" />
               ))}
+            </div>
+          ) : isError ? (
+            <div className="p-3">
+              <QueryError
+                compact
+                message="Couldn't load chats."
+                onRetry={() => refetch()}
+                isRetrying={isFetching}
+              />
             </div>
           ) : (conversations ?? []).length === 0 ? (
             <div className="px-4 py-10 text-center text-sm text-muted-foreground">

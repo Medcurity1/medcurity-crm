@@ -52,6 +52,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import {
   Tooltip,
   TooltipContent,
@@ -108,7 +109,7 @@ export function LayoutEditor() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin" || profile?.role === "super_admin";
   const [entity, setEntity] = useState<LayoutEntity>("accounts");
-  const { data: layout, isLoading } = usePageLayout(entity);
+  const { data: layout, isLoading, isError, isFetching, refetch } = usePageLayout(entity);
 
   if (!isAdmin) {
     // Non-admins should never see this component (parent gates by role),
@@ -155,6 +156,12 @@ export function LayoutEditor() {
 
         {isLoading ? (
           <Skeleton className="h-96 w-full" />
+        ) : isError ? (
+          <QueryError
+            message="Couldn't load this layout."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : !layout ? (
           <div className="text-sm text-muted-foreground border rounded-md p-6 text-center">
             No layout seeded for this entity yet.

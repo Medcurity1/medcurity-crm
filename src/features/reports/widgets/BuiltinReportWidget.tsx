@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
-import { formatCurrency, stageLabel } from "@/lib/formatters";
+import { formatCurrency, stageLabel, formatDate } from "@/lib/formatters";
+import { QueryError } from "@/components/QueryError";
 import {
   Table,
   TableBody,
@@ -85,7 +86,7 @@ interface ChurnStatRow {
 }
 
 function PipelineByStage() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["widget", "pipeline_by_stage"],
     queryFn: async () => {
       const rows = await rpcRows<GroupedStatRow>(
@@ -107,6 +108,7 @@ function PipelineByStage() {
   });
 
   if (isLoading) return <Skeleton />;
+  if (isError) return <WidgetError onRetry={refetch} isRetrying={isFetching} />;
   return (
     <Table>
       <TableHeader>
@@ -130,7 +132,7 @@ function PipelineByStage() {
 }
 
 function ClosedWonByOwnerQtr() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["widget", "closed_won_by_owner_qtr"],
     queryFn: async () => {
       const today = new Date();
@@ -160,6 +162,7 @@ function ClosedWonByOwnerQtr() {
   });
 
   if (isLoading) return <Skeleton />;
+  if (isError) return <WidgetError onRetry={refetch} isRetrying={isFetching} />;
   return (
     <Table>
       <TableHeader>
@@ -184,7 +187,7 @@ function ClosedWonByOwnerQtr() {
 
 function ProductGrowthYoY() {
   // Compare current-year vs prior-year closed_won ARR per product.
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["widget", "product_growth_yoy"],
     queryFn: async () => {
       const now = new Date();
@@ -246,6 +249,7 @@ function ProductGrowthYoY() {
   });
 
   if (isLoading) return <Skeleton />;
+  if (isError) return <WidgetError onRetry={refetch} isRetrying={isFetching} />;
   return (
     <Table>
       <TableHeader>
@@ -283,7 +287,7 @@ function ProductGrowthYoY() {
 }
 
 function ChurnMetrics() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["widget", "churn_metrics"],
     queryFn: async () => {
       const now = new Date();
@@ -316,6 +320,7 @@ function ChurnMetrics() {
   });
 
   if (isLoading) return <Skeleton />;
+  if (isError) return <WidgetError onRetry={refetch} isRetrying={isFetching} />;
   if (!data) return null;
   const delta = data.lastYtdChurnAmt
     ? ((data.ytdChurnAmt - data.lastYtdChurnAmt) / data.lastYtdChurnAmt) * 100
@@ -335,7 +340,7 @@ function ChurnMetrics() {
 }
 
 function ArrByProduct() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["widget", "arr_by_product"],
     queryFn: async () => {
       // Was: select EVERY opportunity_products row (no filter whatsoever),
@@ -360,6 +365,7 @@ function ArrByProduct() {
   });
 
   if (isLoading) return <Skeleton />;
+  if (isError) return <WidgetError onRetry={refetch} isRetrying={isFetching} />;
   return (
     <Table>
       <TableHeader>
@@ -381,7 +387,7 @@ function ArrByProduct() {
 }
 
 function RenewalsCalendar() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["widget", "renewals_calendar"],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -400,6 +406,7 @@ function RenewalsCalendar() {
   });
 
   if (isLoading) return <Skeleton />;
+  if (isError) return <WidgetError onRetry={refetch} isRetrying={isFetching} />;
   return (
     <Table>
       <TableHeader>
@@ -419,7 +426,7 @@ function RenewalsCalendar() {
               {formatCurrency(Number(r.amount ?? 0))}
             </TableCell>
             <TableCell className="text-right">
-              {new Date(r.contract_end_date!).toLocaleDateString()}
+              {formatDate(r.contract_end_date!)}
             </TableCell>
           </TableRow>
         ))}
@@ -449,4 +456,20 @@ function Row({
 
 function Skeleton() {
   return <div className="h-24 bg-muted animate-pulse rounded" />;
+}
+
+/**
+ * A dashboard-card-sized error state. Every widget above used to fall
+ * straight from isLoading into an empty table on a failed fetch — e.g.
+ * Churn Metrics would show "0 churned accounts, $0 churn" (great news,
+ * falsely) instead of admitting the RPC failed.
+ */
+function WidgetError({
+  onRetry,
+  isRetrying,
+}: {
+  onRetry: () => void;
+  isRetrying?: boolean;
+}) {
+  return <QueryError compact message="Couldn't load this widget." onRetry={onRetry} isRetrying={isRetrying} />;
 }

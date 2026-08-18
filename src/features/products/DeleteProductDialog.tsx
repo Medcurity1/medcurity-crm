@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { useEntriesForProduct, useProductReferences } from "./api";
 import { formatCurrency, stageLabel } from "@/lib/formatters";
 import type { Product, OpportunityStage } from "@/types/crm";
@@ -46,10 +47,26 @@ export function DeleteProductDialog({
   isPending: boolean;
 }) {
   const navigate = useNavigate();
-  const { data: entries, isLoading: entriesLoading } = useEntriesForProduct(product?.id);
-  const { data: refs, isLoading: refsLoading } = useProductReferences(product?.id);
+  const {
+    data: entries,
+    isLoading: entriesLoading,
+    isError: entriesError,
+    isFetching: entriesFetching,
+    refetch: refetchEntries,
+  } = useEntriesForProduct(product?.id);
+  const {
+    data: refs,
+    isLoading: refsLoading,
+    isError: refsError,
+    isFetching: refsFetching,
+    refetch: refetchRefs,
+  } = useProductReferences(product?.id);
 
   const isLoading = entriesLoading || refsLoading;
+  // A failed count must never present as "0 opportunities, safe to
+  // delete" — that's the exact false-negative that could destroy
+  // revenue history. Block the whole picker on error instead.
+  const isError = entriesError || refsError;
   const opportunityCount = refs?.opportunityCount ?? 0;
   const entryCount = refs?.entryCount ?? 0;
   const onAnyOpp = opportunityCount > 0;
@@ -135,6 +152,15 @@ export function DeleteProductDialog({
 
         {isLoading ? (
           <Skeleton className="h-24 w-full" />
+        ) : isError ? (
+          <QueryError
+            message="Couldn't check what references this product."
+            onRetry={() => {
+              if (entriesError) refetchEntries();
+              if (refsError) refetchRefs();
+            }}
+            isRetrying={entriesFetching || refsFetching}
+          />
         ) : (
           <div className="space-y-4">
             <div className="rounded-md border bg-muted/30 p-3 text-sm space-y-1">

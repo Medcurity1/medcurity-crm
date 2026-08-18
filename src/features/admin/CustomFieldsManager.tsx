@@ -21,6 +21,7 @@ import {
   useDeleteCustomField,
 } from "./admin-api";
 import { AddFieldDialog } from "./AddFieldDialog";
+import { QueryError } from "@/components/QueryError";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -55,7 +56,7 @@ const ENTITY_TABS: { value: EntityTab; label: string }[] = [
 ];
 
 function EntityFieldsTable({ entity }: { entity: EntityTab }) {
-  const { data: fields, isLoading } = useCustomFieldDefinitions(entity);
+  const { data: fields, isLoading, isError, isFetching, refetch } = useCustomFieldDefinitions(entity);
   const createField = useCreateCustomField();
   const updateField = useUpdateCustomField();
   const deleteField = useDeleteCustomField();
@@ -138,6 +139,16 @@ function EntityFieldsTable({ entity }: { entity: EntityTab }) {
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <QueryError
+        message="Couldn't load custom fields."
+        onRetry={() => refetch()}
+        isRetrying={isFetching}
+      />
     );
   }
 

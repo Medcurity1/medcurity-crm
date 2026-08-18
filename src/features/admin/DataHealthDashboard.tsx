@@ -33,6 +33,7 @@ import { formatDate, formatCurrency, stageLabel, RETIRED_STAGES } from "@/lib/fo
 import type { OpportunityStage } from "@/types/crm";
 import { Link } from "react-router-dom";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
+import { QueryError } from "@/components/QueryError";
 import { toast } from "sonner";
 import { useBulkUpdateOwner as useBulkUpdateAccountOwner } from "@/features/accounts/api";
 import { useBulkUpdateOwner as useBulkUpdateContactOwner } from "@/features/contacts/api";
@@ -284,7 +285,7 @@ function DrilldownPanel({ entity, issue, onClose }: {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [ownerDialogOpen, setOwnerDialogOpen] = useState(false);
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["data_health_drilldown", entity, issue, page],
     queryFn: () => fetchDrilldown(entity, issue, page),
   });
@@ -383,6 +384,13 @@ function DrilldownPanel({ entity, issue, onClose }: {
             <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
               <Loader2 className="h-3 w-3 animate-spin" /> Loading...
             </div>
+          ) : isError ? (
+            <QueryError
+              compact
+              message="Couldn't load these records."
+              onRetry={() => refetch()}
+              isRetrying={isFetching}
+            />
           ) : records.length > 0 ? (
             <>
               <div className="rounded-md border bg-background">
@@ -486,7 +494,7 @@ function DrilldownPanel({ entity, issue, onClose }: {
 /* ---------- Ghost-stage card ---------- */
 
 function RetiredStageCard() {
-  const { data, isLoading } = useRetiredStageDeals();
+  const { data, isLoading, isError, isFetching, refetch } = useRetiredStageDeals();
   const totalCount = data?.totalCount ?? 0;
   const deals = data?.deals ?? [];
 
@@ -509,6 +517,16 @@ function RetiredStageCard() {
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" /> Checking...
           </div>
+        ) : isError ? (
+          // Never show the green "all clear" state on a failed check —
+          // that would tell an admin nothing's wrong when the check
+          // itself just didn't run.
+          <QueryError
+            compact
+            message="Couldn't run the hidden-pipeline check."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : totalCount === 0 ? (
           <div className="flex items-center gap-2 text-sm">
             <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
@@ -574,8 +592,20 @@ function RetiredStageCard() {
 /* ---------- Component ---------- */
 
 export function DataHealthDashboard() {
-  const { data: stats, isLoading: statsLoading } = useDatabaseStats();
-  const { data: healthRows, isLoading: healthLoading } = useDataHealthCheck();
+  const {
+    data: stats,
+    isLoading: statsLoading,
+    isError: statsError,
+    isFetching: statsFetching,
+    refetch: refetchStats,
+  } = useDatabaseStats();
+  const {
+    data: healthRows,
+    isLoading: healthLoading,
+    isError: healthError,
+    isFetching: healthFetching,
+    refetch: refetchHealth,
+  } = useDataHealthCheck();
   const [expanded, setExpanded] = useState<{ entity: string; issue: "unassigned" | "missing_name" } | null>(null);
 
   if (statsLoading || healthLoading) {
@@ -583,6 +613,24 @@ export function DataHealthDashboard() {
       <div className="flex items-center justify-center h-48">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
+    );
+  }
+
+  // Neither half of this page is safe to show blank-and-quiet on error:
+  // a failed stats fetch would render "0% used" (looks like plenty of
+  // headroom) and a failed health-check fetch would render "No data
+  // health information available" (looks like a clean bill of health).
+  // Both are false-negative readings an admin could reasonably act on.
+  if (statsError || healthError) {
+    return (
+      <QueryError
+        message="Couldn't load the data health dashboard."
+        onRetry={() => {
+          if (statsError) refetchStats();
+          if (healthError) refetchHealth();
+        }}
+        isRetrying={statsFetching || healthFetching}
+      />
     );
   }
 

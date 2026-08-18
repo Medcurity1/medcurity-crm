@@ -39,6 +39,7 @@ import type { AppRole, UserProfile } from "@/types/crm";
 import { useAllUsers, useUpdateUserProfile, useInviteUser } from "./admin-api";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
+import { QueryError } from "@/components/QueryError";
 
 const ROLE_OPTIONS: { value: AppRole; label: string }[] = [
   { value: "sales", label: "Sales" },
@@ -307,7 +308,7 @@ function InviteUserDialog({
 // ── Main Users Manager ──────────────────────────────────────────────
 
 export function UsersManager() {
-  const { data: users, isLoading } = useAllUsers();
+  const { data: users, isLoading, isError, isFetching, refetch } = useAllUsers();
   const updateUser = useUpdateUserProfile();
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [editRole, setEditRole] = useState<AppRole>("sales");
@@ -347,6 +348,16 @@ export function UsersManager() {
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <QueryError
+        message="Couldn't load users."
+        onRetry={() => refetch()}
+        isRetrying={isFetching}
+      />
     );
   }
 

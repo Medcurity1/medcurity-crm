@@ -20,7 +20,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useIdeas, useIdeaWeeks, useGenerateIdeas, useIdeaFeedback } from "./api";
-import { LoadError } from "./LoadError";
+import { QueryError } from "@/components/QueryError";
 import type { PlaybookIdea } from "./types";
 
 function IdeaCard({ idea }: { idea: PlaybookIdea }) {
@@ -165,7 +165,7 @@ export function IdeasTab() {
           {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-28 w-full" />)}
         </div>
       ) : isError ? (
-        <LoadError what="ideas" onRetry={() => refetch()} />
+        <QueryError message="Couldn't load ideas." onRetry={() => refetch()} />
       ) : !ideas?.length ? (
         <EmptyState
           icon={Lightbulb}

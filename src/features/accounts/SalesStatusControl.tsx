@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Popover,
   PopoverContent,
@@ -240,7 +241,10 @@ export function SalesStatusControl({ account }: { account: Account }) {
           </DialogHeader>
           <div className="max-h-[40vh] space-y-1 overflow-y-auto">
             {contacts === undefined ? (
-              <p className="text-sm text-muted-foreground">Loading contacts…</p>
+              <div className="space-y-1.5">
+                <Skeleton className="h-8 w-full" />
+                <Skeleton className="h-8 w-full" />
+              </div>
             ) : contacts.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 No contacts on this account yet — add a contact first.

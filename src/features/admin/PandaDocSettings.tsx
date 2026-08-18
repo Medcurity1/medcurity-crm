@@ -33,6 +33,8 @@ import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { env } from "@/lib/env";
+import { formatDate } from "@/lib/formatters";
+import { QueryError } from "@/components/QueryError";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -176,7 +178,13 @@ export function PandaDocSettings() {
   const [showApiKey, setShowApiKey] = useState(false);
 
   const { data: connection, isLoading: loadingConnection } = usePandaDocConnection();
-  const { data: documents, isLoading: loadingDocuments } = useRecentDocuments();
+  const {
+    data: documents,
+    isLoading: loadingDocuments,
+    isError: documentsError,
+    isFetching: documentsFetching,
+    refetch: refetchDocuments,
+  } = useRecentDocuments();
   const saveApiKey = useSaveApiKey();
   const testConnection = useTestConnection();
 
@@ -345,6 +353,13 @@ export function PandaDocSettings() {
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
+          ) : documentsError ? (
+            <QueryError
+              compact
+              message="Couldn't load synced documents."
+              onRetry={() => refetchDocuments()}
+              isRetrying={documentsFetching}
+            />
           ) : documents && documents.length > 0 ? (
             <div className="rounded-md border">
               <Table>
@@ -367,7 +382,7 @@ export function PandaDocSettings() {
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {doc.date_completed
-                          ? new Date(doc.date_completed).toLocaleDateString()
+                          ? formatDate(doc.date_completed)
                           : "--"}
                       </TableCell>
                       <TableCell>

@@ -29,8 +29,9 @@ import {
 } from "./api";
 import { NewsletterEditor } from "./NewsletterEditor";
 import { StyleGuideDialog } from "./StyleGuideDialog";
-import { LoadError } from "./LoadError";
+import { QueryError } from "@/components/QueryError";
 import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
+import { formatDate } from "@/lib/formatters";
 import type { Newsletter, NewsletterType } from "./types";
 
 const TYPE_FULL: Record<string, string> = {
@@ -185,7 +186,7 @@ export function NewslettersTab() {
       {isLoading ? (
         <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}</div>
       ) : isError ? (
-        <LoadError what="newsletters" onRetry={() => refetch()} />
+        <QueryError message="Couldn't load newsletters." onRetry={() => refetch()} />
       ) : !shown.length ? (
         <EmptyState
           icon={FileText}
@@ -215,7 +216,7 @@ function NewsletterRow({ n, onEdit, onDelete }: { n: Newsletter; onEdit: () => v
         <div className="min-w-0">
           <h3 className="font-semibold text-sm truncate">{n.subject || "(untitled draft)"}</h3>
           <p className="text-xs text-muted-foreground mt-1">
-            {n.send_time ? new Date(n.send_time).toLocaleDateString() : "Draft"}
+            {n.send_time ? formatDate(n.send_time) : "Draft"}
             {m.sent ? ` · ${m.sent} sent` : ""}
             {m.openRate ? ` · ${m.openRate} open` : ""}
             {m.clickRate ? ` · ${m.clickRate} click` : ""}

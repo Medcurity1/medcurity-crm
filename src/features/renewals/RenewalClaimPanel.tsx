@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 
 // Temporary claim panel for the generated-renewal backlog (Summer/Molly via
@@ -65,7 +66,7 @@ function useUnclaimedRenewals() {
 
 export function RenewalClaimPanel() {
   const qc = useQueryClient();
-  const { data: rows, isLoading } = useUnclaimedRenewals();
+  const { data: rows, isLoading, isError, isFetching, refetch } = useUnclaimedRenewals();
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [showAll, setShowAll] = useState(false);
 
@@ -94,8 +95,10 @@ export function RenewalClaimPanel() {
   }
 
 
-  // Self-retiring: no unclaimed rows, no panel.
-  if (!isLoading && (rows ?? []).length === 0) return null;
+  // Self-retiring: no unclaimed rows, no panel. A failed fetch must NOT
+  // take this path — that would silently vanish the panel instead of
+  // surfacing the blip, indistinguishable from "all caught up".
+  if (!isLoading && !isError && (rows ?? []).length === 0) return null;
 
   const visible = showAll ? (rows ?? []) : (rows ?? []).slice(0, 15);
 
@@ -120,6 +123,13 @@ export function RenewalClaimPanel() {
       <CardContent className="pt-0">
         {isLoading ? (
           <Skeleton className="h-24 w-full" />
+        ) : isError ? (
+          <QueryError
+            compact
+            message="Couldn't load unclaimed renewals."
+            onRetry={() => refetch()}
+            isRetrying={isFetching}
+          />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

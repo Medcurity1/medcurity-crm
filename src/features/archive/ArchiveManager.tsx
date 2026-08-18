@@ -4,6 +4,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
+import { QueryError } from "@/components/QueryError";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -102,7 +103,7 @@ function getDisplayName(record: ArchivedRecord): string {
 }
 
 function ArchivedTable({ table, scopeUserId }: { table: string; scopeUserId: string | null }) {
-  const { data: records, isLoading } = useArchivedRecords(table, scopeUserId);
+  const { data: records, isLoading, isError, isFetching, refetch } = useArchivedRecords(table, scopeUserId);
   const restoreMutation = useRestoreRecord();
   // Activities get two extra columns (type + when it happened) — a bare
   // subject isn't enough to tell two archived tasks apart.
@@ -115,6 +116,16 @@ function ArchivedTable({ table, scopeUserId }: { table: string; scopeUserId: str
           <Skeleton key={i} className="h-12 w-full" />
         ))}
       </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <QueryError
+        message={`Couldn't load archived ${table}.`}
+        onRetry={() => refetch()}
+        isRetrying={isFetching}
+      />
     );
   }
 

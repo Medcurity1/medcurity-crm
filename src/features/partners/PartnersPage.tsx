@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Handshake, Search, AlertTriangle } from "lucide-react";
+import { Handshake, Search } from "lucide-react";
 import { usePartners } from "./api";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
+import { QueryError } from "@/components/QueryError";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Pagination } from "@/components/Pagination";
 import { SortableHeader, type SortState } from "@/components/SortableHeader";
 import { MultiSelect } from "@/components/MultiSelect";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { usePicklistOptionsFor } from "@/features/picklists/api";
@@ -141,15 +141,11 @@ export function PartnersPage() {
           ))}
         </div>
       ) : isError ? (
-        <EmptyState
-          icon={AlertTriangle}
-          title="Couldn't load partners"
-          description="Something went wrong loading the partner list. This is usually a momentary hiccup — try again."
-        >
-          <Button onClick={() => refetch()} disabled={isFetching}>
-            {isFetching ? "Retrying…" : "Try again"}
-          </Button>
-        </EmptyState>
+        <QueryError
+          message="Couldn't load partners."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
       ) : !partners?.length ? (
         <EmptyState
           icon={Handshake}

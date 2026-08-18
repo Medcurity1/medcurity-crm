@@ -105,7 +105,7 @@ export function FinishLineDialog({ request, onDismiss, onComplete }: FinishLineD
   // ----- data ---------------------------------------------------------
   const { data: account } = useAccount(open ? accountId : undefined);
   const needsEmail = !!request?.missingKeys.includes("contact_email");
-  const { data: contacts, isLoading: contactsLoading } = useQuery({
+  const { data: contacts, isLoading: contactsLoading, isError: contactsError } = useQuery({
     queryKey: ["finish-line-contacts", accountId],
     enabled: open && needsEmail && !!accountId,
     queryFn: async () => {
@@ -581,9 +581,11 @@ export function FinishLineDialog({ request, onDismiss, onComplete }: FinishLineD
               icon={<Mail className="h-4 w-4" aria-hidden />}
               title="A contact with an email"
               hint={
-                contacts && contacts.length === 0
-                  ? `${accountLabel} has no contacts yet, so this also creates its first one.`
-                  : "Every client needs at least one reachable contact. Saves to the contact you pick."
+                contactsError
+                  ? "Couldn't check this account's contacts — close and reopen this to try again."
+                  : contacts && contacts.length === 0
+                    ? `${accountLabel} has no contacts yet, so this also creates its first one.`
+                    : "Every client needs at least one reachable contact. Saves to the contact you pick."
               }
             >
               {contactsLoading ? (

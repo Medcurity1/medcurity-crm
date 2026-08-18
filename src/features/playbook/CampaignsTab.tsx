@@ -16,7 +16,7 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { CampaignWizard } from "./CampaignWizard";
 import { TemplatesSection } from "./TemplatesSection";
 import { CampaignReplies } from "./CampaignReplies";
-import { LoadError } from "./LoadError";
+import { QueryError } from "@/components/QueryError";
 import { CampaignCard, type CampaignRow } from "./CampaignCard";
 import { CampaignDetailSheet } from "./CampaignDetailSheet";
 import { InboxHealthDialog } from "./InboxHealthDialog";
@@ -336,7 +336,7 @@ export function CampaignsTab() {
             {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}
           </div>
         ) : isError ? (
-          <LoadError what="campaigns" onRetry={() => refetch()} />
+          <QueryError message="Couldn't load campaigns." onRetry={() => refetch()} />
         ) : ongoing.length ? (
           <div className="space-y-2">
             {ongoing.map(renderCard)}

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import { InlineEdit, type InlineEditProps } from "@/components/InlineEdit";
 import { HelpTooltip } from "@/components/ui/help-tooltip";
 import { usePageLayout } from "./api";
@@ -53,10 +54,22 @@ export function LayoutDrivenDetail<T extends Record<string, unknown>>({
   inlineEditTypes,
   layoutName = "standard",
 }: LayoutDrivenDetailProps<T>) {
-  const { data: layout, isLoading } = usePageLayout(entity, layoutName);
+  const { data: layout, isLoading, isError, isFetching, refetch } = usePageLayout(entity, layoutName);
 
   if (isLoading) {
     return <Skeleton className="h-96 w-full" />;
+  }
+  if (isError) {
+    // This renders the body of every record detail page — a failed
+    // fetch must not read as "nobody configured this page" (which
+    // points a rep at an admin) when it's really just a blip.
+    return (
+      <QueryError
+        message="Couldn't load this page's layout."
+        onRetry={() => refetch()}
+        isRetrying={isFetching}
+      />
+    );
   }
   if (!layout) {
     return (

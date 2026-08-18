@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import {
   Select,
   SelectContent,
@@ -74,7 +75,7 @@ export function ArrBaseDataset() {
   const [range, setRange] = useState<DateRangeKey>("all_time");
   const { start, end } = resolveRange(range);
 
-  const { data: rows, isLoading, error: fetchError } = useQuery({
+  const { data: rows, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["report", "arr-base-dataset-v2", start, end],
     queryFn: async (): Promise<ArrRow[]> => {
       const {
@@ -299,12 +300,6 @@ export function ArrBaseDataset() {
         }
       />
 
-      {fetchError && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          Error: {(fetchError as Error).message}
-        </div>
-      )}
-
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Kpi label="Opportunities" value={summary.count.toLocaleString()} />
         <Kpi label="Total Amount" value={formatCurrency(summary.totalAmount)} />
@@ -343,6 +338,17 @@ export function ArrBaseDataset() {
                   <TableRow>
                     <TableCell colSpan={16} className="p-4">
                       <Skeleton className="h-48 w-full" />
+                    </TableCell>
+                  </TableRow>
+                ) : isError ? (
+                  <TableRow>
+                    <TableCell colSpan={16} className="p-4">
+                      <QueryError
+                        compact
+                        message="Couldn't load the ARR base dataset."
+                        onRetry={() => refetch()}
+                        isRetrying={isFetching}
+                      />
                     </TableCell>
                   </TableRow>
                 ) : !rows?.length ? (

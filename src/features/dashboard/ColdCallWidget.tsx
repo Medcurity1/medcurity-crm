@@ -36,8 +36,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatName, formatRelativeDate } from "@/lib/formatters";
-import { formatPhone } from "@/components/PhoneInput";
+import { formatName, formatRelativeDate, formatPhoneWithExt } from "@/lib/formatters";
 
 interface ColdCallRow {
   id: string;
@@ -45,6 +44,7 @@ interface ColdCallRow {
   last_name: string | null;
   title: string | null;
   phone: string | null;
+  phone_ext: string | null;
   state: string | null;
   account_id: string | null;
   account_name: string | null;
@@ -136,7 +136,7 @@ export function ColdCallBody({
       let q = supabase
         .from("v_cold_call_contacts")
         .select(
-          "id, first_name, last_name, title, phone, state, account_id, account_name, industry, account_type, fte_count, last_activity_at",
+          "id, first_name, last_name, title, phone, phone_ext, state, account_id, account_name, industry, account_type, fte_count, last_activity_at",
         )
         // Warm-first: most recently touched at the top; never-touched last.
         .order("last_activity_at", { ascending: false, nullsFirst: false })
@@ -230,10 +230,13 @@ export function ColdCallBody({
                       </Link>
                       {row.phone && (
                         <a
-                          href={`tel:${row.phone}`}
+                          // tel: URIs can't carry "(208) 555-1234 x567" —
+                          // dial the base number (digits only); the visible
+                          // text still shows the extension.
+                          href={`tel:${row.phone.split(/x|ext/i)[0].replace(/[^\d+]/g, "")}`}
                           className="block text-xs text-muted-foreground hover:text-primary"
                         >
-                          {formatPhone(row.phone)}
+                          {formatPhoneWithExt(row.phone, row.phone_ext)}
                         </a>
                       )}
                     </TableCell>

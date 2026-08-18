@@ -18,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryError } from "@/components/QueryError";
 import {
   useCampaignSuggestions,
   useCampaignTemplates,
@@ -152,7 +153,7 @@ export function InsightsPanel({
   open: boolean;
   onOpenChange: (o: boolean) => void;
 }) {
-  const { data: suggestions, isLoading } = useCampaignSuggestions();
+  const { data: suggestions, isLoading, isError, isFetching, refetch } = useCampaignSuggestions();
   const { data: templates } = useCampaignTemplates();
   const saveTemplate = useSaveTemplate();
   const decide = useDecideSuggestion();
@@ -292,6 +293,12 @@ export function InsightsPanel({
         <div className="space-y-4 px-4 pb-4">
           {isLoading ? (
             Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)
+          ) : isError ? (
+            <QueryError
+              message="Couldn't load insights."
+              onRetry={() => refetch()}
+              isRetrying={isFetching}
+            />
           ) : !pending.length ? (
             <p className="text-sm text-muted-foreground">
               No suggestions right now. These show up automatically once a
