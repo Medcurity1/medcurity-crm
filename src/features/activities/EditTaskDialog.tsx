@@ -29,6 +29,7 @@ import {
 } from "./reminder";
 import { errorMessage } from "@/lib/errors";
 import { toast } from "sonner";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import type { Activity } from "@/types/crm";
 
 /**
@@ -125,18 +126,16 @@ export function EditTaskDialog({
       body !== (task.body ?? "") ||
       dueAt !== (task.due_at ? toLocalInput(task.due_at) : "") ||
       priority !== (task.priority ?? "normal"));
+  // Migrated to the shared guard (2026-08-17): the onInteractOutside/
+  // onEscapeKeyDown pair this used to use silently blocked the dismissal
+  // with no explanation, and neither one covered the dialog's own X
+  // button (a separate Radix code path) — this does, and adds the confirm.
+  const discard = useDialogDiscardGuard(dirty, () => onOpenChange(false));
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="sm:max-w-md"
-        onInteractOutside={(e) => {
-          if (dirty) e.preventDefault();
-        }}
-        onEscapeKeyDown={(e) => {
-          if (dirty) e.preventDefault();
-        }}
-      >
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Edit Task</DialogTitle>
           <DialogDescription>
@@ -198,7 +197,7 @@ export function EditTaskDialog({
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={discard.requestClose}>
               Cancel
             </Button>
             <Button type="submit" disabled={update.isPending}>
@@ -208,6 +207,8 @@ export function EditTaskDialog({
         </form>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }
 

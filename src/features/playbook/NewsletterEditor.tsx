@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import { cn } from "@/lib/utils";
 import {
   useNewsletter,
@@ -74,6 +75,9 @@ export function NewsletterEditor({ id, open, onOpenChange }: Props) {
   }, [nl?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const dirty = !!nl && (subject !== (nl.subject ?? "") || preview !== (nl.preview_text ?? "") || html !== (nl.html_content ?? ""));
+  // Full-screen editor with no explicit Cancel — the X button, outside
+  // click, and Escape are the only ways out, so all three need the guard.
+  const discard = useDialogDiscardGuard(dirty, () => onOpenChange(false));
   const alreadyPushed = nl?.status === "mailchimp_draft" || !!nl?.mailchimp_campaign_id;
   const type = (nl?.newsletter_type ?? "report") as NewsletterType;
 
@@ -119,7 +123,8 @@ export function NewsletterEditor({ id, open, onOpenChange }: Props) {
   const uploading = replacePlaceholder.isPending || insertImage.isPending;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent className="w-[96vw] sm:max-w-[1400px] h-[92vh] flex flex-col overflow-hidden p-4 sm:p-6">
         <DialogHeader className="shrink-0">
           <DialogTitle>Newsletter draft</DialogTitle>
@@ -304,5 +309,7 @@ export function NewsletterEditor({ id, open, onOpenChange }: Props) {
         )}
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }

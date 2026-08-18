@@ -34,6 +34,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import type { ActivityType, Activity } from "@/types/crm";
 
 interface ActivityFormProps {
@@ -376,20 +377,15 @@ export function ActivityForm({
   }
 
   const selectedType = form.watch("activity_type");
+  // Migrated to the shared guard (2026-08-17) — see EditTaskDialog.tsx for
+  // why: it also covers the dialog's own X button, and shows an actual
+  // confirm instead of silently swallowing the dismissal.
+  const discard = useDialogDiscardGuard(form.formState.isDirty, () => onOpenChange(false));
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="sm:max-w-md"
-        // Don't let a stray outside-click / Esc silently discard a
-        // filled-in activity — only the explicit Cancel/X should close.
-        onInteractOutside={(e) => {
-          if (form.formState.isDirty) e.preventDefault();
-        }}
-        onEscapeKeyDown={(e) => {
-          if (form.formState.isDirty) e.preventDefault();
-        }}
-      >
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit Activity" : "Log Activity"}</DialogTitle>
         </DialogHeader>
@@ -591,7 +587,7 @@ export function ActivityForm({
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={discard.requestClose}
             >
               Cancel
             </Button>
@@ -609,5 +605,7 @@ export function ActivityForm({
         </form>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }

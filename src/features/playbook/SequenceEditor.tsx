@@ -31,6 +31,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import { useSaveTemplate } from "./api";
 import type { CampaignTemplate, SequenceChannel, SequenceStep } from "./types";
 
@@ -174,8 +175,21 @@ export function SequenceEditor({
     );
   };
 
+  // Guard against a stray outside-click/Esc wiping a build in progress —
+  // compare against the initial/seeded steps so opening and closing
+  // untouched (or an unmodified "customize a copy") doesn't trip it. Each
+  // open is a fresh mount (name/description/steps are lazy useState off
+  // `initial`, never re-synced), so comparing against `initial` here is safe.
+  const initialSteps = initial?.steps?.length ? initial.steps : [freshStep(1)];
+  const dirty =
+    name !== (initial?.name ?? "") ||
+    description !== (initial?.description ?? "") ||
+    JSON.stringify(steps) !== JSON.stringify(initialSteps);
+  const discard = useDialogDiscardGuard(dirty, () => onOpenChange(false));
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[88vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{initial?.id ? "Edit sequence" : "Build a sequence"}</DialogTitle>
@@ -332,7 +346,7 @@ export function SequenceEditor({
         </div>
 
         <DialogFooter className="gap-2 sm:items-center">
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button variant="ghost" onClick={discard.requestClose}>
             Cancel
           </Button>
           {initial?.id ? (
@@ -363,5 +377,7 @@ export function SequenceEditor({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }

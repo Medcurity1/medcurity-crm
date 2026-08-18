@@ -19,6 +19,7 @@ import {
 import { useUsers } from "@/features/accounts/api";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useUrlState } from "@/hooks/useUrlState";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import { PipelineColumn, UNMAPPED_COLUMN_ID } from "./PipelineColumn";
 import { PipelineCard } from "./PipelineCard";
 import { CreatePipelineDialog } from "./CreatePipelineDialog";
@@ -215,6 +216,14 @@ function PipelineKanban({
     doMove(lossPrompt.id, "closed_lost", lossPrompt.accountId, withReason ? lossReason : undefined);
     setLossPrompt(null);
   }
+  // Guard against a stray outside-click/Esc/X silently moving the deal
+  // WITHOUT the reason the user was mid-typing — today that's exactly what
+  // happens (onOpenChange -> resolveLoss(false)). "Move without a reason" is
+  // left unguarded on purpose: it's a deliberate button, not an accidental
+  // dismissal. lossReason is reset to "" every time a fresh prompt opens
+  // (see the drag handler above), so comparing against "" is safe.
+  const lossDirty = lossReason.trim() !== "";
+  const lossDiscard = useDialogDiscardGuard(lossDirty, () => resolveLoss(false));
   const [activeItem, setActiveItem] = useState<ActivePipelineRow | null>(null);
 
   const sensors = useSensors(
@@ -330,7 +339,7 @@ function PipelineKanban({
       </DragOverlay>
     </DndContext>
 
-    <Dialog open={!!lossPrompt} onOpenChange={(o) => { if (!o) resolveLoss(false); }}>
+    <Dialog open={!!lossPrompt} onOpenChange={lossDiscard.guardedOnOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Why is this deal lost?</DialogTitle>
@@ -358,6 +367,7 @@ function PipelineKanban({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {lossDiscard.dialog}
     {closedLostGuard.dialog}
     <FinishLineDialog
       request={finishLine}

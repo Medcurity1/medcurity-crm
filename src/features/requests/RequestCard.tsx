@@ -41,6 +41,7 @@ import {
   useRequestAttachments,
   downloadAttachment,
 } from "./api";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 
 const PRIORITY_BADGE: Record<RequestPriority, string> = {
   high: "bg-red-500 text-white",
@@ -189,6 +190,10 @@ export function RequestDetailDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
   const notesDirty = notesDraft.trim() !== (request.working_notes ?? "").trim();
+  // Guard against a stray outside-click/Esc/X discarding an unsaved notes
+  // edit. The decisive action buttons (Mark complete/Approve/Deny) stay
+  // unguarded on purpose — they're deliberate choices, not accidental exits.
+  const discard = useDialogDiscardGuard(notesDirty, () => onOpenChange(false));
   const [summary, setSummary] = useState<string | null>(request.ai_summary);
   const [designPrompt, setDesignPrompt] = useState<string | null>(
     request.design_prompt,
@@ -235,7 +240,8 @@ export function RequestDetailDialog({
   const fields = detailFields(request);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       {/* Scrolling lives on an inner wrapper, NOT on DialogContent: the
           dialog is centered with a CSS transform, and a transformed
           scroll container clips its right edge at non-100% page zoom. */}
@@ -617,13 +623,15 @@ export function RequestDetailDialog({
             </Button>
           )}
           {!isPending && (
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
+            <Button variant="outline" onClick={discard.requestClose}>
               Close
             </Button>
           )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }
 

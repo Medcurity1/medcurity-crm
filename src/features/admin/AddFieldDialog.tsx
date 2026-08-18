@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { X } from "lucide-react";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import type { CustomFieldDefinition, CustomFieldType } from "@/types/crm";
 
 const FIELD_TYPE_LABELS: Record<CustomFieldType, string> = {
@@ -140,8 +141,34 @@ export function AddFieldDialog({
     });
   }
 
+  // Guard against a stray outside-click/Esc discarding a filled-in field
+  // definition. Compare against the seeded values (existingField when
+  // editing, blank defaults when creating) so opening/closing an untouched
+  // dialog never trips the confirm.
+  const dirty = existingField
+    ? label !== existingField.label ||
+      fieldKey !== existingField.field_key ||
+      fieldType !== existingField.field_type ||
+      isRequired !== existingField.is_required ||
+      section !== existingField.section ||
+      defaultValue !== (existingField.default_value ?? "") ||
+      sortOrder !== existingField.sort_order ||
+      JSON.stringify(options) !== JSON.stringify(existingField.options ?? []) ||
+      newOption.trim() !== ""
+    : label !== "" ||
+      fieldKey !== "" ||
+      fieldType !== "text" ||
+      isRequired !== false ||
+      section !== "Custom Fields" ||
+      defaultValue !== "" ||
+      sortOrder !== 0 ||
+      options.length > 0 ||
+      newOption.trim() !== "";
+  const discard = useDialogDiscardGuard(dirty, () => onOpenChange(false));
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
@@ -287,7 +314,7 @@ export function AddFieldDialog({
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={discard.requestClose}
             >
               Cancel
             </Button>
@@ -298,5 +325,7 @@ export function AddFieldDialog({
         </form>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }

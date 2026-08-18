@@ -38,6 +38,7 @@ import { toast } from "sonner";
 import type { AppRole, UserProfile } from "@/types/crm";
 import { useAllUsers, useUpdateUserProfile, useInviteUser } from "./admin-api";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 
 const ROLE_OPTIONS: { value: AppRole; label: string }[] = [
   { value: "sales", label: "Sales" },
@@ -110,6 +111,15 @@ function InviteUserDialog({
     }
     onOpenChange(nextOpen);
   }
+
+  // Guard against a stray outside-click/Esc discarding a filled-in invite.
+  // Never dirty once createdPassword is set — that screen is a one-time
+  // "here are the credentials" readout, not something to protect from
+  // closing (Done/X should just close it).
+  const dirty =
+    !createdPassword &&
+    (email !== "" || password !== "" || fullName !== "" || role !== "sales");
+  const discard = useDialogDiscardGuard(dirty, () => handleClose(false));
 
   function handleGeneratePassword() {
     setPassword(generatePassword());
@@ -193,7 +203,8 @@ function InviteUserDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Add New User</DialogTitle>
@@ -270,7 +281,7 @@ function InviteUserDialog({
             <Button
               type="button"
               variant="outline"
-              onClick={() => handleClose(false)}
+              onClick={discard.requestClose}
             >
               Cancel
             </Button>
@@ -288,6 +299,8 @@ function InviteUserDialog({
         </form>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }
 

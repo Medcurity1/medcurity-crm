@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import type { Opportunity } from "@/types/crm";
 
 const emailFormSchema = z.object({
@@ -145,19 +146,15 @@ export function LogEmailDialog({
     );
   }
 
+  // Migrated to the shared guard (2026-08-17) — see EditTaskDialog.tsx for
+  // why: it also covers the dialog's own X button, and shows an actual
+  // confirm instead of silently swallowing the dismissal.
+  const discard = useDialogDiscardGuard(form.formState.isDirty, () => onOpenChange(false));
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="sm:max-w-md"
-        // Don't let a stray outside-click / Esc silently throw away a
-        // half-written email log — only the explicit Cancel/X should discard.
-        onInteractOutside={(e) => {
-          if (form.formState.isDirty) e.preventDefault();
-        }}
-        onEscapeKeyDown={(e) => {
-          if (form.formState.isDirty) e.preventDefault();
-        }}
-      >
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Mail className="h-5 w-5 text-purple-600" />
@@ -257,7 +254,7 @@ export function LogEmailDialog({
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={discard.requestClose}
             >
               Cancel
             </Button>
@@ -268,5 +265,7 @@ export function LogEmailDialog({
         </form>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }

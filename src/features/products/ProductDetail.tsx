@@ -15,6 +15,7 @@ import {
 } from "./api";
 import { DeleteProductDialog } from "./DeleteProductDialog";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -412,8 +413,22 @@ function ProductEditDialog({
     }
   }
 
+  // Guard against a stray outside-click/Esc discarding in-progress edits —
+  // compare against the seeded `product` values.
+  const dirty =
+    name !== (product.name ?? "") ||
+    code !== (product.code ?? "") ||
+    shortName !== ((product as { short_name?: string | null }).short_name ?? "") ||
+    family !== (product.product_family ?? "") ||
+    pricingModel !== (product.pricing_model ?? "per_fte") ||
+    hasFlatPrice !== (product.has_flat_price ?? false) ||
+    defaultArr !== (product.default_arr != null ? String(product.default_arr) : "") ||
+    description !== (product.description ?? "");
+  const discard = useDialogDiscardGuard(dirty, () => onOpenChange(false));
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Edit Product</DialogTitle>
@@ -527,7 +542,7 @@ function ProductEditDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={discard.requestClose}>
             Cancel
           </Button>
           <Button onClick={handleSave} disabled={updateMutation.isPending}>
@@ -536,6 +551,8 @@ function ProductEditDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }
 

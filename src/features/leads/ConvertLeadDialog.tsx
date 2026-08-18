@@ -33,6 +33,7 @@ import {
 import { useAddOpportunityProductsBulk } from "@/features/opportunities/api";
 import { employeesToFteRange, formatCurrency, customerStatusLabel } from "@/lib/formatters";
 import { DuplicateWarning } from "@/components/DuplicateWarning";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 
 interface ConvertLeadDialogProps {
   open: boolean;
@@ -135,6 +136,16 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
   const [stagedProducts, setStagedProducts] = useState<StagedOpportunityProduct[]>([]);
   const [showAddProduct, setShowAddProduct] = useState(false);
 
+  // Discard-guard baseline for the account picker: the auto-match search
+  // below can flip mode/selectedAccount from "new"/null to "existing"/<match>
+  // on its own, with no user action — so `dirty` has to compare against
+  // whatever the auto-match last settled on, not against the hardcoded
+  // "new"/null starting point, or an untouched dialog would read as dirty.
+  const accountBaselineRef = useRef<{ mode: AccountMode; selectedAccountId: string | null }>({
+    mode: "new",
+    selectedAccountId: null,
+  });
+
   // Reset state when the dialog reopens for a different lead
   useEffect(() => {
     if (!open) return;
@@ -147,6 +158,7 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
     setStagedProducts([]);
     setShowAddProduct(false);
     setHasOpenedOnce(false);
+    accountBaselineRef.current = { mode: "new", selectedAccountId: null };
     // seedName depends on lead.* — listing it would loop the effect
     // since seedName is computed each render. Just key off `open` and
     // `lead.id`.
@@ -239,6 +251,7 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
         if (match) {
           setMode("existing");
           setSelectedAccount(match);
+          accountBaselineRef.current = { mode: "existing", selectedAccountId: match.id };
         }
         setHasOpenedOnce(true);
       }
@@ -357,8 +370,23 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
     }
   }
 
+  // Guard against a stray outside-click/Esc discarding this build — compare
+  // against the reset-effect's defaults (and the auto-match baseline for
+  // mode/selectedAccount, since that can change on its own — see above).
+  const dirty =
+    mode !== accountBaselineRef.current.mode ||
+    (selectedAccount?.id ?? null) !== accountBaselineRef.current.selectedAccountId ||
+    accountQuery !== (lead.company ?? "") ||
+    firstName !== lead.first_name ||
+    lastName !== lead.last_name ||
+    createOpportunity !== true ||
+    opportunityStage !== "details_analysis" ||
+    stagedProducts.length > 0;
+  const discard = useDialogDiscardGuard(dirty, () => onOpenChange(false));
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Promote to Contact</DialogTitle>
@@ -673,7 +701,7 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={discard.requestClose}>
             Cancel
           </Button>
           <Button
@@ -714,5 +742,7 @@ export function ConvertLeadDialog({ open, onOpenChange, lead }: ConvertLeadDialo
         onStage={(rows) => setStagedProducts((prev) => [...prev, ...rows])}
       />
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }

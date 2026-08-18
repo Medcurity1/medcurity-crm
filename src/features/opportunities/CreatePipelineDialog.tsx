@@ -27,6 +27,7 @@ import {
   useUpdatePipelineView,
 } from "./pipeline-views-api";
 import { ALL_STAGES, stageLabel } from "@/lib/formatters";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import type { PipelineView, PipelineViewConfig, OpportunityStage } from "@/types/crm";
 
 const pipelineViewSchema = z.object({
@@ -78,7 +79,7 @@ export function CreatePipelineDialog({
     setValue,
     watch,
     reset,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm<PipelineViewFormValues>({
     resolver: zodResolver(pipelineViewSchema),
     defaultValues: {
@@ -161,9 +162,11 @@ export function CreatePipelineDialog({
   }
 
   const isPending = createMutation.isPending || updateMutation.isPending;
+  const discard = useDialogDiscardGuard(isDirty, () => onOpenChange(false));
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
@@ -260,7 +263,7 @@ export function CreatePipelineDialog({
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={discard.requestClose}
             >
               Cancel
             </Button>
@@ -275,5 +278,7 @@ export function CreatePipelineDialog({
         </form>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }

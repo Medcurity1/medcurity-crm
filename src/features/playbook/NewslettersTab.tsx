@@ -30,6 +30,7 @@ import {
 import { NewsletterEditor } from "./NewsletterEditor";
 import { StyleGuideDialog } from "./StyleGuideDialog";
 import { LoadError } from "./LoadError";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import type { Newsletter, NewsletterType } from "./types";
 
 const TYPE_FULL: Record<string, string> = {
@@ -78,6 +79,9 @@ export function NewslettersTab() {
       { onSuccess: (r) => { setComposeType(null); setEditorId(r.draft_id); } },
     );
   }
+  // Guard against a stray outside-click/Esc discarding the compose notes.
+  const composeDirty = notes.trim() !== "";
+  const composeDiscard = useDialogDiscardGuard(composeDirty, () => setComposeType(null));
 
   if (mc && !mc.configured) {
     return (
@@ -130,7 +134,7 @@ export function NewslettersTab() {
       </div>
 
       {/* Compose — capture notes/topics BEFORE the AI drafts */}
-      <Dialog open={!!composeType} onOpenChange={(o) => !o && setComposeType(null)}>
+      <Dialog open={!!composeType} onOpenChange={composeDiscard.guardedOnOpenChange}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>New {composeType ? TYPE_FULL[composeType] : "newsletter"} draft</DialogTitle>
@@ -150,7 +154,7 @@ export function NewslettersTab() {
             />
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setComposeType(null)} disabled={genDraft.isPending}>Cancel</Button>
+            <Button variant="ghost" onClick={composeDiscard.requestClose} disabled={genDraft.isPending}>Cancel</Button>
             <Button variant="ai" onClick={generateDraft} disabled={genDraft.isPending}>
               {genDraft.isPending
                 ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Writing… (up to ~90s)</>
@@ -159,6 +163,7 @@ export function NewslettersTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {composeDiscard.dialog}
 
       <StyleGuideDialog type={styleType} open={!!styleType} onOpenChange={(o) => !o && setStyleType(null)} />
 

@@ -22,6 +22,7 @@ import {
 } from "./api";
 import { DeleteProductDialog } from "./DeleteProductDialog";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { Badge } from "@/components/ui/badge";
@@ -463,8 +464,14 @@ function ManageFamiliesDialog({
     }
   }
 
+  // Each add already commits on click, so the only thing a stray
+  // outside-click/Esc could discard is a half-typed name still in the box.
+  const dirty = newName.trim() !== "";
+  const discard = useDialogDiscardGuard(dirty, () => onOpenChange(false));
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Manage Product Families</DialogTitle>
@@ -517,12 +524,14 @@ function ManageFamiliesDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={discard.requestClose}>
             Done
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }
 
@@ -703,8 +712,31 @@ function ProductDialog({
     }
   }
 
+  // Guard against a stray outside-click/Esc discarding a filled-in product —
+  // compare against the seeded values (product prop when editing, blank
+  // defaults when creating) so opening/closing untouched never trips it.
+  const dirty = product
+    ? name !== product.name ||
+      code !== product.code ||
+      family !== (product.product_family ?? "") ||
+      pricingModel !== (product.pricing_model ?? "per_fte") ||
+      hasFlatPrice !== (product.has_flat_price ?? false) ||
+      defaultArr !== (product.default_arr != null ? String(product.default_arr) : "") ||
+      description !== (product.description ?? "") ||
+      isActive !== product.is_active
+    : name !== "" ||
+      code !== "" ||
+      family !== "" ||
+      pricingModel !== "per_fte" ||
+      hasFlatPrice !== false ||
+      defaultArr !== "" ||
+      description !== "" ||
+      isActive !== true;
+  const discard = useDialogDiscardGuard(dirty, () => onOpenChange(false));
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit Product" : "Add Product"}</DialogTitle>
@@ -809,13 +841,15 @@ function ProductDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="outline" onClick={discard.requestClose}>Cancel</Button>
           <Button onClick={handleSave} disabled={createMutation.isPending || updateMutation.isPending}>
             {(createMutation.isPending || updateMutation.isPending) ? "Saving..." : isEditing ? "Save Changes" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }
 
@@ -1491,8 +1525,23 @@ function PriceBookDialog({
     }
   }
 
+  // Same seeded-vs-blank comparison as ProductDialog above.
+  const dirty = priceBook
+    ? name !== priceBook.name ||
+      description !== (priceBook.description ?? "") ||
+      effectiveDate !== (priceBook.effective_date ?? "") ||
+      isDefault !== priceBook.is_default ||
+      isActive !== priceBook.is_active
+    : name !== "" ||
+      description !== "" ||
+      effectiveDate !== "" ||
+      isDefault !== false ||
+      isActive !== true;
+  const discard = useDialogDiscardGuard(dirty, () => onOpenChange(false));
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit Price Book" : "Add Price Book"}</DialogTitle>
@@ -1530,13 +1579,15 @@ function PriceBookDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="outline" onClick={discard.requestClose}>Cancel</Button>
           <Button onClick={handleSave} disabled={createMutation.isPending || updateMutation.isPending}>
             {(createMutation.isPending || updateMutation.isPending) ? "Saving..." : isEditing ? "Save Changes" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }
 

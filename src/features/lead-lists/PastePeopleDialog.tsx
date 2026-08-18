@@ -15,6 +15,7 @@ import { supabase } from "@/lib/supabase";
 import { useQueryClient } from "@tanstack/react-query";
 import type { LeadList } from "@/types/crm";
 import { useBulkAddContactsToList } from "./lead-lists-api";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 
@@ -113,14 +114,18 @@ export function PastePeopleDialog({
     setMatched(null);
   };
 
+  // Guard against a stray outside-click/Esc/X silently wiping a pasted
+  // block of emails (or a whole uploaded CSV) — today onOpenChange resets
+  // unconditionally on any close.
+  const dirty = text.trim() !== "";
+  const discard = useDialogDiscardGuard(dirty, () => {
+    reset();
+    onOpenChange(false);
+  });
+
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(o) => {
-        if (!o) reset();
-        onOpenChange(o);
-      }}
-    >
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Paste people into {list.name}</DialogTitle>
@@ -200,5 +205,7 @@ export function PastePeopleDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }

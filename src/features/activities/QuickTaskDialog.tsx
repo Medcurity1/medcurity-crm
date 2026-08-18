@@ -40,6 +40,7 @@ import {
   formatParsedDate,
   removeRanges,
 } from "./parse-task-text";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 
 interface QuickTaskDialogProps {
   open: boolean;
@@ -198,18 +199,16 @@ export function QuickTaskDialog({
     recur.mode !== "none" ||
     priority !== "normal" ||
     attach !== EMPTY_TASK_RECORD;
+  // Migrated to the shared guard (2026-08-17) — see EditTaskDialog.tsx for
+  // why: it also covers the dialog's own X button, and shows an actual
+  // confirm instead of silently swallowing the dismissal. onClose is
+  // handleClose(false) so the existing reset-on-discard behavior is kept.
+  const discard = useDialogDiscardGuard(dirty, () => handleClose(false));
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent
-        className="sm:max-w-md"
-        onInteractOutside={(e) => {
-          if (dirty) e.preventDefault();
-        }}
-        onEscapeKeyDown={(e) => {
-          if (dirty) e.preventDefault();
-        }}
-      >
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Add Task</DialogTitle>
           <DialogDescription>
@@ -322,7 +321,7 @@ export function QuickTaskDialog({
             <Button
               type="button"
               variant="outline"
-              onClick={() => handleClose(false)}
+              onClick={discard.requestClose}
             >
               Cancel
             </Button>
@@ -339,5 +338,7 @@ export function QuickTaskDialog({
         </form>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }

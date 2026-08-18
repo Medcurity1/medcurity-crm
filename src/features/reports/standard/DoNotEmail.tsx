@@ -29,6 +29,7 @@ import {
 import { downloadCsv, todayStamp } from "./report-helpers";
 import { fetchUsersById, fetchAllRows } from "./report-fetchers";
 import { PreviewNote, PREVIEW_LIMIT } from "./PreviewNote";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 
 // Same basic shape-check as CampaignRecipients.tsx's EMAIL_RE — good enough
 // to catch a typo before a round trip; the edge function normalizes and
@@ -119,6 +120,11 @@ export function DoNotEmail() {
     setOptoutEmail("");
     setOptoutNote("");
   }
+
+  // Guard against a stray outside-click/Esc discarding a half-typed
+  // opt-out.
+  const optoutDirty = optoutEmail.trim() !== "" || optoutNote.trim() !== "";
+  const optoutDiscard = useDialogDiscardGuard(optoutDirty, closeOptoutDialog);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["report", "do-not-email", category],
@@ -282,7 +288,7 @@ export function DoNotEmail() {
         </CardContent>
       </Card>
 
-      <Dialog open={optoutOpen} onOpenChange={(o) => { if (!o) closeOptoutDialog(); else setOptoutOpen(true); }}>
+      <Dialog open={optoutOpen} onOpenChange={optoutDiscard.guardedOnOpenChange}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Opt out an email</DialogTitle>
@@ -316,7 +322,7 @@ export function DoNotEmail() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={closeOptoutDialog}>Cancel</Button>
+            <Button variant="outline" onClick={optoutDiscard.requestClose}>Cancel</Button>
             <Button
               disabled={!optoutEmailValid || addOptout.isPending}
               onClick={() =>
@@ -331,6 +337,7 @@ export function DoNotEmail() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {optoutDiscard.dialog}
     </div>
   );
 }

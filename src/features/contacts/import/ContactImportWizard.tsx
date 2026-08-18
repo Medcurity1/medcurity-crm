@@ -26,6 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import {
   UploadCloud, ArrowLeft, ArrowRight, CheckCircle2, AlertTriangle,
   Loader2, Users, RefreshCw, CalendarPlus, Loader,
@@ -137,6 +138,13 @@ export function ContactImportWizard({
     if (!o) reset();
     onOpenChange(o);
   }
+
+  // Guard against a stray outside-click/Esc wiping an upload + column
+  // mapping + options in progress — reset() used to run unconditionally on
+  // every close. Once a real result exists the import already happened, so
+  // there's nothing left to discard.
+  const dirty = step > 1 && !result;
+  const discard = useDialogDiscardGuard(dirty, () => close(false));
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -273,7 +281,7 @@ export function ContactImportWizard({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={close}>
+      <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
         <DialogContent className="sm:max-w-3xl max-h-[88vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -635,6 +643,7 @@ export function ContactImportWizard({
         confirmLabel="Import"
         onConfirm={runImport}
       />
+      {discard.dialog}
     </>
   );
 }

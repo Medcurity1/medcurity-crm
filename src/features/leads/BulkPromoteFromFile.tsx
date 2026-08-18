@@ -26,6 +26,7 @@ import {
   type PromotePreview,
   type BulkPromoteResult,
 } from "./api";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -242,14 +243,21 @@ export function BulkPromoteFromFile({
     }
   }
 
+  // Guard against a stray outside-click/Esc discarding an uploaded/parsed
+  // file (and any batch tags picked) — reset() used to run unconditionally
+  // on every close. Once a real result exists the promote already ran, so
+  // there's nothing left to discard.
+  const dirty = parsed !== null && !result;
+  const discard = useDialogDiscardGuard(dirty, () => {
+    reset();
+    onOpenChange(false);
+  });
+
   return (
     <>
       <Dialog
         open={open}
-        onOpenChange={(o) => {
-          if (!o) reset();
-          onOpenChange(o);
-        }}
+        onOpenChange={discard.guardedOnOpenChange}
       >
         <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
@@ -481,6 +489,7 @@ export function BulkPromoteFromFile({
         confirmLabel="Promote them"
         onConfirm={runPromote}
       />
+      {discard.dialog}
     </>
   );
 }

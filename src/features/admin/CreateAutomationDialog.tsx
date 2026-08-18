@@ -7,6 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -351,14 +352,26 @@ export function CreateAutomationDialog({
   const eventLabel =
     EVENTS.find((e) => e.value === event)?.label ?? event;
 
+  // Guard against a stray outside-click/Esc wiping a build in progress —
+  // resetForm() used to run unconditionally on every close. Advancing past
+  // step 0, or any field diverging from the template/blank defaults, counts
+  // as dirty; opening and closing untouched does not.
+  const dirty =
+    step > 0 ||
+    entity !== (template?.trigger_entity ?? "opportunities") ||
+    event !== (template?.trigger_event ?? "stage_changed") ||
+    JSON.stringify(conditions) !== JSON.stringify(template?.trigger_conditions ?? []) ||
+    JSON.stringify(actions) !== JSON.stringify(template?.actions ?? [{ type: "update_field" }]) ||
+    name !== (template?.name ?? "") ||
+    description !== (template?.description ?? "");
+  const discard = useDialogDiscardGuard(dirty, () => {
+    resetForm();
+    onOpenChange(false);
+  });
+
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        if (!v) resetForm();
-        onOpenChange(v);
-      }}
-    >
+    <>
+    <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Create Automation</DialogTitle>
@@ -535,7 +548,7 @@ export function CreateAutomationDialog({
             )}
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
+            <Button variant="outline" onClick={discard.requestClose}>
               Cancel
             </Button>
             {step < 2 ? (
@@ -552,5 +565,7 @@ export function CreateAutomationDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {discard.dialog}
+    </>
   );
 }
