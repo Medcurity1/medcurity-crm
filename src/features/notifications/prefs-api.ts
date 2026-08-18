@@ -129,6 +129,13 @@ export const CRM_NOTIF_TYPES: NotifTypeDef[] = [
     defSound: "felt",
     defDuration: 5,
   },
+  {
+    key: "follow_up_due",
+    label: "Account follow-up reminders",
+    desc: "The daily grouped bell when follow-up dates are due",
+    defSound: "lantern",
+    defDuration: 5,
+  },
 ];
 
 export const EMAIL_OPT_INS: Array<{ key: string; label: string; desc: string }> = [

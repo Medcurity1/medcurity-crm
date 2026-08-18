@@ -94,6 +94,7 @@ export const NOTIF_TYPE_FALLBACK_SOUNDS: Record<string, string> = {
   // someone gave you never sounds like your own task coming due.
   record_assigned: "quill",
   task_assigned: "felt",
+  follow_up_due: "lantern",
 };
 
 /** Saved seconds value → repeat-duration bucket (Nexus index.html:12239). */

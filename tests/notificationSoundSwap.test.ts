@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "fs";
+import path from "path";
 import {
   KEPT_SOUNDS,
   SOUND_ALIASES,
@@ -161,6 +163,23 @@ describe("per-type defaults", () => {
     expect(NOTIF_TYPE_FALLBACK_SOUNDS.task_assigned).not.toBe(
       NOTIF_TYPE_FALLBACK_SOUNDS.record_assigned,
     );
+  });
+
+  it("plays Pulse audio in a hidden tab and silences the OS ding", () => {
+    const root = path.resolve(__dirname, "..");
+    const toasts = readFileSync(path.join(root, "src/hooks/useNotificationToasts.ts"), "utf8");
+    const engine = readFileSync(path.join(root, "src/lib/notification-sounds.ts"), "utf8");
+    expect(toasts).toMatch(/if \(soundOn\) \{\s*playScheduled/);
+    expect(toasts).toMatch(/silent = true/);
+    expect(toasts).toMatch(/urgent, true/);
+    expect(engine).toContain("notifAudio.volume = 0");
+    expect(engine).toContain("stopActiveSound();");
+    expect(engine).toContain("sound.play().then(() => true).catch(() => false)");
+  });
+
+  it("includes follow-up due in the type tables so the picker can name it", () => {
+    expect(NOTIF_TYPE_FALLBACK_SOUNDS.follow_up_due).toBe("lantern");
+    expect(ALL_TYPES.some((t) => t.key === "follow_up_due")).toBe(true);
   });
 
   it("gives both 'someone needs a human' alerts the carrying sound", () => {

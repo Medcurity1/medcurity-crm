@@ -65,6 +65,7 @@ export function NotificationPermissionPrompt() {
           new Notification("You're all set", {
             body: "This is what a Pulse alert looks like.",
             tag: "pulse-perm-test",
+            silent: true,
           });
         } catch {
           // some browsers require a service worker for this — fine
@@ -81,7 +82,7 @@ export function NotificationPermissionPrompt() {
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-[340px] rounded-xl border border-border bg-popover p-4 shadow-2xl">
+    <div className="fixed bottom-4 right-4 z-50 w-[min(340px,calc(100vw-2rem))] rounded-xl border border-border bg-popover p-4 shadow-2xl">
       <button
         type="button"
         aria-label="Dismiss"
@@ -97,8 +98,8 @@ export function NotificationPermissionPrompt() {
         <div className="min-w-0">
           <p className="text-sm font-semibold">Turn on desktop alerts?</p>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            Pulse can pop up an alert when something needs you — like a website
-            visitor asking to talk to a person — even when you're in another
+            Pulse can pop up an alert when something needs you, like a website
+            visitor asking to talk to a person, even when you're in another
             tab. Your browser will ask once; just click <strong>Allow</strong>.
           </p>
           <div className="mt-3 flex gap-2">

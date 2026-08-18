@@ -94,7 +94,7 @@ export function NotificationSettingsPanel() {
       <Section
         icon={<Bell className="h-4 w-4" />}
         title="Support notifications"
-        desc="Alerts from the platform (app.medcurity.com) Meddy — a separate stream from the website chat."
+        desc="Alerts from the platform (app.medcurity.com) Meddy, a separate stream from the website chat."
       >
         {SUPPORT_NOTIF_TYPES.map((def) => (
           <NotifRow key={def.key} def={def} prefs={prefs} />
@@ -114,7 +114,7 @@ export function NotificationSettingsPanel() {
       <Section
         icon={<Mail className="h-4 w-4" />}
         title="Email alerts"
-        desc="Meddy emails sent to your inbox. All start off — turn on the ones you want."
+        desc="Meddy emails sent to your inbox. All start off. Turn on the ones you want."
       >
         {EMAIL_OPT_INS.map((opt) => (
           <EmailRow key={opt.key} optKey={opt.key} label={opt.label} desc={opt.desc} prefs={prefs} />
@@ -144,7 +144,7 @@ export function NotificationSettingsPanel() {
       <Section
         icon={<Bell className="h-4 w-4" />}
         title="Account follow-up reminders"
-        desc="One grouped reminder per day when accounts you're working have follow-up dates due — never a separate ping per account."
+        desc="One grouped reminder per day when accounts you're working have follow-up dates due. Never a separate ping per account."
       >
         <EmailRow
           optKey="follow_up_due_bell"
@@ -165,12 +165,12 @@ export function NotificationSettingsPanel() {
       <Section
         icon={<Bell className="h-4 w-4" />}
         title="Website inquiries"
-        desc="When someone submits the website contact form, they land in Contacts automatically — this controls whether you also get a bell about it."
+        desc="When someone submits the website contact form, they land in Contacts automatically. This controls whether you also get a bell about it."
       >
         <EmailRow
           optKey="website_inquiry_bell"
           label="Bell on new website inquiry"
-          desc="An in-app notification linking to the new (or returning) contact. Off by default — Nathan, Summer, and Molly start with it on."
+          desc="An in-app notification linking to the new (or returning) contact. Off by default for most people."
           prefs={prefs}
         />
       </Section>
@@ -275,13 +275,15 @@ function NotifRow({ def, prefs }: { def: NotifTypeDef; prefs: Record<string, unk
           variant="ghost"
           size="icon-xs"
           title="Preview"
+          aria-label="Preview sound"
           disabled={!soundOn}
           onClick={() => previewSound(soundType, "short")}
         >
           <Play className="h-3 w-3" />
         </Button>
+        {def.key !== "deal_high_five" && (
         <label className="flex items-center gap-1.5 text-muted-foreground">
-          Duration:
+          Banner & repeat:
           <select
             value={duration}
             onChange={(e) => setPref({ [`duration_${def.key}`]: Number(e.target.value) })}
@@ -294,6 +296,7 @@ function NotifRow({ def, prefs }: { def: NotifTypeDef; prefs: Record<string, unk
             ))}
           </select>
         </label>
+        )}
       </div>
     </div>
   );
@@ -325,7 +328,7 @@ function EmailRow({
         <p className="text-sm font-medium">{label}</p>
         <p className="text-xs text-muted-foreground">{desc}</p>
       </div>
-      <Switch checked={on} onCheckedChange={(v) => update.mutate({ [optKey]: v })} />
+      <Switch checked={on} aria-label={label} onCheckedChange={(v) => update.mutate({ [optKey]: v })} />
     </div>
   );
 }
@@ -343,7 +346,7 @@ function PushoverRow({ savedKey }: { savedKey: string | null }) {
     setTesting(true);
     try {
       const res = await staffAction("pushover_test");
-      if (res.success) toast.success("Test push sent — check your phone");
+      if (res.success) toast.success("Test push sent. Check your phone");
       else toast.error(String(res.error ?? "Test failed"));
     } catch (err) {
       toast.error((err as Error).message);

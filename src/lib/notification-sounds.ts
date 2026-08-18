@@ -67,27 +67,31 @@ let _audioUnlocked = false;
 // Unlock audio on first user interaction so notification sounds work.
 function _unlockAudio() {
   if (_audioUnlocked) return;
+  const prev = notifAudio.volume;
+  notifAudio.volume = 0;
   notifAudio
     .play()
     .then(() => {
       notifAudio.pause();
       notifAudio.currentTime = 0;
+      notifAudio.volume = prev || 0.5;
       _audioUnlocked = true;
     })
-    .catch(() => {});
+    .catch(() => {
+      notifAudio.volume = prev || 0.5;
+    });
 }
 document.addEventListener("click", _unlockAudio, { once: false });
 document.addEventListener("keydown", _unlockAudio, { once: false });
 document.addEventListener("touchstart", _unlockAudio, { once: false });
 
-function _playNotifAudio(): boolean {
+function _playNotifAudio(): Promise<boolean> {
   try {
     const sound = notifAudio.cloneNode() as HTMLAudioElement;
     sound.volume = 0.5;
-    sound.play().catch(() => {});
-    return true;
+    return sound.play().then(() => true).catch(() => false);
   } catch {
-    return false;
+    return Promise.resolve(false);
   }
 }
 
@@ -95,9 +99,9 @@ function _playNotifAudio(): boolean {
 type QueuedSound = { soundType: string; durationType: string };
 let _soundQueue: QueuedSound[] = [];
 export function drainSoundQueue() {
-  while (_soundQueue.length > 0) {
-    _soundQueue.shift();
-    _playNotifAudio();
+  const queued = _soundQueue.splice(0, _soundQueue.length);
+  for (const item of queued) {
+    playScheduled(item.soundType, item.durationType);
   }
 }
 document.addEventListener("visibilitychange", () => {
@@ -290,6 +294,7 @@ export function playScheduled(soundType: string, durationType: string, onFinish?
   // all sound types feel samey. The oscillator plays clean when the
   // AudioContext is running; the WAV chime is the background-tab
   // fallback only (where oscillators can't run).
+  stopActiveSound();
   try {
     const ctx = getAudioCtx();
     if (ctx.state !== "suspended") {
@@ -325,15 +330,16 @@ export function playScheduled(soundType: string, durationType: string, onFinish?
     } else {
       // AudioContext suspended (background tab): fall back to the WAV
       // chime via HTML5 Audio, queueing if even that can't play yet.
-      const audioPlayed = _playNotifAudio();
-      if (!audioPlayed && document.hidden) {
-        _soundQueue.push({ soundType, durationType });
-      }
+      void _playNotifAudio().then((audioPlayed) => {
+        if (!audioPlayed && document.hidden) {
+          _soundQueue.push({ soundType, durationType });
+        }
+      });
       const totalMs = getSoundDurationMs(durationType);
       if (totalMs > 0) {
         const cycleMs = getSoundCycleMs(soundType);
         for (let elapsed = cycleMs; elapsed < totalMs; elapsed += cycleMs) {
-          setTimeout(() => _playNotifAudio(), elapsed);
+          setTimeout(() => { void _playNotifAudio(); }, elapsed);
         }
       }
       if (onFinish) setTimeout(() => onFinish(), Math.max(totalMs, 500));
@@ -347,7 +353,6 @@ export function playNotifSoundByType(type?: string) {
   playScheduled(type || DEFAULT_SOUND, "short");
 }
 export function previewSound(soundType?: string, durationType?: string, onFinish?: () => void) {
-  stopActiveSound();
   playScheduled(soundType || DEFAULT_SOUND, durationType || "short", onFinish);
 }
 
