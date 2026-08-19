@@ -621,6 +621,17 @@ describe("v1.2 source guards (role gating, title source, scope)", () => {
     expect(lib).not.toContain("buildChipGroups(filtered");
   });
 
+  it("the saved condensed preference renders a true one-row-per-asset list", () => {
+    const lib = read("src", "features", "collateral", "CollateralLibrary.tsx");
+    const css = read("src", "features", "collateral", "collateral.css");
+    expect(lib).toContain('aria-label="List view"');
+    expect(lib).toContain('? "collat-list"');
+    expect(lib).toContain('"collat-list-row group"');
+    expect(lib).toContain('className="collat-list-actions"');
+    expect(css).toMatch(/\.collat-list\s*\{[\s\S]*?flex-direction:\s*column/);
+    expect(css).toMatch(/\.collat-list-row\s*\{[\s\S]*?display:\s*flex/);
+  });
+
   it("the v1.1 default Use filter is gone (change 4)", () => {
     const lib = read("src", "features", "collateral", "CollateralLibrary.tsx");
     expect(lib).not.toContain("SEND_TO_PROSPECT");
