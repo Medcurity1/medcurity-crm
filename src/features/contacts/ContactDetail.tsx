@@ -174,7 +174,7 @@ export function ContactDetail() {
       { id, reason },
       {
         onSuccess: () => {
-          toast.success("Contact archived — an admin can restore it if needed");
+          toast.success("Contact archived. An admin can restore it if needed.");
           navigate("/contacts");
         },
         onError: (err) => {
@@ -189,7 +189,7 @@ export function ContactDetail() {
       {contact.import_status === "pending" && (
         <div className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
           <span className="font-medium">Pending import.</span>{" "}
-          This person came in on a raw list and hasn't been promoted yet — they're hidden from the
+          This person came in on a raw list and hasn't been promoted yet. They're hidden from the
           normal Contacts views. Promote or archive them from the{" "}
           <Link to="/imports" className="text-primary hover:underline">Imports tab</Link>.
           {contact.import_company && (
@@ -412,7 +412,7 @@ export function ContactDetail() {
           <InlineEdit
             value={contact.notes ?? null}
             type="textarea"
-            placeholder={'Add a quick note — e.g. "Meeting set for the 28th"'}
+            placeholder={'Add a quick note (example: "Meeting set for the 28th")'}
             onSave={async (v) => {
               await updateMutation.mutateAsync({
                 id: contactId,
