@@ -103,17 +103,14 @@ function _playNotifAudio(): Promise<boolean> {
   }
 }
 
-// Sound queue for background-tab failures, drained when visible again.
-type QueuedSound = { soundType: string; durationType: string };
-let _soundQueue: QueuedSound[] = [];
 export function drainSoundQueue() {
-  const queued = _soundQueue.splice(0, _soundQueue.length);
+  const queued = htmlAudio.takeQueue();
   for (const item of queued) {
     playScheduled(item.soundType, item.durationType);
   }
 }
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && _soundQueue.length > 0) drainSoundQueue();
+  if (!document.hidden && htmlAudio.hasQueued()) drainSoundQueue();
 });
 
 // ── AudioContext layer ────────────────────────────────────────────────
@@ -341,9 +338,8 @@ export function playScheduled(soundType: string, durationType: string, onFinish?
       // chime via HTML5 Audio, queueing if even that can't play yet.
       const started = htmlAudio.beginPlay();
       void _playNotifAudio().then((audioPlayed) => {
-        if (!htmlAudio.isCurrent(started)) return;
         if (!audioPlayed && document.hidden) {
-          _soundQueue.push({ soundType, durationType });
+          htmlAudio.enqueue({ soundType, durationType }, started);
         }
       });
       const totalMs = getSoundDurationMs(durationType);
