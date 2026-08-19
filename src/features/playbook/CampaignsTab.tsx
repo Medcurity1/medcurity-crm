@@ -1,9 +1,11 @@
 // Campaigns home — one Create action, one Smartlead sync surface, then
-// Needs you / active / drafts / recently ended.
+// independently collapsible Replies / Needs you / Active / Drafts /
+// Recently ended. Page title lives on PlaybookPage; this header is
+// freshness plus named actions only.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Megaphone, RefreshCw, Loader2, Plus, Inbox, AlertTriangle, Search, MoreHorizontal, Download } from "lucide-react";
+import { Megaphone, RefreshCw, Loader2, Plus, Inbox, AlertTriangle, Search, Download, LayoutTemplate, ChevronDown } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +23,7 @@ import { CampaignCard, type CampaignRow } from "./CampaignCard";
 import { CampaignDetailSheet } from "./CampaignDetailSheet";
 import { InboxHealthDialog } from "./InboxHealthDialog";
 import { campaignAttentionFlags, type AttentionFlag } from "./needs-attention";
+import { campaignGroupOpen, collapsedSearchMatchLabel, type CampaignListGroupId } from "./campaign-groups";
 import { dailySweepLocalTimeLabel, lastSyncedLabel } from "./campaign-freshness";
 import {
   useCampaigns,
@@ -58,6 +61,53 @@ function FilterPill({ label, active, onClick }: { label: string; active: boolean
   );
 }
 
+function CampaignGroup({
+  id,
+  title,
+  count,
+  open,
+  onToggle,
+  searchActive,
+  children,
+  className,
+  icon,
+}: {
+  id: CampaignListGroupId;
+  title: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  searchActive: boolean;
+  children: ReactNode;
+  className?: string;
+  icon?: ReactNode;
+}) {
+  if (count <= 0) return null;
+  const matchLabel = !open && searchActive ? collapsedSearchMatchLabel(count) : null;
+  return (
+    <section className={className} data-campaigns-group={id}>
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-2 text-left"
+        aria-expanded={open}
+        onClick={onToggle}
+      >
+        <h3 className="text-sm font-semibold flex items-center gap-1.5">
+          {icon}
+          {title} ({count})
+        </h3>
+        <span className="flex items-center gap-2">
+          {matchLabel && (
+            <span className="text-xs font-medium text-primary">{matchLabel}</span>
+          )}
+          <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", open && "rotate-180")} />
+        </span>
+      </button>
+      {open && <div className="space-y-2 pt-2">{children}</div>}
+    </section>
+  );
+}
+
 export function CampaignsTab() {
   const { profile } = useAuth();
   const { data: campaigns, isLoading, isError, refetch } = useCampaigns();
@@ -80,7 +130,8 @@ export function CampaignsTab() {
   const [detailCampaign, setDetailCampaign] = useState<CampaignRow | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [inboxHealthOpen, setInboxHealthOpen] = useState(false);
-  const [operationsOpen, setOperationsOpen] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [groupOverride, setGroupOverride] = useState<Partial<Record<CampaignListGroupId, boolean>>>({});
 
   const inboxLabels = useMemo(() => {
     const m = new Map<string, string>();
@@ -176,6 +227,16 @@ export function CampaignsTab() {
     setDetailOpen(true);
   }, [campaigns, searchParams]);
 
+  const searchKey = search.trim().toLowerCase();
+  useEffect(() => {
+    setGroupOverride((prev) => {
+      if (prev.recentlyEnded === undefined) return prev;
+      const next = { ...prev };
+      delete next.recentlyEnded;
+      return next;
+    });
+  }, [searchKey]);
+
   const statsIds = useMemo(() => ownerFiltered.map((c) => c.id), [ownerFiltered]);
   const { data: statsById } = useCampaignEnrollmentStats(statsIds);
   const { data: monthStats } = useCampaignsMonthStats();
@@ -197,11 +258,18 @@ export function CampaignsTab() {
   }
 
   function openFromTemplate(seed: { template_id: string | null; name: string; steps: SequenceStep[] }) {
-    setOperationsOpen(false);
+    setTemplatesOpen(false);
     setWizardMode("template");
     setWizardSeed(seed);
     setWizardNonce((n) => n + 1);
     setWizardOpen(true);
+  }
+
+  function toggleGroup(id: CampaignListGroupId, count: number) {
+    setGroupOverride((prev) => ({
+      ...prev,
+      [id]: !campaignGroupOpen(id, count, searchActive, prev[id]),
+    }));
   }
 
   function renderCard(c: CampaignRow) {
@@ -220,21 +288,20 @@ export function CampaignsTab() {
     );
   }
 
-  function renderGroup(title: string, rows: CampaignRow[]) {
-    if (!rows.length) return null;
-    return (
-      <div className="space-y-2">
-        <h3 className="text-sm font-semibold">{title}</h3>
-        {rows.map(renderCard)}
-      </div>
-    );
-  }
+  const needsOpen = campaignGroupOpen("needsYou", needsAttention.length, searchActive, groupOverride.needsYou);
+  const activeOpen = campaignGroupOpen("active", active.length, searchActive, groupOverride.active);
+  const draftsOpen = campaignGroupOpen("drafts", drafts.length, searchActive, groupOverride.drafts);
+  const recentlyEndedOpen = campaignGroupOpen(
+    "recentlyEnded",
+    recentlyEnded.length,
+    searchActive,
+    groupOverride.recentlyEnded,
+  );
 
   return (
     <div className="campaigns-aurora space-y-5" data-campaigns-shell>
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold tracking-tight">Campaigns</h2>
           <p className="text-xs text-muted-foreground">
             {lastSyncedLabel(latestSync) ?? "Not synced yet"}
             {" · "}Automatic refresh daily at {dailySweepLocalTimeLabel()} Pacific
@@ -255,8 +322,18 @@ export function CampaignsTab() {
                   <><RefreshCw className="h-4 w-4 mr-1" /> Sync Smartlead</>
                 )}
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setOperationsOpen(true)}>
-                <MoreHorizontal className="h-4 w-4 mr-1" /> Operations
+              <Button size="sm" variant="outline" onClick={() => setTemplatesOpen(true)}>
+                <LayoutTemplate className="h-4 w-4 mr-1" /> Templates
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setInboxHealthOpen(true)}>
+                <Inbox className="h-4 w-4 mr-1" /> Sending inboxes
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => importMut.mutate()} disabled={busy}>
+                {importMut.isPending ? (
+                  <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Importing…</>
+                ) : (
+                  <><Download className="h-4 w-4 mr-1" /> Advanced import</>
+                )}
               </Button>
             </>
           ) : slError ? (
@@ -310,14 +387,19 @@ export function CampaignsTab() {
           </Button>
         </div>
       )}
-      {!isLoading && !isError && needsAttention.length > 0 && (
-        <div className="rounded-xl campaigns-surface p-3 space-y-2">
-          <h3 className="text-sm font-semibold flex items-center gap-1.5">
-            <AlertTriangle className="h-4 w-4 text-amber-600" />
-            Needs you ({needsAttention.length})
-          </h3>
+      {!isLoading && !isError && (
+        <CampaignGroup
+          id="needsYou"
+          title="Needs you"
+          count={needsAttention.length}
+          open={needsOpen}
+          onToggle={() => toggleGroup("needsYou", needsAttention.length)}
+          searchActive={searchActive}
+          className="rounded-xl campaigns-surface p-3"
+          icon={<AlertTriangle className="h-4 w-4 text-amber-600" />}
+        >
           {needsAttention.map(renderCard)}
-        </div>
+        </CampaignGroup>
       )}
 
       {isLoading ? (
@@ -328,9 +410,27 @@ export function CampaignsTab() {
         <QueryError message="Couldn't load campaigns." onRetry={() => refetch()} />
       ) : (
         <div className="space-y-5">
-          {renderGroup("Active", active)}
-          {renderGroup("Drafts", drafts)}
-          {!anyLiveAnywhere && (
+          <CampaignGroup
+            id="active"
+            title="Active"
+            count={active.length}
+            open={activeOpen}
+            onToggle={() => toggleGroup("active", active.length)}
+            searchActive={searchActive}
+          >
+            {active.map(renderCard)}
+          </CampaignGroup>
+          <CampaignGroup
+            id="drafts"
+            title="Drafts"
+            count={drafts.length}
+            open={draftsOpen}
+            onToggle={() => toggleGroup("drafts", drafts.length)}
+            searchActive={searchActive}
+          >
+            {drafts.map(renderCard)}
+          </CampaignGroup>
+          {!anyLiveAnywhere && recentlyEnded.length === 0 && (
             <EmptyState
               icon={Megaphone}
               title={
@@ -347,7 +447,16 @@ export function CampaignsTab() {
               }
             />
           )}
-          {recentlyEnded.length > 0 && renderGroup("Recently ended", recentlyEnded)}
+          <CampaignGroup
+            id="recentlyEnded"
+            title="Recently ended"
+            count={recentlyEnded.length}
+            open={recentlyEndedOpen}
+            onToggle={() => toggleGroup("recentlyEnded", recentlyEnded.length)}
+            searchActive={searchActive}
+          >
+            {recentlyEnded.map(renderCard)}
+          </CampaignGroup>
           {olderPast.length > 0 && (
             <div className="space-y-2">
               <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowAllPast((v) => !v)}>
@@ -367,27 +476,19 @@ export function CampaignsTab() {
         templateSeed={wizardSeed}
       />
 
-      <Dialog open={operationsOpen} onOpenChange={setOperationsOpen}>
-        <DialogContent className="campaigns-aurora sm:max-w-3xl max-h-[88vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Campaign operations</DialogTitle>
-            <DialogDescription>
-              Inbox health, templates, and advanced Smartlead import.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => setInboxHealthOpen(true)}>
-              <Inbox className="h-4 w-4 mr-1" /> Sending inboxes
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => importMut.mutate()} disabled={busy}>
-              {importMut.isPending ? (
-                <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Importing…</>
-              ) : (
-                <><Download className="h-4 w-4 mr-1" /> Advanced import</>
-              )}
-            </Button>
+      <Dialog open={templatesOpen} onOpenChange={setTemplatesOpen}>
+        <DialogContent className="campaigns-aurora campaigns-templates-dialog sm:max-w-4xl max-h-[min(88vh,calc(100dvh-2rem))] overflow-hidden flex flex-col p-0 gap-0">
+          <div className="px-6 pt-6 pb-3 pr-12 shrink-0">
+            <DialogHeader>
+              <DialogTitle>Manage templates</DialogTitle>
+              <DialogDescription>
+                Review saved sequences, start from one, or create a custom campaign.
+              </DialogDescription>
+            </DialogHeader>
           </div>
-          <TemplatesSection embedded onUseTemplate={openFromTemplate} />
+          <div className="campaigns-templates-body px-6 pb-6">
+            <TemplatesSection embedded onUseTemplate={openFromTemplate} />
+          </div>
         </DialogContent>
       </Dialog>
 

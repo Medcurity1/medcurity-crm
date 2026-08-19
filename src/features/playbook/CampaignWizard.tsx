@@ -16,7 +16,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Loader2, Sparkles, Wand2, ArrowLeft, ArrowRight, Rocket, CheckCircle2, AlertTriangle,
-  Plus, Trash2, Eye, PencilLine, RotateCw, UserRound, Building2, Signature,
+  Plus, Trash2, Eye, PencilLine, PenLine, LayoutTemplate, RotateCw, UserRound, Building2, Signature,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
@@ -173,6 +173,27 @@ function parseCampaignDraftState(json: unknown): CampaignDraftState | null {
   if (typeof s.minGap !== "number") return null;
   return s as unknown as CampaignDraftState;
 }
+
+const BUILD_START_METHODS = [
+  {
+    id: "template" as const,
+    label: "Use a template",
+    description: "Start from proven copy.",
+    Icon: LayoutTemplate,
+  },
+  {
+    id: "ai" as const,
+    label: "Draft with AI",
+    description: "Describe the audience and goal.",
+    Icon: Sparkles,
+  },
+  {
+    id: "choose" as const,
+    label: "Write my own",
+    description: "Paste, write, or build the sequence yourself.",
+    Icon: PenLine,
+  },
+];
 
 export function CampaignWizard({
   open, onOpenChange, initialDescription = "", sourceIdeaId,
@@ -717,39 +738,47 @@ export function CampaignWizard({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                {([
-                  ["template", "Use a template"],
-                  ["ai", "Draft with AI"],
-                  ["choose", "Write my own"],
-                ] as const).map(([id, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    data-selected={id === "choose"
+              <div>
+                <p className="campaigns-start-label">How would you like to start?</p>
+                <div className="campaigns-start-grid" role="group" aria-label="How would you like to start?">
+                  {BUILD_START_METHODS.map(({ id, label, description, Icon }) => {
+                    const selected = id === "choose"
                       ? flow === "template" && editingSequence
-                      : flow === id && !editingSequence}
-                    className="campaigns-method rounded-xl campaigns-surface px-3 py-3 text-sm font-medium text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    onClick={() => {
-                      if (id === "choose") {
-                        setFlow("template");
-                        setTemplateSteps((prev) => prev.length ? prev : [{
-                          order: 1, day_offset: 1, channel: "EMAIL_AUTO", automation: "AUTO",
-                          send_window_start: "10:00", send_window_end: "11:00",
-                          content_ai_draft: false, pause_on_reply: true, stop_on_unsubscribe: true,
-                          subject_template: "", body_template: "",
-                        }]);
-                        setEditingSequence(true);
-                      } else {
-                        setFlow(id);
-                        if (id === "template") setAutoStart(true);
-                        setEditingSequence(false);
-                      }
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
+                      : flow === id && !editingSequence;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        data-method={id}
+                        data-selected={selected}
+                        aria-pressed={selected}
+                        className="campaigns-method campaigns-start-choice"
+                        onClick={() => {
+                          if (id === "choose") {
+                            setFlow("template");
+                            setTemplateSteps((prev) => prev.length ? prev : [{
+                              order: 1, day_offset: 1, channel: "EMAIL_AUTO", automation: "AUTO",
+                              send_window_start: "10:00", send_window_end: "11:00",
+                              content_ai_draft: false, pause_on_reply: true, stop_on_unsubscribe: true,
+                              subject_template: "", body_template: "",
+                            }]);
+                            setEditingSequence(true);
+                          } else {
+                            setFlow(id);
+                            if (id === "template") setAutoStart(true);
+                            setEditingSequence(false);
+                          }
+                        }}
+                      >
+                        <span className="campaigns-start-icon" aria-hidden="true">
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        <strong>{label}</strong>
+                        <small>{description}</small>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {flow === "ai" && !campaign && (

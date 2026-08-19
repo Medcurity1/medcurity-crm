@@ -1,14 +1,13 @@
 // Replies feed — recent reply campaign_events (Campaigns overhaul S7;
 // extended S9 with a reply-category badge, an "Open contact" link, and
 // "Mark handled" so a reply doesn't require opening Smartlead to notice OR
-// to triage). Sits between the template gallery and the Ongoing/Recently
-// ended tracker in CampaignsTab.tsx, same border-t/h3 rhythm as those
-// sections, collapsible (defaults open) since it's read-only and one more
-// thing on the page.
+// to triage). Independently collapsible with the other Campaigns home
+// groups; expanded by default when nonempty, user-toggleable.
 
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronDown, MessageSquareText } from "lucide-react";
+import { campaignGroupOpen } from "./campaign-groups";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -160,13 +159,14 @@ function ReplyRow({
 }
 
 export function CampaignReplies() {
-  const [open, setOpen] = useState(true);
+  const [openOverride, setOpenOverride] = useState<boolean | undefined>(undefined);
   const [handledOpen, setHandledOpen] = useState(false);
   const { data: replies, isLoading, isError, refetch } = useCampaignReplies();
   const markHandled = useMarkReplyHandled();
   const logCall = useLogReplyCall();
   const { profile } = useAuth();
   const count = replies?.length ?? 0;
+  const open = campaignGroupOpen("replies", isLoading ? 1 : count, false, openOverride);
   // Rows whose call has already been logged this session — the button
   // becomes a static "Call logged" so a second click can't write a second
   // call row (adversarial review). loggingRowId keys the in-flight spinner
@@ -203,15 +203,15 @@ export function CampaignReplies() {
   }, [replies]);
 
   return (
-    <div className="border-t pt-4 space-y-3">
+    <section className="space-y-3" data-campaigns-group="replies">
       <button
         type="button"
         className="flex w-full items-center justify-between gap-2 text-left"
         aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpenOverride(!open)}
       >
         <h3 className="text-sm font-semibold">
-          Replies{count > 0 ? ` (${count})` : ""}
+          Replies ({isLoading ? "…" : count})
         </h3>
         <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", open && "rotate-180")} />
       </button>
@@ -281,6 +281,6 @@ export function CampaignReplies() {
           </div>
         )
       )}
-    </div>
+    </section>
   );
 }
