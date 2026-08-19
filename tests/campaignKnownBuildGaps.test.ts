@@ -65,6 +65,7 @@ describe("known Campaigns build gaps", () => {
     expect(wizard).toMatch(/setFlow\(s\.flow \?\?/);
     expect(wizard).toMatch(/campaign\?\.campaign_name \?\? templateName/);
     expect(wizard).toMatch(/requestedName \? \{ \.\.\.r\.campaign, campaign_name: requestedName \}/);
+    expect(wizard).toMatch(/flow === "template" && editingSequence/);
   });
 
   it("refreshes visible enrollment details and card counts after Smartlead reconciliation", () => {

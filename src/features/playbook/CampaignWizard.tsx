@@ -726,7 +726,9 @@ export function CampaignWizard({
                   <button
                     key={id}
                     type="button"
-                    data-selected={id === "choose" ? flow === "choose" && !campaign : flow === id}
+                    data-selected={id === "choose"
+                      ? flow === "template" && editingSequence
+                      : flow === id && !editingSequence}
                     className="campaigns-method rounded-xl campaigns-surface px-3 py-3 text-sm font-medium text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onClick={() => {
                       if (id === "choose") {
