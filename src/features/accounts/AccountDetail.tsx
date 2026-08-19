@@ -14,6 +14,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SalesStatusControl } from "./SalesStatusControl";
 import { ArchiveDialog } from "@/components/ArchiveDialog";
 import { MergeAccountsDialog } from "./merge/MergeAccountsDialog";
+import { CustomerStatusOverrideDialog } from "./CustomerStatusOverrideDialog";
 import { ChangeOwnerDialog } from "@/components/ChangeOwnerDialog";
 import { QueryError } from "@/components/QueryError";
 import { RecordId } from "@/components/RecordId";
@@ -94,7 +95,7 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex flex-col">
       <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-sm font-medium">{value ?? "\u2014"}</span>
+      <span className="text-sm font-medium">{value ?? "Not set"}</span>
     </div>
   );
 }
@@ -170,6 +171,7 @@ export function AccountDetail() {
   const [showMerge, setShowMerge] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [showChangeOwner, setShowChangeOwner] = useState(false);
+  const [showCustomerOverride, setShowCustomerOverride] = useState(false);
   const { addRecent } = useRecentRecords();
 
   useEffect(() => {
@@ -285,7 +287,7 @@ export function AccountDetail() {
       { id, reason },
       {
         onSuccess: () => {
-          toast.success("Account archived — an admin can restore it if needed");
+          toast.success("Account archived. An admin can restore it if needed.");
           navigate("/accounts");
         },
         onError: (err) => {
@@ -433,7 +435,7 @@ export function AccountDetail() {
                 <ExternalLink className="h-3 w-3 shrink-0" />
               </a>
             ) : (
-              <p className="text-sm text-muted-foreground">{"\u2014"}</p>
+              <p className="text-sm text-muted-foreground">Not set</p>
             )}
           </CardContent>
         </Card>
@@ -446,7 +448,7 @@ export function AccountDetail() {
               <Phone className="h-3 w-3 text-muted-foreground" />
               {account.phone
                 ? formatPhone(`${account.phone}${account.phone_extension ? ` x${account.phone_extension}` : ""}`)
-                : "\u2014"}
+                : "Not set"}
             </p>
             {/* Summer's request (2026-07-29): the timezone lives far down the
                 page; callers need it at a glance next to the number. Shows
@@ -493,9 +495,11 @@ export function AccountDetail() {
               label={customerStatusLabel(account.customer_status)}
             />
             {account.customer_status_override ? (
-              <div className="mt-1 space-y-0.5">
-                <p className="text-[10px] text-muted-foreground">Set by a rep, not automatic</p>
-                {canWrite && (
+              <div className="mt-1 space-y-1">
+                <p className="text-[10px] leading-snug text-muted-foreground">
+                  Manual{account.customer_status_override_reason ? `: ${account.customer_status_override_reason}` : ""}
+                </p>
+                {(account.customer_status_override === "client" ? isAdmin : canWrite) && (
                   <button
                     type="button"
                     className="text-[10px] text-primary hover:underline disabled:opacity-50"
@@ -514,7 +518,18 @@ export function AccountDetail() {
                 )}
               </div>
             ) : (
-              <p className="text-[10px] text-muted-foreground mt-1">Automatic · from deal history</p>
+              <p className="mt-1 text-[10px] leading-snug text-muted-foreground">
+                Automatic from deal and contract history
+              </p>
+            )}
+            {isAdmin && account.customer_status !== "client" && (
+              <button
+                type="button"
+                className="mt-1 block text-[10px] text-primary hover:underline"
+                onClick={() => setShowCustomerOverride(true)}
+              >
+                Mark as Customer
+              </button>
             )}
           </CardContent>
         </Card>
@@ -524,7 +539,7 @@ export function AccountDetail() {
           </CardHeader>
           <CardContent className="px-4 pb-3">
             <p className="text-sm font-semibold">
-              {account.acv != null ? formatCurrency(account.acv) : "\u2014"}
+              {account.acv != null ? formatCurrency(account.acv) : "Not set"}
             </p>
           </CardContent>
         </Card>
@@ -544,7 +559,7 @@ export function AccountDetail() {
             <InlineEdit
               value={account.notes ?? null}
               type="textarea"
-              placeholder={'Add a quick note \u2014 e.g. "Meeting set for the 28th"'}
+              placeholder={'Add a quick note, e.g. "Meeting set for the 28th"'}
               onSave={saveField("notes")}
             />
           </CardContent>
@@ -612,7 +627,7 @@ export function AccountDetail() {
                 {(account.account_type ?? "").startsWith("Partner") && (
                   <div className="rounded-md border border-border px-4 py-2.5 text-sm flex items-center gap-2">
                     <span className="text-xs text-muted-foreground">Partner Type</span>
-                    <span className="font-medium">{account.partner_type ?? "—"}</span>
+                    <span className="font-medium">{account.partner_type ?? "Not set"}</span>
                   </div>
                 )}
                 <AccountPartners
@@ -826,7 +841,7 @@ export function AccountDetail() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
           <Field
             label="Created By"
-            value={account.creator?.full_name ?? "\u2014"}
+            value={account.creator?.full_name ?? "Not set"}
           />
           <Field
             label="Last Modified By"
@@ -836,7 +851,7 @@ export function AccountDetail() {
                 className="text-primary hover:underline inline-flex items-center gap-1"
                 title="View audit history for this account and its related records"
               >
-                {account.updater?.full_name ?? "\u2014"}
+                {account.updater?.full_name ?? "Not set"}
                 <History className="h-3 w-3" />
               </Link>
             }
@@ -858,6 +873,12 @@ export function AccountDetail() {
       </CollapsibleSection>
 
       </DetailPageLayout>
+      <CustomerStatusOverrideDialog
+        accountId={account.id}
+        accountName={account.name}
+        open={showCustomerOverride}
+        onOpenChange={setShowCustomerOverride}
+      />
 
       <ArchiveDialog
         open={showArchive}
@@ -944,7 +965,7 @@ function ContractHistoryTable({ contracts }: { contracts: AccountContract[] }) {
         <TableBody>
           {contracts.map((c) => (
             <TableRow key={c.opportunity_id}>
-              <TableCell>{c.contract_year ?? "\u2014"}</TableCell>
+              <TableCell>{c.contract_year ?? "Not set"}</TableCell>
               <TableCell>
                 <Link
                   to={`/opportunities/${c.opportunity_id}`}
@@ -957,10 +978,10 @@ function ContractHistoryTable({ contracts }: { contracts: AccountContract[] }) {
               <TableCell>{formatDate(c.contract_end_date)}</TableCell>
               <TableCell className="text-right">{formatCurrency(c.total_amount)}</TableCell>
               <TableCell className="text-right">
-                {c.service_amount != null ? formatCurrency(c.service_amount) : "\u2014"}
+                {c.service_amount != null ? formatCurrency(c.service_amount) : "Not set"}
               </TableCell>
               <TableCell className="text-right">
-                {c.product_amount != null ? formatCurrency(c.product_amount) : "\u2014"}
+                {c.product_amount != null ? formatCurrency(c.product_amount) : "Not set"}
               </TableCell>
               <TableCell className="text-center">
                 {c.services_included ? "\u2713" : "\u2717"}

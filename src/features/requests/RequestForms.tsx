@@ -74,15 +74,17 @@ function useDirtyReport(dirty: boolean, onDirtyChange?: (d: boolean) => void) {
 function PrioritySelect({
   value,
   onChange,
+  className,
 }: {
   value: RequestPriority;
   onChange: (v: RequestPriority) => void;
+  className?: string;
 }) {
   return (
-    <div className="space-y-2">
+    <div className={cn("max-w-32 space-y-2", className)}>
       <Label>Priority</Label>
       <Select value={value} onValueChange={(v) => onChange(v as RequestPriority)}>
-        <SelectTrigger>
+        <SelectTrigger className="w-full">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -97,14 +99,15 @@ function PrioritySelect({
   );
 }
 
-/** Sticky submit bar. -mx-6 is coupled to RequestDialog's scroll-body px-6
- * so the bar spans edge-to-edge; the body deliberately has NO bottom padding
+/** Sticky submit bar. Its responsive negative margin matches RequestDialog's
+ * scroll-body padding so the bar spans edge-to-edge without mobile overflow;
+ * the body deliberately has NO bottom padding
  * (a negative-bottom-margin variant left a strip where scrolling content
  * peeked out under the bar — Nathan, 8/4). Fully opaque for the same reason.
  * No "From" line: it's always from the signed-in user anyway. */
 function FormFooter({ children }: { children: ReactNode }) {
   return (
-    <div className="sticky bottom-0 -mx-6 mt-4 flex justify-end border-t border-border bg-background px-6 py-3">
+    <div className="sticky bottom-0 -mx-4 mt-4 flex justify-end border-t border-border bg-background px-4 py-3 sm:-mx-6 sm:px-6">
       {children}
     </div>
   );
@@ -249,7 +252,7 @@ function AttachmentPicker({
           <p className="text-amber-900 dark:text-amber-200">
             <strong className="font-semibold">A screenshot makes this much faster to fix.</strong>{" "}
             Grab one with <kbd className="rounded border border-amber-400/50 px-1 font-mono">⌘⇧4</kbd>,
-            then paste it into the description box above — no need to save the
+            then paste it into the description box above. No need to save the
             file first.
           </p>
         </div>
@@ -366,7 +369,7 @@ function ClarifyingQuestions({
         <div className="space-y-0.5">
           <p className="text-sm font-medium">A couple of quick questions</p>
           <p className="text-xs text-muted-foreground">
-            Answering these saves a round trip later. All optional — submit
+            Answering these saves a round trip later. All optional. Submit
             without them if they don&apos;t apply.
           </p>
         </div>
@@ -503,7 +506,7 @@ export function CollateralForm({ onDirtyChange, onDone }: RequestFormProps) {
         <Label htmlFor="c-desc">Describe what you need <span className="text-destructive">*</span></Label>
         <Textarea id="c-desc" rows={3} maxLength={4000} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What should it cover, any must-haves, references..." />
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_8rem] sm:items-end">
         <div className="space-y-2">
           <Label>Who is it for?</Label>
           <Select value={audience} onValueChange={setAudience}>
@@ -526,6 +529,7 @@ export function CollateralForm({ onDirtyChange, onDone }: RequestFormProps) {
             </SelectContent>
           </Select>
         </div>
+        <PrioritySelect className="max-w-none" value={priority} onChange={setPriority} />
       </div>
       <div className="space-y-2">
         <Label htmlFor="c-partner">Specific partner or event?</Label>
@@ -536,7 +540,6 @@ export function CollateralForm({ onDirtyChange, onDone }: RequestFormProps) {
         <Input id="c-usage" maxLength={200} value={usage} onChange={(e) => setUsage(e.target.value)} placeholder="Optional" />
       </div>
       <AttachmentPicker files={files} onChange={setFiles} maxSizeMB={5} />
-      <PrioritySelect value={priority} onChange={setPriority} />
       <FormFooter>
         <Button onClick={submit} disabled={create.isPending} className="gap-2">
           <Send className="h-4 w-4" />
@@ -641,7 +644,7 @@ function ClientImpactConfirm({
           <p className="text-sm font-medium">Is a client affected right now?</p>
           <p className="text-xs text-muted-foreground">
             {asking
-              ? `${verdict.reasoning} We've started on "yes" because that's the safer answer when nobody has checked — change it only if you're sure.`
+              ? `${verdict.reasoning} We've started on "yes" because that's the safer answer when nobody has checked. Change it only if you're sure.`
               : `We looked at the code and think the answer is ${
                   verdict.clientFacing ? "yes" : "no"
                 }. ${verdict.reasoning}`}
@@ -661,7 +664,7 @@ function ClientImpactConfirm({
             // When the automatic check failed, this answer is the only thing
             // standing between the report and the review queue — say so.
             hint: asking
-              ? "Waits for a reviewer — nothing re-checks this automatically"
+              ? "Waits for a reviewer. Nothing re-checks this automatically"
               : "Reviewed first, then queued with the dev team",
           },
         ].map((o) => (
@@ -970,17 +973,27 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
           invalidateVerdict();
         }}
       />
-      <div className="space-y-2">
-        <Label htmlFor="p-title">Title <span className="text-destructive">*</span></Label>
-        <Input
-          id="p-title"
-          maxLength={200}
-          value={title}
-          onChange={(e) => {
-            setTitle(e.target.value);
+      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_8rem] sm:items-end">
+        <div className="min-w-0 space-y-2">
+          <Label htmlFor="p-title">Title <span className="text-destructive">*</span></Label>
+          <Input
+            id="p-title"
+            maxLength={200}
+            value={title}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              invalidateVerdict();
+            }}
+            placeholder="e.g. Replace the office chairs with beanbags"
+          />
+        </div>
+        <PrioritySelect
+          className="max-w-none"
+          value={priority}
+          onChange={(v) => {
+            setPriority(v);
             invalidateVerdict();
           }}
-          placeholder="e.g. Replace the office chairs with beanbags"
         />
       </div>
       <div className="space-y-2">
@@ -1016,13 +1029,6 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
         onChange={setFiles}
         maxSizeMB={25}
         urgeScreenshot={category === "bug"}
-      />
-      <PrioritySelect
-        value={priority}
-        onChange={(v) => {
-          setPriority(v);
-          invalidateVerdict();
-        }}
       />
       {category === "bug" && verdict && (
         <ClientImpactConfirm
@@ -1097,7 +1103,7 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
             <AlertDialogDescription asChild>
               <div className="space-y-3">
                 <p>
-                  Bug reports with a screenshot get fixed noticeably faster — it
+                  Bug reports with a screenshot get fixed noticeably faster. It
                   usually answers &ldquo;which screen?&rdquo; and &ldquo;what did
                   it actually look like?&rdquo; before anyone has to ask.
                 </p>
@@ -1108,7 +1114,7 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
                   don&apos;t need to save it as a file first.
                 </p>
                 <p className="text-muted-foreground">
-                  If there&apos;s nothing to capture, go ahead and submit — this
+                  If there&apos;s nothing to capture, go ahead and submit. This
                   won&apos;t ask again.
                 </p>
               </div>

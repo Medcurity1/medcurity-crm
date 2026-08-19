@@ -80,6 +80,11 @@ describe("category identity", () => {
     expect(categoryLabel("request:product")).toBe("Product requests");
     expect(stopCategoryLabel("request:product")).toBe("Stop product requests");
   });
+
+  it("labels the meeting-booked source as Meeting prep", () => {
+    expect(categoryLabel("outreach_paused")).toBe("Meeting prep");
+    expect(stopCategoryLabel("outreach_paused")).toBe("Stop meeting prep");
+  });
 });
 
 describe("one dismissal must never suppress all task reminders", () => {

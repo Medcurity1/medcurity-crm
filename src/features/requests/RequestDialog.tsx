@@ -1,6 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { MessageSquarePlus, Palette, Package, Wrench, X } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { ArrowLeft, MessageSquarePlus, Palette, Package, Wrench, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   AlertDialog,
@@ -15,9 +14,9 @@ import {
 import { CollateralForm, ProductForm, CrmForm, type RequestTab } from "./RequestForms";
 
 const TABS: Array<{ value: RequestTab; label: string; icon: typeof Palette }> = [
-  { value: "collateral", label: "Collateral", icon: Palette },
   { value: "product", label: "Product", icon: Package },
   { value: "crm", label: "CRM", icon: Wrench },
+  { value: "collateral", label: "Collateral", icon: Palette },
 ];
 
 /**
@@ -33,10 +32,10 @@ export function RequestDialog({
   initialTab,
   onClose,
 }: {
-  initialTab: RequestTab;
+  initialTab: RequestTab | null;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<RequestTab>(initialTab);
+  const [tab, setTab] = useState<RequestTab | null>(initialTab);
   // Ref, not state: dirtiness changes on every keystroke and nothing needs to
   // re-render for it — it's only read at close/switch time.
   const dirtyRef = useRef(false);
@@ -46,7 +45,7 @@ export function RequestDialog({
   // A close or tab-switch attempted while the form holds unsubmitted input
   // parks here until the discard confirmation resolves it.
   const [pending, setPending] = useState<
-    null | { kind: "close" } | { kind: "switch"; tab: RequestTab }
+    null | { kind: "close" } | { kind: "switch"; tab: RequestTab | null }
   >(null);
 
   function attemptClose() {
@@ -54,7 +53,7 @@ export function RequestDialog({
     else onClose();
   }
 
-  function attemptSwitch(next: RequestTab) {
+  function attemptSwitch(next: RequestTab | null) {
     if (next === tab) return;
     if (dirtyRef.current) setPending({ kind: "switch", tab: next });
     else setTab(next);
@@ -94,10 +93,23 @@ export function RequestDialog({
             <div className="absolute -bottom-16 -left-10 h-44 w-44 rounded-full bg-rose-300/40 blur-3xl" />
             <div className="relative">
               <div className="flex items-start justify-between gap-4">
-                <DialogTitle className="flex items-center gap-2 text-lg font-semibold text-white">
-                  <MessageSquarePlus className="h-5 w-5" />
-                  Submit a request
-                </DialogTitle>
+                <div className="flex min-w-0 items-center gap-2">
+                  {tab ? (
+                    <button
+                      type="button"
+                      aria-label="Back to request types"
+                      onClick={() => attemptSwitch(null)}
+                      className="rounded-full p-1 text-white/80 transition-colors hover:bg-white/15 hover:text-white"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                    </button>
+                  ) : (
+                    <MessageSquarePlus className="h-5 w-5 shrink-0" />
+                  )}
+                  <DialogTitle className="truncate text-lg font-semibold text-white">
+                    {tab ? TABS.find((item) => item.value === tab)?.label : "Submit a request"}
+                  </DialogTitle>
+                </div>
                 <button
                   type="button"
                   aria-label="Close"
@@ -107,32 +119,30 @@ export function RequestDialog({
                   <X className="h-4 w-4" />
                 </button>
               </div>
-              <div className="mt-3 flex w-fit gap-1 rounded-full bg-white/15 p-1 backdrop-blur-sm">
-                {TABS.map((t) => (
-                  <button
-                    key={t.value}
-                    type="button"
-                    onClick={() => attemptSwitch(t.value)}
-                    aria-pressed={tab === t.value}
-                    className={cn(
-                      "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors",
-                      tab === t.value
-                        ? "bg-white text-orange-700 shadow-sm"
-                        : "text-white/85 hover:bg-white/10",
-                    )}
-                  >
-                    <t.icon className="h-3.5 w-3.5" />
-                    {t.label}
-                  </button>
-                ))}
-              </div>
             </div>
           </div>
           {/* Scrolling form body. Padding is load-bearing: FormFooter's -mx-6
               assumes px-6 here, and the missing bottom padding is deliberate —
               it lets the sticky footer sit flush with the scrollport bottom so
               no strip of content can peek out beneath it (Nathan, 8/4). */}
-          <div className="max-h-[min(62vh,560px)] overflow-y-auto px-6 pt-5">
+          <div className="max-h-[min(72vh,680px)] overflow-y-auto px-4 pt-5 sm:px-6">
+            {tab === null && (
+              <div className="grid gap-3 pb-6 sm:grid-cols-3" aria-label="Request type">
+                {TABS.map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    onClick={() => attemptSwitch(item.value)}
+                    className="flex min-h-24 items-center gap-3 rounded-xl border bg-card p-4 text-left transition-colors hover:border-orange-500/60 hover:bg-orange-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex-col sm:justify-center sm:text-center"
+                  >
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-orange-500/10 text-orange-600 dark:text-orange-400">
+                      <item.icon className="h-5 w-5" />
+                    </span>
+                    <span className="font-semibold">{item.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             {tab === "collateral" && (
               <CollateralForm onDirtyChange={handleDirty} onDone={onClose} />
             )}
@@ -150,7 +160,7 @@ export function RequestDialog({
             <AlertDialogTitle>Discard this request?</AlertDialogTitle>
             <AlertDialogDescription>
               {pending?.kind === "switch"
-                ? "You've started filling this out. Switching forms will clear what you've typed."
+                ? "You've started filling this out. Going back will clear what you've typed."
                 : "You've started filling this out. Closing will discard what you've typed."}
             </AlertDialogDescription>
           </AlertDialogHeader>
