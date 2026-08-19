@@ -11,6 +11,7 @@ import {
   resolveNotifSound,
 } from "@/lib/notification-sounds";
 import { celebrateHighFive } from "@/lib/confetti";
+import { notificationForDisplay } from "@/features/notifications/notification-display";
 
 /**
  * The notification delivery engine — banners, sounds, and OS
@@ -137,6 +138,11 @@ export function useNotificationToasts() {
       if (!prefs) return; // prefs not loaded — badge only, don't default to enabled
 
       const key = n.type ?? "system";
+      const display = notificationForDisplay({
+        type: (n.type ?? "system") as Parameters<typeof notificationForDisplay>[0]["type"],
+        title: n.title,
+        message: n.message,
+      });
       const bannerOn = prefs[key] !== false;
       const soundOn = prefs[`sound_${key}`] !== false;
       const urgent = URGENT_TYPES.has(key);
@@ -154,13 +160,13 @@ export function useNotificationToasts() {
       }
       if (document.hidden) {
         if (bannerOn || soundOn) {
-          showOsNotification(n.title, n.message ?? "", `pulse-${n.id}`, urgent, true);
+          showOsNotification(display.title, display.message ?? "", `pulse-${n.id}`, urgent, true);
         }
         return;
       }
       if (bannerOn) {
-        toast(n.title, {
-          description: n.message ?? undefined,
+        toast(display.title, {
+          description: display.message ?? undefined,
           duration: (durVal > 0 ? durVal : 2) * 1000,
           action: link
             ? {
@@ -171,7 +177,7 @@ export function useNotificationToasts() {
               }
             : undefined,
         });
-        showOsNotification(n.title, n.message ?? "", `pulse-${n.id}`, urgent, true);
+        showOsNotification(display.title, display.message ?? "", `pulse-${n.id}`, urgent, true);
       }
     }
 

@@ -14,6 +14,7 @@ import {
   priorityLabel,
 } from "@/features/activities/taskOrder";
 import { describeRecurrence } from "@/features/activities/recurrence";
+import { activityTitleForDisplay } from "@/features/activities/activity-display";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Building2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -271,7 +272,7 @@ export function TasksWidget({
                     aria-label={`${priorityLabel(task.priority)} priority`}
                   />
                   <span className="text-sm font-medium truncate">
-                    {task.subject}
+                    {activityTitleForDisplay(task.subject)}
                   </span>
                   {dueLabel && (
                     <span className={`text-xs font-medium ${dueColor}`}>

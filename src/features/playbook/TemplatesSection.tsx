@@ -109,10 +109,8 @@ export function TemplatesSection() {
   return (
     <div className="space-y-2">
       <div>
-        <h3 className="text-sm font-semibold">Start a campaign from a template</h3>
-        <p className="text-xs text-muted-foreground">
-          Pick a proven sequence, edit any step, then launch it on a list or contact. Email steps send automatically; calls and LinkedIn become your tasks in Up Next.
-        </p>
+        <h3 className="text-sm font-semibold">Start from a template</h3>
+        <p className="text-xs text-muted-foreground">Pick one, choose people, launch.</p>
       </div>
 
       {isLoading ? (
@@ -147,13 +145,14 @@ export function TemplatesSection() {
                   </div>
                   <div>
                     <h4 className="font-semibold text-sm">{t.name}</h4>
-                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{t.description}</p>
                   </div>
                   <div className="flex items-center justify-between gap-2 pt-1">
                     <SequenceMiniPreview steps={t.steps} />
                     <span className="text-[11px] text-muted-foreground inline-flex items-center gap-2 shrink-0">
                       <span className="inline-flex items-center gap-1"><Layers className="h-3 w-3" />{t.step_count ?? t.steps.length}</span>
-                      <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{t.duration_days ?? "—"}d</span>
+                      {t.duration_days != null && (
+                        <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{t.duration_days}d</span>
+                      )}
                     </span>
                   </div>
                   {/* Lifetime scoreboard (Campaigns overhaul Phase 3, S9) —
@@ -161,7 +160,7 @@ export function TemplatesSection() {
                       campaigns" on every template that's never been used. */}
                   {score && score.campaigns > 0 && (
                     <p className="text-[11px] text-muted-foreground">
-                      {score.campaigns} {score.campaigns === 1 ? "campaign" : "campaigns"} · {score.replies} {score.replies === 1 ? "reply" : "replies"}
+                      {score.campaigns} {score.campaigns === 1 ? "campaign" : "campaigns"}, {score.replies} {score.replies === 1 ? "reply" : "replies"}
                     </p>
                   )}
                 </CardContent>
@@ -169,26 +168,14 @@ export function TemplatesSection() {
             );
           })}
 
-          {/* Start from scratch */}
-          <Card
-            className="py-0 cursor-pointer hover:shadow-md hover:border-primary/30 transition-all border-dashed overflow-hidden"
-            onClick={openBlank}
-          >
-            <div className="h-1.5 w-full bg-gradient-to-r from-slate-500/20 to-slate-400/10" />
-            <CardContent className="p-3 space-y-2">
-              <div className="flex items-start justify-between gap-2">
-                <div className="h-8 w-8 rounded-md flex items-center justify-center bg-slate-500/15 text-slate-600 dark:text-slate-300">
-                  <Wand2 className="h-4 w-4" />
-                </div>
-              </div>
-              <div>
-                <h4 className="font-semibold text-sm">Custom sequence</h4>
-                <p className="text-xs text-muted-foreground mt-0.5">Build your own from scratch — same builder, empty canvas.</p>
-              </div>
-            </CardContent>
-          </Card>
         </div>
       )}
+
+      <div className="flex justify-start">
+        <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-muted-foreground" onClick={openBlank}>
+          <Wand2 className="h-3.5 w-3.5 mr-1" /> Or start a custom campaign
+        </Button>
+      </div>
 
       {/* Template preview dialog — the visual timeline */}
       <Dialog open={!!preview} onOpenChange={(o) => !o && setPreview(null)}>
@@ -201,11 +188,13 @@ export function TemplatesSection() {
               </DialogHeader>
               <div className="flex items-center gap-3 text-xs text-muted-foreground -mt-1 mb-1">
                 <span className="inline-flex items-center gap-1"><Layers className="h-3.5 w-3.5" />{preview.step_count ?? preview.steps.length} touches</span>
-                <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" />{preview.duration_days ?? "—"} days</span>
+                {preview.duration_days != null && (
+                  <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" />{preview.duration_days} days</span>
+                )}
               </div>
               {preview.domain_rules?.start_anchor === "nearest_monday" && (
                 <p className="text-[11px] text-muted-foreground -mt-0.5 mb-1">
-                  Weekdays shown assume a Monday start (the actual dates are set when you launch).
+                  Days assume a Monday start.
                 </p>
               )}
               <SequenceTimeline steps={preview.steps} />

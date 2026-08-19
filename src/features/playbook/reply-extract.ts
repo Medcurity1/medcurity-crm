@@ -9,6 +9,8 @@
 // list in sync with normalizeWebhookPayload's replyBody read if that ever
 // changes.
 
+import { normalizeReplyText } from "./reply-text";
+
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -26,10 +28,10 @@ function firstNonEmptyString(...vals: unknown[]): string | null {
 export function extractReplyBody(payload: unknown): string | null {
   if (!isPlainObject(payload)) return null;
   const data = isPlainObject(payload.data) ? payload.data : {};
-  return firstNonEmptyString(
+  return normalizeReplyText(firstNonEmptyString(
     payload.reply, payload.reply_body, payload.preview_text, payload.reply_message,
     data.reply, data.reply_body, data.preview_text,
-  );
+  ));
 }
 
 /** Client-side twin of supabase/functions/_shared/reply-category.ts's

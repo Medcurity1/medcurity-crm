@@ -119,7 +119,10 @@ function taskToEventBody(task: TaskRow) {
   const end = new Date(start.getTime() + 30 * 60 * 1000);
   const context = buildContextLines(task);
   const notes = task.body
-    ? `<p>${task.body.replace(/\n/g, "<br>")}</p>`
+    // Task bodies are plain text, including campaign reply excerpts. Escape
+    // before adding line breaks so provider HTML or user-entered angle
+    // brackets can never become executable Graph event markup.
+    ? `<p>${escapeHtml(task.body).replace(/\n/g, "<br>")}</p>`
     : "";
   const footer = `<p style="color:#999;font-size:12px">Synced from Pulse · <a href="${APP_BASE}/activities/${task.id}">Open task</a></p>`;
   return {

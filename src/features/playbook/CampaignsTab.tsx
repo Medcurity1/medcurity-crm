@@ -5,7 +5,8 @@
 // refresh both. Start/Pause/Resume/Stop live right on each card (Campaigns
 // overhaul S4) — a campaign never has to be managed by opening Smartlead.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Megaphone, Download, RefreshCw, Loader2, Plus, Inbox, AlertTriangle, Search } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
@@ -42,6 +43,7 @@ function FilterPill({ label, active, onClick }: { label: string; active: boolean
   return (
     <button
       type="button"
+      aria-pressed={active}
       onClick={onClick}
       className={cn(
         "rounded-full px-3 py-1 text-xs font-medium border transition-colors",
@@ -58,7 +60,8 @@ function FilterPill({ label, active, onClick }: { label: string; active: boolean
 export function CampaignsTab() {
   const { profile } = useAuth();
   const { data: campaigns, isLoading, isError, refetch } = useCampaigns();
-  const { data: sl } = useSmartleadStatus();
+  const { data: sl, isLoading: slLoading, isError: slError, refetch: refetchSl } = useSmartleadStatus();
+  const [searchParams] = useSearchParams();
   const { data: inboxes } = useEmailAccounts();
   const importMut = useImportCampaigns();
   const syncMut = useSyncCampaigns();
@@ -199,6 +202,15 @@ export function CampaignsTab() {
     return rows.find((c) => c.id === detailCampaign.id) ?? detailCampaign;
   }, [campaigns, detailCampaign]);
 
+  useEffect(() => {
+    const id = searchParams.get("campaign");
+    if (!id || !campaigns) return;
+    const row = (campaigns as CampaignRow[]).find((c) => c.id === id);
+    if (!row) return;
+    setDetailCampaign(row);
+    setDetailOpen(true);
+  }, [campaigns, searchParams]);
+
   // One grouped enrollment-stats fetch for every campaign in the OWNER-
   // filtered list (not the search-filtered one — see ownerFiltered's
   // comment — and not just the rendered subset): cheap at this scale, and
@@ -240,7 +252,7 @@ export function CampaignsTab() {
       {monthStats && (monthStats.campaignsLaunched || monthStats.peopleEnrolled || monthStats.replies) ? (
         <div className="border-t pt-4">
           <p className="text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">This month:</span>{" "}
+            <span className="font-medium text-foreground">Last 30 days:</span>{" "}
             {monthStats.campaignsLaunched} {monthStats.campaignsLaunched === 1 ? "campaign" : "campaigns"} launched
             {" · "}{monthStats.peopleEnrolled} {monthStats.peopleEnrolled === 1 ? "person" : "people"} enrolled
             {" · "}{monthStats.replies} {monthStats.replies === 1 ? "reply" : "replies"}
@@ -269,13 +281,13 @@ export function CampaignsTab() {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            {sl?.configured && (
-              <Button variant="ai" size="sm" onClick={() => setWizardOpen(true)}>
-                <span className="ai-icon mr-1"><Plus className="h-4 w-4" /></span> New Campaign
-              </Button>
-            )}
-            {sl?.configured ? (
+            {slLoading ? (
+              <p className="text-xs text-muted-foreground">Checking Smartlead…</p>
+            ) : sl?.configured ? (
               <>
+                <Button variant="ai" size="sm" onClick={() => setWizardOpen(true)}>
+                  <span className="ai-icon mr-1"><Plus className="h-4 w-4" /></span> New Campaign
+                </Button>
                 <Button size="sm" variant="outline" onClick={() => setInboxHealthOpen(true)}>
                   <Inbox className="h-4 w-4 mr-1" /> Sending inboxes
                 </Button>
@@ -294,9 +306,13 @@ export function CampaignsTab() {
                   )}
                 </Button>
               </>
+            ) : slError ? (
+              <Button size="sm" variant="outline" onClick={() => refetchSl()}>
+                Retry Smartlead check
+              </Button>
             ) : (
               <p className="text-xs text-muted-foreground">
-                Smartlead isn't configured — add SMARTLEAD_API_KEY to enable import/launch.
+                Smartlead isn't connected. Reconnect it before launching campaigns.
               </p>
             )}
           </div>
@@ -314,7 +330,7 @@ export function CampaignsTab() {
           <div className="rounded-md border border-amber-300/60 dark:border-amber-500/30 p-3 flex items-center gap-2 flex-wrap">
             <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
             <p className="text-xs text-muted-foreground">
-              Couldn't check for waiting replies — "Needs you today" may be missing reply alerts.
+              Couldn't check for waiting replies. "Needs you today" may be missing reply alerts.
             </p>
             <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => unhandledQ.refetch()}>
               Retry

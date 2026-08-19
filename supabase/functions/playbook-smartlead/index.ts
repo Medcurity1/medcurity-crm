@@ -317,11 +317,50 @@ function todayISODate(): string {
  *  read-only PREVIEW version (which substitutes generic phrases like "the
  *  contact" for a template gallery card), this substitutes the real
  *  recipient's data since it's building an actual task. */
-function mergeTemplate(tpl: string, vars: { first_name: string; last_name: string; company: string }): string {
+function mergeTemplate(tpl: string, vars: {
+  first_name: string;
+  last_name: string;
+  company: string;
+  sender_name: string;
+  phone: string;
+}): string {
   return tpl
-    .replace(/\{\{\s*first_name\s*\}\}/gi, vars.first_name)
-    .replace(/\{\{\s*last_name\s*\}\}/gi, vars.last_name)
-    .replace(/\{\{\s*company\s*\}\}/gi, vars.company);
+    .replace(/\[\[\s*First name\s*\]\]/gi, () => vars.first_name)
+    .replace(/\[\[\s*Organization\s*\]\]/gi, () => vars.company)
+    .replace(/\[\[\s*Signature\s*\]\]/gi, () => vars.sender_name)
+    .replace(/\[\[\s*Work phone\s*\]\]/gi, () => vars.phone)
+    .replace(/\{\{\s*first_name\s*\}\}/gi, () => vars.first_name)
+    .replace(/\{\{\s*last_name\s*\}\}/gi, () => vars.last_name)
+    .replace(/\{\{\s*(?:company|company_name)\s*\}\}/gi, () => vars.company)
+    .replace(/\{\{\s*sender_name\s*\}\}/gi, () => vars.sender_name)
+    .replace(/\{\{\s*phone\s*\}\}/gi, () => vars.phone);
+}
+
+/** Provider-safe personalization generated at launch. Salespeople write with
+ * friendly editor tokens; legacy templates may still contain raw merge fields.
+ * Both routes land on the same missing-value fallbacks and automatic signature. */
+function protectCampaignPersonalization(template: string): string {
+  const source = template ?? "";
+  const first = "{{#if first_name}}{{first_name}}{{else}}there{{/if}}";
+  const company = "{{#if company_name}}{{company_name}}{{else}}your organization{{/if}}";
+  const blocks: string[] = [];
+  let sentinelPrefix = "__PULSE_LIQUID_BLOCK_";
+  while (source.includes(sentinelPrefix)) sentinelPrefix = `_${sentinelPrefix}`;
+  const keepBlock = (block: string) => {
+    const sentinel = `${sentinelPrefix}${blocks.length}__`;
+    blocks.push(block);
+    return sentinel;
+  };
+  return source
+    .replace(/\{\{#if\s+(?:first_name|company_name|company)\}\}[\s\S]*?\{\{\/if\}\}/gi, keepBlock)
+    .replace(/\[\[\s*First name\s*\]\]/gi, () => keepBlock(first))
+    .replace(/\[\[\s*Organization\s*\]\]/gi, () => keepBlock(company))
+    .replace(/\[\[\s*Signature\s*\]\]/gi, "%signature%")
+    .replace(/\{\{\s*company\s*\}\}/gi, "{{company_name}}")
+    .replace(/\{\{\s*sender_name\s*\}\}/gi, "%signature%")
+    .replace(/\{\{\s*first_name\s*\}\}/gi, () => keepBlock(first))
+    .replace(/\{\{\s*company_name\s*\}\}/gi, () => keepBlock(company))
+    .replace(new RegExp(`${sentinelPrefix}(\\d+)__`, "g"), (_match, index) => blocks[Number(index)] ?? "");
 }
 
 /**
@@ -759,6 +798,27 @@ async function spawnCampaignTasks(campaignId: string): Promise<{ tasksCreated: n
   }
   if (!enrollments?.length) return { tasksCreated: 0 };
 
+  const taskOwnerIds = Array.from(new Set(enrollments.map((e) =>
+    (e.owner_user_id as string | null) ?? (campaign.owner_user_id as string | null),
+  ).filter((id): id is string => !!id)));
+  const ownerProfiles = new Map<string, { full_name: string; outreach_phone: string }>();
+  if (taskOwnerIds.length) {
+    const { data: profiles, error: profileErr } = await svc
+      .from("user_profiles")
+      .select("id, full_name, outreach_phone")
+      .in("id", taskOwnerIds);
+    if (profileErr) {
+      console.error("spawnCampaignTasks: couldn't load outreach profiles:", profileErr.message);
+    } else {
+      for (const profile of profiles ?? []) {
+        ownerProfiles.set(profile.id as string, {
+          full_name: (profile.full_name as string | null) || "Your campaign owner",
+          outreach_phone: (profile.outreach_phone as string | null) || "[add your work phone in My Settings]",
+        });
+      }
+    }
+  }
+
   // Pre-check: which (enrollment, step) pairs already have a spawned task —
   // covers a retry after a previous partial failure without duplicating.
   const enrollmentIds = enrollments.map((e) => e.id as string);
@@ -784,13 +844,17 @@ async function spawnCampaignTasks(campaignId: string): Promise<{ tasksCreated: n
   // Build one row-group per enrollment (only the steps it's still missing).
   const rowsByEnrollment = new Map<string, Record<string, unknown>[]>();
   for (const e of enrollments) {
+    const taskOwnerId = (e.owner_user_id as string | null) ?? (campaign.owner_user_id as string | null);
+    const ownerProfile = taskOwnerId ? ownerProfiles.get(taskOwnerId) : undefined;
     const vars = {
       // A blank first name reads as "Call " (trailing space, no name at
       // all) in a spawned task title — fall back to the email address so
       // the task is always identifiable ("Call jane@clinic.org").
       first_name: (e.first_name as string) || (e.email as string) || "",
       last_name: (e.last_name as string) || "",
-      company: (e.company as string) || "",
+      company: (e.company as string) || "their organization",
+      sender_name: ownerProfile?.full_name || "Your campaign owner",
+      phone: ownerProfile?.outreach_phone || "[add your work phone in My Settings]",
     };
     const rows: Record<string, unknown>[] = [];
     for (const step of nonEmailSteps) {
@@ -803,7 +867,7 @@ async function spawnCampaignTasks(campaignId: string): Promise<{ tasksCreated: n
         // Owner routing (outside-review group 2): the person's own owner
         // does their calls/LinkedIn touches; the campaign owner only covers
         // enrollments without one (CSV/paste people, unowned contacts).
-        owner_user_id: (e.owner_user_id as string | null) ?? campaign.owner_user_id,
+        owner_user_id: taskOwnerId,
         subject: mergeTemplate(step.manual_task_title_template || defaultTaskTitle(step.channel), vars),
         body: note || null,
         due_at: dueAt,
@@ -1337,14 +1401,11 @@ async function resolveSmartleadLeadId(smartleadCampaignId: number, email: string
 }
 
 /**
- * Best-effort pause/resume of ONE lead within a Smartlead campaign — the
+ * Pause/resume ONE lead within a Smartlead campaign — the
  * per-person analog of setCampaignStatus's campaign-wide POST
- * /campaigns/{id}/status. Endpoint shape unverified beyond "matches the
- * /campaigns/{id}/leads/{lead_id}/<verb> pattern Smartlead's own docs
- * describe for pause/resume-by-lead" — same unverified-but-best-guess
- * posture as registerCampaignWebhook. Throws on failure (raw Smartlead error
- * message) so the caller can fold it into a plain-English `warning` — this
- * must NEVER be swallowed silently on the stop path per the spec.
+ * /campaigns/{id}/status. Smartlead's official v1 API documents these
+ * campaign-scoped pause/resume endpoints. Throws on failure so callers never
+ * mark Pulse paused while Smartlead is still able to send.
  */
 async function smartleadSetLeadPauseState(smartleadCampaignId: number, leadId: number, pause: boolean): Promise<void> {
   const verb = pause ? "pause" : "resume";
@@ -1525,6 +1586,9 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
   if (!p.campaign_name || !p.recipients?.length || (!usingSteps && !p.sequence?.length)) {
     throw new Error("campaign_name, a sequence (or steps), and recipients are required");
   }
+  if (p.recipients.length > 10_000) {
+    throw new Error("A campaign can include at most 10,000 recipients. Split this audience into smaller launches.");
+  }
   // Rep rollout flip point: remove/adjust this admin gate when reps get UI
   // access to Campaigns (see App.tsx's AdminGate + ContactsList.tsx's own
   // admin check — those are the gates that actually decide who can reach
@@ -1540,12 +1604,31 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
   // Smartlead's flat email sequence FROM it and ignore p.sequence entirely.
   // AI-wizard launch (no p.steps): p.sequence drives Smartlead directly and
   // sequenceToSteps() backfills campaigns.steps for the tracker.
-  const steps: CampaignStep[] = usingSteps
+  const rawSteps: CampaignStep[] = usingSteps
     ? p.steps!
     : (sequenceToSteps(p.sequence!) as unknown as CampaignStep[]);
+  const steps: CampaignStep[] = rawSteps.map((step) => step.channel === "EMAIL_AUTO"
+    ? {
+        ...step,
+        content_ai_draft: false,
+        subject_template: protectCampaignPersonalization(step.subject_template || ""),
+        body_template: protectCampaignPersonalization(step.body_template || ""),
+      }
+    : step);
+  const firstEmailOrder = Math.min(...steps.filter((step) => step.channel === "EMAIL_AUTO").map((step) => step.order));
+  const incompleteEmails = steps.filter((step) => step.channel === "EMAIL_AUTO" && (
+    step.content_ai_draft === true ||
+    (step.order === firstEmailOrder && !String(step.subject_template ?? "").trim()) ||
+    !String(step.body_template ?? "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").trim()
+  ));
+  if (incompleteEmails.length) {
+    throw new Error(
+      `${incompleteEmails.length === 1 ? "One automated email is" : `${incompleteEmails.length} automated emails are`} missing visible wording. Finish the copy in Pulse before launching.`,
+    );
+  }
   const emailSequence: Array<Record<string, unknown>> = usingSteps
     ? (emailStepsToSmartleadSequence(steps) as unknown as Array<Record<string, unknown>>)
-    : p.sequence!;
+    : (emailStepsToSmartleadSequence(steps) as unknown as Array<Record<string, unknown>>);
 
   // The launch date every enrollment's throttle math anchors to — "payload
   // date or today" per the S3 spec, resolved ONCE and reused below for both
@@ -2095,9 +2178,17 @@ async function launch(p: LaunchInput, callerCtx: CallerContext) {
               "playbook launch: post-start task spawn failed (campaign is live; not rolling back):",
               (postErr as Error).message,
             );
+            const taskWarning =
+              "The campaign IS sending, but Pulse couldn't finish scheduling the call and LinkedIn tasks. Open the campaign tracker and press Pause, then Resume, to retry the task setup.";
+            launchWarning = launchWarning ? `${launchWarning} ALSO: ${taskWarning}` : taskWarning;
           }
         }
-      } catch { /* leave as draft */ }
+      } catch (startErr) {
+        console.error("playbook launch: Smartlead start failed; campaign remains a draft:", (startErr as Error).message);
+        const startWarning =
+          "The campaign was created, but Smartlead did not start it. Open it in the Pulse campaign tracker and press Start to retry.";
+        launchWarning = launchWarning ? `${launchWarning} ALSO: ${startWarning}` : startWarning;
+      }
     }
   } catch (err) {
     try { await smartleadFetch(`/campaigns/${campaignId}`, { method: "DELETE" }); } catch { /* best-effort */ }
@@ -2935,7 +3026,7 @@ async function dailySweep(): Promise<DailySweepReport> {
     const candidates = await fetchAllRows<Record<string, unknown>>((from, to) =>
       svc
         .from("campaign_enrollments")
-        .select("id, campaign_id, contact_id, account_id, first_name, last_name, email, owner_user_id, status, paused_reason, enrolled_at, meeting_pause_dismissed_at")
+        .select("id, campaign_id, contact_id, account_id, first_name, last_name, email, owner_user_id, status, paused_reason, enrolled_at, meeting_pause_dismissed_at, smartlead_lead_id")
         .not("status", "in", `(${ENROLLMENT_TERMINAL_STATUSES.join(",")})`)
         .or("contact_id.not.is.null,account_id.not.is.null")
         .order("id", { ascending: true })
@@ -2949,6 +3040,7 @@ async function dailySweep(): Promise<DailySweepReport> {
       owner_user_id: string | null;
       status: string; paused_reason: string | null; enrolled_at: string;
       meeting_pause_dismissed_at: string | null;
+      smartlead_lead_id: number | null;
     }[];
 
     if (eligible.length) {
@@ -2995,13 +3087,13 @@ async function dailySweep(): Promise<DailySweepReport> {
 
       // Batch campaign owner/name lookups once rather than per-pause.
       const campaignIds = Array.from(new Set(eligible.map((e) => e.campaign_id)));
-      const campaignInfo = new Map<string, { owner_user_id: string | null; name: string }>();
+      const campaignInfo = new Map<string, { owner_user_id: string | null; name: string; smartlead_campaign_id: number | null }>();
       for (let i = 0; i < campaignIds.length; i += LOOKUP_BATCH) {
         const batch = campaignIds.slice(i, i + LOOKUP_BATCH);
-        const { data: campRows, error: campErr } = await svc.from("campaigns").select("id, owner_user_id, name").in("id", batch);
+        const { data: campRows, error: campErr } = await svc.from("campaigns").select("id, owner_user_id, name, smartlead_campaign_id").in("id", batch);
         if (campErr) { console.error("daily-sweep: campaign lookup for meeting-pause failed:", campErr.message); continue; }
-        for (const c of (campRows ?? []) as { id: string; owner_user_id: string | null; name: string }[]) {
-          campaignInfo.set(c.id, { owner_user_id: c.owner_user_id, name: c.name });
+        for (const c of (campRows ?? []) as { id: string; owner_user_id: string | null; name: string; smartlead_campaign_id: number | null }[]) {
+          campaignInfo.set(c.id, { owner_user_id: c.owner_user_id, name: c.name, smartlead_campaign_id: c.smartlead_campaign_id });
         }
       }
 
@@ -3023,6 +3115,44 @@ async function dailySweep(): Promise<DailySweepReport> {
         });
         if (!hasQualifyingOpp) continue;
 
+        // Stop the actual sender before changing Pulse. A Pulse-only pause is
+        // dangerously misleading because Smartlead would keep emailing.
+        const info = campaignInfo.get(e.campaign_id);
+        if (!info?.smartlead_campaign_id) {
+          const message = `meeting-pause skipped for enrollment ${e.id}: campaign has no Smartlead id`;
+          console.error(`daily-sweep: ${message}`);
+          report.errors.push(message);
+          continue;
+        }
+        let leadId = e.smartlead_lead_id;
+        if (!leadId && e.email) {
+          try {
+            leadId = await resolveSmartleadLeadId(info.smartlead_campaign_id, e.email);
+            if (leadId) {
+              await svc.from("campaign_enrollments").update({ smartlead_lead_id: leadId }).eq("id", e.id);
+            }
+          } catch (err) {
+            const message = `meeting-pause could not resolve Smartlead lead for enrollment ${e.id}: ${(err as Error).message}`;
+            console.error(`daily-sweep: ${message}`);
+            report.errors.push(message);
+            continue;
+          }
+        }
+        if (!leadId) {
+          const message = `meeting-pause skipped for enrollment ${e.id}: Smartlead lead was not found`;
+          console.error(`daily-sweep: ${message}`);
+          report.errors.push(message);
+          continue;
+        }
+        try {
+          await smartleadSetLeadPauseState(info.smartlead_campaign_id, leadId, true);
+        } catch (err) {
+          const message = `meeting-pause failed in Smartlead for enrollment ${e.id}: ${(err as Error).message}`;
+          console.error(`daily-sweep: ${message}`);
+          report.errors.push(message);
+          continue;
+        }
+
         const { error: updErr } = await svc
           .from("campaign_enrollments")
           .update({ status: "paused", paused_reason: "meeting_booked" })
@@ -3034,7 +3164,6 @@ async function dailySweep(): Promise<DailySweepReport> {
         report.tasks_cancelled += await archivePendingTasksForEnrollment(svc, e.id, "Opportunity opened");
         report.meetings_paused++;
 
-        const info = campaignInfo.get(e.campaign_id);
         // Owner routing (group 2): notify the person's own owner; the
         // campaign owner is the fallback.
         const pauseNotifyUserId = e.owner_user_id ?? info?.owner_user_id ?? null;
@@ -3616,25 +3745,59 @@ Deno.serve(async (req) => {
       // RLS: admin can SELECT, nothing else for `authenticated`), so a
       // client-side "mark handled" has to go through this action rather than
       // a direct table update.
-      const eventId = body.event_id as string;
-      if (!eventId) throw new Error("event_id is required");
+      const eventId = typeof body.event_id === "string" ? body.event_id : "";
       const handledBy = await callerUserId(auth);
-      const { data: row, error: findErr } = await svc
-        .from("campaign_events")
-        .select("id, payload")
-        .eq("id", eventId)
-        .single();
-      if (findErr || !row) throw new Error("Reply not found: " + (findErr?.message ?? eventId));
+      const enrollmentId = typeof body.enrollment_id === "string" ? body.enrollment_id : null;
       const handledStamp = { at: new Date().toISOString(), by: handledBy };
-      const nextPayload = {
-        ...((row.payload as Record<string, unknown> | null) ?? {}),
-        handled: handledStamp,
-      };
-      const { error: updErr } = await svc
-        .from("campaign_events")
-        .update({ payload: nextPayload, handled_at: handledStamp.at })
-        .eq("id", eventId);
-      if (updErr) throw new Error("Couldn't mark this reply handled: " + updErr.message);
+
+      async function stampEvent(id: string, payload: Record<string, unknown> | null) {
+        const nextPayload = { ...(payload ?? {}), handled: handledStamp };
+        const { error: updErr } = await svc
+          .from("campaign_events")
+          .update({ payload: nextPayload, handled_at: handledStamp.at })
+          .eq("id", id);
+        if (updErr) throw new Error("Couldn't mark this reply handled: " + updErr.message);
+      }
+
+      let targetEnrollmentId: string | null = enrollmentId;
+      if (eventId) {
+        const { data: row, error: findErr } = await svc
+          .from("campaign_events")
+          .select("id, payload, enrollment_id")
+          .eq("id", eventId)
+          .single();
+        if (findErr || !row) throw new Error("Reply not found: " + (findErr?.message ?? eventId));
+        await stampEvent(row.id, (row.payload as Record<string, unknown> | null) ?? null);
+        targetEnrollmentId = (row.enrollment_id as string | null) ?? targetEnrollmentId;
+      } else if (enrollmentId) {
+        const { data: rows, error: listErr } = await svc
+          .from("campaign_events")
+          .select("id, payload")
+          .eq("enrollment_id", enrollmentId)
+          .in("event_type", ["EMAIL_REPLY", "EMAIL_REPLIED"])
+          .is("handled_at", null)
+          .limit(20);
+        if (listErr) throw new Error("Couldn't load replies to mark handled: " + listErr.message);
+        for (const row of rows ?? []) {
+          await stampEvent(row.id, (row.payload as Record<string, unknown> | null) ?? null);
+        }
+      } else {
+        throw new Error("event_id is required");
+      }
+
+      // Completing the follow-up task is the same action as marking the
+      // feed row handled: one reply, one queue.
+      if (targetEnrollmentId) {
+        const { error: taskErr } = await svc
+          .from("activities")
+          .update({ completed_at: handledStamp.at })
+          .eq("campaign_enrollment_id", targetEnrollmentId)
+          .eq("activity_type", "task")
+          .is("campaign_step_number", null)
+          .is("completed_at", null)
+          .is("archived_at", null);
+        if (taskErr) console.error("mark-reply-handled: follow-up complete failed:", taskErr.message);
+      }
       return json({ success: true });
     }
     if (action === "lead-statuses") {

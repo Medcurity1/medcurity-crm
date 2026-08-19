@@ -14,12 +14,14 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, Phone, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Phone, ChevronDown, ChevronUp, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { QuickTaskDialog } from "@/features/activities/QuickTaskDialog";
+import { useCompleteActivity } from "@/features/activities/api";
+import { activityTitleForDisplay } from "@/features/activities/activity-display";
 import { categoryDotClass, categoryOf } from "./day-queue";
 import {
   useDayQueue,
@@ -297,6 +299,7 @@ export function Briefing({
   const snooze = useSnoozeDayItem();
   const hideItem = useHideDayItem();
   const hideCategory = useHideDayCategory();
+  const completeTask = useCompleteActivity();
   const [showAll, setShowAll] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
   const [hidePrompt, setHidePrompt] = useState<DayQueueRow | null>(null);
@@ -355,6 +358,18 @@ export function Briefing({
       return;
     }
     navigate(to);
+  }
+
+  function handleComplete(row: DayQueueRow) {
+    const taskId = taskIdOf(row);
+    if (!taskId) return;
+    completeTask.mutate(
+      { id: taskId },
+      {
+        onSuccess: () => toast.success("Task completed"),
+        onError: (err) => toast.error("Couldn't complete task: " + (err as Error).message),
+      },
+    );
   }
 
   async function handleSnooze(row: DayQueueRow) {
@@ -469,6 +484,8 @@ export function Briefing({
               onOpen={(to) => handleOpen(row, to)}
               onSnooze={() => handleSnooze(row)}
               snoozing={snooze.isPending}
+              onComplete={() => handleComplete(row)}
+              completing={completeTask.isPending}
             />
           ))}
         </div>
@@ -499,6 +516,8 @@ export function Briefing({
                   onOpen={(to) => handleOpen(row, to)}
                   onSnooze={() => handleSnooze(row)}
                   snoozing={snooze.isPending}
+                  onComplete={() => handleComplete(row)}
+                  completing={completeTask.isPending}
                 />
               ))}
             </div>
@@ -585,6 +604,8 @@ function BriefingCard({
   onOpen,
   onSnooze,
   snoozing,
+  onComplete,
+  completing,
   isAdmin,
 }: {
   row: DayQueueRow;
@@ -592,6 +613,8 @@ function BriefingCard({
   onOpen: (to: string) => void;
   onSnooze: () => void;
   snoozing: boolean;
+  onComplete: () => void;
+  completing: boolean;
   isAdmin: boolean;
 }) {
   const action = primaryAction(row, isAdmin);
@@ -607,7 +630,7 @@ function BriefingCard({
         />
         <div className="min-w-0">
           <p className="text-sm font-medium leading-snug">
-            {row.title ?? "Untitled"}
+            {activityTitleForDisplay(row.title)}
           </p>
           {reasonForDisplay(row) && (
             <p className="mt-0.5 text-xs text-muted-foreground">{reasonForDisplay(row)}</p>
@@ -618,6 +641,11 @@ function BriefingCard({
         <Button size="sm" className="flex-1" onClick={() => onOpen(action.to)}>
           {action.label}
         </Button>
+        {taskIdOf(row) && (
+          <Button size="sm" variant="outline" onClick={onComplete} disabled={completing}>
+            <CheckCircle2 className="mr-1 h-4 w-4" /> Done
+          </Button>
+        )}
         <Button
           size="sm"
           variant="ghost"
@@ -637,12 +665,16 @@ function BriefingListRow({
   onOpen,
   onSnooze,
   snoozing,
+  onComplete,
+  completing,
   isAdmin,
 }: {
   row: DayQueueRow;
   onOpen: (to: string) => void;
   onSnooze: () => void;
   snoozing: boolean;
+  onComplete: () => void;
+  completing: boolean;
   isAdmin: boolean;
 }) {
   const action = primaryAction(row, isAdmin);
@@ -653,7 +685,7 @@ function BriefingListRow({
         className={cn("h-2 w-2 shrink-0 rounded-full", dotClass(row))}
       />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{row.title ?? "Untitled"}</p>
+        <p className="truncate text-sm font-medium">{activityTitleForDisplay(row.title)}</p>
         {reasonForDisplay(row) && (
           <p className="truncate text-xs text-muted-foreground">{reasonForDisplay(row)}</p>
         )}
@@ -661,6 +693,11 @@ function BriefingListRow({
       <Button size="sm" variant="outline" onClick={() => onOpen(action.to)}>
         {action.label}
       </Button>
+      {taskIdOf(row) && (
+        <Button size="sm" variant="outline" onClick={onComplete} disabled={completing}>
+          <CheckCircle2 className="mr-1 h-4 w-4" /> Done
+        </Button>
+      )}
       <Button
         size="sm"
         variant="ghost"

@@ -322,31 +322,18 @@ function CollateralCard({
       >
         <div className="collat-list-preview">
           {showThumb ? (
-            <img
-              src={thumb}
-              alt=""
-              loading="lazy"
-              onError={() => setThumbFailed(true)}
-            />
+            <img src={thumb} alt="" loading="lazy" onError={() => setThumbFailed(true)} />
           ) : (
-            <span className="collat-icon">
-              <Icon className="h-4 w-4" />
-            </span>
+            <span className="collat-icon"><Icon className="h-4 w-4" /></span>
           )}
         </div>
-
         <div className="collat-list-main">
           <div className="flex min-w-0 items-start gap-2">
-            <h3 title={item.title} className="min-w-0 flex-1 truncate">
-              {displayTitle(item.title)}
-            </h3>
+            <h3 title={item.title} className="min-w-0 flex-1 truncate">{displayTitle(item.title)}</h3>
             {isAdmin && (
               <button
                 type="button"
-                className={cn(
-                  "collat-iconbtn shrink-0",
-                  !item.pinned && "opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100",
-                )}
+                className={cn("collat-iconbtn shrink-0", !item.pinned && "opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100")}
                 title={item.pinned ? "Unpin" : "Pin to top row"}
                 aria-label={item.pinned ? "Unpin" : "Pin to top row"}
                 onClick={() => togglePin.mutate({ id: item.id, pinned: !item.pinned })}
@@ -355,44 +342,22 @@ function CollateralCard({
               </button>
             )}
           </div>
-
           <div className="collat-list-details">
             {item.asset_type && <span className="collat-tag">{item.asset_type}</span>}
             {item.products.slice(0, 2).map((product) => (
-              <span key={product} className="collat-tag collat-tag--muted max-w-40 truncate">
-                {product}
-              </span>
+              <span key={product} className="collat-tag collat-tag--muted max-w-40 truncate">{product}</span>
             ))}
-            {item.products.length > 2 && (
-              <span className="collat-tag collat-tag--muted">+{item.products.length - 2}</span>
-            )}
+            {item.products.length > 2 && <span className="collat-tag collat-tag--muted">+{item.products.length - 2}</span>}
             {use && <UsePill value={use} />}
-            {review === "due" && (
-              <span className="collat-badge-due"><Clock className="h-2.5 w-2.5" /> Review due</span>
-            )}
-            {review === "never" && (
-              <span className="collat-badge-due"><Clock className="h-2.5 w-2.5" /> Not reviewed</span>
-            )}
-            {review !== "never" && item.last_reviewed && (
-              <span className="collat-meta">Reviewed {formatReviewDate(item.last_reviewed)}</span>
-            )}
-            {item.owner_name && (
-              <span className="collat-meta truncate" title={`Owner: ${item.owner_name}`}>
-                {item.owner_name}
-              </span>
-            )}
+            {review === "due" && <span className="collat-badge-due"><Clock className="h-2.5 w-2.5" /> Review due</span>}
+            {review === "never" && <span className="collat-badge-due"><Clock className="h-2.5 w-2.5" /> Not reviewed</span>}
+            {review !== "never" && item.last_reviewed && <span className="collat-meta">Reviewed {formatReviewDate(item.last_reviewed)}</span>}
+            {item.owner_name && <span className="collat-meta truncate" title={`Owner: ${item.owner_name}`}>{item.owner_name}</span>}
           </div>
         </div>
-
         <div className="collat-list-actions">
-          <button type="button" className="collat-link" onClick={copyLink}>
-            <Copy className="h-3 w-3" />
-            Copy Link
-          </button>
-          <a className="collat-link" href={item.web_url} target="_blank" rel="noreferrer">
-            Open
-            <ExternalLink className="h-3 w-3" />
-          </a>
+          <button type="button" className="collat-link" onClick={copyLink}><Copy className="h-3 w-3" />Copy Link</button>
+          <a className="collat-link" href={item.web_url} target="_blank" rel="noreferrer">Open<ExternalLink className="h-3 w-3" /></a>
         </div>
       </div>
     );

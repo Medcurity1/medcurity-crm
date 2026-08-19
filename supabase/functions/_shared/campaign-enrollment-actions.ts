@@ -7,6 +7,8 @@
 // same task-archive reason string, same bell notification + follow-up task
 // shape for a reply, same campaign_events row, same contact-timeline
 // activity for a reply. One implementation, two callers.
+
+import { normalizeReplyText } from "./reply-text.ts";
 //
 // S9 addition: previously only the real-time webhook (campaign-webhooks/
 // index.ts) logged a campaign_events row — the daily sweep's reconcile
@@ -357,6 +359,7 @@ export async function stopEnrollmentForReply(
   fallbackEmail: string | null,
   eventMeta?: { occurredAt?: string | null; source?: string },
 ): Promise<{ updated: boolean; tasksCancelled: number }> {
+  const readableReplyBody = normalizeReplyText(replyBody);
   // Atomic transition guard: the live webhook and the daily sweep can both
   // observe the same reply and call this concurrently. A plain read-then-act
   // check against the caller's (possibly stale) `enrollment.status` snapshot
@@ -391,7 +394,7 @@ export async function stopEnrollmentForReply(
     payload: eventMeta?.source ? { source: eventMeta.source, reply_body: replyBody } : {},
   });
 
-  await logReplyActivity(svc, enrollment, campaign, replyBody);
+  await logReplyActivity(svc, enrollment, campaign, readableReplyBody);
 
   const tasksCancelled = await archivePendingTasksForEnrollment(svc, enrollment.id, "Contact replied");
 
@@ -402,13 +405,18 @@ export async function stopEnrollmentForReply(
   const notifyUserId = enrollment.owner_user_id ?? campaign.owner_user_id;
   if (notifyUserId) {
     const who = displayName(enrollment, fallbackEmail);
-    const link = `/playbook?campaign=${campaign.id}`;
+    // /playbook is admin-gated; contact owners who get this bell must land
+    // on the person they need to follow up with. Campaigns tab is still
+    // reachable for admins from the sidebar.
+    const link = enrollment.contact_id
+      ? `/contacts/${enrollment.contact_id}`
+      : `/playbook?campaign=${campaign.id}`;
 
     const { error: notifErr } = await svc.from("notifications").insert({
       user_id: notifyUserId,
       type: "engagement",
       title: "Reply received",
-      message: `${who} replied in ${campaign.name} — their sequence stopped`,
+      message: `${who} replied. Their sequence is stopped.`,
       link,
     });
     if (notifErr) console.error("campaign-enrollment-actions: reply notification insert failed:", notifErr.message);
@@ -417,13 +425,16 @@ export async function stopEnrollmentForReply(
     const { error: taskErr } = await svc.from("activities").insert({
       activity_type: "task",
       owner_user_id: notifyUserId,
-      subject: `Reply from ${who} — ${campaign.name}`,
-      body: replyBody ? replyBody.slice(0, 2000) : null,
+      subject: `Follow up with ${who}`,
+      body: readableReplyBody,
       due_at: nowIso,
       priority: "high",
-      reminder_schedule: "once",
-      reminder_at: nowIso,
-      reminder_channels: ["in_app", "email"],
+      // The dedicated "Reply received" notification above is the immediate
+      // alert. The task is the durable work item; giving it its own instant
+      // bell + email created three alerts for one reply in the live QA.
+      reminder_schedule: "none",
+      reminder_at: null,
+      reminder_channels: [],
       is_campaign_generated: true,
       campaign_enrollment_id: enrollment.id,
       campaign_step_number: null,

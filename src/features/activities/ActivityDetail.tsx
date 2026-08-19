@@ -21,9 +21,10 @@ import {
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { useArchiveActivity } from "./api";
+import { useArchiveActivity, useCompleteActivity, useReopenActivity } from "./api";
 import { errorMessage } from "@/lib/errors";
 import type { Activity } from "@/types/crm";
+import { activityBodyForDisplay, activityTitleForDisplay, isCampaignReplyTask } from "./activity-display";
 
 // Extended shape with joined related records — used only in this
 // detail page, so local instead of polluting the global Activity
@@ -57,6 +58,8 @@ export function ActivityDetail() {
   const [editOpen, setEditOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const archiveMutation = useArchiveActivity();
+  const completeMutation = useCompleteActivity();
+  const reopenMutation = useReopenActivity();
 
   const { data: activity, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["activities", id],
@@ -121,6 +124,10 @@ export function ActivityDetail() {
     activity.activity_type === "conference" ? Presentation :
     activity.activity_type === "note" ? StickyNote :
     CheckSquare;
+  const displayTitle = activityTitleForDisplay(activity.subject);
+  const displayBody = isCampaignReplyTask(activity)
+    ? activityBodyForDisplay(activity.body)
+    : activity.body;
 
   return (
     <div>
@@ -132,10 +139,30 @@ export function ActivityDetail() {
       </div>
 
       <PageHeader
-        title={activity.subject}
+        title={displayTitle}
         description={activityLabel(activity.activity_type)}
         actions={
           <div className="flex items-center gap-2">
+            {activity.activity_type === "task" && (
+              <Button
+                variant={activity.completed_at ? "outline" : "default"}
+                size="sm"
+                disabled={completeMutation.isPending || reopenMutation.isPending}
+                onClick={() => {
+                  const mutation = activity.completed_at ? reopenMutation : completeMutation;
+                  mutation.mutate(
+                    { id: activity.id },
+                    {
+                      onSuccess: () => toast.success(activity.completed_at ? "Task reopened" : "Task completed"),
+                      onError: (err) => toast.error("Couldn't update task: " + errorMessage(err)),
+                    },
+                  );
+                }}
+              >
+                <CheckCircle2 className="h-4 w-4 mr-1" />
+                {activity.completed_at ? "Reopen" : "Mark complete"}
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
               <Pencil className="h-4 w-4 mr-1" />
               Edit
@@ -254,11 +281,11 @@ export function ActivityDetail() {
             <EmailMessageCard key={i} message={msg} defaultOpen={i === 0} />
           ))}
         </div>
-      ) : activity.body ? (
+      ) : displayBody ? (
         <Card>
           <CardContent className="px-4 py-3">
             <pre className="whitespace-pre-wrap break-words font-sans text-sm text-foreground">
-              {activity.body}
+              {displayBody}
             </pre>
           </CardContent>
         </Card>

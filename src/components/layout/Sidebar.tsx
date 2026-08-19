@@ -74,6 +74,8 @@ type NavItem = {
 // to a freshly launched tab). COMING_SOON ("bg-orange-500 text-white")
 // retired 2026-07-03 with the old /nexus placeholder tab.
 const ADMIN_BADGE = "bg-sky-500 text-white";
+// New = the classic red launch tag (Meddy wore it 6/16–7/2; Collateral
+// wears it now per Nathan 8/18 — he picked New over Launched for this one).
 const NEW_BADGE = "bg-red-500 text-white";
 // Nexus launch highlight (Nathan 2026-08-04): a blue-focused gradient
 // pill per his call. Retire once the launch is old news.
@@ -115,8 +117,8 @@ const navItems: NavItem[] = [
   // Collateral opened to every user (Jordan's v1.2 spec change 7,
   // 2026-08-18): the tab is read-only and shows only admin-promoted
   // Current assets, so the admin gate defeated its purpose — reps are the
-  // intended audience. ADMIN badge dropped; the red New badge announces
-  // the new destination without implying a separate launch state.
+  // intended audience. ADMIN badge dropped; the red New tag announces the
+  // new destination (Nathan 8/18: New, not Launched, for this one).
   { to: "/collateral", icon: FolderOpen, label: "Collateral", badge: { label: "New", className: NEW_BADGE } },
   // Forecasting + Analytics moved into /reports as tabs (2026-04-17).
   // "New" badge retired 2026-07-02 (Nathan).

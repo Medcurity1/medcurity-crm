@@ -507,11 +507,11 @@ export function useActiveUsers() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("user_profiles")
-        .select("id, full_name")
+        .select("id, full_name, outreach_phone")
         .eq("is_active", true)
         .order("full_name");
       if (error) throw error;
-      return (data ?? []) as { id: string; full_name: string | null }[];
+      return (data ?? []) as { id: string; full_name: string | null; outreach_phone: string | null }[];
     },
   });
 }
@@ -718,7 +718,7 @@ export function useRepairCampaignWebhook() {
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] });
       if (r?.webhook_id != null) toast.success("Live updates reconnected.");
-      else toast.warning("Smartlead didn't accept the reconnection — tonight's self-repair will retry.");
+      else toast.warning("Smartlead didn't accept the reconnection. Tonight's self-repair will retry.");
     },
     onError: (e) => toast.error("Couldn't reconnect live updates: " + (e as Error).message),
   });
@@ -746,7 +746,7 @@ export function useGenerateCampaignInsights() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] });
       qc.invalidateQueries({ queryKey: ["playbook", "campaign-suggestions"] });
-      toast.success("Fresh insights ready — open the Insights panel to review them.");
+      toast.success("Fresh insights ready. Open the Insights panel to review them.");
     },
     onError: (e) => toast.error("Couldn't generate insights: " + (e as Error).message),
   });
@@ -830,7 +830,7 @@ function useMailchimpRead(action: "ingest" | "sync") {
       qc.invalidateQueries({ queryKey: ["playbook", "newsletters"] });
       if (action === "ingest") {
         const more = r.more_remaining
-          ? " More remain — click Ingest again to continue."
+          ? " More remain. Click Ingest again to continue."
           : "";
         toast.success(`Ingested ${r.ingested ?? 0} new, skipped ${r.skipped ?? 0}.${more}`);
       } else toast.success(`Synced ${r.synced ?? 0} newsletters.`);
@@ -969,7 +969,7 @@ export function useAddNewsletterTraining() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["playbook", "training"] });
-      toast.success("Saved — the AI will use this on future newsletters.");
+      toast.success("Saved. The AI will use this on future newsletters.");
     },
     onError: (e) => toast.error("Couldn't save note: " + (e as Error).message),
   });
@@ -1086,7 +1086,7 @@ export async function fetchRecipientsByList(list: LeadList): Promise<Recipient[]
     // The Lists page refuses to create such a list, so hitting this means a
     // corrupt/legacy filter_config: say so, don't report "matches nobody"
     // (same posture as useFreezeSmartList).
-    if (smartRulesEmpty(rules)) throw new Error("This smart list has no usable rules — open it on the Lists page and set them up again.");
+    if (smartRulesEmpty(rules)) throw new Error("This smart list has no usable rules. Open it on the Lists page and set them up again.");
     const all: Record<string, unknown>[] = [];
     for (let page = 0; page < 50; page++) {
       const { data, error } = await buildSmartQuery(
@@ -1233,7 +1233,7 @@ export function useAddManualOptout() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["report", "do-not-email"] });
-      toast.success("Opted out — this address will no longer be marketed to.");
+      toast.success("Opted out. This address will no longer be marketed to.");
     },
     onError: (e) => toast.error("Couldn't opt out that address: " + (e as Error).message),
   });
@@ -1244,7 +1244,8 @@ export function useAddManualOptout() {
 // ---------------------------------------------------------------------------
 
 const REPLIES_LOOKBACK_DAYS = 30;
-const REPLIES_LIMIT = 50;
+const UNHANDLED_REPLIES_FEED_LIMIT = 100;
+const HANDLED_REPLIES_FEED_LIMIT = 20;
 
 // Raw campaign_events.event_type values that represent a reply — the
 // webhook path stores Smartlead's RAW event name (verified live 2026-07-22
@@ -1270,35 +1271,48 @@ export interface CampaignReplyRow {
   enrollment: { first_name: string | null; last_name: string | null; contact_id: string | null; account_id: string | null; reply_category: string | null } | null;
 }
 
-/** Recent reply campaign_events, newest first, last 30 days, capped at 50 —
- *  the Replies section in CampaignsTab.tsx. One query (campaign + enrollment
- *  embedded) — campaign_events is admin-only RLS, same as everything else
- *  this admin-only tab reads. Matches BOTH the raw and canonical event-type
- *  spelling (REPLY_EVENT_TYPES above) so rows logged by either the real-time
- *  webhook or the daily sweep (S9) show up here. */
+const REPLY_SELECT =
+  "id, campaign_id, enrollment_id, email, payload, occurred_at, created_at, handled_at, " +
+  "campaign:campaigns(id, name), enrollment:campaign_enrollments(first_name, last_name, contact_id, account_id, reply_category)";
+
+/** Recent reply campaign_events for the Replies section. Unhandled rows are
+ *  fetched on their own (they must never fall off the feed because handled
+ *  rows consumed a shared 50-row cap). A short handled preview rides along. */
 export function useCampaignReplies() {
   return useQuery({
     queryKey: ["playbook", "campaign-replies"],
     queryFn: async () => {
       const cutoff = new Date();
       cutoff.setDate(cutoff.getDate() - REPLIES_LOOKBACK_DAYS);
-      const { data, error } = await supabase
-        .from("campaign_events")
-        .select(
-          "id, campaign_id, enrollment_id, email, payload, occurred_at, created_at, " +
-            "campaign:campaigns(id, name), enrollment:campaign_enrollments(first_name, last_name, contact_id, account_id, reply_category)",
-        )
-        .in("event_type", REPLY_EVENT_TYPES)
-        .gte("created_at", cutoff.toISOString())
-        .order("created_at", { ascending: false })
-        .limit(REPLIES_LIMIT);
-      if (error) throw error;
-      // Same to-one-embed cast as fetchActiveEnrollmentsForEmails below —
-      // PostgREST returns a single object for both campaign_id -> campaigns
-      // and enrollment_id -> campaign_enrollments, but the query-builder's
-      // type inference (no generated Database types in this project) sees
-      // them as arrays.
-      return (data ?? []) as unknown as CampaignReplyRow[];
+      const cutoffIso = cutoff.toISOString();
+      const [unhandledRes, handledRes] = await Promise.all([
+        supabase
+          .from("campaign_events")
+          .select(REPLY_SELECT)
+          .in("event_type", REPLY_EVENT_TYPES)
+          .is("handled_at", null)
+          .gte("created_at", cutoffIso)
+          .order("created_at", { ascending: false })
+          .limit(UNHANDLED_REPLIES_FEED_LIMIT),
+        supabase
+          .from("campaign_events")
+          .select(REPLY_SELECT)
+          .in("event_type", REPLY_EVENT_TYPES)
+          .not("handled_at", "is", null)
+          .gte("created_at", cutoffIso)
+          .order("created_at", { ascending: false })
+          .limit(HANDLED_REPLIES_FEED_LIMIT),
+      ]);
+      if (unhandledRes.error) throw unhandledRes.error;
+      if (handledRes.error) throw handledRes.error;
+      const seen = new Set<string>();
+      const merged: CampaignReplyRow[] = [];
+      for (const row of [...(unhandledRes.data ?? []), ...(handledRes.data ?? [])] as unknown as CampaignReplyRow[]) {
+        if (seen.has(row.id)) continue;
+        seen.add(row.id);
+        merged.push(row);
+      }
+      return merged;
     },
   });
 }
@@ -1360,6 +1374,9 @@ export function useMarkReplyHandled() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["playbook", "campaign-replies"] });
       qc.invalidateQueries({ queryKey: ["playbook", "unhandled-reply-counts"] });
+      qc.invalidateQueries({ queryKey: ["activities"] });
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["nexus", "day-queue"] });
     },
     onError: (e) => toast.error("Couldn't mark handled: " + (e as Error).message),
   });
@@ -1605,10 +1622,12 @@ export function useLogReplyCall() {
       account_id: string | null;
       owner_user_id: string | null;
       campaignName: string | null;
+      outcome: "Call - Spoke" | "Call - Left VM" | "Call - No answer";
     }) => {
       const { error } = await supabase.from("activities").insert({
         activity_type: "call",
-        subject: `Call after campaign reply${p.campaignName ? ` — ${p.campaignName}` : ""}`,
+        subject: p.outcome,
+        body: p.campaignName ? `After a campaign reply in ${p.campaignName}.` : "After a campaign reply.",
         contact_id: p.contact_id,
         account_id: p.account_id,
         owner_user_id: p.owner_user_id,

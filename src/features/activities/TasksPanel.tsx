@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { errorMessage } from "@/lib/errors";
 import { toast } from "sonner";
 import type { Activity } from "@/types/crm";
+import { activityTitleForDisplay } from "./activity-display";
 
 interface TasksPanelProps {
   accountId?: string;
@@ -85,7 +86,7 @@ function TaskItem({
             isCompleted && "line-through text-muted-foreground"
           )}
         >
-          {task.subject}
+          {activityTitleForDisplay(task.subject)}
         </p>
         <div className="flex items-center gap-3 mt-0.5">
           <TaskDueChip dueAt={task.due_at} completed={isCompleted} />

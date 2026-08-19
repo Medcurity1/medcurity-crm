@@ -1,4 +1,5 @@
 import { SlidersHorizontal } from "lucide-react";
+import { activityTitleForDisplay } from "@/features/activities/activity-display";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -138,7 +139,7 @@ export function DayQueueTuneList() {
                   />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm">
-                      {item.title?.trim() || "Reminder"}
+                      {activityTitleForDisplay(item.title) || "Reminder"}
                     </p>
                     <p className="truncate text-[11px] text-muted-foreground">
                       {categoryLabel(item.category)}

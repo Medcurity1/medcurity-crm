@@ -165,6 +165,8 @@ export function useCreateActivity() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["activities"] });
       qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["nexus", "day-queue"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
     },
   });
 }
@@ -180,11 +182,30 @@ export function useCompleteActivity() {
         .select()
         .single();
       if (error) throw error;
+      const enrollmentId = (data as { campaign_enrollment_id?: string | null } | null)
+        ?.campaign_enrollment_id;
+      const subject = (data as { subject?: string | null } | null)?.subject ?? "";
+      const isReplyFollowUp =
+        (data as { activity_type?: string } | null)?.activity_type === "task" &&
+        !!enrollmentId &&
+        (/^Follow up with\s+/i.test(subject) || /^Reply from\s+/i.test(subject));
+      if (isReplyFollowUp && enrollmentId) {
+        const { error: handleErr } = await supabase.functions.invoke("playbook-smartlead", {
+          body: { action: "mark-reply-handled", enrollment_id: enrollmentId },
+        });
+        if (handleErr) {
+          console.error("complete-activity: could not mark the campaign reply handled", handleErr);
+        }
+      }
       return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["activities"] });
       qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["nexus", "day-queue"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["playbook", "campaign-replies"] });
+      qc.invalidateQueries({ queryKey: ["playbook", "unhandled-reply-counts"] });
     },
   });
 }
@@ -250,6 +271,7 @@ export function useReopenActivity() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["activities"] });
       qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["nexus", "day-queue"] });
       qc.invalidateQueries({ queryKey: ["dashboard", "my-tasks"] });
     },
   });

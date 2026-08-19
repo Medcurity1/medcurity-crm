@@ -32,6 +32,7 @@ import { errorMessage } from "@/lib/errors";
 import { toast } from "sonner";
 import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import type { Activity } from "@/types/crm";
+import { activityBodyForDisplay, activityTitleForDisplay, isCampaignReplyTask } from "./activity-display";
 
 /**
  * View + edit an existing task. Kept narrow on purpose:
@@ -72,8 +73,12 @@ export function EditTaskDialog({
   // Re-hydrate from the task when it changes.
   useEffect(() => {
     if (!task) return;
-    setSubject(task.subject ?? "");
-    setBody(task.body ?? "");
+    setSubject(activityTitleForDisplay(task.subject));
+    setBody(
+      isCampaignReplyTask(task)
+        ? activityBodyForDisplay(task.body) ?? ""
+        : task.body ?? "",
+    );
     // Convert ISO back to the "YYYY-MM-DDTHH:mm" local datetime-local
     // format the input expects.
     setDueAt(task.due_at ? toLocalInput(task.due_at) : "");
@@ -104,10 +109,14 @@ export function EditTaskDialog({
     try {
       const dueIso = dueAt ? new Date(dueAt).toISOString() : null;
       const reminderFields = buildReminderFields(reminder, dueIso);
+      const displaySubject = activityTitleForDisplay(task.subject);
+      const displayBody = isCampaignReplyTask(task)
+        ? activityBodyForDisplay(task.body) ?? ""
+        : task.body ?? "";
       await update.mutateAsync({
         id: task.id,
-        subject: subject.trim(),
-        body: body.trim() || null,
+        subject: subject.trim() === displaySubject ? (task.subject ?? subject.trim()) : subject.trim(),
+        body: body === displayBody ? (task.body ?? null) : (body.trim() || null),
         due_at: dueIso,
         reminder_schedule: reminderFields.reminder_schedule,
         reminder_at: reminderFields.reminder_at,
@@ -133,8 +142,8 @@ export function EditTaskDialog({
   // typed fields against the original task.
   const dirty =
     !!task &&
-    (subject !== (task.subject ?? "") ||
-      body !== (task.body ?? "") ||
+    (subject !== activityTitleForDisplay(task.subject) ||
+      body !== (isCampaignReplyTask(task) ? (activityBodyForDisplay(task.body) ?? "") : (task.body ?? "")) ||
       dueAt !== (task.due_at ? toLocalInput(task.due_at) : "") ||
       priority !== (task.priority ?? "normal") ||
       // A hand-off is the most consequential edit in this dialog — it

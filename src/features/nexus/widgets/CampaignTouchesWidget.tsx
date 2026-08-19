@@ -19,6 +19,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDate } from "@/lib/formatters";
+import { activityTitleForDisplay } from "@/features/activities/activity-display";
 import { WidgetError } from "./WidgetError";
 import type { NexusWidgetBodyProps } from "../WidgetShell";
 
@@ -157,15 +158,17 @@ export function CampaignTouchesWidget({ widget, searchQuery, onDataUpdated }: Ne
             <div key={task.id} className="flex items-start gap-3 py-1.5">
               <div className="flex-1 min-w-0">
                 <div className="flex items-baseline gap-2 flex-wrap">
-                  <span className="text-sm font-medium truncate">{task.subject}</span>
+                  <span className="text-sm font-medium truncate">{activityTitleForDisplay(task.subject)}</span>
                   {dueLabel && <span className={`text-xs font-medium ${dueColor}`}>{dueLabel}</span>}
                 </div>
                 <div className="flex items-center gap-1.5 mt-0.5 text-xs text-muted-foreground min-w-0">
                   {contactId ? (
                     <Link to={`/contacts/${contactId}`} className="hover:text-primary hover:underline truncate">
-                      {campaignName}
+                      Contact
                     </Link>
-                  ) : campaignId ? (
+                  ) : null}
+                  {contactId && campaignName ? <span>·</span> : null}
+                  {campaignId ? (
                     <Link to={`/playbook?campaign=${campaignId}`} className="hover:text-primary hover:underline truncate">
                       {campaignName}
                     </Link>

@@ -14,7 +14,6 @@ import { Layers, Clock, Wand2 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
-import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/EmptyState";
 import { QueryError } from "@/components/QueryError";
@@ -58,6 +57,7 @@ export function QuickCampaignDialog({
   const smartleadDisabled = sl?.configured === false;
   const [launchOpen, setLaunchOpen] = useState(false);
   const [launchNonce, setLaunchNonce] = useState(0);
+  const [launchMode, setLaunchMode] = useState<"ai" | "template">("template");
   const [launchSeed, setLaunchSeed] = useState<{ template_id: string | null; name: string; steps: CampaignTemplate["steps"] } | null>(null);
   const [launchRecipients, setLaunchRecipients] = useState<Recipient[]>([]);
 
@@ -67,8 +67,8 @@ export function QuickCampaignDialog({
   const withEmail = contacts.filter((c) => !!c.email?.trim());
   const missingEmail = contacts.length - withEmail.length;
 
-  function pickTemplate(t: CampaignTemplate) {
-    const recipients: Recipient[] = withEmail.map((c) => ({
+  function seededRecipients(): Recipient[] {
+    return withEmail.map((c) => ({
       email: (c.email as string).trim(),
       first_name: c.first_name ?? "",
       last_name: c.last_name ?? "",
@@ -76,26 +76,37 @@ export function QuickCampaignDialog({
       contact_id: c.id,
       account_id: c.account_id ?? undefined,
     }));
+  }
+
+  function openWizard(nextMode: "ai" | "template", seed: typeof launchSeed) {
+    setLaunchRecipients(seededRecipients());
+    setLaunchMode(nextMode);
+    setLaunchSeed(seed);
+    setLaunchNonce((n) => n + 1);
+    setLaunchOpen(true);
+  }
+
+  function pickTemplate(t: CampaignTemplate) {
     const label = withEmail.length === 1
       ? contactLabel(withEmail[0])
       : `${withEmail.length} people`;
-    setLaunchRecipients(recipients);
-    setLaunchSeed({ template_id: t.id, name: `${t.name} — ${label}`, steps: t.steps });
-    setLaunchNonce((n) => n + 1);
-    onOpenChange(false);
-    setLaunchOpen(true);
+    openWizard("template", { template_id: t.id, name: `${t.name}: ${label}`, steps: t.steps });
+  }
+
+  function pickCustom() {
+    openWizard("ai", null);
   }
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog open={open && !launchOpen} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Start a campaign</DialogTitle>
             <DialogDescription>
               {contacts.length === 1
-                ? `Pick a sequence for ${contactLabel(contacts[0])}. This starts a new campaign just for them.`
-                : `Pick a sequence for ${contacts.length} people. This starts one new campaign for the group.`}
+                ? `Pick a template for ${contactLabel(contacts[0])}.`
+                : `Pick a template for ${contacts.length} people.`}
             </DialogDescription>
           </DialogHeader>
 
@@ -108,7 +119,7 @@ export function QuickCampaignDialog({
 
           {smartleadDisabled ? (
             <div className="py-8 text-center text-sm text-muted-foreground">
-              Campaigns aren't connected yet — ask an admin to finish Smartlead setup.
+              Campaigns aren't connected yet. Ask an admin to finish Smartlead setup.
             </div>
           ) : withEmail.length === 0 ? (
             <EmptyState
@@ -120,48 +131,61 @@ export function QuickCampaignDialog({
                   : "None of the selected contacts have an email on file."
               }
             />
-          ) : isLoading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)}
-            </div>
-          ) : isError ? (
-            <QueryError
-              message="Couldn't load sequence templates."
-              onRetry={() => refetch()}
-              isRetrying={isFetching}
-            />
-          ) : !templates?.length ? (
-            <EmptyState icon={Wand2} title="No sequence templates yet" description="Build one from Playbook → Campaigns first." />
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {templates.map((t) => {
-                const cat = CATEGORY[t.category] ?? CATEGORY.custom;
-                const Icon = cat.icon;
-                return (
-                  <Card
-                    key={t.id}
-                    className="py-0 cursor-pointer hover:shadow-md hover:border-primary/30 transition-all overflow-hidden"
-                    onClick={() => pickTemplate(t)}
-                  >
-                    <div className={cn("h-1 w-full bg-gradient-to-r", cat.accent)} />
-                    <CardContent className="p-3 space-y-1.5">
-                      <div className="flex items-center gap-2">
-                        <div className={cn("h-6 w-6 rounded-md flex items-center justify-center shrink-0", cat.chip)}>
-                          <Icon className="h-3.5 w-3.5" />
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {isLoading ? (
+                  Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)
+                ) : isError ? (
+                  <div className="sm:col-span-2">
+                    <QueryError
+                      message="Couldn't load templates. You can still start a custom campaign."
+                      onRetry={() => refetch()}
+                      isRetrying={isFetching}
+                    />
+                  </div>
+                ) : (templates ?? []).map((t) => {
+                  const cat = CATEGORY[t.category] ?? CATEGORY.custom;
+                  const Icon = cat.icon;
+                  return (
+                    <button
+                      type="button"
+                      key={t.id}
+                      className="rounded-xl border bg-card text-card-foreground shadow-sm text-left cursor-pointer hover:shadow-md hover:border-primary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-all overflow-hidden"
+                      onClick={() => pickTemplate(t)}
+                    >
+                      <div className={cn("h-1 w-full bg-gradient-to-r", cat.accent)} />
+                      <div className="p-3 space-y-1.5">
+                        <div className="flex items-center gap-2">
+                          <div className={cn("h-6 w-6 rounded-md flex items-center justify-center shrink-0", cat.chip)}>
+                            <Icon className="h-3.5 w-3.5" />
+                          </div>
+                          <h4 className="font-semibold text-sm truncate">{t.name}</h4>
                         </div>
-                        <h4 className="font-semibold text-sm truncate">{t.name}</h4>
+                        <div className="flex items-center justify-between gap-2">
+                          <SequenceMiniPreview steps={t.steps} />
+                          <span className="text-[11px] text-muted-foreground inline-flex items-center gap-2 shrink-0">
+                            <span className="inline-flex items-center gap-1"><Layers className="h-3 w-3" />{t.step_count ?? t.steps.length}</span>
+                            {t.duration_days != null && (
+                              <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{t.duration_days}d</span>
+                            )}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <SequenceMiniPreview steps={t.steps} />
-                        <span className="text-[11px] text-muted-foreground inline-flex items-center gap-2 shrink-0">
-                          <span className="inline-flex items-center gap-1"><Layers className="h-3 w-3" />{t.step_count ?? t.steps.length}</span>
-                          <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{t.duration_days ?? "—"}d</span>
-                        </span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                className="w-full rounded-lg border border-dashed px-3 py-2 text-left text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={pickCustom}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Wand2 className="h-3.5 w-3.5" />
+                  Or start a custom campaign
+                </span>
+              </button>
             </div>
           )}
         </DialogContent>
@@ -172,8 +196,11 @@ export function QuickCampaignDialog({
       <CampaignWizard
         key={launchNonce}
         open={launchOpen}
-        onOpenChange={setLaunchOpen}
-        mode="template"
+        onOpenChange={(nextOpen) => {
+          setLaunchOpen(nextOpen);
+          if (!nextOpen) onOpenChange(false);
+        }}
+        mode={launchMode}
         templateSeed={launchSeed ?? { template_id: null, name: "", steps: [] }}
         initialRecipients={launchRecipients}
       />

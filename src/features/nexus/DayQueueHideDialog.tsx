@@ -1,3 +1,4 @@
+import { activityTitleForDisplay } from "@/features/activities/activity-display";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -28,7 +29,7 @@ export function DayQueueHideDialog({
 }) {
   if (!row) return null;
   const copy = hidePromptCopy(row);
-  const title = row.title?.trim() || "This reminder";
+  const title = activityTitleForDisplay(row.title) || "This reminder";
 
   return (
     <Dialog

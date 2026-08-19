@@ -29,6 +29,7 @@ import {
   DUE_BUCKET_LABELS,
 } from "./taskOrder";
 import { TaskDueChip } from "./TaskDueChip";
+import { activityTitleForDisplay } from "./activity-display";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import type { Activity, ActivityType } from "@/types/crm";
@@ -562,7 +563,7 @@ export function ActivitiesListPage() {
                           className="text-primary hover:underline"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {a.subject}
+                          {activityTitleForDisplay(a.subject)}
                         </Link>
                       </TableCell>
                       <TableCell className="text-muted-foreground">

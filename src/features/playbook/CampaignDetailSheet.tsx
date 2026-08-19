@@ -76,7 +76,7 @@ function enrollmentSubtitle(e: CampaignEnrollmentRow): string | null {
   if (e.status === "replied" && e.replied_at) return `Replied ${formatRelativeDate(e.replied_at)}`;
   if (e.status === "bounced" && e.bounced_at) return `Bounced ${formatRelativeDate(e.bounced_at)}`;
   if (e.status === "stopped") return e.paused_reason === "stopped_by_user" ? "Stopped by a teammate" : "Stopped";
-  if (e.status === "paused" && e.paused_reason === "meeting_booked") return "Paused — opportunity opened";
+  if (e.status === "paused" && e.paused_reason === "meeting_booked") return "Paused: opportunity opened";
   if (e.status === "paused" && e.paused_reason === "paused_by_user") return "Paused by a teammate";
   if (e.status === "completed") return "Finished the sequence";
   return null;
@@ -145,7 +145,7 @@ export function CampaignDetailSheet({
       {
         onSuccess: (r) => {
           if (r.warning) { toast.warning(r.warning); return; }
-          if (action === "stop") toast.success("Stopped — their scheduled tasks are cancelled.");
+          if (action === "stop") toast.success("Stopped. Their scheduled tasks are cancelled.");
           else if (action === "pause") toast.success("Paused.");
           else toast.success("Resumed.");
         },
@@ -306,7 +306,7 @@ export function CampaignDetailSheet({
                     touchStats.unattributed > 0
                       ? `${touchStats.unattributed} event${touchStats.unattributed === 1 ? "" : "s"} didn't say which email they belonged to and aren't counted above.`
                       : null,
-                    touchStats.capped ? "Counts stopped at the first 10,000 events — treat them as a floor." : null,
+                    touchStats.capped ? "Counts stopped at the first 10,000 events. Treat them as a floor." : null,
                   ].filter(Boolean).join(" ")}
                 </p>
               )}
@@ -330,7 +330,7 @@ export function CampaignDetailSheet({
               </p>
               {influence.capped && (
                 <p className="text-[11px] text-muted-foreground">
-                  Deal totals stopped at a read cap — treat the dollars as a floor, not the full picture.
+                  Deal totals stopped at a read cap. Treat the dollars as a floor, not the full picture.
                 </p>
               )}
               <div className="space-y-1">
@@ -392,7 +392,7 @@ export function CampaignDetailSheet({
                   <TableBody>
                     {filteredEnrollments.map((e) => {
                       const meta = ENROLLMENT_STATUS_META[e.status] ?? { label: e.status, className: "" };
-                      const displayName = formatName(e.first_name ?? "", e.last_name ?? "").trim() || e.email || "—";
+                      const displayName = formatName(e.first_name ?? "", e.last_name ?? "").trim() || e.email || "Unknown";
                       const subtitle = enrollmentSubtitle(e);
                       // current_step only advances once campaign_events sees
                       // a step-attributable send (Smartlead doesn't reliably
@@ -433,7 +433,7 @@ export function CampaignDetailSheet({
                               {subtitle && <p className="text-[11px] text-muted-foreground">{subtitle}</p>}
                             </div>
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">{e.company || "—"}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">{e.company || "None"}</TableCell>
                           <TableCell>
                             <Badge variant="secondary" className={cn("text-[10px]", meta.className)} title={formatDateTime(e.last_event_at)}>
                               {meta.label}
@@ -494,7 +494,7 @@ export function CampaignDetailSheet({
               </div>
             ) : !events?.length ? (
               <p className="text-xs text-muted-foreground">
-                Nothing yet — this fills in once Smartlead reports sends, opens, or replies.
+                Nothing yet. This fills in once Smartlead reports sends, opens, or replies.
               </p>
             ) : (
               <ul className="space-y-1.5">
@@ -520,7 +520,7 @@ export function CampaignDetailSheet({
           <AlertDialogHeader>
             <AlertDialogTitle>Stop this person?</AlertDialogTitle>
             <AlertDialogDescription>
-              Stops remaining emails and cancels their scheduled tasks — can't be undone for this person.
+              Stops remaining emails and cancels their scheduled tasks. Can't be undone for this person.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

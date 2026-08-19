@@ -37,6 +37,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { useDialogDiscardGuard } from "@/hooks/useDialogDiscardGuard";
 import type { ActivityType, Activity } from "@/types/crm";
+import { activityBodyForDisplay, activityTitleForDisplay, isCampaignReplyTask } from "./activity-display";
 
 interface ActivityFormProps {
   open: boolean;
@@ -225,8 +226,10 @@ export function ActivityForm({
       const dueLocal = activity.due_at ? toLocalSlice(activity.due_at) : "";
       form.reset({
         activity_type: activity.activity_type,
-        subject: activity.subject ?? "",
-        body: activity.body ?? "",
+        subject: activityTitleForDisplay(activity.subject),
+        body: isCampaignReplyTask(activity)
+          ? activityBodyForDisplay(activity.body) ?? ""
+          : activity.body ?? "",
         activity_date: activity.activity_date
           ? activity.activity_date.slice(0, 10)
           : activity.created_at
@@ -323,8 +326,12 @@ export function ActivityForm({
         {
           id: activity.id,
           activity_type: values.activity_type,
-          subject: values.subject,
-          body: values.body || null,
+          subject: isCampaignReplyTask(activity) && values.subject === activityTitleForDisplay(activity.subject)
+            ? activity.subject
+            : values.subject,
+          body: isCampaignReplyTask(activity) && (values.body || "") === (activityBodyForDisplay(activity.body) ?? "")
+            ? activity.body
+            : values.body || null,
           activity_date: activityDateIso,
           due_at: dueAtIso,
           contact_id: resolvedContactId,
@@ -391,6 +398,7 @@ export function ActivityForm({
   }
 
   const selectedType = form.watch("activity_type");
+  const isCampaignTask = isCampaignReplyTask(activity);
   // Migrated to the shared guard (2026-08-17) — see EditTaskDialog.tsx for
   // why: it also covers the dialog's own X button, and shows an actual
   // confirm instead of silently swallowing the dismissal.
@@ -399,22 +407,27 @@ export function ActivityForm({
   return (
     <>
     <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{isEditing ? "Edit Activity" : "Log Activity"}</DialogTitle>
+          <DialogTitle>{isEditing ? (selectedType === "task" ? "Edit task" : "Edit activity") : "Log activity"}</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
           {/* Activity type selector */}
           <div className="space-y-2">
             <Label>Type</Label>
-            <div className="flex gap-1">
+            {isCampaignTask ? (
+              <div className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+                <CheckSquare className="h-4 w-4 text-primary" />
+                Campaign reply follow-up
+              </div>
+            ) : <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {activityTypes.map(({ value, label, icon: Icon }) => (
                 <button
                   key={value}
                   type="button"
                   onClick={() => form.setValue("activity_type", value)}
-                  className={`flex flex-1 flex-col items-center gap-1 rounded-md border px-2 py-2 text-xs transition-colors ${
+                  className={`flex min-w-0 flex-col items-center gap-1 rounded-md border px-2 py-2 text-xs transition-colors ${
                     selectedType === value
                       ? "border-primary bg-primary/5 text-primary"
                       : "border-border text-muted-foreground hover:bg-muted"
@@ -424,7 +437,7 @@ export function ActivityForm({
                   {label}
                 </button>
               ))}
-            </div>
+            </div>}
             {form.formState.errors.activity_type && (
               <p className="text-sm text-destructive">
                 {form.formState.errors.activity_type.message}
@@ -458,7 +471,7 @@ export function ActivityForm({
                   return (
                     <option key={c.id} value={c.id}>
                       {name}
-                      {c.title ? ` — ${c.title}` : ""}
+                      {c.title ? ` (${c.title})` : ""}
                     </option>
                   );
                 })}
@@ -521,7 +534,7 @@ export function ActivityForm({
               id="body"
               {...form.register("body")}
               placeholder="Optional details..."
-              rows={3}
+              rows={isCampaignTask ? 6 : 4}
             />
           </div>
 
@@ -589,7 +602,7 @@ export function ActivityForm({
               (separate from when the task is due). */}
           <div className="space-y-1">
             <Label htmlFor="activity_date" className="text-xs text-muted-foreground">
-              Activity Date {selectedType === "task" && "(when logged — optional)"}
+              Activity Date {selectedType === "task" && "(when logged, optional)"}
             </Label>
             <Input
               id="activity_date"

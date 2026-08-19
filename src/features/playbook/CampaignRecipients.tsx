@@ -21,6 +21,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Upload, X, Loader2, ShieldAlert, Users2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -51,6 +52,9 @@ export function CampaignRecipients({
   suppressionOverrides, setSuppressionOverrides,
   activeEnrollments, setActiveEnrollments,
   enrollmentOverrides, setEnrollmentOverrides,
+  compact = false,
+  onChecksPendingChange,
+  onChecksFailedChange,
 }: {
   recipients: Recipient[];
   setRecipients: (r: Recipient[]) => void;
@@ -63,6 +67,12 @@ export function CampaignRecipients({
   setActiveEnrollments: (rows: ActiveEnrollmentEntry[]) => void;
   enrollmentOverrides: string[];
   setEnrollmentOverrides: (emails: string[]) => void;
+  /** Right-click/contact-detail launches already know their audience. Keep
+   *  the safety rails mounted, but replace the full audience builder with a
+   *  compact, locked confirmation. */
+  compact?: boolean;
+  onChecksPendingChange?: (pending: boolean) => void;
+  onChecksFailedChange?: (failed: boolean) => void;
 }) {
   const [recipientTag, setRecipientTag] = useState("");
   const [tagLoading, setTagLoading] = useState(false);
@@ -78,8 +88,12 @@ export function CampaignRecipients({
   const [showAll, setShowAll] = useState(false);
   const [showSuppressed, setShowSuppressed] = useState(false);
   const [showAlreadyEnrolled, setShowAlreadyEnrolled] = useState(false);
-  const [suppressionLoading, setSuppressionLoading] = useState(false);
-  const [enrollmentLoading, setEnrollmentLoading] = useState(false);
+  const [suppressionLoading, setSuppressionLoading] = useState(recipients.length > 0);
+  const [enrollmentLoading, setEnrollmentLoading] = useState(recipients.length > 0);
+  const [suppressionError, setSuppressionError] = useState(false);
+  const [enrollmentError, setEnrollmentError] = useState(false);
+  const [safetyCheckNonce, setSafetyCheckNonce] = useState(0);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [csv, setCsv] = useState<{ header: string[]; rows: string[][]; mapping: RecipientField[] } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const suppressionReqId = useRef(0);
@@ -92,32 +106,48 @@ export function CampaignRecipients({
   // result clobbered by a slower earlier response.
   useEffect(() => {
     const id = ++suppressionReqId.current;
-    if (!recipients.length) { setSuppression([]); return; }
+    if (!recipients.length) {
+      setSuppression([]); setSuppressionLoading(false); setSuppressionError(false); return;
+    }
     setSuppressionLoading(true);
+    setSuppressionError(false);
     fetchSuppressionForEmails(recipients.map((r) => r.email))
       .then((rows) => { if (suppressionReqId.current === id) setSuppression(rows); })
       .catch((e) => {
         if (suppressionReqId.current === id) {
+          setSuppressionError(true);
           toast.error("Couldn't check the Do-Not-Email list: " + (e as Error).message);
         }
       })
       .finally(() => { if (suppressionReqId.current === id) setSuppressionLoading(false); });
-  }, [recipients, setSuppression]);
+  }, [recipients, setSuppression, safetyCheckNonce]);
 
   // Same pattern, checking "already actively enrolled elsewhere" instead.
   useEffect(() => {
     const id = ++enrollmentReqId.current;
-    if (!recipients.length) { setActiveEnrollments([]); return; }
+    if (!recipients.length) {
+      setActiveEnrollments([]); setEnrollmentLoading(false); setEnrollmentError(false); return;
+    }
     setEnrollmentLoading(true);
+    setEnrollmentError(false);
     fetchActiveEnrollmentsForEmails(recipients.map((r) => r.email))
       .then((rows) => { if (enrollmentReqId.current === id) setActiveEnrollments(rows); })
       .catch((e) => {
         if (enrollmentReqId.current === id) {
+          setEnrollmentError(true);
           toast.error("Couldn't check existing enrollments: " + (e as Error).message);
         }
       })
       .finally(() => { if (enrollmentReqId.current === id) setEnrollmentLoading(false); });
-  }, [recipients, setActiveEnrollments]);
+  }, [recipients, setActiveEnrollments, safetyCheckNonce]);
+
+  useEffect(() => {
+    onChecksPendingChange?.(suppressionLoading || enrollmentLoading);
+  }, [suppressionLoading, enrollmentLoading, onChecksPendingChange]);
+
+  useEffect(() => {
+    onChecksFailedChange?.(suppressionError || enrollmentError);
+  }, [suppressionError, enrollmentError, onChecksFailedChange]);
 
   const partition = useMemo(
     () => partitionSuppression(recipients, (r) => r.email, suppression, suppressionOverrides),
@@ -204,8 +234,9 @@ export function CampaignRecipients({
     // The cap is its own count (adversarial review) — a list blowing past
     // 10,000 is not "dupes/invalid" and must not be reported as such.
     let msg = `${added} added${skipped ? `, ${skipped} skipped (dupes/invalid)` : ""}.`;
-    if (capped) msg += ` ${capped} not added — the 10,000-recipient limit was reached.`;
-    toast.success(msg);
+    if (capped) msg += ` ${capped} not added. The 10,000-recipient limit was reached.`;
+    if (added === 0 && !capped) toast.info(msg);
+    else toast.success(msg);
   }
 
   async function loadTag(tagId: string) {
@@ -235,7 +266,7 @@ export function CampaignRecipients({
         // subset into a campaign (adversarial review). At this team's
         // sending rates an audience this size is a mistake, not a plan.
         toast.error(
-          `That list has ${recs.length.toLocaleString()} people — too many for one campaign. ` +
+          `That list has ${recs.length.toLocaleString()} people, too many for one campaign. ` +
           `Narrow the list (or split it) to under ${LIST_AUDIENCE_CEILING.toLocaleString()} and try again.`,
         );
       } else {
@@ -274,11 +305,11 @@ export function CampaignRecipients({
     setPasted("");
   }
 
-  function clearAll() {
-    if (!confirm("Clear all recipients?")) return;
+  function confirmClearAll() {
     setRecipients([]);
     setSuppressionOverrides([]);
     setEnrollmentOverrides([]);
+    setClearConfirmOpen(false);
   }
 
   const hasEmailMapped = csv?.mapping.includes("email");
@@ -286,6 +317,31 @@ export function CampaignRecipients({
 
   return (
     <div className="space-y-4">
+      {compact && (
+        <div className="rounded-lg border bg-muted/25 px-3 py-2.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Going to</p>
+              <p className="text-sm font-semibold truncate">
+                {recipients.length === 1
+                  ? ([recipients[0].first_name, recipients[0].last_name].filter(Boolean).join(" ") || recipients[0].email)
+                  : `${recipients.length} people`}
+              </p>
+              {recipients.length === 1 && (
+                <p className="text-xs text-muted-foreground truncate">{recipients[0].email}</p>
+              )}
+            </div>
+            <span className="shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+              Recipient locked
+            </span>
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Pulse checks Do-Not-Email status and other active campaigns automatically before launch.
+          </p>
+        </div>
+      )}
+
+      {!compact && <>
       {/* Source 1: tag */}
       <div className="space-y-1">
         <Label className="text-xs">From a contact tag (custom list)</Label>
@@ -307,7 +363,7 @@ export function CampaignRecipients({
         <div className="space-y-1">
           <Label className="text-xs">From a saved list</Label>
           {listsError ? (
-            <p className="text-xs text-amber-600">Couldn't load your saved lists — reopen this step to retry.</p>
+            <p className="text-xs text-amber-600">Couldn't load your saved lists. Reopen this step to retry.</p>
           ) : (
             <>
               <div className="flex items-center gap-2">
@@ -316,7 +372,7 @@ export function CampaignRecipients({
                   <SelectContent>
                     {(lists ?? []).map((l) => (
                       <SelectItem key={l.id} value={l.id}>
-                        {l.name}{l.is_dynamic ? " (smart — resolved when you pick it)" : ""}
+                        {l.name}{l.is_dynamic ? " (smart, resolved when you pick it)" : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -380,13 +436,14 @@ export function CampaignRecipients({
         <Textarea rows={2} placeholder="one@x.com, two@y.com…" value={pasted} onChange={(e) => setPasted(e.target.value)} />
         <Button size="sm" variant="outline" onClick={applyPasted} disabled={!pasted.trim()}>Add pasted emails</Button>
       </div>
+      </>}
 
       {/* Recipient table */}
       <div className="space-y-1">
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium">{recipients.length} recipients</p>
-          {recipients.length > 0 && (
-            <Button size="xs" variant="ghost" className="text-destructive" onClick={clearAll}>Clear all</Button>
+          {!compact && recipients.length > 0 && (
+            <Button size="xs" variant="ghost" className="text-destructive" onClick={() => setClearConfirmOpen(true)}>Clear all</Button>
           )}
         </div>
 
@@ -394,6 +451,14 @@ export function CampaignRecipients({
           <p className="text-xs text-muted-foreground flex items-center gap-1 flex-wrap">
             {suppressionLoading || enrollmentLoading ? (
               <><Loader2 className="h-3 w-3 animate-spin" /> Checking the Do-Not-Email list and existing enrollments…</>
+            ) : suppressionError || enrollmentError ? (
+              <>
+                <ShieldAlert className="h-3.5 w-3.5 text-amber-600" />
+                <span className="font-medium text-amber-600">Safety check incomplete.</span>
+                <Button type="button" size="xs" variant="outline" className="h-6" onClick={() => setSafetyCheckNonce((n) => n + 1)}>
+                  Retry checks
+                </Button>
+              </>
             ) : (
               <>
                 {recipients.length} selected → <span className="font-medium text-foreground">{sendableCount} eligible</span>
@@ -440,10 +505,12 @@ export function CampaignRecipients({
                       </span>
                     )}
                   </span>
-                  <button type="button" className="text-muted-foreground hover:text-destructive shrink-0"
-                    onClick={() => setRecipients(recipients.filter((x) => x.email !== r.email))}>
-                    <X className="h-3.5 w-3.5" />
-                  </button>
+                  {!compact && (
+                    <button type="button" className="text-muted-foreground hover:text-destructive shrink-0"
+                      onClick={() => setRecipients(recipients.filter((x) => x.email !== r.email))}>
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -494,7 +561,7 @@ export function CampaignRecipients({
                       </span>
                       <span className={checked ? "shrink-0 text-[10px] font-medium text-emerald-600" : "shrink-0 text-[10px] font-medium text-muted-foreground"}>
                         {locked
-                          ? (reasonCodes.includes("optout_unsubscribed") ? "Unsubscribed — can't include" : "Opted out — can't include")
+                          ? (reasonCodes.includes("optout_unsubscribed") ? "Unsubscribed, can't include" : "Opted out, can't include")
                           : checked ? "Included anyway" : "Excluded"}
                       </span>
                     </label>
@@ -504,7 +571,7 @@ export function CampaignRecipients({
             )}
             <p className="px-2 py-1.5 text-[11px] text-muted-foreground border-t">
               Checked people are added to the campaign anyway. Everyone else here is left out of the send.
-              People who unsubscribed or opted out can't be included — that choice is theirs.
+              People who unsubscribed or opted out can't be included. That choice is theirs.
             </p>
           </div>
         )}
@@ -548,11 +615,20 @@ export function CampaignRecipients({
               </div>
             )}
             <p className="px-2 py-1.5 text-[11px] text-muted-foreground border-t">
-              Checked people are enrolled in this campaign too. Everyone else here is left out — they'll keep getting the campaign they're already in.
+              Checked people are enrolled in this campaign too. Everyone else here is left out; they'll keep getting the campaign they're already in.
             </p>
           </div>
         )}
       </div>
+      <ConfirmDialog
+        open={clearConfirmOpen}
+        onOpenChange={setClearConfirmOpen}
+        title="Clear this audience?"
+        description={`Remove all ${recipients.length} selected ${recipients.length === 1 ? "person" : "people"} from this campaign setup?`}
+        confirmLabel="Clear audience"
+        onConfirm={confirmClearAll}
+        destructive
+      />
     </div>
   );
 }

@@ -43,7 +43,7 @@ export function StyleGuideDialog({
     <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[88vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>{type ? LABEL[type] : ""} — style guide</DialogTitle>
+          <DialogTitle>{type ? LABEL[type] : ""} style guide</DialogTitle>
           <DialogDescription>
             What the AI has learned about this newsletter's voice and structure. Edit it by hand, or regenerate it from
             your recent sends. It's applied to every new draft of this type.
@@ -64,7 +64,7 @@ export function StyleGuideDialog({
         ) : (
           <Textarea
             className="flex-1 min-h-[340px] font-mono text-xs"
-            placeholder="No style guide yet — click 'Regenerate from sends' to build one from your past issues."
+            placeholder="No style guide yet. Click 'Regenerate from sends' to build one from your past issues."
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
