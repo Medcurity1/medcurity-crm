@@ -615,7 +615,7 @@ export function CampaignWizard({
   }
 
   const canGenerate = description.trim().length >= 20;
-  const progress = builderProgress(flow === "template" ? "template" : "ai", step, hasLockedRecipients);
+  const progress = builderProgress(mode, step, hasLockedRecipients);
   const displayTotal = progress.displayTotal;
   const displayStep = progress.displayStep;
   const templateEmailSteps = templateSteps.filter((s) => s.channel === "EMAIL_AUTO");
@@ -983,10 +983,12 @@ export function CampaignWizard({
           {/* Template / write-my-own sequence editor */}
           {((step === 1 && flow === "template" && editingSequence) || editingSequence) && (
             <div className="space-y-3">
-              <div className="space-y-1">
-                <Label className="text-xs">Campaign name</Label>
-                <Input value={templateName} onChange={(e) => setTemplateName(e.target.value)} placeholder="What should this launch be called?" />
-              </div>
+              {step !== 1 && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Campaign name</Label>
+                  <Input value={templateName} onChange={(e) => setTemplateName(e.target.value)} placeholder="What should this launch be called?" />
+                </div>
+              )}
 
               {templateEmailSteps.length > 0 && (
                 <div className="space-y-2">
