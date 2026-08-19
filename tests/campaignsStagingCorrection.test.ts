@@ -96,6 +96,32 @@ describe("Aurora build method cards", () => {
     expect(wizard).toMatch(/campaigns-start-choice/);
     expect(wizard).toMatch(/mode === "template" \? "template" : "choose"/);
     expect(wizard).toMatch(/aria-pressed=\{selected\}/);
+    expect(wizard).toMatch(/customSequence/);
+  });
+});
+
+describe("Build sequence authoring correction", () => {
+  it("starts Write my own as a compact recommended sequence with optional Customize", () => {
+    const wizard = visibleSource("src/features/playbook/CampaignWizard.tsx");
+    expect(wizard).toMatch(/Recommended sequence/);
+    expect(wizard).toMatch(/Customize sequence/);
+    expect(wizard).toMatch(/recommendedCustomSequence\(\)/);
+    expect(wizard).toMatch(/setEditingSequence\(false\)/);
+    expect(wizard).toMatch(/SequenceStepList/);
+    expect(wizard).toMatch(/launchOnlyNotice/);
+    expect(wizard).not.toMatch(/useSaveTemplate/);
+  });
+
+  it("reveals field-specific copy errors only after touch and blur or a continue attempt", () => {
+    const list = visibleSource("src/features/playbook/SequenceStepList.tsx");
+    const wizard = visibleSource("src/features/playbook/CampaignWizard.tsx");
+    expect(list).toMatch(/shouldShowFieldValidation/);
+    expect(list).toMatch(/Add a subject/);
+    expect(list).toMatch(/Add the email wording/);
+    expect(list.match(/Add the email wording/g)).toHaveLength(1);
+    expect(wizard).toMatch(/setSequenceAttempted\(true\)/);
+    expect(wizard).not.toMatch(/This email still needs wording/);
+    expect(wizard).not.toMatch(/One email above still needs wording/);
   });
 });
 

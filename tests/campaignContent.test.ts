@@ -19,6 +19,33 @@ describe("campaign copy authoring", () => {
       .toBe("<p>Hello &lt;team&gt;<br>line two</p><p>Thanks</p>");
   });
 
+  it("round-trips internal and trailing spaces while typing", () => {
+    for (const sample of ["Hello  world", "Hello ", "  Hello", "Hello \nworld "]) {
+      expect(templateToAuthorText(authorTextToTemplateHtml(sample))).toBe(sample);
+    }
+  });
+
+  it("round-trips line breaks and blank lines while typing", () => {
+    expect(authorTextToTemplateHtml("Hello\n")).toBe("<p>Hello<br></p>");
+    expect(templateToAuthorText(authorTextToTemplateHtml("Hello\n"))).toBe("Hello\n");
+    expect(templateToAuthorText(authorTextToTemplateHtml("Hello\nworld"))).toBe("Hello\nworld");
+    expect(templateToAuthorText(authorTextToTemplateHtml("Hello\n\nThanks"))).toBe("Hello\n\nThanks");
+    expect(templateToAuthorText(authorTextToTemplateHtml("Hello\n\n"))).toBe("Hello\n\n");
+  });
+
+  it("treats whitespace-only copy as empty", () => {
+    expect(authorTextToTemplateHtml("   ")).toBe("");
+    expect(authorTextToTemplateHtml("\n\n")).toBe("");
+    expect(authorTextToTemplateHtml(" \n ")).toBe("");
+  });
+
+  it("does not trim live author text on every conversion", () => {
+    expect(authorTextToTemplateHtml("Hello ")).toBe("<p>Hello </p>");
+    expect(authorTextToTemplateHtml("Hello\n")).toBe("<p>Hello<br></p>");
+    expect(templateToAuthorText("<p>Hello </p>")).toBe("Hello ");
+    expect(templateToAuthorText("<p>Hello<br></p>")).toBe("Hello\n");
+  });
+
   it("adds missing-name and missing-company fallbacks automatically", () => {
     const protectedCopy = protectCampaignPersonalization(
       "Hi {{first_name}}, welcome to {{company}}. {{sender_name}}",

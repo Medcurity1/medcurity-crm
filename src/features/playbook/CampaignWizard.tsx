@@ -3,10 +3,10 @@
 //     writes the email sequence (Claude).
 //   - "template" (Campaigns overhaul S3): opened from TemplatesSection's
 //     "Use this template" or SequenceEditor's "Launch this sequence" — skips
-//     Describe, edits a template's own EMAIL_AUTO steps instead of an
-//     AI-generated sequence, and carries the non-email (CALL/LINKEDIN/
-//     EMAIL_HYBRID) steps through read-only (they become tasks at launch,
-//     not something this wizard edits).
+//     Describe and seeds this launch from the template's steps. Write my own
+//     uses the same per-launch editor. Add/remove/reorder, day/timing, and
+//     EMAIL_AUTO / EMAIL_HYBRID / CALL / LINKEDIN are all editable here.
+//     Edits apply to THIS launch only; the saved template is never written.
 // Recipients come from a contact tag, a CSV upload, or pasted emails; Launch
 // creates the campaign in Smartlead AND enrolls every recipient
 // (campaign_enrollments) — see playbook-smartlead/index.ts's `launch`
@@ -39,6 +39,7 @@ import { useTags } from "@/features/tags/api";
 import { formatRelativeDate } from "@/lib/formatters";
 import { CampaignRecipients } from "./CampaignRecipients";
 import { SequenceTimeline } from "./SequenceTimeline";
+import { SequenceStepList } from "./SequenceStepList";
 import { CATEGORY } from "./template-category";
 import { builderProgress, initialLaunchStep, resumeLaunchStep } from "./campaign-launch";
 import { partitionSuppression, normalizeEmail, type SuppressionEntry } from "./suppression";
@@ -51,6 +52,7 @@ import {
   insertAuthorToken,
   templateToAuthorText,
 } from "./campaign-content";
+import { incompleteAutoEmails, recommendedCustomSequence } from "./sequence-authoring";
 import {
   useGenerateCampaign, useSuggestCampaign, useRegenerateEmail, useEmailAccounts, useLaunchCampaign,
   useInboxHealth, useSmartleadStatus, useActiveUsers, useCampaignTemplates, smartleadUrl,
@@ -131,6 +133,7 @@ interface CampaignDraftState {
   v: 1;
   mode: "ai" | "template";
   flow?: "choose" | "ai" | "template";
+  customSequence?: boolean;
   step: Step;
   description: string;
   campaign: GeneratedCampaign | null;
@@ -171,6 +174,7 @@ function parseCampaignDraftState(json: unknown): CampaignDraftState | null {
   if (typeof s.adaptive !== "boolean") return null;
   if (typeof s.leadsPerDay !== "number") return null;
   if (typeof s.minGap !== "number") return null;
+  if (s.customSequence !== undefined && typeof s.customSequence !== "boolean") return null;
   return s as unknown as CampaignDraftState;
 }
 
@@ -278,7 +282,9 @@ export function CampaignWizard({
     templateSeed?.steps ? templateSeed.steps.map((s) => ({ ...s })) : [],
   );
   const [flow, setFlow] = useState<"choose" | "ai" | "template">(mode === "template" ? "template" : "choose");
+  const [customSequence, setCustomSequence] = useState(false);
   const [editingSequence, setEditingSequence] = useState(false);
+  const [sequenceAttempted, setSequenceAttempted] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const gen = useGenerateCampaign();
@@ -407,7 +413,7 @@ export function CampaignWizard({
     if (!open) { autosaveBaselineRef.current = null; return; }
     if (launch.isPending || launchResult || !hasMeaningfulContent) return;
     const state: CampaignDraftState = {
-      v: 1, mode, flow, step, description, campaign, templateName, templateSteps,
+      v: 1, mode, flow, customSequence, step, description, campaign, templateName, templateSteps,
       recipients, suppressionOverrides, enrollmentOverrides, inboxId, ownerId,
       autoStart, adaptive, leadsPerDay, minGap,
     };
@@ -428,7 +434,7 @@ export function CampaignWizard({
     return () => clearTimeout(t);
   }, [
     open, launch.isPending, launchResult, hasMeaningfulContent,
-    mode, flow, step, description, campaign, templateName, templateSteps,
+    mode, flow, customSequence, step, description, campaign, templateName, templateSteps,
     recipients, suppressionOverrides, enrollmentOverrides, inboxId, ownerId,
     autoStart, adaptive, leadsPerDay, minGap,
   ]);
@@ -446,6 +452,9 @@ export function CampaignWizard({
     setDescription(s.description); setCampaign(s.campaign);
     setTemplateName(s.templateName); setTemplateSteps(s.templateSteps);
     setFlow(s.flow ?? (s.campaign ? "ai" : s.templateSteps.length ? "template" : mode === "template" ? "template" : "choose"));
+    setCustomSequence(Boolean(s.customSequence));
+    setEditingSequence(false);
+    setSequenceAttempted(false);
     setRecipients(s.recipients);
     setSuppressionOverrides(s.suppressionOverrides); setEnrollmentOverrides(s.enrollmentOverrides);
     setInboxId(s.inboxId); setOwnerId(s.ownerId);
@@ -474,7 +483,8 @@ export function CampaignWizard({
     setTemplateName(templateSeed?.name ?? "");
     setTemplateSteps(templateSeed?.steps ? templateSeed.steps.map((s) => ({ ...s })) : []);
     setFlow(mode === "template" ? "template" : "choose");
-    setEditingSequence(false); setSettingsOpen(false);
+    setCustomSequence(false);
+    setEditingSequence(false); setSequenceAttempted(false); setSettingsOpen(false);
     setConfirmOpen(false); setDraftBanner(null); draftIdRef.current = null;
     autosaveBaselineRef.current = null;
   }
@@ -529,10 +539,6 @@ export function CampaignWizard({
   }
   function toggleCode(seq: number) {
     setCodeView((s) => { const n = new Set(s); n.has(seq) ? n.delete(seq) : n.add(seq); return n; });
-  }
-
-  function patchTemplateStep(order: number, patch: Partial<SequenceStep>) {
-    setTemplateSteps((steps) => steps.map((s) => (s.order === order ? { ...s, ...patch } : s)));
   }
 
   function handleLaunchSuccess(r: {
@@ -641,22 +647,34 @@ export function CampaignWizard({
   const displayStep = progress.displayStep;
   const templateEmailSteps = templateSteps.filter((s) => s.channel === "EMAIL_AUTO");
   const templateTaskSteps = templateSteps.filter((s) => s.channel !== "EMAIL_AUTO");
+  const sequencePreviewContext = {
+    firstName: recipients[0]?.first_name,
+    recipientEmail: recipients[0]?.email,
+    organization: recipients[0]?.company_name,
+  };
   // Every automated email needs real wording before it can go out — block
   // Continue (template mode) / Launch (AI mode) until subject AND body are
   // both non-empty on every EMAIL_AUTO step. AI mode already writes copy for
   // every email it generates, so this rarely fires there; it's a cheap
-  // last-line guard, not the primary flow (see the per-step hint below for
-  // template mode, where a hand-cleared field is the real target).
+  // last-line guard, not the primary flow. Field-level warnings wait for
+  // touch+blur or a Continue/Done attempt.
   const isEmailStepEmpty = (
     subject: string | undefined,
     bodyHtml: string | undefined,
     requireSubject = true,
   ) => !plain(bodyHtml ?? "").trim() || (requireSubject && !subject?.trim());
-  const firstTemplateEmailOrder = Math.min(...templateEmailSteps.map((s) => s.order));
-  const incompleteTemplateEmails = templateEmailSteps.filter((s) =>
-    isEmailStepEmpty(s.subject_template, s.body_template, s.order === firstTemplateEmailOrder));
+  const incompleteTemplateEmails = incompleteAutoEmails(templateSteps);
   const aiEmailsIncomplete = flow === "ai" && !!campaign &&
     campaign.sequence.some((e) => isEmailStepEmpty(e.subject, e.body_html, e.seq_number === 1));
+  function continueFromBuild() {
+    if (incompleteTemplateEmails.length > 0) {
+      setSequenceAttempted(true);
+      setEditingSequence(true);
+      return;
+    }
+    setEditingSequence(false);
+    setStep(hasLockedRecipients ? 3 : 2);
+  }
 
   // Launch-confirmation summary (Step 4's Launch button opens this instead
   // of calling doLaunch() directly). Mirrors the same counts the Step 4
@@ -743,8 +761,10 @@ export function CampaignWizard({
                 <div className="campaigns-start-grid" role="group" aria-label="How would you like to start?">
                   {BUILD_START_METHODS.map(({ id, label, description, Icon }) => {
                     const selected = id === "choose"
-                      ? flow === "template" && editingSequence
-                      : flow === id && !editingSequence;
+                      ? customSequence
+                      : id === "template"
+                        ? flow === "template" && !customSequence
+                        : flow === "ai";
                     return (
                       <button
                         key={id}
@@ -754,18 +774,23 @@ export function CampaignWizard({
                         aria-pressed={selected}
                         className="campaigns-method campaigns-start-choice"
                         onClick={() => {
+                          setSequenceAttempted(false);
                           if (id === "choose") {
                             setFlow("template");
-                            setTemplateSteps((prev) => prev.length ? prev : [{
-                              order: 1, day_offset: 1, channel: "EMAIL_AUTO", automation: "AUTO",
-                              send_window_start: "10:00", send_window_end: "11:00",
-                              content_ai_draft: false, pause_on_reply: true, stop_on_unsubscribe: true,
-                              subject_template: "", body_template: "",
-                            }]);
-                            setEditingSequence(true);
+                            if (!customSequence) setTemplateSteps(recommendedCustomSequence());
+                            setCustomSequence(true);
+                            setEditingSequence(false);
+                          } else if (id === "template") {
+                            setFlow("template");
+                            setCustomSequence(false);
+                            setAutoStart(true);
+                            setEditingSequence(false);
+                            if (customSequence) {
+                              setTemplateSteps(templateSeed?.steps ? templateSeed.steps.map((s) => ({ ...s })) : []);
+                            }
                           } else {
-                            setFlow(id);
-                            if (id === "template") setAutoStart(true);
+                            setFlow("ai");
+                            setCustomSequence(false);
                             setEditingSequence(false);
                           }
                         }}
@@ -813,7 +838,9 @@ export function CampaignWizard({
                           setTemplateName((current) => current.trim() || t.name);
                           setTemplateSteps(t.steps.map((s) => ({ ...s })));
                           setFlow("template");
+                          setCustomSequence(false);
                           setEditingSequence(false);
+                          setSequenceAttempted(false);
                         }}
                       >
                         <div className="flex items-center gap-2">
@@ -827,14 +854,32 @@ export function CampaignWizard({
               )}
 
               {(flow === "template" && templateSteps.length > 0 && !editingSequence) && (
-                <div className="flex justify-end">
-                  <Button
-                    className="campaigns-cta"
-                    onClick={() => setStep(hasLockedRecipients ? 3 : 2)}
-                    disabled={!templateName.trim() || incompleteTemplateEmails.length > 0}
-                  >
-                    {hasLockedRecipients ? "Review" : "People"} <ArrowRight className="h-4 w-4 ml-1" />
-                  </Button>
+                <div className="space-y-3">
+                  <div className="rounded-xl campaigns-surface p-3 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">{customSequence ? "Recommended sequence" : "This launch's sequence"}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {customSequence
+                            ? "Ready to use. Customize it for this launch if you need to."
+                            : "Edits apply to this launch only. The saved template stays unchanged."}
+                        </p>
+                      </div>
+                      <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => setEditingSequence(true)}>
+                        <PencilLine className="h-3.5 w-3.5 mr-1" /> Customize sequence
+                      </Button>
+                    </div>
+                    <SequenceTimeline steps={templateSteps} previewContext={sequencePreviewContext} />
+                  </div>
+                  <div className="flex justify-end">
+                    <Button
+                      className="campaigns-cta"
+                      onClick={continueFromBuild}
+                      disabled={!templateName.trim() || recipientChecksPending || recipientChecksFailed || (hasLockedRecipients && sendableRecipients.length === 0)}
+                    >
+                      {hasLockedRecipients ? "Review" : "People"} <ArrowRight className="h-4 w-4 ml-1" />
+                    </Button>
+                  </div>
                 </div>
               )}
             </div>
@@ -997,7 +1042,7 @@ export function CampaignWizard({
               )}
 
               <div className="flex justify-between pt-2">
-                <Button variant="ghost" onClick={() => { setCampaign(null); setFlow("choose"); }}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
+                <Button variant="ghost" onClick={() => { setCampaign(null); setFlow("choose"); setCustomSequence(false); }}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
                 <Button
                   className="campaigns-cta"
                   onClick={() => setStep(hasLockedRecipients ? 3 : 2)}
@@ -1010,7 +1055,7 @@ export function CampaignWizard({
           )}
 
           {/* Template / write-my-own sequence editor */}
-          {((step === 1 && flow === "template" && editingSequence) || editingSequence) && (
+          {editingSequence && (
             <div className="space-y-3">
               {step !== 1 && (
                 <div className="space-y-1">
@@ -1019,106 +1064,25 @@ export function CampaignWizard({
                 </div>
               )}
 
-              {templateEmailSteps.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground">Edits apply to this launch only.</p>
-                  {templateEmailSteps.map((s) => {
-                    const isPreview = codeView.has(s.order);
-                    const authorBody = templateToAuthorText(s.body_template ?? "");
-                    const hasAdvancedFormatting = hasUnsupportedRichEmailHtml(s.body_template ?? "");
-                    const incomplete = isEmailStepEmpty(s.subject_template, s.body_template, s.order === firstTemplateEmailOrder);
-                    return (
-                      <div key={s.order} className={cn("rounded-md border p-3 space-y-2", incomplete && "border-amber-400/60")}>
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-semibold">Day {s.day_offset} email</span>
-                          <Button variant="ghost" size="xs" className="h-6" disabled={hasAdvancedFormatting} onClick={() => toggleCode(s.order)}>
-                            {isPreview ? <><PencilLine className="h-3 w-3 mr-1" /> Write</> : <><Eye className="h-3 w-3 mr-1" /> Preview</>}
-                          </Button>
-                        </div>
-                        <Input
-                          value={templateToAuthorText(s.subject_template ?? "")}
-                          placeholder="Subject"
-                          onChange={(e) => patchTemplateStep(s.order, { subject_template: e.target.value })}
-                        />
-                        <div className="flex flex-wrap items-center gap-1">
-                          <span className="mr-1 text-[11px] text-muted-foreground">Add to subject</span>
-                          <Button type="button" variant="outline" size="xs" onClick={() => patchTemplateStep(s.order, { subject_template: insertAuthorToken(templateToAuthorText(s.subject_template ?? ""), AUTHOR_TOKENS.firstName), content_ai_draft: false })}>
-                            <UserRound className="h-3 w-3 mr-1" /> First name
-                          </Button>
-                          <Button type="button" variant="outline" size="xs" onClick={() => patchTemplateStep(s.order, { subject_template: insertAuthorToken(templateToAuthorText(s.subject_template ?? ""), AUTHOR_TOKENS.organization), content_ai_draft: false })}>
-                            <Building2 className="h-3 w-3 mr-1" /> Organization
-                          </Button>
-                        </div>
-                        {hasAdvancedFormatting ? (
-                          <>
-                            <p className="rounded-md bg-amber-500/10 px-2.5 py-2 text-xs text-amber-700 dark:text-amber-300">
-                              This email has advanced layout or embedded images. Pulse is preserving it exactly; rebuild it as clean copy in the template editor before changing the body.
-                            </p>
-                            <div className="rounded border bg-white overflow-hidden">
-                              <iframe title={`Day ${s.day_offset} email`} srcDoc={emailSrcDoc(s.body_template ?? "")} sandbox="" className="w-full min-h-[160px]" />
-                            </div>
-                          </>
-                        ) : <>
-                        {!isPreview && (
-                          <div className="flex flex-wrap items-center gap-1">
-                            <span className="mr-1 text-[11px] text-muted-foreground">Personalize email</span>
-                            {[
-                              [AUTHOR_TOKENS.firstName, "First name", UserRound],
-                              [AUTHOR_TOKENS.organization, "Organization", Building2],
-                              [AUTHOR_TOKENS.signature, "Signature", Signature],
-                            ].map(([token, label, Icon]) => (
-                              <Button key={String(token)} type="button" variant="outline" size="xs" onClick={() => patchTemplateStep(s.order, { body_template: authorTextToTemplateHtml(insertAuthorToken(authorBody, String(token))), content_ai_draft: false })}>
-                                <Icon className="h-3 w-3 mr-1" /> {String(label)}
-                              </Button>
-                            ))}
-                          </div>
-                        )}
-                        {isPreview ? (
-                          <div className="rounded border bg-white overflow-hidden">
-                            <iframe title={`Day ${s.day_offset} email`} srcDoc={emailSrcDoc(campaignPreviewHtml(s.body_template ?? "", { firstName: recipients[0]?.first_name, organization: recipients[0]?.company_name }))} sandbox="" className="w-full min-h-[160px]" />
-                          </div>
-                        ) : (
-                          <Textarea rows={7} value={authorBody}
-                            placeholder="Write the email exactly as it should read. Pulse handles personalization and formatting."
-                            onChange={(e) => patchTemplateStep(s.order, { body_template: authorTextToTemplateHtml(e.target.value), content_ai_draft: false })} />
-                        )}
-                        </>}
-                        {incomplete && (
-                          <p className="text-[11px] text-amber-600">This email still needs wording.</p>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+              <SequenceStepList
+                steps={templateSteps}
+                onChange={setTemplateSteps}
+                previewContext={sequencePreviewContext}
+                revealErrors={sequenceAttempted}
+                launchOnlyNotice
+              />
 
-              {templateTaskSteps.length > 0 && (
-                <div className="space-y-1">
-                  <p className="text-xs font-medium text-muted-foreground">Calls and LinkedIn become tasks.</p>
-                  <SequenceTimeline
-                    steps={templateTaskSteps}
-                    previewContext={{
-                      firstName: recipients[0]?.first_name,
-                      recipientEmail: recipients[0]?.email,
-                      organization: recipients[0]?.company_name,
-                    }}
-                  />
-                </div>
-              )}
-
-              {incompleteTemplateEmails.length > 0 && (
-                <p className="text-xs text-amber-600">
-                  {incompleteTemplateEmails.length === 1
-                    ? "One email above still needs wording before you can continue."
-                    : `${incompleteTemplateEmails.length} emails above still need wording before you can continue.`}
-                </p>
-              )}
               <div className="flex justify-between pt-2">
                 <Button variant="ghost" onClick={() => setEditingSequence(false)}>Back</Button>
                 <Button
                   className="campaigns-cta"
-                  onClick={() => { setEditingSequence(false); setStep(step === 3 ? 3 : (hasLockedRecipients ? 3 : 2)); }}
-                  disabled={!templateName.trim() || incompleteTemplateEmails.length > 0 || recipientChecksPending || recipientChecksFailed || (hasLockedRecipients && sendableRecipients.length === 0)}
+                  onClick={() => {
+                    if (incompleteTemplateEmails.length > 0) {
+                      setSequenceAttempted(true);
+                      return;
+                    }
+                    setEditingSequence(false);
+                  }}
                 >
                   Done
                 </Button>
@@ -1208,20 +1172,9 @@ export function CampaignWizard({
                       </div>
                       <SequenceTimeline
                         steps={templateSteps}
-                        previewContext={{
-                          firstName: recipients[0]?.first_name,
-                          recipientEmail: recipients[0]?.email,
-                          organization: recipients[0]?.company_name,
-                        }}
+                        previewContext={sequencePreviewContext}
                         onEdit={() => setEditingSequence(true)}
                       />
-                      {incompleteTemplateEmails.length > 0 && (
-                        <p className="text-xs text-amber-600">
-                          {incompleteTemplateEmails.length === 1
-                            ? "One email still needs wording."
-                            : `${incompleteTemplateEmails.length} emails still need wording.`}
-                        </p>
-                      )}
                     </div>
                   )}
                   <div className="rounded-xl campaigns-surface p-3 space-y-2">

@@ -89,6 +89,7 @@ describe("template launch flow", () => {
       "src/features/playbook/campaign-launch.ts",
       "src/features/playbook/SequenceTimeline.tsx",
       "src/features/playbook/CampaignWizard.tsx",
+      "src/features/playbook/SequenceStepList.tsx",
       "src/features/playbook/TemplatesSection.tsx",
       "src/features/playbook/QuickCampaignDialog.tsx",
     ];
