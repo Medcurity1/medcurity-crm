@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { primaryAction, taskIdOf, requestIdOf } from "@/features/nexus/Briefing";
+import { cardLabel, primaryAction, taskIdOf, requestIdOf } from "@/features/nexus/Briefing";
 import type { DayQueueRow } from "@/features/nexus/day-queue-api";
 
 // Minimal row factory — only the fields the action logic reads.
@@ -59,5 +59,11 @@ describe("Open task deep link (Molly's 8/12 ticket)", () => {
 
   it("request rows keep their id parsing (regression guard for Jordan M's 8/4 fix)", () => {
     expect(requestIdOf(row({ kind: "request", item_key: "request:r-1" }))).toBe("r-1");
+  });
+
+  it("product request cards name the category, not a generic waiting label", () => {
+    expect(
+      cardLabel(row({ kind: "request", category: "request:product" })),
+    ).toBe("Product request");
   });
 });

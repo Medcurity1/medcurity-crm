@@ -4,15 +4,26 @@
 // server-side) returns the ranked next-best-action rows. "Not today"
 // writes a per-user snooze that hides the row until the next 4am Pacific,
 // which is the queue's own day boundary (the RPC computes every date in
-// America/Los_Angeles).
+// America/Los_Angeles), and atomically counts that exact item.
 //
 // "Done" is deliberately not stored: finishing the underlying work (task
 // completed, reply handled, deal opened) drops the row on the next fetch.
+// Exact-item and category hides are durable prefs, restored from Tune
+// your list.
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthProvider";
+import {
+  canHideCategory,
+  categoryLabel,
+  categoryOf,
+  nextFourAmPacific,
+  shouldAskToHide,
+} from "./day-queue";
+
+export { nextFourAmPacific };
 
 // ── Row shape ────────────────────────────────────────────────────────
 
@@ -47,9 +58,30 @@ export interface DayQueueRow {
   task_id: string | null;
   campaign_id: string | null;
   event_id: string | null;
+  /** Hide group. Requests are request:product / request:crm / request:collateral. */
+  category?: string | null;
+}
+
+export interface DayQueueNotTodayResult {
+  dismiss_count: number;
+  ask_to_hide: boolean;
+}
+
+export interface HiddenDayItem {
+  item_key: string;
+  title: string | null;
+  kind: string;
+  category: string;
+  hidden_at: string | null;
+}
+
+export interface DayQueuePrefs {
+  hiddenCategories: string[];
+  hiddenItems: HiddenDayItem[];
 }
 
 export const DAY_QUEUE_KEY = ["nexus", "day-queue"] as const;
+export const DAY_QUEUE_PREFS_KEY = ["nexus", "day-queue-prefs"] as const;
 
 /**
  * The signed-in user's ranked queue. Short staleTime plus refetch on
@@ -71,98 +103,218 @@ export function useDayQueue() {
   });
 }
 
-// ── Snooze ("Not today") ─────────────────────────────────────────────
-
-/** UTC offset of America/Los_Angeles at `at`, in minutes (negative west). */
-function pacificOffsetMinutes(at: Date): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles",
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).formatToParts(at);
-  const get = (type: string) =>
-    Number(parts.find((p) => p.type === type)?.value ?? "0");
-  const asIfUtc = Date.UTC(
-    get("year"),
-    get("month") - 1,
-    get("day"),
-    get("hour"),
-    get("minute"),
-    get("second"),
-  );
-  return Math.round((asIfUtc - Math.floor(at.getTime() / 1000) * 1000) / 60000);
+export function useDayQueuePrefs(enabled = true) {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: DAY_QUEUE_PREFS_KEY,
+    enabled: enabled && !!user?.id,
+    staleTime: 30 * 1000,
+    queryFn: async (): Promise<DayQueuePrefs> => {
+      const [cats, items] = await Promise.all([
+        supabase
+          .from("day_queue_hidden_categories")
+          .select("category")
+          .order("category"),
+        supabase
+          .from("day_queue_item_state")
+          .select("item_key, title, kind, category, hidden_at")
+          .not("hidden_at", "is", null)
+          .order("hidden_at", { ascending: false }),
+      ]);
+      if (cats.error) throw cats.error;
+      if (items.error) throw items.error;
+      return {
+        hiddenCategories: (cats.data ?? []).map((r) => r.category as string),
+        hiddenItems: (items.data ?? []) as HiddenDayItem[],
+      };
+    },
+  });
 }
 
-/**
- * Tomorrow at 4am Pacific, as an instant. 4am is before anyone's workday
- * starts, so a snoozed row is back at the top of the next morning's
- * briefing. Exported for reuse and so the DST math is testable.
- */
-export function nextFourAmPacific(now: Date = new Date()): Date {
-  const offsetNow = pacificOffsetMinutes(now);
-  const pacificClock = new Date(now.getTime() + offsetNow * 60_000);
-  const wallClock = Date.UTC(
-    pacificClock.getUTCFullYear(),
-    pacificClock.getUTCMonth(),
-    pacificClock.getUTCDate() + 1,
-    4,
-    0,
-    0,
-  );
-  // Re-resolve the offset at the target instant so a spring-forward /
-  // fall-back night still lands on 4am local rather than 3am or 5am.
-  let target = wallClock - offsetNow * 60_000;
-  const offsetThen = pacificOffsetMinutes(new Date(target));
-  if (offsetThen !== offsetNow) target = wallClock - offsetThen * 60_000;
-  return new Date(target);
+function parseNotTodayResult(data: unknown): DayQueueNotTodayResult {
+  const row = Array.isArray(data) ? data[0] : data;
+  const count = Number((row as { dismiss_count?: unknown } | null)?.dismiss_count ?? 0);
+  const flagged = Boolean((row as { ask_to_hide?: unknown } | null)?.ask_to_hide);
+  return {
+    dismiss_count: count,
+    ask_to_hide: flagged || shouldAskToHide(count),
+  };
 }
 
 /**
  * Hide one queue row until tomorrow morning. Keyed on item_key, which is
  * deterministic per underlying thing, so the snooze sticks across
- * refetches and re-ranks.
+ * refetches and re-ranks. Counts this exact item atomically.
  */
 export function useSnoozeDayItem() {
   const qc = useQueryClient();
   const { user } = useAuth();
   return useMutation({
-    mutationFn: async (itemKey: string) => {
+    mutationFn: async (row: DayQueueRow): Promise<DayQueueNotTodayResult> => {
       if (!user?.id) throw new Error("Not signed in");
-      const { error } = await supabase.from("day_queue_snoozes").upsert(
-        {
-          user_id: user.id,
-          item_key: itemKey,
-          until: nextFourAmPacific().toISOString(),
-        },
-        { onConflict: "user_id,item_key" },
-      );
+      const { data, error } = await supabase.rpc("day_queue_not_today", {
+        p_item_key: row.item_key,
+        p_kind: row.kind,
+        p_category: categoryOf(row),
+        p_title: row.title,
+        p_until: nextFourAmPacific().toISOString(),
+      });
       if (error) throw error;
+      return parseNotTodayResult(data);
     },
     // Optimistic (docket C2 round 4, "briefing cycles instantly"): the row
     // disappears and the next-ranked item slides into the strip the moment
     // Not today is clicked, not a round-trip later. Rolled back on error.
-    onMutate: async (itemKey: string) => {
+    onMutate: async (row: DayQueueRow) => {
       await qc.cancelQueries({ queryKey: DAY_QUEUE_KEY });
       const previous = qc.getQueryData<DayQueueRow[]>(DAY_QUEUE_KEY);
       qc.setQueryData<DayQueueRow[]>(DAY_QUEUE_KEY, (rows) =>
-        (rows ?? []).filter((r) => r.item_key !== itemKey),
+        (rows ?? []).filter((r) => r.item_key !== row.item_key),
       );
       return { previous };
     },
-    onSuccess: () => {
-      toast.success("Back tomorrow.");
+    onSuccess: (result) => {
+      if (!result.ask_to_hide) toast.success("Back tomorrow.");
     },
-    onError: (e, _itemKey, ctx) => {
+    onError: (e, _row, ctx) => {
       if (ctx?.previous) qc.setQueryData(DAY_QUEUE_KEY, ctx.previous);
       toast.error("Couldn't snooze that: " + (e as Error).message);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: DAY_QUEUE_KEY });
+    },
+  });
+}
+
+export function useHideDayItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (row: DayQueueRow) => {
+      const { error } = await supabase.rpc("day_queue_hide_item", {
+        p_item_key: row.item_key,
+        p_kind: row.kind,
+        p_category: categoryOf(row),
+        p_title: row.title,
+      });
+      if (error) throw error;
+    },
+    onMutate: async (row: DayQueueRow) => {
+      await qc.cancelQueries({ queryKey: DAY_QUEUE_KEY });
+      const previous = qc.getQueryData<DayQueueRow[]>(DAY_QUEUE_KEY);
+      qc.setQueryData<DayQueueRow[]>(DAY_QUEUE_KEY, (rows) =>
+        (rows ?? []).filter((r) => r.item_key !== row.item_key),
+      );
+      return { previous };
+    },
+    onSuccess: () => {
+      toast.success("Hidden from Your Day.");
+    },
+    onError: (e, _row, ctx) => {
+      if (ctx?.previous) qc.setQueryData(DAY_QUEUE_KEY, ctx.previous);
+      toast.error("Couldn't hide that: " + (e as Error).message);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: DAY_QUEUE_KEY });
+      qc.invalidateQueries({ queryKey: DAY_QUEUE_PREFS_KEY });
+    },
+  });
+}
+
+export function useHideDayCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (category: string) => {
+      if (!canHideCategory(category)) {
+        throw new Error("Task reminders stay on your list");
+      }
+      const { error } = await supabase.rpc("day_queue_hide_category", {
+        p_category: category,
+      });
+      if (error) throw error;
+      return category;
+    },
+    onMutate: async (category: string) => {
+      await qc.cancelQueries({ queryKey: DAY_QUEUE_KEY });
+      const previous = qc.getQueryData<DayQueueRow[]>(DAY_QUEUE_KEY);
+      qc.setQueryData<DayQueueRow[]>(DAY_QUEUE_KEY, (rows) =>
+        (rows ?? []).filter((r) => categoryOf(r) !== category),
+      );
+      return { previous };
+    },
+    onSuccess: (category) => {
+      toast.success(`${categoryLabel(category)} hidden from Your Day.`);
+    },
+    onError: (e, _category, ctx) => {
+      if (ctx?.previous) qc.setQueryData(DAY_QUEUE_KEY, ctx.previous);
+      toast.error("Couldn't hide that: " + (e as Error).message);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: DAY_QUEUE_KEY });
+      qc.invalidateQueries({ queryKey: DAY_QUEUE_PREFS_KEY });
+    },
+  });
+}
+
+export function useUnhideDayItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (itemKey: string) => {
+      const { error } = await supabase.rpc("day_queue_unhide_item", {
+        p_item_key: itemKey,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Back on your list.");
+    },
+    onError: (e) => {
+      toast.error("Couldn't restore that: " + (e as Error).message);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: DAY_QUEUE_KEY });
+      qc.invalidateQueries({ queryKey: DAY_QUEUE_PREFS_KEY });
+    },
+  });
+}
+
+export function useSetDayCategoryHidden() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      category,
+      hidden,
+    }: {
+      category: string;
+      hidden: boolean;
+    }) => {
+      if (hidden && !canHideCategory(category)) {
+        throw new Error("Task reminders stay on your list");
+      }
+      const { error } = hidden
+        ? await supabase.rpc("day_queue_hide_category", { p_category: category })
+        : await supabase.rpc("day_queue_unhide_category", { p_category: category });
+      if (error) throw error;
+      return { category, hidden };
+    },
+    onMutate: async ({ category, hidden }) => {
+      await qc.cancelQueries({ queryKey: DAY_QUEUE_PREFS_KEY });
+      const previous = qc.getQueryData<DayQueuePrefs>(DAY_QUEUE_PREFS_KEY);
+      qc.setQueryData<DayQueuePrefs>(DAY_QUEUE_PREFS_KEY, (prefs) => {
+        const current = prefs ?? { hiddenCategories: [], hiddenItems: [] };
+        const next = hidden
+          ? Array.from(new Set([...current.hiddenCategories, category]))
+          : current.hiddenCategories.filter((c) => c !== category);
+        return { ...current, hiddenCategories: next };
+      });
+      return { previous };
+    },
+    onError: (e, _vars, ctx) => {
+      if (ctx?.previous) qc.setQueryData(DAY_QUEUE_PREFS_KEY, ctx.previous);
+      toast.error("Couldn't update that: " + (e as Error).message);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: DAY_QUEUE_KEY });
+      qc.invalidateQueries({ queryKey: DAY_QUEUE_PREFS_KEY });
     },
   });
 }

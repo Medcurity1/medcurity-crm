@@ -286,7 +286,7 @@ export function ContactImportWizard({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <UploadCloud className="h-5 w-5 text-indigo-600" />
-              {penMode ? "Import a List" : "Import Contacts"} {result ? "" : `— Step ${step} of 4`}
+              {penMode ? "Import a List" : "Import Contacts"} {result ? "" : `: Step ${step} of 4`}
             </DialogTitle>
             <DialogDescription>
               {step === 1 &&
@@ -294,7 +294,7 @@ export function ContactImportWizard({
                   ? "Upload a CSV of people. New ones land in the Imports pen for cleanup; anyone already a contact is matched by email."
                   : "Upload a CSV of people. We'll match them to your contacts by email.")}
               {step === 2 && "Tell us which column is which. We guessed based on the headers."}
-              {step === 3 && "Choose how to handle duplicates — and optionally log an event for everyone."}
+              {step === 3 && "Choose how to handle duplicates. You can also log an event for everyone."}
               {step === 4 && !result && "Review what will happen, then import."}
               {result && "Import complete."}
             </DialogDescription>
@@ -320,7 +320,7 @@ export function ContactImportWizard({
             {step === 1 && (
               <div className="space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  Upload a <span className="font-medium">.csv</span> file — for example a webinar
+                  Upload a <span className="font-medium">.csv</span> file, such as a webinar
                   attendee list or an event registration export. The first row should be column headers.
                 </p>
                 <div className="space-y-2">
@@ -334,7 +334,7 @@ export function ContactImportWizard({
                 )}
                 <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200">
                   New people become contacts (matching or creating their account by company name).
-                  Anyone already in your CRM is matched by email — you'll choose whether to update or skip them.
+                  Anyone already in your CRM is matched by email. You'll choose whether to update or skip them.
                 </div>
               </div>
             )}
@@ -359,7 +359,7 @@ export function ContactImportWizard({
                         <TableRow key={i}>
                           <TableCell className="font-medium">{h || <span className="text-muted-foreground">(blank)</span>}</TableCell>
                           <TableCell className="max-w-[180px] truncate text-muted-foreground">
-                            {dataRows[0]?.[i] || "—"}
+                            {dataRows[0]?.[i] || "Empty"}
                           </TableCell>
                           <TableCell>
                             <Select
@@ -388,13 +388,13 @@ export function ContactImportWizard({
                 {!hasLastName && (
                   <div className="flex items-start gap-2 rounded-md border border-amber-300/50 bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/20 dark:text-amber-200">
                     <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-                    Map one column to <span className="font-medium">Last Name</span> — it's required to create a contact.
+                    Map one column to <span className="font-medium">Last Name</span>. It's required to create a contact.
                   </div>
                 )}
                 {hasLastName && !hasEmail && (
                   <div className="flex items-start gap-2 rounded-md border border-amber-300/50 bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/20 dark:text-amber-200">
                     <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-                    No <span className="font-medium">Email</span> column mapped — without it we can't match against existing
+                    No <span className="font-medium">Email</span> column mapped. Without it we can't match against existing
                     contacts, so everyone will be created as new (and re-imports would duplicate them).
                   </div>
                 )}
@@ -463,7 +463,7 @@ export function ContactImportWizard({
                         <CalendarPlus className="h-4 w-4 text-indigo-600" /> Log an event for everyone
                       </Label>
                       <p className="text-xs text-muted-foreground">
-                        Adds one activity to every contact in this list — e.g. a webinar they attended.
+                        Adds one activity to every contact in this list, such as a webinar they attended.
                       </p>
                     </div>
                     <Switch checked={eventOn} onCheckedChange={setEventOn} />
@@ -532,12 +532,12 @@ export function ContactImportWizard({
                     {preview.ambiguous_account > 0 && (
                       <div className="rounded-md border border-amber-300/50 bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/20 dark:text-amber-200">
                         {preview.ambiguous_account.toLocaleString()} contact(s) will be created without an account
-                        because their company name matches more than one account — you can assign those manually after.
+                        because their company name matches more than one account. You can assign those manually after.
                       </div>
                     )}
                     <p className="text-xs text-muted-foreground">
                       {dupMode === "update"
-                        ? "Existing contacts will only have their blank fields filled — nothing is overwritten."
+                        ? "Existing contacts will only have their blank fields filled. Nothing is overwritten."
                         : "Existing contacts won't be changed"}
                       {eventOn ? `; everyone matched still gets the "${eventSubject.trim()}" ${eventType} logged.` : "."}
                     </p>

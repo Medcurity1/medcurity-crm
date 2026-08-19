@@ -265,7 +265,7 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
         return `${f.replace(/_/g, " ")}${msg}`;
       })
       .join("; ");
-    toast.error(`Can't save — invalid field(s): ${detail}`);
+    toast.error(`Can't save. Invalid field(s): ${detail}`);
     console.warn("Contact form validation errors:", formErrors);
   }
 
@@ -367,7 +367,7 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
                   allowClear
                 />
                 <p className="text-xs text-muted-foreground">
-                  Optional — leave empty for an individual whose company you don't know yet.
+                  Optional. Leave empty for an individual whose company you don't know yet.
                 </p>
                 {errors.account_id && <p className="text-sm text-destructive">{errors.account_id.message}</p>}
               </div>
@@ -412,14 +412,14 @@ function ContactFormInner({ contact }: { contact: Contact | undefined }) {
 
               <div className="space-y-2">
                 <Label htmlFor="email2">Additional Email</Label>
-                <Input id="email2" type="email" placeholder="Optional — a second address" {...register("email2")} />
+                <Input id="email2" type="email" placeholder="Optional second address" {...register("email2")} />
                 {errors.email2 && <p className="text-sm text-destructive">{errors.email2.message}</p>}
               </div>
 
               {watch("email2") ? (
                 <div className="space-y-2">
                   <Label htmlFor="email3">Additional Email</Label>
-                  <Input id="email3" type="email" placeholder="Optional — a third address" {...register("email3")} />
+                  <Input id="email3" type="email" placeholder="Optional third address" {...register("email3")} />
                   {errors.email3 && <p className="text-sm text-destructive">{errors.email3.message}</p>}
                 </div>
               ) : null}
@@ -761,4 +761,3 @@ function EventsAttendedField({
     </div>
   );
 }
-

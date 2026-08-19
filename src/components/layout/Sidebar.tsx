@@ -74,6 +74,7 @@ type NavItem = {
 // to a freshly launched tab). COMING_SOON ("bg-orange-500 text-white")
 // retired 2026-07-03 with the old /nexus placeholder tab.
 const ADMIN_BADGE = "bg-sky-500 text-white";
+const NEW_BADGE = "bg-red-500 text-white";
 // Nexus launch highlight (Nathan 2026-08-04): a blue-focused gradient
 // pill per his call. Retire once the launch is old news.
 // bg-origin-border + bg-no-repeat (Nathan 2026-08-05): the Badge base has a
@@ -114,9 +115,9 @@ const navItems: NavItem[] = [
   // Collateral opened to every user (Jordan's v1.2 spec change 7,
   // 2026-08-18): the tab is read-only and shows only admin-promoted
   // Current assets, so the admin gate defeated its purpose — reps are the
-  // intended audience. ADMIN badge dropped; LAUNCHED pill announces the
-  // new destination (v1.2 change 8), same pattern as Nexus above.
-  { to: "/collateral", icon: FolderOpen, label: "Collateral", badge: { label: "Launched", className: LAUNCHED_BADGE } },
+  // intended audience. ADMIN badge dropped; the red New badge announces
+  // the new destination without implying a separate launch state.
+  { to: "/collateral", icon: FolderOpen, label: "Collateral", badge: { label: "New", className: NEW_BADGE } },
   // Forecasting + Analytics moved into /reports as tabs (2026-04-17).
   // "New" badge retired 2026-07-02 (Nathan).
   // Requests tab removed 2026-08-04 (Nathan): it's now the Submit Request

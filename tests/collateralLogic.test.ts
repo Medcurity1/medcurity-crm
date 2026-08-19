@@ -550,14 +550,14 @@ describe("v1.2 source guards (role gating, title source, scope)", () => {
     expect(app).toContain('<Route path="playbook" element={<AdminGate><PlaybookPage /></AdminGate>} />');
   });
 
-  it("sidebar: Collateral sits in navItems with the LAUNCHED pill, no ADMIN badge", () => {
+  it("sidebar: Collateral sits in navItems with the New badge, no Admin badge", () => {
     const sidebar = read("src", "components", "layout", "Sidebar.tsx");
     const collateralLines = sidebar
       .split("\n")
       .filter((l) => l.includes('"/collateral"') && !l.trim().startsWith("//"));
     expect(collateralLines).toHaveLength(1);
-    expect(collateralLines[0]).toContain('label: "Launched"');
-    expect(collateralLines[0]).toContain("LAUNCHED_BADGE");
+    expect(collateralLines[0]).toContain('label: "New"');
+    expect(collateralLines[0]).toContain("NEW_BADGE");
     expect(collateralLines[0]).not.toContain("ADMIN_BADGE");
     // The entry must appear in navItems (before the adminItems array), and
     // the admin group must keep its own entries intact.
@@ -618,6 +618,17 @@ describe("v1.2 source guards (role gating, title source, scope)", () => {
     const lib = read("src", "features", "collateral", "CollateralLibrary.tsx");
     expect(lib).toContain("buildChipGroups(items ?? [])");
     expect(lib).not.toContain("buildChipGroups(filtered");
+  });
+
+  it("the saved condensed preference renders a true one-row-per-asset list", () => {
+    const lib = read("src", "features", "collateral", "CollateralLibrary.tsx");
+    const css = read("src", "features", "collateral", "collateral.css");
+    expect(lib).toContain('aria-label="List view"');
+    expect(lib).toContain('? "collat-list"');
+    expect(lib).toContain('"collat-list-row group"');
+    expect(lib).toContain('className="collat-list-actions"');
+    expect(css).toMatch(/\.collat-list\s*\{[\s\S]*?flex-direction:\s*column/);
+    expect(css).toMatch(/\.collat-list-row\s*\{[\s\S]*?display:\s*flex/);
   });
 
   it("the v1.1 default Use filter is gone (change 4)", () => {
