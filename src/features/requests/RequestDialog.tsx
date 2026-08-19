@@ -125,7 +125,7 @@ export function RequestDialog({
               assumes px-6 here, and the missing bottom padding is deliberate —
               it lets the sticky footer sit flush with the scrollport bottom so
               no strip of content can peek out beneath it (Nathan, 8/4). */}
-          <div className="max-h-[min(62vh,560px)] overflow-y-auto px-4 pt-5 sm:px-6">
+          <div className="max-h-[min(72vh,680px)] overflow-y-auto px-4 pt-5 sm:px-6">
             {tab === null && (
               <div className="grid gap-3 pb-6 sm:grid-cols-3" aria-label="Request type">
                 {TABS.map((item) => (

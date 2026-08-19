@@ -34,4 +34,15 @@ describe("Submit Request chooser", () => {
     expect(dialog).toContain('kind: "switch"; tab: RequestTab | null');
     expect(dialog).toContain("if (dirtyRef.current) setPending");
   });
+
+  it("uses the available dialog height and keeps priority prominent responsively", () => {
+    const dialog = read("src", "features", "requests", "RequestDialog.tsx");
+    const forms = read("src", "features", "requests", "RequestForms.tsx");
+    expect(dialog).toContain("max-h-[min(72vh,680px)]");
+    expect(forms).toContain(
+      "sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_8rem] sm:items-end",
+    );
+    expect(forms).toContain("sm:grid-cols-[minmax(0,1fr)_8rem] sm:items-end");
+    expect(forms).toContain('<PrioritySelect className="max-w-none"');
+  });
 });

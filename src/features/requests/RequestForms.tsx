@@ -74,15 +74,17 @@ function useDirtyReport(dirty: boolean, onDirtyChange?: (d: boolean) => void) {
 function PrioritySelect({
   value,
   onChange,
+  className,
 }: {
   value: RequestPriority;
   onChange: (v: RequestPriority) => void;
+  className?: string;
 }) {
   return (
-    <div className="space-y-2">
+    <div className={cn("max-w-32 space-y-2", className)}>
       <Label>Priority</Label>
       <Select value={value} onValueChange={(v) => onChange(v as RequestPriority)}>
-        <SelectTrigger>
+        <SelectTrigger className="w-full">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -504,7 +506,7 @@ export function CollateralForm({ onDirtyChange, onDone }: RequestFormProps) {
         <Label htmlFor="c-desc">Describe what you need <span className="text-destructive">*</span></Label>
         <Textarea id="c-desc" rows={3} maxLength={4000} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What should it cover, any must-haves, references..." />
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_8rem] sm:items-end">
         <div className="space-y-2">
           <Label>Who is it for?</Label>
           <Select value={audience} onValueChange={setAudience}>
@@ -527,6 +529,7 @@ export function CollateralForm({ onDirtyChange, onDone }: RequestFormProps) {
             </SelectContent>
           </Select>
         </div>
+        <PrioritySelect className="max-w-none" value={priority} onChange={setPriority} />
       </div>
       <div className="space-y-2">
         <Label htmlFor="c-partner">Specific partner or event?</Label>
@@ -537,7 +540,6 @@ export function CollateralForm({ onDirtyChange, onDone }: RequestFormProps) {
         <Input id="c-usage" maxLength={200} value={usage} onChange={(e) => setUsage(e.target.value)} placeholder="Optional" />
       </div>
       <AttachmentPicker files={files} onChange={setFiles} maxSizeMB={5} />
-      <PrioritySelect value={priority} onChange={setPriority} />
       <FormFooter>
         <Button onClick={submit} disabled={create.isPending} className="gap-2">
           <Send className="h-4 w-4" />
@@ -971,17 +973,27 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
           invalidateVerdict();
         }}
       />
-      <div className="space-y-2">
-        <Label htmlFor="p-title">Title <span className="text-destructive">*</span></Label>
-        <Input
-          id="p-title"
-          maxLength={200}
-          value={title}
-          onChange={(e) => {
-            setTitle(e.target.value);
+      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_8rem] sm:items-end">
+        <div className="min-w-0 space-y-2">
+          <Label htmlFor="p-title">Title <span className="text-destructive">*</span></Label>
+          <Input
+            id="p-title"
+            maxLength={200}
+            value={title}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              invalidateVerdict();
+            }}
+            placeholder="e.g. Replace the office chairs with beanbags"
+          />
+        </div>
+        <PrioritySelect
+          className="max-w-none"
+          value={priority}
+          onChange={(v) => {
+            setPriority(v);
             invalidateVerdict();
           }}
-          placeholder="e.g. Replace the office chairs with beanbags"
         />
       </div>
       <div className="space-y-2">
@@ -1017,13 +1029,6 @@ export function ProductForm({ onDirtyChange, onDone }: RequestFormProps) {
         onChange={setFiles}
         maxSizeMB={25}
         urgeScreenshot={category === "bug"}
-      />
-      <PrioritySelect
-        value={priority}
-        onChange={(v) => {
-          setPriority(v);
-          invalidateVerdict();
-        }}
       />
       {category === "bug" && verdict && (
         <ClientImpactConfirm
