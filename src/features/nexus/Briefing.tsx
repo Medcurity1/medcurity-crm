@@ -22,7 +22,16 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { QuickTaskDialog } from "@/features/activities/QuickTaskDialog";
 import { useCompleteActivity } from "@/features/activities/api";
 import { activityTitleForDisplay } from "@/features/activities/activity-display";
-import { useDayQueue, useSnoozeDayItem, type DayQueueRow } from "./day-queue-api";
+import { categoryDotClass, categoryOf } from "./day-queue";
+import {
+  useDayQueue,
+  useHideDayCategory,
+  useHideDayItem,
+  useSnoozeDayItem,
+  type DayQueueRow,
+} from "./day-queue-api";
+import { DayQueueHideDialog } from "./DayQueueHideDialog";
+import { DayQueueTuneList } from "./DayQueueTuneList";
 import { NEXUS_FEEDBACK_LINK } from "./landing-flip";
 import { useRequestDialog } from "@/features/requests/RequestDialogProvider";
 import { RequestDetailDialog } from "@/features/requests/RequestCard";
@@ -101,18 +110,8 @@ export function buildCountsLine(rows: DayQueueRow[]): string {
 
 // ── Per-kind presentation ────────────────────────────────────────────
 
-const KIND_DOT: Record<string, string> = {
-  reply: "bg-rose-500 dark:bg-rose-400",
-  request: "bg-sky-500 dark:bg-sky-400",
-  renewal: "bg-blue-500 dark:bg-blue-400",
-  task: "bg-amber-500 dark:bg-amber-400",
-  campaign_task: "bg-violet-500 dark:bg-violet-400",
-  outreach_paused: "bg-violet-500 dark:bg-violet-400",
-  stale_deal: "bg-slate-400 dark:bg-slate-500",
-};
-
-function dotClass(kind: string): string {
-  return KIND_DOT[kind] ?? "bg-slate-400 dark:bg-slate-500";
+function dotClass(row: DayQueueRow): string {
+  return categoryDotClass(categoryOf(row));
 }
 
 /** True when a task row's due date is already behind us (local day). */
@@ -128,6 +127,10 @@ function isOverdue(row: DayQueueRow): boolean {
 
 /** The small uppercase label on a card ("Answer first", "Due today", …). */
 export function cardLabel(row: DayQueueRow): string {
+  const category = categoryOf(row);
+  if (category === "request:product") return "Product request";
+  if (category === "request:crm") return "CRM request";
+  if (category === "request:collateral") return "Collateral request";
   switch (row.kind) {
     case "reply":
       return "Answer first";
@@ -140,6 +143,8 @@ export function cardLabel(row: DayQueueRow): string {
       return "Deal opened";
     case "stale_deal":
       return "Going quiet";
+    case "request":
+      return "Request";
     default:
       return "Waiting on you";
   }
@@ -282,9 +287,12 @@ export function Briefing({
   const navigate = useNavigate();
   const { data, isLoading, isError, error } = useDayQueue();
   const snooze = useSnoozeDayItem();
+  const hideItem = useHideDayItem();
+  const hideCategory = useHideDayCategory();
   const completeTask = useCompleteActivity();
   const [showAll, setShowAll] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
+  const [hidePrompt, setHidePrompt] = useState<DayQueueRow | null>(null);
 
   const rows = useMemo(() => data ?? [], [data]);
   const countsLine = useMemo(
@@ -354,6 +362,19 @@ export function Briefing({
     );
   }
 
+  async function handleSnooze(row: DayQueueRow) {
+    try {
+      const result = await snooze.mutateAsync(row);
+      if (result.ask_to_hide) setHidePrompt(row);
+    } catch {
+      // useSnoozeDayItem already toasts and rolls back.
+    }
+  }
+
+  function closeHidePrompt() {
+    setHidePrompt(null);
+  }
+
   if (isError) {
     // Never break the tab over a briefing. Nexus falls back to the grid.
     console.error("Nexus briefing: day queue failed to load", error);
@@ -409,6 +430,9 @@ export function Briefing({
               {name ? `${greeting}, ${name}.` : `${greeting}.`}
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">{countsLine}</p>
+            <div className="mt-3">
+              <DayQueueTuneList />
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" onClick={() => setTaskOpen(true)}>
@@ -448,7 +472,7 @@ export function Briefing({
               isAdmin={isAdmin}
               rank={i + 1}
               onOpen={(to) => handleOpen(row, to)}
-              onSnooze={() => snooze.mutate(row.item_key)}
+              onSnooze={() => handleSnooze(row)}
               snoozing={snooze.isPending}
               onComplete={() => handleComplete(row)}
               completing={completeTask.isPending}
@@ -480,7 +504,7 @@ export function Briefing({
                   row={row}
                   isAdmin={isAdmin}
                   onOpen={(to) => handleOpen(row, to)}
-                  onSnooze={() => snooze.mutate(row.item_key)}
+                  onSnooze={() => handleSnooze(row)}
                   snoozing={snooze.isPending}
                   onComplete={() => handleComplete(row)}
                   completing={completeTask.isPending}
@@ -514,6 +538,26 @@ export function Briefing({
           }}
         />
       )}
+
+      <DayQueueHideDialog
+        row={hidePrompt}
+        open={!!hidePrompt}
+        onOpenChange={(open) => {
+          if (!open) closeHidePrompt();
+        }}
+        busy={hideItem.isPending || hideCategory.isPending}
+        onKeep={closeHidePrompt}
+        onStopItem={() => {
+          if (!hidePrompt) return;
+          hideItem.mutate(hidePrompt, { onSuccess: closeHidePrompt });
+        }}
+        onStopCategory={() => {
+          if (!hidePrompt) return;
+          hideCategory.mutate(categoryOf(hidePrompt), {
+            onSuccess: closeHidePrompt,
+          });
+        }}
+      />
     </div>
   );
 }
@@ -572,7 +616,7 @@ function BriefingCard({
       <div className="flex items-start gap-2.5 min-w-0">
         <span
           aria-hidden
-          className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", dotClass(row.kind))}
+          className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", dotClass(row))}
         />
         <div className="min-w-0">
           <p className="text-sm font-medium leading-snug">
@@ -628,7 +672,7 @@ function BriefingListRow({
     <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card px-3 py-2">
       <span
         aria-hidden
-        className={cn("h-2 w-2 shrink-0 rounded-full", dotClass(row.kind))}
+        className={cn("h-2 w-2 shrink-0 rounded-full", dotClass(row))}
       />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{activityTitleForDisplay(row.title)}</p>
