@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cardLabel, primaryAction, taskIdOf, requestIdOf } from "@/features/nexus/Briefing";
+import { cardLabel, primaryAction, reasonForDisplay, taskIdOf, requestIdOf } from "@/features/nexus/Briefing";
 import type { DayQueueRow } from "@/features/nexus/day-queue-api";
 
 // Minimal row factory — only the fields the action logic reads.
@@ -65,5 +65,16 @@ describe("Open task deep link (Molly's 8/12 ticket)", () => {
     expect(
       cardLabel(row({ kind: "request", category: "request:product" })),
     ).toBe("Product request");
+  });
+
+  it("presents the existing meeting-booked pause as meeting preparation", () => {
+    const meeting = row({
+      kind: "outreach_paused",
+      account_id: "acct-9",
+      reason: "Opportunity opened, outreach paused",
+    });
+    expect(cardLabel(meeting)).toBe("Meeting prep");
+    expect(reasonForDisplay(meeting)).toBe("Meeting booked. Review the account before the call.");
+    expect(primaryAction(meeting)).toEqual({ label: "Open account", to: "/accounts/acct-9" });
   });
 });

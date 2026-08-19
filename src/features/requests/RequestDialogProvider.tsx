@@ -42,12 +42,12 @@ export function useRequestDialog(): RequestDialogCtx {
  * heavy chunk loads on first use.
  */
 export function RequestDialogProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<{ open: boolean; tab: RequestTab }>({
+  const [state, setState] = useState<{ open: boolean; tab: RequestTab | null }>({
     open: false,
-    tab: "collateral",
+    tab: null,
   });
   const openRequestDialog = useCallback(
-    (tab: RequestTab = "collateral") => setState({ open: true, tab }),
+    (tab?: RequestTab) => setState({ open: true, tab: tab ?? null }),
     [],
   );
   const close = useCallback(() => setState((s) => ({ ...s, open: false })), []);

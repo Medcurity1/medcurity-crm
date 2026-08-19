@@ -606,6 +606,37 @@ export function useClearCustomerStatusOverride() {
   });
 }
 
+/** Admin-controlled correction when deal history cannot express that an
+ * account is still a customer. The existing RPC owns authorization and audit
+ * fields; this hook keeps every account surface in sync after the change. */
+export function useSetCustomerStatusOverride() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      accountId,
+      override,
+      reason,
+    }: {
+      accountId: string;
+      override: "client" | "former_client";
+      reason: string;
+    }) => {
+      const cleanReason = reason.trim();
+      if (!cleanReason) throw new Error("Add a reason for this change.");
+      const { error } = await supabase.rpc("set_account_customer_status_override", {
+        p_account_id: accountId,
+        p_override: override,
+        p_reason: cleanReason,
+      });
+      if (error) throw error;
+    },
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      qc.invalidateQueries({ queryKey: ["accounts", variables.accountId] });
+    },
+  });
+}
+
 export function useAccountContracts(accountId: string | undefined) {
   return useQuery({
     queryKey: ["account_contracts", accountId],

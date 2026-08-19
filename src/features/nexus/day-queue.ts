@@ -12,7 +12,7 @@ export const DAY_QUEUE_CATEGORIES = [
   { id: "request:collateral", label: "Collateral requests", hideable: true },
   { id: "renewal", label: "Renewals", hideable: true },
   { id: "campaign_task", label: "Campaign steps", hideable: true },
-  { id: "outreach_paused", label: "Paused outreach", hideable: true },
+  { id: "outreach_paused", label: "Meeting prep", hideable: true },
   { id: "stale_deal", label: "Quiet deals", hideable: true },
   { id: "task", label: "Tasks", hideable: false },
 ] as const;
@@ -104,7 +104,7 @@ export const CATEGORY_DOT: Record<string, string> = {
   renewal: "bg-blue-500 dark:bg-blue-400",
   task: "bg-amber-500 dark:bg-amber-400",
   campaign_task: "bg-violet-500 dark:bg-violet-400",
-  outreach_paused: "bg-violet-500 dark:bg-violet-400",
+  outreach_paused: "bg-cyan-500 dark:bg-cyan-400",
   stale_deal: "bg-slate-400 dark:bg-slate-500",
 };
 

@@ -17,6 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           submodules: true
           lfs: false
 
@@ -50,13 +51,9 @@ jobs:
       # across deploys.
 
       - name: Deploy Edge Functions (Production)
-        # Deploys every CI-managed edge function (18 today): the Outlook
-        # trio, task-reminders/task-digest, product-request +
-        # request-email-notify, the Meddy suite, the Playbook suite,
-        # ask-ai, and invite-user. outlook-oauth receives requests from
-        # Microsoft (not an authenticated browser) and meddy-chat /
-        # meddy-support serve the public website widget, so those three
-        # need --no-verify-jwt; everything else keeps JWT verification ON.
+        # Deploys only CI-managed functions changed by this push. The checked-in
+        # selector owns the complete function list and exact JWT exceptions.
+        # Shared-code changes or an unsafe/unknown git diff deploy the full list.
         #
         # NOT deployed by CI — manual `supabase functions deploy` only, so
         # merging changes to these does NOT ship them anywhere:
@@ -73,50 +70,10 @@ jobs:
         #   npx supabase functions download clickup-sf-id-sync \
         #     --project-ref igmwomnkbbsytihtvhbp
         # and commit it under supabase/functions/clickup-sf-id-sync/.
-        run: |
-          set -e
-          npx supabase link --project-ref $SUPABASE_PROJECT_REF
-          npx supabase functions deploy outlook-oauth --no-verify-jwt
-          # sync-emails + outlook-calendar-sync gate on the token's VERIFIED
-          # role claim, so they deploy WITH jwt verification ON (default): the
-          # gateway verifies the signature, the function trusts role=service_role.
-          # Do NOT add --no-verify-jwt here — that would let a forged role claim
-          # through. (Exact-key-match here caused the 2026-07-05 email outage.)
-          npx supabase functions deploy daily-deal
-          npx supabase functions deploy sync-emails
-          npx supabase functions deploy outlook-calendar-sync
-          npx supabase functions deploy task-reminders
-          npx supabase functions deploy task-digest
-          npx supabase functions deploy product-request-action
-          npx supabase functions deploy collateral-sync
-          npx supabase functions deploy request-email-notify
-          npx supabase functions deploy meddy-chat --no-verify-jwt
-          npx supabase functions deploy meddy-support --no-verify-jwt
-          npx supabase functions deploy meddy-staff-action
-          npx supabase functions deploy meddy-sweep
-          npx supabase functions deploy meddy-weekly-report
-          npx supabase functions deploy meddy-crawl
-          npx supabase functions deploy playbook-ai
-          npx supabase functions deploy playbook-smartlead
-          npx supabase functions deploy playbook-mailchimp
-          npx supabase functions deploy ask-ai
-          npx supabase functions deploy partner-contract-summary
-          npx supabase functions deploy invite-user
-          # inbound-lead joins CI on PROD at the lead-retirement cutover
-          # (2026-07-20): the contacts-version IS the intended live behavior
-          # now, so the fn swap ships atomically with the promote instead of
-          # as a dangling manual step. X-API-Key still gates callers.
-          npx supabase functions deploy inbound-lead --no-verify-jwt
-          # nexus-activity joins CI too (2026-07-20): the retirement version
-          # drops the lead-fallback; the old prod copy was logging onto
-          # archived tombstone leads.
-          npx supabase functions deploy nexus-activity --no-verify-jwt
-          # campaign-webhooks (Campaigns overhaul Phase 2, S5, 2026-07-22):
-          # Smartlead's servers POST here, not an authenticated browser —
-          # --no-verify-jwt like the other inbound webhook endpoints
-          # (pandadoc-sync, inbound-lead). Auth is a per-campaign
-          # ?token=<webhook_secret> the function checks itself.
-          npx supabase functions deploy campaign-webhooks --no-verify-jwt
+        run: >-
+          node scripts/ci/deploy-changed-functions.mjs
+          --base "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}"
+          --head "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ secrets.PRODUCTION_SUPABASE_PROJECT_REF }}

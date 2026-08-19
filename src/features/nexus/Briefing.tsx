@@ -96,7 +96,7 @@ export function buildCountsLine(rows: DayQueueRow[]): string {
   const paused = n(["outreach_paused"]);
   if (paused)
     parts.push(
-      `${plural(paused, "paused conversation", "paused conversations")}`,
+      `${plural(paused, "meeting to prepare", "meetings to prepare")}`,
     );
 
   const stale = n(["stale_deal"]);
@@ -140,7 +140,7 @@ export function cardLabel(row: DayQueueRow): string {
     case "campaign_task":
       return isOverdue(row) ? "Overdue" : "Due today";
     case "outreach_paused":
-      return "Deal opened";
+      return "Meeting prep";
     case "stale_deal":
       return "Going quiet";
     case "request":
@@ -148,6 +148,16 @@ export function cardLabel(row: DayQueueRow): string {
     default:
       return "Waiting on you";
   }
+}
+
+/** The existing queue branch is sourced only from
+ * campaign_enrollments.paused_reason=meeting_booked. Keep the stored kind for
+ * snooze/hide compatibility while presenting what the rep actually needs. */
+export function reasonForDisplay(row: DayQueueRow): string | null {
+  if (row.kind === "outreach_paused") {
+    return "Meeting booked. Review the account before the call.";
+  }
+  return row.reason;
 }
 
 /**
@@ -622,8 +632,8 @@ function BriefingCard({
           <p className="text-sm font-medium leading-snug">
             {activityTitleForDisplay(row.title)}
           </p>
-          {row.reason && (
-            <p className="mt-0.5 text-xs text-muted-foreground">{row.reason}</p>
+          {reasonForDisplay(row) && (
+            <p className="mt-0.5 text-xs text-muted-foreground">{reasonForDisplay(row)}</p>
           )}
         </div>
       </div>
@@ -676,8 +686,8 @@ function BriefingListRow({
       />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{activityTitleForDisplay(row.title)}</p>
-        {row.reason && (
-          <p className="truncate text-xs text-muted-foreground">{row.reason}</p>
+        {reasonForDisplay(row) && (
+          <p className="truncate text-xs text-muted-foreground">{reasonForDisplay(row)}</p>
         )}
       </div>
       <Button size="sm" variant="outline" onClick={() => onOpen(action.to)}>
