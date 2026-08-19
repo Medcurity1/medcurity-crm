@@ -32,6 +32,7 @@ Statuses: `IDEA` · `QUEUED` · `IN PROGRESS` · `BLOCKED` · `STAGING` (awaitin
 
 | # | Item | Who | Detail | Verify | Checked |
 |---|---|---|---|---|---|
+| B41 | Collateral announcement mobile layout | Nathan live QA 8/18 | At 390px, stack the copy and full-width action while keeping dismiss clear; preserve the desktop row. Production stays blocked until this exact follow-up clears Staging. | focused layout tests + production build + live 390px Staging check | 2026-08-18 |
 | B39 | Collateral v1.2 design tweaks — STAGING, awaiting Nathan's prod go | Jordan Mayer (v1.2 docx 8/11) via Nathan's build brief 8/18 | All 14 spec changes plus Nathan's live round, on Staging. **8/18 audit polish (local, not pushed):** unchecking one SRA variant from All now leaves the other variants selected; image cards no longer send `no-referrer` (live SharePoint cookie check still required); pinned row is labeled when filters are on; empty-state copy points at the Request button. Prod promotion = Nathan's explicit go only. | prod: collateral_settings.visible_to_roles still `{admin,super_admin}` and prod sidebar still shows the ADMIN badge on Collateral (v1.2 not promoted) | 2026-08-18 |
 
 ---

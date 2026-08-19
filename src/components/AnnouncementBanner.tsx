@@ -91,32 +91,38 @@ export function AnnouncementBanner() {
       {/* Launch-gradient accent (Nathan 8/18): same sky→indigo family as
           the sidebar's LAUNCHED pill, so the banner and the badge read as
           one launch moment. (The orange era belonged to Nexus.) */}
-      <div className="relative mx-auto flex max-w-[1800px] items-center gap-3 overflow-hidden rounded-xl border border-sky-500/30 bg-gradient-to-r from-sky-500/15 via-blue-500/10 to-indigo-500/10 px-4 py-3 shadow-sm backdrop-blur">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/20 ring-1 ring-sky-500/30">
-          <Sparkles className="h-5 w-5 text-sky-500" />
+      <div className="relative mx-auto max-w-[1800px] overflow-hidden rounded-xl border border-sky-500/30 bg-gradient-to-r from-sky-500/15 via-blue-500/10 to-indigo-500/10 px-4 py-3 pr-10 shadow-sm backdrop-blur sm:pr-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="flex min-w-0 flex-1 items-start gap-3 sm:items-center">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/20 ring-1 ring-sky-500/30">
+              <Sparkles className="h-5 w-5 text-sky-500" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">{title}</p>
+              <p className="mt-0.5 text-xs leading-snug text-muted-foreground sm:mt-0 sm:truncate sm:text-sm sm:leading-normal">
+                {message}
+              </p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            className="w-full gap-1.5 bg-gradient-to-r from-sky-400 via-blue-500 to-indigo-500 text-white shadow-sm shadow-blue-500/30 hover:opacity-90 sm:w-auto sm:shrink-0"
+            onClick={() => {
+              dismiss();
+              navigate(ctaRoute);
+            }}
+          >
+            {ctaLabel} <ArrowRight className="h-4 w-4" />
+          </Button>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={dismiss}
+            className="absolute right-2 top-2 rounded-md p-1 text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground sm:static sm:shrink-0"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold">{title}</p>
-          <p className="text-sm text-muted-foreground sm:truncate">{message}</p>
-        </div>
-        <Button
-          size="sm"
-          className="shrink-0 gap-1.5 bg-gradient-to-r from-sky-400 via-blue-500 to-indigo-500 text-white shadow-sm shadow-blue-500/30 hover:opacity-90"
-          onClick={() => {
-            dismiss();
-            navigate(ctaRoute);
-          }}
-        >
-          {ctaLabel} <ArrowRight className="h-4 w-4" />
-        </Button>
-        <button
-          type="button"
-          aria-label="Dismiss"
-          onClick={dismiss}
-          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground"
-        >
-          <X className="h-4 w-4" />
-        </button>
       </div>
     </div>
   );
