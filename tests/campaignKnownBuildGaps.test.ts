@@ -58,4 +58,18 @@ describe("known Campaigns build gaps", () => {
     expect(pulsePause).toBeGreaterThan(remotePause);
     expect(edge.slice(remotePause, pulsePause)).toContain("continue;");
   });
+
+  it("keeps the chosen build method and campaign title when the unified builder autosaves or switches methods", () => {
+    const wizard = read("src/features/playbook/CampaignWizard.tsx");
+    expect(wizard).toMatch(/v: 1, mode, flow, step/);
+    expect(wizard).toMatch(/setFlow\(s\.flow \?\?/);
+    expect(wizard).toMatch(/campaign\?\.campaign_name \?\? templateName/);
+    expect(wizard).toMatch(/requestedName \? \{ \.\.\.r\.campaign, campaign_name: requestedName \}/);
+  });
+
+  it("refreshes visible enrollment details and card counts after Smartlead reconciliation", () => {
+    const api = read("src/features/playbook/api.ts");
+    expect(api).toMatch(/invalidateQueries\(\{ queryKey: \["playbook", "campaign-enrollments"\] \}\)/);
+    expect(api).toMatch(/invalidateQueries\(\{ queryKey: \["playbook", "campaign-enrollment-stats"\] \}\)/);
+  });
 });

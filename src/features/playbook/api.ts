@@ -393,6 +393,8 @@ function useSmartleadAction(action: "import" | "sync" | "refresh") {
     },
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ["playbook", "campaigns"] });
+      qc.invalidateQueries({ queryKey: ["playbook", "campaign-enrollments"] });
+      qc.invalidateQueries({ queryKey: ["playbook", "campaign-enrollment-stats"] });
       const copy = formatSmartleadRefreshToast(r);
       if (copy.warning) toast.warning(copy.message, { duration: 8000 });
       else toast.success(copy.message);

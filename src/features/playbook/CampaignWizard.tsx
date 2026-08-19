@@ -130,6 +130,7 @@ function projectSendRamp(steps: SequenceStep[], leadsPerDay: number, recipientCo
 interface CampaignDraftState {
   v: 1;
   mode: "ai" | "template";
+  flow?: "choose" | "ai" | "template";
   step: Step;
   description: string;
   campaign: GeneratedCampaign | null;
@@ -155,6 +156,7 @@ function parseCampaignDraftState(json: unknown): CampaignDraftState | null {
   const s = json as Record<string, unknown>;
   if (s.v !== 1) return null;
   if (s.mode !== "ai" && s.mode !== "template") return null;
+  if (s.flow !== undefined && s.flow !== "choose" && s.flow !== "ai" && s.flow !== "template") return null;
   if (typeof s.step !== "number") return null;
   if (typeof s.description !== "string") return null;
   if (s.campaign !== null && typeof s.campaign !== "object") return null;
@@ -384,7 +386,7 @@ export function CampaignWizard({
     if (!open) { autosaveBaselineRef.current = null; return; }
     if (launch.isPending || launchResult || !hasMeaningfulContent) return;
     const state: CampaignDraftState = {
-      v: 1, mode, step, description, campaign, templateName, templateSteps,
+      v: 1, mode, flow, step, description, campaign, templateName, templateSteps,
       recipients, suppressionOverrides, enrollmentOverrides, inboxId, ownerId,
       autoStart, adaptive, leadsPerDay, minGap,
     };
@@ -396,7 +398,7 @@ export function CampaignWizard({
       return;
     }
     if (serialized === autosaveBaselineRef.current) return;
-    const title = templateName.trim() || "Untitled campaign";
+    const title = campaign?.campaign_name.trim() || templateName.trim() || "Untitled campaign";
     const t = setTimeout(() => {
       saveCampaignDraft({ id: draftIdRef.current ?? undefined, title, state_json: state as unknown as Record<string, unknown> })
         .then((id) => { draftIdRef.current = id; })
@@ -405,7 +407,7 @@ export function CampaignWizard({
     return () => clearTimeout(t);
   }, [
     open, launch.isPending, launchResult, hasMeaningfulContent,
-    mode, step, description, campaign, templateName, templateSteps,
+    mode, flow, step, description, campaign, templateName, templateSteps,
     recipients, suppressionOverrides, enrollmentOverrides, inboxId, ownerId,
     autoStart, adaptive, leadsPerDay, minGap,
   ]);
@@ -422,6 +424,7 @@ export function CampaignWizard({
     setStep(resumeLaunchStep(mode, s.step, hasLockedRecipients));
     setDescription(s.description); setCampaign(s.campaign);
     setTemplateName(s.templateName); setTemplateSteps(s.templateSteps);
+    setFlow(s.flow ?? (s.campaign ? "ai" : s.templateSteps.length ? "template" : mode === "template" ? "template" : "choose"));
     setRecipients(s.recipients);
     setSuppressionOverrides(s.suppressionOverrides); setEnrollmentOverrides(s.enrollmentOverrides);
     setInboxId(s.inboxId); setOwnerId(s.ownerId);
@@ -467,7 +470,11 @@ export function CampaignWizard({
   }
 
   function handleGenerate(desc?: string) {
-    gen.mutate(desc ?? description, { onSuccess: (r) => { setCampaign(r.campaign); setFlow("ai"); setSuggestions(null); setAppliedSug(new Set()); } });
+    gen.mutate(desc ?? description, { onSuccess: (r) => {
+      const requestedName = templateName.trim();
+      setCampaign(requestedName ? { ...r.campaign, campaign_name: requestedName } : r.campaign);
+      setFlow("ai"); setSuggestions(null); setAppliedSug(new Set());
+    } });
   }
   function regenerateWithFeedback() {
     const fb = regenFeedback.trim();
@@ -689,10 +696,10 @@ export function CampaignWizard({
                 <div className="space-y-1">
                   <Label className="text-xs">Campaign name</Label>
                   <Input
-                    value={flow === "ai" ? (campaign?.campaign_name ?? "") : templateName}
+                    value={flow === "ai" ? (campaign?.campaign_name ?? templateName) : templateName}
                     onChange={(e) => {
+                      setTemplateName(e.target.value);
                       if (flow === "ai" && campaign) setCampaign({ ...campaign, campaign_name: e.target.value });
-                      else setTemplateName(e.target.value);
                     }}
                     placeholder="What should this campaign be called?"
                   />
@@ -733,6 +740,7 @@ export function CampaignWizard({
                         setEditingSequence(true);
                       } else {
                         setFlow(id);
+                        if (id === "template") setAutoStart(true);
                         setEditingSequence(false);
                       }
                     }}
@@ -771,7 +779,7 @@ export function CampaignWizard({
                         type="button"
                         className="campaigns-method rounded-xl campaigns-surface p-3 text-left"
                         onClick={() => {
-                          setTemplateName(t.name);
+                          setTemplateName((current) => current.trim() || t.name);
                           setTemplateSteps(t.steps.map((s) => ({ ...s })));
                           setFlow("template");
                           setEditingSequence(false);
