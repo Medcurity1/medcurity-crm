@@ -109,10 +109,8 @@ export function TemplatesSection() {
   return (
     <div className="space-y-2">
       <div>
-        <h3 className="text-sm font-semibold">Start a campaign from a template</h3>
-        <p className="text-xs text-muted-foreground">
-          Pick a proven sequence, edit any step, then launch it on a list or contact. Email steps send automatically; calls and LinkedIn become your tasks in Up Next.
-        </p>
+        <h3 className="text-sm font-semibold">Start from a template</h3>
+        <p className="text-xs text-muted-foreground">Pick one, choose people, launch.</p>
       </div>
 
       {isLoading ? (
@@ -147,7 +145,6 @@ export function TemplatesSection() {
                   </div>
                   <div>
                     <h4 className="font-semibold text-sm">{t.name}</h4>
-                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{t.description}</p>
                   </div>
                   <div className="flex items-center justify-between gap-2 pt-1">
                     <SequenceMiniPreview steps={t.steps} />
@@ -163,7 +160,7 @@ export function TemplatesSection() {
                       campaigns" on every template that's never been used. */}
                   {score && score.campaigns > 0 && (
                     <p className="text-[11px] text-muted-foreground">
-                      {score.campaigns} {score.campaigns === 1 ? "campaign" : "campaigns"} · {score.replies} {score.replies === 1 ? "reply" : "replies"}
+                      {score.campaigns} {score.campaigns === 1 ? "campaign" : "campaigns"}, {score.replies} {score.replies === 1 ? "reply" : "replies"}
                     </p>
                   )}
                 </CardContent>
@@ -171,26 +168,14 @@ export function TemplatesSection() {
             );
           })}
 
-          {/* Start from scratch */}
-          <Card
-            className="py-0 cursor-pointer hover:shadow-md hover:border-primary/30 transition-all border-dashed overflow-hidden"
-            onClick={openBlank}
-          >
-            <div className="h-1.5 w-full bg-gradient-to-r from-slate-500/20 to-slate-400/10" />
-            <CardContent className="p-3 space-y-2">
-              <div className="flex items-start justify-between gap-2">
-                <div className="h-8 w-8 rounded-md flex items-center justify-center bg-slate-500/15 text-slate-600 dark:text-slate-300">
-                  <Wand2 className="h-4 w-4" />
-                </div>
-              </div>
-              <div>
-                <h4 className="font-semibold text-sm">Custom sequence</h4>
-                <p className="text-xs text-muted-foreground mt-0.5">Build your own from scratch. Same builder, empty canvas.</p>
-              </div>
-            </CardContent>
-          </Card>
         </div>
       )}
+
+      <div className="flex justify-start">
+        <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-muted-foreground" onClick={openBlank}>
+          <Wand2 className="h-3.5 w-3.5 mr-1" /> Or start a custom campaign
+        </Button>
+      </div>
 
       {/* Template preview dialog — the visual timeline */}
       <Dialog open={!!preview} onOpenChange={(o) => !o && setPreview(null)}>
@@ -209,7 +194,7 @@ export function TemplatesSection() {
               </div>
               {preview.domain_rules?.start_anchor === "nearest_monday" && (
                 <p className="text-[11px] text-muted-foreground -mt-0.5 mb-1">
-                  Weekdays shown assume a Monday start (the actual dates are set when you launch).
+                  Days assume a Monday start.
                 </p>
               )}
               <SequenceTimeline steps={preview.steps} />

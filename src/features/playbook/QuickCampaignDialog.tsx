@@ -105,8 +105,8 @@ export function QuickCampaignDialog({
             <DialogTitle>Start a campaign</DialogTitle>
             <DialogDescription>
               {contacts.length === 1
-                ? `Pick a sequence for ${contactLabel(contacts[0])}. This starts a new campaign just for them.`
-                : `Pick a sequence for ${contacts.length} people. This starts one new campaign for the group.`}
+                ? `Pick a template for ${contactLabel(contacts[0])}.`
+                : `Pick a template for ${contacts.length} people.`}
             </DialogDescription>
           </DialogHeader>
 
@@ -132,66 +132,60 @@ export function QuickCampaignDialog({
               }
             />
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {isLoading ? (
+                  Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)
+                ) : isError ? (
+                  <div className="sm:col-span-2">
+                    <QueryError
+                      message="Couldn't load templates. You can still start a custom campaign."
+                      onRetry={() => refetch()}
+                      isRetrying={isFetching}
+                    />
+                  </div>
+                ) : (templates ?? []).map((t) => {
+                  const cat = CATEGORY[t.category] ?? CATEGORY.custom;
+                  const Icon = cat.icon;
+                  return (
+                    <button
+                      type="button"
+                      key={t.id}
+                      className="rounded-xl border bg-card text-card-foreground shadow-sm text-left cursor-pointer hover:shadow-md hover:border-primary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-all overflow-hidden"
+                      onClick={() => pickTemplate(t)}
+                    >
+                      <div className={cn("h-1 w-full bg-gradient-to-r", cat.accent)} />
+                      <div className="p-3 space-y-1.5">
+                        <div className="flex items-center gap-2">
+                          <div className={cn("h-6 w-6 rounded-md flex items-center justify-center shrink-0", cat.chip)}>
+                            <Icon className="h-3.5 w-3.5" />
+                          </div>
+                          <h4 className="font-semibold text-sm truncate">{t.name}</h4>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <SequenceMiniPreview steps={t.steps} />
+                          <span className="text-[11px] text-muted-foreground inline-flex items-center gap-2 shrink-0">
+                            <span className="inline-flex items-center gap-1"><Layers className="h-3 w-3" />{t.step_count ?? t.steps.length}</span>
+                            {t.duration_days != null && (
+                              <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{t.duration_days}d</span>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
               <button
                 type="button"
-                className="rounded-xl border bg-card text-card-foreground shadow-sm text-left cursor-pointer border-primary/25 bg-primary/[0.03] hover:shadow-md hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-all overflow-hidden"
+                className="w-full rounded-lg border border-dashed px-3 py-2 text-left text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={pickCustom}
               >
-                <div className="h-1 w-full bg-gradient-to-r from-violet-500 to-fuchsia-500" />
-                <div className="p-3 space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <div className="h-6 w-6 rounded-md flex items-center justify-center shrink-0 bg-violet-500/15 text-violet-600 dark:text-violet-400">
-                      <Wand2 className="h-3.5 w-3.5" />
-                    </div>
-                    <h4 className="font-semibold text-sm">Custom campaign</h4>
-                  </div>
-                  <p className="text-[11px] leading-relaxed text-muted-foreground">
-                    Describe the outreach you want. Pulse drafts it for {withEmail.length === 1 ? contactLabel(withEmail[0]) : "this group"}.
-                  </p>
-                </div>
+                <span className="inline-flex items-center gap-2">
+                  <Wand2 className="h-3.5 w-3.5" />
+                  Or start a custom campaign
+                </span>
               </button>
-              {isLoading ? (
-                Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-24 w-full" />)
-              ) : isError ? (
-                <div className="sm:col-span-2">
-                  <QueryError
-                    message="Couldn't load saved sequence templates. You can still start a custom campaign."
-                    onRetry={() => refetch()}
-                    isRetrying={isFetching}
-                  />
-                </div>
-              ) : (templates ?? []).map((t) => {
-                const cat = CATEGORY[t.category] ?? CATEGORY.custom;
-                const Icon = cat.icon;
-                return (
-                  <button
-                    type="button"
-                    key={t.id}
-                    className="rounded-xl border bg-card text-card-foreground shadow-sm text-left cursor-pointer hover:shadow-md hover:border-primary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-all overflow-hidden"
-                    onClick={() => pickTemplate(t)}
-                  >
-                    <div className={cn("h-1 w-full bg-gradient-to-r", cat.accent)} />
-                    <div className="p-3 space-y-1.5">
-                      <div className="flex items-center gap-2">
-                        <div className={cn("h-6 w-6 rounded-md flex items-center justify-center shrink-0", cat.chip)}>
-                          <Icon className="h-3.5 w-3.5" />
-                        </div>
-                        <h4 className="font-semibold text-sm truncate">{t.name}</h4>
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <SequenceMiniPreview steps={t.steps} />
-                        <span className="text-[11px] text-muted-foreground inline-flex items-center gap-2 shrink-0">
-                          <span className="inline-flex items-center gap-1"><Layers className="h-3 w-3" />{t.step_count ?? t.steps.length}</span>
-                          {t.duration_days != null && (
-                            <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{t.duration_days}d</span>
-                          )}
-                        </span>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
             </div>
           )}
         </DialogContent>
