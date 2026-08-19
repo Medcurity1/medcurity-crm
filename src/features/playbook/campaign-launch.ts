@@ -37,6 +37,17 @@ export function builderProgress(
   step: number,
   hasLockedRecipients: boolean,
 ): { displayStep: number; displayTotal: number; title: string; description: string } {
+  // A template shortcut normally starts on People/Review, but Back can
+  // deliberately return to Build for per-launch sequence editing. The
+  // header must follow the visible stage instead of the original shortcut.
+  if (step === 1) {
+    return {
+      displayStep: 1,
+      displayTotal: hasLockedRecipients ? 2 : 3,
+      title: "Build",
+      description: "Name the campaign, then use a template, draft with AI, or write your own.",
+    };
+  }
   if (mode === "template") {
     const displayTotal = hasLockedRecipients ? 1 : 2;
     if (hasLockedRecipients || step >= 3) {

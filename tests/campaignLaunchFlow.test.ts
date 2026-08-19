@@ -52,6 +52,11 @@ describe("template launch flow", () => {
       title: "Review",
     });
     expect(builderProgress("ai", 1, false).title).toBe("Build");
+    expect(builderProgress("template", 1, false)).toMatchObject({
+      displayStep: 1,
+      displayTotal: 3,
+      title: "Build",
+    });
   });
 
   it("formats sequence timing without dashes", () => {

@@ -634,7 +634,7 @@ export function CampaignWizard({
           ...shared,
           campaign_name: templateName,
           steps: templateSteps,
-          template_id: templateSeed?.template_id ?? undefined,
+          template_id: customSequence ? undefined : (templateSeed?.template_id ?? undefined),
         },
         { onSuccess: handleLaunchSuccess },
       );
@@ -761,7 +761,7 @@ export function CampaignWizard({
                 <div className="campaigns-start-grid" role="group" aria-label="How would you like to start?">
                   {BUILD_START_METHODS.map(({ id, label, description, Icon }) => {
                     const selected = id === "choose"
-                      ? customSequence
+                      ? flow === "template" && customSequence
                       : id === "template"
                         ? flow === "template" && !customSequence
                         : flow === "ai";
@@ -779,18 +779,17 @@ export function CampaignWizard({
                             setFlow("template");
                             if (!customSequence) setTemplateSteps(recommendedCustomSequence());
                             setCustomSequence(true);
+                            setAutoStart(false);
                             setEditingSequence(false);
                           } else if (id === "template") {
                             setFlow("template");
                             setCustomSequence(false);
                             setAutoStart(true);
                             setEditingSequence(false);
-                            if (customSequence) {
-                              setTemplateSteps(templateSeed?.steps ? templateSeed.steps.map((s) => ({ ...s })) : []);
-                            }
+                            setTemplateSteps(templateSeed?.steps ? templateSeed.steps.map((s) => ({ ...s })) : []);
                           } else {
                             setFlow("ai");
-                            setCustomSequence(false);
+                            setAutoStart(false);
                             setEditingSequence(false);
                           }
                         }}
@@ -807,20 +806,17 @@ export function CampaignWizard({
               </div>
 
               {flow === "ai" && !campaign && (
-                <div className="space-y-3">
-                  <Label>What's the campaign?</Label>
-                  <Textarea
-                    rows={5}
-                    placeholder="e.g. A 3-email cold sequence to small dental practices (1-20 staff) introducing the SRA and offering a quick demo."
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                  />
+                <div className="flex flex-wrap items-center gap-2">
                   <Button variant="ai" onClick={() => handleGenerate()} disabled={!canGenerate || gen.isPending}>
                     {gen.isPending
                       ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Writing…</>
                       : <><span className="ai-icon mr-1"><Sparkles className="h-4 w-4" /></span> Generate sequence</>}
                   </Button>
-                  {!canGenerate && description.length > 0 && <p className="text-xs text-muted-foreground">A little more detail helps (20+ characters).</p>}
+                  {!canGenerate && (
+                    <p className="text-xs text-muted-foreground">
+                      {description.length > 0 ? "Add a little more detail to the Goal above." : "Describe the audience and goal above to draft the sequence."}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -888,17 +884,6 @@ export function CampaignWizard({
           {/* AI sequence editor lives on Build after a draft is generated */}
           {step === 1 && flow === "ai" && campaign && (
             <div className="space-y-3">
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">Campaign name</Label>
-                  <Input value={campaign.campaign_name} onChange={(e) => setCampaign({ ...campaign, campaign_name: e.target.value })} />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Target audience</Label>
-                  <Input value={campaign.target_audience} onChange={(e) => setCampaign({ ...campaign, target_audience: e.target.value })} />
-                </div>
-              </div>
-
               {gen.isPending && (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Rewriting the sequence…</div>
               )}
