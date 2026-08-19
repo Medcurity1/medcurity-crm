@@ -98,6 +98,8 @@ export function SequenceEditor({
   const [steps, setSteps] = useState<SequenceStep[]>(
     initial?.steps?.length ? initial.steps.map((s) => ({ ...s })) : [freshStep(1)],
   );
+  const [channelPicker, setChannelPicker] = useState<number | null>(null);
+  const [subjectFocused, setSubjectFocused] = useState<number | null>(null);
 
   const patchStep = (i: number, patch: Partial<SequenceStep>) =>
     setSteps((prev) => prev.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
@@ -216,7 +218,7 @@ export function SequenceEditor({
   return (
     <>
     <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[88vh] overflow-y-auto">
+      <DialogContent className="campaigns-aurora sm:max-w-2xl max-h-[88vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{initial?.id ? "Edit sequence" : "Build a sequence"}</DialogTitle>
           <DialogDescription>
@@ -286,28 +288,40 @@ export function SequenceEditor({
                     </div>
                   </div>
 
-                  {/* Channel picker */}
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {CHANNELS.map((c) => {
-                      const CIcon = c.icon;
-                      const active = s.channel === c.value;
-                      return (
-                        <button
-                          key={c.value}
-                          type="button"
-                          onClick={() => setChannel(i, c.value)}
-                          className={
-                            "flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs text-left transition-colors " +
-                            (active
-                              ? "border-primary bg-primary/10 text-foreground"
-                              : "text-muted-foreground hover:bg-muted")
-                          }
-                        >
-                          <CIcon className="h-4 w-4 shrink-0" />
-                          {c.label}
-                        </button>
-                      );
-                    })}
+                  <div className="space-y-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setChannelPicker((open) => open === i ? null : i)}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-muted/70 px-2.5 py-1 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      {def.label}
+                    </button>
+                    {channelPicker === i && (
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {CHANNELS.map((c) => {
+                          const CIcon = c.icon;
+                          const active = s.channel === c.value;
+                          return (
+                            <button
+                              key={c.value}
+                              type="button"
+                              onClick={() => { setChannel(i, c.value); setChannelPicker(null); }}
+                              className={
+                                "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs text-left transition-colors " +
+                                (active
+                                  ? "campaigns-method bg-primary/10 text-foreground"
+                                  : "text-muted-foreground hover:bg-muted")
+                              }
+                              data-selected={active}
+                            >
+                              <CIcon className="h-4 w-4 shrink-0" />
+                              {c.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
 
                   {/* Email content */}
@@ -322,15 +336,31 @@ export function SequenceEditor({
                         placeholder="Subject"
                         value={templateToAuthorText(s.subject_template ?? "")}
                         onChange={(e) => patchStep(i, { subject_template: e.target.value, content_ai_draft: false })}
+                        onFocus={() => setSubjectFocused(i)}
                         className="h-8"
                       />
                       <div className="flex flex-wrap items-center gap-1">
-                        <span className="mr-1 text-[11px] text-muted-foreground">Add to subject</span>
-                        <Button type="button" variant="outline" size="xs" onClick={() => patchStep(i, { subject_template: insertAuthorToken(templateToAuthorText(s.subject_template ?? ""), AUTHOR_TOKENS.firstName), content_ai_draft: false })}>
+                        <span className="mr-1 text-xs text-muted-foreground">{subjectFocused === i ? "Add to subject" : "Personalize"}</span>
+                        <Button type="button" variant="outline" size="xs" onClick={() => {
+                          if (subjectFocused === i) {
+                            patchStep(i, { subject_template: insertAuthorToken(templateToAuthorText(s.subject_template ?? ""), AUTHOR_TOKENS.firstName), content_ai_draft: false });
+                          } else {
+                            patchStep(i, { body_template: authorTextToTemplateHtml(insertAuthorToken(templateToAuthorText(s.body_template ?? ""), AUTHOR_TOKENS.firstName)), content_ai_draft: false });
+                          }
+                        }}>
                           <UserRound className="h-3 w-3 mr-1" /> First name
                         </Button>
-                        <Button type="button" variant="outline" size="xs" onClick={() => patchStep(i, { subject_template: insertAuthorToken(templateToAuthorText(s.subject_template ?? ""), AUTHOR_TOKENS.organization), content_ai_draft: false })}>
+                        <Button type="button" variant="outline" size="xs" onClick={() => {
+                          if (subjectFocused === i) {
+                            patchStep(i, { subject_template: insertAuthorToken(templateToAuthorText(s.subject_template ?? ""), AUTHOR_TOKENS.organization), content_ai_draft: false });
+                          } else {
+                            patchStep(i, { body_template: authorTextToTemplateHtml(insertAuthorToken(templateToAuthorText(s.body_template ?? ""), AUTHOR_TOKENS.organization)), content_ai_draft: false });
+                          }
+                        }}>
                           <Building2 className="h-3 w-3 mr-1" /> Organization
+                        </Button>
+                        <Button type="button" variant="outline" size="xs" onClick={() => patchStep(i, { body_template: authorTextToTemplateHtml(insertAuthorToken(templateToAuthorText(s.body_template ?? ""), AUTHOR_TOKENS.signature)), content_ai_draft: false })}>
+                          <Signature className="h-3 w-3 mr-1" /> Signature
                         </Button>
                       </div>
                       {hasAdvancedFormatting ? (
@@ -343,22 +373,11 @@ export function SequenceEditor({
                           </div>
                         </>
                       ) : <>
-                      <div className="flex flex-wrap items-center gap-1">
-                        <span className="mr-1 text-[11px] text-muted-foreground">Personalize email</span>
-                        <Button type="button" variant="outline" size="xs" onClick={() => patchStep(i, { body_template: authorTextToTemplateHtml(insertAuthorToken(templateToAuthorText(s.body_template ?? ""), AUTHOR_TOKENS.firstName)), content_ai_draft: false })}>
-                          <UserRound className="h-3 w-3 mr-1" /> First name
-                        </Button>
-                        <Button type="button" variant="outline" size="xs" onClick={() => patchStep(i, { body_template: authorTextToTemplateHtml(insertAuthorToken(templateToAuthorText(s.body_template ?? ""), AUTHOR_TOKENS.organization)), content_ai_draft: false })}>
-                          <Building2 className="h-3 w-3 mr-1" /> Organization
-                        </Button>
-                        <Button type="button" variant="outline" size="xs" onClick={() => patchStep(i, { body_template: authorTextToTemplateHtml(insertAuthorToken(templateToAuthorText(s.body_template ?? ""), AUTHOR_TOKENS.signature)), content_ai_draft: false })}>
-                          <Signature className="h-3 w-3 mr-1" /> Signature
-                        </Button>
-                      </div>
                       <Textarea
                         placeholder="Write the email exactly as it should read. Pulse handles names, spacing, and the sender signature."
                         value={templateToAuthorText(s.body_template ?? "")}
                         onChange={(e) => patchStep(i, { body_template: authorTextToTemplateHtml(e.target.value), content_ai_draft: false })}
+                        onFocus={() => setSubjectFocused(null)}
                         rows={6}
                       />
                       </>}

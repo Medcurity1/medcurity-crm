@@ -28,6 +28,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import {
   fetchRecipientsByTag, fetchRecipientsByList, fetchSuppressionForEmails, fetchActiveEnrollmentsForEmails,
   type Recipient, type ActiveEnrollmentEntry,
@@ -95,6 +96,7 @@ export function CampaignRecipients({
   const [safetyCheckNonce, setSafetyCheckNonce] = useState(0);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [csv, setCsv] = useState<{ header: string[]; rows: string[][]; mapping: RecipientField[] } | null>(null);
+  const [addSource, setAddSource] = useState<"list" | "tag" | "upload" | "paste">("list");
   const fileRef = useRef<HTMLInputElement>(null);
   const suppressionReqId = useRef(0);
   const enrollmentReqId = useRef(0);
@@ -342,99 +344,130 @@ export function CampaignRecipients({
       )}
 
       {!compact && <>
-      {/* Source 1: tag */}
-      <div className="space-y-1">
-        <Label className="text-xs">From a contact tag (custom list)</Label>
-        <div className="flex items-center gap-2">
-          <Select value={recipientTag} onValueChange={loadTag} disabled={tagLoading}>
-            <SelectTrigger className="flex-1"><SelectValue placeholder="Pick a tag…" /></SelectTrigger>
-            <SelectContent>
-              {tags.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          {tagLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+      <div className="space-y-3">
+        <div>
+          <p className="text-sm font-medium">Add people</p>
+          <p className="text-xs text-muted-foreground">List, tag, upload, and paste all add to the same audience.</p>
         </div>
-        <p className="text-[11px] text-muted-foreground">Do-Not-Email people are checked after you add them, below.</p>
-      </div>
-
-      {/* Source 1b: saved list (outside-review I26 — Report Builder
-          audiences arrive here via its Save-as-list) */}
-      {((lists ?? []).length > 0 || listsError) && (
-        <div className="space-y-1">
-          <Label className="text-xs">From a saved list</Label>
-          {listsError ? (
-            <p className="text-xs text-amber-600">Couldn't load your saved lists. Reopen this step to retry.</p>
-          ) : (
-            <>
-              <div className="flex items-center gap-2">
-                <Select value={recipientList} onValueChange={loadList} disabled={listLoading}>
-                  <SelectTrigger className="flex-1"><SelectValue placeholder="Pick a list…" /></SelectTrigger>
-                  <SelectContent>
-                    {(lists ?? []).map((l) => (
-                      <SelectItem key={l.id} value={l.id}>
-                        {l.name}{l.is_dynamic ? " (smart, resolved when you pick it)" : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {listLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                Built an audience in the Report Builder? Save it as a list there, then pick it here.
-              </p>
-            </>
-          )}
+        <div className="flex flex-wrap gap-1.5">
+          {([
+            ["list", "List"],
+            ["tag", "Tag"],
+            ["upload", "Upload"],
+            ["paste", "Paste"],
+          ] as const).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setAddSource(id)}
+              data-selected={addSource === id}
+              className={cn(
+                "campaigns-method rounded-full px-3 py-1.5 text-xs font-medium",
+                addSource === id ? "text-foreground" : "bg-muted/60 text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-      )}
 
-      {/* Source 2: CSV upload */}
-      <div className="space-y-1">
-        <Label className="text-xs">Upload a list (CSV or .txt)</Label>
-        <input ref={fileRef} type="file" accept=".csv,.txt" className="hidden"
-          onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) onFile(f); }} />
-        <button
-          type="button"
-          className="w-full rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground hover:bg-accent/40"
-          onClick={() => fileRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) onFile(f); }}
-        >
-          <Upload className="h-5 w-5 mx-auto mb-1" />
-          <span className="font-medium text-foreground">Click to upload</span> or drag & drop a CSV
-        </button>
-
-        {csv && (
-          <div className="rounded-md border p-2 space-y-2">
-            <p className="text-[11px] text-muted-foreground">Map your columns ({csv.rows.length} rows):</p>
-            <div className="space-y-1 max-h-40 overflow-y-auto">
-              {csv.header.map((h, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className="text-xs flex-1 truncate" title={h}>{h || `Column ${i + 1}`}</span>
-                  <Select value={csv.mapping[i]} onValueChange={(v) => {
-                    const m = [...csv.mapping]; m[i] = v as RecipientField; setCsv({ ...csv, mapping: m });
-                  }}>
-                    <SelectTrigger className="h-7 w-40 text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {FIELD_OPTIONS.map((f) => <SelectItem key={f} value={f}>{FIELD_LABEL[f]}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ))}
-            </div>
+        {addSource === "tag" && (
+          <div className="space-y-1">
+            <Label className="text-xs">From a contact tag</Label>
             <div className="flex items-center gap-2">
-              <Button size="sm" onClick={importCsv} disabled={!hasEmailMapped}>Import</Button>
-              <Button size="sm" variant="ghost" onClick={() => setCsv(null)}>Cancel</Button>
-              {!hasEmailMapped && <span className="text-[11px] text-amber-600">Map a column to Email.</span>}
+              <Select value={recipientTag} onValueChange={loadTag} disabled={tagLoading}>
+                <SelectTrigger className="flex-1"><SelectValue placeholder="Pick a tag…" /></SelectTrigger>
+                <SelectContent>
+                  {tags.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {tagLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
             </div>
+            <p className="text-xs text-muted-foreground">Do-Not-Email people are checked after you add them, below.</p>
           </div>
         )}
-      </div>
 
-      {/* Source 3: paste */}
-      <div className="space-y-1">
-        <Label className="text-xs">Or paste emails</Label>
-        <Textarea rows={2} placeholder="one@x.com, two@y.com…" value={pasted} onChange={(e) => setPasted(e.target.value)} />
-        <Button size="sm" variant="outline" onClick={applyPasted} disabled={!pasted.trim()}>Add pasted emails</Button>
+        {addSource === "list" && (
+          <div className="space-y-1">
+            <Label className="text-xs">From a saved list</Label>
+            {listsError ? (
+              <p className="text-xs text-amber-600">Couldn't load your saved lists. Reopen this step to retry.</p>
+            ) : (lists ?? []).length === 0 ? (
+              <p className="text-xs text-muted-foreground">No saved lists yet. Build one in Reports, then pick it here.</p>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <Select value={recipientList} onValueChange={loadList} disabled={listLoading}>
+                    <SelectTrigger className="flex-1"><SelectValue placeholder="Pick a list…" /></SelectTrigger>
+                    <SelectContent>
+                      {(lists ?? []).map((l) => (
+                        <SelectItem key={l.id} value={l.id}>
+                          {l.name}{l.is_dynamic ? " (smart, resolved when you pick it)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {listLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Built an audience in the Report Builder? Save it as a list there, then pick it here.
+                </p>
+              </>
+            )}
+          </div>
+        )}
+
+        {addSource === "upload" && (
+          <div className="space-y-1">
+            <Label className="text-xs">Upload a list (CSV or .txt)</Label>
+            <input ref={fileRef} type="file" accept=".csv,.txt" className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) onFile(f); }} />
+            <button
+              type="button"
+              className="w-full rounded-xl border border-dashed p-4 text-center text-xs text-muted-foreground hover:bg-accent/40"
+              onClick={() => fileRef.current?.click()}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) onFile(f); }}
+            >
+              <Upload className="h-5 w-5 mx-auto mb-1" />
+              <span className="font-medium text-foreground">Click to upload</span> or drag and drop a CSV
+            </button>
+
+            {csv && (
+              <div className="rounded-xl campaigns-surface p-2 space-y-2">
+                <p className="text-xs text-muted-foreground">Map your columns ({csv.rows.length} rows):</p>
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {csv.header.map((h, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="text-xs flex-1 truncate" title={h}>{h || `Column ${i + 1}`}</span>
+                      <Select value={csv.mapping[i]} onValueChange={(v) => {
+                        const m = [...csv.mapping]; m[i] = v as RecipientField; setCsv({ ...csv, mapping: m });
+                      }}>
+                        <SelectTrigger className="h-7 w-40 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {FIELD_OPTIONS.map((f) => <SelectItem key={f} value={f}>{FIELD_LABEL[f]}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={importCsv} disabled={!hasEmailMapped}>Import</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setCsv(null)}>Cancel</Button>
+                  {!hasEmailMapped && <span className="text-xs text-amber-600">Map a column to Email.</span>}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {addSource === "paste" && (
+          <div className="space-y-1">
+            <Label className="text-xs">Paste emails</Label>
+            <Textarea rows={2} placeholder="one@x.com, two@y.com…" value={pasted} onChange={(e) => setPasted(e.target.value)} />
+            <Button size="sm" variant="outline" onClick={applyPasted} disabled={!pasted.trim()}>Add pasted emails</Button>
+          </div>
+        )}
       </div>
       </>}
 
@@ -548,29 +581,32 @@ export function CampaignRecipients({
                   const locked = reasonCodes.some(isNonOverridableReason);
                   const checked = overrideSet.has(key) && !locked;
                   return (
-                    <label key={r.email} className={locked ? "flex items-center gap-2 px-2 py-1.5 text-xs" : "flex items-center gap-2 px-2 py-1.5 text-xs cursor-pointer"}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={locked}
-                        onChange={(e) => toggleOverride(r.email, e.target.checked)}
-                      />
+                    <div key={r.email} className="flex items-center gap-2 px-2 py-2 text-xs">
                       <span className="flex-1 min-w-0 truncate">
                         {r.email}
                         <span className="text-muted-foreground"> · {reasons || "suppressed"}</span>
                       </span>
-                      <span className={checked ? "shrink-0 text-[10px] font-medium text-emerald-600" : "shrink-0 text-[10px] font-medium text-muted-foreground"}>
-                        {locked
-                          ? (reasonCodes.includes("optout_unsubscribed") ? "Unsubscribed, can't include" : "Opted out, can't include")
-                          : checked ? "Included anyway" : "Excluded"}
-                      </span>
-                    </label>
+                      {locked ? (
+                        <span className="shrink-0 text-xs font-medium text-muted-foreground">
+                          {reasonCodes.includes("optout_unsubscribed") ? "Unsubscribed, can't include" : "Opted out, can't include"}
+                        </span>
+                      ) : (
+                        <div className="flex shrink-0 gap-1">
+                          <Button type="button" size="xs" variant={checked ? "ghost" : "outline"} onClick={() => toggleOverride(r.email, false)}>
+                            Keep out
+                          </Button>
+                          <Button type="button" size="xs" variant={checked ? "default" : "outline"} onClick={() => toggleOverride(r.email, true)}>
+                            Include anyway
+                          </Button>
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
             )}
-            <p className="px-2 py-1.5 text-[11px] text-muted-foreground border-t">
-              Checked people are added to the campaign anyway. Everyone else here is left out of the send.
+            <p className="px-2 py-1.5 text-xs text-muted-foreground border-t">
+              Include anyway adds this person to the send. Keep out leaves them out.
               People who unsubscribed or opted out can't be included. That choice is theirs.
             </p>
           </div>
@@ -596,26 +632,26 @@ export function CampaignRecipients({
                   const campaignNames = (enrollmentReasonsByEmail.get(key) ?? []).join(" · ");
                   const checked = enrollmentOverrideSet.has(key);
                   return (
-                    <label key={r.email} className="flex items-center gap-2 px-2 py-1.5 text-xs cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(e) => toggleEnrollmentOverride(r.email, e.target.checked)}
-                      />
+                    <div key={r.email} className="flex items-center gap-2 px-2 py-2 text-xs">
                       <span className="flex-1 min-w-0 truncate">
                         {r.email}
                         <span className="text-muted-foreground"> · already in: {campaignNames || "another campaign"}</span>
                       </span>
-                      <span className={checked ? "shrink-0 text-[10px] font-medium text-emerald-600" : "shrink-0 text-[10px] font-medium text-muted-foreground"}>
-                        {checked ? "Enrolled anyway" : "Excluded"}
-                      </span>
-                    </label>
+                      <div className="flex shrink-0 gap-1">
+                        <Button type="button" size="xs" variant={checked ? "ghost" : "outline"} onClick={() => toggleEnrollmentOverride(r.email, false)}>
+                          Keep out
+                        </Button>
+                        <Button type="button" size="xs" variant={checked ? "default" : "outline"} onClick={() => toggleEnrollmentOverride(r.email, true)}>
+                          Enroll in both
+                        </Button>
+                      </div>
+                    </div>
                   );
                 })}
               </div>
             )}
-            <p className="px-2 py-1.5 text-[11px] text-muted-foreground border-t">
-              Checked people are enrolled in this campaign too. Everyone else here is left out; they'll keep getting the campaign they're already in.
+            <p className="px-2 py-1.5 text-xs text-muted-foreground border-t">
+              Enroll in both adds them to this campaign too. Keep out leaves them on the campaign they are already in.
             </p>
           </div>
         )}

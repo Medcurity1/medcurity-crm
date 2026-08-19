@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
 import path from "path";
 import {
+  builderProgress,
+  firstMeaningfulLine,
   formatSequenceWhen,
   initialLaunchStep,
   resumeLaunchStep,
+  sequenceStepHeadline,
   templateLaunchProgress,
 } from "../src/features/playbook/campaign-launch";
 
@@ -19,42 +22,50 @@ function visibleSource(relative: string): string {
 
 describe("template launch flow", () => {
   it("starts a template launch on audience, or review when people are already locked", () => {
-    expect(initialLaunchStep("template", false)).toBe(3);
-    expect(initialLaunchStep("template", true)).toBe(4);
+    expect(initialLaunchStep("template", false)).toBe(2);
+    expect(initialLaunchStep("template", true)).toBe(3);
     expect(initialLaunchStep("ai", false)).toBe(1);
   });
 
   it("resumes templates through audience unless recipients are locked", () => {
-    expect(resumeLaunchStep("template", 2, false)).toBe(3);
-    expect(resumeLaunchStep("template", 4, false)).toBe(3);
-    expect(resumeLaunchStep("template", 4, true)).toBe(4);
-    expect(resumeLaunchStep("ai", 4, false)).toBe(3);
-    expect(resumeLaunchStep("ai", 2, false)).toBe(2);
+    expect(resumeLaunchStep("template", 2, false)).toBe(2);
+    expect(resumeLaunchStep("template", 4, false)).toBe(2);
+    expect(resumeLaunchStep("template", 4, true)).toBe(3);
+    expect(resumeLaunchStep("ai", 4, false)).toBe(2);
+    expect(resumeLaunchStep("ai", 2, false)).toBe(1);
   });
 
-  it("shows choose people, then review and launch", () => {
-    expect(templateLaunchProgress(3, false)).toMatchObject({
+  it("shows people, then review, or review only when recipients are locked", () => {
+    expect(templateLaunchProgress(2, false)).toMatchObject({
       displayStep: 1,
       displayTotal: 2,
-      title: "Choose people",
+      title: "People",
     });
-    expect(templateLaunchProgress(4, false)).toMatchObject({
+    expect(templateLaunchProgress(3, false)).toMatchObject({
       displayStep: 2,
       displayTotal: 2,
-      title: "Review and launch",
+      title: "Review",
     });
-    expect(templateLaunchProgress(4, true)).toMatchObject({
+    expect(templateLaunchProgress(3, true)).toMatchObject({
       displayStep: 1,
       displayTotal: 1,
-      title: "Review and launch",
+      title: "Review",
     });
-    expect(templateLaunchProgress(2, false).title).toBe("Edit sequence");
+    expect(builderProgress("ai", 1, false).title).toBe("Build");
   });
 
   it("formats sequence timing without dashes", () => {
     expect(formatSequenceWhen(1, "Mon")).toBe("Day 1 Mon");
     expect(formatSequenceWhen(5, "Fri", "10:00", "11:00")).toBe("Day 5 Fri 10:00 to 11:00");
     expect(formatSequenceWhen(8, "Mon", "09:00")).toBe("Day 8 Mon 09:00");
+  });
+
+  it("shows a real subject or threaded follow-up instead of a generic email label", () => {
+    expect(sequenceStepHeadline({ channel: "EMAIL_AUTO", subject: "Quick intro", isFirstEmail: true }))
+      .toBe("Quick intro");
+    expect(sequenceStepHeadline({ channel: "EMAIL_AUTO", subject: "  ", isFirstEmail: false }))
+      .toBe("Threaded follow-up");
+    expect(firstMeaningfulLine("<p>Hello there, this is the body.</p>")).toBe("Hello there, this is the body.");
   });
 
   it("keeps sequence rows collapsed until opened", () => {

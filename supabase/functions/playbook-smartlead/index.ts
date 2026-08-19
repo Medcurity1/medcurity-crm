@@ -51,6 +51,7 @@ import {
   firstNumber,
   extractDailyLimit,
 } from "../_shared/smartlead-sync.ts";
+import { planTerminalEnrollmentReconcile } from "../_shared/campaign-terminal-enrollments.ts";
 import {
   computeFirstSendDates,
   relativeStepOffsets,
@@ -603,9 +604,16 @@ async function importCampaigns() {
       // the source of truth for a linked campaign's send state, including
       // pause/resume, not just forward lifecycle progress) — but never
       // regress a Pulse-terminal status on an unrecognized/backward value;
-      // see resolveSyncedStatus above.
+      // see resolveSyncedStatus above. Freshness goes through the merge RPC
+      // so a concurrent settings write cannot drop last_metrics_sync_at.
       const status = resolveSyncedStatus(existing.status as string, mappedStatus);
-      await svc.from("campaigns").update({ metrics: merged, status }).eq("id", existing.id);
+      const { error: applyErr } = await svc.rpc("campaign_sync_apply", {
+        p_campaign_id: existing.id,
+        p_metrics: merged,
+        p_status: status,
+        p_settings_patch: { last_metrics_sync_at: new Date().toISOString() },
+      });
+      if (applyErr) throw new Error(applyErr.message);
       updated++;
     } else {
       // Brand-new row: no prior status to preserve, and the status column
@@ -680,7 +688,132 @@ async function syncCampaigns(deadline?: number) {
       synced++;
     } catch { /* skip this one */ }
   }
+  // Interactive Sync (no deadline) also closes stale active enrollments on
+  // campaigns that are already stopped/completed in Pulse. The daily sweep
+  // still owns this as step 6 so a budget-capped sync cannot skip the
+  // nightly catch-up.
+  if (deadline == null) {
+    const reconciled = await reconcileTerminalEnrollments();
+    return {
+      synced,
+      capped,
+      enrollments_updated: reconciled.enrollments_updated,
+      enrollments_deferred: reconciled.enrollments_deferred,
+      tasks_cancelled: reconciled.tasks_cancelled,
+    };
+  }
   return { synced, capped };
+}
+
+async function refreshSmartlead() {
+  const imported = await importCampaigns();
+  const synced = await syncCampaigns();
+  return {
+    created: imported.created,
+    updated: imported.updated,
+    total: imported.total,
+    synced: synced.synced,
+    capped: synced.capped ?? 0,
+    enrollments_updated: synced.enrollments_updated ?? 0,
+    enrollments_deferred: synced.enrollments_deferred ?? 0,
+    tasks_cancelled: synced.tasks_cancelled ?? 0,
+  };
+}
+
+/** Close active enrollments whose parent campaign is already stopped or
+ *  completed. Matches daily-sweep step 6: stopped campaigns flip and
+ *  archive pending tasks; completed campaigns only flip enrollments whose
+ *  call/LinkedIn tasks are done. Never writes unsubscribe/bounce/replied
+ *  rows — those are already terminal and excluded by the active filter. */
+async function reconcileTerminalEnrollments(deadline?: number): Promise<{
+  enrollments_updated: number;
+  enrollments_deferred: number;
+  tasks_cancelled: number;
+  capped: number;
+}> {
+  let enrollments_updated = 0;
+  let enrollments_deferred = 0;
+  let tasks_cancelled = 0;
+  let capped = 0;
+  const doneCampaigns = await fetchAllRows<{ id: string; status: string }>((from, to) =>
+    svc
+      .from("campaigns")
+      .select("id, status")
+      .in("status", ["completed", "stopped"])
+      .neq("origin", "legacy")
+      .order("id", { ascending: true })
+      .range(from, to));
+  const rows = (doneCampaigns ?? []) as { id: string; status: string }[];
+  for (let idx = 0; idx < rows.length; idx++) {
+    const c = rows[idx];
+    if (deadline != null && Date.now() > deadline) {
+      capped = rows.length - idx;
+      break;
+    }
+    let stragglers: { id: string }[];
+    try {
+      stragglers = await fetchAllRows<{ id: string }>((from, to) =>
+        svc
+          .from("campaign_enrollments")
+          .select("id")
+          .eq("campaign_id", c.id)
+          .eq("status", "active")
+          .order("id", { ascending: true })
+          .range(from, to));
+    } catch (findErr) {
+      console.error(`reconcile-terminal: straggler lookup failed for campaign ${c.id}:`, (findErr as Error).message);
+      continue;
+    }
+    const ids = stragglers.map((e) => e.id);
+    if (!ids.length) continue;
+
+    const withPending = new Set<string>();
+    if (c.status === "completed") {
+      const PENDING_BATCH = 500;
+      let pendingLookupFailed = false;
+      for (let i = 0; i < ids.length; i += PENDING_BATCH) {
+        const idBatch = ids.slice(i, i + PENDING_BATCH);
+        const { data: pendingRows, error: pendErr } = await svc
+          .from("activities")
+          .select("campaign_enrollment_id")
+          .in("campaign_enrollment_id", idBatch)
+          .eq("is_campaign_generated", true)
+          .is("completed_at", null)
+          .is("archived_at", null);
+        if (pendErr) {
+          console.error(`reconcile-terminal: pending-task check failed for campaign ${c.id}:`, pendErr.message);
+          pendingLookupFailed = true;
+          break;
+        }
+        for (const row of (pendingRows ?? []) as { campaign_enrollment_id: string }[]) {
+          withPending.add(row.campaign_enrollment_id);
+        }
+      }
+      if (pendingLookupFailed) {
+        enrollments_deferred += ids.length;
+        continue;
+      }
+    }
+
+    const plan = planTerminalEnrollmentReconcile({
+      parentStatus: c.status,
+      activeEnrollmentIds: ids,
+      pendingTaskEnrollmentIds: withPending,
+    });
+    enrollments_deferred += plan.deferredIds.length;
+    if (!plan.flipIds.length) continue;
+
+    const { error: updErr } = await svc.from("campaign_enrollments").update({ status: "completed" }).in("id", plan.flipIds);
+    if (updErr) {
+      console.error(`reconcile-terminal: update failed for campaign ${c.id}:`, updErr.message);
+      continue;
+    }
+    enrollments_updated += plan.flipIds.length;
+    for (const id of plan.archiveTaskIds) {
+      tasks_cancelled += await archivePendingTasksForEnrollment(svc, id, "Campaign stopped");
+    }
+  }
+  return { enrollments_updated, enrollments_deferred, tasks_cancelled, capped };
 }
 
 /** Page a PostgREST select to exhaustion — a plain select silently caps at
@@ -3305,93 +3438,16 @@ async function dailySweep(): Promise<DailySweepReport> {
 
   const stepAutoComplete = async () => {
   // ---- 6. Auto-complete straggler enrollments -------------------------
-  // Split by WHY the campaign ended (outside-review group 2, docket I6):
-  // 'stopped' means a human killed it — archiving the pending call/LinkedIn
-  // tasks is right. 'completed' means Smartlead merely finished SENDING the
-  // emails — typically days before a Day-10+ CALL/LINKEDIN touch is due —
-  // so those manual touches stay alive for the rep to finish; the
-  // enrollment still flips to 'completed' so tracking is honest, and the
-  // tasks complete naturally from Up Next.
+  // Shared with interactive Sync. Stopped campaigns flip remaining active
+  // enrollments and archive pending call/LinkedIn tasks. Completed campaigns
+  // only flip enrollments whose manual touches are done; the rest stay
+  // active so a later reply/unsubscribe can still land.
   try {
-    const doneCampaigns = await fetchAllRows<{ id: string; status: string }>((from, to) =>
-      svc
-        .from("campaigns")
-        .select("id, status")
-        .in("status", ["completed", "stopped"])
-        // Legacy snapshot rows can't have enrollments — skip the per-
-        // campaign lookup entirely (adversarial review, after the I16
-        // migration completed them all).
-        .neq("origin", "legacy")
-        .order("id", { ascending: true })
-        .range(from, to));
-    for (const c of (doneCampaigns ?? []) as { id: string; status: string }[]) {
-      if (!hasBudget()) { report.skipped_for_budget++; break; }
-      let stragglers: { id: string }[];
-      try {
-        stragglers = await fetchAllRows<{ id: string }>((from, to) =>
-          svc
-            .from("campaign_enrollments")
-            .select("id")
-            .eq("campaign_id", c.id)
-            .eq("status", "active")
-            .order("id", { ascending: true })
-            .range(from, to));
-      } catch (findErr) {
-        console.error(`daily-sweep: auto-complete straggler lookup failed for campaign ${c.id}:`, (findErr as Error).message);
-        continue;
-      }
-      const ids = stragglers.map((e) => e.id);
-      if (!ids.length) continue;
-
-      // 'completed' campaigns: only flip enrollments whose manual touches
-      // are DONE. Flipping while tasks were still pending created a zombie
-      // state (adversarial review): 'completed' is terminal, so a later
-      // reply/unsubscribe's transition guard no-op'd and the surviving
-      // tasks became permanently un-archivable — the rep would call
-      // someone who had already replied or opted out. An enrollment with
-      // pending tasks stays 'active' (webhooks still react fully to it)
-      // and flips here on a later sweep once its tasks finish or archive.
-      let flippable = ids;
-      if (c.status === "completed") {
-        const withPending = new Set<string>();
-        const PENDING_BATCH = 500;
-        for (let i = 0; i < ids.length; i += PENDING_BATCH) {
-          const idBatch = ids.slice(i, i + PENDING_BATCH);
-          const { data: pendingRows, error: pendErr } = await svc
-            .from("activities")
-            .select("campaign_enrollment_id")
-            .in("campaign_enrollment_id", idBatch)
-            .eq("is_campaign_generated", true)
-            .is("completed_at", null)
-            .is("archived_at", null);
-          if (pendErr) {
-            // Can't tell who still has tasks — skip the whole campaign this
-            // run rather than risk completing someone mid-touch.
-            console.error(`daily-sweep: auto-complete pending-task check failed for campaign ${c.id}:`, pendErr.message);
-            withPending.clear();
-            idBatch.forEach((id) => withPending.add(id));
-          } else {
-            for (const row of (pendingRows ?? []) as { campaign_enrollment_id: string }[]) {
-              withPending.add(row.campaign_enrollment_id);
-            }
-          }
-        }
-        flippable = ids.filter((id) => !withPending.has(id));
-      }
-      if (!flippable.length) continue;
-
-      const { error: updErr } = await svc.from("campaign_enrollments").update({ status: "completed" }).in("id", flippable);
-      if (updErr) {
-        console.error(`daily-sweep: auto-complete update failed for campaign ${c.id}:`, updErr.message);
-        continue;
-      }
-      report.enrollments_updated += flippable.length;
-      if (c.status === "stopped") {
-        for (const id of flippable) {
-          report.tasks_cancelled += await archivePendingTasksForEnrollment(svc, id, "Campaign stopped");
-        }
-      }
-    }
+    const deadline = startedAt + SWEEP_BUDGET_MS;
+    const reconciled = await reconcileTerminalEnrollments(deadline);
+    report.enrollments_updated += reconciled.enrollments_updated;
+    report.tasks_cancelled += reconciled.tasks_cancelled;
+    report.skipped_for_budget += reconciled.capped;
   } catch (err) {
     console.error("daily-sweep: auto-complete step failed:", (err as Error).message);
     report.errors.push("step 6 (auto-complete): " + (err as Error).message);
@@ -3646,6 +3702,7 @@ Deno.serve(async (req) => {
     }
     if (action === "import") return json(await importCampaigns());
     if (action === "sync") return json(await syncCampaigns());
+    if (action === "refresh") return json(await refreshSmartlead());
     if (action === "daily-sweep") return json(await runDailySweepWithLog());
     if (action === "inbox-health") return json(await inboxHealth());
     if (action === "launch") return json(await launch(body as unknown as LaunchInput, callerCtx));

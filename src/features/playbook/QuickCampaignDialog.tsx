@@ -100,7 +100,7 @@ export function QuickCampaignDialog({
   return (
     <>
       <Dialog open={open && !launchOpen} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogContent className="campaigns-aurora sm:max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Start a campaign</DialogTitle>
             <DialogDescription>

@@ -17,6 +17,7 @@ import {
   useAnalyzeCampaign, useDeleteCampaign, useSetCampaignStatus, useSmartleadStatus, smartleadUrl,
   type CampaignEnrollmentStats, type CampaignStatusAction,
 } from "./api";
+import { shouldActivateCardKey } from "./campaign-card-keyboard";
 import type { AttentionFlag } from "./needs-attention";
 import type { Campaign } from "./types";
 
@@ -229,10 +230,9 @@ export function CampaignCard({
       tabIndex={onOpenDetail ? 0 : undefined}
       onClick={onOpenDetail ? () => onOpenDetail(c) : undefined}
       onKeyDown={onOpenDetail ? (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpenDetail(c);
-        }
+        if (!shouldActivateCardKey(e)) return;
+        e.preventDefault();
+        onOpenDetail(c);
       } : undefined}
     >
       <CardContent className="px-4 py-3 space-y-2">

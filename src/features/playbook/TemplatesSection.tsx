@@ -8,7 +8,7 @@
 // it's the one place both launch triggers converge.
 
 import { useState } from "react";
-import { Rocket, Flame, Wand2, Sparkles, Clock, Layers, ArrowRight, Pencil, Copy, Trash2 } from "lucide-react";
+import { Wand2, Clock, Layers, ArrowRight, Pencil, Copy, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -28,22 +28,19 @@ import { SequenceTimeline, SequenceMiniPreview } from "./SequenceTimeline";
 import { SequenceEditor } from "./SequenceEditor";
 import { CampaignWizard } from "./CampaignWizard";
 import type { CampaignTemplate, SequenceStep } from "./types";
+import { CATEGORY } from "./template-category";
+export { CATEGORY } from "./template-category";
 
 type EditorSeed = (Partial<CampaignTemplate> & { steps: SequenceStep[] }) | null;
 type LaunchSeed = { template_id: string | null; name: string; steps: SequenceStep[] };
 
-// Exported for QuickCampaignDialog.tsx's compact template picker (Campaigns
-// overhaul S7) — same category -> icon/accent/label mapping, one source.
-export const CATEGORY: Record<string, { icon: typeof Rocket; accent: string; chip: string; label: string }> = {
-  flagship:      { icon: Rocket,   accent: "from-amber-500/20 to-orange-500/10", chip: "bg-amber-500/15 text-amber-600 dark:text-amber-400", label: "Flagship" },
-  warming:       { icon: Flame,    accent: "from-orange-500/20 to-rose-500/10",  chip: "bg-orange-500/15 text-orange-600 dark:text-orange-400", label: "Warming" },
-  post_demo:     { icon: Sparkles, accent: "from-violet-500/20 to-fuchsia-500/10", chip: "bg-violet-500/15 text-violet-600 dark:text-violet-400", label: "Post-demo" },
-  re_engagement: { icon: Sparkles, accent: "from-sky-500/20 to-cyan-500/10",     chip: "bg-sky-500/15 text-sky-600 dark:text-sky-400", label: "Re-engage" },
-  event:         { icon: Sparkles, accent: "from-emerald-500/20 to-teal-500/10", chip: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400", label: "Event" },
-  custom:        { icon: Wand2,    accent: "from-slate-500/20 to-slate-400/10",  chip: "bg-slate-500/15 text-slate-600 dark:text-slate-300", label: "Custom" },
-};
-
-export function TemplatesSection() {
+export function TemplatesSection({
+  embedded = false,
+  onUseTemplate,
+}: {
+  embedded?: boolean;
+  onUseTemplate?: (seed: LaunchSeed) => void;
+} = {}) {
   const { data: templates, isLoading, isError, isFetching, refetch } = useCampaignTemplates();
   const { data: scoreboard } = useTemplateScoreboard();
   const { data: sl } = useSmartleadStatus();
@@ -74,6 +71,10 @@ export function TemplatesSection() {
     // funnel point for every template-based launch in this component.
     if (smartleadDisabled) {
       toast.info("Connect Smartlead to launch campaigns.");
+      return;
+    }
+    if (onUseTemplate) {
+      onUseTemplate(seed);
       return;
     }
     setLaunchSeed(seed);
@@ -108,10 +109,12 @@ export function TemplatesSection() {
 
   return (
     <div className="space-y-2">
-      <div>
-        <h3 className="text-sm font-semibold">Start from a template</h3>
-        <p className="text-xs text-muted-foreground">Pick one, choose people, launch.</p>
-      </div>
+      {!embedded && (
+        <div>
+          <h3 className="text-sm font-semibold">Start from a template</h3>
+          <p className="text-xs text-muted-foreground">Pick one, choose people, launch.</p>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -258,6 +261,7 @@ export function TemplatesSection() {
           "Use this template" above or SequenceEditor's "Use this sequence"
           via onLaunch. key remounts it fresh per open, same reason as the
           editor above. */}
+      {!onUseTemplate && (
       <CampaignWizard
         key={launchNonce}
         open={launchOpen}
@@ -265,6 +269,7 @@ export function TemplatesSection() {
         mode="template"
         templateSeed={launchSeed ?? { template_id: null, name: "", steps: [] }}
       />
+      )}
 
       {/* Delete a custom template */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
