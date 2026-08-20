@@ -44,11 +44,11 @@ export function InboxHealthDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="camp-scope camp-shell sm:max-w-2xl max-h-[85vh] overflow-y-auto p-6">
+      <DialogContent className="camp-scope camp-shell sm:max-w-xl max-h-[85vh] overflow-y-auto p-6 gap-4">
         <DialogHeader>
           <DialogTitle>Sending inboxes</DialogTitle>
           <DialogDescription>
-            Warmup health and today's load on each inbox, straight from Smartlead.
+            Warmup health and today's load, straight from Smartlead.
           </DialogDescription>
         </DialogHeader>
 
@@ -71,30 +71,23 @@ export function InboxHealthDialog({
               const label = ib.from_email ?? ib.from_name ?? `Inbox ${ib.id}`;
               const headroom = ib.daily_limit != null ? Math.max(0, ib.daily_limit - ib.total_leads_per_day) : null;
               return (
-                <div key={ib.id} className="camp-card p-3.5 space-y-1.5">
+                <div key={ib.id} className="camp-card p-3 space-y-1">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <span className="text-sm font-medium truncate">{label}</span>
+                    <span className="text-sm font-medium truncate min-w-0">{label}</span>
                     <Badge variant="secondary" className={badge.className}>{badge.label}</Badge>
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {ib.daily_limit != null ? `${ib.daily_limit}/day limit` : "Daily limit unknown"}
-                    {ib.warmup?.sent_7d != null ? ` · ${ib.warmup.sent_7d} sent in the last 7 days` : ""}
+                    {ib.warmup?.sent_7d != null ? ` · ${ib.warmup.sent_7d} sent last 7 days` : ""}
+                    {headroom != null
+                      ? ` · room for ~${headroom} more/day`
+                      : ib.total_leads_per_day > 0 ? " · remaining room unknown" : ""}
                   </p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-muted-foreground truncate">
                     {ib.campaigns.length > 0
-                      ? `Feeding ${ib.campaigns.length} campaign${ib.campaigns.length === 1 ? "" : "s"} · ${ib.total_leads_per_day} new ${ib.total_leads_per_day === 1 ? "person" : "people"}/day`
-                      : "Not feeding any active campaigns right now"}
+                      ? `Feeding ${ib.campaigns.length === 1 ? ib.campaigns[0].name : `${ib.campaigns.length} campaigns`} · ${ib.total_leads_per_day} new/day`
+                      : "Not feeding any active campaigns"}
                   </p>
-                  {ib.campaigns.length > 0 && (
-                    <p className="text-[11px] text-muted-foreground truncate">
-                      {ib.campaigns.map((c) => c.name).join(", ")}
-                    </p>
-                  )}
-                  {headroom != null ? (
-                    <p className="text-[11px] text-muted-foreground">Room for ~{headroom} more people/day</p>
-                  ) : ib.total_leads_per_day > 0 ? (
-                    <p className="text-[11px] text-muted-foreground">Daily limit unknown. Can't estimate remaining room.</p>
-                  ) : null}
                 </div>
               );
             })}

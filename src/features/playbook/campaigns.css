@@ -307,7 +307,9 @@
   border: 1px solid var(--camp-line);
   border-radius: 1.25rem;
   box-shadow: 0 24px 70px hsl(258 45% 20% / 0.28);
-  padding: 0;
+  /* No padding here on purpose: unlayered padding would override every
+     dialog's own p-* utility (the Sending-inboxes margin bug, 8/19).
+     Each dialog controls its padding with utilities. */
 }
 .dark .camp-shell {
   box-shadow: 0 24px 70px hsl(250 40% 3% / 0.65);

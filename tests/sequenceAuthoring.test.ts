@@ -96,12 +96,17 @@ describe("CampaignWizard per-launch authoring", () => {
     expect(wizard).toMatch(/flow === "template" && customSequence/);
   });
 
-  it("uses the single Campaign name and Goal row for AI setup and generated copy", () => {
+  it("asks for the AI description in its own box, with no dead Goal field (Nathan 8/19)", () => {
     const wizard = visibleSource("src/features/playbook/CampaignWizard.tsx");
-    expect(wizard.match(/<Label className="text-xs">Goal<\/Label>/g)).toHaveLength(1);
+    // The Goal input did nothing outside AI mode — it's gone. Draft-with-AI
+    // gets a dedicated Describe-the-campaign textarea instead, and the
+    // generated draft exposes an editable Audience field.
+    expect(wizard).not.toMatch(/<Label className="text-xs">Goal<\/Label>/);
+    expect(wizard.match(/Describe the campaign<\/Label>/g)).toHaveLength(1);
+    expect(wizard.match(/<Label className="text-xs">Audience<\/Label>/g)).toHaveLength(1);
     expect(wizard).not.toMatch(/<Label>What's the campaign\?<\/Label>/);
-    expect(wizard).not.toMatch(/<Label className="text-xs">Target audience<\/Label>/);
-    expect(wizard).toMatch(/Describe the audience and goal above to draft the sequence\./);
+    expect(wizard).toMatch(/value=\{description\}/);
+    expect(wizard).toMatch(/campaign\.target_audience/);
   });
 
   it("does not paper over keyboard input with stopPropagation", () => {

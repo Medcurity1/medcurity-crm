@@ -9,7 +9,6 @@
 
 import { useState } from "react";
 import { Wand2, Clock, Layers, ArrowRight, Pencil, Copy, Trash2 } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -133,24 +132,25 @@ export function TemplatesSection({
             const Icon = cat.icon;
             const score = scoreboard?.[t.id];
             return (
-              <Card
+              <button
+                type="button"
                 key={t.id}
-                className="py-0 cursor-pointer hover:shadow-md hover:border-primary/30 transition-all overflow-hidden"
+                className="camp-row camp-row--clickable w-full text-left"
                 onClick={() => setPreview(t)}
               >
                 <div className={cn("h-1.5 w-full bg-gradient-to-r", cat.accent)} />
-                <CardContent className="p-3 space-y-2">
+                <div className="p-3 space-y-2 min-w-0">
                   <div className="flex items-start justify-between gap-2">
-                    <div className={cn("h-8 w-8 rounded-md flex items-center justify-center", cat.chip)}>
+                    <div className={cn("h-8 w-8 rounded-md flex items-center justify-center shrink-0", cat.chip)}>
                       <Icon className="h-4 w-4" />
                     </div>
-                    <Badge variant="outline" className={cn("text-[10px]", cat.chip, "border-transparent")}>{cat.label}</Badge>
+                    <Badge variant="outline" className={cn("text-[10px] shrink-0", cat.chip, "border-transparent")}>{cat.label}</Badge>
                   </div>
-                  <div>
-                    <h4 className="font-semibold text-sm">{t.name}</h4>
-                  </div>
-                  <div className="flex items-center justify-between gap-2 pt-1">
-                    <SequenceMiniPreview steps={t.steps} />
+                  <h4 className="font-semibold text-sm truncate">{t.name}</h4>
+                  <div className="flex items-center justify-between gap-2 pt-1 min-w-0">
+                    <div className="min-w-0 overflow-hidden">
+                      <SequenceMiniPreview steps={t.steps} />
+                    </div>
                     <span className="text-[11px] text-muted-foreground inline-flex items-center gap-2 shrink-0">
                       <span className="inline-flex items-center gap-1"><Layers className="h-3 w-3" />{t.step_count ?? t.steps.length}</span>
                       {t.duration_days != null && (
@@ -166,8 +166,8 @@ export function TemplatesSection({
                       {score.campaigns} {score.campaigns === 1 ? "campaign" : "campaigns"}, {score.replies} {score.replies === 1 ? "reply" : "replies"}
                     </p>
                   )}
-                </CardContent>
-              </Card>
+                </div>
+              </button>
             );
           })}
 
@@ -175,7 +175,7 @@ export function TemplatesSection({
       )}
 
       <div className="flex justify-start pt-1">
-        <button type="button" className="camp-btn text-xs" onClick={openBlank}>
+        <button type="button" className="camp-btn-primary text-xs" onClick={openBlank}>
           <Wand2 className="h-3.5 w-3.5" /> Build a new sequence
         </button>
       </div>

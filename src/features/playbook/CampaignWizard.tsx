@@ -762,31 +762,18 @@ export function CampaignWizard({
                 {stepperSteps && <p className="camp-step-kicker">Step 1 of {displayTotal}</p>}
                 <h2 className="camp-step-title">What are you sending?</h2>
               </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label className="text-xs">
-                    Campaign name <span aria-hidden="true" className="text-muted-foreground">*</span>
-                  </Label>
-                  <Input
-                    value={flow === "ai" ? (campaign?.campaign_name ?? templateName) : templateName}
-                    onChange={(e) => {
-                      setTemplateName(e.target.value);
-                      if (flow === "ai" && campaign) setCampaign({ ...campaign, campaign_name: e.target.value });
-                    }}
-                    placeholder="What should this campaign be called?"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Goal</Label>
-                  <Input
-                    value={flow === "ai" && campaign ? campaign.target_audience : description}
-                    onChange={(e) => {
-                      if (flow === "ai" && campaign) setCampaign({ ...campaign, target_audience: e.target.value });
-                      else setDescription(e.target.value);
-                    }}
-                    placeholder="Who is this for, and what should it do?"
-                  />
-                </div>
+              <div className="space-y-1.5 sm:max-w-md">
+                <Label className="text-xs">
+                  Campaign name <span aria-hidden="true" className="text-muted-foreground">*</span>
+                </Label>
+                <Input
+                  value={flow === "ai" ? (campaign?.campaign_name ?? templateName) : templateName}
+                  onChange={(e) => {
+                    setTemplateName(e.target.value);
+                    if (flow === "ai" && campaign) setCampaign({ ...campaign, campaign_name: e.target.value });
+                  }}
+                  placeholder="What should this campaign be called?"
+                />
               </div>
 
               <div className="space-y-2">
@@ -839,17 +826,26 @@ export function CampaignWizard({
               </div>
 
               {flow === "ai" && !campaign && (
-                <div className="flex flex-wrap items-center gap-2">
-                  <button type="button" className="camp-btn-primary" onClick={() => handleGenerate()} disabled={!canGenerate || gen.isPending}>
-                    {gen.isPending
-                      ? <><Loader2 className="h-4 w-4 animate-spin" /> Writing…</>
-                      : <><Sparkles className="h-4 w-4" /> Generate sequence</>}
-                  </button>
-                  {!canGenerate && (
-                    <p className="text-xs text-muted-foreground">
-                      {description.length > 0 ? "Add a little more detail to the Goal above." : "Describe the audience and goal above to draft the sequence."}
-                    </p>
-                  )}
+                <div className="camp-card p-4 space-y-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Describe the campaign</Label>
+                    <Textarea
+                      rows={3}
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      placeholder="Who is it for, what should it say, and how many touches? e.g. Rural hospital compliance leads in MN. Introduce our SRA service and book a call. Three emails and one call over two weeks."
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button type="button" className="camp-btn-primary" onClick={() => handleGenerate()} disabled={!canGenerate || gen.isPending}>
+                      {gen.isPending
+                        ? <><Loader2 className="h-4 w-4 animate-spin" /> Writing…</>
+                        : <><Sparkles className="h-4 w-4" /> Generate sequence</>}
+                    </button>
+                    {!canGenerate && description.length > 0 && (
+                      <p className="text-xs text-muted-foreground">Add a little more detail first.</p>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -918,6 +914,14 @@ export function CampaignWizard({
           {/* AI sequence editor lives on Build after a draft is generated */}
           {step === 1 && flow === "ai" && campaign && (
             <div className="space-y-3">
+              <div className="space-y-1.5 sm:max-w-md">
+                <Label className="text-xs">Audience</Label>
+                <Input
+                  value={campaign.target_audience}
+                  onChange={(e) => setCampaign({ ...campaign, target_audience: e.target.value })}
+                  placeholder="Who this campaign is for"
+                />
+              </div>
               {gen.isPending && (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Rewriting the sequence…</div>
               )}
