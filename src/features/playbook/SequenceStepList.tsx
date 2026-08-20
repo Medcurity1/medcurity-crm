@@ -130,22 +130,20 @@ export function SequenceStepList({
                   className="h-7 w-16"
                   aria-label={`Step ${index + 1} day`}
                 />
-                {def.isEmail && (
+                {/* Automated emails send inside the campaign's own Smartlead
+                    window — Pulse has no per-email send hour, so no clock
+                    control here (Nathan 8/19: day cadence only). A
+                    review-and-send step keeps ONE time: when the review
+                    task comes due. */}
+                {step.channel === "EMAIL_HYBRID" && (
                   <>
+                    due at
                     <Input
                       value={step.send_window_start ?? ""}
                       onChange={(e) => onChange(patchSequenceStep(steps, index, { send_window_start: e.target.value }))}
                       placeholder="10:00"
                       className="h-7 w-16"
-                      aria-label={`Step ${index + 1} start time`}
-                    />
-                    to
-                    <Input
-                      value={step.send_window_end ?? ""}
-                      onChange={(e) => onChange(patchSequenceStep(steps, index, { send_window_end: e.target.value }))}
-                      placeholder="11:00"
-                      className="h-7 w-16"
-                      aria-label={`Step ${index + 1} end time`}
+                      aria-label={`Step ${index + 1} task due time`}
                     />
                   </>
                 )}

@@ -124,6 +124,11 @@ describe("CampaignWizard per-launch authoring", () => {
     expect(list).toMatch(/Move down/);
     expect(list).toMatch(/Remove step/);
     expect(list).toMatch(/send_window_start/);
+    // Nathan 8/19: no per-email clock control — automated emails send in
+    // the campaign's own Smartlead window. Only the review-and-send step
+    // keeps ONE time (when its task comes due); nothing edits the end time.
+    expect(list).toMatch(/step\.channel === "EMAIL_HYBRID" && \(/);
+    expect(list).not.toMatch(/patchSequenceStep\(steps, index, \{ send_window_end/);
     expect(list).toMatch(/EMAIL_AUTO/);
     expect(list).toMatch(/EMAIL_HYBRID/);
     expect(list).toMatch(/CALL/);

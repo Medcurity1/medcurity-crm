@@ -92,7 +92,13 @@ export function SequenceTimeline({
         const Icon = cfg.icon;
         const who = whoBadge(s);
         const open = openOrder === s.order;
-        const when = formatSequenceWhen(s.day_offset, weekdayForOffset(s.day_offset), s.send_window_start, s.send_window_end);
+        // Automated emails send inside the campaign's Smartlead window, not
+        // at a per-step hour — printing the step's stored clock times there
+        // would advertise a control that doesn't exist (Nathan 8/19). Task
+        // steps keep their time: it's when the task comes due.
+        const when = s.channel === "EMAIL_AUTO"
+          ? formatSequenceWhen(s.day_offset, weekdayForOffset(s.day_offset))
+          : formatSequenceWhen(s.day_offset, weekdayForOffset(s.day_offset), s.send_window_start, s.send_window_end);
         const headline = sequenceStepHeadline({
           channel: s.channel,
           subject: readableTaskPreview(s.subject_template, previewContext) || s.subject_template,
