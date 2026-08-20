@@ -38,6 +38,12 @@
   --camp-tint: hsl(266 70% 97%);
   --camp-tint-strong: hsl(266 68% 94.5%);
   --camp-accent-text: hsl(268 65% 48%);
+  /* Section headers sit RECESSED (rows are elevated cards) and glow cyan
+     on hover — a different hue than the rows' purple, so headers and
+     items read apart at a glance (Nathan 8/19 round 3). */
+  --camp-head-bg: hsl(256 45% 95.5% / 0.75);
+  --camp-head-line: hsl(258 28% 90%);
+  --camp-glow: hsl(196 85% 42%);
   --camp-shadow: 0 1px 2px hsl(260 40% 40% / 0.05), 0 8px 24px hsl(262 45% 45% / 0.07);
   --camp-shadow-lift: 0 2px 4px hsl(260 40% 40% / 0.07), 0 14px 34px hsl(262 45% 45% / 0.13);
   --camp-cta-shadow: 0 6px 18px hsl(268 70% 55% / 0.35);
@@ -54,6 +60,9 @@
   --camp-tint: hsl(260 22% 19%);
   --camp-tint-strong: hsl(262 24% 23%);
   --camp-accent-text: hsl(266 85% 80%);
+  --camp-head-bg: hsl(250 20% 8.5% / 0.8);
+  --camp-head-line: hsl(251 12% 20%);
+  --camp-glow: hsl(190 90% 58%);
   --camp-shadow: 0 1px 2px hsl(250 30% 4% / 0.4), 0 10px 26px hsl(250 30% 4% / 0.34);
   --camp-shadow-lift: 0 2px 4px hsl(250 30% 4% / 0.45), 0 16px 36px hsl(250 30% 4% / 0.5);
   --camp-cta-shadow: 0 6px 18px hsl(268 70% 40% / 0.4);
@@ -210,17 +219,18 @@
   align-items: center;
   gap: 0.6rem;
   text-align: left;
-  background: var(--camp-surface);
-  border: 1px solid var(--camp-line);
+  background: var(--camp-head-bg);
+  border: 1px solid var(--camp-head-line);
   border-radius: 0.9rem;
   padding: 0.6rem 0.9rem;
-  box-shadow: 0 1px 2px hsl(260 30% 30% / 0.05);
   cursor: pointer;
-  transition: border-color 0.14s ease, background-color 0.14s ease;
+  transition: border-color 0.14s ease, background-color 0.14s ease, box-shadow 0.14s ease;
 }
 .camp-section-head:hover {
-  border-color: color-mix(in srgb, var(--camp-purple) 40%, var(--camp-line));
-  background: var(--camp-tint);
+  border-color: color-mix(in srgb, var(--camp-glow) 55%, var(--camp-head-line));
+  background: color-mix(in srgb, var(--camp-glow) 7%, var(--camp-head-bg));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--camp-glow) 22%, transparent),
+    0 4px 16px color-mix(in srgb, var(--camp-glow) 16%, transparent);
 }
 .camp-section-head:focus-visible {
   outline: 2px solid var(--camp-purple);
@@ -351,6 +361,9 @@
   flex: 1 1 auto;
   overflow-x: hidden;
   overflow-y: auto;
+  /* Headroom so the first tile row's hover lift + border glow isn't
+     clipped by this scroll container's top edge (Nathan 8/19 round 3). */
+  padding-top: 0.375rem;
 }
 .camp-templates-dialog .camp-templates-body .grid {
   min-width: 0;

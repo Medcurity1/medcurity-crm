@@ -5,12 +5,12 @@
 import { useState } from "react";
 import { Trash2, Plus, Brain } from "lucide-react";
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from "@/components/ui/sheet";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -56,20 +56,20 @@ export function TrainingPanel({
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="camp-scope w-full sm:max-w-md overflow-y-auto">
-        <SheetHeader>
-          <SheetTitle className="flex items-center gap-2">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="camp-scope camp-shell sm:max-w-lg max-h-[85vh] overflow-y-auto p-6 gap-4">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
             <Brain className="h-4 w-4" />
             Training
-          </SheetTitle>
-          <SheetDescription>
+          </DialogTitle>
+          <DialogDescription>
             Notes here become hard rules the AI follows when writing ideas,
             campaigns, and adaptations. The more you teach it, the better it gets.
-          </SheetDescription>
-        </SheetHeader>
+          </DialogDescription>
+        </DialogHeader>
 
-        <div className="space-y-3 px-4 pb-4">
+        <div className="space-y-3">
           <div className="space-y-2">
             <Textarea
               placeholder="e.g. Always lead with the SRA. Never use fear tactics."
@@ -126,7 +126,7 @@ export function TrainingPanel({
             )}
           </div>
         </div>
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }

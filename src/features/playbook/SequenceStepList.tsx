@@ -167,19 +167,28 @@ export function SequenceStepList({
             </div>
 
             <div className="space-y-1.5">
-              {/* A real dropdown-looking control — the step type is
-                  changeable, and it should look changeable (Nathan 8/19). */}
-              <button
-                type="button"
-                onClick={() => setChannelPicker((open) => open === index ? null : index)}
-                aria-expanded={channelPicker === index}
-                className="camp-btn text-xs !py-1.5"
-                title="Change step type"
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {def.label}
-                <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", channelPicker === index && "rotate-180")} />
-              </button>
+              <div className="flex items-center justify-between gap-2">
+                {/* A real dropdown-looking control — the step type is
+                    changeable, and it should look changeable (Nathan 8/19). */}
+                <button
+                  type="button"
+                  onClick={() => setChannelPicker((open) => open === index ? null : index)}
+                  aria-expanded={channelPicker === index}
+                  className="camp-btn text-xs !py-1.5"
+                  title="Change step type"
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {def.label}
+                  <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", channelPicker === index && "rotate-180")} />
+                </button>
+                {/* Preview lives on the same line — a right-aligned toggle on
+                    its own row read as a dead empty band (Nathan 8/19 r3). */}
+                {def.isEmail && (
+                  <Button variant="ghost" size="xs" className="h-6" disabled={hasAdvancedFormatting} onClick={() => togglePreview(index)}>
+                    {isPreview ? <><PencilLine className="h-3 w-3 mr-1" /> Write</> : <><Eye className="h-3 w-3 mr-1" /> Preview</>}
+                  </Button>
+                )}
+              </div>
               {channelPicker === index && (
                 <div className="grid grid-cols-2 gap-1.5">
                   {SEQUENCE_CHANNEL_OPTIONS.map((option) => {
@@ -212,11 +221,6 @@ export function SequenceStepList({
                     This older template was marked “AI writes later,” but no email should launch unseen. Add the wording here to make it ready.
                   </p>
                 )}
-                <div className="flex items-center justify-end">
-                  <Button variant="ghost" size="xs" className="h-6" disabled={hasAdvancedFormatting} onClick={() => togglePreview(index)}>
-                    {isPreview ? <><PencilLine className="h-3 w-3 mr-1" /> Write</> : <><Eye className="h-3 w-3 mr-1" /> Preview</>}
-                  </Button>
-                </div>
                 <Input
                   placeholder="Subject"
                   value={templateToAuthorText(step.subject_template ?? "")}
