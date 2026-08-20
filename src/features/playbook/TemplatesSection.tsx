@@ -174,15 +174,15 @@ export function TemplatesSection({
         </div>
       )}
 
-      <div className="flex justify-start">
-        <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-muted-foreground" onClick={openBlank}>
-          <Wand2 className="h-3.5 w-3.5 mr-1" /> Or start a custom campaign
-        </Button>
+      <div className="flex justify-start pt-1">
+        <button type="button" className="camp-btn text-xs" onClick={openBlank}>
+          <Wand2 className="h-3.5 w-3.5" /> Build a new sequence
+        </button>
       </div>
 
       {/* Template preview dialog — the visual timeline */}
       <Dialog open={!!preview} onOpenChange={(o) => !o && setPreview(null)}>
-        <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogContent className="camp-scope camp-shell sm:max-w-lg max-h-[85vh] overflow-y-auto p-6">
           {preview && (
             <>
               <DialogHeader>
@@ -217,25 +217,26 @@ export function TemplatesSection({
                 <div className="flex flex-col items-end gap-1 order-1 sm:order-2">
                   <div className="flex items-center gap-2">
                     {preview.is_preset ? (
-                      <Button variant="outline" size="sm" onClick={() => openCustomize(preview)}>
-                        <Copy className="h-4 w-4 mr-1" /> Customize a copy
-                      </Button>
+                      <button type="button" className="camp-btn text-xs" onClick={() => openCustomize(preview)}>
+                        <Copy className="h-4 w-4" /> Customize a copy
+                      </button>
                     ) : (
-                      <Button variant="outline" size="sm" onClick={() => openEdit(preview)}>
-                        <Pencil className="h-4 w-4 mr-1" /> Edit
-                      </Button>
+                      <button type="button" className="camp-btn text-xs" onClick={() => openEdit(preview)}>
+                        <Pencil className="h-4 w-4" /> Edit
+                      </button>
                     )}
-                    <Button
-                      variant="ai"
+                    <button
+                      type="button"
+                      className="camp-btn-primary"
                       disabled={smartleadDisabled}
                       onClick={() => {
                         openLaunch({ template_id: preview.id, name: preview.name, steps: preview.steps });
                         setPreview(null);
                       }}
                     >
-                      <span className="ai-icon mr-1"><ArrowRight className="h-4 w-4" /></span>
                       Use this template
-                    </Button>
+                      <ArrowRight className="h-4 w-4" />
+                    </button>
                   </div>
                   {smartleadDisabled && (
                     <p className="text-xs text-muted-foreground">Connect Smartlead to launch campaigns.</p>

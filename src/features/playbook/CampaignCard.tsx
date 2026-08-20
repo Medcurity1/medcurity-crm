@@ -6,9 +6,9 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { ExternalLink, Loader2, Trash2, Play, Pause, PlayCircle, Square } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -102,49 +102,49 @@ export function CampaignStatusControls({
   return (
     <div className={className ?? "flex items-center gap-2 shrink-0"}>
       {c.status === "draft" && (
-        <Button
-          size="sm" className="h-7 text-xs"
+        <button
+          type="button" className="camp-btn-primary !py-1.5 !px-3 text-xs"
           disabled={busy || smartleadDisabled}
           title={smartleadDisabled ? "Connect Smartlead to start" : undefined}
           onClick={() => setStartConfirmOpen(true)}
         >
-          {busyAction === "start" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><Play className="h-3.5 w-3.5 mr-1" /> Start</>}
-        </Button>
+          {busyAction === "start" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><Play className="h-3.5 w-3.5" /> Start</>}
+        </button>
       )}
       {c.status === "active" && (
         <>
-          <Button
-            size="sm" variant="outline" className="h-7 text-xs"
+          <button
+            type="button" className="camp-btn h-8 text-xs"
             disabled={busy}
             onClick={() => runStatus("pause")}
           >
-            {busyAction === "pause" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><Pause className="h-3.5 w-3.5 mr-1" /> Pause</>}
-          </Button>
-          <Button
-            size="sm" variant="outline" className="h-7 text-xs text-destructive hover:text-destructive"
+            {busyAction === "pause" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><Pause className="h-3.5 w-3.5" /> Pause</>}
+          </button>
+          <button
+            type="button" className="camp-btn camp-btn--danger h-8 text-xs"
             disabled={busy}
             onClick={() => setStopConfirmOpen(true)}
           >
-            <Square className="h-3.5 w-3.5 mr-1" /> Stop
-          </Button>
+            <Square className="h-3.5 w-3.5" /> Stop
+          </button>
         </>
       )}
       {c.status === "paused" && (
         <>
-          <Button
-            size="sm" variant="outline" className="h-7 text-xs"
+          <button
+            type="button" className="camp-btn h-8 text-xs"
             disabled={busy}
             onClick={() => runStatus("resume")}
           >
-            {busyAction === "resume" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><PlayCircle className="h-3.5 w-3.5 mr-1" /> Resume</>}
-          </Button>
-          <Button
-            size="sm" variant="outline" className="h-7 text-xs text-destructive hover:text-destructive"
+            {busyAction === "resume" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><PlayCircle className="h-3.5 w-3.5" /> Resume</>}
+          </button>
+          <button
+            type="button" className="camp-btn camp-btn--danger h-8 text-xs"
             disabled={busy}
             onClick={() => setStopConfirmOpen(true)}
           >
-            <Square className="h-3.5 w-3.5 mr-1" /> Stop
-          </Button>
+            <Square className="h-3.5 w-3.5" /> Stop
+          </button>
         </>
       )}
 
@@ -222,10 +222,15 @@ export function CampaignCard({
   } | null;
 
   const hint = originHint(c);
+  const accent = (attention?.length ?? 0) > 0
+    ? "attention"
+    : c.status === "active" ? "active" : c.status === "paused" ? "paused" : c.status === "draft" ? "draft" : undefined;
+  const hasMetrics = c.metrics?.sent != null || c.metrics?.openRate != null || c.metrics?.clickRate != null || c.metrics?.replies != null;
 
   return (
-    <Card
-      className={onOpenDetail ? "py-0 cursor-pointer hover:border-primary/40 transition-colors" : "py-0"}
+    <div
+      className={cn("camp-row", onOpenDetail && "camp-row--clickable")}
+      data-accent={accent}
       role={onOpenDetail ? "button" : undefined}
       tabIndex={onOpenDetail ? 0 : undefined}
       onClick={onOpenDetail ? () => onOpenDetail(c) : undefined}
@@ -235,9 +240,9 @@ export function CampaignCard({
         onOpenDetail(c);
       } : undefined}
     >
-      <CardContent className="px-4 py-3 space-y-2">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
+      <div className="px-4 py-3 pl-5 space-y-2">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="min-w-0 flex-1 space-y-1">
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="font-semibold text-sm truncate">{c.name}</h3>
               <Badge variant="secondary" className={statusMeta.className}>{statusMeta.label}</Badge>
@@ -257,32 +262,29 @@ export function CampaignCard({
                 </Badge>
               ))}
             </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {c.owner?.full_name ? `${c.owner.full_name}` : ""}
-              {c.owner?.full_name && hint ? " · " : ""}
-              {hint ?? ""}
-              {inboxLabel ? `${(c.owner?.full_name || hint) ? " · " : ""}from ${inboxLabel}` : ""}
+            <p className="text-xs text-muted-foreground truncate">
+              {[c.owner?.full_name, hint, inboxLabel ? `from ${inboxLabel}` : null].filter(Boolean).join(" · ")}
             </p>
-            {(c.metrics?.sent != null || c.metrics?.openRate != null || c.metrics?.clickRate != null || c.metrics?.replies != null) && (
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {c.metrics?.sent != null ? `${c.metrics.sent} sent` : ""}
-                {c.metrics?.openRate != null ? ` · ${c.metrics.openRate} open` : ""}
-                {c.metrics?.clickRate != null ? ` · ${c.metrics.clickRate} click` : ""}
-                {c.metrics?.replies != null ? (
+            {(hasMetrics || (stats && stats.total > 0)) && (
+              <div className="flex items-center gap-3 flex-wrap pt-0.5">
+                {c.metrics?.sent != null && <span className="camp-stat"><strong>{c.metrics.sent}</strong> sent</span>}
+                {c.metrics?.openRate != null && <span className="camp-stat"><strong>{c.metrics.openRate}</strong> open</span>}
+                {c.metrics?.clickRate != null && <span className="camp-stat"><strong>{c.metrics.clickRate}</strong> click</span>}
+                {c.metrics?.replies != null && (
                   // Replies are the number that matters on this card — the
                   // one metric a rep acts on today (outside-review I27).
-                  <span className={Number(c.metrics.replies) > 0 ? "font-medium text-foreground" : undefined}>
-                    {` · ${c.metrics.replies} replies`}
+                  <span className={cn("camp-stat", Number(c.metrics.replies) > 0 && "camp-stat--hot")}>
+                    <strong>{c.metrics.replies}</strong> {Number(c.metrics.replies) === 1 ? "reply" : "replies"}
                   </span>
-                ) : ""}
-              </p>
-            )}
-            {stats && stats.total > 0 && (
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {stats.total} {stats.total === 1 ? "person" : "people"}
-                {stats.finished > 0 ? ` · ${stats.finished} finished` : ""}
-                {stats.replied > 0 ? ` · ${stats.replied} replied` : ""}
-              </p>
+                )}
+                {stats && stats.total > 0 && (
+                  <span className="camp-stat">
+                    <strong>{stats.total}</strong> {stats.total === 1 ? "person" : "people"}
+                    {stats.finished > 0 ? ` · ${stats.finished} finished` : ""}
+                    {stats.replied > 0 ? ` · ${stats.replied} replied` : ""}
+                  </span>
+                )}
+              </div>
             )}
           </div>
           {/* stopPropagation so clicking any action here never also opens the
@@ -290,7 +292,7 @@ export function CampaignCard({
           <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
             {c.status === "completed" && !c.analyzed_at && (
               <Button
-                size="sm" variant="ai" className="h-7 text-xs"
+                size="sm" variant="ai" className="h-8 text-xs"
                 disabled={analyze.isPending}
                 onClick={() => analyze.mutate(c.id)}
               >
@@ -304,7 +306,7 @@ export function CampaignCard({
 
             {url && (
               <a href={url} target="_blank" rel="noopener noreferrer"
-                className="text-xs text-primary hover:underline inline-flex items-center gap-1">
+                className="camp-link inline-flex items-center gap-1">
                 Smartlead <ExternalLink className="h-3 w-3" />
               </a>
             )}
@@ -313,7 +315,7 @@ export function CampaignCard({
                 type="button"
                 title="Delete campaign"
                 aria-label="Delete campaign"
-                className="p-1 text-muted-foreground hover:text-destructive"
+                className="camp-btn camp-btn--danger h-8 w-8 !p-0"
                 onClick={() => setConfirmOpen(true)}
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -322,7 +324,7 @@ export function CampaignCard({
           </div>
         </div>
         {a && (
-          <div className="rounded-md bg-muted/40 p-2 text-xs space-y-1">
+          <div className="rounded-lg p-2.5 text-xs space-y-1" style={{ background: "var(--camp-tint)" }}>
             <p className="font-medium">
               AI analysis{a.performance ? ` · ${a.performance.replace(/_/g, " ")}` : ""}
             </p>
@@ -331,7 +333,7 @@ export function CampaignCard({
             {a.improvements?.length ? <p className="text-muted-foreground">→ {a.improvements.join("; ")}</p> : null}
           </div>
         )}
-      </CardContent>
+      </div>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
@@ -352,6 +354,6 @@ export function CampaignCard({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Card>
+    </div>
   );
 }

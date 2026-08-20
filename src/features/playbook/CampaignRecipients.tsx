@@ -28,7 +28,6 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
 import {
   fetchRecipientsByTag, fetchRecipientsByList, fetchSuppressionForEmails, fetchActiveEnrollmentsForEmails,
   type Recipient, type ActiveEnrollmentEntry,
@@ -360,11 +359,8 @@ export function CampaignRecipients({
               key={id}
               type="button"
               onClick={() => setAddSource(id)}
-              data-selected={addSource === id}
-              className={cn(
-                "campaigns-method rounded-full px-3 py-1.5 text-xs font-medium",
-                addSource === id ? "text-foreground" : "bg-muted/60 text-muted-foreground hover:bg-muted",
-              )}
+              aria-pressed={addSource === id}
+              className="camp-pill"
             >
               {label}
             </button>
@@ -434,7 +430,7 @@ export function CampaignRecipients({
             </button>
 
             {csv && (
-              <div className="rounded-xl campaigns-surface p-2 space-y-2">
+              <div className="camp-card p-2.5 space-y-2">
                 <p className="text-xs text-muted-foreground">Map your columns ({csv.rows.length} rows):</p>
                 <div className="space-y-1 max-h-40 overflow-y-auto">
                   {csv.header.map((h, i) => (

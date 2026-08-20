@@ -44,11 +44,11 @@ export function InboxHealthDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="campaigns-aurora sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+      <DialogContent className="camp-scope camp-shell sm:max-w-2xl max-h-[85vh] overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle>Sending inboxes</DialogTitle>
           <DialogDescription>
-            Warmup health and how much daily volume each inbox is already carrying, straight from Smartlead.
+            Warmup health and today's load on each inbox, straight from Smartlead.
           </DialogDescription>
         </DialogHeader>
 
@@ -71,7 +71,7 @@ export function InboxHealthDialog({
               const label = ib.from_email ?? ib.from_name ?? `Inbox ${ib.id}`;
               const headroom = ib.daily_limit != null ? Math.max(0, ib.daily_limit - ib.total_leads_per_day) : null;
               return (
-                <div key={ib.id} className="rounded-md border p-3 space-y-1.5">
+                <div key={ib.id} className="camp-card p-3.5 space-y-1.5">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <span className="text-sm font-medium truncate">{label}</span>
                     <Badge variant="secondary" className={badge.className}>{badge.label}</Badge>

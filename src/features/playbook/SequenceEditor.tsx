@@ -102,7 +102,7 @@ export function SequenceEditor({
   return (
     <>
     <Dialog open={open} onOpenChange={discard.guardedOnOpenChange}>
-      <DialogContent className="campaigns-aurora sm:max-w-2xl max-h-[88vh] overflow-y-auto">
+      <DialogContent className="camp-scope camp-shell sm:max-w-2xl max-h-[88vh] overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle>{initial?.id ? "Edit sequence" : "Build a sequence"}</DialogTitle>
           <DialogDescription>

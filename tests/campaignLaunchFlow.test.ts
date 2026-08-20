@@ -83,7 +83,10 @@ describe("template launch flow", () => {
   it("keeps custom campaigns as a secondary choice on both creation pickers", () => {
     const gallery = read("src/features/playbook/TemplatesSection.tsx");
     const picker = read("src/features/playbook/QuickCampaignDialog.tsx");
-    expect(gallery).toMatch(/Or start a custom campaign/);
+    // 8/19 rename: in the templates manager the button builds a new saved
+    // sequence ("start a custom campaign" was a confusing name for it —
+    // Nathan). The quick-launch picker keeps its custom-campaign path.
+    expect(gallery).toMatch(/Build a new sequence/);
     expect(picker).toMatch(/Or start a custom campaign/);
     expect(gallery).not.toMatch(/<h4 className="font-semibold text-sm">Custom sequence<\/h4>/);
     expect(picker.indexOf("Pick a template")).toBeLessThan(picker.indexOf("Or start a custom campaign"));

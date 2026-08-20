@@ -11,7 +11,11 @@ export function defaultCampaignGroupOpen(
   searchActive = false,
 ): boolean {
   if (count <= 0) return false;
-  if (id === "recentlyEnded") return searchActive;
+  // Nathan 8/19: the page stays quiet by default — action items (Replies,
+  // Needs you) and Active open; Drafts and Recently ended stay collapsed
+  // until asked for. A search still auto-opens collapsed groups so matches
+  // are never invisible.
+  if (id === "drafts" || id === "recentlyEnded") return searchActive;
   return true;
 }
 

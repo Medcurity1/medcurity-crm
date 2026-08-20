@@ -155,7 +155,7 @@ export function CampaignDetailSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="campaigns-aurora w-full sm:max-w-2xl flex flex-col gap-0 p-0">
+      <SheetContent side="right" className="camp-scope w-full sm:max-w-2xl flex flex-col gap-0 p-0">
         <SheetHeader className="border-b px-5 py-4 gap-3 pr-10">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">

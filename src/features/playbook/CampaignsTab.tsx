@@ -1,20 +1,23 @@
-// Campaigns home — one Create action, one Smartlead sync surface, then
-// independently collapsible Replies / Needs you / Active / Drafts /
-// Recently ended. Page title lives on PlaybookPage; this header is
-// freshness plus named actions only.
+// Campaigns home — Aurora rebuild (Nathan 8/19). One action row (Create +
+// Sync; Templates and Sending inboxes moved up to the page header), then
+// consistent collapsible groups: Replies / Needs you / Active / Drafts /
+// Recently ended. Every group gets the same clickable section header —
+// "Needs you" is no longer the lone boxed one. Sync Smartlead runs the
+// server's unified refresh (import new campaigns + metrics + statuses +
+// stale-enrollment cleanup), so the old separate "Advanced import" button
+// is gone — one button does all of it.
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Megaphone, RefreshCw, Loader2, Plus, Inbox, AlertTriangle, Search, Download, LayoutTemplate, ChevronDown } from "lucide-react";
+import { Megaphone, RefreshCw, Loader2, Plus, AlertTriangle, Search } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { CampaignSectionHeader } from "./CampaignSection";
 import { CampaignWizard } from "./CampaignWizard";
 import { TemplatesSection } from "./TemplatesSection";
 import { CampaignReplies } from "./CampaignReplies";
@@ -24,11 +27,10 @@ import { CampaignDetailSheet } from "./CampaignDetailSheet";
 import { InboxHealthDialog } from "./InboxHealthDialog";
 import { campaignAttentionFlags, type AttentionFlag } from "./needs-attention";
 import { campaignGroupOpen, collapsedSearchMatchLabel, type CampaignListGroupId } from "./campaign-groups";
-import { dailySweepLocalTimeLabel, lastSyncedLabel } from "./campaign-freshness";
+import { lastSyncedLabel } from "./campaign-freshness";
 import {
   useCampaigns,
   useSmartleadStatus,
-  useImportCampaigns,
   useRefreshSmartlead,
   useAnalyzeCampaign,
   useDeleteCampaign,
@@ -43,24 +45,6 @@ import type { SequenceStep } from "./types";
 const RECENTLY_ENDED_DAYS = 30;
 const RECENTLY_ENDED_MS = RECENTLY_ENDED_DAYS * 24 * 60 * 60 * 1000;
 
-function FilterPill({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "rounded-full px-3 py-1 text-xs font-medium transition-colors",
-        active
-          ? "campaigns-cta text-white"
-          : "bg-transparent text-muted-foreground hover:bg-accent",
-      )}
-    >
-      {label}
-    </button>
-  );
-}
-
 function CampaignGroup({
   id,
   title,
@@ -69,7 +53,6 @@ function CampaignGroup({
   onToggle,
   searchActive,
   children,
-  className,
   icon,
 }: {
   id: CampaignListGroupId;
@@ -79,47 +62,45 @@ function CampaignGroup({
   onToggle: () => void;
   searchActive: boolean;
   children: ReactNode;
-  className?: string;
   icon?: ReactNode;
 }) {
   if (count <= 0) return null;
   const matchLabel = !open && searchActive ? collapsedSearchMatchLabel(count) : null;
   return (
-    <section className={className} data-campaigns-group={id}>
-      <button
-        type="button"
-        className="flex w-full items-center justify-between gap-2 text-left"
-        aria-expanded={open}
-        onClick={onToggle}
-      >
-        <h3 className="text-sm font-semibold flex items-center gap-1.5">
-          {icon}
-          {title} ({count})
-        </h3>
-        <span className="flex items-center gap-2">
-          {matchLabel && (
-            <span className="text-xs font-medium text-primary">{matchLabel}</span>
-          )}
-          <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", open && "rotate-180")} />
-        </span>
-      </button>
+    <section data-campaigns-group={id}>
+      <CampaignSectionHeader
+        title={title}
+        count={count}
+        open={open}
+        onToggle={onToggle}
+        icon={icon}
+        trailing={matchLabel ? <span className="text-xs font-medium camp-link">{matchLabel}</span> : null}
+      />
       {open && <div className="space-y-2 pt-2">{children}</div>}
     </section>
   );
 }
 
-export function CampaignsTab() {
+export function CampaignsTab({
+  templatesOpen,
+  onTemplatesOpenChange,
+  inboxHealthOpen,
+  onInboxHealthOpenChange,
+}: {
+  templatesOpen: boolean;
+  onTemplatesOpenChange: (o: boolean) => void;
+  inboxHealthOpen: boolean;
+  onInboxHealthOpenChange: (o: boolean) => void;
+}) {
   const { profile } = useAuth();
   const { data: campaigns, isLoading, isError, refetch } = useCampaigns();
   const { data: sl, isLoading: slLoading, isError: slError, refetch: refetchSl } = useSmartleadStatus();
   const [searchParams] = useSearchParams();
   const { data: inboxes } = useEmailAccounts();
-  const importMut = useImportCampaigns();
   const refreshMut = useRefreshSmartlead();
   const analyze = useAnalyzeCampaign();
   const del = useDeleteCampaign();
   const setStatus = useSetCampaignStatus();
-  const busy = importMut.isPending || refreshMut.isPending;
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardNonce, setWizardNonce] = useState(0);
   const [wizardMode, setWizardMode] = useState<"ai" | "template">("ai");
@@ -129,8 +110,6 @@ export function CampaignsTab() {
   const [showAllPast, setShowAllPast] = useState(false);
   const [detailCampaign, setDetailCampaign] = useState<CampaignRow | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [inboxHealthOpen, setInboxHealthOpen] = useState(false);
-  const [templatesOpen, setTemplatesOpen] = useState(false);
   const [groupOverride, setGroupOverride] = useState<Partial<Record<CampaignListGroupId, boolean>>>({});
 
   const inboxLabels = useMemo(() => {
@@ -258,7 +237,7 @@ export function CampaignsTab() {
   }
 
   function openFromTemplate(seed: { template_id: string | null; name: string; steps: SequenceStep[] }) {
-    setTemplatesOpen(false);
+    onTemplatesOpenChange(false);
     setWizardMode("template");
     setWizardSeed(seed);
     setWizardNonce((n) => n + 1);
@@ -299,72 +278,55 @@ export function CampaignsTab() {
   );
 
   return (
-    <div className="campaigns-aurora space-y-5" data-campaigns-shell>
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="min-w-0">
+    <div className="camp-wash space-y-5 p-4 sm:p-5" data-campaigns-shell>
+      {/* THE action row — everything else moved up to the page header. */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {slLoading ? (
+          <p className="text-xs text-muted-foreground">Checking Smartlead…</p>
+        ) : sl?.configured ? (
+          <>
+            <button type="button" className="camp-btn-primary" onClick={openCreate}>
+              <Plus className="h-4 w-4" /> Create campaign
+            </button>
+            <button type="button" className="camp-btn" onClick={() => refreshMut.mutate()} disabled={refreshMut.isPending}>
+              {refreshMut.isPending ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Syncing…</>
+              ) : (
+                <><RefreshCw className="h-4 w-4" /> Sync Smartlead</>
+              )}
+            </button>
+            {lastSyncedLabel(latestSync) && (
+              <span className="text-[11px] text-muted-foreground">{lastSyncedLabel(latestSync)}</span>
+            )}
+          </>
+        ) : slError ? (
+          <button type="button" className="camp-btn" onClick={() => refetchSl()}>
+            Retry Smartlead check
+          </button>
+        ) : (
           <p className="text-xs text-muted-foreground">
-            {lastSyncedLabel(latestSync) ?? "Not synced yet"}
-            {" · "}Automatic refresh daily at {dailySweepLocalTimeLabel()} Pacific
+            Smartlead isn't connected. Reconnect it before launching campaigns.
           </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {slLoading ? (
-            <p className="text-xs text-muted-foreground">Checking Smartlead…</p>
-          ) : sl?.configured ? (
-            <>
-              <Button className="campaigns-cta" size="sm" onClick={openCreate}>
-                <Plus className="h-4 w-4 mr-1" /> Create campaign
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => refreshMut.mutate()} disabled={busy}>
-                {refreshMut.isPending ? (
-                  <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Syncing…</>
-                ) : (
-                  <><RefreshCw className="h-4 w-4 mr-1" /> Sync Smartlead</>
-                )}
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => setTemplatesOpen(true)}>
-                <LayoutTemplate className="h-4 w-4 mr-1" /> Templates
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setInboxHealthOpen(true)}>
-                <Inbox className="h-4 w-4 mr-1" /> Sending inboxes
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => importMut.mutate()} disabled={busy}>
-                {importMut.isPending ? (
-                  <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Importing…</>
-                ) : (
-                  <><Download className="h-4 w-4 mr-1" /> Advanced import</>
-                )}
-              </Button>
-            </>
-          ) : slError ? (
-            <Button size="sm" variant="outline" onClick={() => refetchSl()}>
-              Retry Smartlead check
-            </Button>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              Smartlead isn't connected. Reconnect it before launching campaigns.
-            </p>
-          )}
-        </div>
-      </div>
-
-      <div className="flex items-center gap-3 flex-wrap">
+        )}
+        <span className="flex-1" />
         <div className="flex items-center gap-1">
-          <FilterPill label="Everyone" active={ownerFilter === "everyone"} onClick={() => setOwnerFilter("everyone")} />
-          <FilterPill label="Mine" active={ownerFilter === "mine"} onClick={() => setOwnerFilter("mine")} />
+          <button type="button" className="camp-pill" aria-pressed={ownerFilter === "everyone"} onClick={() => setOwnerFilter("everyone")}>
+            Everyone
+          </button>
+          <button type="button" className="camp-pill" aria-pressed={ownerFilter === "mine"} onClick={() => setOwnerFilter("mine")}>
+            Mine
+          </button>
         </div>
         <div className="relative">
-          <Search className="h-3.5 w-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search campaigns…"
-            className="h-8 w-52 pl-7 text-xs"
+            className="h-9 w-52 pl-8 text-xs rounded-lg"
           />
         </div>
       </div>
-
-      <CampaignReplies />
 
       {monthStats && (monthStats.campaignsLaunched || monthStats.peopleEnrolled || monthStats.replies) ? (
         <p className="text-xs text-muted-foreground">
@@ -376,15 +338,17 @@ export function CampaignsTab() {
         </p>
       ) : null}
 
+      <CampaignReplies />
+
       {!isLoading && !isError && talliesError && (
-        <div className="rounded-xl campaigns-surface p-3 flex items-center gap-2 flex-wrap">
+        <div className="camp-card p-3 flex items-center gap-2 flex-wrap">
           <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
           <p className="text-xs text-muted-foreground">
             Couldn't check for waiting replies. "Needs you" may be missing reply alerts.
           </p>
-          <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => unhandledQ.refetch()}>
+          <button type="button" className="camp-btn h-6 px-2 text-xs" onClick={() => unhandledQ.refetch()}>
             Retry
-          </Button>
+          </button>
         </div>
       )}
       {!isLoading && !isError && (
@@ -395,8 +359,7 @@ export function CampaignsTab() {
           open={needsOpen}
           onToggle={() => toggleGroup("needsYou", needsAttention.length)}
           searchActive={searchActive}
-          className="rounded-xl campaigns-surface p-3"
-          icon={<AlertTriangle className="h-4 w-4 text-amber-600" />}
+          icon={<AlertTriangle className="h-4 w-4 text-amber-500" />}
         >
           {needsAttention.map(renderCard)}
         </CampaignGroup>
@@ -409,7 +372,7 @@ export function CampaignsTab() {
       ) : isError ? (
         <QueryError message="Couldn't load campaigns." onRetry={() => refetch()} />
       ) : (
-        <div className="space-y-5">
+        <div className="space-y-4">
           <CampaignGroup
             id="active"
             title="Active"
@@ -459,9 +422,9 @@ export function CampaignsTab() {
           </CampaignGroup>
           {olderPast.length > 0 && (
             <div className="space-y-2">
-              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowAllPast((v) => !v)}>
+              <button type="button" className="camp-link" onClick={() => setShowAllPast((v) => !v)}>
                 {showAllPast ? "Hide older campaigns" : `Show all past (${olderPast.length})`}
-              </Button>
+              </button>
               {showAllPast && olderPast.map(renderCard)}
             </div>
           )}
@@ -476,23 +439,23 @@ export function CampaignsTab() {
         templateSeed={wizardSeed}
       />
 
-      <Dialog open={templatesOpen} onOpenChange={setTemplatesOpen}>
-        <DialogContent className="campaigns-aurora campaigns-templates-dialog sm:max-w-4xl max-h-[min(88vh,calc(100dvh-2rem))] overflow-hidden flex flex-col p-0 gap-0">
+      <Dialog open={templatesOpen} onOpenChange={onTemplatesOpenChange}>
+        <DialogContent className="camp-scope camp-shell camp-templates-dialog overflow-hidden flex flex-col p-0 gap-0">
           <div className="px-6 pt-6 pb-3 pr-12 shrink-0">
             <DialogHeader>
-              <DialogTitle>Manage templates</DialogTitle>
-              <DialogDescription>
+              <DialogTitle>Templates</DialogTitle>
+              <DialogDescription className="sr-only">
                 Review saved sequences, start from one, or create a custom campaign.
               </DialogDescription>
             </DialogHeader>
           </div>
-          <div className="campaigns-templates-body px-6 pb-6">
+          <div className="camp-templates-body px-6 pb-6">
             <TemplatesSection embedded onUseTemplate={openFromTemplate} />
           </div>
         </DialogContent>
       </Dialog>
 
-      <InboxHealthDialog open={inboxHealthOpen} onOpenChange={setInboxHealthOpen} />
+      <InboxHealthDialog open={inboxHealthOpen} onOpenChange={onInboxHealthOpenChange} />
 
       <CampaignDetailSheet
         campaign={liveDetailCampaign}

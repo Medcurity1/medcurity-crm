@@ -6,8 +6,9 @@
 
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronDown, MessageSquareText } from "lucide-react";
+import { MessageSquareText } from "lucide-react";
 import { campaignGroupOpen } from "./campaign-groups";
+import { CampaignSectionHeader } from "./CampaignSection";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -69,7 +70,7 @@ function ReplyRow({
   const positive = isPositiveReplyCategory(category);
 
   return (
-    <div className={cn("rounded-md border p-3 space-y-1", handled && "opacity-60")}>
+    <div className={cn("camp-row p-3 pl-4 space-y-1", handled && "opacity-60")}>
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <span className="text-sm font-medium">
           {replyWho(row)}
@@ -203,20 +204,18 @@ export function CampaignReplies() {
   }, [replies]);
 
   return (
-    <section className="space-y-3" data-campaigns-group="replies">
-      <button
-        type="button"
-        className="flex w-full items-center justify-between gap-2 text-left"
-        aria-expanded={open}
-        onClick={() => setOpenOverride(!open)}
-      >
-        <h3 className="text-sm font-semibold">
-          Replies ({isLoading ? "…" : count})
-        </h3>
-        <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", open && "rotate-180")} />
-      </button>
+    <section data-campaigns-group="replies">
+      <CampaignSectionHeader
+        title="Replies"
+        count={isLoading ? "…" : count}
+        open={open}
+        onToggle={() => setOpenOverride(!open)}
+        icon={<MessageSquareText className="h-4 w-4 text-muted-foreground" />}
+      />
 
       {open && (
+        <div className="space-y-2 pt-2">
+        {
         isLoading ? (
           <div className="space-y-2">
             {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
@@ -280,6 +279,8 @@ export function CampaignReplies() {
             )}
           </div>
         )
+        }
+        </div>
       )}
     </section>
   );

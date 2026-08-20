@@ -86,13 +86,13 @@ function parseSuggestions(text: string): string[] {
 
 function ReadinessRow({ ready, label, detail }: { ready: boolean; label: string; detail: string }) {
   return (
-    <div className="flex items-start gap-2 py-1.5">
-      {ready
-        ? <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0 text-emerald-600" />
-        : <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-amber-600" />}
+    <div className="camp-check">
+      <span className="camp-check-dot" data-ok={ready}>
+        {ready ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+      </span>
       <div className="min-w-0">
-        <p className="text-xs font-medium">{label}</p>
-        <p className="text-[11px] text-muted-foreground">{detail}</p>
+        <p className="text-sm font-medium leading-tight">{label}</p>
+        <p className="text-xs text-muted-foreground mt-0.5">{detail}</p>
       </div>
     </div>
   );
@@ -691,18 +691,45 @@ export function CampaignWizard({
   const audienceReady = !recipientChecksPending && !recipientChecksFailed && sendableRecipients.length > 0;
   const senderReady = !!selectedInbox && inboxHeadroom !== 0;
 
+  const stepperSteps = mode === "ai" && !hasLockedRecipients ? ["Build", "People", "Review"] : null;
+
   return (
     <>
       <Dialog open={open} onOpenChange={close}>
-        <DialogContent className="campaigns-aurora sm:max-w-3xl max-h-[88vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {progress.title}{displayTotal > 1 ? ` (${displayStep} of ${displayTotal})` : ""}
-            </DialogTitle>
-            <DialogDescription>
-              {progress.description}
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="camp-scope camp-shell w-[min(50rem,calc(100vw-2rem))] sm:max-w-3xl max-h-[min(90vh,calc(100dvh-2rem))] gap-0 p-0 overflow-hidden flex flex-col">
+          {/* Top bar — name of the flow, the Build/People/Review stepper,
+              and the close X (the shared dialog close sits top-right). */}
+          <div
+            className="flex items-center justify-between gap-3 px-6 py-3.5 pr-12 shrink-0 border-b flex-wrap"
+            style={{ borderColor: "var(--camp-line)" }}
+          >
+            <DialogHeader className="contents">
+              <DialogTitle className="text-sm font-semibold tracking-tight">
+                {mode === "template" ? "Launch a sequence" : "New campaign"}
+              </DialogTitle>
+              <DialogDescription className="sr-only">{progress.description}</DialogDescription>
+            </DialogHeader>
+            {stepperSteps ? (
+              <div className="camp-stepper">
+                {stepperSteps.map((label, i) => (
+                  <span
+                    key={label}
+                    className="camp-step"
+                    data-state={displayStep === i + 1 ? "current" : displayStep > i + 1 ? "done" : "todo"}
+                  >
+                    <span className="camp-step-num">{displayStep > i + 1 ? "✓" : i + 1}</span>
+                    {label}
+                  </span>
+                ))}
+              </div>
+            ) : displayTotal > 1 ? (
+              <span className="text-xs text-muted-foreground">
+                {progress.title} · step {displayStep} of {displayTotal}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
 
           {/* Resume-a-draft banner — only on the wizard's first screen. */}
           {draftBanner && displayStep === 1 && (
@@ -730,10 +757,16 @@ export function CampaignWizard({
 
           {/* Step 1 — Build */}
           {step === 1 && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">Campaign name</Label>
+            <div className="space-y-5">
+              <div className="space-y-1">
+                {stepperSteps && <p className="camp-step-kicker">Step 1 of {displayTotal}</p>}
+                <h2 className="camp-step-title">What are you sending?</h2>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">
+                    Campaign name <span aria-hidden="true" className="text-muted-foreground">*</span>
+                  </Label>
                   <Input
                     value={flow === "ai" ? (campaign?.campaign_name ?? templateName) : templateName}
                     onChange={(e) => {
@@ -743,7 +776,7 @@ export function CampaignWizard({
                     placeholder="What should this campaign be called?"
                   />
                 </div>
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   <Label className="text-xs">Goal</Label>
                   <Input
                     value={flow === "ai" && campaign ? campaign.target_audience : description}
@@ -756,9 +789,9 @@ export function CampaignWizard({
                 </div>
               </div>
 
-              <div>
-                <p className="campaigns-start-label">How would you like to start?</p>
-                <div className="campaigns-start-grid" role="group" aria-label="How would you like to start?">
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">How would you like to start?</p>
+                <div className="camp-methods" role="group" aria-label="How would you like to start?">
                   {BUILD_START_METHODS.map(({ id, label, description, Icon }) => {
                     const selected = id === "choose"
                       ? flow === "template" && customSequence
@@ -772,7 +805,7 @@ export function CampaignWizard({
                         data-method={id}
                         data-selected={selected}
                         aria-pressed={selected}
-                        className="campaigns-method campaigns-start-choice"
+                        className="camp-method"
                         onClick={() => {
                           setSequenceAttempted(false);
                           if (id === "choose") {
@@ -794,7 +827,7 @@ export function CampaignWizard({
                           }
                         }}
                       >
-                        <span className="campaigns-start-icon" aria-hidden="true">
+                        <span className="camp-icon-chip" aria-hidden="true">
                           <Icon className="h-4 w-4" />
                         </span>
                         <strong>{label}</strong>
@@ -807,11 +840,11 @@ export function CampaignWizard({
 
               {flow === "ai" && !campaign && (
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button variant="ai" onClick={() => handleGenerate()} disabled={!canGenerate || gen.isPending}>
+                  <button type="button" className="camp-btn-primary" onClick={() => handleGenerate()} disabled={!canGenerate || gen.isPending}>
                     {gen.isPending
-                      ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Writing…</>
-                      : <><span className="ai-icon mr-1"><Sparkles className="h-4 w-4" /></span> Generate sequence</>}
-                  </Button>
+                      ? <><Loader2 className="h-4 w-4 animate-spin" /> Writing…</>
+                      : <><Sparkles className="h-4 w-4" /> Generate sequence</>}
+                  </button>
                   {!canGenerate && (
                     <p className="text-xs text-muted-foreground">
                       {description.length > 0 ? "Add a little more detail to the Goal above." : "Describe the audience and goal above to draft the sequence."}
@@ -829,7 +862,7 @@ export function CampaignWizard({
                       <button
                         key={t.id}
                         type="button"
-                        className="campaigns-method rounded-xl campaigns-surface p-3 text-left"
+                        className="camp-method !flex-row !items-center !gap-2 !p-3"
                         onClick={() => {
                           setTemplateName((current) => current.trim() || t.name);
                           setTemplateSteps(t.steps.map((s) => ({ ...s })));
@@ -851,7 +884,7 @@ export function CampaignWizard({
 
               {(flow === "template" && templateSteps.length > 0 && !editingSequence) && (
                 <div className="space-y-3">
-                  <div className="rounded-xl campaigns-surface p-3 space-y-2">
+                  <div className="camp-card p-4 space-y-2">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="text-sm font-medium">{customSequence ? "Recommended sequence" : "This launch's sequence"}</p>
@@ -861,20 +894,21 @@ export function CampaignWizard({
                             : "Edits apply to this launch only. The saved template stays unchanged."}
                         </p>
                       </div>
-                      <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => setEditingSequence(true)}>
-                        <PencilLine className="h-3.5 w-3.5 mr-1" /> Customize sequence
-                      </Button>
+                      <button type="button" className="camp-btn shrink-0 text-xs" onClick={() => setEditingSequence(true)}>
+                        <PencilLine className="h-3.5 w-3.5" /> Customize sequence
+                      </button>
                     </div>
                     <SequenceTimeline steps={templateSteps} previewContext={sequencePreviewContext} />
                   </div>
                   <div className="flex justify-end">
-                    <Button
-                      className="campaigns-cta"
+                    <button
+                      type="button"
+                      className="camp-btn-primary"
                       onClick={continueFromBuild}
                       disabled={!templateName.trim() || recipientChecksPending || recipientChecksFailed || (hasLockedRecipients && sendableRecipients.length === 0)}
                     >
-                      {hasLockedRecipients ? "Review" : "People"} <ArrowRight className="h-4 w-4 ml-1" />
-                    </Button>
+                      {hasLockedRecipients ? "Review" : "Choose people"} <ArrowRight className="h-4 w-4" />
+                    </button>
                   </div>
                 </div>
               )}
@@ -893,7 +927,7 @@ export function CampaignWizard({
                 const authorBody = templateToAuthorText(email.body_html);
                 const hasAdvancedFormatting = hasUnsupportedRichEmailHtml(email.body_html);
                 return (
-                  <div key={email.seq_number} className="rounded-md border p-3 space-y-2">
+                  <div key={email.seq_number} className="camp-card p-4 space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-semibold">Email {email.seq_number}</span>
@@ -981,9 +1015,9 @@ export function CampaignWizard({
               })}
 
               <div className="flex flex-wrap items-center gap-2">
-                <Button size="sm" variant="outline" onClick={addEmail} disabled={campaign.sequence.length >= MAX_EMAILS}>
-                  <Plus className="h-4 w-4 mr-1" /> Add follow-up
-                </Button>
+                <button type="button" className="camp-btn text-xs" onClick={addEmail} disabled={campaign.sequence.length >= MAX_EMAILS}>
+                  <Plus className="h-4 w-4" /> Add follow-up
+                </button>
                 <Button size="sm" variant="ai" onClick={() => setShowRegen((v) => !v)} disabled={gen.isPending}>
                   <span className="ai-icon mr-1"><RotateCw className="h-4 w-4" /></span> Regenerate
                 </Button>
@@ -1028,22 +1062,26 @@ export function CampaignWizard({
 
               <div className="flex justify-between pt-2">
                 <Button variant="ghost" onClick={() => { setCampaign(null); setFlow("choose"); setCustomSequence(false); }}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
-                <Button
-                  className="campaigns-cta"
+                <button
+                  type="button"
+                  className="camp-btn-primary"
                   onClick={() => setStep(hasLockedRecipients ? 3 : 2)}
                   disabled={aiEmailsIncomplete || recipientChecksPending || recipientChecksFailed || (hasLockedRecipients && sendableRecipients.length === 0)}
                 >
-                  {hasLockedRecipients ? "Review" : "People"} <ArrowRight className="h-4 w-4 ml-1" />
-                </Button>
+                  {hasLockedRecipients ? "Review" : "Choose people"} <ArrowRight className="h-4 w-4" />
+                </button>
               </div>
             </div>
           )}
 
           {/* Template / write-my-own sequence editor */}
           {editingSequence && (
-            <div className="space-y-3">
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <h2 className="camp-step-title !text-lg">Your sequence</h2>
+              </div>
               {step !== 1 && (
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   <Label className="text-xs">Campaign name</Label>
                   <Input value={templateName} onChange={(e) => setTemplateName(e.target.value)} placeholder="What should this launch be called?" />
                 </div>
@@ -1058,9 +1096,10 @@ export function CampaignWizard({
               />
 
               <div className="flex justify-between pt-2">
-                <Button variant="ghost" onClick={() => setEditingSequence(false)}>Back</Button>
-                <Button
-                  className="campaigns-cta"
+                <Button variant="ghost" onClick={() => setEditingSequence(false)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
+                <button
+                  type="button"
+                  className="camp-btn-primary"
                   onClick={() => {
                     if (incompleteTemplateEmails.length > 0) {
                       setSequenceAttempted(true);
@@ -1070,14 +1109,18 @@ export function CampaignWizard({
                   }}
                 >
                   Done
-                </Button>
+                </button>
               </div>
             </div>
           )}
 
           {/* Step 2 — People */}
           {step === 2 && !editingSequence && (
-            <div className="space-y-3">
+            <div className="space-y-4">
+              <div className="space-y-1">
+                {stepperSteps && <p className="camp-step-kicker">Step 2 of {displayTotal}</p>}
+                <h2 className="camp-step-title">Who should get this?</h2>
+              </div>
               <CampaignRecipients
                 recipients={recipients} setRecipients={setRecipients} tags={tags ?? []}
                 suppression={suppression} setSuppression={setSuppression}
@@ -1098,18 +1141,24 @@ export function CampaignWizard({
               )}
               <div className="flex justify-between pt-2">
                 <Button variant="ghost" onClick={() => setStep(1)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
-                <Button className="campaigns-cta" onClick={() => setStep(3)} disabled={recipientChecksPending || recipientChecksFailed || sendableRecipients.length === 0}>
-                  Review <ArrowRight className="h-4 w-4 ml-1" />
-                </Button>
+                <button type="button" className="camp-btn-primary" onClick={() => setStep(3)} disabled={recipientChecksPending || recipientChecksFailed || sendableRecipients.length === 0}>
+                  Review campaign <ArrowRight className="h-4 w-4" />
+                </button>
               </div>
             </div>
           )}
 
           {/* Step 3 — Review */}
           {step === 3 && !editingSequence && (
-            <div className="space-y-3">
+            <div className="space-y-4">
+              {!launchResult && (
+                <div className="space-y-1">
+                  {stepperSteps && <p className="camp-step-kicker">Step {displayTotal} of {displayTotal}</p>}
+                  <h2 className="camp-step-title">Ready when you are.</h2>
+                </div>
+              )}
               {launchResult ? (
-                <div className="rounded-xl campaigns-surface p-5 space-y-3">
+                <div className="camp-card p-5 space-y-3">
                   {launchResult.failed > 0 ? <AlertTriangle className="h-8 w-8 text-amber-500" /> : <CheckCircle2 className="h-8 w-8 text-green-600" />}
                   <p className="text-base font-semibold">{launchResult.started ? "Campaign started." : "Draft saved in Pulse."}</p>
                   <p className="text-sm text-muted-foreground">
@@ -1135,25 +1184,23 @@ export function CampaignWizard({
                   {!launchResult.started && <p className="text-xs text-muted-foreground">Press Start on the campaign card when you are ready. Starting only in Smartlead would skip Pulse task scheduling.</p>}
                   <div className="flex flex-wrap gap-2 pt-1">
                     {smartleadUrl(launchResult.id) && (
-                      <Button size="sm" variant="outline" asChild>
-                        <a href={smartleadUrl(launchResult.id)!} target="_blank" rel="noopener noreferrer">Open Smartlead</a>
-                      </Button>
+                      <a className="camp-btn text-xs" href={smartleadUrl(launchResult.id)!} target="_blank" rel="noopener noreferrer">Open Smartlead</a>
                     )}
-                    <Button size="sm" className="campaigns-cta" onClick={() => close(false)}>Done</Button>
+                    <button type="button" className="camp-btn-primary text-xs" onClick={() => close(false)}>Done</button>
                   </div>
                 </div>
               ) : (
                 <>
                   {(flow === "template" || templateSteps.length > 0) && (
-                    <div className="space-y-2 rounded-xl campaigns-surface p-3">
+                    <div className="camp-card p-4 space-y-2">
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="space-y-1 min-w-0 flex-1">
+                        <div className="space-y-1.5 min-w-0 flex-1">
                           <Label className="text-xs">Campaign name</Label>
                           <Input value={templateName} onChange={(e) => setTemplateName(e.target.value)} placeholder="Campaign name" />
                         </div>
-                        <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => setEditingSequence(true)}>
-                          <PencilLine className="h-3.5 w-3.5 mr-1" /> Edit sequence
-                        </Button>
+                        <button type="button" className="camp-btn shrink-0 text-xs" onClick={() => setEditingSequence(true)}>
+                          <PencilLine className="h-3.5 w-3.5" /> Edit sequence
+                        </button>
                       </div>
                       <SequenceTimeline
                         steps={templateSteps}
@@ -1162,7 +1209,7 @@ export function CampaignWizard({
                       />
                     </div>
                   )}
-                  <div className="rounded-xl campaigns-surface p-3 space-y-2">
+                  <div className="camp-card p-4 space-y-2">
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <p className="text-sm font-medium">Recommended settings</p>
@@ -1171,9 +1218,9 @@ export function CampaignWizard({
                           {selectedInbox ? ` · ${confirmInboxLabel}` : ""}
                         </p>
                       </div>
-                      <Button type="button" size="sm" variant="outline" onClick={() => setSettingsOpen((v) => !v)}>
+                      <button type="button" className="camp-btn shrink-0 text-xs" onClick={() => setSettingsOpen((v) => !v)}>
                         {settingsOpen ? "Done" : "Customize"}
-                      </Button>
+                      </button>
                     </div>
                   </div>
                   {settingsOpen && (
@@ -1234,35 +1281,35 @@ export function CampaignWizard({
                       </p>
                     ) : null}
                   </div>
-                  <div className="flex rounded-full bg-muted/60 p-1 w-fit">
+                  <div
+                    className="inline-flex rounded-full p-1 w-fit border"
+                    style={{ borderColor: "var(--camp-line)", background: "var(--camp-surface-2)" }}
+                  >
                     <button
                       type="button"
-                      className={cn("rounded-full px-3 py-1.5 text-xs font-medium", autoStart && "campaigns-cta")}
+                      className="camp-pill"
+                      aria-pressed={autoStart}
                       onClick={() => setAutoStart(true)}
                     >
-                      Start now
+                      Start sending on launch
                     </button>
                     <button
                       type="button"
-                      className={cn("rounded-full px-3 py-1.5 text-xs font-medium", !autoStart && "bg-background shadow-sm")}
+                      className="camp-pill"
+                      aria-pressed={!autoStart}
                       onClick={() => setAutoStart(false)}
                     >
                       Save as draft
                     </button>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    {autoStart
-                      ? "Launch will start sending immediately."
-                      : "Saves a Pulse draft. Press Start on the campaign card when you are ready."}
-                  </p>
                   {rampProjection && (
-                    <p className="text-[11px] text-muted-foreground">{rampProjection}</p>
+                    <p className="text-xs text-muted-foreground">{rampProjection}</p>
                   )}
-                  <div className="rounded-lg border overflow-hidden">
-                    <div className="px-3 py-2 border-b bg-muted/25">
+                  <div className="camp-card overflow-hidden">
+                    <div className="px-4 pt-3">
                       <p className="text-xs font-semibold">Launch readiness</p>
                     </div>
-                    <div className="px-3 py-1 divide-y">
+                    <div className="px-4 pb-2">
                       <ReadinessRow
                         ready={copyReady}
                         label="Sequence copy"
@@ -1300,28 +1347,29 @@ export function CampaignWizard({
                             : `${confirmInboxLabel} selected${inboxHeadroom != null ? `; room for about ${inboxHeadroom} more per day` : "; Smartlead will enforce its delivery limits"}.`}
                       />
                     </div>
-                    <div className={cn("px-3 py-2 text-[11px] border-t", autoStart ? "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300" : "bg-muted/25 text-muted-foreground")}>
-                      {autoStart ? "Launch will start sending immediately." : "Launch will create a draft; nothing sends until it is started."}
+                    <div
+                      className={cn("px-4 py-2 text-[11px] border-t", autoStart ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground")}
+                      style={{ borderColor: "var(--camp-line)", background: autoStart ? undefined : "var(--camp-surface-2)" }}
+                    >
+                      {autoStart ? "Launch starts sending immediately." : "Launch saves a draft; nothing sends until you press Start."}
                     </div>
                   </div>
                   {aiEmailsIncomplete && (
-                    <p className="text-xs text-amber-600">One or more emails still need wording. Go back to Step 2 to finish them.</p>
-                  )}
-                  {sl?.configured === false && (
-                    <p className="text-xs text-muted-foreground">Connect Smartlead to launch campaigns.</p>
+                    <p className="text-xs text-amber-600">One or more emails still need wording. Go back to Build to finish them.</p>
                   )}
                   <div className={cn("flex pt-2", hasLockedRecipients ? "justify-end" : "justify-between")}>
                     {!hasLockedRecipients && (
                       <Button variant="ghost" onClick={() => setStep(2)}><ArrowLeft className="h-4 w-4 mr-1" /> Back</Button>
                     )}
-                    <Button className="campaigns-cta" onClick={() => setConfirmOpen(true)} disabled={launch.isPending || !copyReady || !audienceReady || !senderReady || smartleadDisabled}>
-                      {launch.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Launching…</> : <><Rocket className="h-4 w-4 mr-1" /> {autoStart ? "Launch & start" : "Create draft"}</>}
-                    </Button>
+                    <button type="button" className="camp-btn-primary" onClick={() => setConfirmOpen(true)} disabled={launch.isPending || !copyReady || !audienceReady || !senderReady || smartleadDisabled}>
+                      {launch.isPending ? <><Loader2 className="h-4 w-4 animate-spin" /> Launching…</> : <><Rocket className="h-4 w-4" /> {autoStart ? "Launch campaign" : "Save draft"}</>}
+                    </button>
                   </div>
                 </>
               )}
             </div>
           )}
+          </div>
         </DialogContent>
       </Dialog>
 

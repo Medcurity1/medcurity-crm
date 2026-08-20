@@ -3,6 +3,7 @@ import {
   ArrowDown,
   ArrowUp,
   Building2,
+  ChevronDown,
   Eye,
   Mail,
   MailCheck,
@@ -111,7 +112,7 @@ export function SequenceStepList({
           <div
             key={`${step.order}-${index}`}
             data-sequence-step={index}
-            className={cn("rounded-lg border p-3 space-y-3", stepInvalid && "border-amber-400/60")}
+            className={cn("camp-card p-3.5 space-y-3", stepInvalid && "!border-amber-400/70")}
           >
             <div className="flex items-center gap-2">
               <Badge variant="secondary" className="gap-1">
@@ -166,13 +167,18 @@ export function SequenceStepList({
             </div>
 
             <div className="space-y-1.5">
+              {/* A real dropdown-looking control — the step type is
+                  changeable, and it should look changeable (Nathan 8/19). */}
               <button
                 type="button"
                 onClick={() => setChannelPicker((open) => open === index ? null : index)}
-                className="inline-flex items-center gap-1.5 rounded-full bg-muted/70 px-2.5 py-1 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-expanded={channelPicker === index}
+                className="camp-btn text-xs !py-1.5"
+                title="Change step type"
               >
                 <Icon className="h-3.5 w-3.5" />
                 {def.label}
+                <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", channelPicker === index && "rotate-180")} />
               </button>
               {channelPicker === index && (
                 <div className="grid grid-cols-2 gap-1.5">
@@ -187,12 +193,7 @@ export function SequenceStepList({
                           onChange(setSequenceChannel(steps, index, option.value as SequenceChannel));
                           setChannelPicker(null);
                         }}
-                        className={
-                          "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs text-left transition-colors " +
-                          (active
-                            ? "campaigns-method bg-primary/10 text-foreground"
-                            : "text-muted-foreground hover:bg-muted")
-                        }
+                        className="camp-method !flex-row !items-center !gap-2 !p-2.5 text-xs"
                         data-selected={active}
                       >
                         <OptionIcon className="h-4 w-4 shrink-0" />
@@ -341,9 +342,9 @@ export function SequenceStepList({
         );
       })}
 
-      <Button variant="outline" size="sm" onClick={() => onChange(addSequenceStep(steps))} className="w-full">
-        <Plus className="h-4 w-4 mr-1" /> Add step
-      </Button>
+      <button type="button" className="camp-btn w-full text-xs" onClick={() => onChange(addSequenceStep(steps))}>
+        <Plus className="h-4 w-4" /> Add step
+      </button>
     </div>
   );
 }
