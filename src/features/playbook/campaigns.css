@@ -331,7 +331,10 @@
     radial-gradient(120% 55% at 100% -20%, hsl(266 60% 30% / 0.14), transparent 52%),
     radial-gradient(90% 45% at 0% -10%, hsl(330 55% 32% / 0.1), transparent 47%);
 }
-.camp-shell > * {
+/* Keep content above the ::before glow — but never touch the shared
+   dialog close button: forcing it relative knocks its absolute top-right
+   anchor into flow (the bottom-left X bug, 8/19). */
+.camp-shell > :not([data-slot="dialog-close"]) {
   position: relative;
 }
 
