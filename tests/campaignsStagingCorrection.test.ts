@@ -99,6 +99,11 @@ describe("Campaigns home correction", () => {
     expect(replies).toMatch(/campaignGroupOpen\("replies"/);
     expect(replies).toMatch(/setOpenOverride\(!open\)/);
     expect(replies).toMatch(/CampaignSectionHeader/);
+    // The Replies badge counts only UNHANDLED replies (Nathan 8/19) —
+    // handled ones wait behind "Show handled" and don't hold the section
+    // open either.
+    expect(replies).toMatch(/const count = active\.length/);
+    expect(replies).not.toMatch(/const count = replies\?\.length/);
   });
 });
 

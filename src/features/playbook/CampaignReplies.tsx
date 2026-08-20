@@ -166,7 +166,20 @@ export function CampaignReplies() {
   const markHandled = useMarkReplyHandled();
   const logCall = useLogReplyCall();
   const { profile } = useAuth();
-  const count = replies?.length ?? 0;
+
+  const { active, handled } = useMemo(() => {
+    const active: CampaignReplyRow[] = [];
+    const handled: CampaignReplyRow[] = [];
+    for (const row of replies ?? []) {
+      (handledInfo(row) ? handled : active).push(row);
+    }
+    return { active, handled };
+  }, [replies]);
+
+  // The badge counts only UNHANDLED replies (Nathan 8/19): a handled reply
+  // asks nothing of anyone, so it neither inflates the number nor holds
+  // the section open — it waits behind "Show handled" instead.
+  const count = active.length;
   const open = campaignGroupOpen("replies", isLoading ? 1 : count, false, openOverride);
   // Rows whose call has already been logged this session — the button
   // becomes a static "Call logged" so a second click can't write a second
@@ -193,15 +206,6 @@ export function CampaignReplies() {
       },
     );
   }
-
-  const { active, handled } = useMemo(() => {
-    const active: CampaignReplyRow[] = [];
-    const handled: CampaignReplyRow[] = [];
-    for (const row of replies ?? []) {
-      (handledInfo(row) ? handled : active).push(row);
-    }
-    return { active, handled };
-  }, [replies]);
 
   return (
     <section data-campaigns-group="replies">
