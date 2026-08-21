@@ -72,6 +72,32 @@ describe("assessor follow-up migration", () => {
   });
 });
 
+describe("assessor Training-placeholder sweep (20260821213000)", () => {
+  const sweep = read(
+    "supabase/migrations/20260821213000_assessor_training_placeholder_sweep.sql",
+  );
+
+  it("creates tasks the follow-up machinery recognizes as its own", () => {
+    // The auto-complete trigger and the daily reminder both match on the
+    // subject prefix AND this exact body marker — a drifted string would
+    // orphan the swept tasks (never auto-complete, never remind).
+    expect(sweep).toMatch(/'Assign the assessor: ' \|\|/);
+    expect(sweep).toMatch(/Created by the assessor follow-up automation\./);
+  });
+
+  it("is a safe, idempotent, environment-aware data fix", () => {
+    // No Training user (staging) → explicit no-op, never a guess.
+    expect(sweep).toMatch(/if v_training_ids is null then/);
+    // Clears the placeholder rather than deleting or reassigning users.
+    expect(sweep).toMatch(/set assigned_assessor_id = null/);
+    expect(sweep).not.toMatch(/delete from public\.user_profiles/i);
+    // Re-run guard: skip deals that already have an open assessor task.
+    expect(sweep).toMatch(/not exists \(\s*select 1 from public\.activities t/);
+    // Jordan-first routing with the owner fallback, same as the trigger.
+    expect(sweep).toMatch(/coalesce\(v_jordan, v_deal\.owner_user_id\)/);
+  });
+});
+
 describe("assessor follow-up frontend wiring", () => {
   it("keeps the close-gate MECHANISM (config-driven), only the config flips", () => {
     const gate = read("src/lib/closeReadiness.ts");
