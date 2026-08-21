@@ -4,7 +4,7 @@
 
 import { useMemo } from "react";
 import type { ColumnDescriptor } from "./columns";
-import { useListColumnPrefs, useUpdateListColumnPrefs } from "./list-column-prefs-api";
+import { useListColumnPrefs, useUpdateListColumnPrefs, type ColumnConfig } from "./list-column-prefs-api";
 
 export interface ColumnPrefs {
   /** Full registry, in declaration order. */
@@ -14,10 +14,30 @@ export interface ColumnPrefs {
   isVisible: (key: string) => boolean;
   /** Toggle a non-locked column on/off (persists immediately). */
   toggle: (key: string) => void;
-  /** Clear all hidden columns (back to defaults). */
+  /** Clear all overrides (back to defaults — defaultHidden columns hide again). */
   reset: () => void;
   /** How many toggleable columns are currently shown (for "can't empty" guard). */
   visibleToggleableCount: number;
+}
+
+/**
+ * The one visibility rule, pure and testable (Summer 8/19 — the Expected
+ * Close column made `defaultHidden` real): a column is hidden when the user
+ * hid it (deny-list) OR it's hidden by default and the user hasn't shown it
+ * (allow-list). Only keys that still exist and are hideable are honored, so
+ * a renamed/removed column can't strand a stale pref.
+ */
+export function computeHiddenKeys(
+  columns: ColumnDescriptor[],
+  config: ColumnConfig | undefined,
+): Set<string> {
+  const hideable = new Set(columns.filter((c) => !c.locked).map((c) => c.key));
+  const hidden = new Set((config?.hidden ?? []).filter((k) => hideable.has(k)));
+  const shown = new Set((config?.shown ?? []).filter((k) => hideable.has(k)));
+  for (const c of columns) {
+    if (c.defaultHidden && !c.locked && !shown.has(c.key)) hidden.add(c.key);
+  }
+  return hidden;
 }
 
 export function useColumnPrefs(
@@ -27,14 +47,7 @@ export function useColumnPrefs(
   const { data: config } = useListColumnPrefs(listKey);
   const update = useUpdateListColumnPrefs(listKey);
 
-  // Reconcile the persisted deny-list against the canonical registry: only
-  // honor keys that still exist and are actually hideable.
-  const hidden = useMemo(() => {
-    const hideable = new Set(
-      columns.filter((c) => !c.locked).map((c) => c.key),
-    );
-    return new Set((config?.hidden ?? []).filter((k) => hideable.has(k)));
-  }, [config, columns]);
+  const hidden = useMemo(() => computeHiddenKeys(columns, config), [config, columns]);
 
   const visibleColumns = useMemo(
     () => columns.filter((c) => c.locked || !hidden.has(c.key)),
@@ -44,14 +57,24 @@ export function useColumnPrefs(
   function toggle(key: string) {
     const col = columns.find((c) => c.key === key);
     if (!col || col.locked) return;
-    const next = new Set(hidden);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    update.mutate({ hidden: [...next] });
+    const denied = new Set(config?.hidden ?? []);
+    const shown = new Set(config?.shown ?? []);
+    if (hidden.has(key)) {
+      // Show it: clear any deny entry; defaultHidden columns also need an
+      // explicit allow entry.
+      denied.delete(key);
+      if (col.defaultHidden) shown.add(key);
+    } else {
+      // Hide it: drop the allow entry; a default-visible column also needs
+      // an explicit deny entry.
+      shown.delete(key);
+      if (!col.defaultHidden) denied.add(key);
+    }
+    update.mutate({ hidden: [...denied], shown: [...shown] });
   }
 
   function reset() {
-    update.mutate({ hidden: [] });
+    update.mutate({ hidden: [], shown: [] });
   }
 
   return {

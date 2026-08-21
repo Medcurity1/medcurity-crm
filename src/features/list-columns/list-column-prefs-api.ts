@@ -10,6 +10,9 @@ import { toast } from "sonner";
 export interface ColumnConfig {
   /** Deny-list of column keys the user has hidden for this list. */
   hidden?: string[];
+  /** Allow-list of defaultHidden column keys the user has turned ON
+   *  (Summer 8/19 — the Expected Close column). */
+  shown?: string[];
   /** Reserved for a future reorder feature; unused in v1. */
   order?: string[];
 }

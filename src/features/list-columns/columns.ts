@@ -14,7 +14,9 @@ export interface ColumnDescriptor {
   /** Cannot be hidden — the row-select checkbox, the primary Name link, a
    *  trailing actions/badge column. */
   locked?: boolean;
-  /** Available but off by default (reserved; unused in v1). */
+  /** Available in the picker but off by default — the user turns it on
+   *  explicitly (persisted in ColumnConfig.shown). Made real 8/19 for the
+   *  Opportunities "Expected Close" column. */
   defaultHidden?: boolean;
   align?: "left" | "right" | "center";
   /** Forwarded to the header cell (e.g. "w-10" for the select column). */
