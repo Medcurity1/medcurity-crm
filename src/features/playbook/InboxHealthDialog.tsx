@@ -139,7 +139,8 @@ export function InboxHealthDialog({
                     {editingLimitId !== ib.id && (
                       <button type="button" className="text-primary hover:underline" onClick={() => { setEditingLimitId(ib.id); setDailyLimitDraft(ib.daily_limit ?? 25); }}>Edit limit</button>
                     )}
-                    {ib.warmup?.sent_7d != null ? ` · ${ib.warmup.sent_7d} sent last 7 days` : ""}
+                    {ib.sent_today != null ? ` · ${ib.sent_today} sent today` : " · Sent today unavailable from Smartlead"}
+                    {ib.warmup?.sent_7d != null ? ` · ${ib.warmup.sent_7d} warmup sends last 7 days` : ""}
                     {headroom != null
                       ? ` · room for ~${headroom} more/day`
                       : ib.total_leads_per_day > 0 ? " · remaining room unknown" : ""}

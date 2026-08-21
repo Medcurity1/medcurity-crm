@@ -52,6 +52,18 @@ describe("formatSmartleadRefreshToast", () => {
     expect(r.message).toContain("no longer blocked");
   });
 
+  it("reports partial Smartlead failures instead of swallowing them", () => {
+    const r = formatSmartleadRefreshToast({ synced: 3, attempted: 4, failed: 1 });
+    expect(r.warning).toBe(true);
+    expect(r.message).toContain("1 of 4 attempted campaigns could not be refreshed");
+  });
+
+  it("does not call an incomplete sync up to date", () => {
+    const r = formatSmartleadRefreshToast({ attempted: 1, failed: 1, capped: 2 });
+    expect(r.message).toContain("finished partially");
+    expect(r.message).not.toContain("up to date");
+  });
+
   it("surfaces deferred tasks and unfinished sync honestly", () => {
     const r = formatSmartleadRefreshToast({
       synced: 12,

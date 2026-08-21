@@ -63,9 +63,9 @@ describe("Campaigns home correction", () => {
   it("has ONE sync action and no separate Advanced import anywhere (Nathan 8/19)", () => {
     const tab = visibleSource("src/features/playbook/CampaignsTab.tsx");
     const page = visibleSource("src/features/playbook/PlaybookPage.tsx");
-    // Sync Smartlead runs the server's unified refresh (import + metrics +
-    // statuses); the redundant Advanced import button is gone from the tab
-    // and everywhere else in the feature.
+    // The ordinary action remains a bounded unified refresh so campaigns
+    // created directly in Smartlead are imported, without double-fetching
+    // campaigns already refreshed during that same pass.
     expect(tab).toMatch(/Sync Smartlead/);
     expect(tab).toMatch(/useRefreshSmartlead/);
     expect(tab).not.toMatch(/Advanced import/);
@@ -79,6 +79,36 @@ describe("Campaigns home correction", () => {
     expect(tab).toMatch(/camp-templates-dialog/);
     expect(tab).toMatch(/overflow-hidden flex flex-col p-0/);
     expect(tab).toMatch(/InboxHealthDialog/);
+  });
+
+  it("settles slow syncs and keeps the enrollment-safe server reconciliation", () => {
+    const api = visibleSource("src/features/playbook/api.ts");
+    const edge = visibleSource("supabase/functions/playbook-smartlead/index.ts");
+    const shared = visibleSource("supabase/functions/_shared/smartlead.ts");
+    expect(api).toMatch(/55_000/);
+    expect(api).toMatch(/Partial updates were kept/);
+    expect(edge).toMatch(/syncCampaigns\(Date\.now\(\) \+ 35_000\)/);
+    expect(edge).toMatch(/new Set\(imported\.processedIds\)/);
+    expect(edge).toMatch(/if \(!existing\)[\s\S]*fetchCampaignSequences/);
+    expect(edge).toMatch(/reconcileTerminalEnrollments\(deadline\)/);
+    expect(shared).toMatch(/SMARTLEAD_REQUEST_TIMEOUT_MS = 15_000/);
+    expect(shared).toMatch(/controller\.abort\(\)/);
+  });
+
+  it("labels Pulse campaigns by their actual authoring method", () => {
+    const card = visibleSource("src/features/playbook/CampaignCard.tsx");
+    const wizard = visibleSource("src/features/playbook/CampaignWizard.tsx");
+    expect(card).toMatch(/Written in Pulse/);
+    expect(card).toMatch(/Created in Pulse/);
+    expect(wizard).toMatch(/authoring_method/);
+    expect(wizard).toMatch(/write_own/);
+  });
+
+  it("guards every edited campaign-builder dismissal path", () => {
+    const wizard = visibleSource("src/features/playbook/CampaignWizard.tsx");
+    expect(wizard).toMatch(/useDialogDiscardGuard/);
+    expect(wizard).toMatch(/discard\.requestClose\(\)/);
+    expect(wizard).toMatch(/\{discard\.dialog\}/);
   });
 
   it("toggles Replies, Needs you, Active, Drafts, and Recently ended independently", () => {

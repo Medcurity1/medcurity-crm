@@ -41,7 +41,12 @@ export function originHint(c: CampaignRow): string | null {
   if (c.template?.name) return c.template.name;
   if (c.origin === "smartlead_import") return "Imported from Smartlead";
   if (c.origin === "legacy") return "Migrated campaign";
-  if (c.origin === "pulse") return "AI-generated sequence";
+  if (c.origin === "pulse") {
+    if (c.settings?.authoring_method === "ai") return "AI-generated sequence";
+    if (c.settings?.authoring_method === "write_own") return "Written in Pulse";
+    if (c.settings?.authoring_method === "template") return "Template sequence";
+    return "Created in Pulse";
+  }
   return null;
 }
 
